@@ -98,6 +98,33 @@
  * it, so the series plots nothing"*. That is the truth at a query position and
  * not at a presentation one, where no series is derived for the name in the
  * first place, so its consequence is per position too.
+ *
+ * ## Which SET `chart-axis-not-selected` resolves against (#15734)
+ *
+ * The consequence is per POSITION; the selection it is measured against is per
+ * SURFACE — and on the report surface that selection is not `report.values`.
+ * At the same pinned revision `DatasetReportRenderer.tsx` runs
+ * `useDatasetRows(dataset, plan.kind === 'series' && xAxis ? [xAxis] : [],
+ * wantsQuery && yAxis ? [yAxis] : [], …)` and derives the plotted series with
+ * `buildChartSeries(…, [xAxis], [yAxis], …)` — *"the selection is exactly one
+ * dimension × one measure, so this takes the helper's single-dimension branch
+ * and returns ONE series"*. `report.values` is the selection of the TABLE
+ * beneath the chart; the chart's own is the axis pair. Two things follow:
+ *
+ *  - **Nothing to report at the report `chart.yAxis`.** That position IS the
+ *    chart's query, so it cannot fail to select itself. The warning that fired
+ *    for a declared measure outside `report.values` stated a query consequence
+ *    its own pin refutes: the chart asks for exactly that measure and plots
+ *    it. `chart-measure-unknown` at that position is untouched — an UNDECLARED
+ *    measure still returns no column, and still gates.
+ *  - **`chart.series[].name` resolves against the singleton `{ chart.yAxis }`.**
+ *    The override is paired with a DERIVED series and the chart derives one,
+ *    so that singleton — not `report.values` — is the set an entry can land
+ *    on. An entry naming `chart.yAxis` lands however the table is selected;
+ *    one naming any other declared measure lands on nothing.
+ *
+ * The list-view and page-component surfaces keep `values`: there it IS the
+ * measure set the query asks for, so the existing resolution is correct.
  */
 
 export const CHART_DIMENSION_UNKNOWN = 'chart-dimension-unknown';
@@ -204,6 +231,19 @@ interface ChartBinding {
    * different sentence from a series entry that pairs with nothing.
    */
   axes?: Array<{ name: string; path: string }>;
+  /**
+   * The measures THIS chart's own query selects, when that is narrower than
+   * the `values` limb above (#15734). Set on the report surface and nowhere
+   * else: the embedded report chart queries `chart.xAxis` × `chart.yAxis`
+   * alone and derives exactly ONE series from it, while `report.values` is the
+   * selection of the table beneath it. `chart-axis-not-selected` resolves
+   * against this set where it is present — which is both why a `series[].name`
+   * override is measured against the singleton `{ chart.yAxis }`, and why the
+   * report `chart.yAxis` carries no not-selected check at all (a chart cannot
+   * fail to select what it queries). The other two surfaces leave it undefined
+   * and resolve against `values`, which on them IS the query's measure set.
+   */
+  ownSelection?: string[];
   where: string;
   /** Path of the chart container, for the dataset-level finding. */
   path: string;
@@ -372,6 +412,11 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     }
     const valSel = binding.values;
     const selected = new Set(valSel?.names ?? []);
+    // What this chart DERIVES A SERIES FOR — the set `chart-axis-not-selected`
+    // is measured against (#15734). Equal to the selection above wherever the
+    // chart IS the surface's selection; the narrower `{ chart.yAxis }` on the
+    // report surface, whose chart runs its own axis-pair query.
+    const derived = binding.ownSelection ? new Set(binding.ownSelection) : selected;
     if (valSel) {
       for (let i = 0; i < valSel.names.length; i++) {
         // The SELECTION itself — the names the dataset query asks for on every
@@ -380,12 +425,16 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       }
     }
     if (binding.xAxis) dimensionRef(binding.xAxis.name, binding.xAxis.path);
-    if (binding.yAxis) measureRef(binding.yAxis.name, binding.yAxis.path, 'query', selected);
+    // No selection is passed at this position: the report `yAxis` IS the query
+    // the chart issues, so it cannot name a measure that query does not ask
+    // for (#15734). The `chart-measure-unknown` half still runs — an undeclared
+    // measure is no column at all.
+    if (binding.yAxis) measureRef(binding.yAxis.name, binding.yAxis.path, 'query');
     // Axes before series, the order the page surface reported them in when the
     // two shared one limb — the split (#15575) changes the message, not the
     // walk.
-    for (const a of binding.axes ?? []) measureRef(a.name, a.path, 'page-axis', selected);
-    for (const s of binding.series ?? []) measureRef(s.name, s.path, s.kind, selected);
+    for (const a of binding.axes ?? []) measureRef(a.name, a.path, 'page-axis', derived);
+    for (const s of binding.series ?? []) measureRef(s.name, s.path, s.kind, derived);
   };
 
   // ── 1. Report charts (report.chart + report.blocks[].chart) ──
@@ -403,14 +452,23 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       path: string,
     ) => {
       if (!isRec(chart)) return;
+      const yAxisName = strName(chart.yAxis);
       check({
         dataset,
-        // `values` is the report's measure SELECTION, not a chart ref; feeding
-        // it in lets the yAxis "declared but not selected" check work without
-        // reporting the selection itself twice.
+        // `values` is the REPORT's measure selection — what the table beneath
+        // the chart shows — not a chart ref. It is fed in so those names are
+        // resolved against the dataset (`chart-measure-unknown`) once, here,
+        // rather than reported twice or not at all. It is NOT what the chart
+        // queries, so it is no longer the set `chart-axis-not-selected` reads
+        // on this surface; `ownSelection` below is (#15734).
         values: { names: values, path: `${path}.values` },
         xAxis: strName(chart.xAxis) ? { name: strName(chart.xAxis)!, path: `${path}.chart.xAxis` } : undefined,
-        yAxis: strName(chart.yAxis) ? { name: strName(chart.yAxis)!, path: `${path}.chart.yAxis` } : undefined,
+        yAxis: yAxisName ? { name: yAxisName, path: `${path}.chart.yAxis` } : undefined,
+        // The chart's own selection: the ONE measure it queries and derives a
+        // series from. Empty when no `yAxis` is authored — the chart plots
+        // nothing at all then, which the shape rules own, so no override can
+        // be reported as landing on nothing.
+        ownSelection: yAxisName ? [yAxisName] : [],
         series: recordsOf(chart.series)
           .map((s, si) => ({
             name: strName(s.name),

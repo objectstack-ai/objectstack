@@ -60,6 +60,15 @@ export * from './filter-text-conformance';
 // sibling of the text table for the same reason that table is a sibling of the
 // logic table: comparand TYPE is its own axis, out of both of their scopes.
 export * from './filter-comparand-type-conformance';
+// [#15661] The text-operator DECLARED-TYPE door — the contract half of the
+// C-deny ruling: a `$contains`-family operator over a field whose declared
+// type can never store a string (the six existing numeric / boolean /
+// temporal / structured-JSON classes, by reference) is refused at the engine's
+// field-aware seam with INVALID_FILTER 400; string-valued classes pass;
+// `formula` is judged by its declared returnType or deferred. Named for the
+// door it declares, like `filter-comparand-type`, not as a driver case-set:
+// drivers sit beneath this door and keep answering FILTER_TEXT_CASES' row.
+export * from './filter-text-operator-declared-type';
 export * from './temporal-conformance';
 // Canonical conformance cases for deterministic paged reads — the standard
 // every driver's `find()` is held to whenever `limit`/`offset` slice the result

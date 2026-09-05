@@ -631,6 +631,109 @@ const BLOCK_SCALAR_HEADER = /^[|>][+-]?\d*$/;
  * right.
  */
 export function runCommandTexts(workflowText) {
+  return runCommandSteps(workflowText).map((step) => step.text);
+}
+
+/**
+ * An Actions EXPRESSION, which is the only thing a step's `env:` value can
+ * carry that is not a literal.
+ *
+ * ⚠️ Deliberately NOT `WORKFLOW_VALUE_SOURCE`, which the argv reader uses:
+ * that pattern also admits `$NAME` and `${NAME}`, because argv is read by a
+ * SHELL and a shell expands them. An `env:` value is not — Actions substitutes
+ * `${{ … }}` there and hands the rest through verbatim, so `FOO: $HOME` passes
+ * the four characters `$HOME`. Reading the shell forms here would score a
+ * literal env value as a workflow value and subtract a runnable command, which
+ * is the silent direction `payloadEnvDependence` refuses one screen down.
+ */
+const WORKFLOW_ENV_EXPRESSION = /\$\{\{[\s\S]*?\}\}/;
+
+/**
+ * The names in a step's `env:` block whose VALUE is an Actions expression —
+ * the values that step takes from the workflow and passes to its command
+ * through the ENVIRONMENT rather than through argv (#15761).
+ *
+ * `lines` is the whole workflow, and `[start, end)` the step this `run:` key
+ * belongs to; the caller derives both from the same indentation walk it uses
+ * for the body, so the two readings cannot disagree about where a step ends.
+ *
+ * ## The boundaries, each with the direction it fails in
+ *
+ *   - the `env:` key is read only at the step's OWN key column, exactly as
+ *     `extractStepBlocks` reads `if:` and for the same reason: a nested `with:`
+ *     or a `services:` mapping carries `env:` keys of its own, and reading one
+ *     of those would attribute another container's environment to this command;
+ *   - only the DIRECT children of that key are read (the first child column,
+ *     and lines deeper than it are the value of one of them, never a sibling);
+ *   - a flow mapping (`env: {A: …}`) is not parsed at all, and neither is a
+ *     job-level or workflow-level `env:`. Both under-report — a family keeps its
+ *     place in `--commands` — which is the loud direction: the status quo this
+ *     card names, a red the dev has to go read a gate to understand. Widening
+ *     either one SUBTRACTS a row, and a subtraction that fires wrongly is
+ *     silent. Neither form appears in this tree today.
+ */
+export function stepEnvExpressionVariables(lines, start, end, keyColumn) {
+  const names = [];
+  for (let i = start; i < end; i++) {
+    const key = /^([ \t]*)(-[ \t]+)?env:[ \t]*(.*)$/.exec(lines[i]);
+    if (!key) continue;
+    if (key[1].length + (key[2] ? key[2].length : 0) !== keyColumn) continue;
+    if (key[3].trim() !== '') continue;
+    let childColumn = -1;
+    for (let j = i + 1; j < end; j++) {
+      if (lines[j].trim() === '') continue;
+      const column = /^[ \t]*/.exec(lines[j])[0].length;
+      if (column <= keyColumn) break;
+      if (childColumn === -1) childColumn = column;
+      if (column !== childColumn) continue;
+      const pair = /^[ \t]*([A-Za-z_][\w.-]*):[ \t]*(.*)$/.exec(lines[j]);
+      if (!pair) continue;
+      let value = pair[2];
+      if (BLOCK_SCALAR_HEADER.test(value.trim())) {
+        const body = [];
+        for (let k = j + 1; k < end; k++) {
+          if (lines[k].trim() === '') {
+            body.push('');
+            continue;
+          }
+          if (/^[ \t]*/.exec(lines[k])[0].length <= column) break;
+          body.push(lines[k]);
+        }
+        value = body.join('\n');
+      }
+      if (WORKFLOW_ENV_EXPRESSION.test(value) && !names.includes(pair[1])) names.push(pair[1]);
+    }
+  }
+  return names;
+}
+
+/**
+ * Every `run:` step of a workflow as `{ text, envVariables }` — the command
+ * text `runCommandTexts` has always returned, plus the values the STEP passes
+ * to it through `env:` (#15761).
+ *
+ * ## Why the step and not the command text alone
+ *
+ * `runCommandTexts` reads a `run:` value and throws the rest of the step away,
+ * so a value the workflow hands the command through the ENVIRONMENT was
+ * invisible to every reader downstream. `.github/workflows/`
+ * `partof-closing-keyword-guard.yml` is the specimen: `PR_BODY` and
+ * `PR_NUMBER` arrive through `env:` and the argv is bare, so the argv-shaped
+ * classifier scored `node scripts/check-partof-closing-keyword.mjs` as a
+ * command a dev can paste — while the gate's own refusal says the opposite in
+ * its own words ("NOT WIRED — neither PR_BODY nor PR_NUMBER is set … This is a
+ * wiring or usage failure, NOT a verdict"). The step is therefore the unit
+ * this walk returns, and the command text stays exactly what it was.
+ *
+ * The step's extent is found with the SAME rule the body walk uses: the step's
+ * keys sit at the `run:` key column, so the step ends at the first non-blank
+ * line shallower than it — which is the next `- ` dash (a dash is indentation
+ * for the mapping it opens) or the dedent out of the steps list. A compact
+ * step (`- run: …`) opens its own mapping on the dash line, so the walk starts
+ * there; a named step's `env:` may sit either side of its `run:`, so the walk
+ * runs backwards from the key as well as forwards from the body.
+ */
+export function runCommandSteps(workflowText) {
   const lines = workflowText.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
@@ -641,27 +744,71 @@ export function runCommandTexts(workflowText) {
     // for the mapping it opens, so it counts. See the header block above for
     // the measurement that settles this.
     const keyColumn = lead.length + (dash ? dash.length : 0);
+    const runLine = i;
+    let text;
     if (!BLOCK_SCALAR_HEADER.test(inline.trim())) {
-      out.push(inline.trim());
-      continue;
-    }
-    // Block scalar: the body is every following line indented deeper than the
-    // key (blank lines belong to it too). Advancing `i` past the body is what
-    // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
-    const body = [];
-    let j = i + 1;
-    for (; j < lines.length; j++) {
-      if (lines[j].trim() === '') {
-        body.push('');
-        continue;
+      text = inline.trim();
+    } else {
+      // Block scalar: the body is every following line indented deeper than the
+      // key (blank lines belong to it too). Advancing `i` past the body is what
+      // keeps a `run:` MENTIONED inside a body from being parsed as a new key.
+      const body = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        if (lines[j].trim() === '') {
+          body.push('');
+          continue;
+        }
+        if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
+        body.push(lines[j]);
       }
-      if (/^[ \t]*/.exec(lines[j])[0].length <= keyColumn) break;
-      body.push(lines[j]);
+      text = body.filter((l) => !/^[ \t]*#/.test(l)).join('\n');
+      i = j - 1;
     }
-    out.push(body.filter((l) => !/^[ \t]*#/.test(l)).join('\n'));
-    i = j - 1;
+    let start = runLine;
+    if (!dash) {
+      let j = runLine - 1;
+      for (; j >= 0; j--) {
+        if (lines[j].trim() === '') continue;
+        if (/^[ \t]*/.exec(lines[j])[0].length >= keyColumn) continue;
+        break;
+      }
+      start = j + 1;
+    }
+    let end = i + 1;
+    for (; end < lines.length; end++) {
+      if (lines[end].trim() === '') continue;
+      if (/^[ \t]*/.exec(lines[end])[0].length >= keyColumn) continue;
+      break;
+    }
+    out.push({ text, envVariables: stepEnvExpressionVariables(lines, start, end, keyColumn) });
   }
   return out;
+}
+
+/**
+ * A step's `env:` names minus the ones its command line spells as a shell
+ * expansion — the split between the two CARRIERS of one workflow value
+ * (#15761).
+ *
+ * A name the command spells (`"$MERGE_BASE"`, `${OS_ATTEST_DIR}`) is read by
+ * the shell, so it is already in the command TEXT and `renderedArgv` has
+ * classified it. A name the command does not spell reaches the program only
+ * through `process.env`, and that is the carrier no reader of the command line
+ * can see — the whole defect this card names.
+ *
+ * Measured on this tree over the 13 `run:` steps that both carry an `env:`
+ * expression and invoke a check: 8 of them spell every one of their env names
+ * in the command (the `--base "$MERGE_BASE"` trio in `pr-automation.yml`, the
+ * two `check-shard-attestation --verify` steps and the affected-set step in
+ * `ci.yml`, `half-state-patrol.yml`'s `--provenance`, `required-set-patrol`'s
+ * `$RUNNER_TEMP` redirection), so this filter is what keeps the classification
+ * off eight invocations it must not touch.
+ */
+function envNamesNotSpelledInCommand(commandText, names) {
+  return (names ?? []).filter(
+    (name) => !new RegExp(String.raw`\$\{?${name.replace(/[^\w]/g, '\\$&')}\b`).test(commandText),
+  );
 }
 
 /** Strip one layer of YAML quoting from a scalar. */
@@ -1779,13 +1926,24 @@ function tailBeforeRedirection(tail, nextChar) {
  */
 export function extractCheckInvocations(workflowText, workflowFile) {
   const out = [];
-  for (const raw of runCommandTexts(workflowText)) {
+  for (const { text: raw, envVariables: stepEnv } of runCommandSteps(workflowText)) {
     // ONE joined text for all three matchers, so no two of them can disagree
     // about where a command ends — the discipline `discoverFamilies` follows
     // for the workflow reads it makes.
     const cmd = joinLineContinuations(raw);
+    // The step's `env:` values, MINUS the ones this command line spells for
+    // itself (#15761). `env: MERGE_BASE: ${{ … }}` beside
+    // `run: node scripts/check-changeset-no-major.mjs --base "$MERGE_BASE"` is
+    // one value with one carrier: the variable reaches the script through
+    // ARGV, the argv reader already sees it, and `declaredArgvDefaults` may
+    // already have repaired the invocation into a runnable one (#15441).
+    // Counting it a second time here would undo that repair and mark three
+    // live `--base` families NOT MEASURED again. What is left is the class
+    // this card is about: a value that reaches the program only through
+    // `process.env`, which no reader of the command line can see.
+    const carriedEnv = envNamesNotSpelledInCommand(cmd, stepEnv);
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
-      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
+      out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile, envVariables: carriedEnv });
     }
     for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
       const script = m[1];
@@ -1804,6 +1962,13 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         // travels on the invocation so every rendering downstream reads one
         // answer rather than re-deriving it (#15083).
         argvVariables: argv ? argv.variables : [],
+        // The same fact for the OTHER carrier (#15761): the values the step
+        // hands this command through `env:`. It rides the invocation for the
+        // same reason `argvVariables` does — so every rendering downstream
+        // reads one answer rather than re-deriving it — and it is a fact about
+        // the STEP, so it is attached to every matcher here and narrowed to the
+        // families it may classify in `workflowEnvValues`, never here.
+        envVariables: carriedEnv,
         // The same declaration the matcher below reads, on the same flag: this
         // invocation runs the script's SELF-TEST rather than its work, and two
         // narrowings downstream turn on knowing that (the import/spawn/manifest
@@ -1830,6 +1995,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
         workflow: workflowFile,
         direct: true,
         selfTest: true,
+        envVariables: carriedEnv,
       });
     }
   }
@@ -2693,10 +2859,20 @@ export const ROOT_WALK_RESIDUE_LEDGER = [
       + 'CI does not schedule, so a whole-tree row for this family would advertise work no workflow performs.',
   ],
   [
+    'check:pm-half-states',
+    'lint.yml runs the SELF-TEST HALF and never the sweep — the npm script is `check-half-states.mjs '
+      + '--self-test`. The `git ls-files` oracle that vouches for the root walk is read ONCE PER LIVE SWEEP, after '
+      + 'the board gathering, so it belongs to the networked half-state patrol that no lint job schedules; a '
+      + 'whole-tree row here would advertise work this family never performs. It became a member under #15753: it '
+      + 'used to be placed BY PATH on every changeset card, through the gate\'s own noise-floor constant read as a '
+      + 'watch surface — a placement that said the opposite of what the constant declares.',
+  ],
+  [
     'scripts/symbol-anchors.mjs --self-test',
     'a shared grammar-and-extractor LIBRARY, invoked by CI only as its own self-test; its `git ls-files` runs over a '
-      + 'corpus its caller passes in. The corpus walk it lends is exercised by check-adr-symbol-anchors.mjs, which '
-      + 'declares ROOT_DIR_WATCH_HINTS = [docs/adr/**] and is placed by that.',
+      + 'corpus its caller passes in. The corpus walk it lends is exercised by its registrations — '
+      + 'check-adr-symbol-anchors.mjs, which declares ROOT_DIR_WATCH_HINTS = [docs/adr/**], and '
+      + 'check-scripts-symbol-anchors.mjs, which declares [scripts/**] — and each is placed by its own.',
   ],
 ];
 
@@ -2860,6 +3036,86 @@ export function ciOnlyMeasurement(entry, rootScripts = {}) {
   );
   if (namedByManifest) return null;
   return { env };
+}
+
+/**
+ * The values a family takes from the workflow through its step's `env:` — the
+ * THIRD carrier, and the generalisation of #14004 rather than a second special
+ * case of it (#15761).
+ *
+ * ## The defect
+ *
+ * `.github/workflows/partof-closing-keyword-guard.yml` passes the pull request
+ * to `node scripts/check-partof-closing-keyword.mjs` through
+ * `env: PR_BODY: ${{ … }}` / `PR_NUMBER: ${{ … }}`, and its argv is BARE. The
+ * argv-shaped classifier one screen up therefore saw a command with no
+ * variable in it and put it in `--commands`, under a caption that promises a
+ * runnable command — while the gate's own refusal says the opposite in its own
+ * words: "NOT WIRED — neither PR_BODY nor PR_NUMBER is set, so this run was
+ * handed no pull request and judged nothing. This is a wiring or usage
+ * failure, NOT a verdict". A dev harvesting the family runs a command whose
+ * only possible outcome outside CI is exit 2.
+ *
+ * ⛔ The fix REFUSED: moving `PR_BODY` into the argv so the existing detector
+ * sees it. That `env:` spelling is a security decision the workflow states at
+ * length ("An expression interpolated into a shell line is substituted before
+ * bash ever sees it, so a PR body is arbitrary attacker-controlled text
+ * landing in a command; through `env:` it is inert data"), and reopening a
+ * deliberately closed injection surface to fix a DISPLAY bug trades the two
+ * the wrong way round. The repair is on the reader's side, which is where this
+ * one is.
+ *
+ * ## What it selects, measured rather than argued
+ *
+ * On this tree: 405 `run:` steps, 52 carrying an `env:` expression, 13 of
+ * those invoking a check. Eight spell every env name in the command itself and
+ * are filtered out before this function sees them (`envNamesNotSpelledInCommand`,
+ * which is what keeps #15441's three repaired `--base` families runnable). Of
+ * the five that reach the limbs below, the conjunction selects THREE — every
+ * one of which was verified by running it here, and every one of which refuses
+ * rather than judges:
+ *
+ *   `check-partof-closing-keyword.mjs`            exit 2, "NOT WIRED"
+ *   `check-single-claim-paths.mjs`                exit 2, "NOT WIRED — PR_NUMBER is not set"
+ *   `check-required-contexts.mjs --verify-required-set`
+ *                                                 exit 2, "NOT VERIFIED — … HTTP 401"
+ *
+ * so the class this card names is three families wide, not one. A fourth,
+ * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, is
+ * already NOT MEASURED through its argv and only gains the two env names it
+ * also carries.
+ *
+ * ## The limbs, each with a live case on this tree
+ *
+ *   selfTest  a `--self-test` invocation runs the script's own fixtures and
+ *             consumes no workflow value, exactly the argument `ciOnlyMeasurement`
+ *             makes one screen up. LIVE: `render-release-coverage-anchor.mjs
+ *             --self-test` sits in a step carrying three `${{ … }}` env values,
+ *             and it is runnable here — this limb is what keeps it in the list.
+ *   direct    a `check:*` family is invocable by name by construction (#14004's
+ *             limb 2), and its KEY drops the argv, so one key is produced by
+ *             steps in different environments and the env of one of them is not
+ *             a property of the key. LIVE: `check:console-injection`, run by
+ *             `ci.yml` and `release.yml` under `CONSOLE_DIST_CACHE_KEY` and by
+ *             the root manifest under nothing.
+ *   ciOnly    the family is ALREADY named in the CI-measured bucket, and one
+ *             family printed as two omissions tells a reader it owes two runs.
+ *             LIVE: `check-governed-queue-guard.mjs`, whose step also passes
+ *             `GITHUB_TOKEN: ${{ … }}` — #14004's own specimen.
+ *
+ * ⚠️ What this does NOT claim, and it is `payloadEnvDependence`'s caveat
+ * unchanged: that the gate READS the variable. It reads what the WORKFLOW
+ * passes, not what the program consumes, so the family stays NAMED with its
+ * variables printed beside it in every rendering — an annotation a reader can
+ * check against the gate, never a family this tool quietly disappears.
+ */
+export function workflowEnvValues(entry) {
+  const names = entry?.envVariables ?? [];
+  if (names.length === 0) return [];
+  if (entry.selfTest) return [];
+  if (!entry.direct) return [];
+  if (entry.ciOnly) return [];
+  return [...names];
 }
 
 /**
@@ -3233,10 +3489,10 @@ const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
  * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
  * this repairs live files rather than guarding against a future spelling:
  *
- *   scripts/check-test-completeness.mjs:576
- *   scripts/measure-position-name-fold-census.mjs:689
+ *   `scripts/check-test-completeness.mjs#selfTest`
+ *   `scripts/measure-position-name-fold-census.mjs#selfTest`
  *       both `function selfTest({ quiet = false } = {})`
- *   scripts/workspace-enumerator.mjs:328
+ *   `scripts/workspace-enumerator.mjs#selfTest`
  *       `export function selfTest({ root = null } = {})`
  *
  * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
@@ -3857,8 +4113,8 @@ export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } =
  * no hint at all. That is right for `'./invoked-as.mjs'` and `'./package.json'`
  * and wrong for these two, which are unambiguous subtree declarations:
  *
- *   packages/spec/scripts/build-docs.ts:61             path.resolve(__dirname, '../src')
- *   packages/spec/scripts/build-skill-references.ts:35 path.resolve(__dirname, '../src')
+ *   `packages/spec/scripts/build-docs.ts#SRC_DIR`             path.resolve(__dirname, '../src')
+ *   `packages/spec/scripts/build-skill-references.ts#SPEC_SRC` path.resolve(__dirname, '../src')
  *
  * Checked at the declaration site rather than assumed, which is the provenance
  * criterion this file prices: `build-docs.ts` does `fs.readdirSync(SRC_DIR)`
@@ -4176,6 +4432,166 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
 }
 
 /**
+ * The spans of a scanned gate's own EXCLUSION constants — the declarations
+ * whose contents are the paths that gate refuses to look at (#15753).
+ *
+ * ## The defect
+ *
+ * The scan below reads the whole module body, so a path literal sitting inside
+ * a declared exclusion list was admitted as a surface the gate WATCHES — the
+ * exact inverse of what the declaration says. `check-half-states.mjs` declares
+ * a two-spelling noise floor meaning "never pair on this", and the hint
+ * `.changeset` came straight out of the prefix half of it. Every user-visible
+ * PR in this repo adds a changeset, so that derivation landed on essentially
+ * every card: an exclusion list read as an inclusion surface, where the size of
+ * the mistake is set by the spelling that happens to be in the constant rather
+ * than by anything anyone chose. A noise floor that later grows a broader
+ * prefix scales it silently, and the hint reader had no way to tell
+ * watch-this from never-pair-on-this.
+ *
+ * ## Why the DECLARATION, and not a list of paths here
+ *
+ * A copy of any gate's noise floor inside this tool would answer today's
+ * spelling and drift from the constant the moment either side moved — the
+ * defect this file refuses everywhere else. The exclusion is already declared,
+ * in the scanned source, by the identifier the literal is assigned under, so
+ * that is what is read. A comment-marker convention was refused for a
+ * mechanical reason rather than a stylistic one: `maskedModuleBody` blanks
+ * comments before this scan ever runs, so a marker on the constant is invisible
+ * from here, while declaration TEXT survives the mask.
+ *
+ * ## The census, measured on this tree
+ *
+ * 3,513 top-level VALUE declarations over the 230 tracked JS/TS files under
+ * `scripts/`. 64 identifiers match the predicate; 58 carry at least one string
+ * literal; the whole set moves 14 hints, across 6 files:
+ *
+ *   scripts/check-doc-authoring.mjs       SKIP_PATHS, SKIP_FILES,
+ *                                         PACKAGES_PROSE_EXCLUDED           6
+ *   scripts/check-refd-timer-probe.mjs    EXCLUDED_DIRS                     4
+ *   scripts/check-corpus-claim-drift.mjs  SKIP_SUBTREES                     1
+ *   scripts/check-role-word.mjs           SKIP_SUBTREES                     1
+ *   scripts/check-keyed-text-bounds.mjs   SKIP_DIRS                         1
+ *   scripts/pm/check-half-states.mjs      H36_SHARED_PREFIX_NOISE           1
+ *
+ * Each was read against the gate that declares it, and each is an exclusion in
+ * that gate's own words: "whole subtrees skipped by path", "generated
+ * subtrees, excluded by PATH under ROOTS", "generated from spec/frontmatter —
+ * not hand-authored, don't police", "directories `git ls-files` can still name
+ * that hold no authored source", and — for `PACKAGES_PROSE_EXCLUDED`, the one
+ * that is a bare string rather than a list — the `continue` in the gate's own
+ * `descend` that skips it.
+ *
+ * ## What the 14 cost, which is not 14
+ *
+ * EIGHT of them change no derivation at all, because the gate ALSO declares the
+ * containing root as an inclusion population and `hintCovers` still reaches the
+ * path through that. Measured per hint, probing under each dropped hint against
+ * the surviving set: all six of check-doc-authoring's (`.claude/**`, `docs/**`,
+ * `content/**` and `packages/**` are its `ROOT_WATCH_HINTS`) and both
+ * `content/docs/references` (covered by `content/docs`). That gate's own
+ * self-test already said so from the other side — every `SKIP_PATHS` entry must
+ * sit UNDER a declared root — so the exclusion hints were pure duplication.
+ *
+ * SIX really leave a derivation, and every one of them is a lead that was
+ * false: `node_modules`, `dist`, `coverage` and `.turbo` off
+ * check-refd-timer-probe's skip set, and `.changeset` twice — off
+ * check-keyed-text-bounds' `SKIP_DIRS` and off the noise floor the card was
+ * filed on. The changeset pair is what a dev actually saw: a card that has not
+ * written its changeset yet is told which families it will owe once it does,
+ * and that projection carried FOUR fabricated rows, 16 -> 12 — including
+ * `check-half-states.mjs --format=markdown --provenance="$PROVENANCE"`, the
+ * networked half-state-patrol sweep, advertised to every card in the tree as a
+ * gate its changeset would trigger.
+ *
+ * ## The predicate: what the census kept, and what it retired
+ *
+ * `DENY`/`DENIED` was measured and REMOVED. It matched exactly one declaration
+ * on this tree and that one is a false positive — an HTTP fixture, not an
+ * exclusion list — and "deny" in this tree names AUTHORIZATION vocabulary
+ * (`DENY_CODE`), never a path skip list. Matches for the surviving
+ * alternatives, first-match attribution: SKIP 47, EXCLUDED 9, NOISE 2,
+ * SKIPPED 2, EXCLUSION 2, EXCLUSIONS 1, EXCLUDES 1, and EXCLUDE / IGNORE /
+ * IGNORED 0. The three zero-scoring arms are kept deliberately and the reason is
+ * the direction this predicate fails in: over-matching DROPS a hint (a missing
+ * lead — one card, one CI round), while under-matching KEEPS a wrong one (a
+ * fabricated lead pasted into every dispatch prompt whose surface brushes it).
+ * That asymmetry is the extractor's own, stated in its docblock below, and it
+ * is why an author's next spelling should be met by this predicate rather than
+ * by a rediscovery of this card.
+ *
+ * ONE false positive survives, and it costs nothing: `SHOW_EXCLUDED` in
+ * `scripts/objectui-range.mjs` is a CLI flag whose sense is to INCLUDE the
+ * excluded rows, not a population — its only literal is `'--all'`, refused by
+ * the flag rule regardless. A matched identifier that turns out to be an
+ * INCLUSION list is the reading that would narrow this predicate; the census
+ * found none, and `check-watch-hint-literal.mjs`'s roster of the inclusion
+ * idiom (`ROOT_WATCH_HINTS` and its three siblings) shares no word with it.
+ *
+ * ## What this deliberately does NOT reach, so a reader is not told otherwise
+ *
+ * Only TOP-LEVEL declarations, because `topLevelDecls` is anchored at column 0
+ * for the reasons its own docblock gives. A function-local exclusion constant
+ * is not reached — `check-test-completeness.mjs` has the one instance on this
+ * tree, and it costs nothing today because every literal in it is a bare
+ * directory word the admission rule already refuses. camelCase spellings are
+ * not reached either: the anchor is the SCREAMING_SNAKE segment, and the four
+ * camelCase near-misses on this tree (`scripts/docs-audit/affected-docs.mjs`)
+ * are counters and note strings, not populations. Both are the direction that
+ * drops LESS, which is the direction a widening of this rule may not silently
+ * take.
+ */
+const EXCLUSION_DECL_NAME =
+  /(?:^|_)(?:NOISE|SKIP|SKIPPED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED)(?:_|$)/;
+
+/** `topLevelDecls` classifies self-tests for its OTHER caller; this one has no stake in it. */
+const NO_SELF_TEST_STARTS = new Set();
+
+/**
+ * The VALUE-declaration arm of `TOP_LEVEL_DECL`, on its own, as a prefilter.
+ *
+ * `topLevelDecls` needs a full `scanSource` of the body, and that scan is the
+ * expensive half: measured on this tree with `--commands` over this file, two
+ * runs each, running it unconditionally inside the hint scan cost ~12% of a
+ * whole discovery pass (17.2s -> 19.2s). About 180 of the 230 scripts declare
+ * no exclusion constant at all, so this decides that with a regex before any
+ * scan starts, and the same measurement comes back 18.1s — ~5%, paid only by
+ * the ~50 files that really carry one. ⛔ Not memoised on top of that: the
+ * remaining cost is one scan per declaring file per analyser pass, and a third
+ * bespoke cache for it would buy ~3% for a construct the profile above does not
+ * justify. Re-measure before adding one.
+ *
+ * It is a SUPERSET of what `topLevelDecls` can return — the same arm, minus the
+ * code-position test — so it never hides a declaration; the worst it does is
+ * pay for a scan that then finds nothing, which is what a match inside a
+ * string or a comment costs.
+ */
+const EXCLUSION_DECL_PREFILTER = /^(?:export[ \t]+)?(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)[ \t]*=/gm;
+
+/**
+ * The `[start, end)` spans of `moduleBody`'s exclusion declarations, in source
+ * order. Pure, and derived from the SAME masked text the scan reads, so the two
+ * cannot disagree about what is code.
+ */
+function exclusionDeclSpans(moduleBody) {
+  EXCLUSION_DECL_PREFILTER.lastIndex = 0;
+  let candidate = false;
+  for (const m of moduleBody.matchAll(EXCLUSION_DECL_PREFILTER)) {
+    if (EXCLUSION_DECL_NAME.test(m[1])) {
+      candidate = true;
+      break;
+    }
+  }
+  if (!candidate) return [];
+  const spans = [];
+  for (const decl of topLevelDecls(moduleBody, scanSource(moduleBody), NO_SELF_TEST_STARTS)) {
+    if (decl.callable || !EXCLUSION_DECL_NAME.test(decl.name)) continue;
+    spans.push([decl.start, decl.end]);
+  }
+  return spans;
+}
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -4262,11 +4678,18 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
   const moduleBody = maskedModuleBody(scriptSource);
+  const exclusions = exclusionDeclSpans(moduleBody);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
     const raw = m[1];
     if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(raw)) continue;
     if (!/^[\w.@][\w.@/*-]*$/.test(raw)) continue;
+    // A literal the scanned gate declares as EXCLUDED is not a surface it
+    // watches — it is the surface it refuses to look at, and admitting it
+    // states the exact inverse of the declaration. See `exclusionDeclSpans`
+    // above for the identifier predicate, the tree-wide census behind it, and
+    // the three shapes it deliberately does not reach.
+    if (exclusions.some(([from, to]) => m.index >= from && m.index < to)) continue;
     // ADMISSION reads the literal as the AUTHOR wrote it, minus the depth
     // prefix — byte for byte the test this scan has always applied. Only the
     // VALUE is resolved, below. Widening admission to the resolved form was
@@ -4839,7 +5262,7 @@ export function collapseHint(hint) {
  * shape the idioms above use: `packages/**` → `packages`, `packages/spec/src/**`
  * → `packages/spec/src`, `packages/client*` → `packages/client`. Each names a
  * subtree root the tree really has, and `ROOT_DIR_WATCH_HINTS` depends on
- * exactly that reduction (`scripts/check-published-files.mjs:215-248` declares
+ * exactly that reduction (`scripts/check-published-files.mjs` declares
  * the workspace globs VERBATIM so "the glob collapse reduces each back to the
  * root it names", justified there at 91.3%).
  *
@@ -9224,7 +9647,7 @@ export function alwaysRunsPopulationLines(rows) {
     lines.push(
       `      ↳ liveness: its own source carries ${row.rootWalk}` +
         `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}` +
-        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — its argv takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
+        `${row.notRunnable ? ` · ⛔ NOT RUNNABLE LOCALLY — it takes ${row.notRunnable.variables.join(', ')} from the workflow, so it is NOT in --commands` : ''}`,
     );
   }
   lines.push(
@@ -9740,7 +10163,19 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   for (const inv of invocations) {
     const key = inv.check;
     if (!byCheck.has(key)) byCheck.set(key, { ...inv, workflows: new Set(), files: [], hints: [] });
-    byCheck.get(key).workflows.add(inv.workflow);
+    const merged = byCheck.get(key);
+    merged.workflows.add(inv.workflow);
+    // INTERSECTION, not union (#15761). `argvVariables` needs no merge — argv
+    // is part of the KEY, so every invocation under one key spells the same
+    // one. `env:` is NOT part of the key, so two workflows can run the same
+    // command in different environments, and the classification this feeds
+    // SUBTRACTS a row from `--commands`: keeping only the names EVERY step
+    // passes means a command one workflow runs bare keeps its place in the
+    // list. A wrong subtraction is silent; a miss is loud (#14004's trade,
+    // same direction). Costs nothing measurable today — 14 of the 260 keys on
+    // this tree carry more than one invocation and NONE of them disagree about
+    // its env, so union and intersection classify identically here.
+    merged.envVariables = (merged.envVariables ?? []).filter((name) => (inv.envVariables ?? []).includes(name));
   }
   for (const entry of byCheck.values()) {
     // Only the workflows that DECLARE a filter become trigger keys. An
@@ -10059,8 +10494,20 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         entry.localCheck = `${entry.script} ${substituted.args}`;
       }
     }
-    entry.notRunnable = (entry.argvVariables ?? []).length > 0
-      ? { variables: [...entry.argvVariables] }
+    // Both CARRIERS of one fact — a value that comes from the workflow and has
+    // none here (#15761). They are unioned into ONE classification rather than
+    // given a bucket each, because a reader asking "can I run this" is asking
+    // one question: the rendering, the `--json` key and the subtraction from
+    // `--commands` are all the argv one, unchanged. The env names are spelled
+    // `env NAME` so the two carriers stay legible in a single list — an argv
+    // variable always carries its `$`.
+    entry.envValues = workflowEnvValues(entry);
+    const workflowValues = [
+      ...(entry.argvVariables ?? []),
+      ...entry.envValues.map((name) => `env ${name}`),
+    ];
+    entry.notRunnable = workflowValues.length > 0
+      ? { variables: workflowValues, envVariables: [...entry.envValues] }
       : null;
   }
   return { byCheck, workflows, workflowEntries };
@@ -10337,7 +10784,7 @@ export function familyReconciliationLines(recon) {
   const notRunnableLine =
     (recon.notRunnable ?? 0) > 0
       ? `  + ${recon.notRunnable} famil(ies) this card's paths reach take a VALUE FROM THE WORKFLOW and sit OUTSIDE this total —` +
-        ' their argv carries a variable that has no value outside a CI run, so there is no local invocation to hand you.' +
+        " their argv, or their step's `env:`, carries a variable that has no value outside a CI run, so there is no local invocation to hand you." +
         ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
         ' and omitted from --commands by design.'
       : null;
@@ -10395,7 +10842,7 @@ export function familyReconciliationLines(recon) {
     // than about a family nobody can run here (#15083).
     const notRunnableConventionRows = recon.notRunnableConventionRows ?? 0;
     if (notRunnableConventionRows > 0) {
-      notes.push(`${notRunnableConventionRows} value-bearing argv, contributing no runnable command`);
+      notes.push(`${notRunnableConventionRows} value-bearing argv or env, contributing no runnable command`);
     }
     const accounted = recon.staleRows + ciOnlyConventionRows + notRunnableConventionRows;
     if (recon.conventionRows - accounted > recon.convention) {
@@ -10735,7 +11182,7 @@ export function runReconciliationLines(recon) {
   if (recon.explainedNotRunnable.length > 0) {
     lines.push(
       `  Classified by this tool, no explanation owed (${recon.explainedNotRunnable.length}) — VALUE-BEARING famil(ies):`
-        + ' its argv takes a value from the workflow, so it is recorded, not derived as runnable:',
+        + " its argv or its step's `env:` takes a value from the workflow, so it is recorded, not derived as runnable:",
     );
     for (const command of recon.explainedNotRunnable) lines.push(`    - ${command}`);
   }
@@ -10912,7 +11359,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   if (notRunnableRows.length) {
     console.error(
       `  + ${notRunnableRows.length} famil(ies) matched by path take a VALUE FROM THE WORKFLOW and are ${mode === 'json' ? 'flagged as notRunnable on their matched row, not in commands' : 'NOT above'} — ` +
-        'their argv carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.',
+        "their argv or their step's `env:` carries a variable with no value outside a CI run. Run without --commands/--json to see each one printed as CI spells it.",
     );
     // Named, one per line, and named as NOT MEASURED rather than as an omission
     // (#15441). A count says something is missing; it does not say that a
@@ -11236,7 +11683,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // labelled line of its own, never an ellipsis and never a truncated command.
   if (notRunnableRows.length) {
     console.log('');
-    console.log(`Value-bearing argv — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
+    console.log(`Value-bearing argv or env — matched by path, and NOT runnable here (${notRunnableRows.length} famil(ies)):`);
     // A sibling of the SAME script that this card CAN run, matched on the
     // script path rather than on a name (#15441). It is what a reader reaches
     // for when the row below says the question is unanswered, and it is exactly
@@ -11254,9 +11701,17 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
         `      ⛔ NOT RUNNABLE LOCALLY — ${notRunnable.variables.length} value(s) come from the workflow:` +
           ` ${notRunnable.variables.join(', ')}`,
       );
+      // Two carriers, two reasons — and the argv sentence is FALSE for an
+      // env-carried row: there is no flag to document a default for (#15761).
+      // Printing it anyway would send a reader to a usage block that cannot
+      // hold the answer, which is the shape of advice this file refuses.
+      const envCarried = (notRunnable.envVariables ?? []).length === notRunnable.variables.length;
       console.log(
-        `      ⊘ NOT MEASURED — nothing this card can run answers ${command}. Its script documents no default for the flag` +
-          ' the workflow pins, so there is no local invocation of it, and this tool will ⛔ not invent one.',
+        `      ⊘ NOT MEASURED — nothing this card can run answers ${command}. `
+          + (envCarried
+            ? "The value reaches its script through the step's `env:` and not through a flag this tool could default"
+            : 'Its script documents no default for the flag the workflow pins')
+          + ', so there is no local invocation of it, and this tool will ⛔ not invent one.',
       );
       const sibling = siblingOf.get(script);
       if (sibling) {
@@ -13380,6 +13835,97 @@ function selfTest() {
   // line (already covered above, but the negative half needs its own pin).
   t('a bare `-run:` is not read as a compact step', runCommandTexts('      -run: pnpm check:not-a-step').length === 0);
 
+  // ── The step's `env:` is the OTHER carrier of a workflow value (#15761) ────
+  //
+  // `partof-closing-keyword-guard.yml` passes the whole input through `env:`
+  // and leaves the argv bare, so the argv-shaped classifier scored
+  // `node scripts/check-partof-closing-keyword.mjs` as a command a dev can
+  // paste — one whose only possible outcome here is the gate's own exit 2
+  // ("NOT WIRED — neither PR_BODY nor PR_NUMBER is set"). The fixture carries
+  // the specimen's shape plus the three shapes that must NOT move.
+  const envWf = [
+    'jobs:',
+    '  guard:',
+    '    steps:',
+    '      - name: The specimen — bare argv, the input through env:',
+    '        env:',
+    '          PR_BODY: ${{ github.event.pull_request.body }}',
+    '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '        run: node scripts/check-env-carried.mjs',
+    '      - name: A LITERAL env value is not a workflow value',
+    '        run: node scripts/check-literal-env.mjs',
+    '        env:',
+    '          PR_BODY: a body written down right here',
+    '          HOME_ISH: $HOME/not-an-expression',
+    '      - name: argv-carried, the regression control',
+    '        run: node scripts/check-argv-carried.mjs --base "$MERGE_BASE"',
+    '      - name: one value, one carrier — the command spells this env name itself',
+    '        env:',
+    '          MERGE_BASE: ${{ github.event.pull_request.base.sha }}',
+    '        run: node scripts/check-spelled-env.mjs --base "$MERGE_BASE"',
+    '      - run: node scripts/check-compact-env.mjs',
+    '        env:',
+    '          COMPACT: ${{ github.sha }}',
+    '      - name: an env: that belongs to a nested mapping is not this step\'s',
+    '        uses: some/action@v1',
+    '        with:',
+    '          env:',
+    '            NESTED: ${{ github.sha }}',
+    '        run: node scripts/check-nested-env.mjs',
+  ].join('\n');
+  const envInvs = extractCheckInvocations(envWf, 'partof-closing-keyword-guard.yml');
+  const envOf = (name) => (envInvs.find((i) => i.script === name)?.envVariables ?? null);
+  // (a) The specimen: the step's `env:` names ride the invocation, in order.
+  t(
+    '\u2b50 a bare argv beside an `env:` expression carries the env NAMES the step passes it',
+    (envOf('scripts/check-env-carried.mjs') ?? []).join(',') === 'PR_BODY,PR_NUMBER',
+  );
+  t(
+    '\u2026and it reads the `env:` block whichever side of `run:` the step writes it on',
+    (envOf('scripts/check-compact-env.mjs') ?? []).join(',') === 'COMPACT',
+  );
+  // (b) A literal `env:` value keeps the command runnable — including the shell
+  //     spellings, which Actions does NOT substitute in an env value.
+  t(
+    '\u2b50 a LITERAL `env:` value is not a workflow value, so the command stays runnable',
+    (envOf('scripts/check-literal-env.mjs') ?? null)?.length === 0,
+  );
+  // (c) The regression control: argv-carried detection is untouched, and a name
+  //     the command spells for itself is ONE value with ONE carrier.
+  t(
+    'CONTROL: an argv-carried variable is still detected, and carries no env of its own',
+    envInvs.some((i) => i.check === 'scripts/check-argv-carried.mjs --base "$MERGE_BASE"'
+      && (i.argvVariables ?? []).join(',') === '$MERGE_BASE'
+      && (i.envVariables ?? []).length === 0),
+  );
+  t(
+    '\u2b50 CONTROL: an env name the command SPELLS is argv-carried, not counted twice \u2014 this is what keeps #15441\'s repaired `--base` families runnable',
+    (envOf('scripts/check-spelled-env.mjs') ?? null)?.length === 0,
+  );
+  t(
+    'CONTROL: an `env:` nested under `with:` is not read as the step\'s own',
+    (envOf('scripts/check-nested-env.mjs') ?? null)?.length === 0,
+  );
+  t(
+    'the same walk, read directly: one step per `run:` key, each with its own env',
+    runCommandSteps(envWf).length === 6
+      && runCommandSteps(envWf)[0].envVariables.join(',') === 'PR_BODY,PR_NUMBER'
+      && runCommandSteps(envWf)[1].envVariables.length === 0,
+  );
+  t(
+    'CONTROL: the classic and compact fixtures above carry no `env:` expression, so this widening moved neither',
+    runCommandSteps(blockWf).every((step) => step.envVariables.length === 0)
+      && runCommandSteps(compactWf).every((step) => step.envVariables.length === 0),
+  );
+  // The limbs, each one of which has a live case on this tree (see
+  // `workflowEnvValues`' docblock for which family each keeps out).
+  const envEntry = (over = {}) => ({ envVariables: ['PR_BODY'], direct: true, selfTest: false, ciOnly: null, ...over });
+  t('\u2b50 a direct, non-self-test family with no payload dependence is classified by its env carrier', workflowEnvValues(envEntry()).join(',') === 'PR_BODY');
+  t('a `--self-test` invocation consumes no workflow value, so its step\'s env cannot subtract it', workflowEnvValues(envEntry({ selfTest: true })).length === 0);
+  t('a `check:*` family is invocable by name and its KEY drops the argv, so one step\'s env is not a property of it', workflowEnvValues(envEntry({ direct: false })).length === 0);
+  t('a family already named CI-MEASURED ONLY is not named a second time as value-bearing', workflowEnvValues(envEntry({ ciOnly: { env: 'GITHUB_EVENT_PATH' } })).length === 0);
+  t('CONTROL: no env carrier at all classifies nothing', workflowEnvValues(envEntry({ envVariables: [] })).length === 0);
+
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
   // cannot drift apart.
@@ -13445,6 +13991,57 @@ function selfTest() {
   t('finds glob hint', hints.some((h) => h.startsWith('packages/spec/src')));
   t('skips urls', !hints.some((h) => h.includes('example.com')));
   t('skips flags and bare words', !hints.includes('--self-test') && !hints.includes('hello'));
+
+  // ── An EXCLUSION constant is not a watch surface (#15753) ─────────────────
+  //
+  // The declaration is the whole reading: the same literal, under a name that
+  // says "never look here", must not become a lead — and under any other name
+  // must still be one. Both halves are asserted on ONE literal so the pair
+  // cannot drift, and the positive control is what makes the negative a
+  // measurement rather than a scan that stopped working.
+  //
+  // Every fixture NAME that would MATCH the predicate is assembled at run time
+  // rather than written after a `const`. `maskSelfTests` already blanks this
+  // body before the module scans itself, so no fixture here reaches the live
+  // hint set today; the assembly is what keeps that true if the block is ever
+  // moved out of the masked region, where a verbatim declaration would be a
+  // real declaration site silencing THIS module's own hints. It is the fixture
+  // hazard `check-watch-hint-literal.mjs` records about its own, one class over
+  // — there with no mask standing in the way.
+  const NOISE_SUFFIX = ['NO', 'ISE'].join('');
+  const excluded = `export const SHARED_PREFIX_${NOISE_SUFFIX} = Object.freeze(['.changeset/']);`;
+  const included = "export const SHARED_PREFIX_ROOTS = Object.freeze(['.changeset/']);";
+  t('a path literal declared inside an exclusion constant is NOT a hint', !extractWatchHints(excluded).includes('.changeset'));
+  t('CONTROL: the same literal under a plain declaration still is — the scan did not simply stop', extractWatchHints(included).includes('.changeset'));
+  // The span, not the line: a noise floor is usually written multi-line, and a
+  // per-line check would admit every entry but the first.
+  const multiline = [
+    `const SCAN_${NOISE_SUFFIX} = new Set([`,
+    "  'packages/generated/src',",
+    "  'apps/fixtures/src',",
+    ']);',
+    "const REAL = 'packages/core/src';",
+  ].join('\n');
+  const multilineHints = extractWatchHints(multiline);
+  t('every entry of a MULTI-LINE exclusion list is skipped, not just the one on the declaration line', !multilineHints.some((h) => h.startsWith('packages/generated') || h.startsWith('apps/fixtures')));
+  t('and a declaration AFTER it is unaffected — the span closes where the statement does', multilineHints.includes('packages/core/src'));
+  // The named spellings, one case each, so a narrowing of the predicate is
+  // visible here rather than only in the live census.
+  for (const word of ['SKIP', 'EXCLUDE', 'EXCLUDED', 'EXCLUSIONS', 'IGNORE']) {
+    const named = `const ${word}_PATHS = ['packages/skipped/src'];`;
+    t(`\`${word}\` names an exclusion too — the predicate is the convention, not one constant`, !extractWatchHints(named).includes('packages/skipped/src'));
+  }
+  t('a name that merely CONTAINS the word without a segment boundary is not one', extractWatchHints("const SKIPPY_ROOTS = ['packages/skippy/src'];").includes('packages/skippy/src'));
+  t('nor is a CALLABLE whose name matches — a function body is not a population declaration', extractWatchHints("function skipDirs() { return ['packages/callable/src']; }").includes('packages/callable/src'));
+  // LIVE, against the gate the card was filed on: the noise floor is gone from
+  // its hints and the gate is still reachable by its own script path, which is
+  // the pair a narrowing has to hold. Read from disk rather than restated.
+  {
+    const half = 'scripts/pm/check-half-states.mjs';
+    const liveHints = extractWatchHints(readFileSync(nodePath.join(ROOT, half), 'utf8'), half);
+    t('LIVE: the gate that declares the noise floor no longer offers `.changeset` as a surface it watches', !liveHints.some((h) => h.startsWith('.changeset')));
+    t('LIVE: and it is still reachable — the narrowing took the exclusion, not the gate', liveHints.includes(half));
+  }
 
   // ── What a gate READS vs what its source MENTIONS (#8478) ─────────────────
   //
@@ -14767,14 +15364,18 @@ function selfTest() {
   t('and claims nothing elsewhere under packages/', !docFormulaHints.some((h) => hintCovers(h, 'packages/core/src/index.ts')));
   t('nor under apps/', !docFormulaHints.some((h) => hintCovers(h, 'apps/console/src/main.tsx')));
   t('nor under examples/', !docFormulaHints.some((h) => hintCovers(h, 'examples/crm/objects/account.object.ts')));
-  // The bounded residual, pinned as pre-existing rather than as a cost of this
-  // declaration. `hintCovers` cannot subtract, so `docs/**` necessarily claims
-  // the exempt `docs/plans` — but that subtree ALREADY derived the gate through
-  // its own SKIP_PATHS literal, so the declaration adds nothing on that side.
+  // The bounded residual, whose PROVENANCE moved under #15753. `hintCovers`
+  // cannot subtract, so `docs/**` necessarily claims the exempt `docs/plans`.
+  // That subtree used to derive the gate a SECOND way as well, through the
+  // `SKIP_PATHS` literal that names it — and a skip list is not a watch
+  // surface, so the extractor no longer reads it. The over-claim is the
+  // declaration's alone now, which is the honest reading rather than a
+  // narrower one: a root claiming a subtree carved out of it, stated here.
   // Asserted with the declaration removed from the hint set, which is what makes
   // it a measurement instead of a restatement.
   const withoutDeclaration = docFormulaHints.filter((h) => !['docs/**', 'skills/**', 'content/**', '.claude/**'].includes(h));
-  t('the exempt subtree derived the gate before this declaration, and still does — the over-claim is bounded, not new', withoutDeclaration.some((h) => hintCovers(h, 'docs/plans/x.md')));
+  t('the exempt subtree no longer derives the gate through the skip list that names it — an exclusion is not a watch surface (#15753)', !withoutDeclaration.some((h) => hintCovers(h, 'docs/plans/x.md')));
+  t('while the declaration still reaches it, so the over-claim is bounded and STATED rather than quietly doubled', docFormulaHints.some((h) => hintCovers(h, 'docs/plans/x.md')));
   t('while the live corpus derived nothing without it — the gap this closes', !withoutDeclaration.some((h) => hintCovers(h, 'docs/qa/platform-checklist/RUNNER.md')));
   // The pair that makes the declaration worth having: the bare words this gate
   // spells in its ROOTS array stay refused, so the coverage above is bought by
@@ -20917,7 +21518,7 @@ function selfTest() {
     t(
       'the value-bearing bucket gets its OWN labelled line, naming the reason and the command',
       explainedText.includes('VALUE-BEARING famil(ies)')
-        && explainedText.includes('its argv takes a value from the workflow')
+        && explainedText.includes("its argv or its step's `env:` takes a value from the workflow")
         && explainedText.includes(valueBearing),
     );
     t(
@@ -20994,6 +21595,13 @@ function selfTest() {
     }
   }
 
+  // The gate whose CI invocation takes a value from the workflow, spelled once
+  // for the two blocks below. It lives INSIDE the self-test on purpose: a path
+  // literal at module scope would be read by this tool's own extractor and
+  // become a ninth hint on this file — the fabrication `CHANGESET_PROBE_PATH`'s
+  // docblock measured and refused, one class over.
+  const VALUE_BEARING_PROBE_SCRIPT = 'scripts/pm/check-half-states.mjs';
+
   // ── END TO END: the VALUE-BEARING bucket is WIRED, not merely present (#15115) ──
   //
   // Every unit case above stays green if the `--ran` call site never PASSES
@@ -21010,11 +21618,15 @@ function selfTest() {
   {
     const vbTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-vb-'));
     try {
-      // A changeset path, because that is what reaches the live value-bearing
-      // families — and it is the tool's own constant rather than a spelling
-      // this test invented.
-      const vbCard = CHANGESET_PROBE_PATH;
-      const jsonRun = runCli(['--json', vbCard]);
+      // A changeset path AND the gate script whose value-bearing invocation the
+      // rows below are judged on. The changeset path alone used to reach that
+      // family, through the noise-floor literal #15753 stopped reading as a
+      // watch surface; the CONTROL beside the NOT MEASURED block pins that it
+      // no longer does, so the derivation this change removed is recorded as an
+      // assertion rather than lost along with the probe. The second path is the
+      // gate's own script, which is how a card honestly reaches this family.
+      const vbCard = [CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT];
+      const jsonRun = runCli(['--json', ...vbCard]);
       const doc = jsonRun.status === 0 ? JSON.parse(jsonRun.stdout ?? '{}') : null;
       const vbRows = [...(doc?.matched ?? []), ...(doc?.alwaysRunsPopulation ?? [])].filter((row) => row.notRunnable);
       t('CONTROL: this tree still derives at least one VALUE-BEARING family for a changeset path', Boolean(doc) && vbRows.length >= 1);
@@ -21023,7 +21635,7 @@ function selfTest() {
         t('CONTROL: and the runnable union WITHHOLDS it — which is the whole reason the bucket exists', !doc.commands.includes(vbCommand));
         const vbRecord = nodePath.join(vbTmp, 'ran-value-bearing.list');
         writeFileSync(vbRecord, `${[...doc.commands, vbCommand].join('\n')}\n`);
-        const vbRun = runCli([RAN_FLAG, vbRecord, vbCard]);
+        const vbRun = runCli([RAN_FLAG, vbRecord, ...vbCard]);
         const vbOut = vbRun.stdout ?? '';
         t(
           '⭐ a real run that RECORDS it lands it in the VALUE-BEARING bucket, with the remainder heading gone entirely',
@@ -21034,7 +21646,7 @@ function selfTest() {
         );
         t(
           'and the reason travels with it, so the runner learns why this invocation is not one they could have derived',
-          vbOut.includes('its argv takes a value from the workflow'),
+          vbOut.includes("its argv or its step's `env:` takes a value from the workflow"),
         );
         t(
           'while the verdict is unmoved — the bucket is diagnostic, and every derived family is still accounted for',
@@ -21054,10 +21666,20 @@ function selfTest() {
   // `--self-test` in the list above is not the thing that is missing, and that
   // substitution is what the card was filed on.
   {
-    const notMeasuredRun = runCli([CHANGESET_PROBE_PATH]);
+    // The probe card names the changeset path AND the gate script, for the
+    // reason the value-bearing block above states: this family was reached from
+    // a changeset path alone only through the gate's own exclusion constant,
+    // which #15753 stopped reading as a watch surface. The first case below is
+    // that removal, pinned; the second is the card as it must now be spelled.
+    const changesetOnlyRun = runCli([CHANGESET_PROBE_PATH]);
+    t(
+      '⭐ a changeset path alone reaches NO value-bearing family any more — the noise floor it used to be derived through is an exclusion, not a surface (#15753)',
+      changesetOnlyRun.status === 0 && !(changesetOnlyRun.stdout ?? '').includes('Value-bearing argv'),
+    );
+    const notMeasuredRun = runCli([CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
     const notMeasuredOut = notMeasuredRun.stdout ?? '';
     t(
-      'CONTROL: a changeset card still reaches a family this tool cannot run, so the wording below is judged on a live row',
+      'CONTROL: this card still reaches a family this tool cannot run, so the wording below is judged on a live row',
       notMeasuredRun.status === 0 && notMeasuredOut.includes('Value-bearing argv'),
     );
     t(
@@ -21069,7 +21691,7 @@ function selfTest() {
       notMeasuredOut.includes('node scripts/check-adr-0087-registration.mjs --base origin/main')
         && notMeasuredOut.includes("is this script's own documented default; CI pins it to $MERGE_BASE"),
     );
-    const notMeasuredCommands = runCli(['--commands', CHANGESET_PROBE_PATH]);
+    const notMeasuredCommands = runCli(['--commands', CHANGESET_PROBE_PATH, VALUE_BEARING_PROBE_SCRIPT]);
     t(
       '⭐ --commands says it on stderr too, one line per family, where it cannot corrupt the harvest',
       (notMeasuredCommands.stderr ?? '').includes('⊘ NOT MEASURED — scripts/pm/check-half-states.mjs')
@@ -21082,6 +21704,40 @@ function selfTest() {
     t(
       'CONTROL: stdout is still commands and nothing else — the NOT MEASURED lines never reach the stream a consumer executes',
       (notMeasuredCommands.stdout ?? '').split('\n').filter(Boolean).every((l) => /^(pnpm|node) \S/.test(l)),
+    );
+  }
+
+  // ── The env-carried half of that bucket, on the LIVE tree (#15761) ─────────
+  //
+  // The fixture cases above judge the reader; this one judges the tree. The
+  // change set is the specimen workflow itself, so the card, the docblock and
+  // this pin all name one file. Before the env read, stdout carried
+  // `node scripts/check-partof-closing-keyword.mjs` under a caption promising
+  // a runnable command, and running it here exits 2 with the gate's own
+  // "NOT WIRED" refusal.
+  {
+    const envLive = runCli(['--commands', '.github/workflows/partof-closing-keyword-guard.yml']);
+    const envLiveOut = (envLive.stdout ?? '').split('\n');
+    const envLiveErr = envLive.stderr ?? '';
+    t(
+      'CONTROL: the specimen workflow really is a change set that derives this family, so the cases below judge a live row',
+      envLive.status === 0 && (envLiveOut.join('\n') + envLiveErr).includes('partof-closing-keyword'),
+    );
+    t(
+      '⭐ the bare invocation whose input arrives through `env:` is NO LONGER offered as runnable',
+      !envLiveOut.includes('node scripts/check-partof-closing-keyword.mjs'),
+    );
+    t(
+      '⭐ …it is NAMED as NOT MEASURED instead, on the stream that cannot corrupt the harvest',
+      envLiveErr.includes('⊘ NOT MEASURED — scripts/check-partof-closing-keyword.mjs'),
+    );
+    t(
+      '⭐ CONTROL: the `pnpm check:` form of the same gate takes nothing from the workflow and is still in the list',
+      envLiveOut.includes('pnpm check:partof-closing-keyword'),
+    );
+    t(
+      'CONTROL: the accounting line stays true of both carriers, so a reader is not told to look only at argv',
+      envLiveErr.includes("their argv or their step's `env:` carries a variable with no value outside a CI run"),
     );
   }
 

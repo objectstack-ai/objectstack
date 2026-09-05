@@ -31,6 +31,18 @@
  * A host that wires no `declaredFieldType` gets the `LIKE` it always got —
  * "cannot answer, do not block" — and a comparand the contract refuses is
  * refused BEFORE the constant is considered, on every compiler.
+ *
+ * ## [#15684] The control that had to avoid the case axis, restored
+ *
+ * One assertion below (`$not over the constant composes`) once compared
+ * against `a.b` rather than `acme`, with a comment saying why: the compiler
+ * emitted a plain `LIKE`, SQLite folds ASCII case, and a case-bearing
+ * comparand therefore answered rows 1 AND 2 whether the disjunction worked or
+ * not. #15684 made the case-EXACT family compile per dialect, so this suite
+ * now says which dialect its sql.js engine is and the control is back on the
+ * case axis, answering row 2 alone. `unawareCtx` deliberately keeps the
+ * dialect-blind configuration: the coercion rows this file exists for were
+ * measured through it.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -187,7 +199,7 @@ describe('[#14079] the two strategies, on a real SQLite engine over a REAL colum
   let db: any;
   /** `ctx` for the raw-SQL strategy, with the declared-type hook a host wires. */
   let nativeCtx: DatasetScopedStrategyContext;
-  /** The same ctx without the hook — the "cannot answer" host. */
+  /** The same ctx with NEITHER hook — the "cannot answer" host. */
   let unawareCtx: DatasetScopedStrategyContext;
   let echoCtx: DatasetScopedStrategyContext;
 
@@ -217,8 +229,14 @@ describe('[#14079] the two strategies, on a real SQLite engine over a REAL colum
       executeRawSql: async (_object: string, sql: string, params: unknown[]) => run(sql, params).rows,
     };
     unawareCtx = { ...base } as DatasetScopedStrategyContext;
-    nativeCtx = { ...base, declaredFieldType } as DatasetScopedStrategyContext;
-    echoCtx = { getCube: base.getCube, queryCapabilities: base.queryCapabilities, declaredFieldType } as DatasetScopedStrategyContext;
+    // [#15684] The engine under this suite IS SQLite, so the host says so —
+    // the same answer `plugin.ts` reads off the driver that owns the object.
+    // Without it the case-EXACT family compiles a plain `LIKE`, which folds
+    // ASCII case here; `unawareCtx` above keeps that configuration on purpose,
+    // because the coercion this file pins was measured through it.
+    const sqlDialect = () => 'sqlite';
+    nativeCtx = { ...base, declaredFieldType, sqlDialect } as DatasetScopedStrategyContext;
+    echoCtx = { getCube: base.getCube, queryCapabilities: base.queryCapabilities, declaredFieldType, sqlDialect } as DatasetScopedStrategyContext;
   });
 
   afterAll(() => {
@@ -269,20 +287,25 @@ describe('[#14079] the two strategies, on a real SQLite engine over a REAL colum
       expect(echo.sql, `echo of ${JSON.stringify(where)}`).not.toMatch(/LIKE/);
       expect(echo.params, `echo of ${JSON.stringify(where)}`).toEqual([]);
     }
-    // The text column beside it still compiles its LIKE on both.
+    // The text column beside it still compiles a real predicate on both — and
+    // since #15684 that predicate is the dialect's case-EXACT construct, `GLOB`
+    // on the SQLite engine this suite runs, with the escaped pattern its own.
     const native = await new NativeSQLStrategy().generateSql(query({ name: { $contains: 'acme' } }), nativeCtx);
-    expect(native.sql).toMatch(/LIKE/);
-    expect(native.params).toEqual(['%acme%', '\\']);
+    expect(native.sql).toMatch(/GLOB/);
+    expect(native.params).toEqual(['*acme*']);
   });
 
   it('$not over the constant composes: every row for !contains, no row for !notContains', async () => {
     expect(await executedIds({ $not: { score: { $contains: '5' } } }, nativeCtx)).toEqual(ALL_IDS);
     expect(await executedIds({ $not: { score: { $notContains: '5' } } }, nativeCtx)).toEqual([]);
     // The constant is one disjunct among ordinary ones: the text column's own
-    // LIKE still decides the rest. (`a.b`, not `acme`: this compiler emits a
-    // plain `LIKE`, which folds ASCII case on SQLite — a known property of
-    // this face, not this card's subject — so the control must not turn on case.)
-    expect(await executedIds({ $or: [{ score: { $contains: '5' } }, { name: { $contains: 'a.b' } }] }, nativeCtx)).toEqual(['9']);
+    // predicate still decides the rest. [#15684] The comparand is back on the
+    // CASE axis — this control had to be steered off it (`a.b`) while the
+    // compiler emitted a plain `LIKE` that folds ASCII case on SQLite, so
+    // `acme` answered rows 1 AND 2 and could not distinguish a working
+    // disjunction from a folding one. It answers row 2 alone now, which is
+    // both the #4706 Q2 = A contract and a stronger control.
+    expect(await executedIds({ $or: [{ score: { $contains: '5' } }, { name: { $contains: 'acme' } }] }, nativeCtx)).toEqual(['2']);
   });
 
   it('the read scope takes the same rule through the same hook', async () => {

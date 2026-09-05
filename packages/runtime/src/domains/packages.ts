@@ -1345,36 +1345,49 @@ _context: HttpProtocolContext,
     const datasets: any[] = [];
     const readErrors: string[] = [];
     for (const name of names) {
-        // Read the just-published seed body. Try the active org first, then
-        // fall back to an env-wide read — a workspace seed is often stored
-        // org-wide (organization_id IS NULL), and resolving the wrong scope
-        // here is what silently produced "0 rows loaded".
-        const attempts = organizationId
-            ? [{ type: 'seed', name, organizationId }, { type: 'seed', name }]
-            : [{ type: 'seed', name }];
+        // Read the just-published seed body. THE REGISTRY DECIDES THE SCOPE,
+        // not this call site: `seed` declares `allowOrgOverride: false`, and
+        // since #14908 `getMetaItem` opens by resolving
+        // `organizationIdForMetaRead(request.type, request.organizationId)`
+        // and spends THAT binding — never the raw argument — on every read
+        // beneath it. The predicate answers `undefined` for every type the
+        // registry declares non-overridable, so this read is env-wide by
+        // construction: `organization_id IS NULL`, the partition a workspace
+        // seed is stored in and the only one cold boot hydrates.
+        //
+        // [#15068] This used to be a two-attempt org-then-env ladder, written
+        // when resolving the wrong scope here is what silently produced "0
+        // rows loaded". The gate is that fix now, and it made the org-first
+        // rung a byte-identical repeat: both attempts resolved the same
+        // partition and served the same answer, so the only thing the second
+        // one could still do was report an identical failed read twice on a
+        // client-facing `seedApplied.errors[]`.
+        //
+        // ⛔ Do NOT restore an org-first attempt. An org-scoped `seed` row is
+        // the unhydratable phantom `reportUnhydratableOrgScopedRows` exists to
+        // warn about — reading it back would serve a body that vanishes at the
+        // next restart. Dropping the organization is the REPAIR, exactly as on
+        // the `app` flip above.
         let item: any;
-        for (const args of attempts) {
-            try {
-                item = await protocol.getMetaItem(args);
-                if (item) break;
-            } catch (e) {
-                // [#8443] The SAME rule as the catch at the door, applied to
-                // the sibling key of the same field: `readErrors` becomes
-                // `seedApplied.errors[]` on that 200 response, so it is a
-                // client-facing payload too. Measured before the change: with
-                // `sys_metadata` unreachable this read fails FIRST — before the
-                // loader is ever constructed — and answered `"errors": ["read
-                // project_seed: SQLITE_ERROR: no such table: sys_metadata"]`,
-                // so fixing only the door's catch would have left the commonest
-                // outage shape disclosing exactly as before. A DECLARED 4xx
-                // refusal (`[item_locked]`, `[writable_package_required]`, …)
-                // still reaches the author verbatim — that is the point of the
-                // positive list.
-                (deps.logger ?? console).warn(
-                    `[applyPublishedSeeds] seed body read failed for "${name}": ${(e as Error)?.message ?? String(e)}`,
-                );
-                readErrors.push(`read ${name}: ${clientFacingFailureText(e, 'the reason is in the server log')}`);
-            }
+        try {
+            item = await protocol.getMetaItem({ type: 'seed', name });
+        } catch (e) {
+            // [#8443] The SAME rule as the catch at the door, applied to the
+            // sibling key of the same field: `readErrors` becomes
+            // `seedApplied.errors[]` on that 200 response, so it is a
+            // client-facing payload too. Measured before the change: with
+            // `sys_metadata` unreachable this read fails FIRST — before the
+            // loader is ever constructed — and answered `"errors": ["read
+            // project_seed: SQLITE_ERROR: no such table: sys_metadata"]`, so
+            // fixing only the door's catch would have left the commonest
+            // outage shape disclosing exactly as before. A DECLARED 4xx
+            // refusal (`[item_locked]`, `[writable_package_required]`, …)
+            // still reaches the author verbatim — that is the point of the
+            // positive list.
+            (deps.logger ?? console).warn(
+                `[applyPublishedSeeds] seed body read failed for "${name}": ${(e as Error)?.message ?? String(e)}`,
+            );
+            readErrors.push(`read ${name}: ${clientFacingFailureText(e, 'the reason is in the server log')}`);
         }
         // protocol.getMetaItem returns a WRAPPER: `{ type, name, item, lock,
         // editable, … }` — the seed body (object/records) lives under

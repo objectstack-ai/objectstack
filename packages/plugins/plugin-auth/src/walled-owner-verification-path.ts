@@ -238,11 +238,6 @@ export async function probeWalledOwnerAccountState(
   const config = resolvePlatformAdminEmails();
   if (config.emails.length === 0 || !engine || typeof engine.find !== 'function') return 'unknown';
   const SYSTEM = { context: { isSystem: true } };
-  const asRows = (raw: unknown): Record<string, unknown>[] => {
-    if (Array.isArray(raw)) return raw as Record<string, unknown>[];
-    const records = (raw as { records?: unknown } | null | undefined)?.records;
-    return Array.isArray(records) ? (records as Record<string, unknown>[]) : [];
-  };
   try {
     // Both spellings for EVERY declared address, exactly as the standing
     // resolver queries them — the as-typed forms come from the parser's own
@@ -250,8 +245,10 @@ export async function probeWalledOwnerAccountState(
     const spellings = [...new Set([...config.emails, ...config.declaredSpellings])];
     const byId = new Map<unknown, Record<string, unknown>>();
     for (const spelling of spellings) {
-      for (const row of asRows(
-        await engine.find(SystemObjectName.USER, { where: { email: spelling }, limit: 5 }, SYSTEM),
+      for (const row of await engine.find(
+        SystemObjectName.USER,
+        { where: { email: spelling }, limit: 5 },
+        SYSTEM,
       )) {
         if (row?.id) byId.set(row.id, row);
       }

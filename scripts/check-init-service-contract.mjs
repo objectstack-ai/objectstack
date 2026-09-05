@@ -788,7 +788,8 @@ function selfTest() {
     }
   `;
 
-  // 13. #4772 VERBATIM, pre-fix (`f2eb85007^`, packages/plugins/plugin-auth/src/auth-plugin.ts:346):
+  // 13. #4772 VERBATIM, pre-fix — `packages/plugins/plugin-auth/src/auth-plugin.ts`
+  //     as it stood at `f2eb85007^` (line 346 there, a dated reading, not a pointer):
   //     init() resolves the workspace-provided `cache` through `getServiceAsync`,
   //     via an optional call on a cast `ctx`, inside a best-effort try/catch, and
   //     the plugin's declarations cover `data`/`manifest`/objectql — never `cache`.
