@@ -160,6 +160,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { blank, scanSource } from './js-comment-mask.mjs';
 
 /* The grammar, as a string, so a gate can print it in its own failure text
  * instead of restating it and drifting from this file. */
@@ -427,6 +428,45 @@ export function extractAnchors(markdown) {
   return { anchors, lineAnchors };
 }
 
+/* ──────────────────── document-side: the doc PROJECTION ────────────────── */
+
+/**
+ * The COMMENT PROSE of a JavaScript-shaped source, with every other character
+ * blanked to a space and every newline kept -- so a finding's LINE NUMBER is
+ * still the line number in the real file.
+ *
+ * ## Why a corpus needs this at all (#15765, measured)
+ *
+ * `extractAnchors` is line-based and knows nothing about syntax: hand it a
+ * `.mjs` file and it reads comment prose EXACTLY as it reads a paragraph of an
+ * ADR -- that half needed no change and the self-test pins it per comment form.
+ * What it also reads is the CODE, and that is the half that made a raw `.mjs`
+ * corpus unusable. Measured over the 216 tracked `scripts/**` `.mjs` files on
+ * `5315098df`: 251 live line citations raw against 128 through this projection.
+ * The 123 that vanish are not rot -- they are a gate's own self-test FIXTURES,
+ * string literals like `'p.ts:2'` and `'content/docs/other.mdx:1'` written to
+ * provoke that gate's own line-reporting. Judging those would red a gate for
+ * testing itself, which is the fabrication direction
+ * `scripts/js-comment-mask.mjs` exists to close.
+ *
+ * So the separator is the shared one, never a private stripper: this asks
+ * `scripts/js-comment-mask.mjs#scanSource` the same question every other
+ * source-scanning gate asks it, and projects the answer the other way round
+ * from `scripts/js-comment-mask.mjs#maskComments` -- that one keeps the code
+ * and blanks the prose; a doc corpus wants the prose and blanks the code.
+ *
+ * ⚠️ BLANK, NEVER DELETE, and it is `scripts/js-comment-mask.mjs#blank` that
+ * guarantees it: a projection that dropped the code lines would report every
+ * finding against a line number that does not exist in the file the author
+ * opens.
+ */
+export function commentProse(source) {
+  const { comment } = scanSource(source);
+  const code = new Uint8Array(comment.length);
+  for (let i = 0; i < comment.length; i += 1) code[i] = comment[i] ? 0 : 1;
+  return blank(source, code);
+}
+
 /* ───────────────────────── corpus registration ─────────────────────────── */
 
 /**
@@ -436,10 +476,19 @@ export function extractAnchors(markdown) {
  * lives above and is shared.
  */
 export function defineCorpus(spec) {
-  const { id, label, docRoots, docPattern = /\.mdx?$/, crossRepos = {}, checkBarePaths = false } = spec;
+  const {
+    id, label, docRoots, docPattern = /\.mdx?$/, crossRepos = {}, checkBarePaths = false,
+    docProjection = null, judgeUntrackedLineAnchors = true,
+  } = spec;
   if (!id || !label) throw new Error('defineCorpus: `id` and `label` are required');
   if (!Array.isArray(docRoots) || docRoots.length === 0) throw new Error('defineCorpus: `docRoots` must be a non-empty array');
-  return { id, label, docRoots, docPattern, crossRepos, checkBarePaths };
+  /* A projection that is present but not callable would be silently skipped by
+   * an `if (corpus.docProjection)` guard, and the corpus would sweep raw source
+   * while its registration reads as though it did not. Refused loudly instead. */
+  if (docProjection !== null && typeof docProjection !== 'function') {
+    throw new Error('defineCorpus: `docProjection` must be a function or null');
+  }
+  return { id, label, docRoots, docPattern, crossRepos, checkBarePaths, docProjection, judgeUntrackedLineAnchors };
 }
 
 function walk(dir, pattern, out = []) {
@@ -480,7 +529,7 @@ function trackedFiles(root) {
 export function sweepCorpus(corpus, root = process.cwd()) {
   const tracked = trackedFiles(root);
   const findings = [];
-  const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0 };
+  const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0, unresolvableLineCitation: 0 };
   const sourceCache = new Map();
   const readTarget = (p) => {
     if (!sourceCache.has(p)) sourceCache.set(p, readFileSync(join(root, p), 'utf8'));
@@ -491,10 +540,35 @@ export function sweepCorpus(corpus, root = process.cwd()) {
   for (const abs of docs) {
     const rel = relative(root, abs);
     counts.docs += 1;
-    const { anchors, lineAnchors } = extractAnchors(readFileSync(abs, 'utf8'));
+    const rawDoc = readFileSync(abs, 'utf8');
+    const { anchors, lineAnchors } = extractAnchors(corpus.docProjection ? corpus.docProjection(rawDoc) : rawDoc);
 
     for (const la of lineAnchors) {
       if (la.exempt && EXEMPT_CLASSES.includes(la.exempt)) { counts.exempt += 1; continue; }
+      /* A corpus may decline to judge a citation that names NO FILE IN THIS
+       * TREE, and `docs/adr/**` leaves this ON while a `scripts/**` gate-header
+       * corpus turns it OFF. That is the same call `checkBarePaths` makes one
+       * paragraph down, on the same evidence shape, and it is a SCOPE
+       * declaration, never a softening of the grammar: a citation this gate
+       * cannot resolve either way is one it cannot tell an author how to fix,
+       * and a gate whose only remedy is "stop writing that" is the
+       * permanently-red gate this repo retired.
+       *
+       * Measured on `5315098df` over `scripts/**` `.mjs` comment prose: 128
+       * live citations in all, of which 32 name a tracked file and 96 do not --
+       * 66 bare filenames (`engine.ts:9407`, an abbreviation inside a census
+       * table that no resolver can bind to one of this tree's several
+       * `engine.ts`), 22 continuations inheriting no path of their own, 11
+       * directory-qualified paths that are illustrations or sibling-repo files
+       * (`path/to/file.ts:1234`, `src/github.sh:68-91`), and 1 tilde form. The
+       * 96 are a real defect class and are recorded as a follow-up, exactly as
+       * the 1,056 bare paths under `checkBarePaths` were -- but they are not
+       * the cross-file rot #15765 measured, and folding them in would bury this
+       * gate's signal under a cleanup nobody ruled on. */
+      if (!corpus.judgeUntrackedLineAnchors && !tracked.has(la.path ?? '')) {
+        counts.unresolvableLineCitation += 1;
+        continue;
+      }
       /* A marker whose CLASS is unrecognised is its own finding, never a
        * silent pass and never an ordinary line anchor: a typo in the class
        * must not be a quiet way to switch this gate off, and it must not be
@@ -599,7 +673,7 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 51,
+  'symbol-anchors self-test': 63,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -756,6 +830,54 @@ export function selfTest() {
   let threw = false;
   try { defineCorpus({ id: 'x', label: 'x', docRoots: [] }); } catch { threw = true; }
   check(threw, 'defineCorpus must refuse an empty docRoots');
+
+  // 9. ⭐ The doc PROJECTION (#15765). A `.mjs` corpus hands `extractAnchors`
+  //    comment prose and nothing else, so each comment FORM is provoked by
+  //    name, and the negative -- a citation living in a STRING LITERAL, which
+  //    is a gate's own test fixture and not a doc citation -- is provoked
+  //    beside them. A projection that kept the code would red a gate for
+  //    testing itself; one that dropped the code lines would report every
+  //    finding against a line number the author cannot open.
+  const mjs = [
+    'import { x } from "y";',                                   // 1  code
+    '// A line comment cites packages/a/line.ts:11 here.',      // 2  `//`
+    '/* A block comment cites packages/a/block.ts:22 here. */', // 3  `/* */`
+    '/**',                                                      // 4  docblock
+    ' * A docblock cites packages/a/doc.ts:33 and anchors',     // 5
+    ' * `packages/a/doc.ts#realThing` properly.',               // 6
+    ' */',                                                      // 7
+    "const fixture = 'packages/a/string.ts:44';",               // 8  ⛔ negative
+    'const tpl = `packages/a/template.ts:55`;',                 // 9  ⛔ negative
+  ].join('\n');
+  const projected = commentProse(mjs);
+  const pj = extractAnchors(projected);
+  const pjRaw = pj.lineAnchors.map((l) => l.raw).join(' ');
+  check(pj.lineAnchors.some((l) => l.raw === 'packages/a/line.ts:11'), `a citation in a \`//\` comment must be read, got: ${pjRaw}`);
+  check(pj.lineAnchors.some((l) => l.raw === 'packages/a/block.ts:22'), `a citation in a \`/* */\` block comment must be read, got: ${pjRaw}`);
+  check(pj.lineAnchors.some((l) => l.raw === 'packages/a/doc.ts:33'), `a citation in a docblock must be read, got: ${pjRaw}`);
+  check(pj.anchors.some((a) => a.symbol === 'realThing' && a.path === 'packages/a/doc.ts'), 'a SYMBOL anchor written in a comment must be extracted, not only the rot');
+  // ⛔ The negatives, one per literal form. A gate's fixtures are code.
+  check(!pj.lineAnchors.some((l) => l.raw.includes('string.ts')), `a citation inside a STRING LITERAL is not a doc citation, got: ${pjRaw}`);
+  check(!pj.lineAnchors.some((l) => l.raw.includes('template.ts')), `a citation inside a TEMPLATE literal is not a doc citation, got: ${pjRaw}`);
+  // ...and the raw source proves the projection is what makes the difference:
+  // without it the extractor reads the fixtures too, which is the whole reason
+  // a `.mjs` corpus needs one.
+  const unprojected = extractAnchors(mjs).lineAnchors.map((l) => l.raw);
+  check(unprojected.some((r) => r.includes('string.ts')) && unprojected.some((r) => r.includes('template.ts')),
+    'without the projection the extractor DOES read string fixtures — the control that makes the two negatives above mean something');
+  // LINE NUMBERS SURVIVE. Blanking, not deleting: the docblock citation is on
+  // source line 5 and must be reported there.
+  check(pj.lineAnchors.find((l) => l.raw === 'packages/a/doc.ts:33')?.line === 5,
+    'the projection must preserve line numbers — a finding is reported against the line the author opens');
+  check(projected.split('\n').length === mjs.split('\n').length, 'the projection must preserve the line COUNT');
+
+  // 10. The corpus knobs the projection comes with.
+  check(defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).judgeUntrackedLineAnchors === true,
+    'judging every line citation is the DEFAULT — an existing corpus must not be narrowed by adding this option');
+  check(defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).docProjection === null, 'no projection is the default');
+  let projThrew = false;
+  try { defineCorpus({ id: 'x', label: 'x', docRoots: ['a'], docProjection: 'commentProse' }); } catch { projThrew = true; }
+  check(projThrew, 'defineCorpus must refuse a docProjection that is not callable — a skipped projection sweeps raw source while reading as though it did not');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
