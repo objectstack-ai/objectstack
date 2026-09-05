@@ -31,6 +31,41 @@
 // samples in `content/docs` -- the copy a customer starts from -- were invisible
 // to it, which is exactly how instance 3 survived the two code fixes.
 //
+// ## The class is a SHAPE, not the `records` spelling (#15599)
+//
+// All three instances above are spelled `.records`, and this header -- and the
+// titles of the cards that fixed them -- inherited that spelling as if it named
+// the class. It does not. The class is a SHAPE: a union normalizer,
+// `Array.isArray(x) ? x : x.<limb>` applied to a `find()` result. The limb is
+// `records` in some members and `data` in others, and some members carry both,
+// so a reader who greps for `records` sees a fraction of the class and
+// concludes it is a fraction of its real size.
+//
+// Re-measured on this branch's base `66e68adc6`, over the roots the #15094
+// census used (`packages/**` + `examples/**`, source extensions, 5,694 files):
+// 142 union-normalizer blocks -- 98 source, 44 test -- of which 71 read the
+// `records` limb, 82 read `data`, 11 read both.
+//
+// ⚠️ THOSE COUNTS ARE A BAND, NOT A CONSTANT, and that is the durable half.
+// The #15094 census (report `5547410463`, at `ca46f8f12`) read 104 blocks --
+// 41 `records`, 57 `data`, 6 both -- with a harness that was never committed.
+// Re-deriving from its prose definition, four defensible readings of "the same
+// brace-balanced enclosing block" gave 69 / 116 / 142 / 164 blocks on ONE
+// tree; the run quoted above is the reading that reproduces all four members
+// the census names by path (`packages/verify/src/rls.ts`,
+// `packages/rest/src/import-runner.ts`,
+// `packages/cli/src/utils/secret-reference-union.ts`,
+// `packages/plugins/plugin-auth/src/phone-sms-texts.ts`). ⛔ Do not carry
+// either count forward as a fact about the tree -- re-derive it, and rely only
+// on what every reading agrees on: BOTH limbs are populous, so the spelling
+// cannot be the signal.
+//
+// ⛔ None of this widens anything. #15094 ruled the population stays (option D:
+// the class is a bounded per-package cleanup, not a detector -- a syntactic
+// rule cannot tell a dead limb from the REST envelope, where `records` is a
+// contract-declared field). The counts are here so the next reader of this
+// header does not mistake the minority spelling for the class.
+//
 // ## Why this is a gate and not that test with a wider reach (#10751 ruling 3)
 //
 // A test in an example app reading `content/docs` needs a
@@ -87,11 +122,27 @@
 //                                      Sweeping those would fabricate ~30 findings.
 //   client.data.find / useQuery     -> `@objectstack/client`, which resolves a
 //                                      `PaginatedResult` whose rows ARE under
-//                                      `records` (packages/client/src/index.ts:310).
-//                                      `content/docs/api/client-sdk.mdx:659`
-//                                      reads `data?.records.map(...)` and is
+//                                      `records` -- declared at
+//                                      `packages/client/src/index.ts#PaginatedResult`.
+//                                      `content/docs/api/client-sdk.mdx` reads
+//                                      `data?.records.map(...)` and is
 //                                      CORRECT. Sweeping it would fabricate a
 //                                      fourth instance of a defect that is not there.
+//
+// ⚠️ Both citations above name a SYMBOL or a FILE, never a line, and that is
+// deliberate (#15599). The first one read `packages/client/src/index.ts:310`
+// when it was written; the #15094 census found that declaration at `:392` and
+// triage read `:390` the same day -- a cross-file line citation that rotted
+// twice inside one day, which is an argument against citing a line at all
+// rather than for repointing it. The second read `client-sdk.mdx:659`; that
+// sample had drifted off the cited line too. ⛔ Every number in this paragraph
+// is a DATED rot record, not a pointer -- do not repair one. `scripts/**` is
+// outside `check-adr-symbol-anchors`'s corpus (`docs/adr/**`, `.md` only), so
+// nothing resolves these two for you -- but the form is this repo's own
+// declared grammar, whose last line reads
+// `⛔ <dir>/<file>.ts:4901  A LINE NUMBER IS NOT AN ANCHOR FORM.`
+// (`scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR`), and a symbol name stays
+// checkable by grep where a number does not.
 //
 // So the marker is the identifier holding the adapter, not the method name:
 // `useAdapter(`, or a `find`/`findOne` on an `adapter` / `dataSource`. A
