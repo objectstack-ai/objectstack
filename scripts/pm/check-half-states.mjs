@@ -318,8 +318,8 @@
  *       own state model (maintainer ruling 2026-08-19/20, verbatim: 「同意 并
  *       存」) has it COEXIST with the card's standing `pm:*` label rather than
  *       replace it: the objecting seat applies it alongside its evidence
- *       comment, and the triage Routine — which re-judges every `pm:retriage`
- *       card each fire, high priority (SKILL.md) — is the only remover. That
+ *       comment, and the triage Routine — which answers every `pm:retriage`
+ *       card's question each fire (SKILL.md) — is the only remover. That
  *       division of duties is H13's healing-loop shape again: a label nobody
  *       re-checks for age is the next "state nobody is watching", and without
  *       this item nothing here would say so. Aged past one cycle the row names
@@ -329,11 +329,11 @@
  *       disputed grading is unidentifiable (异议对象不明) from the label set
  *       alone. Age is read from `updated_at`, the same proxy H13 uses for the
  *       same reason: this sweep makes no per-card timeline fetch for the
- *       label-APPLICATION event, and every triage re-judgement (grade kept or
- *       changed) bumps `updated_at`, so a stale reading means nothing touched
- *       the card since some triage pass — which is exactly the failure this
- *       item exists to name. Report-only and NOT loud, like H14–H16: the
- *       remedy is the triage Routine's next fire, never a label written here.
+ *       label-APPLICATION event, and every triage answer (whatever it decides)
+ *       bumps `updated_at`, so a stale reading means nothing touched the card
+ *       since some triage pass — which is exactly the failure this item exists
+ *       to name. Report-only and NOT loud, like H14–H16: the remedy is the
+ *       triage Routine's next fire, never a label written here.
  *
  * ## H19 — the question that ENDS a block
  *
@@ -2995,8 +2995,9 @@ export function h17TriggerFileCandidates(text) {
  * checkout. A token the oracle does not recognise is DROPPED in silence: the
  * measured decoys are `Field` and `FIXTURE_CAPTURED_NEGATED` (backticked
  * identifiers sitting inside real trigger clauses on #8656 and #8662) and
- * `scripts/check-type-check-coverage.mjs:1679` (a real path with a line suffix
- * — tracked as a file, NOT as that token, so the suffix form correctly fails).
+ * `scripts/check-type-check-coverage.mjs` carrying a line suffix of 1679 (a real
+ * path with a line suffix — tracked as a file, NOT as that token, so the suffix
+ * form correctly fails).
  * Each of those is a row this index would otherwise have rendered wrong.
  *
  * @param {string[]} texts card body plus every hold-comment body
@@ -3086,17 +3087,17 @@ function readTrackedFiles() {
 
 /**
  * H18 threshold — one triage-Routine cycle, the same reasoning as
- * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and re-judges
- * every `pm:retriage` card "each fire, high priority" (SKILL.md, 「`pm:retriage`
- * 重判每 fire 高优先处理」), so a card still carrying the label after 2h has
- * survived at least one re-judgement pass it should not have. Age is read
- * from `updated_at` rather than a per-card timeline fetch for the
- * label-APPLICATION event: this sweep makes that fetch for no item (H13's
- * same proxy choice, for the same reason — see `h13DomainWithoutPmState`),
- * and every triage write on the card (grade kept or changed) bumps
- * `updated_at`, so a stale reading here means nothing touched the card since
- * any triage pass at all, which is exactly the failure this item exists to
- * name.
+ * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and ANSWERS the
+ * question on every `pm:retriage` card each fire (SKILL.md, 「`pm:retriage` 每
+ * fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」), so a card
+ * still carrying the label after 2h has survived at least one answer pass it
+ * should not have. Age is read from `updated_at` rather than a per-card
+ * timeline fetch for the label-APPLICATION event: this sweep makes that fetch
+ * for no item (H13's same proxy choice, for the same reason — see
+ * `h13DomainWithoutPmState`), and every triage write on the card (whatever
+ * the answer) bumps `updated_at`, so a stale reading here means nothing
+ * touched the card since any triage pass at all, which is exactly the failure
+ * this item exists to name.
  */
 export const RETRIAGE_STALE_HOURS = 2;
 
@@ -3127,10 +3128,11 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
       ? `alongside its standing ${coexisting.map((l) => `\`${l}\``).join(', ')}`
       : 'ALONE, with no coexisting standing `pm:*` label — the disputed grading is unidentifiable (异议对象不明)';
   return (
-    `\`pm:retriage\` carried ${carrying}, ${reading} — the objecting seat's grade is still undecided past ` +
-    `one triage cycle. The triage Routine re-judges every \`pm:retriage\` card each fire (SKILL.md); a card ` +
-    `still here past the threshold is a re-judgement pass that did not run, not inventory: resolve the ` +
-    `grade (keep or change) and drop the label in the same write, oldest first.`
+    `\`pm:retriage\` carried ${carrying}, ${reading} — the question the objecting seat put to triage is ` +
+    `still unanswered past one triage cycle. The triage Routine answers every \`pm:retriage\` card's ` +
+    `question each fire (SKILL.md); a card still here past the threshold is an answer pass that did not ` +
+    `run, not inventory: answer what the comment asks and drop the label in the same write (an answer that ` +
+    `needs the maintainer goes to the inbox with the label still removed), oldest first.`
   );
 }
 
@@ -4081,10 +4083,10 @@ export function h21NegatedClosingKeyword(pr) {
  *                 itself, whose label is what makes the seat list page a board.
  *                 A closed seat card keeps it as identity, not as state.
  *   `pm:epic`     a delegation marker on a parent, the same kind of identity.
- *   `pm:retriage` a request for re-judgement. Plausibly residue too, and it did
- *                 not appear in the census — so it stays out until something
- *                 measures it, rather than being widened in on a hunch. The
- *                 set is one edit away when that measurement exists.
+ *   `pm:retriage` a question put to the triage seat. Plausibly residue too, and
+ *                 it did not appear in the census — so it stays out until
+ *                 something measures it, rather than being widened in on a
+ *                 hunch. The set is one edit away when that measurement exists.
  */
 export const PM_RESIDUE_LABELS = [
   'pm:dispatched',
@@ -8031,7 +8033,7 @@ export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = 
 //
 // ## The rule, and the gap that is NOT in the rule
 //
-// `.claude/skills/pm-dispatch/SKILL.md:164` carries a maintainer ruling of
+// `.claude/skills/pm-dispatch/SKILL.md` carries a maintainer ruling of
 // 2026-09-02 (「其他同意」): 「板面/树/队列读数自带取数时刻:写进认领、派发令、
 // 复核、轮次报告、座位贴段落的读数恒带 UTC 时间戳(形如 `2026-03T00:21Z`),树读
 // 数另带 ref 或 tip;无时间戳的读数是格式错误不是现值,读者按未取处理」.
@@ -14307,6 +14309,16 @@ function selfTest() {
   t('H18: …and the finding names the threshold', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
   t('H18: …and names the coexisting standing label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
   t('H18: multiple coexisting labels are all named', h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
+  // The label is a QUESTION put to the triage seat, not a request to re-grade
+  // (SKILL.md 「`pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」):
+  // the row says the question is unanswered, and the remedy is to answer what
+  // the objection comment asks and drop the label in the same write.
+  t('H18: the row reads the label as an unanswered question', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('is still unanswered past one triage cycle'), true);
+  t('H18: …and the remedy is answer + drop the label in the same write', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('answer what the comment asks and drop the label in the same write'), true);
+  t('H18: …and an answer that needs the maintainer still drops the label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('needs the maintainer goes to the inbox with the label still removed'), true);
+  // The retired re-grade vocabulary is gone from BOTH row shapes.
+  t('H18: no re-grade vocabulary in the coexisting row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
+  t('H18: …nor in the ALONE row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW)), false);
   // Under-threshold: fresh objection is normal intake latency, not a finding.
   t('H18: retriage under the threshold -> clean', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
   t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
