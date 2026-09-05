@@ -110,7 +110,7 @@
 // `scripts/error-status-unpinned-baseline.json`; a NEW one fails the gate, and a
 // row that becomes pinned fails it too (ratchet down with `--update`).
 import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
-import { maskComments } from './js-comment-mask.mjs';
+import { maskComments, scanSource, blank } from './js-comment-mask.mjs';
 import { join, relative } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -154,11 +154,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '20 — the ungraded census: an entry the parser READ but for which no page': 3,
   '21 — nowPinned, the PRODUCER branch: a baselined code that GAINS a': 2,
   '22 — nowPinned, the DOC-REMOVED branch: the #9266/#9563 counterfactual,': 2,
+  '23 — R5b: the body span is brace-BALANCED, and the braces it counts are': 3,
+  '24 — R6, the ASSIGNMENT form, and the two bounds that keep it honest.': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 25;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -324,6 +326,106 @@ function classBodies(src) {
 const lineOf = (src, idx) => src.slice(0, idx).split('\n').length;
 
 /**
+ * The two projections a rule may read, from ONE scan of the source.
+ *
+ *   `src`         comments blanked, string/template/regex CONTENT intact — what
+ *                 every rule matches on, because a gate's signal (`code:
+ *                 'UNIQUE_VIOLATION'`) is itself a string literal.
+ *   `structural`  comments AND literal content blanked — the ONLY projection a
+ *                 BRACE WALK may read. A brace inside a string, a template or a
+ *                 regex is not a delimiter, and counting one flips the parity of
+ *                 every brace after it: the span then closes early (blinding) or
+ *                 runs to end of file (fabricating). Both offsets survive the
+ *                 mask, so a line number read off either is true of the original.
+ */
+function projections(raw) {
+  const { comment, literal } = scanSource(raw);
+  const both = new Uint8Array(raw.length);
+  for (let k = 0; k < both.length; k++) both[k] = comment[k] || literal[k];
+  return { src: blank(raw, comment), structural: blank(raw, both) };
+}
+
+/**
+ * The index of the `}` matching the `{` at `open`, walked on the STRUCTURAL
+ * projection, or -1 when the source ends first.
+ */
+function matchingBrace(structural, open) {
+  let depth = 0;
+  for (let i = open; i < structural.length; i++) {
+    if (structural[i] === '{') depth++;
+    else if (structural[i] === '}' && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * True when `a` and `b` sit in the SAME block: no brace opened between them is
+ * still open at `b`, and no brace closed between them was opened before `a`.
+ * Read on the structural projection, so a brace in prose or in a string cannot
+ * join two blocks or split one.
+ */
+function sameBlock(structural, a, b) {
+  const [lo, hi] = a <= b ? [a, b] : [b, a];
+  let depth = 0;
+  for (let i = lo; i < hi; i++) {
+    if (structural[i] === '{') depth++;
+    else if (structural[i] === '}') { if (depth === 0) return false; depth--; }
+  }
+  return depth === 0;
+}
+
+/**
+ * How far apart the two halves of an ASSIGNMENT-form declaration may sit. The
+ * bound is `sameBlock` first — a window alone would pair two unrelated
+ * statements in two neighbouring functions — and this line count second, so a
+ * long top-level block cannot marry a `code` assignment near its top to a
+ * `status` assignment near its bottom. The real producer this rule was written
+ * for writes them on consecutive lines.
+ */
+const ASSIGNMENT_PAIR_WINDOW_LINES = 20;
+
+/**
+ * `<ident>.code = <expr>;` paired with the same identifier's `<ident>.status =
+ * <expr>;` (or `.statusCode`), nearest partner first, bounded by `sameBlock`
+ * and `ASSIGNMENT_PAIR_WINDOW_LINES`.
+ *
+ * A pair is refused outright when another assignment to the SAME identifier's
+ * `code` sits between the two halves — that identifier was restamped in
+ * between, so which `code` the `status` belongs to is a guess, and this gate
+ * reports rather than guesses.
+ *
+ * @returns {{ ident: string, code: string, status: string, line: number }[]}
+ */
+function assignmentPairs(src, structural) {
+  const hits = [];
+  for (const m of src.matchAll(/\b([A-Za-z_$][\w$]*)\.(code|status|statusCode)\s*=\s*([^;\n]+);/g)) {
+    hits.push({
+      ident: m[1],
+      prop: m[2] === 'statusCode' ? 'status' : m[2],
+      expr: m[3].trim(),
+      at: m.index,
+      line: lineOf(src, m.index),
+    });
+  }
+  const out = [];
+  for (const codeHit of hits) {
+    if (codeHit.prop !== 'code') continue;
+    let best;
+    for (const other of hits) {
+      if (other === codeHit || other.ident !== codeHit.ident) continue;
+      if (other.prop !== 'status') continue;
+      if (Math.abs(other.line - codeHit.line) > ASSIGNMENT_PAIR_WINDOW_LINES) continue;
+      if (!sameBlock(structural, codeHit.at, other.at)) continue;
+      const [lo, hi] = codeHit.at <= other.at ? [codeHit.at, other.at] : [other.at, codeHit.at];
+      if (hits.some((h) => h.prop === 'code' && h.ident === codeHit.ident && h.at > lo && h.at < hi)) continue;
+      if (!best || Math.abs(other.at - codeHit.at) < Math.abs(best.at - codeHit.at)) best = other;
+    }
+    if (best) out.push({ ident: codeHit.ident, code: codeHit.expr, status: best.expr, line: codeHit.line });
+  }
+  return out;
+}
+
+/**
  * Every (code, status) pair the scanned sources prove reachable, with the
  * evidence that proves it.
  *
@@ -346,7 +448,7 @@ export function deriveRuntimeStatuses(sources, index) {
     unresolved.push(`${where}: code=${String(code).trim()} status=${String(status).trim()}`);
 
   for (const [path, raw] of sources) {
-    const src = maskComments(raw);
+    const { src, structural } = projections(raw);
     // R1 — error classes declaring their own code + status/statusCode.
     for (const { name, body } of classBodies(src)) {
       const codeM = /^[ \t]*(?:public\s+|protected\s+|private\s+)?readonly\s+code\s*(?::[^=\n]+)?=\s*([^;\n]+);/m.exec(body);
@@ -390,13 +492,40 @@ export function deriveRuntimeStatuses(sources, index) {
       if (!/^[A-Z][A-Z0-9_]*$/.test(code)) continue;
       record(code, status, `${path}:${lineOf(src, m.index)}: { code, status }`);
     }
-    // R5b — `{ status: N, body: { …, code: 'X' } }`, the mapper's two sanitised
-    // 5xx terminals, where the pair straddles a nested brace.
-    for (const m of src.matchAll(/\bstatus\s*:\s*(\d{3})\s*,\s*body\s*:\s*\{([^{}]*)\}/g)) {
-      const c = /\bcode\s*:\s*'([A-Z][A-Z0-9_]*)'/.exec(m[2]);
+    // R5b — `{ status: N, body: { … } }`, the REST mapper's terminals, where the
+    // pair straddles a nested brace. The body span is BRACE-BALANCED and walked
+    // on `structural`.
+    //
+    // It was a brace-FREE character class, which read the two flat 5xx terminals
+    // and skipped every arm whose body carries a conditional spread — the
+    // `DuplicateRecordError` arm in `packages/rest/src/error-response.ts` builds
+    // its 409 `UNIQUE_VIOLATION` body that way, so the code documented as 409 and
+    // pinned by two tests derived NO producer at all. Skipped, not reported:
+    // exactly the silent blindness this file's header rules out.
+    for (const m of src.matchAll(/\bstatus\s*:\s*(\d{3})\s*,\s*body\s*:\s*\{/g)) {
+      const open = m.index + m[0].length - 1;
+      const close = matchingBrace(structural, open);
+      if (close < 0) continue;
+      const c = /\bcode\s*:\s*'([A-Z][A-Z0-9_]*)'/.exec(src.slice(open + 1, close));
       const status = resolveStatus(m[1], index);
       if (!c || status === undefined) continue;
       record(c[1], status, `${path}:${lineOf(src, m.index)}: { status, body }`);
+    }
+    // R6 — the ASSIGNMENT form: `err.code = …;` and `err.status = …;` stamped on
+    // the same identifier. Every rule above reads a DECLARATION — a class
+    // property, a call argument, an object literal — so a producer that builds
+    // its envelope by assigning onto a plain `Error` matched nothing at all.
+    // `driver-memory`'s `conflictRefusal` is exactly that shape, and its 409
+    // was the second of this code's two invisible producers.
+    for (const pair of assignmentPairs(src, structural)) {
+      const where = `${path}:${pair.line}: assignment`;
+      const code = resolveString(pair.code, index);
+      const status = resolveStatus(pair.status, index);
+      // A resolved code that is not SCREAMING_SNAKE is not an error code: some
+      // other `.code`/`.status` pair, dropped the way R3/R4 drop theirs.
+      if (code !== undefined && !/^[A-Z][A-Z0-9_]*$/.test(code)) continue;
+      if (code === undefined || status === undefined) { refuse(where, pair.code, pair.status); continue; }
+      record(code, status, where);
     }
   }
   return { emitted, unresolved, sites };
@@ -1160,7 +1289,100 @@ function selfTest() {
     nowPinnedDocRemovedMessage('TRANSACTION_FAILED').includes('doc entry was removed')
     && !nowPinnedDocRemovedMessage('TRANSACTION_FAILED').includes('a producer now declares'));
 
-  const CASES = 40;
+  // 23 — R5b: the body span is brace-BALANCED, and the braces it counts are
+  //      the STRUCTURAL ones. The first case is the real shape this rule was
+  //      blind to — `structuredCodeAnswer`'s `DuplicateRecordError` arm, whose
+  //      409 body carries conditional spreads, so a brace-free character class
+  //      matched nothing and the code derived NO producer at all. The other two
+  //      are the directions a widened span can go wrong in: fabricating a code
+  //      out of a body that has none, and closing early on a brace that is text.
+  battery('23 — R5b: the body span is brace-BALANCED, and the braces it counts are');
+  const spread = runFixture({
+    files: {
+      'a/m.ts':
+        'function answer(error, field) {\n'
+        + '  return {\n'
+        + '    status: 409,\n'
+        + '    body: {\n'
+        + "      error: 'A record with this value already exists',\n"
+        + "      code: 'UNIQUE_VIOLATION',\n"
+        + "      ...(typeof error?.message === 'string' ? { developerMessage: error.message } : {}),\n"
+        + '      ...(field ? { field } : {}),\n'
+        + '    },\n'
+        + '  };\n'
+        + '}\n',
+    },
+    handling: '', catalog: '', members: ['VALIDATION_ERROR'],
+  });
+  check('23 a conditional-spread body derives across its nested braces',
+    spread.emitted.get('UNIQUE_VIOLATION')?.has(409) === true, [...spread.emitted.keys()].join(','));
+  const noCode = runFixture({
+    files: { 'a/m.ts': "const answer = () => ({ status: 409, body: { error: 'conflict', details: { hint: 'retry' } } });" },
+    handling: '', catalog: '', members: ['VALIDATION_ERROR'],
+  });
+  check('23b a body with no code inside the span fabricates nothing',
+    noCode.emitted.size === 0, [...noCode.emitted.keys()].join(','));
+  const braceInText = runFixture({
+    files: { 'a/m.ts': "const answer = () => ({ status: 403, body: { error: 'unbalanced } brace', code: 'PERMISSION_DENIED' } });" },
+    handling: '', catalog: '', members: ['PERMISSION_DENIED'],
+  });
+  check('23c a brace inside a string does not close the span early',
+    braceInText.emitted.get('PERMISSION_DENIED')?.has(403) === true, [...braceInText.emitted.keys()].join(','));
+
+  // 24 — R6, the ASSIGNMENT form, and the two bounds that keep it honest.
+  //      `driver-memory`'s `conflictRefusal` stamps its ADR-0112 envelope by
+  //      assigning onto a plain `Error`; every rule before R6 reads a
+  //      DECLARATION, so that producer matched nothing. The bounds are the
+  //      whole risk of reading assignments: two halves that never belonged to
+  //      each other pair into a status nobody declared.
+  battery('24 — R6, the ASSIGNMENT form, and the two bounds that keep it honest.');
+  const stamped = runFixture({
+    files: {
+      'a/c.ts': "export const REFUSAL_CODE = 'TIMEOUT';\nexport const REFUSAL_STATUS = 504;",
+      'a/e.ts':
+        'function refuse(message) {\n  const err = new Error(message);\n'
+        + '  err.code = REFUSAL_CODE;\n  err.status = REFUSAL_STATUS;\n  return err;\n}',
+    },
+    handling: '#### `TIMEOUT`\n**HTTP Status:** 504  \n', catalog: '', members: ['TIMEOUT'],
+  });
+  check('24 the assignment form derives through the constant index',
+    stamped.reconciledPairs === 1 && stamped.unresolved.length === 0, JSON.stringify(stamped.unresolved));
+  const opaqueStatus = runFixture({
+    files: {
+      'a/e.ts':
+        'function refuse(message) {\n  const err = new Error(message);\n'
+        + "  err.code = 'TIMEOUT';\n  err.status = statusFor(message);\n  return err;\n}",
+    },
+    handling: '', catalog: '', members: ['TIMEOUT'],
+  });
+  check('24b an assignment pair whose status will not resolve is REPORTED, not dropped',
+    opaqueStatus.unresolved.length === 1 && opaqueStatus.unresolved[0].includes('assignment')
+    && !opaqueStatus.emitted.has('TIMEOUT'),
+    JSON.stringify(opaqueStatus.unresolved));
+  const twoObjects = runFixture({
+    files: {
+      'a/e.ts':
+        "function pair() {\n  const a = new Error('a');\n  const b = new Error('b');\n"
+        + "  a.code = 'TIMEOUT';\n  b.status = 504;\n  return [a, b];\n}",
+    },
+    handling: '', catalog: '', members: ['TIMEOUT'],
+  });
+  check('24c a code and a status on DIFFERENT identifiers never pair',
+    !twoObjects.emitted.has('TIMEOUT') && twoObjects.unresolved.length === 0,
+    JSON.stringify([...twoObjects.emitted.keys(), ...twoObjects.unresolved]));
+  const twoBlocks = runFixture({
+    files: {
+      'a/e.ts':
+        "function one() {\n  const err = new Error('x');\n  err.code = 'TIMEOUT';\n  return err;\n}\n"
+        + "function two() {\n  const err = new Error('y');\n  err.status = 504;\n  return err;\n}",
+    },
+    handling: '', catalog: '', members: ['TIMEOUT'],
+  });
+  check('24d the same identifier in two BLOCKS never pairs across the boundary',
+    !twoBlocks.emitted.has('TIMEOUT') && twoBlocks.unresolved.length === 0,
+    JSON.stringify([...twoBlocks.emitted.keys(), ...twoBlocks.unresolved]));
+
+  const CASES = 47;
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
