@@ -108,7 +108,14 @@ function recorder(opts: { infoThrows?: string } = {}) {
     return {
         errors,
         logger: {
-            info(_msg: string) { if (opts.infoThrows) throw new Error(opts.infoThrows); },
+            // Armed at exactly ONE call: the run-summary line `recordLog`
+            // writes for a TERMINAL run (`meta.status`), which is the
+            // statement inside the window. The engine also logs `info` while
+            // registering executors and while running, and throwing from
+            // those would measure a different seam entirely.
+            info(_msg: string, meta?: { status?: string }) {
+                if (opts.infoThrows && meta?.status === 'failed') throw new Error(opts.infoThrows);
+            },
             warn() {},
             debug() {},
             error(message: string, errorSlot?: unknown, meta?: unknown) {
@@ -168,7 +175,7 @@ async function park(engine: AutomationEngine) {
 describe('#15555 — a throw between the journal and the stamp must not lose the strand verdict', () => {
     it('PIN 1 — the durable terminal write throws synchronously: the verdict still ships, and the repair works', async () => {
         const store = new SyncThrowTerminalStore();
-        const { errors, logger } = recorder();
+        const { logger } = recorder();
         const { engine, led } = engineOver(store, logger);
         const runId = await park(engine);
 
@@ -266,7 +273,7 @@ describe('#15555 — a throw between the journal and the stamp must not lose the
         // journalled a snapshot. An exit above the consumption point has
         // nothing to repair and must keep saying so.
         const { errors, logger } = recorder();
-        const { engine, knobs, led } = engineOver(new SyncThrowTerminalStore(), logger);
+        const { engine, led } = engineOver(new SyncThrowTerminalStore(), logger);
         const runId = await park(engine);
 
         const refused = await engine.resume(runId, { variables: { $internal: 1 } } as never);
@@ -278,14 +285,18 @@ describe('#15555 — a throw between the journal and the stamp must not lose the
         expect((await engine.restoreConsumedSuspension(runId)).refusal).toBe('RUN_SUSPENDED');
         expect(errors).toEqual([]);
 
-        // …and the same run, resumed cleanly, still carries no status at all —
-        // the terminal write throws here too, and a COMPLETED run is not a
-        // strand however loudly its bookkeeping failed.
-        knobs.throws = false;
-        const done = await resumeOutcome(engine, runId);
+        // …and a run resumed cleanly still carries no status at all. Driven on
+        // a HEALTHY store on purpose: the completion path has its own
+        // unguarded `recordLog`, and a store that throws there makes `resume`
+        // throw over a run that COMPLETED — a different exit, a different
+        // card, and filed separately rather than widened into this guard.
+        const clean = engineOver(new InMemorySuspendedRunStore(), recorder().logger);
+        clean.knobs.throws = false;
+        const cleanRunId = await park(clean.engine);
+        const done = await resumeOutcome(clean.engine, cleanRunId);
         expect(done.kind).toBe('returned');
         expect(done.result?.success).toBe(true);
         expect(done.result?.status, 'a completed run is never stranded').toBeUndefined();
-        expect(led.tail).toBe(1);
+        expect(clean.led.tail).toBe(1);
     });
 });

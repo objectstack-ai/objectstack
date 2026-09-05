@@ -5515,23 +5515,90 @@ export class AutomationEngine implements IAutomationService {
                 // ordering above is untouched. It is the evidence a repair
                 // needs, written at the only moment it still exists.
                 const consumed = this.journalConsumedSuspension(run, stepCountAtPause, errorMessage);
-                const logged = this.recordLog({
-                    id: runId,
-                    flowName: run.flowName,
-                    flowVersion: run.flowVersion,
-                    status: 'failed',
-                    startedAt: run.startedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs,
-                    trigger: buildRunTrigger(context),
-                    steps,
-                    error: errorMessage,
-                }, context, consumed.run);
-                // Subflow chain: a child failing terminally fails every
-                // ancestor awaiting it — they can never be resumed otherwise.
-                // The delegation path handles its own level (skipBubble).
-                if (!skipBubble) {
-                    await this.failAncestors(run.context, errorMessage);
+                // [#15555] From the line above, "this run is repairable" is a
+                // FACT: a snapshot exists and `restoreConsumedSuspension` puts
+                // it back. Everything from here to the `status: 'stranded'`
+                // stamp below is BOOKKEEPING ABOUT that fact — and none of it
+                // may be allowed to delete the fact by throwing.
+                //
+                // It could, and the direction is the dangerous one. The stamp
+                // is the ONLY thing that tells a consumer the run is
+                // repairable (`plugin-approvals` derives its operator-facing
+                // `repairable` from it verbatim: `status === 'stranded'`), and
+                // two statements in here throw out of the whole arm. Both live
+                // in `recordLog`'s terminal path: the run-summary line
+                // (`logger.info`, on by default) and `store.recordTerminal`,
+                // whose SYNCHRONOUS throw escapes — the `void write.catch(...)`
+                // beneath that call only ever sees a returned promise's
+                // rejection. Then `failAncestors` awaits a walk that can throw.
+                // A throw anywhere in that window replaced a truthful
+                // `repairable: true` with `false`, which does not merely lose
+                // information: it tells an operator NOT to attempt a repair
+                // that succeeds. A false negative on a repair instruction is
+                // worse than silence, and it is the opposite of the direction
+                // everybody checks for.
+                //
+                // ⛔ This is NOT "assume repairable when the failure is
+                // unknown" — that would invert the honest default and promise
+                // a repair for a lost run. The guard opens AFTER the journal,
+                // so only a run that demonstrably HAS a snapshot can reach the
+                // stamp: a throw from `journalConsumedSuspension` itself still
+                // propagates, and every exit above the consumption point is
+                // untouched and still carries no status at all.
+                //
+                // ⛔ And the journal is NOT moved down to sit beside the stamp
+                // instead. `recordLog` is what carries the snapshot into the
+                // durable row, so journalling after it would leave a
+                // `recordLog` failure with NO snapshot anywhere — converting
+                // this false negative into a TRUE one by destroying the repair
+                // rather than by reporting it.
+                let logged: ExecutionLogEntry | undefined;
+                try {
+                    logged = this.recordLog({
+                        id: runId,
+                        flowName: run.flowName,
+                        flowVersion: run.flowVersion,
+                        status: 'failed',
+                        startedAt: run.startedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs,
+                        trigger: buildRunTrigger(context),
+                        steps,
+                        error: errorMessage,
+                    }, context, consumed.run);
+                    // Subflow chain: a child failing terminally fails every
+                    // ancestor awaiting it — they can never be resumed otherwise.
+                    // The delegation path handles its own level (skipBubble).
+                    if (!skipBubble) {
+                        await this.failAncestors(run.context, errorMessage);
+                    }
+                } catch (bookkeeping) {
+                    // #4632 verdict: DURABILITY, so `error` — the caller is
+                    // told a truthful, actionable thing (the run stranded, and
+                    // it is repairable), which is exactly what makes the rest
+                    // invisible from the outside: the terminal history row
+                    // never landed and/or the ancestor cascade stopped
+                    // part-way, nothing retries either, and no envelope
+                    // carries a word about it. Consequence and fix in the
+                    // first line, per AGENTS.md. Said ONCE per stranded run,
+                    // not once per failed write.
+                    //
+                    // THIRD argument per `error(message, error?, meta?)`; the
+                    // `Error` slot stays empty on purpose (#5575), and the
+                    // thrown text goes to the structured slot rather than into
+                    // the message (#6499).
+                    this.logger.error(
+                        `[Automation] run '${runId}' of flow '${run.flowName}' is STRANDED and its ` +
+                            `post-strand bookkeeping threw, so its terminal history row never landed ` +
+                            `and/or its subflow ancestors were not failed — nothing retries either, and ` +
+                            `the run reads healthy to the Runs surfaces and the approvals sweeps. The ` +
+                            `strand itself IS reported and repairable right now: restore it with ` +
+                            `restoreConsumedSuspension('${runId}') before this process restarts, which ` +
+                            `drops the in-memory journal this repair rides on. Fix the failure in this ` +
+                            `record's meta.`,
+                        undefined,
+                        describeThrownForLog(bookkeeping),
+                    );
                 }
                 // Surface the flow's friendly error message (the raw error stays
                 // in `error` for logs/diagnostics).
@@ -5569,7 +5636,11 @@ export class AutomationEngine implements IAutomationService {
                     // worse) condition, which this stamp must not claim.
                     status: 'stranded',
                     errorMessage: flow.errorMessage,
-                    summary: logged.summary,
+                    // [#15555] Recomputed when the guard above had to abandon
+                    // `recordLog`: the same pure function of the same steps
+                    // that `recordLog`'s own first statement runs, so the two
+                    // spellings cannot disagree.
+                    summary: logged?.summary ?? summarizeRun(steps),
                 };
             }
         } finally {
