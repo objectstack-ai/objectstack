@@ -1,5 +1,92 @@
 # @objectstack/plugin-hono-server
 
+## 17.4.0
+
+### Minor Changes
+
+- 5f7fa1d: feat(hono-server): `GET /auth/me/localization` → `locale` is now the signed-in user's language — `sys_user.locale` when set, then the request's `Accept-Language`, then the deployment default (#14788)
+  
+  Maintainer ruling 2026-09-03 (option D on #14788): this endpoint is the ONE
+  read face for "what language is this user", now that `sys_user.locale` is a
+  user-stated preference (#13881 / #14787) and the never-produced
+  `SessionUser.language` is retired from the session contract
+  (`@objectstack/spec`, same release).
+  
+  What changed, for an authenticated caller:
+  
+  - `locale` resolves **the user's own `sys_user.locale`** first — read under a
+    system context by the caller's own id and accepted only when it passes the
+    column's OWN `locale_bcp47_shape` rule as the registry declares it (the
+    endpoint evaluates that rule; it carries no second locale parser). A
+    malformed, blank or unverifiable value falls through, it is never served.
+  - then **the request's `Accept-Language`** preference (`preferredLocaleFromHeader`,
+    the same parse REST and the runtime dispatcher feed `execCtx.locale` from);
+  - then **the deployment default** (`resolveLocalizationContext` — the
+    `localization.locale` settings cascade, floor `en-US`).
+  
+  Before, the resolver behind this endpoint assembled no localization at all, so
+  `locale` was `null` for every authenticated caller; it is now always a string
+  for an authenticated caller. The response shape is unchanged
+  (`{ authenticated, currency, locale, timezone }`), `currency` / `timezone`
+  are untouched, and the unauthenticated answer (`{ authenticated: false }`) is
+  unchanged. `resolveSignedInUserLocale` is exported for hosts that compose the
+  current-user endpoints directly.
+
+### Patch Changes
+
+- fa85759: `GET /auth/me/localization` answers the deployment's resolved `currency` and `timezone` instead of `null`
+  
+  The handler read both off the request `ExecutionContext`, citing ADR-0053, but the resolver serving this surface is a hand-rolled envelope that never carried them — so every authenticated caller was answered `currency: null, timezone: null` whatever the `localization` settings said, and the console's regional-formatting seed was fed nulls. All three values now come from one reading of the same `resolveLocalizationContext` cascade the dispatcher's shared assembler uses. `locale` resolution is unchanged. `timezone` now always answers (cascade floor `UTC`); `currency` still answers `null` when the deployment configures none — that value has no floor.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

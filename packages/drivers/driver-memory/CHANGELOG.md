@@ -1,5 +1,77 @@
 # @objectstack/driver-memory
 
+## 17.4.0
+
+### Minor Changes
+
+- 2003259: fix(driver-memory): `find()`, `findOne()` and `create()` publish their declared types (#14435)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, the same shape #13878 landed on `update()` / `upsert()` one door over, shipped as `minor` under the launch-window convention (`major` is refused by `check-changeset-no-major`, so the BREAKING banner and the ADR-0087 disposition are the carriers, not the level).
+  
+  `IDataDriver` has always declared `Promise<Record<string, unknown>[]>`, `Promise<Record<string, unknown> | null>` and `Promise<Record<string, unknown>>` on these three doors. The emitted `.d.ts` published `Promise<any[]>`, `Promise<any>` and `Promise<Record<string, any>>`: the return types of `find` and `findOne` were INFERRED through the backing store's `any[]` rows (`private db: Record<string, any[]>` to `getTable()`), and `create` carried an explicit annotation that itself spelled `Record<string, any>`. They are now declared as the contract declares them.
+  
+  What this asks of a consumer holding a concrete `InMemoryDriver`: a caller that reads fields off a `findOne()` result narrows the `null` arm first — the arm the driver has always been able to answer with (`results[0] || null`) and that no caller was ever asked to handle; and a caller that leaned on `any` to read a member off a `find()` row or a `create()` result now types it, since the rows are `Record<string, unknown>`. A consumer whose receiver is typed as `IDataDriver` sees no change at all — that declaration already said this.
+  
+  The parameters are deliberately untouched: `create(data: Record<string, any>)` stays as it is, because narrowing an INPUT would be a second, unrelated break, and method parameters compare bivariantly against the contract's `Record<string, unknown>`. No runtime behaviour changes; the store keeps its `any[]` rows, which the card measured to cascade if re-typed.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A published return type moves off `any` onto the contract's own shape: no metadata key is removed, renamed or re-shaped, no spec schema changes (this diff touches `packages/drivers/driver-memory/**` only), and nothing exists for `objectstack migrate meta` to rewrite. The obligation is a TypeScript narrowing at the consumer's call site, delivered by the compiler. -->
+
+### Patch Changes
+
+- a646120: fix(driver-memory): the reference matcher's `$notContains` arm answers the predicate, not a type test, for a stored non-string value
+  
+  `match()` used to answer `{ n: { $notContains: '5' } }` with NO for `{ n: 5 }` — the arm read `typeof value !== 'string' || value.includes(target)`, so a number failed `$contains` (correct) AND its negation (wrong: for the very reason a number cannot contain the substring, it does not contain it). This package's own live mingo path admitted the row, so one filter answered two ways depending on which face was asked; on this face the failure mode was silently dropped rows.
+  
+  The arm now answers what `FILTER_TEXT_CASES`' new `score` rows declare on every face (maintainer ruling 2026-09-05 on the contract card): a stored value that is not a string never satisfies a positive text operator and always satisfies `$notContains`. The no-value cells keep their #13166 answer; nothing else in the matcher moved.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

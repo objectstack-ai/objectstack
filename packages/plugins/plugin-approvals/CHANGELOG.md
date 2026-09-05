@@ -1,5 +1,83 @@
 # @objectstack/plugin-approvals
 
+## 17.4.0
+
+### Minor Changes
+
+- 3d3f60e: An approval decision that lands while its flow run strands now says so in fields, not only in prose.
+  
+  `POST /api/v1/approvals/requests/{id}/reject` — and its sibling decision doors — could produce three coexisting outcomes from one call: the caller read HTTP 500, the request row **was** in its terminal status and had left the pending inbox, and the workflow run was stranded. A caller reading 500 has one honest inference available — "the rejection did not happen" — and it was the wrong one, so scripts and operators retried or escalated against a decision that was already durable. The only carrier of the truth was English prose in `error`, so finding the affected run meant regexing a run id out of a sentence, and nothing said whether that run could be repaired at all.
+  
+  The 500 stays. A recorded decision whose flow never advances is still a failure and is still reported as one; the door does not become atomic and no decision is ever rolled back. What changed is that it stops discarding what the engine already said:
+  
+  - **The `RESUME_FAILED` body gains four fields**, additively — `finalized` (always `true`: the decision stands), `decision`, `runId`, and `repairable`. Existing consumers see the same `code`, the same `error` and the same status.
+  - **`repairable` carries the engine's own discriminator** — `AutomationResult.status === 'stranded'`, the state stamped on exactly the exit that journals a repair snapshot. `false` is the answer for every other failure, including a lost run: absence of the signal is not repairability, and a repair verb that would refuse is worse than no promise.
+  - **`serviceResume` carries `status`** through to the door. It previously read only `success` / `code` / `error`, and the stranded exit reports a `status` and no `code` at all — so the platform's own repairability signal died one line before the envelope was built.
+  
+  `@objectstack/types` gains `strandedDecisionFailure` / `strandedDecisionDetails` and the `StrandedDecisionDetails` type — the constructor and its recogniser in one module, so the producing service and the REST door cannot drift. A `RESUME_FAILED` raised without that carrier answers exactly the body it always did; the door never synthesises the envelope.
+
+### Patch Changes
+
+- ea03c7c: Fix: a `department` approver on a seeded business unit no longer routes the approval to another organization's members.
+  
+  `ApprovalService.expandBusinessUnitUsers` screened the `sys_business_unit` rows with the null-inclusive tenant predicate (#3807 — a seeded unit carries no organization and is admitted on purpose) but read `sys_business_unit_member` with no organization predicate at all, under a system context that carries no tenant either. A seeded unit id exists identically in every tenant, so a `department:<id>` approver on tenant A's request resolved the shared unit and then collected every tenant's membership rows hanging off it — approval authority over A's record, routed to B's users. The member read now carries a strict `organization_id` equality against the directory organization the approver resolves in: the same screen `plugin-sharing` applies to these rows, and the same posture this package already takes for `sys_team_member` and `sys_user_position`.
+  
+  The screen is strict rather than null-inclusive on purpose. `sys_business_unit_member.organization_id` is filled by REST/session writes but left NULL by seed replay and by elevated system-context writes (tracked in #14570), so a NULL on a membership row means unknown tenancy, not "platform-global", and routing fails closed on it. Declared cost: on a deployment whose membership rows (not merely its units) were seeded or system-written, a `department` approver on a request that carries an organization now expands to nobody — the slot falls to the `department:<id>` literal, the existing `expanded to nobody` warning (#3807) names it, and `onEmptyApprovers` governs the request as for any unstaffed target. The repair is to stamp those membership rows. A request that carries no organization is unchanged, and so is every unit-level screen.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [6acb37e]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

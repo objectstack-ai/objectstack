@@ -1,5 +1,71 @@
 # @objectstack/driver-turso
 
+## 17.4.0
+
+### Minor Changes
+
+- a646120: The remote transport compiles a text operator over a declared numeric or boolean column to the contract's declared answer, in step with the local transport.
+  
+  `RemoteTransport.buildWhereSQL` compiles filters independently of `SqlDriver` and keeps no schema, so a text operator over a `Field.number` used to compile `"col" GLOB ?` and coerce the REAL in the storage class's spelling (`5` as `'5.0'`). `TursoDriver` now hands the transport its declared-type rule (`setNonTextColumnResolver`, the same shape as the temporal `setFilterColumnSql` rule), answered from the registries `registerRemoteFieldMetadata` already fills at schema sync — so a positive text operator over such a column compiles to `1 = 0` and `$notContains` to `1 = 1` on BOTH transports (`FILTER_TEXT_CASES`' `score` rows, maintainer ruling 2026-09-05), instead of a dialect accident. A transport nobody handed the rule to compiles exactly as before, and every comparand refusal still runs ahead of the constant.
+- 2200f8e: feat(driver-turso): the `update()` override publishes its honest type — `Record<string, unknown> | null`, not `any` (#14438)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` overrides `update()` rather than inheriting it, and the override was written out with its own explicit `Promise<any>` — so this package's emitted `.d.ts` re-declared the door as `any` on its own and would not have picked up the `@objectstack/driver-sql` narrowing. Both of its branches already answered the contract's type: the local branch forwards to `SqlDriver.update()` (narrowed alongside, #14438) and the remote branch passes `RemoteTransport.update()`'s `Record<string, unknown> | null` (#14428) through the generic `formatRemoteRow`. The override now declares what it answers. A caller that read fields off the result through the `any` now narrows the `null` arm first. No runtime behaviour changes.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#update) A published driver method's declared return moves off an explicit `any` onto the contract's own shape; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+
+### Patch Changes
+
+- Updated dependencies [2ed6be6]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [61821e5]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/driver-sql@17.4.0
+  - @objectstack/spec@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

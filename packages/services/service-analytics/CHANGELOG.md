@@ -1,5 +1,77 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.4.0
+
+### Minor Changes
+
+- 54bb2f1: The analytics SQL compilers compile the case-sensitive text family per dialect, so a `$contains` policy on SQLite stops admitting rows it excludes (#15684)
+  
+  `$contains` / `$notContains` / `$startsWith` / `$endsWith` are case-SENSITIVE on every backend (#4706 Q2 = A). All three of `service-analytics`' SQL compilers emitted `col LIKE ? ESCAPE ?` on every dialect, and SQLite's `LIKE` folds ASCII case unconditionally — the fold cannot be turned off per statement, because `PRAGMA case_sensitive_like` is a connection-global switch. Measured on sql.js over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` answered `['1','2']` — `ACME Corp` **and** `acme corp` — where `FILTER_TEXT_CASES` says `['2']`.
+  
+  On two of the three compilers that is a wrong chart. The third is `read-scope-sql.ts`, the ADR-0021 D-C read scope: a scope that **admits** rows the policy's case-sensitive predicate excludes is over-reach, not a loose filter — the same reading that file already applied to its own `LIKE` escaping. The `/analytics/sql` echo was wrong in a third way: it printed `LIKE` while the statement it claims to reproduce ran through a driver that has emitted `GLOB` on the SQLite dialects since #6518.
+  
+  What changed:
+  
+  - **The construct is chosen per dialect** (`text-match-sql.ts`), arm for arm with `driver-sql`'s own table: `GLOB` on SQLite (case-exact by definition, with its own `*` / `?` / `[` escaped class and no `ESCAPE` clause), `LIKE` over `CAST(… AS BINARY)` on MySQL, and `LIKE` **unchanged** on Postgres, where it is already exactly the ruled semantics. There is no single construct that is case-exact and parses on all three, so the dialect had to become an input rather than a guess.
+  - **The dialect arrives from the driver that will execute the statement.** New optional `AnalyticsServiceConfig.sqlDialect`, wired by `AnalyticsServicePlugin` from `IDataEngine.getDriverForObject`. `SqlDriver.dialectName` is now public so that answer can be read without a second dialect-resolution table drifting behind the driver's own knex spellings; it is derived and read-only.
+  - **A host that answers no dialect keeps the `LIKE` it always got** — "cannot answer, do not block". Postgres deployments see byte-identical SQL.
+  
+  `$icontains` is untouched: it keeps its own ASCII-only fold on both sides, and collapsing the two families onto one path would hand the case-exact family back the fold the ruling took away from it. `LIKE` escaping is unchanged wherever a `LIKE` is still emitted.
+- a646120: The three SQL compilers in this package — the RLS read-scope lowering (`compileScopedFilterToSql`), `NativeSQLStrategy`'s own `where` and the `ObjectQLStrategy` SQL echo — compile a text operator over a column whose declared type stores no text to the contract's declared answer.
+  
+  `compileScopedFilterToSql(filter, alias, options?)` takes a new optional `nonTextColumn(field)` predicate; when it answers `true`, a positive text operator compiles to `1 = 0` and `$notContains` to `1 = 1` instead of a `LIKE` that coerces on SQLite (`5` renders `'5.0'`) and is refused at query time on Postgres (SQLSTATE 42883 — a 500 on a read scope the platform accepted). The service answers the predicate from the field metadata hook it already holds (`sourceFieldMeta`), exposed to strategies as `DatasetScopedStrategyContext.declaredFieldType`, and the two strategies pass it for the read scope and for the query's own text filters, so a query and its RLS scope answer one cell one way and the echo prints the statement that ran (`FILTER_TEXT_CASES`' `score` rows, maintainer ruling 2026-09-05). A host that wires no field metadata keeps the `LIKE` it always got, and every comparand refusal still runs ahead of the constant.
+
+### Patch Changes
+
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

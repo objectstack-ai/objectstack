@@ -1,5 +1,72 @@
 # @objectstack/cloud-connection
 
+## 17.4.0
+
+### Patch Changes
+
+- 6b66ec7: Fix: the marketplace install-local routes now supply the effective tenancy posture to the shared authorization resolver, so both posture-conditional API-key refusals apply at these doors.
+  
+  Under a wall-enforcing posture (`isolated`), an API key stamped with an organization its owner has left is refused, as is a key carrying no organization at all. Previously neither guard ran here, because both are conditional on a posture the caller supplies and this seam supplied none — the key's tenant was its own stored `active_organization_id`, never checked against current membership.
+  
+  The posture is read from the kernel's `tenancy` service, so it is the posture in force rather than the one requested through `OS_TENANCY_POSTURE`. A deployment that registers no `tenancy` service is unchanged: there is no wall there, and no posture-conditional refusal applies. A `tenancy` service that is registered and fails to build is an outage and answers 503 rather than admitting the caller.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [ceb4877]
+- Updated dependencies [98191d2]
+- Updated dependencies [ca326b5]
+- Updated dependencies [f1a1028]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [b548e43]
+- Updated dependencies [13c48c2]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [da1cffb]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [8a12067]
+- Updated dependencies [401e50a]
+- Updated dependencies [ee32e1c]
+- Updated dependencies [b31ebfe]
+- Updated dependencies [8744de9]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [b398ad2]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/runtime@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
