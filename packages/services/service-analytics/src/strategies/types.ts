@@ -70,4 +70,29 @@ export interface DatasetScopedStrategyContext extends StrategyContext {
    * hook keeps the behaviour it had — "cannot answer, do not block".
    */
   declaredFieldType?(objectName: string, field: string): string | undefined;
+  /**
+   * [#15684] The SQL dialect of the datasource backing `objectName` —
+   * `'sqlite'` / `'postgres'` / `'mysql'`, or `undefined` when the host cannot
+   * answer (no data engine wired, a non-SQL driver, a client neither side
+   * models).
+   *
+   * The second question this package's three SQL compilers cannot answer from
+   * the filter alone. The case-EXACT text family (`$contains` /
+   * `$notContains` / `$startsWith` / `$endsWith`, #4706 Q2 = A) has no single
+   * construct that is case-exact AND parses on every dialect: SQLite's `LIKE`
+   * folds ASCII unconditionally and needs `GLOB`, MySQL follows the column's
+   * collation and needs `CAST(… AS BINARY)`, and both of those are errors on
+   * Postgres — where `LIKE` is already exactly the ruled semantics. So the
+   * construct is chosen per dialect (`text-match-sql.ts`), and the dialect is
+   * an input rather than a guess.
+   *
+   * The service answers it from `AnalyticsServiceConfig.sqlDialect`, which the
+   * plugin fills from the driver that will EXECUTE the statement — the driver
+   * stays the single source of truth for its own dialect, the same posture
+   * `coerceTemporalFilterColumn` takes. Declared HERE rather than on the
+   * spec's {@link StrategyContext} for the reason `declaredFieldType` is:
+   * nothing about it is an authorable surface, and a strategy that does not
+   * know the hook keeps the behaviour it had — "cannot answer, do not block".
+   */
+  sqlDialect?(objectName: string): string | undefined;
 }

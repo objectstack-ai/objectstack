@@ -2572,9 +2572,9 @@
           "evidence": "the probe trace"
         },
         {
-          "clause": "localization rides the ExecutionContext without a setup gate: an ordinary member's /auth/me/localization answers 200 with currency/locale/timezone keys (nulls legal) — the SETTINGS surface is setup-gated, the resolved defaults deliberately are not",
+          "clause": "localization is RESOLVED without a setup gate: an ordinary member's /auth/me/localization answers 200 with currency/locale/timezone keys carrying the deployment cascade's own answers — the SETTINGS surface is setup-gated, the resolved defaults deliberately are not. \"Nulls legal\" no longer holds for all three (#15387, which repaired a resolver that carried none of them and made the endpoint answer null for currency AND timezone to every authenticated caller): locale and timezone ALWAYS answer, on cascade floors en-US / UTC, so a null for either is a FAIL and a regression of that repair. currency is the one key with no floor — null there is legal, and only when the deployment configures no localization.currency",
           "oracle": "api",
-          "verify": "member trace carries authenticated:true plus the three keys",
+          "verify": "member trace carries authenticated:true plus the three keys, with timezone and locale non-null; configure localization.currency and localization.timezone and re-trace — both must move to the configured values (an unmoved trace is the #15387 defect, not a pass)",
           "evidence": "the trace"
         }
       ],

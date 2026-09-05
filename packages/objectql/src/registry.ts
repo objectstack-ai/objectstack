@@ -901,8 +901,21 @@ function provisionTenantScopeIndex(
  * the write path for the mirrored reason: on exactly those rows the plan also
  * strips nothing (`plan.names` is `{ id }`), so the author's declared column is
  * still present when the re-stamp asks.
+ *
+ * [#15225] Exported at MODULE level for the engine's bulk-event producer
+ * (`bulkEventOrganizationId`, engine.ts), which must answer "is this object
+ * walled?" in the wall's own terms and ⛔ not re-spell them a third time: the
+ * R1 contract review measured a re-spelling (`resolveTenantFieldName(schema)
+ * !== DEFAULT_TENANT_FIELD`) that mirrored ONE of the wall's object clauses
+ * and stamped a batch Layer 0 had never constrained. ⚠️ Deliberately NOT
+ * added to the package entries — `index.ts` and `core.ts` re-export NAMED
+ * members of this module, never `export *` — so the published surface of
+ * `@objectstack/objectql` is unchanged (measured on `dist/*.d.ts`, not
+ * assumed): this is the registry's binding of plugin-security's predicate,
+ * not a contract for consumers to build on; the single exported predicate
+ * (option C above) remains the follow-up.
  */
-function carriesTenantScopeColumn(schema: ServiceObject): boolean {
+export function carriesTenantScopeColumn(schema: ServiceObject): boolean {
   // Clause 1 — the wall's own two clauses, spelled here because
   // plugin-security spells them there (option C, the single exported
   // predicate, is bounded to no new `@objectstack/spec` export and no

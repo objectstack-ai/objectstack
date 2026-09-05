@@ -20,6 +20,7 @@ import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-s
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
+import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   rebucketCrossObject,
@@ -81,9 +82,15 @@ const SCALAR_SQL_OPS: Record<string, string> = {
  * than the query it claims to reproduce whenever the comparand carried a `_` or
  * `%` — the #3601 / #3602 / #3650 failure this render block exists to prevent.
  */
-const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape; fold?: boolean }> = {
+const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape; fold?: boolean; negate?: boolean }> = {
+  // [#15684] `sql` is the keyword for the FOLDING row only. The four
+  // case-EXACT rows take their construct from the DIALECT — `text-match-sql.ts`
+  // emits `GLOB` on SQLite and `LIKE` over `CAST(… AS BINARY)` on MySQL, since
+  // a plain `LIKE` is case-exact on Postgres alone. `negate` is what survives
+  // that move: which POLARITY the row is, spelled once, so the construct table
+  // and not this one decides how the negation is written.
   contains: { sql: 'LIKE', shape: 'contains' },
-  notContains: { sql: 'NOT LIKE', shape: 'contains' },
+  notContains: { sql: 'NOT LIKE', shape: 'contains', negate: true },
   startsWith: { sql: 'LIKE', shape: 'starts' },
   endsWith: { sql: 'LIKE', shape: 'ends' },
   // [#6520] `$icontains`: the same escaped pattern and bound `ESCAPE` as its
@@ -541,8 +548,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#14079] The same declared-type rule `NativeSQLStrategy.applyReadScope`
       // hands the compiler, so the echo prints the constant the executed
       // statement runs for a text operator over a numeric or boolean column.
+      // [#15684] …and the same dialect, so the echoed scope prints the
+      // construct the executed one runs — `GLOB` on SQLite, where a plain
+      // `LIKE` folds ASCII case and admits rows the policy excludes.
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
         nonTextColumn: nonTextColumnResolver(ctx, tableName),
+        dialect: sqlDialectFor(ctx, tableName),
       });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
@@ -1231,16 +1242,30 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what
       // `driver-sql`'s `applyLike` binds for the same operator — so an author
       // who copies this statement out runs the predicate that ran.
-      params.push(likePattern(like.shape, values[0]));
-      const patternRef = `$${params.length}`;
-      params.push(LIKE_ESCAPE_CHAR);
       // [#6520] The fold, when the operator carries one, wraps BOTH sides:
       // folding only the comparand compares a folded needle against a raw column
       // and returns just the rows that were already lower-case — a wrong row set
       // that looks like a working predicate.
-      const lhs = like.fold ? asciiLowerSqlExpr(col) : col;
-      const rhs = like.fold ? asciiLowerSqlExpr(patternRef) : patternRef;
-      return `${lhs} ${like.sql} ${rhs} ESCAPE $${params.length}`;
+      if (like.fold) {
+        params.push(likePattern(like.shape, values[0]));
+        const patternRef = `$${params.length}`;
+        params.push(LIKE_ESCAPE_CHAR);
+        return `${asciiLowerSqlExpr(col)} ${like.sql} ${asciiLowerSqlExpr(patternRef)} ESCAPE $${params.length}`;
+      }
+      // [#15684] The case-EXACT four print what the DIALECT will run. Asked of
+      // the same hook `NativeSQLStrategy` asks, on the same target, so the echo
+      // and the executed statement stay one description — the whole reason this
+      // render block exists (#5333). A caller that handed no target and no
+      // context cannot be asked (the four-argument shape the operator-coverage
+      // suite drives), and keeps the `LIKE` it always got.
+      return textMatchPredicateSql({
+        dialect: target && ctx ? sqlDialectFor(ctx, target.object) : 'unknown',
+        column: col,
+        shape: like.shape,
+        value: values[0],
+        negate: like.negate === true,
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
     }
 
     const op = SCALAR_SQL_OPS[operator];
