@@ -103,7 +103,10 @@ describe('#15662 — a structural condition that is neither text nor an expressi
         // Before the fix this reached `exprStr.trim()` and threw
         // `TypeError: source.trim is not a function` out of the validator — a
         // refusal by accident, with no location and no rule.
-        const thrown = (() => { try { register(flowWith({ decisionCondition: { source: 1 } }))(); } catch (e) { return e as Error; } })();
+        const thrown = ((): Error | undefined => {
+            try { register(flowWith({ decisionCondition: { source: 1 } }))(); } catch (e) { return e as Error; }
+            return undefined;
+        })();
         expect(thrown).toBeDefined();
         expect(thrown!.message).toContain(STRUCTURAL_CONDITION_SHAPE_REFUSAL);
         expect(thrown!.message).not.toContain('is not a function');
