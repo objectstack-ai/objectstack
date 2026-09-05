@@ -504,10 +504,10 @@ export const WebSocketEventSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15676, ruling B on #14478). */
   timestamp: retiredKey(
-    '`WebSocketEvent.timestamp` was renamed to `occurredAt` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the event INSTANT now carries the shared `EpochMs` schema, '
-    + 'which declares the epoch-millisecond unit the bare key name left to the describe '
-    + 'prose. Rename the key to `occurredAt`; the value is unchanged (`Date.now()`).',
+    '`WebSocketEvent.timestamp` was renamed to `occurredAt` in @objectstack/spec 17 — the '
+    + 'event INSTANT now carries the shared `EpochMs` schema, which declares the '
+    + 'epoch-millisecond unit the bare key name left to the describe prose. Rename the key '
+    + 'to `occurredAt`; the value is unchanged (`Date.now()`).',
   ),
 }));
 
@@ -543,12 +543,12 @@ export const SimplePresenceStateSchema = lazySchema(() => z.object({
 
   /** Tombstone for the rename above (#15676, ruling B on #14478). */
   lastSeen: retiredKey(
-    '`SimplePresenceState.lastSeen` was renamed to `lastSeenAt` in @objectstack/spec 17 '
-    + '(#14478 ruling B) — the last-activity INSTANT now carries the shared `EpochMs` '
-    + 'schema, which declares the epoch-millisecond unit. Rename the key to `lastSeenAt`; '
-    + 'the value is unchanged (`Date.now()`). Note the neighbouring '
-    + '`PresenceState.lastSeen` (api/realtime-shared.zod.ts) is a different key with a '
-    + 'different type — an ISO-8601 datetime STRING — and is untouched.',
+    '`SimplePresenceState.lastSeen` was renamed to `lastSeenAt` in @objectstack/spec 17 — '
+    + 'the last-activity INSTANT now carries the shared `EpochMs` schema, which declares '
+    + 'the epoch-millisecond unit. Rename the key to `lastSeenAt`; the value is unchanged '
+    + '(`Date.now()`). Note the neighbouring `PresenceState.lastSeen` '
+    + '(api/realtime-shared.zod.ts) is a different key with a different type — an '
+    + 'ISO-8601 datetime STRING — and is untouched.',
   ),
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional presence metadata (e.g., current page, custom status)'),
 }));
