@@ -399,7 +399,7 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
  * side — an empty translation is not a translation, whichever side it is
  * written on.
  */
-function inlineLocaleText(
+export function inlineLocaleText(
   map: Readonly<Record<string, string>> | undefined,
   locale: string,
 ): string | undefined {
