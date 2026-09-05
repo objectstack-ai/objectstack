@@ -13658,6 +13658,97 @@ function selfTest() {
   // line (already covered above, but the negative half needs its own pin).
   t('a bare `-run:` is not read as a compact step', runCommandTexts('      -run: pnpm check:not-a-step').length === 0);
 
+  // ── The step's `env:` is the OTHER carrier of a workflow value (#15761) ────
+  //
+  // `partof-closing-keyword-guard.yml` passes the whole input through `env:`
+  // and leaves the argv bare, so the argv-shaped classifier scored
+  // `node scripts/check-partof-closing-keyword.mjs` as a command a dev can
+  // paste — one whose only possible outcome here is the gate's own exit 2
+  // ("NOT WIRED — neither PR_BODY nor PR_NUMBER is set"). The fixture carries
+  // the specimen's shape plus the three shapes that must NOT move.
+  const envWf = [
+    'jobs:',
+    '  guard:',
+    '    steps:',
+    '      - name: The specimen — bare argv, the input through env:',
+    '        env:',
+    '          PR_BODY: ${{ github.event.pull_request.body }}',
+    '          PR_NUMBER: ${{ github.event.pull_request.number }}',
+    '        run: node scripts/check-env-carried.mjs',
+    '      - name: A LITERAL env value is not a workflow value',
+    '        run: node scripts/check-literal-env.mjs',
+    '        env:',
+    '          PR_BODY: a body written down right here',
+    '          HOME_ISH: $HOME/not-an-expression',
+    '      - name: argv-carried, the regression control',
+    '        run: node scripts/check-argv-carried.mjs --base "$MERGE_BASE"',
+    '      - name: one value, one carrier — the command spells this env name itself',
+    '        env:',
+    '          MERGE_BASE: ${{ github.event.pull_request.base.sha }}',
+    '        run: node scripts/check-spelled-env.mjs --base "$MERGE_BASE"',
+    '      - run: node scripts/check-compact-env.mjs',
+    '        env:',
+    '          COMPACT: ${{ github.sha }}',
+    '      - name: an env: that belongs to a nested mapping is not this step\'s',
+    '        uses: some/action@v1',
+    '        with:',
+    '          env:',
+    '            NESTED: ${{ github.sha }}',
+    '        run: node scripts/check-nested-env.mjs',
+  ].join('\n');
+  const envInvs = extractCheckInvocations(envWf, 'partof-closing-keyword-guard.yml');
+  const envOf = (name) => (envInvs.find((i) => i.script === name)?.envVariables ?? null);
+  // (a) The specimen: the step's `env:` names ride the invocation, in order.
+  t(
+    '\u2b50 a bare argv beside an `env:` expression carries the env NAMES the step passes it',
+    (envOf('scripts/check-env-carried.mjs') ?? []).join(',') === 'PR_BODY,PR_NUMBER',
+  );
+  t(
+    '\u2026and it reads the `env:` block whichever side of `run:` the step writes it on',
+    (envOf('scripts/check-compact-env.mjs') ?? []).join(',') === 'COMPACT',
+  );
+  // (b) A literal `env:` value keeps the command runnable — including the shell
+  //     spellings, which Actions does NOT substitute in an env value.
+  t(
+    '\u2b50 a LITERAL `env:` value is not a workflow value, so the command stays runnable',
+    (envOf('scripts/check-literal-env.mjs') ?? null)?.length === 0,
+  );
+  // (c) The regression control: argv-carried detection is untouched, and a name
+  //     the command spells for itself is ONE value with ONE carrier.
+  t(
+    'CONTROL: an argv-carried variable is still detected, and carries no env of its own',
+    envInvs.some((i) => i.check === 'scripts/check-argv-carried.mjs --base "$MERGE_BASE"'
+      && (i.argvVariables ?? []).join(',') === '$MERGE_BASE'
+      && (i.envVariables ?? []).length === 0),
+  );
+  t(
+    '\u2b50 CONTROL: an env name the command SPELLS is argv-carried, not counted twice \u2014 this is what keeps #15441\'s repaired `--base` families runnable',
+    (envOf('scripts/check-spelled-env.mjs') ?? null)?.length === 0,
+  );
+  t(
+    'CONTROL: an `env:` nested under `with:` is not read as the step\'s own',
+    (envOf('scripts/check-nested-env.mjs') ?? null)?.length === 0,
+  );
+  t(
+    'the same walk, read directly: one step per `run:` key, each with its own env',
+    runCommandSteps(envWf).length === 6
+      && runCommandSteps(envWf)[0].envVariables.join(',') === 'PR_BODY,PR_NUMBER'
+      && runCommandSteps(envWf)[1].envVariables.length === 0,
+  );
+  t(
+    'CONTROL: the classic and compact fixtures above carry no `env:` expression, so this widening moved neither',
+    runCommandSteps(blockWf).every((step) => step.envVariables.length === 0)
+      && runCommandSteps(compactWf).every((step) => step.envVariables.length === 0),
+  );
+  // The limbs, each one of which has a live case on this tree (see
+  // `workflowEnvValues`' docblock for which family each keeps out).
+  const envEntry = (over = {}) => ({ envVariables: ['PR_BODY'], direct: true, selfTest: false, ciOnly: null, ...over });
+  t('\u2b50 a direct, non-self-test family with no payload dependence is classified by its env carrier', workflowEnvValues(envEntry()).join(',') === 'PR_BODY');
+  t('a `--self-test` invocation consumes no workflow value, so its step\'s env cannot subtract it', workflowEnvValues(envEntry({ selfTest: true })).length === 0);
+  t('a `check:*` family is invocable by name and its KEY drops the argv, so one step\'s env is not a property of it', workflowEnvValues(envEntry({ direct: false })).length === 0);
+  t('a family already named CI-MEASURED ONLY is not named a second time as value-bearing', workflowEnvValues(envEntry({ ciOnly: { env: 'GITHUB_EVENT_PATH' } })).length === 0);
+  t('CONTROL: no env carrier at all classifies nothing', workflowEnvValues(envEntry({ envVariables: [] })).length === 0);
+
   // #7440: the printed line must be runnable as-is. The three shapes come from
   // the same three fixtures above, so the sample workflow and the print site
   // cannot drift apart.
@@ -21360,6 +21451,40 @@ function selfTest() {
     t(
       'CONTROL: stdout is still commands and nothing else — the NOT MEASURED lines never reach the stream a consumer executes',
       (notMeasuredCommands.stdout ?? '').split('\n').filter(Boolean).every((l) => /^(pnpm|node) \S/.test(l)),
+    );
+  }
+
+  // ── The env-carried half of that bucket, on the LIVE tree (#15761) ─────────
+  //
+  // The fixture cases above judge the reader; this one judges the tree. The
+  // change set is the specimen workflow itself, so the card, the docblock and
+  // this pin all name one file. Before the env read, stdout carried
+  // `node scripts/check-partof-closing-keyword.mjs` under a caption promising
+  // a runnable command, and running it here exits 2 with the gate's own
+  // "NOT WIRED" refusal.
+  {
+    const envLive = runCli(['--commands', '.github/workflows/partof-closing-keyword-guard.yml']);
+    const envLiveOut = (envLive.stdout ?? '').split('\n');
+    const envLiveErr = envLive.stderr ?? '';
+    t(
+      'CONTROL: the specimen workflow really is a change set that derives this family, so the cases below judge a live row',
+      envLive.status === 0 && (envLiveOut.join('\n') + envLiveErr).includes('partof-closing-keyword'),
+    );
+    t(
+      '⭐ the bare invocation whose input arrives through `env:` is NO LONGER offered as runnable',
+      !envLiveOut.includes('node scripts/check-partof-closing-keyword.mjs'),
+    );
+    t(
+      '⭐ …it is NAMED as NOT MEASURED instead, on the stream that cannot corrupt the harvest',
+      envLiveErr.includes('⊘ NOT MEASURED — scripts/check-partof-closing-keyword.mjs'),
+    );
+    t(
+      '⭐ CONTROL: the `pnpm check:` form of the same gate takes nothing from the workflow and is still in the list',
+      envLiveOut.includes('pnpm check:partof-closing-keyword'),
+    );
+    t(
+      'CONTROL: the accounting line stays true of both carriers, so a reader is not told to look only at argv',
+      envLiveErr.includes("their argv or their step's `env:` carries a variable with no value outside a CI run"),
     );
   }
 
