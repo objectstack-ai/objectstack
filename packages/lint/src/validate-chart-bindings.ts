@@ -121,16 +121,15 @@ export interface ChartBindingFinding {
   hint: string;
 }
 
-import { suggestName } from './object-graph.js';
+// `recordsOf` — the ONE collection reader (`object-graph.ts`), not the
+// hand-copied `asArray` this file used to carry. That copy spelled the array
+// branch as an unchecked `v as AnyRec[]`, so a junk member (`reports: [null,
+// …]`) was dereferenced rather than skipped and the rule threw instead of
+// reporting. Behaviour is otherwise identical, including the map branch that
+// keeps a member whose value is not a record under the key the author named
+// it with; see that function's header for why the seam reports nothing itself.
+import { recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -157,16 +156,16 @@ interface DatasetNames {
 
 function indexDatasets(stack: AnyRec): Map<string, DatasetNames> {
   const out = new Map<string, DatasetNames>();
-  for (const ds of asArray(stack.datasets)) {
+  for (const ds of recordsOf(stack.datasets)) {
     const name = strName(ds.name);
     if (!name) continue;
     const dimensions = new Set<string>();
-    for (const d of asArray(ds.dimensions)) {
+    for (const d of recordsOf(ds.dimensions)) {
       const n = strName(d.name);
       if (n) dimensions.add(n);
     }
     const measures = new Set<string>();
-    for (const m of asArray(ds.measures)) {
+    for (const m of recordsOf(ds.measures)) {
       const n = strName(m.name);
       if (n) measures.add(n);
     }
@@ -390,7 +389,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   };
 
   // ── 1. Report charts (report.chart + report.blocks[].chart) ──
-  const reports = asArray(stack.reports);
+  const reports = recordsOf(stack.reports);
   for (let ri = 0; ri < reports.length; ri++) {
     const report = reports[ri];
     if (!isRec(report)) continue;
@@ -412,7 +411,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         values: { names: values, path: `${path}.values` },
         xAxis: strName(chart.xAxis) ? { name: strName(chart.xAxis)!, path: `${path}.chart.xAxis` } : undefined,
         yAxis: strName(chart.yAxis) ? { name: strName(chart.yAxis)!, path: `${path}.chart.yAxis` } : undefined,
-        series: asArray(chart.series)
+        series: recordsOf(chart.series)
           .map((s, si) => ({
             name: strName(s.name),
             path: `${path}.chart.series[${si}].name`,
@@ -460,7 +459,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     });
   };
 
-  const views = asArray(stack.views);
+  const views = recordsOf(stack.views);
   for (let vi = 0; vi < views.length; vi++) {
     const view = views[vi];
     if (!isRec(view)) continue;
@@ -473,7 +472,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     }
   }
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let oi = 0; oi < objects.length; oi++) {
     const obj = objects[oi];
     if (!isRec(obj) || !isRec(obj.listViews)) continue;
@@ -491,7 +490,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   // A chart component arrives through the untyped `properties` bag. The
   // presence of a `dataset` key is what marks it dataset-bound (and so
   // checkable); an object-bound chart has none and is left alone.
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     if (!isRec(page)) continue;
@@ -502,10 +501,10 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       // A page chart mixes the list-chart selection (`dataset`/`dimensions`/
       // `values`) with ChartConfig-style axes (`yAxis: [{ field }]`), so both
       // shapes are read here.
-      const axisRefs = asArray(props.yAxis)
+      const axisRefs = recordsOf(props.yAxis)
         .map((a, ai) => ({ name: strName(a.field), path: `${path}.properties.yAxis[${ai}].field` }))
         .filter((a): a is { name: string; path: string } => !!a.name);
-      const seriesRefs = asArray(props.series)
+      const seriesRefs = recordsOf(props.series)
         .map((s, si) => ({
           name: strName(s.name),
           path: `${path}.properties.series[${si}].name`,

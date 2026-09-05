@@ -609,6 +609,49 @@ describe('validateChartBindings — floor', () => {
     expect(findings).toEqual([]);
   });
 
+  // The #15636 seam this file carries: its collection reader was a hand-copied
+  // `asArray` whose array branch was an unchecked cast, so a junk member was
+  // DEREFERENCED (`strName(entry.name)` on `null`) rather than skipped and the
+  // rule threw where it should have reported. Now `recordsOf`, which filters.
+  it('survives a null member in every collection it reads — skipped, not dereferenced', () => {
+    const stack = {
+      datasets: [
+        null,
+        {
+          name: 'task_metrics',
+          object: 'showcase_task',
+          dimensions: [null, { name: 'status', field: 'status' }],
+          measures: [null, { name: 'task_count', aggregate: 'count' }],
+        },
+      ],
+      reports: [
+        null,
+        {
+          name: 'r',
+          dataset: 'task_metrics',
+          values: ['task_count'],
+          chart: {
+            type: 'bar',
+            xAxis: 'status',
+            yAxis: 'task_count',
+            series: [null, { name: 'ghost_measure' }],
+          },
+        },
+      ],
+    } as unknown as Record<string, unknown>;
+
+    const findings = validateChartBindings(stack);
+    // The junk members are gone rather than fatal, and the real declarations
+    // around them still resolve: `status`/`task_count` are found (no unknown-
+    // ref finding for either), and the one genuine defect is still reported.
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(CHART_MEASURE_UNKNOWN);
+    expect(findings[0].severity).toBe('warning');
+    // Positions are indexes into the FILTERED collection — a dropped member
+    // shifts them, which is the honest price of not crashing on junk.
+    expect(findings[0].path).toBe('reports[0].chart.series[0].name');
+  });
+
   it('does not mistake a tree view named "org_chart" for a chart', () => {
     const findings = validateChartBindings({
       ...baseStack(),
