@@ -110,6 +110,7 @@ import {
   DetailRecordNotFoundError,
   MasterReferenceMissingError,
   MaskedValueWriteError,
+  PermissionSetReadUnansweredError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
@@ -746,6 +747,53 @@ function userFacingDenialMessage(
   return renderOperationMessage({ messageKey }, { locale, translate });
 }
 
+/**
+ * The `sys_permission_set` page the enforcement-plane loader asked for, or a
+ * REFUSAL — never a different empty.
+ *
+ * ## The shape, driven rather than declared
+ *
+ * `ObjectQL.find` resolves a BARE array of row objects. That is MEASURED, not
+ * read off `IDataEngine.find`'s declared `Promise<any[]>`: a declared type is
+ * not proof here, because this repo also carries a `find()` that resolves a
+ * `QueryResult` envelope and never an array. `engine-find-bare-array.pin.test.ts`
+ * boots a real `ObjectQL` over a real `SqlDriver`, starts this plugin against
+ * it, and pins what this very loader receives — on a populated page and an
+ * empty one. The `{ records }` limb this function replaced was therefore
+ * unreachable: dead code that read as a contract.
+ *
+ * ## Why anything else REFUSES instead of returning `[]`
+ *
+ * This is the enforcement plane. A value this loader cannot read is a read that
+ * did not answer, and the one thing it must never become is "this principal has
+ * no permission sets" — a statement that silently withdraws grants that exist
+ * while the request keeps looking normal. `PermissionEvaluator
+ * .resolvePermissionSets` catches the refusal one frame up, keeps the request
+ * fail-closed exactly as before, and reports it once (#2565's warn, which the
+ * old swallow made unreachable).
+ *
+ * A non-object ELEMENT refuses for the same reason, and that half is the
+ * repair's other direction: it used to be dropped in silence by the trailing
+ * `r?.name === name` filter, which is the same invention one row at a time.
+ */
+function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any[] {
+  if (!Array.isArray(rows)) {
+    throw new PermissionSetReadUnansweredError(
+      names,
+      `the engine resolved ${rows === null ? 'null' : typeof rows}, not an array of rows`,
+    );
+  }
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') {
+      throw new PermissionSetReadUnansweredError(
+        names,
+        `the page carried a ${row === null ? 'null' : typeof row} where a row object was contracted`,
+      );
+    }
+  }
+  return rows;
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1279,17 +1327,35 @@ export class SecurityPlugin implements Plugin {
     // multiple of the names asked for, never unbounded.
     const dbLoaderFor = ql
       ? (organizationId?: string) => async (names: string[]) => {
-          let rows: any;
-          try {
-            rows = await ql.find(
-              'sys_permission_set',
-              { where: { name: { $in: names } }, limit: Math.max(names.length * 4, 20) },
-              { context: seedCtx(organizationId) },
-            );
-          } catch {
-            rows = [];
-          }
-          const fetched = Array.isArray(rows) ? rows : rows?.records ?? [];
+          // ⛔ NO `catch` here, and ⛔ no invented empty below — this seam is
+          // the DROP-shaped half of this cleanup and is repaired in the OPPOSITE
+          // direction from the dead limbs elsewhere in this plugin.
+          //
+          // Three distinct facts used to leave here as one value, `[]`: the read
+          // succeeded on an empty catalog; the read THREW; the read resolved
+          // something this loader could not read. Only the first is an answer.
+          // The other two were inventions, and this is the enforcement plane —
+          // "no permission sets" silently withdraws grants that EXIST while
+          // every request still looks completely normal. The residue comment
+          // below already names that failure ("revokes standing access with no
+          // signal at the moment of loss"); the swallow above it produced the
+          // same loss for a whole page at once.
+          //
+          // The refusal is not this seam's invention: `resolvePermissionSets`
+          // ALREADY declares how a throwing loader is handled — it catches, the
+          // unresolved sets grant nothing (fail closed, unchanged), and the
+          // failure is named in a warn, because without it "a transient DB error
+          // makes custom permission sets silently vanish and the resulting 403s
+          // are undiagnosable" (#2565). Swallowing here made that warn
+          // UNREACHABLE. Letting the read fault propagate is what re-arms a
+          // diagnostic this repo had already built, and it is the direction the
+          // 2026-08-11 store-fault ruling settles: a fault propagates.
+          const rows = await ql.find(
+            'sys_permission_set',
+            { where: { name: { $in: names } }, limit: Math.max(names.length * 4, 20) },
+            { context: seedCtx(organizationId) },
+          );
+          const fetched = permissionSetPageOrRefuse(rows, names);
           // One row per NAME: this organization's own where it has one, an
           // organization-less leftover only where it does not.
           //
