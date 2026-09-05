@@ -14,7 +14,6 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/api/endpoint.zod.ts` — Exports: ApiMappingSchema, ApiEndpointSchema, ApiEndpoint
 - `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
 - `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — Exports: TransportProtocol, RealtimeEventType, SubscriptionEventSchema, SubscriptionSchema, RealtimePresenceSchema
-- `node_modules/@objectstack/spec/src/api/rest-server.zod.ts` — REST API Server Protocol
 - `node_modules/@objectstack/spec/src/api/versioning.zod.ts` — API Versioning Protocol
 - `node_modules/@objectstack/spec/src/api/websocket.zod.ts` — WebSocket Event Protocol
 
