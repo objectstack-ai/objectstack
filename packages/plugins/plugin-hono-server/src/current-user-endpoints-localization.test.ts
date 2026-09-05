@@ -20,13 +20,30 @@
 // served" clause; the narrowed-rule case is the "no second parser" clause
 // (the answer moves with the registry's rule, not with a built-in regex).
 //
-// Before this card the resolver behind these endpoints assembled NO
-// localization at all — `execCtx.locale` here was always `undefined` and the
-// endpoint answered `locale: null` for every authenticated caller — so the
-// rung-3 cases are also the first pins that this surface answers a language
-// at all. `currency` / `timezone` are deliberately untouched by the ruling and
-// still come off that resolver (i.e. `null` in these fixtures); the response
-// SHAPE objectui reads is pinned unchanged.
+// Before #14788 the resolver behind these endpoints assembled NO localization
+// at all — `execCtx.locale` here was always `undefined` and the endpoint
+// answered `locale: null` for every authenticated caller — so the rung-3 cases
+// are also the first pins that this surface answers a language at all.
+//
+// #15387 — WHAT THIS FILE PINS CHANGED, deliberately and not silently.
+// `currency` / `timezone` were out of #14788's scope and kept coming off that
+// same resolver, so the rung-1 case below asserted `timezone: null` as the
+// contract. It was pinning the DEFECT: the endpoint answered null for both to
+// every authenticated caller whatever the deployment configured. The
+// assertion is now the corrected contract, and the `#15387` block at the foot
+// of this file is what makes the two values falsifiable rather than merely
+// present:
+//
+//   * `timezone` — the deployment cascade's answer, floor `UTC`. An
+//     authenticated caller can no longer be answered `null` for it, which is
+//     why the rung-1 fixture (which configures no time zone) now reads `UTC`.
+//   * `currency` — the deployment cascade's answer, and the one value with NO
+//     floor. `null` there is still legal and still correct for a deployment
+//     that configures no currency, so the rung-1 expectation for it is
+//     UNCHANGED. Keeping that asymmetry visible is the point: the two keys do
+//     not have the same nullability contract.
+//
+// The response SHAPE objectui reads is unchanged — same four keys.
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
@@ -144,7 +161,9 @@ describe('/auth/me/localization — the signed-in user\'s language, three rungs 
         const { status, body } = await get('ja-JP,ja;q=0.9,en;q=0.8');
         expect(status).toBe(200);
         // The SHAPE objectui reads (`json?.locale`, plus `currency`) — unchanged.
-        expect(body).toEqual({ authenticated: true, currency: null, locale: 'zh-CN', timezone: null });
+        // `timezone: 'UTC'` is the cascade floor for a fixture that configures
+        // no time zone (#15387); `currency: null` is the no-floor value.
+        expect(body).toEqual({ authenticated: true, currency: null, locale: 'zh-CN', timezone: 'UTC' });
         // The identity row is read under a SYSTEM context by the caller's own
         // id (the `tryFind` shape core uses for the same row) — never routed
         // through the caller's own RLS wall.
