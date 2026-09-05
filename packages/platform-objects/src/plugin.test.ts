@@ -186,6 +186,7 @@ describe('PlatformObjectsPlugin: fresh-datastore attestation (#3438, ADR-0104)',
     await boot(engine);
 
     expect(engine.rows.map((r: any) => r.id).sort()).toEqual([
+      'adr-0030-notification-event', // #15710 ruling 3 — creation-attested
       'adr-0104-file-references',
       'adr-0104-value-shapes',
     ]);
