@@ -525,8 +525,19 @@ describe('[#15350] §5b — a `tenancy` service that was REGISTERED and FAILED i
     // The whole point of #13906 option A: a FAILURE must not read as "this
     // check does not apply". Whatever the transport renders, it is not the
     // 200 the ablation in §4 produces.
-    expect(res.status).not.toBe(200);
-    expect(res.status).toBeGreaterThanOrEqual(500);
+    //
+    // ⚠️ MEASURED on this tree, and deliberately not pinned tighter than the
+    // outage CLASS: this family answers `500 INTERNAL_ERROR` ("No response from
+    // handler"), not the `503 SERVICE_UNAVAILABLE` the brand carries. That is a
+    // PRE-EXISTING relay gap, not one this card opened — `requireDatasourceAdmin`
+    // has re-raised `AuthzStoreUnavailableError` for the identical `ql`
+    // permission-store outage since #13279, out of route handlers that have no
+    // `catch`, and the Hono adapter renders any escaped throw as a bare 500. It
+    // is filed separately. Asserting the class rather than the digits keeps this
+    // pin measuring the SECURITY property — the outage is never answered as an
+    // admission or as a capability denial — so repairing the status to 503 does
+    // not have to redden a security pin.
+    expect([500, 503]).toContain(res.status);
   });
 
   it('⛔ nor is a WRITE let through — nothing lands, read back from the store', async () => {
