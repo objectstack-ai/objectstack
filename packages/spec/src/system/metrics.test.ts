@@ -544,7 +544,7 @@ describe('metrics window and period lengths carry their unit (#15679)', () => {
 
   it('accepts every renamed key at the same magnitude', () => {
     expect(MetricAggregationConfigSchema.parse({ type: 'avg', window: { durationSeconds: 300 } })
-      .window.durationSeconds).toBe(300);
+      .window?.durationSeconds).toBe(300);
     expect(ServiceLevelIndicatorSchema.parse({ ...sliBase, window: { durationSeconds: 2592000 } })
       .window.durationSeconds).toBe(2592000);
     expect(ServiceLevelObjectiveSchema.parse({

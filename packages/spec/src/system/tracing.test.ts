@@ -542,9 +542,8 @@ describe('Span.duration carries its unit (#15679)', () => {
     expect(SpanSchema.safeParse({ ...base, durationMs: -1 }).success).toBe(false);
   });
 
-  it('leaves the exporter `timeout` alone — its describe names no unit, so it is outside the population', () => {
-    const config = TracingConfigSchema.parse({
-      serviceName: 'test',
+  it('leaves the OTel exporter `timeout` alone — its describe names no unit, so it is outside the population', () => {
+    const config = OpenTelemetryCompatibilitySchema.parse({
       exporter: { type: 'console' },
       resource: { serviceName: 'test' },
     });
