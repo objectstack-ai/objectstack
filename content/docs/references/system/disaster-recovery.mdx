@@ -30,7 +30,7 @@ Backup configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
 | **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -137,7 +137,7 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
 | **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -169,7 +169,7 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable automated DR testing |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for DR test schedule |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for DR test schedule |
 | **notificationChannel** | `string` | optional | Notification channel for DR test results |
 
 ### Nested Shape: `DisasterRecoveryPlan.contacts[number]`
