@@ -126,11 +126,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the printed COMMAND: a path the reader can run, not a name': 9,
   'the inherited pipe-shape advisory': 5,
   'the exit-code CLASS, and the advisory that must move with it': 10,
+  'the CLOSURE: every declared prerequisite, in one command': 11,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -634,6 +635,200 @@ export async function requireDefaultExport(specifier, load, importerUrl, options
   return namespace.default;
 }
 
+// ---------------------------------------------------------------------------
+// The CLOSURE — every prerequisite the refusing gate declares, in one command
+// ---------------------------------------------------------------------------
+
+/**
+ * ## The defect this closes
+ *
+ * A gate declares its prerequisites one `requireDependency` call at a time, and
+ * this module refused at the FIRST unmet one — so a gate with several could
+ * only ever name one of them. `check-doc-formula-expressions` awaits
+ * `@objectstack/formula` and then `@objectstack/lint`; on a cold tree it printed
+ * a fix naming `@objectstack/formula`, and a dev who ran exactly that got a
+ * SECOND refusal naming `@objectstack/lint` and paid a second build round for a
+ * prerequisite the gate had already declared. The printed remedy was not wrong,
+ * it was INCOMPLETE — a declared remedy that does not clear the refusal.
+ *
+ * The repair belongs HERE and not in one gate's await order, because the shape
+ * is shared: measured on this tree, ten callers declare more than one
+ * prerequisite through this frame. Reordering one gate's awaits fixes one of
+ * them and leaves the rest untouched.
+ *
+ * ⚠️ This is a MESSAGE change, not a verdict change. WHEN a gate refuses,
+ * WHETHER it refuses, the exit code and the "Nothing was measured" clause are
+ * all untouched — the composition below runs only AFTER a real import failure
+ * has already produced a verdict, so it can never create a refusal, silence
+ * one, or move any gate's accept/reject set. What it changes is the `Fix:` line
+ * and the lines naming what else that fix covers.
+ *
+ * ## Why the other prerequisites are read out of the CALLER's SOURCE
+ *
+ * They have to be found without running them. The unmet ones are exactly the
+ * ones whose `await` was never reached — the gate exits at the first — so there
+ * is no runtime object to ask, and importing them here to find out would be the
+ * refusal performing the very work it is refusing to perform. The declarations
+ * are in the caller's own text, one call per prerequisite, and reading them
+ * there needs nothing installed and runs no gate code.
+ *
+ * Then each one is probed with the SAME two facts `classifyImportFailure`
+ * turns on — is the package directory there, and is the entry point its own
+ * manifest declares on disk — so a prerequisite reported unmet here is one a
+ * real import would have refused on, not a second opinion about it.
+ *
+ * The price of a source scan is the one `check-cross-package-test-inputs`
+ * publishes in AGENTS.md: it sees only the spellings it knows. Here that price
+ * is bounded in the safe direction — an unrecognised spelling contributes
+ * nothing and the reader gets exactly the refusal this module printed before.
+ * ⛔ It never states a prerequisite it did not read, and never drops one it did.
+ *
+ * ## Why the closure is a repeated `--filter`, and not a computed graph
+ *
+ * turbo already computes the closure: `--filter=A --filter=B` builds A, B and
+ * everything either of them depends on. Deriving "B already carries A" HERE
+ * would mean reading the workspace dependency graph in the one code path that
+ * runs precisely when the tree is unbuilt or uninstalled, and a wrong reduction
+ * prints a fix that is once again one build short — this card's own defect,
+ * re-introduced by its repair. So the command names every package measured
+ * unmet and lets turbo do the reduction it is the authority on. It also stays
+ * correct for a caller whose prerequisites are NOT in one dependency closure,
+ * where no single `--filter` exists to find.
+ */
+
+/**
+ * Every specifier a gate's source declares through this frame, in source order.
+ *
+ * Both spellings, because both refuse through the same path: a gate reaching
+ * for a default export is as capable of declaring two prerequisites as one
+ * reaching for a namespace.
+ */
+const DECLARED_PREREQUISITE = /\b(?:requireDependency|requireDefaultExport)\(\s*(['"])([^'"\n]+)\1/g;
+
+/**
+ * @param {string} importerUrl the refusing gate's `import.meta.url`
+ * @returns {string[]} declared specifiers, deduplicated, in source order — and
+ *   `[]` for an importer whose file cannot be read, which is the degradation
+ *   that hands the reader the refusal this module printed before.
+ */
+export function declaredPrerequisites(importerUrl) {
+  let source;
+  try {
+    source = readFileSync(fileURLToPath(importerUrl), 'utf8');
+  } catch {
+    return [];
+  }
+  const specifiers = [];
+  for (const match of source.matchAll(DECLARED_PREREQUISITE)) {
+    if (!specifiers.includes(match[2])) specifiers.push(match[2]);
+  }
+  return specifiers;
+}
+
+/**
+ * Is one declared prerequisite met on disk right now — WITHOUT importing it?
+ *
+ * The two probes `classifyImportFailure` already uses, in the same order, so
+ * this answers about the same facts rather than modelling them. `unknown` is
+ * the deferral this module owes everywhere: a relative or builtin specifier
+ * names no package to look for, and a manifest that declares no readable entry
+ * point is not evidence of anything.
+ */
+export function probeDeclaredPrerequisite(specifier, fromDir) {
+  const pkg = packageNameOf(specifier);
+  if (!pkg) return { kind: 'unknown', pkg: '' };
+  const pkgDir = findPackageDir(pkg, fromDir);
+  if (!pkgDir) return { kind: 'not-installed', pkg };
+  const entry = entryPointOnDisk(pkgDir);
+  if (entry.present === true) return { kind: 'met', pkg };
+  if (entry.present === false) {
+    return { kind: pkg.startsWith(`${WORKSPACE_SCOPE}/`) ? 'workspace-unbuilt' : 'broken', pkg };
+  }
+  return { kind: 'unknown', pkg };
+}
+
+/** How an unmet prerequisite reads in the list the advisory prints. */
+const UNMET_PHRASE = Object.freeze({
+  'not-installed': 'not installed',
+  'workspace-unbuilt': 'a workspace package that is not built',
+  broken: 'installed, but missing the entry point its own package.json declares',
+});
+
+/**
+ * `workspaceBuildFix` for SEVERAL packages.
+ *
+ * The command head is taken FROM `workspaceBuildFix` rather than re-spelled, so
+ * the single-package and multi-package forms cannot drift apart: change the
+ * canonical spelling once and this follows.
+ */
+function workspaceBuildFixForAll(pkgs) {
+  const [first, ...rest] = pkgs;
+  return rest.reduce((cmd, pkg) => `${cmd} --filter=${pkg}`, workspaceBuildFix(first));
+}
+
+/**
+ * The verdict's own fix, widened to cover every OTHER declared prerequisite
+ * that is also unmet.
+ *
+ * ⛔ Composes only over the two fixes this module itself produces. A caller
+ * that hands in a fix of its own — `check-governed-merges` and
+ * `check-regen-pending` both do — gets it back byte for byte and claims no
+ * closure: this module has no standing to rewrite a remedy it did not derive,
+ * and a widened command that does not include the caller's own step would be
+ * the incomplete remedy this whole section exists to end.
+ *
+ * @returns {{ fix: string, alsoUnmet: {kind: string, pkg: string}[], declared: number }}
+ */
+export function closurePrerequisites(importerUrl, verdict) {
+  const own = String(verdict?.pkg ?? '');
+  const ownFix = String(verdict?.fix ?? '');
+  const unchanged = { fix: ownFix, alsoUnmet: [], declared: 0 };
+  const composable = ownFix === INSTALL_FIX || (own !== '' && ownFix === workspaceBuildFix(own));
+  if (!composable) return unchanged;
+
+  const fromDir = dirname(fileURLToPath(importerUrl));
+  const declared = declaredPrerequisites(importerUrl);
+  const alsoUnmet = [];
+  for (const specifier of declared) {
+    const probe = probeDeclaredPrerequisite(specifier, fromDir);
+    if (!probe.pkg || probe.pkg === own) continue;
+    if (probe.kind === 'met' || probe.kind === 'unknown') continue;
+    if (alsoUnmet.some((u) => u.pkg === probe.pkg)) continue;
+    alsoUnmet.push(probe);
+  }
+  if (!alsoUnmet.length) return { ...unchanged, declared: declared.length };
+
+  // An install clears everything that is merely absent, so it leads; the build
+  // follows because turbo needs the tree installed to run at all.
+  const needsInstall = ownFix === INSTALL_FIX || alsoUnmet.some((u) => u.kind !== 'workspace-unbuilt');
+  const unbuilt = ownFix === INSTALL_FIX ? [] : [own];
+  for (const u of alsoUnmet) {
+    if (u.kind === 'workspace-unbuilt' && !unbuilt.includes(u.pkg)) unbuilt.push(u.pkg);
+  }
+  const steps = [];
+  if (needsInstall) steps.push(INSTALL_FIX);
+  if (unbuilt.length) steps.push(workspaceBuildFixForAll(unbuilt));
+  return { fix: steps.join(' && '), alsoUnmet, declared: declared.length };
+}
+
+/**
+ * The lines that make the widened fix legible: WHICH other prerequisites it
+ * covers, named, and the promise the reader is owed — that following it does
+ * not earn a second refusal.
+ */
+function closureDetail(alsoUnmet, declared) {
+  const more = alsoUnmet.length === 1 ? 'one more is' : `${alsoUnmet.length} more are`;
+  return [
+    ``,
+    `This gate declares ${declared} prerequisites in all, and ${more} ALSO unmet:`,
+    ``,
+    ...alsoUnmet.map((u) => `  ${u.pkg} — ${UNMET_PHRASE[u.kind] ?? u.kind}`),
+    ``,
+    `The fix below clears every one of them, so following it does not earn a second`,
+    `refusal for a prerequisite this gate had already declared.`,
+  ];
+}
+
 /**
  * The shared frame, in `check-i18n-coverage.mjs`'s wording and order: what is
  * unmet, why, the command that clears it, and — load-bearing — that nothing was
@@ -685,10 +880,19 @@ function prerequisiteNotMetText(importerUrl, verdict, measures) {
   // the same defect, relocated one token to the right.
   const command = importerCommandPath(importerUrl);
   const subject = measures ? `whether ${measures}` : `what it gates`;
+  // The refusal names every prerequisite this gate declared that is ALSO unmet,
+  // and one command that clears all of them. With nothing else unmet — the 45
+  // single-prerequisite importers, and every caller that hands in its own fix —
+  // `closure.fix` IS `verdict.fix` and this text is byte for byte the one that
+  // shipped before.
+  const closure = closurePrerequisites(importerUrl, verdict);
+  const detail = closure.alsoUnmet.length
+    ? [...verdict.detail, ...closureDetail(closure.alsoUnmet, closure.declared)]
+    : verdict.detail;
   return (
     `\n${gate}: PREREQUISITE NOT MET — ${verdict.headline}\n\n` +
-      verdict.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
-      `\n\n  Fix:  ${verdict.fix}\n\n` +
+      detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
+      `\n\n  Fix:  ${closure.fix}\n\n` +
       `  Nothing was measured: this gate exited before running a single check, so this\n` +
       `  result says NOTHING about ${subject}. It is NOT a finding, and it is not\n` +
       `  evidence that anything in the tree is wrong.\n` +
@@ -755,6 +959,9 @@ export function selfTest() {
 
     // A workspace package linked but never built: manifest present, dist absent.
     mk('@objectstack/unbuilt-fixture', { name: '@objectstack/unbuilt-fixture', exports: { '.': { import: './dist/index.mjs' } } });
+    // A SECOND unbuilt workspace package. The closure battery needs two:
+    // one is what the pre-closure refusal already named on its own.
+    mk('@objectstack/second-unbuilt-fixture', { name: '@objectstack/second-unbuilt-fixture', exports: { '.': { import: './dist/index.mjs' } } });
     // A third party whose declared entry is missing — a partial install.
     mk('partial-fixture', { name: 'partial-fixture', main: 'index.js' });
     // A whole package, entry point on disk.
@@ -980,6 +1187,141 @@ export function selfTest() {
     t('the /tmp log sink keeps the BASENAME — a repo-relative one names absent directories',
       advisoryFor(lintGate).includes('> /tmp/check-doc-formula-expressions.log 2>&1')
         && !advisoryFor(lintGate).includes('/tmp/packages/lint'));
+
+    // ── the CLOSURE: every declared prerequisite, in one command ────────────
+    //
+    // The acceptance this card was ruled on: what is pinned is the printed
+    // `Fix:`, never the exit code alone. A refusal that still exits 3 while
+    // naming one of two unmet prerequisites is the exact defect, and an
+    // assertion on the code cannot see it.
+    //
+    // REAL files again, both halves: the gate source is read off disk and the
+    // packages it declares are probed on disk. A model of either would agree
+    // with an implementation that never looked, which is the failure this whole
+    // module exists to end.
+    battery('the CLOSURE: every declared prerequisite, in one command');
+    const declaringGate = (name, specifiers, spelling = 'requireDependency') => {
+      const abs = join(wt, 'scripts', name);
+      writeFileSync(
+        abs,
+        specifiers
+          .map((s) => `await ${spelling}('${s}', () => import('${s}'), import.meta.url);\n`)
+          .join(''),
+      );
+      return abs;
+    };
+    const fromWtScripts = join(wt, 'scripts');
+    const missOf = (spec) => classifyImportFailure(spec, MNF(`Cannot find package '${spec}'`), fromWtScripts);
+    const textFor = (abs, v) => prerequisiteNotMetText(pathToFileURL(abs).href, v, undefined);
+
+    const unbuiltHere = missOf('@objectstack/unbuilt-fixture');
+    const twoUnbuilt = declaringGate('check-closure-fixture.mjs', [
+      '@objectstack/unbuilt-fixture',
+      '@objectstack/second-unbuilt-fixture',
+    ]);
+    const twoUnbuiltText = textFor(twoUnbuilt, unbuiltHere);
+    const bothFilters = workspaceBuildFix('@objectstack/unbuilt-fixture')
+      + ' --filter=@objectstack/second-unbuilt-fixture';
+
+    // (a) THE CARD. Two unbuilt workspace packages, ONE printed command, and it
+    // carries both — so the dev who runs it is not refused a second time.
+    t('two unbuilt prerequisites print ONE fix that carries BOTH',
+      twoUnbuiltText.includes(`\n\n  Fix:  ${bothFilters}\n\n`), twoUnbuiltText);
+    // (b) ⛔ THE DEFECT, as a negative: the fix must not END at the first one.
+    // Without this the case above passes on a string that merely STARTS right.
+    t('⛔ and never stops at the FIRST unmet one, which is what refused twice',
+      !twoUnbuiltText.includes(`\n\n  Fix:  ${workspaceBuildFix('@objectstack/unbuilt-fixture')}\n\n`),
+      twoUnbuiltText);
+    // (c) The command HEAD is inherited from `workspaceBuildFix`, never
+    // re-spelled — one spelling to change, not two that can drift apart.
+    t('the multi-package command is the single-package one, widened',
+      bothFilters.startsWith(workspaceBuildFix('@objectstack/unbuilt-fixture'))
+        && twoUnbuiltText.includes(bothFilters));
+    // (d) A command with no reason attached is a command nobody trusts: the
+    // advisory says WHICH other prerequisite it covers and how it is unmet.
+    t('the advisory NAMES the other unmet prerequisite and how many were declared',
+      twoUnbuiltText.includes('This gate declares 2 prerequisites in all, and one more is ALSO unmet:')
+        && twoUnbuiltText.includes('@objectstack/second-unbuilt-fixture — a workspace package that is not built'),
+      twoUnbuiltText);
+
+    // (e) Mixed kinds — the shape a truly cold tree has. An install cannot be
+    // skipped and a build cannot run before it, so the order is load-bearing.
+    const mixedGate = declaringGate('check-closure-mixed-fixture.mjs', [
+      'totally-absent-fixture',
+      '@objectstack/unbuilt-fixture',
+    ]);
+    const mixedText = textFor(mixedGate, missOf('totally-absent-fixture'));
+    t('an absent dependency and an unbuilt package compose install THEN build',
+      mixedText.includes(
+        `\n\n  Fix:  ${INSTALL_FIX} && ${workspaceBuildFix('@objectstack/unbuilt-fixture')}\n\n`),
+      mixedText);
+
+    // (f) NEGATIVE CONTROL for the whole battery. A second prerequisite that is
+    // MET must contribute nothing — otherwise every case above would pass on an
+    // implementation that widens the fix unconditionally.
+    const metSecondGate = declaringGate('check-closure-met-fixture.mjs', [
+      '@objectstack/unbuilt-fixture',
+      '@objectstack/built-fixture',
+    ]);
+    const metSecondText = textFor(metSecondGate, unbuiltHere);
+    t('NEGATIVE CONTROL: a second prerequisite that is BUILT widens nothing',
+      metSecondText.includes(`\n\n  Fix:  ${workspaceBuildFix('@objectstack/unbuilt-fixture')}\n\n`)
+        && !metSecondText.includes('ALSO unmet'),
+      metSecondText);
+
+    // (g) The 45 single-prerequisite importers inherit this text verbatim, and
+    // this card must not have moved a byte of it for them.
+    const loneGate = declaringGate('check-closure-lone-fixture.mjs', ['@objectstack/unbuilt-fixture']);
+    const loneText = textFor(loneGate, unbuiltHere);
+    t('a gate declaring ONE prerequisite prints exactly the refusal it always did',
+      loneText.includes(`\n\n  Fix:  ${workspaceBuildFix('@objectstack/unbuilt-fixture')}\n\n`)
+        && !loneText.includes('ALSO unmet') && !loneText.includes('prerequisites in all'),
+      loneText);
+
+    // (h) `check-governed-merges` and `check-regen-pending` hand in verdicts of
+    // their own making. ⛔ A fix this module did not derive is never rewritten:
+    // a widened command that dropped the caller's own step would be the
+    // incomplete remedy this section exists to end, one layer up.
+    const borrowedText = textFor(twoUnbuilt, {
+      pkg: '',
+      headline: 'the generator toolchain is unreachable',
+      detail: ['d'],
+      fix: 'restore the toolchain, then re-run',
+    });
+    t('a caller-supplied fix is returned byte for byte, and claims no closure',
+      borrowedText.includes('\n\n  Fix:  restore the toolchain, then re-run\n\n')
+        && !borrowedText.includes('ALSO unmet'),
+      borrowedText);
+
+    // (i) An importer whose source cannot be read degrades to the refusal that
+    // shipped before — never to a guess about what it declares.
+    const absentGate = join(wt, 'scripts', 'check-closure-never-written.mjs');
+    t('an unreadable importer degrades to the unwidened refusal',
+      declaredPrerequisites(pathToFileURL(absentGate).href).length === 0
+        && textFor(absentGate, unbuiltHere)
+          .includes(`\n\n  Fix:  ${workspaceBuildFix('@objectstack/unbuilt-fixture')}\n\n`));
+
+    // (j) The three ratchet gates declare `../eslint.config.mjs` alongside a
+    // package. A relative specifier names no package to probe, so it is
+    // DEFERRED — never invented into the fix, and never dropped silently from
+    // a fix it could have belonged to.
+    const relativeGate = declaringGate('check-closure-relative-fixture.mjs', [
+      '@objectstack/unbuilt-fixture',
+      '../eslint.config.mjs',
+    ]);
+    t('a relative specifier is deferred rather than guessed at',
+      probeDeclaredPrerequisite('../eslint.config.mjs', fromWtScripts).kind === 'unknown'
+        && !textFor(relativeGate, unbuiltHere).includes('ALSO unmet'));
+
+    // (k) Both helper spellings declare a prerequisite, and a gate reaching for
+    // a default export refuses through this same path.
+    const defaultExportGate = declaringGate(
+      'check-closure-default-export-fixture.mjs',
+      ['@objectstack/unbuilt-fixture', '@objectstack/second-unbuilt-fixture'],
+      'requireDefaultExport',
+    );
+    t('the `requireDefaultExport` spelling declares a prerequisite too',
+      textFor(defaultExportGate, unbuiltHere).includes(`\n\n  Fix:  ${bothFilters}\n\n`));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
