@@ -426,14 +426,30 @@ function checkCondition(value: any, condition: any): boolean {
                 // `typeof value !== 'string'` — the TYPE test, not the
                 // predicate. Answering it from {@link noValueSatisfiesNegation}
                 // states which question is being answered.
-                //
-                // A present, non-string value keeps the answer it had: the
-                // ruling moved the no-value cells, and only those.
                 if (value == null) {
                     if (noValueSatisfiesNegation(op)) break;
                     return false;
                 }
-                if (typeof value !== 'string' || value.includes(target)) return false;
+                // [#14079] A present value that is NOT a string satisfies this
+                // too. This line used to read `typeof value !== 'string' ||
+                // value.includes(target)` — a TYPE test standing in for the
+                // predicate, so `{ n: 5 }` failed `$contains: '5'` (correct:
+                // a number cannot contain a substring) AND `$notContains:
+                // '5'` (wrong: for the very same reason it cannot, it does not).
+                // Measured: this face answered `['3','4']` where this
+                // package's own live mingo path, `formula`, `having`,
+                // `driver-mongodb` and the analytics face answered all four
+                // rows. #13166's note that a non-string value "keeps the
+                // answer it had" recorded what that ruling chose to leave
+                // alone; the maintainer ruled the cell itself on 2026-09-05
+                // (option A, type-gate): a stored value that is not a string
+                // never satisfies a positive text operator and always
+                // satisfies `$notContains`. `FILTER_TEXT_CASES`' `score` rows
+                // are the pin, on every face. Now the arm answers the
+                // PREDICATE — "contains" is false of a non-string, so "does
+                // not contain" is true — which is `formula`'s shape
+                // (`!(typeof actual === 'string' && actual.includes(v))`).
+                if (typeof value === 'string' && value.includes(target)) return false;
                 break;
             case '$startsWith': 
                 if (typeof value !== 'string' || !value.startsWith(target)) return false; 

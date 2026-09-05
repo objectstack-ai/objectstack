@@ -444,6 +444,7 @@
     "MutualTLSConfig": "src/system/auth-config.zod.ts#MutualTLSConfig (type)",
     "MutualTLSConfigParsed": "src/system/auth-config.zod.ts#MutualTLSConfigParsed (type)",
     "MutualTLSConfigSchema": "src/system/auth-config.zod.ts#MutualTLSConfigSchema (const)",
+    "NOTIFICATION_EVENT_MIGRATION_ID": "src/system/migration.zod.ts#NOTIFICATION_EVENT_MIGRATION_ID (const)",
     "NavNodeLike": "src/system/i18n-resolver.ts#NavNodeLike (interface)",
     "NotificationChannel": "src/system/notification.zod.ts#NotificationChannel (type)",
     "NotificationChannelSchema": "src/system/notification.zod.ts#NotificationChannelSchema (const)",

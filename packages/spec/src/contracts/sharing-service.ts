@@ -511,7 +511,13 @@ export interface DefineSharingRuleInput {
   managedBy?: 'platform' | 'package' | 'admin';
 }
 
-/** Result of a rule evaluation pass. */
+/**
+ * Result of a rule evaluation pass.
+ *
+ * The six counts are what every implementation reports. `grantsRefused` is
+ * the one OPTIONAL key, and its absence is a statement about the
+ * implementation, not about the pass — read its doc before branching on it.
+ */
 export interface SharingRuleEvaluationResult {
   ruleId: string;
   matchedRecords: number;
@@ -519,6 +525,29 @@ export interface SharingRuleEvaluationResult {
   grantsCreated: number;
   grantsUpdated: number;
   grantsRevoked: number;
+  /**
+   * [#14969] Grants the engine REFUSED during the pass — each one an
+   * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` on an organization-less insert
+   * into a tenant-scoped `sys_record_share`. The pass continues past a refused
+   * grant (the remaining grants and the stale-row revocations still run), so
+   * `grantsRefused > 0` is NOT "the pass failed": it is the pass reporting
+   * what it could not grant on.
+   *
+   * Optional by design, and the optionality carries meaning. A required key
+   * would break every other `ISharingRuleService` implementer, in-tree and
+   * out, while an implementation that refuses grants may still narrow it to
+   * required on its own subtype (a legal covariant narrowing —
+   * `@objectstack/plugin-sharing` does exactly that). The key is ABSENT — not
+   * `0` — from any implementation that does not count refusals. A consumer
+   * branching on it must read "unset" as "this implementation does not report
+   * refusals", never as "no grant was refused"; only a present `0` says the
+   * latter.
+   *
+   * The wire already carried it: `POST /api/v1/sharing/rules/:idOrName/evaluate`
+   * answers the service's return value unfiltered, so this key lifts the
+   * declared client type (`shares.rules.evaluate`) up to what the route sends.
+   */
+  grantsRefused?: number;
 }
 
 /**
