@@ -51,8 +51,10 @@ interface NormalizeOptions {
 async function tryFind(ql: any, object: string, where: any): Promise<any[]> {
   try {
     const rows = await ql.find(object, { where, limit: 10_000, fields: ['id', 'managed_by'] }, { context: SYSTEM_CTX });
+    // Bare array, driven — `engine-find-bare-array.pin.test.ts` boots a real
+    // engine over a real `SqlDriver` and pins this seam. The `{ records }` limb
+    // that stood here was dead code that read as a contract.
     if (Array.isArray(rows)) return rows;
-    if (Array.isArray(rows?.records)) return rows.records;
     return [];
   } catch {
     return [];

@@ -28,7 +28,12 @@ trap 'rm -rf "$tmp"' EXIT
 MAIN="$tmp/mainrepo"
 WT="$tmp/wt"
 PLAIN="$tmp/plain"
-mkdir -p "$MAIN/pkg" "$PLAIN"
+# ODD: a PRIMARY checkout whose own path carries a literal `worktrees` segment. Every write
+# into it must BLOCK — it is a primary checkout, and the verdict comes from the git-dir vs
+# git-common-dir structure, never from the spelling of the path (#11809). $WT is its positive
+# twin: a real linked worktree at a path with no such segment.
+ODD="$tmp/worktrees/oddrepo"
+mkdir -p "$MAIN/pkg" "$PLAIN" "$ODD/pkg"
 (
   cd "$MAIN" || exit 1
   git init -q .
@@ -39,6 +44,14 @@ mkdir -p "$MAIN/pkg" "$PLAIN"
   git add -A
   git commit -qm init
   git worktree add -q "$WT" -b selftest-wt
+  cd "$ODD" || exit 1
+  git init -q .
+  git config user.email selftest@example.com
+  git config user.name selftest
+  : > README.md
+  : > pkg/x.ts
+  git add -A
+  git commit -qm init
 ) >/dev/null 2>&1 || { echo "could not build the git fixture" >&2; exit 1; }
 
 CWD="$MAIN"   # payload cwd for the cases that follow; reassigned per section
@@ -63,6 +76,7 @@ expect() { # expect <block|allow> <command> [env…]
   local got; got="$(verdict "$cmd" "$@")"
   local shown="${cmd//$'\n'/ ⏎ }"
   shown="${shown//$MAIN/\$MAIN}"; shown="${shown//$WT/\$WT}"; shown="${shown//$PLAIN/\$PLAIN}"
+  shown="${shown//$ODD/\$ODD}"
   if [ "$got" = "$want" ]; then
     pass=$((pass + 1)); printf '  ok   %-5s  %s\n' "$got" "$shown"
   else
@@ -109,6 +123,19 @@ expect allow 'rm -rf pkg/x.ts'
 expect allow 'touch pkg/new.ts'
 expect allow 'cp /tmp/a.txt pkg/a.txt'
 expect allow "cd $WT && tee pkg/a.ts"
+
+echo "== a PRIMARY checkout whose own path carries a 'worktrees' segment is BLOCKED =="
+# Every target here is ABSOLUTE, so the verdict can only have come from the path's own repo.
+# The two $ODD SUBDIRECTORY cases were `allow` under the `*/worktrees/*` substring test this
+# replaced — unguarded writes into a primary checkout — because git prints an ABSOLUTE
+# git-dir from a subdirectory and a RELATIVE one at the toplevel, so one checkout got
+# opposite verdicts by depth (#11809). The structural test is spelling-independent.
+CWD="$PLAIN"
+expect block "sed -i s/a/b/ $ODD/pkg/x.ts"   # a SUBDIRECTORY — the depth the substring test lost
+expect block "echo x > $ODD/pkg/x.ts"        # same depth, reached through redirection
+expect block "sed -i s/a/b/ $ODD/README.md"  # the toplevel, which blocked only by accident
+expect block "sed -i s/a/b/ $MAIN/pkg/x.ts"  # control: an ordinary shared primary checkout
+expect allow "sed -i s/a/b/ $WT/pkg/x.ts"    # control: a real linked worktree still allows
 
 echo "== writes outside any repo are fine (/tmp, scratchpad, \$HOME dotfiles) =="
 CWD="$MAIN"
