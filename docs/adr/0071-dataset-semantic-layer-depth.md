@@ -12,12 +12,12 @@ The first merged draft listed **matrix / across pivoting** as an open gap (a
 proposed "P1"). That was wrong — a check of the current code found matrix
 pivoting **already implemented end-to-end**:
 
-- **Render** — `packages/plugin-report/src/DatasetReportRenderer.tsx` →
+- **Render** — `objectui:packages/plugin-report/src/DatasetReportRenderer.tsx` →
   `DatasetMatrixTable` does a true cross-tab: one dataset query over
   `[...rows, ...columns]`, pivoted client-side into row × column × measure cells,
   with server-supplied row/column subtotals + grand total and drill-down. Covered
   by `DatasetReportRenderer.test.tsx`.
-- **Author** — `packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.tsx`
+- **Author** — `objectui:packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.tsx`
   offers `type: 'matrix'` and a dedicated "columns across" dimension editor;
   `packages/spec/src/ui/report.form.ts` reveals `columns` when `type == 'matrix'`.
 

@@ -16,7 +16,7 @@ verified sites:
 | Meaning | Where it lives today |
 |---|---|
 | a write must provide the value | `objectql/validation/record-validator.ts` |
-| the COLUMN is `NOT NULL` | `packages/drivers/driver-sql/src/sql-driver.ts` — `if (field.required) col.notNullable()` |
+| the COLUMN is `NOT NULL` | **At decision time (2026-07-30):** `packages/drivers/driver-sql/src/sql-driver.ts#createColumn` — `if (field.required) col.notNullable()`. **Superseded by this ADR's P0** (2026-09 note, #14193): the physical constraint now keys off the explicitly-authored `storage.notNull` at that same `#createColumn` site; `field.required` no longer drives the DDL. |
 | required-vs-nullable divergence is DRIFT | `packages/drivers/driver-sql/src/schema-drift.ts` — metadata-required + nullable column ⇒ expected `NOT NULL`, and imposing `NOT NULL` over possibly-null data is the classifier's `destructive` class |
 
 > ⚠️ **Anchor note (#13556).** The three anchors above were line numbers into
@@ -30,6 +30,14 @@ verified sites:
 > deliberately **not** repaired here: this record's Context describes the
 > PRE-decision state, and rewriting it inside an anchor migration would edit a
 > decision record's substance under cover of a formatting change.
+>
+> **Resolved (2026-09, #14193).** The two Context sites — the table row above and
+> the prose sentence under *The tri-binding, concretely* — are now annotated in
+> place as the state **at decision time**, each naming the `storage.notNull` site
+> that superseded it, and both citations are re-anchored by symbol
+> (`packages/drivers/driver-sql/src/sql-driver.ts#createColumn`) rather than by line. ⛔ No decision text changed:
+> the Context still describes the pre-P0 tri-binding, which is what motivated the
+> decision — it is now dated, so it cannot be read as a description of today.
 
 Because all three ride one flag, **tightening any invariant on a deployed
 object is a destructive migration, blocked by the very legacy nulls that
@@ -56,7 +64,9 @@ becomes a recognized posture: *new writes must provide; old rows may rest.*
 ### The tri-binding, concretely
 
 Authoring `required: true` on a field of a **new** object is unremarkable: the
-column is created `NOT NULL` (packages/drivers/driver-sql/src/sql-driver.ts), the validator enforces
+column is created `NOT NULL` (`packages/drivers/driver-sql/src/sql-driver.ts#createColumn` — *at
+decision time; superseded by this ADR's P0, where that same site keys the constraint off the
+explicit `storage.notNull` instead*), the validator enforces
 presence, the form shows the marker, drift never fires. The knob works —
 until the object has deployed data.
 
