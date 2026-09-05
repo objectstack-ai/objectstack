@@ -96,6 +96,14 @@ import {
  *   rather than error because an empty selection is a legitimate
  *   work-in-progress state a build must tolerate; erroring would gate the
  *   `sys_metadata` publish path on a half-authored widget.
+ * - `widget-measures-missing` (#15508) — a NON-chart dataset widget — a
+ *   single-value family (`metric`/`kpi`/`gauge`/`solid-gauge`/`bullet`) or a
+ *   tabular one (`table`/`pivot`) — selects NO measures. The placeholder above
+ *   is returned for these families too: the pinned `values.length === 0` return
+ *   stands above every family branch, so the KPI number or the table is not
+ *   drawn either. Same warning tier and suppression as the chart-family
+ *   spelling; a separate id because "chart" does not name this condition and
+ *   because the family keeps one id per class.
  * - `chart-dimensions-missing` — a chart-family widget selects at least one
  *   measure but NO dimensions. The pinned renderer's
  *   `isMetric = METRIC_TYPES.has(widgetType) || dimensions.length === 0`
@@ -308,6 +316,37 @@ import {
  * state an author passes THROUGH, and the family's errors are reserved for
  * bindings the analytics service cannot satisfy.
  *
+ * **The measures shape is every family's, not the chart family's (#15508).**
+ * Re-read at the pinned `.objectui-sha` (`a472b0716`, where the four cited
+ * lines still read as quoted above), `:683` is ABOVE `:423`/`:424` and tests
+ * nothing but `values.length === 0`. So a `metric`, `kpi`, `gauge`,
+ * `solid-gauge`, `bullet`, `table` or `pivot` widget that selects no measures
+ * renders that same placeholder: the KPI number or the table the author
+ * declared is not drawn either, and a missing tile on a board reads as
+ * "nothing to report" rather than as a defect. Nothing else reported it —
+ * `table-count-only` requires `values.length > 0` before it looks, and rules
+ * (b)/(c) iterate the arrays, so an empty one is silent by construction.
+ *
+ * The population therefore widens to every DECLARED widget type
+ * ({@link NON_CHART_DATASET_WIDGET_TYPES} is the taxonomy minus the chart
+ * family), carried by TWO ids rather than one:
+ * {@link CHART_MEASURES_MISSING} keeps the chart family, and
+ * {@link WIDGET_MEASURES_MISSING} takes the rest. Two, because "chart" stops
+ * naming the condition once the population is every family — a `metric` tile
+ * is not a chart — while the old id is depended on from OUTSIDE this file (the
+ * `packages/lint` barrel re-exports it, which
+ * `rule-id-barrel-exports.test.ts` makes a public-surface contract, and a
+ * board may already carry `suppressWarnings: ['chart-measures-missing']`).
+ * Renaming would have retired a reachable id and falsified those references;
+ * splitting keeps every one of them true and lets each message state the
+ * consequence its family actually has (no chart drawn / no KPI number drawn /
+ * no table rendered), which one id could only do by branching anyway.
+ *
+ * The DIMENSIONS shape stays chart-family only, and deliberately: a
+ * dimensionless `metric` or `table` is what those families are FOR (the
+ * shipped `system_overview` KPI tiles are exactly that shape), and a
+ * dimensionless `table` already has its own id in `table-count-only`.
+ *
  * ### The three refused binding keys (#15463)
  *
  * `chart-field-unknown` shipped at `error` with a message that named a QUERY
@@ -374,6 +413,16 @@ export const CHART_MEASURES_MISSING = 'chart-measures-missing';
  * chart family.
  */
 export const CHART_DIMENSIONS_MISSING = 'chart-dimensions-missing';
+/**
+ * [#15508] A NON-chart dataset widget — a `METRIC_WIDGET_TYPES` or a
+ * `TABULAR_WIDGET_TYPES` one — selects no measures, so the pinned renderer
+ * draws the same "Pick measures (values)" placeholder in place of the KPI
+ * number or the table. The chart-family spelling of the same shape keeps its
+ * own id ({@link CHART_MEASURES_MISSING}); see "The two empty-selection
+ * shapes" in the module docblock for why the population is split across two
+ * ids rather than carried by one.
+ */
+export const WIDGET_MEASURES_MISSING = 'widget-measures-missing';
 export const TABLE_COUNT_ONLY = 'table-count-only';
 export const MEASURE_AGGREGATE_INCOHERENT = 'measure-aggregate-incoherent';
 export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
@@ -504,6 +553,34 @@ export const CHART_FAMILY_WIDGET_TYPES: ReadonlySet<string> = new Set(
 /** [#15462] Does the pinned renderer draw this widget `type` as a chart? */
 export function isChartFamilyWidgetType(type: unknown): boolean {
   return typeof type === 'string' && CHART_FAMILY_WIDGET_TYPES.has(type);
+}
+
+/**
+ * [#15508] The other side of the same taxonomy split: every declared
+ * `ChartTypeSchema` option the pinned renderer does NOT route to its chart
+ * branch — i.e. `METRIC_WIDGET_TYPES` ∪ `TABULAR_WIDGET_TYPES`, derived by
+ * subtraction rather than re-listed, so the three sets stay a partition of the
+ * taxonomy by construction and a family added to either exception set (or to
+ * the taxonomy itself) lands on exactly one side without a second edit here.
+ *
+ * The population that matters for `widget-measures-missing`: the pin's
+ * `values.length === 0` return (`DatasetWidget.tsx:683`) is type-independent,
+ * so these families degrade to the same placeholder as a chart does. A widget
+ * `type` in NEITHER set is not a declared widget type at all, and stays
+ * unjudged by both ids — the same silence the taxonomy check already gave it.
+ */
+export const NON_CHART_DATASET_WIDGET_TYPES: ReadonlySet<string> = new Set(
+  (ChartTypeSchema.options as readonly string[]).filter(
+    (t) => !CHART_FAMILY_WIDGET_TYPES.has(t),
+  ),
+);
+
+/**
+ * [#15508] Does the pinned renderer draw this DECLARED widget `type` as a
+ * single value or a table rather than as a chart?
+ */
+export function isNonChartDatasetWidgetType(type: unknown): boolean {
+  return typeof type === 'string' && NON_CHART_DATASET_WIDGET_TYPES.has(type);
 }
 
 function list(names: Iterable<string>): string {
@@ -1182,7 +1259,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         });
       }
 
-      // ── (d1) a chart-family widget with an empty selection (#15462) ──
+      // ── (d1) a dataset widget with an empty selection (#15462, #15508) ──
       // Neither shape is about `chartConfig` — the renderer degrades before it
       // is ever consulted — so both are their own ids rather than arms of
       // `chart-config-missing` (which would then misname its own condition).
@@ -1190,13 +1267,23 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       // does not resolve is rules (b)/(c)'s finding, and emptiness is a
       // different question from resolvability.
       //
-      // Mutually exclusive, in the pin's own order: `values.length === 0`
-      // returns the placeholder at `DatasetWidget.tsx:683`, above every family
-      // branch, so a measureless widget never reaches the `isMetric` test the
-      // second id describes. Reporting both would attribute to one widget two
-      // consequences it cannot have at once.
-      if (isChartFamilyWidgetType(w.type)) {
-        if (values.length === 0) {
+      // Mutually exclusive, in the pin's own order, and the ORDER IS THE
+      // CONTROL FLOW below: `values.length === 0` returns the placeholder at
+      // `DatasetWidget.tsx:683`, above every family branch, so a measureless
+      // widget never reaches the `isMetric` test the dimensions id describes.
+      // Reporting both would attribute to one widget two consequences it
+      // cannot have at once. Rule (e) below keeps the same discipline for
+      // `table`/`pivot` — it `continue`s on `values.length === 0` — so a
+      // measureless table reports once, here.
+      //
+      // [#15508] The measures shape is judged on EVERY declared widget type
+      // (the `:683` return is type-independent); the dimensions shape stays
+      // chart-family, because a dimensionless single-value or tabular widget is
+      // what that family is for. Two ids for the one measures shape, split on
+      // the same family line: see the module docblock for why the chart-family
+      // id was kept rather than renamed.
+      if (values.length === 0) {
+        if (isChartFamilyWidgetType(w.type)) {
           push({
             severity: 'warning',
             rule: CHART_MEASURES_MISSING,
@@ -1215,7 +1302,31 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               ` If the widget is deliberately still being authored, suppress with: ` +
               `suppressWarnings: ['${CHART_MEASURES_MISSING}']`,
           });
-        } else if (dims.length === 0) {
+        } else if (isNonChartDatasetWidgetType(w.type)) {
+          // The consequence is stated per family, because it differs: the
+          // single-value families lose the NUMBER the tile exists to show, the
+          // tabular ones lose the grid. The placeholder is the same one, and
+          // it is quoted from the pin rather than paraphrased.
+          const drawn = METRIC_WIDGET_TYPES.has(w.type as string)
+            ? 'the single KPI number this tile is for is not drawn at all'
+            : 'no table is rendered at all';
+          push({
+            severity: 'warning',
+            rule: WIDGET_MEASURES_MISSING,
+            message:
+              `'${w.type}' widget selects no measures (\`values\` is empty), so the ` +
+              `renderer short-circuits to the authoring placeholder "Pick measures ` +
+              `(values) for this dataset widget." before any query runs — ${drawn}.`,
+            hint:
+              `Select at least one measure of dataset "${dsName}" BY NAME — ` +
+              `values: ['<measure>'] (declared measures: ${list(measures.keys())}). ` +
+              `A '${w.type}' widget needs no \`dimensions\`, so measures are the whole ` +
+              `fix. If the widget is deliberately still being authored, suppress with: ` +
+              `suppressWarnings: ['${WIDGET_MEASURES_MISSING}']`,
+          });
+        }
+      } else if (dims.length === 0) {
+        if (isChartFamilyWidgetType(w.type)) {
           push({
             severity: 'warning',
             rule: CHART_DIMENSIONS_MISSING,

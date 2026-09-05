@@ -11,7 +11,7 @@ import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec
 import { SharingRuleSchema } from '@objectstack/spec/security';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
 // with — asserted from the spec's own export, never re-spelled in a test.
-import { ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
+import { ASSIGNMENT_VALUE_ENVELOPE_REFUSAL, PREDICATE_SLOT_STRING_REFUSAL } from '@objectstack/spec/automation';
 
 import {
   validateStackExpressions,
@@ -2117,6 +2117,69 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues.filter(i => i.where.includes('conditions'))).toHaveLength(0);
     });
 
+    /**
+     * [#15572] The same slot, authored as a CEL **envelope** rather than as the
+     * bare CEL text it is declared to hold (`DecisionConditionSchema.expression`
+     * is `z.string()`). Before this, `objectstack validate` reported nothing:
+     * the ledger's `predicate` arm emitted strings only, skipping the envelope
+     * as "a type violation for the schema pass to report" — and `decision`
+     * publishes no descriptor `configSchema`, so no schema pass ever ran.
+     *
+     * ⚠️ Read the RED CONTROL below before trusting any zero here. The reading
+     * this card was filed on used a second envelope as its control — a control
+     * that could itself have been the answer, which makes it no control at all
+     * — so this test drives a form that DOES report (the brace-trap string, on
+     * this very slot, through this very call) in the same run as the forms
+     * under test. Without it, a harness that reached the slot and a harness
+     * that reached nothing would read identically.
+     */
+    describe('a predicate slot authored as an expression envelope (#15572)', () => {
+      const atSlot = (expression: unknown) =>
+        validateStackExpressions(decisionFlow(expression as string))
+          .filter(i => i.where.includes('conditions[0].expression'));
+
+      it('RED CONTROL — the brace-trap string on this slot still reports', () => {
+        // Not an envelope, so it cannot be "the answer" to what is being
+        // measured; it proves only that this call reaches this slot and can
+        // emit. If this ever goes to zero, every zero below is void.
+        const control = atSlot("{lead_record.status} == 'converted'");
+        expect(control).toHaveLength(1);
+        expect(control[0].severity).toBe('error');
+        expect(control[0].message).toContain('template brace');
+      });
+
+      it('reports a `{ dialect, source }` envelope, whatever the source says', () => {
+        for (const envelope of [
+          { dialect: 'cel', source: '   ' },            // the silent-`false` shape
+          { dialect: 'cel', source: 'rows.map(r,' },    // the throwing shape
+          { dialect: 'cel', ast: { kind: 'const' } },   // no `source` at all
+        ]) {
+          const found = atSlot(envelope);
+          expect(found).toHaveLength(1);
+          expect(found[0].severity).toBe('error');
+          expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+          expect(found[0].where).toContain('decision branch expression');
+        }
+      });
+
+      it('attributes the finding to the envelope’s own source when it has one', () => {
+        expect(atSlot({ dialect: 'cel', source: 'rows.map(r,' })[0].source).toBe('rows.map(r,');
+        expect(atSlot({ dialect: 'cel', ast: { kind: 'const' } })[0].source).toBe('');
+      });
+
+      it('reports every other non-string on the same rule, naming what it found', () => {
+        expect(atSlot(42)[0].message).toContain('Found a number');
+        expect(atSlot(['a > 1'])[0].message).toContain('Found an array');
+      });
+
+      it('leaves string predicates alone — including the whitespace-only one', () => {
+        // The card states this boundary explicitly so nobody "fixes" it: a
+        // whitespace-only STRING is "not authored" on both sides and stays so.
+        expect(atSlot('   ')).toHaveLength(0);
+        expect(atSlot("lead_record.status == 'converted'")).toHaveLength(0);
+      });
+    });
+
     it('leaves a correct single-brace loop collection alone', () => {
       // `loop.collection` is the single-brace `{var}` flow-interpolation dialect,
       // where braces are CORRECT. It is recorded in the ledger as `flow-template`
@@ -2850,6 +2913,12 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // keys; the metadata keys it judges are `AssignmentValueSchema`'s, read
       // by the schema and not by name here.
       'shape',
+      // [#15572] The spec's shared refusal for a non-string in a predicate
+      // slot. Its keys are that helper's own `{ message, source }` — never
+      // metadata keys — and it is named to stay clear of the `message` /
+      // `source` receivers for the reason the entry above it records: a local
+      // called `message` here would be excused into masking a genuine read.
+      'shapeRefusal',
       // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
       // import specifier, which this scan cannot tell from `scope.j…`. The two
       // entries above it in this set (`fields`, `guards`) are the same artefact
