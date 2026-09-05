@@ -386,3 +386,37 @@ describe('EnhancedApiErrorSchema.fieldErrors retirement (ADR-0114 D4)', () => {
     expect(parsed.fields).toHaveLength(1);
   });
 });
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('EnhancedApiError.retryAfter \u2192 retryAfterSeconds (#15677 \u2014 BREAKING on the ADR-0112 wire envelope)', () => {
+  const base = { code: 'RATE_LIMIT_EXCEEDED' as const, message: 'Rate limit exceeded' };
+
+  it('REFUSES the retired `retryAfter` spelling with the rename in the message', () => {
+    const result = EnhancedApiErrorSchema.safeParse({ ...base, retryAfter: 60 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'retryAfter');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`EnhancedApiError\.retryAfter` was renamed to `retryAfterSeconds`/,
+    );
+  });
+
+  it('says in the prescription that the HTTP `Retry-After` header is a separate, unchanged surface', () => {
+    const result = EnhancedApiErrorSchema.safeParse({ ...base, retryAfter: 60 });
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'retryAfter');
+    // The next reader must not "fix" the RFC 9110 header to match the envelope.
+    expect(issue!.message).toMatch(/HTTP `Retry-After` response header \u2014 that header keeps its RFC 9110 name/);
+  });
+
+  it('accepts `retryAfterSeconds` at the same magnitude the retired key carried', () => {
+    const parsed = EnhancedApiErrorSchema.parse({ ...base, retryAfterSeconds: 60 });
+    expect(parsed.retryAfterSeconds).toBe(60);
+    expect(parsed).not.toHaveProperty('retryAfter');
+  });
+});

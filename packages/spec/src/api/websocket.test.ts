@@ -22,6 +22,7 @@ import {
   PongMessageSchema,
   WebSocketMessageSchema,
   WebSocketConfigSchema,
+  WebSocketServerConfigSchema,
   type EventSubscription,
   type PresenceState,
   type CursorPosition,
@@ -699,5 +700,64 @@ describe('WebSocketConfigSchema', () => {
       url: 'wss://example.com/ws',
       pingIntervalMs: 0,
     })).toThrow();
+  });
+});
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('WebSocket durations carry their unit (#15677)', () => {
+  const url = 'wss://example.com/ws';
+
+  it.each([
+    ['reconnectInterval', 'reconnectIntervalMs', 2000],
+    ['pingInterval', 'pingIntervalMs', 60000],
+    ['timeout', 'timeoutMs', 10000],
+  ])('REFUSES the retired `%s` with the rename to `%s` in the message', (old, next, value) => {
+    const result = WebSocketConfigSchema.safeParse({ url, [old]: value });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === old);
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(`\`WebSocketConfig.${old}\` was renamed to \`${next}\``);
+  });
+
+  it('accepts the three suffixed client keys at the same magnitudes', () => {
+    const parsed = WebSocketConfigSchema.parse({
+      url, reconnectIntervalMs: 2000, pingIntervalMs: 60000, timeoutMs: 10000,
+    });
+    expect(parsed.reconnectIntervalMs).toBe(2000);
+    expect(parsed.pingIntervalMs).toBe(60000);
+    expect(parsed.timeoutMs).toBe(10000);
+    expect(parsed).not.toHaveProperty('reconnectInterval');
+  });
+
+  it('keeps the positive-integer bound on the renamed keys', () => {
+    expect(WebSocketConfigSchema.safeParse({ url, reconnectIntervalMs: -1000 }).success).toBe(false);
+    expect(WebSocketConfigSchema.safeParse({ url, pingIntervalMs: 0 }).success).toBe(false);
+  });
+
+  it('REFUSES `WebSocketServerConfig.heartbeatInterval` with the rename in the message', () => {
+    const result = WebSocketServerConfigSchema.safeParse({ heartbeatInterval: 30000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'heartbeatInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`WebSocketServerConfig\.heartbeatInterval` was renamed to `heartbeatIntervalMs`/,
+    );
+  });
+
+  it('accepts `heartbeatIntervalMs` and keeps the 30000 default; the COUNT neighbour is untouched', () => {
+    const parsed = WebSocketServerConfigSchema.parse({ heartbeatIntervalMs: 15000 });
+    expect(parsed.heartbeatIntervalMs).toBe(15000);
+    expect(parsed).not.toHaveProperty('heartbeatInterval');
+    const defaults = WebSocketServerConfigSchema.parse({});
+    expect(defaults.heartbeatIntervalMs).toBe(30000);
+    // `reconnectAttempts` is a COUNT, not a duration — it keeps its bare name.
+    expect(defaults.reconnectAttempts).toBe(5);
   });
 });

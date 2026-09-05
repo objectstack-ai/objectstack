@@ -684,3 +684,78 @@ describe('plugin-rest-api.zod', () => {
     });
   });
 });
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('RestApiEndpoint / RestApiPluginConfig durations carry their unit (#15677)', () => {
+  const endpoint = {
+    method: 'GET' as const, path: '/api/v1/discovery',
+    handler: 'getDiscovery', category: 'discovery' as const,
+  };
+
+  it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
+    const result = RestApiEndpointSchema.safeParse({ ...endpoint, timeout: 30000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`RestApiEndpoint\.timeout` was renamed to `timeoutMs`/);
+  });
+
+  it('REFUSES the retired `cacheTtl` spelling with the rename in the message', () => {
+    const result = RestApiEndpointSchema.safeParse({ ...endpoint, cacheTtl: 3600 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'cacheTtl');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`RestApiEndpoint\.cacheTtl` was renamed to `cacheTtlSeconds`/);
+  });
+
+  it('names the OTHER unit in each prescription — the pair is why this rename exists', () => {
+    const t = RestApiEndpointSchema.safeParse({ ...endpoint, timeout: 1 })
+      .error!.issues.find((i) => i.path.join('.') === 'timeout')!;
+    const c = RestApiEndpointSchema.safeParse({ ...endpoint, cacheTtl: 1 })
+      .error!.issues.find((i) => i.path.join('.') === 'cacheTtl')!;
+    expect(t.message).toMatch(/cache TTL two lines below is in SECONDS/);
+    expect(c.message).toMatch(/request timeout two lines above is in MILLISECONDS/);
+  });
+
+  it('accepts the suffixed endpoint keys at the same magnitudes', () => {
+    const parsed = RestApiEndpointSchema.parse({ ...endpoint, timeoutMs: 30000, cacheTtlSeconds: 3600 });
+    expect(parsed.timeoutMs).toBe(30000);
+    expect(parsed.cacheTtlSeconds).toBe(3600);
+    expect(parsed).not.toHaveProperty('timeout');
+    expect(parsed).not.toHaveProperty('cacheTtl');
+  });
+
+  it('REFUSES `performance.defaultCacheTtl` — a tombstone inside a LIVE block', () => {
+    const result = RestApiPluginConfigSchema.safeParse({
+      routes: [],
+      performance: { enableCompression: true, defaultCacheTtl: 600 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'performance.defaultCacheTtl',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`RestApiPluginConfig\.performance\.defaultCacheTtl` was renamed to `defaultCacheTtlSeconds`/,
+    );
+  });
+
+  it('parses the live siblings of that tombstone, and keeps the 300 default', () => {
+    const config = RestApiPluginConfigSchema.parse({
+      routes: [],
+      performance: { enableCompression: false, defaultCacheTtlSeconds: 600 },
+    });
+    expect(config.performance?.enableCompression).toBe(false);
+    expect(config.performance?.defaultCacheTtlSeconds).toBe(600);
+    expect(RestApiPluginConfigSchema.parse({ routes: [], performance: {} })
+      .performance?.defaultCacheTtlSeconds).toBe(300);
+  });
+});

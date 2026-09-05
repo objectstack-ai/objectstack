@@ -107,7 +107,10 @@ export const ApiEndpointSchema = strictObject({
   aliases: {
     // Policy block — the highest-consequence misses on this surface.
     auth: 'authRequired', authentication: 'authRequired', requiresAuth: 'authRequired',
-    cacheTTL: 'cacheTtl', ttl: 'cacheTtl', cache: 'cacheTtl',
+    // Retargeted onto `cacheTtlSeconds` by #15677: an alias must point at a key
+    // the schema really accepts, and `cacheTtl` is now a tombstone that accepts
+    // nothing (`check:alias-integrity` / alias-integrity.test.ts enforce this).
+    cacheTTL: 'cacheTtlSeconds', ttl: 'cacheTtlSeconds', cache: 'cacheTtlSeconds',
     rateLimiting: 'rateLimit', throttle: 'rateLimit',
     // Identity / routing.
     id: 'name', url: 'path', route: 'path', endpoint: 'path', uri: 'path',

@@ -433,10 +433,13 @@ Event pattern (supports wildcards like "record.*" or "*.created")
 | **url** | `string` | ✅ | WebSocket server URL |
 | **protocols** | `string[]` | optional | WebSocket sub-protocols |
 | **reconnect** | `boolean` | optional (default: `true`) | Enable automatic reconnection |
-| **reconnectInterval** | `integer` | optional (default: `1000`) | Reconnection interval in milliseconds |
+| **reconnectIntervalMs** | `integer` | optional (default: `1000`) | Reconnection interval in milliseconds |
 | **maxReconnectAttempts** | `integer` | optional (default: `5`) | Maximum reconnection attempts |
-| **pingInterval** | `integer` | optional (default: `30000`) | Ping interval in milliseconds |
-| **timeout** | `integer` | optional (default: `5000`) | Message timeout in milliseconds |
+| **pingIntervalMs** | `integer` | optional (default: `30000`) | Ping interval in milliseconds |
+| **timeoutMs** | `integer` | optional (default: `5000`) | Message timeout in milliseconds |
+| **reconnectInterval** | `never` | optional | [REMOVED] `WebSocketConfig.reconnectInterval` was renamed to `reconnectIntervalMs` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `reconnectIntervalMs`; the value (milliseconds) is unchanged. |
+| **pingInterval** | `never` | optional | [REMOVED] `WebSocketConfig.pingInterval` was renamed to `pingIntervalMs` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `pingIntervalMs`; the value (milliseconds) is unchanged. |
+| **timeout** | `never` | optional | [REMOVED] `WebSocketConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 | **headers** | `Record<string, string>` | optional | Custom headers for WebSocket handshake |
 
 
@@ -719,10 +722,11 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable WebSocket server |
 | **path** | `string` | optional (default: `"/ws"`) | WebSocket endpoint path |
-| **heartbeatInterval** | `number` | optional (default: `30000`) | Heartbeat interval in milliseconds |
+| **heartbeatIntervalMs** | `number` | optional (default: `30000`) | Heartbeat interval in milliseconds |
 | **reconnectAttempts** | `number` | optional (default: `5`) | Maximum reconnection attempts for clients |
 | **presence** | `boolean` | optional (default: `false`) | Enable presence tracking |
 | **cursorSharing** | `boolean` | optional (default: `false`) | Enable collaborative cursor sharing |
+| **heartbeatInterval** | `never` | optional | [REMOVED] `WebSocketServerConfig.heartbeatInterval` was renamed to `heartbeatIntervalMs` in @objectstack/spec 17 (#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `heartbeatIntervalMs`; the value (milliseconds) is unchanged. |
 
 
 ---
