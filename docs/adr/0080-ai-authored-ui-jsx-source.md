@@ -35,7 +35,7 @@ The SDUI runtime is **not** the thing that needs to change:
 | Recursive tree interpreter (`type` → component, children recurse) | `@object-ui/react` `SchemaRenderer` → `ComponentRegistry.get()` → `React.createElement` |
 | Recursive node schema (`{ type, props, children }`, `className`/`style`, `visibleOn`) | `@object-ui/types` `BaseSchema` / discriminated `LayoutSchema` (`objectui:packages/types/src/layout.ts`, literal `type` discriminants) |
 | Per-component prop declaration | `ComponentInput[]` on `register()` (`objectui:packages/core/src/registry/Registry.ts`) |
-| Conflict-free styling channels | typed primitive props → safelisted class map (`ResponsiveGrid.tsx`), and **scoped per-node CSS** (ADR-0065, `packages/core/src/styling/scoped-styles.ts`) |
+| Conflict-free styling channels | typed primitive props → safelisted class map (`ResponsiveGrid.tsx`), and **scoped per-node CSS** (ADR-0065, `objectui:packages/core/src/styling/scoped-styles.ts`) |
 | Enumerable catalog across ~40 plugins | `ComponentRegistry.getAllConfigs()` / `getAllTypes()` |
 | An HTML escape hatch (today unsafe) | `renderers/basic/html.tsx` — raw `dangerouslySetInnerHTML`, no sanitize |
 

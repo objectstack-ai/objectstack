@@ -139,6 +139,8 @@ HotCRM has a placeholder `live_data` skill that grounds Copilot answers in the l
 1. Add `'flow_author'` to `sales_copilot.skills[]`.
 2. Drop the explicit cut we made when removing the in-CRM `flow_designer` draft (commit retained in branch `feat/wow-2-flow-designer-draft`).
 3. Update `content/docs/ai-copilot/live-schema.mdx` with a Wow #2 sibling page.
+   *(Path note, 2026-09: this is a HotCRM path, not a path in this repository — no file has ever
+   existed at `content/docs/ai-copilot/` here. It is kept as the record of the planned edit.)*
 
 No CRM data model changes.
 
@@ -154,3 +156,5 @@ Pending platform review. HotCRM v1 launch (W9) will ship without Wow #2 unless t
 * ADR-0003 — package-as-first-class-citizen (target for `register_flow`).
 * ADR-0008 — metadata repository + change log (provides idempotency + audit).
 * HotCRM `content/docs/ai-copilot/live-schema.mdx` — Wow #1 marketing copy that sets up Wow #2.
+  *(Path note, 2026-09: a HotCRM path, not a path in this repository — no file has ever existed at
+  `content/docs/ai-copilot/` here.)*
