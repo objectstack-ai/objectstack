@@ -23,8 +23,7 @@
     "dev": "tsc -w",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
-    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/verify --project tsconfig.test.json",
-    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/verify --project tsconfig.test.json"
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/verify --project tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",

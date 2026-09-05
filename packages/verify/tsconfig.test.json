@@ -43,7 +43,18 @@
 // 10 files ever gains is red on arrival. 14 of the 30 sibling configs are in
 // that same state. This layer also holds ZERO `@ts-expect-error` directives
 // (grepped with a positive control -- the same grep hits `packages/spec/src`),
-// so no pin was silently dead here; what the gap cost was the other half. The `@objectstack/verify` TEST_DEBT entry in
+// so no pin was silently dead here; what the gap cost was the other half.
+//
+// ⛔ AND THEREFORE NO `gen:test-typecheck-debt` SCRIPT EITHER. That pairing is
+// 1:1 across all 30 sibling configs -- 16 with a ledger declare the generator,
+// 14 without one declare nothing -- and it is enforced rather than stylistic:
+// `check:merge-driver` requires every manifest generator to carry a merge
+// disposition in `scripts/regen-artifacts.mjs`, and #14062's note on that file
+// refuses to invent one for a ledger that does not exist. Measured here: adding
+// the script alone reds that gate ("generator(s) with NO recorded merge
+// disposition: gen:test-typecheck-debt [@objectstack/verify]"). If this layer
+// ever measures non-zero, the ledger, the generator and its regen-artifacts row
+// arrive together, in that one PR. The `@objectstack/verify` TEST_DEBT entry in
 // `scripts/check-type-check-coverage.mjs` graduates in this same PR: it recorded
 // TS2835 x3 for three extension-less `./harness` imports, and with those three
 // given their `.js` the gate re-measured the entry at 0 ("TEST_DEBT records 3,
