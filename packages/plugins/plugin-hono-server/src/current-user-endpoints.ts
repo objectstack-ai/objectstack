@@ -560,7 +560,9 @@ export function annotateEffectiveApiOperations(
  * normalization, the platform-admin derivation and the `ai_seat` synthesis
  * arrive with it instead of being re-implemented — one copy fewer to drift.
  */
-export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
+export function makeExecutionContextResolver(
+    ctx: CurrentUserEndpointsContext,
+): (c: any) => Promise<ExecutionContext | undefined> {
     /**
      * The data engine, or `undefined` when the slot is unclaimed. GUARDED: the
      * locator's contract permits `getService` to THROW for an absent slot (the
