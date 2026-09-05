@@ -71,7 +71,8 @@ Turso / libSQL Connection Configuration
 | **concurrency** | `integer` | optional | Maximum concurrent requests to the remote database |
 | **syncUrl** | `string` | optional | Remote sync URL for embedded-replica mode: a libsql or https Turso endpoint |
 | **sync** | `{ intervalSeconds?: integer; onConnect?: boolean }` | optional | Embedded-replica sync configuration (requires `syncUrl`) |
-| **timeout** | `integer` | optional | Operation timeout in milliseconds for remote operations |
+| **timeoutMs** | `integer` | optional | Operation timeout in milliseconds for remote operations |
+| **timeout** | `never` | optional | [REMOVED] `turso config.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **mode** | `Enum<'local' \| 'replica' \| 'remote'>` | optional | Force a transport mode instead of inferring it from `url` |
 
 ### Nested Shape: `TursoConfig.sync`

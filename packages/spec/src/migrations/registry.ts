@@ -5347,7 +5347,20 @@ const step18: MigrationStep = {
     'milliseconds fourteen lines apart under one name), `DriverOptions.timeout`, and the ' +
     'tenant `connectionPool.idleTimeout` / `accessControl.sessionTimeout` whose unit the ' +
     'reference pages never published (#14519) — are retiredKey tombstones with a ' +
-    'semantic entry each, naming the suffixed key.',
+    'semantic entry each, naming the suffixed key. The `data`, `ui`, `ai` and ' +
+    '`integration` remainder closes the same sweep: `dashboard.refreshInterval` → ' +
+    '`refreshIntervalSeconds`, the connector pair `health.circuitBreaker.monitoringWindow` ' +
+    '→ `monitoringWindowMs` and `triggers[].interval` → `intervalSeconds`, and the two ' +
+    'datasource config keys `memory config.persistence.autoSaveInterval` → ' +
+    '`autoSaveIntervalMs` (BOTH union arms — the `auto` arm forwards the same value to the ' +
+    'same file adapter, so splitting them would have left one value with two spellings) ' +
+    'and `turso config.timeout` → `timeoutMs` all convert, because a dashboard, a ' +
+    'connector and a datasource are stack collection members stored as rows; the two with ' +
+    'no seam — `ConversationAnalytics.duration`, computed at runtime and never authored, ' +
+    'and `NoSQLQueryOptions.timeout`, a per-call driver argument — are retiredKey ' +
+    'tombstones with a semantic entry each. That remainder is what takes ' +
+    '`check:duration-unit-keys` to zero offenders over `packages/spec/src/**`; the gate ' +
+    'goes red again by design when its declared population widens beyond that subtree.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5368,6 +5381,10 @@ const step18: MigrationStep = {
     'hook-timeout-to-timeout-ms',
     'job-timeout-to-timeout-ms',
     'api-endpoint-cache-ttl-to-cache-ttl-seconds',
+    'dashboard-refresh-interval-to-refresh-interval-seconds',
+    'connector-health-and-trigger-durations-unit-in-key',
+    'memory-persistence-auto-save-interval-to-ms',
+    'turso-config-timeout-to-timeout-ms',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5526,6 +5543,38 @@ const step18: MigrationStep = {
         + '`HotReloadManager` stay exported from `@objectstack/core` with their '
         + 'tests green. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing '
         + 'ever read the container, so removing it removes no behaviour.',
+    },
+    {
+      id: 'ai-conversation-analytics-duration-unit-in-key',
+      surface: 'ConversationAnalytics.duration, the emitted session length whose name carried no '
+        + 'unit (ai/conversation.zod.ts)',
+      replacement: 'durationSeconds — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because it is the only offender in ai/ and the only one on its file. '
+        + 'What makes the bare name worth a registry row rather than a quiet edit is the company '
+        + 'it kept: every other number on ConversationAnalytics is a COUNT — totalMessages, '
+        + 'totalTokens, peakTokenUsage, pruningEvents, tokensSavedByPruning — so the one field '
+        + 'that carried a unit was the one field that did not say so, sitting in a block of '
+        + 'twelve unitless integers. The two instants beside it, firstMessageAt and lastMessageAt, '
+        + 'already spelled themselves; the measurement between them did not. Tombstoned with '
+        + 'retiredKey(); the shape is not strict, so a bare deletion would strip in silence and '
+        + 'an emitter writing the old spelling would lose the value with no error anywhere. '
+        + 'Why a semantic entry and not a D2 conversion: conversation analytics are computed at '
+        + 'runtime and handed to a consumer, never authored by hand and never stored as a '
+        + 'sys_metadata row, so the conversion chain has no seam that would ever see one — the '
+        + 'same disposition every runtime-emitted measurement in this stack has taken. '
+        + '#15680, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every producer that BUILDS a ConversationAnalytics spells durationSeconds, and every '
+        + 'consumer that reads a session length reads durationSeconds. Authoring duration fails '
+        + 'to compile (input type `never`) and fails to parse with the rename prescription rather '
+        + 'than a bare unrecognized-key error. Behaviour is unchanged: durationSeconds: 1800 is '
+        + 'the same half hour duration: 1800 was, the key stays optional, and the non-negative '
+        + 'bound rides along with the renamed key so a negative session length is still refused. '
+        + 'The migration is proved correct when no source in the tree spells a bare duration on '
+        + 'this shape AND the twelve sibling counts are untouched — a sweep that suffixed any of '
+        + 'them has read a count as a duration and over-applied the rule.',
     },
     {
       id: 'analytics-authorable-unknown-keys-refused',
@@ -6100,6 +6149,33 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+    },
+    {
+      id: 'data-nosql-query-options-timeout-unit-in-key',
+      surface: 'NoSQLQueryOptions.timeout, the per-query driver deadline whose name carried no '
+        + 'unit (data/driver-nosql.zod.ts)',
+      replacement: 'timeoutMs — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because it is the only offender on its file. The neighbour is what '
+        + 'makes it a real hazard rather than a naming preference: batchSize sits directly beside '
+        + 'it, a plain row COUNT with the same z.number().int().positive() shape and the same '
+        + 'order of magnitude, so two adjacent bare integers meant milliseconds and documents '
+        + 'respectively with nothing at the call site to separate them. Tombstoned with '
+        + 'retiredKey(); the shape is not strict, so a bare deletion would strip in silence and '
+        + 'the query would run with no deadline at all while its author believed one was set — '
+        + 'the failure a driver timeout exists to prevent. Why a semantic entry and not a D2 '
+        + 'conversion: these options are a per-call driver argument, reached only through '
+        + 'AggregationPipeline.options, which no stack.zod.ts collection declares and no '
+        + 'sys_metadata row stores, so the chain has no seam. #15680, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every caller that passes NoSQL query options spells timeoutMs. Authoring timeout fails '
+        + 'to compile (input type `never`) and fails to parse with the rename prescription. '
+        + 'Behaviour is unchanged: timeoutMs: 5000 is the same five seconds timeout: 5000 was, and '
+        + 'the positive-integer bound rides along with the renamed key so a zero or negative '
+        + 'deadline is still refused. Two neighbours on this same shape deliberately do NOT move, '
+        + 'and a sweep that renamed either has over-applied the rule: batchSize is a COUNT of '
+        + 'documents, not a duration, and consistency / projection / hint are not numbers at all.',
     },
     {
       id: 'datasource-config-mongo-options-credential-refused',
@@ -9653,6 +9729,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #15680 (stack card 5/6 of #14478) — maintainer ruling 2026-09-02 ("ruled B"):
+    // a duration-shaped `z.number()` key carries its unit in its NAME, and no
+    // existing offender is grandfathered. `ConversationAnalytics.duration` said
+    // "Session duration in seconds" in prose and nothing else, on a shape where
+    // every OTHER number is a count (messages, tokens, pruning events) and the two
+    // neighbouring instants already spell themselves `firstMessageAt` /
+    // `lastMessageAt`. Renamed to `durationSeconds`; the value is unchanged.
+    // Tombstoned with `retiredKey()` — the shape is not `.strict()`, so a bare
+    // deletion would strip the key in silence and the analytics row would lose the
+    // one measurement it carries, with no error anywhere. No D2 conversion:
+    // conversation analytics are computed and emitted at runtime, never authored
+    // and never a stored `sys_metadata` row, so the chain has no seam that sees
+    // one. See `ai-conversation-analytics-duration-unit-in-key`.
+    'ai/ConversationAnalytics:duration',
     // #15677 (stack card 2/6 of #14478) — maintainer ruling 2026-09-02 ("ruled B"):
     // a duration-shaped `z.number()` key carries its unit in its NAME, and no
     // existing offender is grandfathered. `ApiEndpoint.cacheTtl` said "Response
@@ -10085,6 +10175,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // construction configuration, never a stored row; the semantic entry
     // `websocket-durations-unit-in-key` carries the prescription.
     'api/WebSocketServerConfig:heartbeatInterval',
+    // #15680 (stack card 5/6 of #14478) — ruling B, and the one key in this card
+    // that the gate did NOT list. It is here because it is not a second key: the
+    // `auto` persistence arm resolves to the same Node.js file adapter as the
+    // `file` arm, and this value is forwarded to the same
+    // `FileSystemPersistenceAdapter` field, in the same milliseconds, under the
+    // same `min(100)` bound. Its describe named no unit at all, which is why the
+    // predicate skipped it — and precisely why renaming only the `file` arm would
+    // have left ONE value with TWO spellings across sibling arms of one union, with
+    // the driver reading both. That is the consumer-side dialect Prime Directive
+    // #12 forbids, so the two arms move together. Renamed to `autoSaveIntervalMs`
+    // and its describe now names the unit too. Tombstoned with `retiredKey()`;
+    // covered by `memory-persistence-auto-save-interval-to-ms`, which converts both
+    // arms in one pass.
+    'data/AutoPersistenceConfig:autoSaveInterval',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
@@ -10097,6 +10201,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `driver-options-timeout-to-timeout-ms` carries the prescription. Registered
     // under 18 for the launch-window reason its neighbours state.
     'data/DriverOptions:timeout',
+    // #15680 (stack card 5/6 of #14478) — ruling B.
+    // `FilePersistenceConfig.autoSaveInterval` said "Auto-save interval in ms" in
+    // prose and nothing else. Its `min(100)` bound is what made the bare name
+    // dangerous rather than merely untidy: 100 reads as a plausible number of
+    // SECONDS, so an author who guessed the unit wrong cleared the bound, was
+    // refused nowhere, and saved a thousand times more often than intended.
+    // Renamed to `autoSaveIntervalMs`; the value and the 2000 default are
+    // unchanged. Tombstoned with `retiredKey()` — this shape IS `strictObject`, so
+    // a bare deletion is not silent, but an unknown-key rejection cannot carry the
+    // FROM → TO mapping, which is the whole payload of a rename. Covered by the D2
+    // conversion `memory-persistence-auto-save-interval-to-ms`: a memory datasource
+    // is a `datasources[]` stack collection member whose `config` is stored whole in
+    // `sys_metadata`, so the chain has a seam that sees it.
+    'data/FilePersistenceConfig:autoSaveInterval',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -10124,6 +10242,46 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `NoSQLQueryOptions.timeout`
+    // said "Query timeout (ms)" in prose and nothing else, directly beside
+    // `batchSize`, a plain row COUNT: two bare numbers side by side, one carrying a
+    // unit and one not, with nothing at the call site to tell them apart. Renamed
+    // to `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()`; the
+    // shape is not `.strict()`, so a bare deletion would strip in silence and the
+    // query would run without the limit its author set. No D2 conversion: query
+    // options are a per-call driver argument reached only through
+    // `AggregationPipeline.options`, which no `stack.zod.ts` collection declares
+    // and no `sys_metadata` row stores. See `data-nosql-query-options-timeout-unit-in-key`.
+    'data/NoSQLQueryOptions:timeout',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `TursoConfig.timeout` said
+    // "Operation timeout in milliseconds" in prose and carried a `.meta({ title:
+    // 'Timeout (ms)' })` no parse reads — and sat two keys below
+    // `sync.intervalSeconds`, which already spelled ITS unit. One shape carrying
+    // both conventions, and the suffixed one was the honest half. Renamed to
+    // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()`; the
+    // shape IS `strictObject`, so the tombstone is here for the prescription an
+    // unknown-key rejection cannot carry. Covered by the D2 conversion
+    // `turso-config-timeout-to-timeout-ms`: a turso datasource is a `datasources[]`
+    // stack collection member whose `config` is stored whole in `sys_metadata`.
+    // ⚠️ This is the SPEC's turso contract (`packages/spec/src/data/driver/turso.zod.ts`).
+    // The driver package ships its own parallel `turso.zod.ts` whose `timeout` is
+    // outside this card's declared population and is renamed by the card that
+    // widens that population.
+    'data/TursoConfig:timeout',
+    // #15680 (stack card 5/6 of #14478) — ruling B.
+    // `CircuitBreakerConfig.monitoringWindow` said "Rolling window for failure
+    // count in ms" in prose and nothing else — ONE key below `resetTimeoutMs`,
+    // which already spelled its unit, on the same six-key shape. That is the
+    // sharpest case in this card: a single schema already carried both
+    // conventions, so a reader had no rule to apply, only two examples that
+    // disagreed. Renamed to `monitoringWindowMs`; the value and the 60000 default
+    // are unchanged. Tombstoned with `retiredKey()` — the shape is not `.strict()`,
+    // so a bare deletion would strip in silence and the breaker would fall back to
+    // its default window while the author believed they had widened it. Covered by
+    // the D2 conversion `connector-health-and-trigger-durations-unit-in-key`:
+    // `connectors:` is a stack collection and a published connector row lands whole
+    // in `sys_metadata`, so the chain has a seam that sees it.
+    'integration/CircuitBreakerConfig:monitoringWindow',
     // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
     // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
     // split condition — a downstream consumer in objectui or a customer stack —
@@ -10151,6 +10309,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #12497 / #13823 grading).
     'integration/Connector:errorMapping',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `ConnectorTrigger.interval`
+    // said "Polling interval in seconds" in prose and nothing else. A polling
+    // cadence is exactly the number a reader guesses at, and the bare name `interval`
+    // means MILLISECONDS elsewhere in this same spec — the identical spelling
+    // carrying two units a thousandfold apart is the collision that got this whole
+    // population ruled rather than merely noted. Renamed to `intervalSeconds`; the
+    // value is unchanged. Tombstoned with `retiredKey()`; the shape is not
+    // `.strict()`, so a bare deletion would strip in silence. Covered by the D2
+    // conversion `connector-health-and-trigger-durations-unit-in-key`.
+    // ⚠️ The trigger shape itself is declared-but-unread (no polling loop is driven
+    // by it). The rename does not change that; it makes the declaration honest
+    // about its unit for whoever implements the loop.
+    'integration/ConnectorTrigger:interval',
     // #14676 — the same tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
     // `errorMapping` tombstone on the base is inherited by the shape that
@@ -11453,6 +11624,25 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // parse) and the D3 semantic entry named below.
     // D3 semantic entry: `training-deadline-keys-retired`.
     'system/TrainingPlan:reminderDaysBefore',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `dashboard.refreshInterval`
+    // said "Auto-refresh interval in seconds" in prose and nothing else. The three
+    // rename-hint aliases beside it — `refresh`, `autoRefresh`, `pollInterval` —
+    // measure how many spellings authors actually reach for, and not one of them
+    // named a unit either, so every door into this key left the cadence ambiguous.
+    // All three were repointed to the new spelling in the same edit. Renamed to
+    // `refreshIntervalSeconds`; the value is unchanged. Tombstoned with
+    // `retiredKey()`; the shape IS `strictObject`, so the tombstone is here for the
+    // prescription an unknown-key rejection cannot carry. Covered by the D2
+    // conversion `dashboard-refresh-interval-to-refresh-interval-seconds`:
+    // `dashboards:` is a stack collection and a dashboard is a registered metadata
+    // kind stored as a row.
+    // ⚠️ Unique in this stack: the consumer is in ANOTHER REPOSITORY. objectui's
+    // dashboard renderer reads this key and multiplies by 1000, and publishes it as
+    // a registry input, so its reader could not move in this PR the way every other
+    // reader in this card did. Sequenced as a follow-up card behind a release that
+    // actually ships the rename; until then the renderer sees an absent key and
+    // does not start its timer.
+    'ui/Dashboard:refreshInterval',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"

@@ -148,7 +148,8 @@ Circuit breaker configuration
 | **failureThreshold** | `number` | optional (default: `5`) | Failures before opening circuit |
 | **resetTimeoutMs** | `number` | optional (default: `30000`) | Time in open state before half-open |
 | **halfOpenMaxRequests** | `number` | optional (default: `1`) | Requests allowed in half-open state |
-| **monitoringWindow** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
+| **monitoringWindowMs** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
+| **monitoringWindow** | `never` | optional | [REMOVED] `CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `monitoringWindowMs`; the value (milliseconds) and the 60000 default are unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **fallbackStrategy** | `Enum<'cache' \| 'default_value' \| 'error' \| 'queue'>` | optional | Fallback strategy when circuit is open |
 
 
@@ -272,7 +273,8 @@ Circuit breaker configuration
 | **label** | `string` | ✅ | Trigger label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'polling' \| 'webhook'>` | ✅ | Trigger type |
-| **interval** | `number` | optional | Polling interval in seconds |
+| **intervalSeconds** | `number` | optional | Polling interval in seconds |
+| **interval** | `never` | optional | [REMOVED] `ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Nested Shape: `Connector.syncConfig`
 
@@ -440,7 +442,8 @@ Connector health configuration
 | **failureThreshold** | `number` | optional (default: `5`) | Failures before opening circuit |
 | **resetTimeoutMs** | `number` | optional (default: `30000`) | Time in open state before half-open |
 | **halfOpenMaxRequests** | `number` | optional (default: `1`) | Requests allowed in half-open state |
-| **monitoringWindow** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
+| **monitoringWindowMs** | `number` | optional (default: `60000`) | Rolling window for failure count in ms |
+| **monitoringWindow** | `never` | optional | [REMOVED] `CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `monitoringWindowMs`; the value (milliseconds) and the 60000 default are unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **fallbackStrategy** | `Enum<'cache' \| 'default_value' \| 'error' \| 'queue'>` | optional | Fallback strategy when circuit is open |
 
 
@@ -597,7 +600,8 @@ Connector status
 | **label** | `string` | ✅ | Trigger label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'polling' \| 'webhook'>` | ✅ | Trigger type |
-| **interval** | `number` | optional | Polling interval in seconds |
+| **intervalSeconds** | `number` | optional | Polling interval in seconds |
+| **interval** | `never` | optional | [REMOVED] `ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 
 ---
@@ -755,7 +759,8 @@ Connector type
 | **label** | `string` | ✅ | Trigger label |
 | **description** | `string` | optional |  |
 | **type** | `Enum<'polling' \| 'webhook'>` | ✅ | Trigger type |
-| **interval** | `number` | optional | Polling interval in seconds |
+| **intervalSeconds** | `number` | optional | Polling interval in seconds |
+| **interval** | `never` | optional | [REMOVED] `ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 ### Nested Shape: `DeclarativeConnectorEntry.syncConfig`
 

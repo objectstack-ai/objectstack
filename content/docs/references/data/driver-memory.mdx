@@ -44,7 +44,8 @@ Auto-detect persistence configuration
 | :--- | :--- | :--- | :--- |
 | **type** | `'auto'` | ✅ |  |
 | **path** | `string` | optional | File path override for Node.js environments |
-| **autoSaveInterval** | `number` | optional | Auto-save interval override for Node.js environments |
+| **autoSaveIntervalMs** | `number` | optional | Auto-save interval override for Node.js environments, in milliseconds |
+| **autoSaveInterval** | `never` | optional | [REMOVED] `AutoPersistenceConfig.autoSaveInterval` was renamed to `autoSaveIntervalMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `autoSaveIntervalMs`; the value (milliseconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **key** | `string` | optional | localStorage key override for browser environments |
 
 
@@ -60,7 +61,8 @@ File-system persistence configuration
 | :--- | :--- | :--- | :--- |
 | **type** | `'file'` | ✅ |  |
 | **path** | `string` | optional | File path to persist data |
-| **autoSaveInterval** | `number` | optional (default: `2000`) | Auto-save interval in ms |
+| **autoSaveIntervalMs** | `number` | optional (default: `2000`) | Auto-save interval in ms |
+| **autoSaveInterval** | `never` | optional | [REMOVED] `FilePersistenceConfig.autoSaveInterval` was renamed to `autoSaveIntervalMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `autoSaveIntervalMs`; the value (milliseconds) and the 2000 default are unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 
 
 ---

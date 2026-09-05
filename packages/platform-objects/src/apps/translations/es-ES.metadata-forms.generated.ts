@@ -942,7 +942,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Separación",
         helpText: "Separación de cuadrícula (unidades Tailwind)"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "Intervalo de actualización",
         helpText: "Actualización automática (segundos)"
       },
