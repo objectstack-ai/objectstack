@@ -1029,6 +1029,26 @@ function staleLines(stale) {
  * PR #15458 grew the gate's map from 18 names to 20 and this file went stale in
  * four places the same afternoon (#15459, #15473), under a green farm the whole
  * time, which is the cost of an uncross-checked copy stated as a measurement.
+ *
+ * ## The WORKLIST READINGS (#15503) are in both modes, for the same reason
+ *
+ * `WORKLIST_READING_CONTROLS` pins what the tier-1 worklist PRINTS, and the
+ * `--self-test` exercises those readings against a DECLARED population rather
+ * than against this tree: neither `(none …)` line has ever been printed by a run
+ * of this instrument, and an unreachable reading is a reading nobody proofreads.
+ * That does not weaken its claim to `gated`, it is the claim. The family passes
+ * the test the two sections above apply, and its own declaration states the
+ * answer in those words: can a successful repair destroy it? "No — the empty
+ * worklist it pins is the state the repair programme is trying to reach", so the
+ * day this family matters most is the day the programme succeeds. The self-test
+ * body says the mechanical half: it "compares a producer against a declared
+ * population and never touches membership", so no repair can destroy it.
+ *
+ * ⛔ That is the pattern and not a courtesy: A FAMILY THAT JOINS `gated` OWES A
+ * SECTION HERE, arguing on those terms why a successful repair cannot destroy
+ * it. This block is where the self-test body sends a reader asking that
+ * question, and a pointer landing on a block that names every family but the one
+ * asked about is how the next author learns the obligation is optional.
  */
 const SELF_TEST_MODES = new Set(['all', 'gated']);
 
@@ -1316,7 +1336,7 @@ function isAwaited(node) {
  *
  * Only `foo(...)` and `this.foo(...)` may resolve to a same-file body. Measured
  * cost of the looser rule, which resolved any dotted path by its LAST segment:
- * `packages/services/service-job/src/db-job-adapter.ts:139` calls
+ * `packages/services/service-job/src/db-job-adapter.ts#cancel` calls
  * `this.cron.cancel(name)` — the CronJobAdapter's method — and the loose rule
  * walked into the file's OWN `cancel()` method, reached `setActive()`'s
  * `engine.update(...)` two frames down, and reported a cron-registry cleanup as
