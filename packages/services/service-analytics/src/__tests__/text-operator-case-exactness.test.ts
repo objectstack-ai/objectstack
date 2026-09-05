@@ -72,14 +72,34 @@
  * which it no longer is.
  *
  * ⛔ It was therefore neither deleted nor loosened — it was re-aimed at the
- * property itself, which is now pinned DIRECTLY and more tightly than the proxy
- * ever did (`$icontains and the case-EXACT family stay two constructs…`
- * below): on each dialect, `$icontains` and `$contains` must compile to
- * DIFFERENT text, and `$contains` must carry no fold. That discriminates
- * against the collapse in both directions, where dialect-invariance only
- * discriminated against one. The row sets that make it more than a text
- * comparison are executed in `icontains-dialect-sql.test.ts`, which owns the
- * `$icontains` half of the family from here on.
+ * property itself, pinned DIRECTLY (`$icontains and the case-EXACT family stay
+ * two constructs…` below): on each dialect, `$icontains` and `$contains` must
+ * compile to DIFFERENT text, and `$contains` must carry no fold.
+ *
+ * ⛔ That re-aiming is NOT a strict tightening. An earlier revision of this
+ * header claimed it was ("more tightly than the proxy ever did"); #15780's
+ * contract review measured that claim false, so it is retracted here. What is
+ * true has two halves:
+ *
+ *   - **TIGHTER on family separation.** The re-aimed pin discriminates against
+ *     the collapse in BOTH directions, where dialect-invariance only caught
+ *     one. Named measured set: the four collapse mutations that review drove —
+ *     the fold leaking onto `$contains`, `$contains`' bare construct handed to
+ *     `$icontains`, and the two read-scope directions (drop the fold there /
+ *     hand it to `$contains` there). This file went red on all four.
+ *   - **LOOSER on both-sides folding.** `FOLD_PER_DIALECT` below inspects the
+ *     COLUMN side only. So the mutation that folds the column but leaves the
+ *     comparand UNFOLDED on the `postgres` / `unknown` arm slips PAST this file
+ *     — measured green there, exit 0 and 14 passed — where the pre-#15780
+ *     `LIKE translate($1,` pin would have caught it.
+ *
+ * That second case is held instead by `icontains-dialect-sql.test.ts`, which
+ * pins the `postgres` / `unknown` arm's emitted SQL and bound params VERBATIM,
+ * and which does go red on that same mutation. ⇒ Across the two files the
+ * ratchet is NOT net-weakened; within THIS file alone it is not a strict
+ * tightening. ⛔ Neither claim may be restated as "strictly tighter". The row
+ * sets that make any of this more than a text comparison are executed in that
+ * same suite, which owns the `$icontains` half of the family from here on.
  *
  * Escaping (#5567) is unchanged for every `LIKE` arm; the GLOB arm brings its
  * OWN escaped character class (`*`, `?`, `[`), which is why the second fixture
