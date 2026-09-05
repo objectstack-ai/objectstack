@@ -500,11 +500,14 @@ describe('MetricsConfigSchema', () => {
 describe('metrics window and period lengths carry their unit (#15679)', () => {
   const sliBase = {
     name: 'api_availability',
+    label: 'API Availability',
     metric: 'http_requests_total',
     type: 'availability' as const,
     successCriteria: { threshold: 99.9, operator: 'gte' as const },
   };
-  const sloBase = { name: 'api_uptime_slo', sli: 'api_availability', target: 99.9 };
+  const sloBase = {
+    name: 'api_uptime_slo', label: 'API Uptime SLO', sli: 'api_availability', target: 99.9,
+  };
 
   it('REFUSES the retired `MetricAggregationConfig.window.size`', () => {
     const result = MetricAggregationConfigSchema.safeParse({
@@ -516,7 +519,9 @@ describe('metrics window and period lengths carry their unit (#15679)', () => {
     expect(issue).toBeDefined();
     expect(issue!.code).not.toBe('unrecognized_keys');
     expect(issue!.message).toContain('renamed to `durationSeconds`');
-    expect(issue!.message).not.toContain('sizeSeconds');
+    // The prescription must EXPLAIN the departure from the mechanical name, or the
+    // next author reads `durationSeconds` as a slip and "corrects" it back.
+    expect(issue!.message).toContain('The new name is not `sizeSeconds`');
   });
 
   it('REFUSES the retired `ServiceLevelIndicator.window.size`', () => {
