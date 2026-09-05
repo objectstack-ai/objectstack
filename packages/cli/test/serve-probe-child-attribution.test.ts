@@ -51,10 +51,11 @@
  */
 
 import { describe, it, expect, afterAll } from 'vitest';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Readable } from 'node:stream';
 import {
   CHILD_EXIT_SETTLE_MS,
   PROBE_ATTEMPTS,
@@ -121,14 +122,17 @@ const dir = mkdtempSync(join(tmpdir(), 'probe-child-attribution-'));
 const DRIVER_PATH = join(dir, 'driver.mjs');
 writeFileSync(DRIVER_PATH, DRIVER, 'utf8');
 
-const children: ChildProcessWithoutNullStreams[] = [];
+/** What `spawn(…, { stdio: ['ignore', 'pipe', 'pipe'] })` returns — no `stdin`. */
+type ProbeChild = ChildProcessByStdio<null, Readable, Readable>;
+
+const children: ProbeChild[] = [];
 
 /** Markers the child prints on both streams, so a transcript can be PROVEN carried. */
 const STDOUT_MARKER = 'probe-child stdout:';
 const STDERR_MARKER = 'probe-child stderr:';
 
 interface Driven {
-  child: ChildProcessWithoutNullStreams;
+  child: ProbeChild;
   port: number;
   transcript: () => string;
 }
@@ -139,7 +143,7 @@ function drive(mode: 'answer' | 'die' | 'live'): Promise<Driven> {
     const child = spawn(process.execPath, [DRIVER_PATH, mode], {
       cwd: dir,
       stdio: ['ignore', 'pipe', 'pipe'],
-    }) as ChildProcessWithoutNullStreams;
+    }) as ProbeChild;
     children.push(child);
 
     let out = '';
@@ -165,7 +169,7 @@ function drive(mode: 'answer' | 'die' | 'live'): Promise<Driven> {
   });
 }
 
-async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
+async function stop(child: ProbeChild): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   await new Promise<void>((done) => {
     const give = setTimeout(() => {
