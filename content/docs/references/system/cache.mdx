@@ -195,7 +195,7 @@ Cache warmup strategy
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 
@@ -258,7 +258,7 @@ Rule defining when and how cached entries are invalidated
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 
