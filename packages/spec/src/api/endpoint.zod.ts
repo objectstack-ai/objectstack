@@ -10,6 +10,7 @@ import { strictObject } from '../shared/strict-object';
  * Transform input/output data.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const ApiMappingSchema = lazySchema(() => z.object({
   source: z.string().describe('Source field/path'),
   target: z.string().describe('Target field/path'),
@@ -183,7 +184,21 @@ export const ApiEndpointSchema = strictObject({
   /** Policies */
   authRequired: z.boolean().default(true).describe('Require authentication'),
   rateLimit: RateLimitConfigSchema.optional().describe('Rate limiting policy'),
-  cacheTtl: z.number().optional().describe('Response cache TTL in seconds'),
+  // Renamed from `cacheTtl` (#15677, #14478 ruling B): the unit lived only in
+  // the describe prose. `apis:` is a stack collection, so the rename is
+  // replayable — the protocol-18 D2 conversion `api-endpoint-cache-ttl-to-
+  // cache-ttl-seconds` rewrites stored sources and the tombstone below carries
+  // the prescription for anyone who jumps majors past it.
+  cacheTtlSeconds: z.number().optional().describe('Response cache TTL in seconds'),
+
+  /** Tombstone for the rename above (#15677, ruling B on #14478). */
+  cacheTtl: retiredKey(
+    '`ApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 '
+    + '(#14478 ruling B) — the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is '
+    + 'unchanged, and it stays GET-only. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // `api` is a registered metadata kind as of #5271, so the artifact loader
