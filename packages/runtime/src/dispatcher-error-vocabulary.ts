@@ -649,6 +649,42 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'and registering the code is what ratchets the row out again.',
     },
 
+    // ── pending registration [#14921]: a metadata-tree refusal that reaches a
+    // ── dispatcher-door read ───────────────────────────────────────────────
+    // Not a widened scan and not a demotion: this producer is NEW. #14921 made
+    // `FilesystemLoader.list()` (and the shared `loadMany()` walk behind it)
+    // refuse a metadata name derived from more than one file, where before it
+    // reported the name twice and served the first by extension precedence.
+    // The refusal carries the ADR-0112 envelope the ruling ordered, which is
+    // what puts a site here to classify.
+    {
+        code: 'AMBIGUOUS_METADATA_STEM',
+        file: 'packages/metadata/src/loaders/ambiguous-metadata-stem.ts',
+        shape: 'classconst',
+        door: 'dispatcher',
+        verdict: 'pending-registration',
+        why:
+            "The #14921 refusal: two files under one `ROOT/TYPE/` deriving one metadata name across this "
+            + 'loader\'s REGISTERED extensions is an authoring error, refused with both paths and the type '
+            + 'named rather than resolved by the `.json` → `.yaml` → `.yml` → `.ts` → `.js` precedence '
+            + '(maintainer ruling, director seat, 2026-09-05, option 1 of three). ⭐ Reachability, which is '
+            + 'the only question this table answers, is DERIVED FROM THE CALL GRAPH and is a single '
+            + 'uncaught hop: `MetadataManager.listNames()` and `list()` re-raise this error rather than '
+            + 'absorbing it into their per-loader degradation (that discrimination is the point — a storage '
+            + 'outage still degrades), `listObjects()` is `list(\'object\')`, and '
+            + '`packages/runtime/src/domains/mcp.ts` `listObjectSummaries` awaits `meta.listObjects()` with '
+            + 'NO `try` around it, on the MCP bridge\'s request path. So the throw leaves the domain handler '
+            + 'and reaches `HttpDispatcher.errorFromThrown` — the dispatcher door. ⚠️ The measured in-repo '
+            + 'population of trees that can raise it is ZERO (a walk of 7,770 tracked files over 526 '
+            + 'directories found no stem collision among the registered extensions), so no existing tree '
+            + 'reaches the door today; the row records the PRODUCER, which is what this table is for, and '
+            + 'a producer nobody triggers yet is exactly the one that hides. Since #9106 the door narrows, '
+            + 'so the body parses and `AMBIGUOUS_METADATA_STEM` rides `declaredCode` while `error.code` '
+            + 'takes the member the 500 derives — the demote this verdict names. ⛔ Registering it widens '
+            + '`ApiErrorSchema.code` and is the `packages/spec` lane\'s call, NOT made here: this row is '
+            + 'that batch\'s input, and the registration is what ratchets it out again.',
+    },
+
     // ── boot refusals: no HTTP boundary exists yet ─────────────────────────
     // [#9460] The four `MigrationJournalRefusal` codes below arrive through the
     // same code-carrying-helper shape as `owd_widening_forbidden` — a class
