@@ -4348,7 +4348,25 @@ export class AuthManager {
       return rows.some(
         (row) => typeof row?.email === 'string' && row.email.trim().toLowerCase() === target,
       );
-    } catch {
+    } catch (error) {
+      // The fall-through DIRECTION stays (see above): the vendor runs its own
+      // `findUserByEmail` and still decides. What must not stay is the
+      // SILENCE. A total engine outage is loud by itself — the vendor's read
+      // goes through the same engine and the request answers 500 — but a
+      // failure specific to THIS query shape, or a transient one, is answered
+      // by the duplicate shield with a synthetic 200, which is #15587 exactly:
+      // the defect re-opens with no other signal anywhere. Measured by driving
+      // a throw scoped to this probe's own signature: the pre-fix response came
+      // back, and nothing named the probe. So the refusal that did not happen
+      // says so here, at the same level and through the same facility the
+      // sibling probe uses at its page ceiling.
+      this.audienceLogError(
+        '[audience] the sign-up existing-user probe could not be answered, so the uniqueness '
+          + 'refusal was NOT raised for this request — falling through to better-auth, whose '
+          + 'duplicate shield answers a synthetic 200 when email verification is forced on. '
+          + 'A sign-up for an already-registered address may report success and write nothing.',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       return false;
     }
   }

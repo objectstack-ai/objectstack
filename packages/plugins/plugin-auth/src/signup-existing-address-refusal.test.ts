@@ -203,6 +203,30 @@ async function readAll(engine: ObjectQL, object: string): Promise<Record<string,
   return (Array.isArray(rows) ? rows : []) as Record<string, unknown>[];
 }
 
+/**
+ * Make ONLY the uniqueness probe's own read fail, leaving every other engine
+ * read working. This is the reviewer-measured shape from #15738: a total
+ * outage is loud by itself (the vendor's read goes through the same engine and
+ * the request answers 500), so the interesting failure is one specific to this
+ * query's signature — `sys_user` filtered by `email`.
+ */
+function breakExistingUserProbe(engine: ObjectQL): void {
+  const original = (engine as any).find.bind(engine);
+  (engine as any).find = (object: string, options?: any, ...rest: any[]) => {
+    if (object === 'sys_user' && typeof options?.where?.email === 'string') {
+      throw new Error('probe-scoped failure (simulated)');
+    }
+    return original(object, options, ...rest);
+  };
+}
+
+/** A logger that records what the manager writes at error/warn level. */
+function recordingLogger(): { lines: string[]; logger: Record<string, unknown> } {
+  const lines: string[] = [];
+  const push = (m: string) => { lines.push(String(m)); };
+  return { lines, logger: { error: push, warn: push, info: () => {}, debug: () => {} } };
+}
+
 /** Count every insert attempt that reaches the engine, by object name. */
 function instrumentInserts(engine: ObjectQL): string[] {
   const calls: string[] = [];
@@ -323,6 +347,33 @@ describe('[#15587] sign-up for an address that already exists is refused, not fa
 
     expect(ourLane.status).toBe(vendorLane.status);
     expect(await ourLane.json()).toEqual(await vendorLane.json());
+  });
+
+  it('⑦ an UNANSWERABLE probe keeps the fall-through direction but is never SILENT about it', async () => {
+    // Reviewer-measured on #15738: with a throw scoped to this probe's own
+    // signature the pre-fix response came back — 200, fresh id, no row — and
+    // nothing anywhere named the probe. The direction is deliberate and stays
+    // (the vendor still decides); what is pinned here is that the refusal that
+    // did NOT happen says so, so a query-shape-specific or transient failure
+    // cannot re-open #15587 with zero signal.
+    const engine = await bootEngine();
+    await seedPopulation(engine);
+    const { lines, logger } = recordingLogger();
+    const manager = makeManager(engine, { ...EMAIL_DOMAIN_POSTURE, logger });
+    breakExistingUserProbe(engine);
+
+    const res = await signUp(manager, EXISTING);
+
+    // Direction unchanged: fell through to better-auth, which under a forced-
+    // verification posture answers with its synthetic duplicate response.
+    expect(res.status).toBeLessThan(300);
+    // …and the probe said so. This is the assertion the reviewer's measurement
+    // had nothing to match.
+    const named = lines.filter((l) => l.includes('existing-user probe could not be answered'));
+    expect(named.length, `nothing named the probe; logged: ${JSON.stringify(lines)}`).toBe(1);
+    expect(named[0]).toContain('uniqueness refusal was NOT raised');
+    // Still nothing written — the fall-through did not invent a row either.
+    expect(await readAll(engine, 'sys_account')).toEqual([]);
   });
 
   it('⑥ the shield\'s OTHER trigger: autoSignIn:false arms it under any posture, and that lane is refused too', async () => {
