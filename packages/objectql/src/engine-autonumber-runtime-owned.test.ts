@@ -608,9 +608,12 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
   });
 
   it('keeps a legacy number for a `preserveAudit` historical import THROUGH THE INGRESS (#3493)', async () => {
-    // The regression this whole describe exists for: the ingress strip has no
-    // `preserveAudit` exemption, so if it acted on the flag the value would be
-    // gone before the engine's whitelist ran.
+    // The regression this whole describe exists for: the static strip has no
+    // `preserveAudit` exemption — at the ingress when this was written, inside
+    // `engine.insert` since ruling C — so if it acted on the flagged autonumber
+    // the value would be gone before the runtime-owned whitelist could keep it.
+    // It does not: the static pass runs over `staticReadonlyInsertSubject`,
+    // with runtime-owned types removed, after the runtime-owned pass.
     const created = await rig.protocol.createData({
       object: 'an_invoice',
       data: { name: 'legacy', invoice_number: 'LEGACY-0007' },
@@ -628,7 +631,7 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
     expect(created.record.invoice_number).toBe('INV-000042');
   });
 
-  it('an author-declared `readonly` field of an ORDINARY type is still stripped at the ingress', async () => {
+  it('an author-declared `readonly` field of an ORDINARY type is still stripped on a create through the ingress — inside `engine.insert` since ruling C', async () => {
     // The #3043 strip keeps its full width — only runtime-owned types moved.
     rig.engine.registry.registerObject({
       name: 'an_case',

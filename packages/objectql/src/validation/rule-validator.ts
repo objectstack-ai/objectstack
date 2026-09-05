@@ -997,11 +997,15 @@ export function stripReadonlyWhenFieldsMulti(
  *
  * The set itself now lives in `@objectstack/spec` (`RUNTIME_OWNED_FIELD_TYPES`,
  * #5628) — the protocol's one statement of the ownership — because a SECOND
- * consumer needs it: the DataProtocol create ingress, whose `readonly` strip
- * carries a NARROWER exemption set than this module's (no `preserveAudit`), and
- * which therefore has to recognise these types to stay out of their way. A
- * literal copied over there is the drift `AUDIT_TIMELINE_FIELDS` below stopped
- * paying for. This module keeps the reasoning; the membership is imported.
+ * consumer needs it: the create-side static-`readonly` strip, whose exemption
+ * set is NARROWER than this helper's (no `preserveAudit`) and which therefore
+ * has to recognise these types to stay out of their way. When #5628 landed
+ * that consumer was the DataProtocol create ingress in another package; since
+ * the maintainer ruling of 2026-09-03 (option C, #14147) it is
+ * {@link staticReadonlyInsertSubject} in this module, feeding `engine.insert`,
+ * and the ingress copy is deleted. A literal copied over there was the drift
+ * `AUDIT_TIMELINE_FIELDS` below stopped paying for; the membership stays
+ * imported from the spec. This module keeps the reasoning.
  */
 
 /**
