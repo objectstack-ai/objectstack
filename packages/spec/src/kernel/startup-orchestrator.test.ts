@@ -179,3 +179,66 @@ describe('Startup Orchestrator Protocol', () => {
     });
   });
 });
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. All three old spellings are `retiredKey()`
+// tombstones, so the refusal carries the RENAME (the prescription IS the
+// payload) rather than a bare unrecognized-key error. This contract already
+// contained its own counter-example: `startWithTimeout(plugin, ctx, timeoutMs)`
+// named its parameter correctly while the options object beside it did not.
+describe('Startup orchestration durations carry their unit (#15678)', () => {
+  it('StartupOptions REFUSES the retired `timeout` with the rename in the message', () => {
+    const result = StartupOptionsSchema.safeParse({ timeout: 60000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`StartupOptions.timeout` was renamed to `timeoutMs`');
+  });
+
+  it('PluginStartupResult REFUSES the retired `duration` with the rename in the message', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      plugin: { name: 'crm-plugin' },
+      success: true,
+      duration: 1250,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`PluginStartupResult.duration` was renamed to `durationMs`');
+  });
+
+  it('StartupOrchestrationResult REFUSES the retired `totalDuration` with the rename', () => {
+    const result = StartupOrchestrationResultSchema.safeParse({
+      results: [],
+      totalDuration: 2050,
+      allSuccessful: true,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'totalDuration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs`',
+    );
+  });
+
+  it('the aggregate and its parts now agree: totalDurationMs sums durationMs', () => {
+    const parsed = StartupOrchestrationResultSchema.parse({
+      results: [
+        { plugin: { name: 'plugin1' }, success: true, durationMs: 1200 },
+        { plugin: { name: 'plugin2' }, success: true, durationMs: 850 },
+      ],
+      totalDurationMs: 2050,
+      allSuccessful: true,
+    });
+    expect(parsed.totalDurationMs).toBe(2050);
+    expect(parsed.results.reduce((sum, r) => sum + r.durationMs, 0)).toBe(2050);
+  });
+
+  it('keeps the 30000 default under the renamed key', () => {
+    expect(StartupOptionsSchema.parse({}).timeoutMs).toBe(30000);
+    expect(StartupOptionsSchema.parse({ timeoutMs: 5000 }).timeoutMs).toBe(5000);
+  });
+});

@@ -816,3 +816,34 @@ describe('Enhanced Event Handler', () => {
     expect(() => EventHandlerSchema.parse(handler)).not.toThrow();
   });
 });
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. Both old spellings are `retiredKey()`
+// tombstones, so the refusal carries the RENAME (the prescription IS the
+// payload) rather than a bare unrecognized-key error, and the value survives at
+// the same magnitude. Asserting the message, not just `.toThrow()`: a bare
+// throw stays green when the schema throws for some unrelated reason.
+describe('Event bus retention windows carry their unit (#15678)', () => {
+  it.each([
+    ['EventPersistence', EventPersistenceSchema, { enabled: true }],
+    ['EventSourcingConfig', EventSourcingConfigSchema, {}],
+  ])('%s REFUSES the retired `retention` with the rename in the message', (def, schema, base) => {
+    const result = schema.safeParse({ ...base, retention: 90 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'retention');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(`\`${def}.retention\` was renamed to \`retentionDays\``);
+  });
+
+  it('accepts `retentionDays` at the same magnitude on both defs', () => {
+    expect(EventPersistenceSchema.parse({ enabled: true, retentionDays: 90 }).retentionDays).toBe(90);
+    expect(EventSourcingConfigSchema.parse({ retentionDays: 90 }).retentionDays).toBe(90);
+  });
+
+  it('keeps the count-valued `snapshotRetention` bare — a count has no unit to carry', () => {
+    const parsed = EventSourcingConfigSchema.parse({ snapshotRetention: 10, retentionDays: 365 });
+    expect(parsed.snapshotRetention).toBe(10);
+    expect(parsed.retentionDays).toBe(365);
+  });
+});

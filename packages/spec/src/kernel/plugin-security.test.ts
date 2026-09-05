@@ -340,3 +340,26 @@ describe('Plugin Security Protocol', () => {
     });
   });
 });
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spelling is a `retiredKey()` tombstone,
+// so the refusal carries the RENAME rather than a bare unrecognized-key error.
+describe('PackageDependencyResolutionResult.resolvedIn carries its unit (#15678)', () => {
+  const base = { status: 'success' as const, installOrder: ['com.acme.app'] };
+
+  it('REFUSES the retired `resolvedIn` with the rename in the message', () => {
+    const result = PackageDependencyResolutionResultSchema.safeParse({ ...base, resolvedIn: 150 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'resolvedIn');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`PackageDependencyResolutionResult.resolvedIn` was renamed to `resolvedInMs`',
+    );
+  });
+
+  it('accepts `resolvedInMs` at the same magnitude', () => {
+    const parsed = PackageDependencyResolutionResultSchema.parse({ ...base, resolvedInMs: 150 });
+    expect(parsed.resolvedInMs).toBe(150);
+  });
+});

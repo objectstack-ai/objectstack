@@ -306,3 +306,101 @@ describe('Plugin Security Advanced Schemas', () => {
     });
   });
 });
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. This file is the rule's sharpest case in the
+// spec — FOUR durations on one security manifest carried FOUR DIFFERENT units
+// (ms, seconds, days, hours) and none said so in its name. All four old
+// spellings are `retiredKey()` tombstones inside live blocks, so the refusal
+// carries the RENAME and each block's other members keep parsing beside it.
+describe('Plugin security durations carry their unit (#15678)', () => {
+  it('SandboxConfig REFUSES the retired `process.timeout` with the rename in the message', () => {
+    const result = SandboxConfigSchema.safeParse({ process: { timeout: 30000 } });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'process.timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`SandboxConfig.process.timeout` was renamed to `timeoutMs`');
+  });
+
+  it.each([
+    ['authentication.tokenExpiration', 'tokenExpirationSeconds', 3600,
+      { authentication: { methods: ['jwt' as const], tokenExpiration: 3600 } }],
+    ['auditLog.retention', 'retentionDays', 90,
+      { auditLog: { retention: 90 } }],
+  ])('KernelSecurityPolicy REFUSES the retired `%s` with the rename to `%s`', (old, next, _v, policy) => {
+    const result = KernelSecurityPolicySchema.safeParse(policy);
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === old);
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(`\`KernelSecurityPolicy.${old}\` was renamed to \`${next}\``);
+  });
+
+  it('accepts the suffixed policy keys beside the already-suffixed `windowMs`', () => {
+    const parsed = KernelSecurityPolicySchema.parse({
+      rateLimit: { maxRequests: 100, windowMs: 60000 },
+      authentication: { methods: ['jwt' as const], tokenExpirationSeconds: 3600 },
+      auditLog: { retentionDays: 90 },
+    });
+    expect(parsed.rateLimit?.windowMs).toBe(60000);
+    expect(parsed.authentication?.tokenExpirationSeconds).toBe(3600);
+    expect(parsed.auditLog?.retentionDays).toBe(90);
+  });
+
+  it('accepts the suffixed sandbox key beside its non-duration siblings', () => {
+    const parsed = SandboxConfigSchema.parse({
+      process: { allowSpawn: false, allowedCommands: ['git'], timeoutMs: 30000 },
+    });
+    expect(parsed.process?.timeoutMs).toBe(30000);
+    expect(parsed.process?.allowSpawn).toBe(false);
+  });
+
+  // The pair the rule exists for: ONE bare name, TWO units, two kernel shapes.
+  it('PluginSecurityManifest REFUSES `vulnerabilityDisclosure.responseTime` and names HOURS', () => {
+    const result = PluginSecurityManifestSchema.safeParse({
+      pluginId: 'com.acme.analytics',
+      trustLevel: 'trusted' as const,
+      permissions: { permissions: [] },
+      sandbox: { level: 'strict' as const },
+      vulnerabilityDisclosure: { responseTime: 24 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'vulnerabilityDisclosure.responseTime',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`PluginSecurityManifest.vulnerabilityDisclosure.responseTime` was renamed to '
+      + '`responseTimeHours`',
+    );
+    // Not `responseTimeMs`: the identically-named health-report key IS
+    // milliseconds, and confusing the two is a 3,600,000x error.
+    expect(issue!.message).not.toContain('`responseTimeMs`');
+    expect(issue!.message).toContain('the value (hours) is unchanged');
+  });
+
+  it('accepts `responseTimeHours` beside the unchanged `bugBounty`', () => {
+    const parsed = PluginSecurityManifestSchema.parse({
+      pluginId: 'com.acme.analytics',
+      trustLevel: 'trusted' as const,
+      permissions: { permissions: [] },
+      sandbox: { level: 'strict' as const },
+      vulnerabilityDisclosure: { responseTimeHours: 24, bugBounty: true },
+    });
+    expect(parsed.vulnerabilityDisclosure?.responseTimeHours).toBe(24);
+    expect(parsed.vulnerabilityDisclosure?.bugBounty).toBe(true);
+  });
+
+  // A NEGATIVE control on the same file: this key names no unit anywhere, so it
+  // is outside the gate's population and outside this rename. Without it, a
+  // later sweep reads the four renames above as "every timeout on this file".
+  it('leaves `RuntimeConfig.resourceLimits.timeout` bare — its describe names no unit', () => {
+    const parsed = RuntimeConfigSchema.parse({
+      engine: 'process' as const,
+      resourceLimits: { maxMemory: 1073741824, timeout: 60000 },
+    });
+    expect(parsed.resourceLimits?.timeout).toBe(60000);
+  });
+});

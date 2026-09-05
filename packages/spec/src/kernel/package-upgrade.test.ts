@@ -280,3 +280,35 @@ describe('RollbackPackageResponseSchema', () => {
     expect(parsed.restoredVersion).toBe('1.0.0');
   });
 });
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spelling is a `retiredKey()` tombstone,
+// so the refusal carries the RENAME rather than a bare unrecognized-key error.
+describe('UpgradePlan.estimatedDuration carries its unit (#15678)', () => {
+  const basePlan = {
+    packageId: 'com.acme.crm',
+    fromVersion: '1.0.0',
+    toVersion: '2.0.0',
+    impactLevel: 'low' as const,
+    changes: [],
+  };
+
+  it('REFUSES the retired `estimatedDuration` with the rename in the message', () => {
+    const result = UpgradePlanSchema.safeParse({ ...basePlan, estimatedDuration: 120 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'estimatedDuration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`UpgradePlan.estimatedDuration` was renamed to `estimatedDurationSeconds`',
+    );
+    // The prescription must name the unit, because SECONDS is the minority unit
+    // in this package and the sibling rename on this card is milliseconds.
+    expect(issue!.message).toContain('the value (seconds) is unchanged');
+  });
+
+  it('accepts `estimatedDurationSeconds` at the same magnitude', () => {
+    const parsed = UpgradePlanSchema.parse({ ...basePlan, estimatedDurationSeconds: 120 });
+    expect(parsed.estimatedDurationSeconds).toBe(120);
+  });
+});
