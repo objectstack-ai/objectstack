@@ -103,7 +103,8 @@ const result = CheckpointSchema.parse(data);
 | **id** | `string` | ✅ | Execution instance ID |
 | **flowName** | `string` | ✅ | Machine name of the executed flow |
 | **flowVersion** | `integer` | optional | Version of the flow that was executed |
-| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>` | ✅ | Current execution status |
+| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | ✅ | Current execution status |
+| **refusalMessage** | `string` | optional | Rendered `end` node `message` when `status` is `refused` — the per-record text the flow refused with. Absent on every other status. |
 | **trigger** | `{ type: string; recordId?: string; object?: string; userId?: string; … }` | ✅ | What triggered this execution |
 | **steps** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Ordered list of executed steps |
 | **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | Per-run rollup: records selected / acted on, gate skips, per-node status |
@@ -174,6 +175,7 @@ const result = CheckpointSchema.parse(data);
 * `cancelled`
 * `timed_out`
 * `retrying`
+* `refused`
 
 
 ---
@@ -347,7 +349,7 @@ const result = CheckpointSchema.parse(data);
 | **nextRunAt** | `string` | optional | Next scheduled execution timestamp |
 | **lastRunAt** | `string` | optional | Last execution timestamp |
 | **lastExecutionId** | `string` | optional | Execution ID of the last run |
-| **lastRunStatus** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>` | optional | Status of the last run |
+| **lastRunStatus** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Status of the last run |
 | **totalRuns** | `integer` | optional (default: `0`) | Total number of executions |
 | **consecutiveFailures** | `integer` | optional (default: `0`) | Consecutive failed executions |
 | **startDate** | `string` | optional | Schedule effective start date |
