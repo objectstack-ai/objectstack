@@ -99,7 +99,7 @@ Each node performs a specific action in the flow.
 | Type | Description |
 | :--- | :--- |
 | `start` | Flow entry point |
-| `end` | Flow termination |
+| `end` | Flow termination — `config.outcome` says how: `completed` (default) or `refused` with an interpolated `message` ([below](#end-refuse-the-run-with-per-record-text)) |
 | `decision` | Conditional branching (if/else) |
 | `assignment` | Set variable values |
 | `loop` | Structured iteration **container** — runs a body region once per item (ADR-0031) |
@@ -425,6 +425,60 @@ bound to `config.idVariable` so a later step can reference it.
 
 This is how a single flow walks the user through several full object forms in
 sequence (e.g. lead → account → opportunity), each step saving its own record.
+
+**End (refuse the run with per-record text):** [#end-refuse-the-run-with-per-record-text]
+
+Every `end` used to mean "completed". The terminal node now declares its
+**outcome**, so a flow can say *refuse this, and here is why, for this record*
+instead of dressing a refusal up as a message-only `screen` — an input step that
+renders **Submit** and, on submit, resumes to `end`, whose runner then toasts
+`Flow "…" completed` at a user who was just told the opposite (maintainer
+ruling 2026-09-05, option 2′: a first-class outcome on the existing node, not a
+second terminal node type).
+
+```typescript
+{
+  id: 'refuse_duplicate',
+  type: 'end',
+  label: 'Refused — duplicate',
+  config: {
+    outcome: 'refused',                 // 'completed' (default) | 'refused'
+    message: 'Refused: {record.name} is a confirmed duplicate of {duplicate.name}',
+  },
+}
+```
+
+- `outcome: 'refused'` is a **terminal state, never resumed**, and it is
+  **distinct from `failed`** — a refusal is a successful evaluation that says
+  no; nothing threw. The run row records `status: 'refused'` with the rendered
+  text as `refusalMessage`, and the trigger / resume response carries the same
+  (`success: true`, `status: 'refused'`, `refusalMessage` — and **no**
+  `successMessage`, so there is nothing to toast).
+- `message` is a `{token}` template interpolated at run time **exactly like a
+  `screen` node's `description`**, so the text names the record. It is
+  **required** when `outcome` is `refused` (a refusal without text is the shape
+  this replaces) and **refused** on a completed end (nothing would ever render
+  it — the key would be a silent no-op). The config is strict: an undeclared key
+  is a parse error naming the intended one (`reason` → `message`, `status` →
+  `outcome`).
+- A runner shows `refusalMessage` with **Close only** — no Submit, no
+  `Flow "…" completed` toast; the invoking action's own `successMessage` stays
+  suppressed exactly as it is behind a paused run.
+
+Reach the refusing `end` from a `decision` edge like any other branch, and keep
+every write behind the branch the refusal never takes. Because `end` is
+structural (no executor, no descriptor), the flow parse itself applies the
+contract — `outcome: 'refused'` with no `message` is refused at
+`nodes[i].config.message`, at registration and by `objectstack validate` alike.
+An `end` node with no `config` parses exactly as before.
+
+<Callout type="warn" title="Declared first — the engine and runner halves follow">
+This page states the contract (`@objectstack/spec`). The engine half —
+`service-automation` stamping `refused` and persisting the rendered message at
+the `end` node (#15788) — and the runner half — the console `FlowRunner`
+rendering Close-only (objectui#7707) — land separately. Until both do, a
+`refused` end parses and registers but the run still ends as `completed`.
+</Callout>
 
 ## Structured control flow (ADR-0031)
 
@@ -851,7 +905,7 @@ Each run's `steps[]` records every executed node — including loop iterations,
 parallel branch bodies, and try/catch region steps — which the Studio flow
 designer surfaces, nested by iteration / branch / handler, in its **Runs** side
 panel. Recent runs are held in an in-memory ring buffer; terminal runs
-(completed / failed) are also mirrored to `sys_automation_run` as durable
+(completed / failed / refused — the last with its rendered `refusalMessage`) are also mirrored to `sys_automation_run` as durable
 history with a bounded step log, so `listRuns` / `getRun` still report a run's
 status, steps, and failure reason after a restart or ring-buffer eviction.
 
