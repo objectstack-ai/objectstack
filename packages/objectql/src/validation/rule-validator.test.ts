@@ -1351,11 +1351,17 @@ describe('stripRuntimeOwnedFields — the INSERT-side strip (#5503)', () => {
     expect(out).toEqual({ title: 'x' });
   });
 
-  it('leaves AUTHOR-declared readonly fields alone — insert keeps its #3413 exemption', () => {
-    // The engine is deliberately NOT the place the static-`readonly` insert
-    // strip lives (that is the #3043 protocol ingress); this narrower helper
-    // must not quietly take over that job and start stripping columns the
-    // trusted internal writers legitimately seed on create.
+  it('leaves AUTHOR-declared readonly fields alone — that strip is a SEPARATE pass, never this helper’s', () => {
+    // [#14147] This case used to say "insert keeps its #3413 exemption" and
+    // that the engine was "deliberately NOT the place the static-`readonly`
+    // insert strip lives (that is the #3043 protocol ingress)". The maintainer
+    // ruling of 2026-09-03 (option C) superseded that: the static strip now
+    // runs inside `engine.insert` — but as `stripReadonlyFields` over
+    // `staticReadonlyInsertSubject`, a second pass with its own gate and its
+    // own report. The verdict here is unchanged and still load-bearing: this
+    // narrower runtime-owned helper must not quietly take over that job, or
+    // `preserveAudit` (which this helper honours and the static pass does not)
+    // would start reinstating author-declared columns it was never ruled to.
     const supplied = { title: 'x', closed_at: '2021-01-01T00:00:00Z' };
     const out = stripRuntimeOwnedFields(numberedFields, { ...supplied }, supplied);
     expect(out).toEqual({ title: 'x', closed_at: '2021-01-01T00:00:00Z' });

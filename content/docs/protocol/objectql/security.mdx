@@ -274,11 +274,11 @@ field, but cannot *rescue* one the caller supplied.
 
 <Callout type="warn">
 **`preserveAudit` is an UPDATE-path exemption. It does not apply on INSERT (#6640).**
-The two write paths run two different strips: UPDATE is stripped inside the engine
-(`stripReadonlyFields`), which consults `preserveAudit`; CREATE is stripped earlier, at the
-DataProtocol ingress (`stripReadonlyForInsert`, #3043), whose only exemption is
-`context.isSystem`. So one historical import that *upserts* keeps an author-declared
-`readonly` column on the rows it **updates** and strips it from the rows it **creates**.
+Both write paths run the same strip inside the engine (`stripReadonlyFields`, #14147), but
+they read it differently: UPDATE consults `preserveAudit`, while CREATE is passed no such
+flag and keeps `context.isSystem` as its only exemption. So one historical import that
+*upserts* keeps an author-declared `readonly` column on the rows it **updates** and strips
+it from the rows it **creates**.
 
 That asymmetry is deliberate, not an oversight: `treatAsHistorical` arrives on an ordinary
 (non-system) REST import request, so honouring it on create would let any caller seed the
