@@ -4176,6 +4176,24 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
 }
 
 /**
+ * The spans of the scanned module's own EXCLUSION constants — CENSUS PENDING.
+ */
+const EXCLUSION_DECL_NAME =
+  /(?:^|_)(?:NOISE|SKIP|SKIPPED|EXCLUDE|EXCLUDED|EXCLUDES|EXCLUSION|EXCLUSIONS|IGNORE|IGNORED|DENY|DENIED)(?:_|$)/;
+
+function exclusionDeclSpans(moduleBody) {
+  const spans = [];
+  for (const decl of topLevelDecls(moduleBody, scanSource(moduleBody), EMPTY_SELF_TEST_STARTS)) {
+    if (decl.callable) continue;
+    if (!EXCLUSION_DECL_NAME.test(decl.name)) continue;
+    spans.push([decl.start, decl.end]);
+  }
+  return spans;
+}
+
+const EMPTY_SELF_TEST_STARTS = new Set();
+
+/**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
  * top-level dotted dir) and looks like a repo path rather than a URL or a
@@ -4262,11 +4280,18 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
   const moduleBody = maskedModuleBody(scriptSource);
+  const exclusions = exclusionDeclSpans(moduleBody);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
     const raw = m[1];
     if (/^(https?:|[A-Z_]+=|-{1,2}\w)/.test(raw)) continue;
     if (!/^[\w.@][\w.@/*-]*$/.test(raw)) continue;
+    // A literal the scanned gate declares as EXCLUDED is not a surface it
+    // watches — it is the surface it refuses to look at, and admitting it
+    // states the exact inverse of the declaration. See `exclusionDeclSpans`
+    // above for the identifier predicate, the tree-wide census behind it, and
+    // the three shapes it deliberately does not reach.
+    if (exclusions.some(([from, to]) => m.index >= from && m.index < to)) continue;
     // ADMISSION reads the literal as the AUTHOR wrote it, minus the depth
     // prefix — byte for byte the test this scan has always applied. Only the
     // VALUE is resolved, below. Widening admission to the resolved form was
