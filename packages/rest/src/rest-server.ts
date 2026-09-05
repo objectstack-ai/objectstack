@@ -3702,10 +3702,10 @@ export class RestServer {
      * CONSUMED. The asymmetry with `api` is measured, not stylistic: for each
      * of the four, every key `normalizeConfig` reads is one its schema
      * declares (the key diff is empty), and none carries a tombstone, so a
-     * consumed parse cannot strip anything the runtime honours. `api` keeps
-     * #11637's validate-only shape here; its `??` chain below duplicates the
-     * schema's defaults key for key today, and folding it onto the parse is a
-     * separate, separately-measured change — not a rider on the siblings.
+     * consumed parse cannot strip anything the runtime honours. [#14366] `api`
+     * went through the same door last, separately measured rather than ridden
+     * on the siblings: the asymmetry is gone and all five now build from their
+     * parsed output.
      */
     private parseDeclaredApiConfig(api: unknown): DeclaredApiConfigParsed {
         return parseDeclaredSubConfig('api', declaredSubConfigSchemas().api, api, (issues) => (
