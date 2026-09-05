@@ -64,9 +64,13 @@ function makeStubDriver(): any {
     async execute() { return null; }, async syncSchema() {},
     async find(o: string, ast: any) {
       d.findCalls.push({ object: o, where: ast?.where });
-      return [...store.values()].filter((r) => matches(r, ast?.where));
+      const rows = [...store.values()].filter((r) => matches(r, ast?.where));
+      // Hold the caller's bound, AFTER the filter and by PRESENCE
+      // (`check:objectql-double-limit`): §3's control passes `limit: 1`, so a
+      // limit-blind double would answer it with the whole table.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
-    async findOne(o: string, ast: any) {
+    async findOne(_o: string, ast: any) {
       for (const r of store.values()) if (matches(r, ast?.where)) return r;
       return null;
     },
