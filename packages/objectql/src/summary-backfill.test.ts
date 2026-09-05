@@ -414,6 +414,12 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
 
       expect(project('p_busy').max_estimate).toBe(32);
       expect(report.recomputedUndefinedOnEmpty).toEqual(['project.max_estimate (max)']);
+      // A named count was never skipped, so it is not "recomputed on request"
+      // either, and a duplicate entry resolves once.
+      const named = await backfillSummaryNulls(engine, quietLogger, {
+        recomputeUndefinedOnEmpty: ['project.task_count', 'project.max_estimate', 'project.max_estimate'],
+      });
+      expect(named.recomputedUndefinedOnEmpty).toEqual(['project.max_estimate (max)']);
       // The scope is per column: the sibling avg/min stay out, and stay listed.
       expect(report.skippedUndefinedOnEmpty).toEqual(['project.avg_estimate (avg)', 'project.min_estimate (min)']);
       expect(maxOutcome(report)).toEqual({
@@ -447,24 +453,25 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       expect(maxOutcome(report)).toMatchObject({ nullRows: 1, nonEmpty: 1, filled: 1, sampleRecordIds: ['p_busy'] });
     });
 
-    it('SCOPED: count control — a count fills identically with or without the scope, and naming one is accepted as a no-op', async () => {
+    it('SCOPED: count control — a count fills identically with or without the scope, and naming one is accepted', async () => {
       busyAndQuiet();
 
       const report = await backfillSummaryNulls(engine, quietLogger, {
         apply: true,
         // A publish path passes every column it just declared, function unknown.
-        recomputeUndefinedOnEmpty: ['project.task_count', 'project.max_estimate', 'project.max_estimate'],
+        recomputeUndefinedOnEmpty: ['project.task_count', 'project.max_estimate'],
       });
 
       expect(project('p_busy').task_count).toBe(2);
       expect(project('p_quiet').task_count).toBe(0);
-      // The count column's outcome is byte-identical to the unscoped run's.
+      // The count column's outcome is byte-identical to the unscoped run's —
+      // the control the scope pins above are read against: it asserts nothing
+      // the scope handling produces, so it stays green when that handling is
+      // ablated while the scoped pins go red.
       expect(report.fields.find((f) => f.field === 'task_count')).toEqual(
         BASE_APPLY_REPORT.fields.find((f) => f.field === 'task_count'),
       );
-      // A count was never skipped, so it is not "recomputed on request" either;
-      // the duplicate entry resolves once.
-      expect(report.recomputedUndefinedOnEmpty).toEqual(['project.max_estimate (max)']);
+      expect(report.nullRows).toBe(BASE_APPLY_REPORT.nullRows + 1);
     });
 
     it('SCOPED: min, max and avg all compute through aggregateSummaryValue', async () => {
