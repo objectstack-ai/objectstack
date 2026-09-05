@@ -112,7 +112,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关闭时由解锁扫描放回;工已完、PR 被外部门禁卡住的同用本态 |
 | `pm:awaiting-maintainer` | 决定已做,只剩一次 GitHub 之外的人工动作:不派发不催;与其它 pm 状态标签互斥 |
 | `pm:blocking` | 有 open 下游依赖者(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择全序 |
-| `pm:retriage` | 等分诊改判:与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
+| `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉),异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
 | `finding` | 观察类记录,恒 = 待首次定级;定级即离标;不占队列不进收件箱 |
 | `target:<major>` | 发版阻塞:每个 backlog 恰好一个生产者 |
 | `pm:epic`(父单或 sub-issue) | 已由 epic PM 保留;其它 PM 永不取;⛔ 永不与 `pm:queue` 同挂 |
@@ -379,7 +379,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 判级发生在发现分诊轮,不在立单时;车道座位可附证据/前提重验,⛔ 不定级不改标。
 - 唯一例外:skills 车道 finding 由该席自分诊,全仓轮跳过。
 - 域分批与 sweep 打包晋级五条照用;每批约定与积压告警见 `references/dispatch-runbook.md`。
-- `pm:retriage` 重判每 fire 高优先处理:按异议评论的证据与建议定级重裁。
+- `pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘。
 - retriage 维持或改判皆由分诊席同笔摘标;挂标归异议席。
 - 发版板 `target:<major>`:判据二元,⛔ 不做优先级渐变:不修它,当前 RC 能不能发。
 - 判阻塞四类:① 用户今天就撞的已发布面缺陷;② 公开契约 declared≠enforced。
