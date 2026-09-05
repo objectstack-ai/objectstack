@@ -91,6 +91,14 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // inheritance walks this reference (lint-enforced).
     'parent_organization_id',
     'sort_order',
+    // #14238 (maintainer ruling 2026-09-02, option A) — the organization's
+    // IANA zone, the root default of the `sys_business_unit.timezone`
+    // inheritance chain. better-auth neither reads nor writes it, and it is
+    // deliberately NOT a better-auth `additionalFields` entry (the `locale`
+    // note above: better-auth SELECTs explicit columns). Declared here so the
+    // D7 collision guard proves better-auth's organization schema owns no
+    // `timezone` at the pinned version. Generically editable — see below.
+    'timezone',
   ]),
   sys_api_key: new Set([
     // `sys_api_key` is `managedBy: 'better-auth'` (which is what puts it under
@@ -168,6 +176,13 @@ export const MANAGED_EXTENSION_EDITABLE_FIELDS: Readonly<Record<string, Readonly
     'require_mfa',
     'parent_organization_id',
     'sort_order',
+    // #14238 — the hierarchy's root default is a value an administrator SETS;
+    // a column the guard strips on every user-context write would be a root
+    // default nobody can set. Same tier as `require_mfa` and the D6 pair.
+    // What reaches the row is still judged by the column itself:
+    // `valueDomain: 'iana_time_zone'` refuses a non-member on the write path
+    // (`org-hierarchy-timezone-write-contract.test.ts` drives both layers).
+    'timezone',
   ]),
   // #7727 — revoking a leaked API key is a product operation, and before this
   // entry no product route performed it: `sys_api_key`'s own row actions
