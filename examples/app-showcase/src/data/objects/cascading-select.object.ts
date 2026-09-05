@@ -31,12 +31,14 @@ import { P } from '@objectstack/spec';
  * makes the object reachable: object-level CRUD (gate ①) comes only from a
  * permission set and is checked first. This comment used to say the wide OWD let
  * the seeded admin and the live e2e create records "without a bespoke permission
- * set"; what actually carried them was the admin's built-in WILDCARD set, and
- * every other member hit a 403 on the `nav_cascade` entry
- * (`nav-object-ungranted`, warned on every build). `showcase_member_default` now
- * grants read/create/edit, so the object is in the access-matrix snapshot and
- * the e2e no longer depends on being admin. Note where the narrowing really
- * lives: on one OPTION (`tier: 'restricted'`, admin-only), not on the object.
+ * set". What actually carried the admin was their built-in WILDCARD set: with no
+ * grant anywhere, `nav-object-ungranted` warned on every build and reports the
+ * `nav_cascade` entry as permission-denied for every principal that does not
+ * hold that wildcard set. `showcase_member_default` now grants read/create/edit,
+ * so the object is in the access-matrix snapshot and a plain member holds the
+ * capability the navigation entry already claimed for them. Note where the
+ * narrowing really lives: on one OPTION (`tier: 'restricted'`, admin-only),
+ * not on the object.
  *
  * The server verdict is unit-covered by objectql
  * `rule-validator.option-visibility.test.ts`; this object is the served fixture

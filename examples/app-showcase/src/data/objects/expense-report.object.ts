@@ -40,8 +40,9 @@ export const ExpenseReport = ObjectSchema.create({
   // OWD let "any seeded persona create/edit reports without a bespoke permission
   // set" — measurably false, and the app shipped the proof: the object sat in
   // the shared navigation with no grant anywhere, so `nav-object-ungranted`
-  // warned on every build and every non-admin who clicked the entry got a 403.
-  // It worked for the seeded admin only, who holds the platform's wildcard set.
+  // warned on every build, reporting the entry as permission-denied for every
+  // principal except one holding the platform's built-in wildcard admin set.
+  // The seeded admin holds exactly that set, which is why it looked fine.
   // The grants now live on `showcase_contributor` (file/edit) and
   // `showcase_member_default` (read), and both appear in access-matrix.json.
   sharingModel: 'public_read_write',
