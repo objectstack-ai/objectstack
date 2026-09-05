@@ -11805,12 +11805,17 @@ export function bannerLines({ identity, paths = [], drift = null }) {
  * "1288 cases pass" to zero bytes of output and exit 0 — a self-test that never
  * finished, reported as one that passed.
  *
- * The mechanical probe in `scripts/measure-self-test-floor.mjs` cannot read this
- * file (its anchor matches the first `function selfTest() {` in the source, which
- * here is a FIXTURE STRING, so the injection lands inside a template literal and
- * only ever produces a SyntaxError). That is a limit of the instrument, not a
- * property of this file, and it is why the entry is hand-read there. Anchoring an
- * early return on the real definition below measures it in one run.
+ * The mechanical probe in `scripts/measure-self-test-floor.mjs` READS this file
+ * since #14963: its anchor is taken over a comment-and-literal MASK and must
+ * begin a line, so it lands on the real definition below rather than on either
+ * decoy ahead of it — that phrase quoted in a docblock, then a FIXTURE STRING.
+ * Injected there the copy PARSES and RUNS (re-measured on the merge base of
+ * this change: exit 1, `selfTest() returned without reaching its verdict`),
+ * where the unmasked anchor could only ever produce a SyntaxError. The entry is
+ * still hand-read in `ENTRY_BY_HAND` — four self-test-shaped names stand in raw
+ * source — and the NOT MEASURED its row keeps is the probe's own artefact
+ * (#15515: it writes the copy under `scripts/`, where a single-site sweep
+ * refuses the near-duplicate), not a property of this file.
  */
 /**
  * The lines ONE self-test case prints — a pure renderer, so both directions can
