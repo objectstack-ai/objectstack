@@ -91,7 +91,12 @@ async function defaultLookup(ql: any, name: string, organizationId?: string): Pr
   } catch {
     return { status: 'unknown' };
   }
-  const list = Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : null;
+  // Bare array, driven against a real engine over a real `SqlDriver` — not
+  // inferred from `IDataEngine.find`'s declared `Promise<any[]>`, which is not
+  // proof (this repo has a `find()` that resolves an envelope instead). The
+  // `{ records }` limb that stood here was dead; `engine-find-bare-array.pin.test.ts`
+  // pins this seam. A non-array is still `unknown` — never "no such row".
+  const list = Array.isArray(rows) ? rows : null;
   if (list === null) return { status: 'unknown' };
   // [#10103] This organization's own row answers; an organization-less leftover
   // is reported beside `absent` and never returned as `present`. One spelling of

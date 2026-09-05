@@ -243,6 +243,61 @@ export class MaskedValueWriteError extends Error {
   }
 }
 
+/**
+ * The DB-authored permission-set read did not answer → `500 DATABASE_ERROR`.
+ *
+ * ## Why this exists at all — a read that did not happen is not an empty answer
+ *
+ * `SecurityPlugin`'s `sys_permission_set` loader is the ENFORCEMENT plane's door
+ * to DB-authored sets. It used to map three different facts onto one output, the
+ * empty list: the read succeeded and the catalog is empty; the read THREW; the
+ * read resolved something the loader could not read. The last two are invented
+ * answers, and the invention is not benign — "this principal has no permission
+ * sets" silently withdraws grants that exist, while every request keeps looking
+ * completely normal. That is the failure the loader's own neighbouring comment
+ * calls out as the thing not to do: dropping a row "revokes standing access with
+ * no signal at the moment of loss".
+ *
+ * ## Why REFUSING is the right direction, and not this seam's own invention
+ *
+ * The consumer already declares the handling. `PermissionEvaluator
+ * .resolvePermissionSets` catches a throwing loader, keeps the request
+ * fail-closed (the unresolved sets grant nothing — unchanged), and NAMES the
+ * failure in a warn, because "without the warn, a transient DB error makes
+ * custom permission sets silently vanish and the resulting 403s are
+ * undiagnosable" (#2565). A loader that swallowed its own read failure made
+ * that warn unreachable: the diagnostic the repo had already built could never
+ * fire. Throwing restores it. It also matches the maintainer's 2026-08-11
+ * store-fault ruling for this plugin — FAIL-CLOSED, and a fault PROPAGATES;
+ * absent means absent and only absent.
+ *
+ * ⚠️ Enforcement is unchanged in both directions: before and after, a read that
+ * did not answer grants nothing. What changes is that it is now DISTINGUISHABLE
+ * from an empty catalog.
+ *
+ * `DATABASE_ERROR` comes from ADR-0112's closed vocabulary rather than a new
+ * spelling — the condition is exactly "a database operation did not answer".
+ * The status is declared for consistency with this file's other classes, not
+ * because the error is expected to reach a transport: its only consumer catches
+ * it one frame up.
+ */
+export class PermissionSetReadUnansweredError extends Error {
+  readonly code = 'DATABASE_ERROR';
+  readonly status = 500;
+  readonly statusCode = 500;
+  /** The set names the unanswered read was asked for. */
+  readonly names: readonly string[];
+  constructor(names: readonly string[], detail: string) {
+    super(
+      `[Security] The sys_permission_set read for [${names.join(', ')}] did not answer: ${detail}. `
+      + `Refusing rather than reporting an empty catalog — an unanswered read reported as "no permission `
+      + `sets" silently withdraws grants that exist while every request still looks normal.`,
+    );
+    this.name = 'PermissionSetReadUnansweredError';
+    this.names = [...names];
+  }
+}
+
 export function isPermissionDeniedError(e: unknown): e is PermissionDeniedError {
   if (!e || typeof e !== 'object') return false;
   const anyE = e as any;
