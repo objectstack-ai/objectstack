@@ -248,12 +248,12 @@ describe('a gantt typo is refused AT `gantt` through the real doors (#15469)', (
       manifest: { id: 'com.test.gantt', name: 'test', version: '1.0.0', type: 'app' },
       objects: [{
         name: 'task',
-        fields: [
-          { name: 'name', type: 'text' },
-          { name: 'start_date', type: 'date' },
-          { name: 'end_date', type: 'date' },
-          { name: 'status', type: 'text' },
-        ],
+        fields: {
+          name: { type: 'text' },
+          start_date: { type: 'date' },
+          end_date: { type: 'date' },
+          status: { type: 'text' },
+        },
         listViews: { schedule: { type: 'gantt', columns: ['name'], gantt } },
       }],
     });
