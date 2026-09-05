@@ -75,6 +75,7 @@
     "check:declared-population-live": "node scripts/check-declared-population-live.mjs --self-test && node scripts/check-declared-population-live.mjs",
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:pm-clause2-carriers": "node scripts/pm/check-clause2-carriers.mjs --self-test",
+    "check:pm-closed-card-sweep": "node scripts/pm/sweep-closed-cards.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",
     "check:pm-governed-prose": "node scripts/pm/check-governed-prose.mjs --self-test && node scripts/pm/check-governed-prose.mjs",
     "check:publish-smoke-pin": "node scripts/publish-smoke-pack.mjs --self-test",
