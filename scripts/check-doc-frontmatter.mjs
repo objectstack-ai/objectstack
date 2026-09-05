@@ -921,9 +921,10 @@ const CHILD_MODULE_GRAPH = [
  * and nothing had been found; the cases had not stopped running, they had never
  * been reachable; and the remedy the text prescribes -- hunt for a deleted case
  * -- looks for code nobody deleted. An absent prerequisite is NOT MEASURED, and
- * this repo already answers that with exit 3 `PREREQUISITE NOT MET` in eighteen
- * scripts. This gate was the one outside the convention, not the one proposing
- * it: `scripts/import-prerequisite.mjs` owns the wording, the exit code and the
+ * this repo already answers that with exit 3 `PREREQUISITE NOT MET` across the
+ * scripts that print those two words. This gate was the one outside the
+ * convention, not the one proposing it, so nothing here is designed:
+ * `scripts/import-prerequisite.mjs` owns the wording, the exit code and the
  * load-bearing "Nothing was measured" clause, and its header carries the
  * argument for the number.
  *
@@ -948,7 +949,9 @@ const CHILD_MODULE_GRAPH = [
  * branch against constructed trees without an uninstalled checkout to run on.
  *
  * @param {string} root a repo root to ask about
- * @returns {{ headline: string, detail: string[], fix: string } | null}
+ * @returns {{ pkg: string, headline: string, detail: string[], fix: string } | null}
+ *   -- `pkg` is the shape `classifyImportFailure` returns, so the shared frame's
+ *   closure step reads this verdict exactly as it reads its own.
  */
 export function docsExtractorPrerequisite(root) {
   const from = join(root, DOCS_APP);
@@ -1058,9 +1061,17 @@ export async function selfTest() {
   //
   // Placed here rather than beside battery (7), the only battery that needs it,
   // so the shared frame's load-bearing clause -- "this gate exited before
-  // running a single check" -- is literally true when it prints. 45 gates
-  // inherit that sentence verbatim; a refusal issued after six batteries had
-  // already judged would make it false in all of them.
+  // running a single check" -- is literally true when it prints. Every gate that
+  // imports that frame inherits the sentence verbatim, so a refusal issued after
+  // six batteries had already judged would make it false in all of them at once.
+  //
+  // The price is real and worth naming: on a tree where `apps/docs` is not
+  // installed, batteries (1)-(10) no longer report their own findings. That tree
+  // is a local one -- CI's `lint` job runs `pnpm install --frozen-lockfile` over
+  // the whole workspace, so this line is never reached there -- and the run still
+  // FAILS either way. What a reader loses is a finding they could not have
+  // trusted the count of; what they gain is a verdict that does not lie about
+  // what was measured.
   //
   // ⛔ This is not a weaker gate. Exit 3 is non-zero and every consumer of this
   // script treats any non-zero as failure, so nothing that used to red goes
