@@ -134,4 +134,8 @@ Custom domains and multi-hostname binding (ACME certificates, `sys_domain` table
 
 - Plan: `apps-server-sleepy-newell` (the plan this ADR crystallizes).
 - Code: `packages/runtime/src/kernel-manager.ts`, `packages/runtime/src/project-kernel-factory.ts`, `packages/runtime/src/http-dispatcher.ts`, `apps/objectos/server/bootstrap.ts`, `apps/cloud/objectstack.config.ts`.
+  *(Path note, 2026-09: four of these five are historical and deliberately unlinked — the two runtime
+  paths for the reason the Path note in §2 gives (`packages/runtime/src/cloud/` was removed by #1600,
+  `60fc50186`), and `apps/objectos/` and `apps/cloud/` because both split out to `objectstack-ai/cloud`
+  on 2026-05-21 (`617016428` / `2a1fc869a`). `http-dispatcher.ts` is the only one still in this repository.)*
 - Related guide: [Cloud vs Self-Hosted deployment](../../content/docs/deployment/index.mdx).

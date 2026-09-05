@@ -161,7 +161,7 @@ type lists):
 - `driver-sql` derives `JSON_COLUMN_TYPES` / `NUMERIC_SCALAR_TYPES` membership
   from the spec classes (DDL column choice remains the driver's decision; the
   *classification* moves to the spec).
-- `packages/verify/read-coercion.ts` grows from a 3-type probe to asserting
+- `packages/verify/src/read-coercion.ts` grows from a 3-type probe to asserting
   the full matrix: for every field type, a stored-form write round-trips to a
   stored-form read on every driver.
 

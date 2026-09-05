@@ -206,4 +206,4 @@ Stored `sys_metadata` app rows carrying `hidden: true` were written under the ol
 
 ### Anchors
 
-The two load-bearing implementation sites are pinned in `scripts/adr-anchors.json` — `packages/rest/src/rest-server.ts` (the gate) and `packages/runtime/src/domains/packages.ts` (the flip). Neither carried an anchor before, which is the recurrence shape Prime Directive #13 names: the files that implemented this ADR's §3 never said which decision they were standing on, so the next author could not have known that changing them was changing a decision.
+The two load-bearing implementation sites are pinned in `scripts/adr-anchors/` — `packages/rest/src/rest-server.ts` (the gate) and `packages/runtime/src/domains/packages.ts` (the flip). Neither carried an anchor before, which is the recurrence shape Prime Directive #13 names: the files that implemented this ADR's §3 never said which decision they were standing on, so the next author could not have known that changing them was changing a decision.
