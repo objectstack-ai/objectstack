@@ -127,7 +127,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackageDirs } from './check-console-intercept-disarm.mjs';
 
@@ -178,28 +178,19 @@ const REMEDY = `    // #13517: quiet the registry's per-item registration chatte
     // default. Enforced by scripts/check-registry-log-declared.mjs.
     env: { OS_REGISTRY_LOG: 'warn' },`;
 
-/**
- * Comments AND string/template/regex content blanked, offsets kept. Used where
- * the signal is a bare CODE position (`new SchemaRegistry(`, a property key), so
- * a spelling inside prose or a template literal can never satisfy it.
- *
- * It COMPOSES the shared scanner — `scanSource`'s `comment` and `literal` flags
- * OR-ed through `blank` — and carries no scanning logic of its own; it stays
- * local only because `js-comment-mask.mjs` publishes no comments+literals
- * projection yet, and hoisting one waits on a follow-up card.
- *
- * The imported `maskComments` (comments blanked, string/template/regex content
- * INTACT — S2/S3 read import specifiers out of it) and this mask both preserve
- * offsets, so a range brace-matched on the code mask indexes the comment mask
- * identically — which is how the level VALUE (a string, blanked by this mask)
- * is read out of a block located with it.
- */
-function maskCode(source) {
-  const { comment, literal } = scanSource(source);
-  const flags = new Uint8Array(comment.length);
-  for (let i = 0; i < flags.length; i++) flags[i] = comment[i] | literal[i];
-  return blank(source, flags);
-}
+// This gate reads TWO projections of the same source and relies on them
+// agreeing offset-for-offset: `maskCommentsAndLiterals` (the signal is a bare
+// CODE position — `new SchemaRegistry(`, a property key — so a spelling inside
+// prose or a template must never satisfy it) and `maskComments` (S2/S3 read
+// import specifiers, which ARE quoted text, out of it). Both preserve offsets,
+// so a range brace-matched on the code mask indexes the comment mask
+// identically — which is how the level VALUE (a string, blanked by the code
+// mask) is read out of a block located with it.
+//
+// The comments+literals projection used to be spelled here as a local
+// `maskCode`, "local only because js-comment-mask.mjs publishes no
+// comments+literals projection yet". It publishes one now (#15594), so this
+// gate composes it like every other projection it reads.
 
 /**
  * The level vocabulary, read from the engine's own declaration rather than
@@ -269,7 +260,7 @@ export function bootSignals(dir) {
     const comments = maskComments(raw);
     if (!s2 && S2_DEFINE_RE.test(comments)) s2 = true;
     if (!isTest(file)) continue;
-    if (!s1 && S1_REGISTRY_RE.test(maskCode(raw))) s1 = true;
+    if (!s1 && S1_REGISTRY_RE.test(maskCommentsAndLiterals(raw))) s1 = true;
     if (!s2 && S2_IMPORT_RE.test(comments)) s2 = true;
     if (!s3 && S3_EXAMPLE_RE.test(comments)) s3 = true;
   }
@@ -411,7 +402,7 @@ export function scan(root, levels = readRegistryLogLevels(root)) {
       continue;
     }
     const raw = readFileSync(join(dir, configName), 'utf8');
-    const code = maskCode(raw);
+    const code = maskCommentsAndLiterals(raw);
     const comments = maskComments(raw);
     const where = `${name}/${configName}`;
 

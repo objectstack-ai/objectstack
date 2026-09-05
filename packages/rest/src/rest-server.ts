@@ -3198,6 +3198,39 @@ export class RestServer {
     }
 
     /**
+     * [#14882] The `ResolveOptions` every metadata-document translation in
+     * this server hands `@objectstack/spec/system`: the request's locale plus
+     * the deployment's DECLARED fallback chain.
+     *
+     * The resolvers walk `requested locale → fallbackChain → authored label`,
+     * and default the chain to a literal `['en']` when a caller passes none.
+     * Every seam here used to pass none, so the stack's `i18n.fallbackLocale`
+     * never reached the chain: a `zh-CN` workspace that shipped a courtesy
+     * `en` bundle served `Entry Sheet` to a `zh-CN` request, ahead of its own
+     * authored `填报单`, because `en` was consulted before the authored label.
+     *
+     * The chain is read from the i18n service — `getFallbackLocale()`, the
+     * locale its own `t()` falls back to, which `I18nServicePlugin` receives
+     * as `fallbackLocale || defaultLocale || 'en'` from the stack config — so
+     * a bundle label and a `t()` message agree on which locale comes second.
+     * Feature-detected like `getPackagedObjectBase`: a service that does not
+     * declare a fallback (the method is optional on `II18nService`, and the
+     * core in-memory fallback has no declared one) gets NO chain, so the
+     * resolver's own default applies exactly as before — the serving layer
+     * threads a declaration, it does not invent one. ⛔ Not derived from
+     * `getDefaultLocale()`: that would decide, for a stack declaring
+     * `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'`, whether the
+     * authored label or the `en` bundle answers a `zh-CN` request — a
+     * contract question this seam must not answer on its own.
+     */
+    private static translateOptionsFor(i18n: any, locale: string): { locale: string; fallbackChain?: string[] } {
+        const fallback = i18n && typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        return typeof fallback === 'string' && fallback.length > 0
+            ? { locale, fallbackChain: [fallback] }
+            : { locale };
+    }
+
+    /**
      * An `II18nService.t`-compatible lookup for the request's environment, or
      * `undefined` when no i18n service is registered. Handed to the import
      * runner so its own messages resolve a deployment's `validation.field.*`
@@ -3273,7 +3306,10 @@ export class RestServer {
                 (item as any)?.name,
             )
             : undefined;
-        return translateMetadataDocument(metaType, item, bundle, { locale, packagedBase });
+        return translateMetadataDocument(metaType, item, bundle, {
+            ...RestServer.translateOptionsFor(i18n, locale),
+            packagedBase,
+        });
     }
 
     /**
@@ -3515,7 +3551,7 @@ export class RestServer {
         // the OUTER `{ type, items }`), so every element translates directly —
         // #5563 removed the per-element shape sniff that stood here.
         const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-            locale,
+            ...RestServer.translateOptionsFor(i18n, locale),
             packagedBase: this.packagedObjectBase(p, metaType, item?.name),
         }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
@@ -3542,7 +3578,7 @@ export class RestServer {
             resolveMetadataTypeDescription,
             resolveMetadataFormLabels,
         } = await import('@objectstack/spec/system');
-        const opts = { locale } as const;
+        const opts = RestServer.translateOptionsFor(i18n, locale);
         const entries = payload.entries.map((entry: any) => {
             if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
             const next: any = { ...entry };
@@ -9672,7 +9708,7 @@ export class RestServer {
                                         // one surface still serving the packaged
                                         // string back at a tenant who renamed it.
                                         objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
-                                            locale,
+                                            ...RestServer.translateOptionsFor(i18n, locale),
                                             packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
                                         });
                                     }
