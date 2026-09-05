@@ -205,7 +205,34 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // crossing has no missing-collection false-positive channel. Measured over
   // the shipped view corpus before crossing (0 refusals; population in the
   // #9313 PR).
-  { name: 'validateSearchableFields', runtimeTypes: ['flow', 'view'], run: validateSearchableFields },
+  // [#15495] `object` joins the two above — the SAME member, the surface it
+  // was already reading. Its first rung walks `objects[].searchableFields`
+  // (the canonical set, ADR-0061) and `objects[].listViews.*.searchableFields`
+  // (each narrowing of it), and both live on the OBJECT — the artifact
+  // Studio's app builder actually mints. #15254 crossed the suite ENTRY onto
+  // the object write door for its object-level sibling; this member's own
+  // declaration is what makes it judge the snapshot that arrives there, and
+  // without it the door read an object's `searchableFields` with nothing at
+  // all, exactly the asymmetry that card closed one key over.
+  //
+  // Safe for the #9313 reason, unchanged by the new type: this member resolves
+  // only against `stack.objects`, the one collection every per-write snapshot
+  // carries, so it has no missing-collection false-positive channel. Its
+  // `views[]` rungs simply find no `stack.views` on an object snapshot and
+  // contribute nothing — a rung that is absent, not a rung that reads dead.
+  //
+  // MEASURED before crossing, on the shipped object corpus, through the door's
+  // own shape (`RuntimeStackContext`, per-write, `stack.objects` only,
+  // evaluated differentially as `runtime-gate.ts` does): 116 objects — every
+  // `*.object.ts` under `packages/` and `examples/` (platform-objects 48,
+  // showcase 24, plugins 19, services 12, crm 6, metadata-core 5, todo 1,
+  // qa 1) — carrying 5 `searchableFields` entries across the object and
+  // list-view sets. 0 findings, so 0 false positives: precision 1.0. The zero
+  // is a fact about the corpus AND the rule: the same sweep's synthetic probe
+  // (one entry naming a field the object does not have) is refused with
+  // `searchable-field-unknown` at `error`, and the door controls in
+  // `runtime-gate.object-writes.test.ts` are that probe made permanent.
+  { name: 'validateSearchableFields', runtimeTypes: ['flow', 'view', 'object'], run: validateSearchableFields },
   // [#9257] The same reading, one axis over: a list view's `sort` is a field
   // name written in metadata, resolved against the object's declared fields. It
   // gates (`error`) because the runtime does not tolerate a bad one at all —
@@ -232,15 +259,40 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // false-positive channel. The standalone list view a Studio tenant or an
   // MCP/AI author writes goes through that door and no CLI, so a
   // build-time-only rule would never reach the author who made the typo.
-  { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view'], run: validateListViewFieldRefs },
+  // [#15495] `object` joins it for the same reason and on the same evidence as
+  // its search sibling above: the FIRST rung this member walks is an object's
+  // built-in `listViews`, and an object is what the click path authors. The
+  // three siblings walk identical rungs by construction (the note above this
+  // member says so), so crossing the field axes without this one would have
+  // left the object door judging a list view's search set and not its columns.
+  //
+  // Same missing-collection argument, and it is this member's own reason for
+  // crossing onto `view` restated one surface in: it resolves only against
+  // `stack.objects`. MEASURED over the same 116-object corpus and the same
+  // per-write differential: 105 built-in list views on 40 objects, 666
+  // field-naming positions judged (`columns`, filter keys, `grouping`,
+  // `rowColor`, `userFilters`, `filterableFields`, `hiddenFields`,
+  // `fieldOrder` and the kanban / calendar / gantt / timeline / gallery / map
+  // / tree bindings), 0 findings — precision 1.0 — against a synthetic probe
+  // column that IS refused (`list-view-field-unknown`, `error`).
+  //
+  // `validateSortableFields`, the third sibling, is deliberately NOT crossed
+  // here: it measured equally clean (0 findings over the same corpus) but its
+  // crossing is its own adjudication with its own non-vacuity control, and
+  // this card was scoped to the two axes its title names.
+  { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view', 'object'], run: validateListViewFieldRefs },
   // [#15254] The same question, one surface IN: the field-name lists the
   // OBJECT itself carries (`highlightFields`, `publicSharing.redactFields`),
   // which the three list-view members above do not walk because they are not
   // on a list view. Placed directly after them because it completes the same
   // sweep — every field name an object or its built-in views write down.
   //
-  // `runtimeTypes` is `['flow', 'object']` — the ONLY member of this suite
-  // that names `object`, and `flow` for the floor the suite keeps.
+  // `runtimeTypes` is `['flow', 'object']` — the FIRST member of this suite to
+  // name `object`, and `flow` for the floor the suite keeps. [#15495] It is no
+  // longer the only one: the two field-existence members above now name it as
+  // well, each on its own corpus measurement, so `object` is a surface with a
+  // roster rather than a single crossing (pinned by name in
+  // `runtime-gate.object-writes.test.ts`).
   //
   // It names `object` because that is the point of the member: Studio's app
   // builder mints no `view` items at all, so the list-view members have

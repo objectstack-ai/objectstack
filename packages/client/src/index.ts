@@ -884,6 +884,136 @@ function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, stri
     return { 'If-Match': String(options.ifMatch) };
 }
 
+/**
+ * An OAuth client application exactly as `@better-auth/oauth-provider` puts it
+ * on the wire: RFC 7591 §2 client metadata, snake_case, served BARE — these
+ * routes carry no ObjectStack envelope (`auth-route-ledger.ts` records all six
+ * `oauth2/*` client routes as `source: 'better-auth'`).
+ *
+ * ⚠️ **The two timestamps are RFC 7591 numbers — Unix epoch SECONDS — not
+ * `Date` and not ISO-8601 strings.** The provider converts its stored `Date`
+ * to seconds before serialising, so a `Date` never reaches the wire and there
+ * is nothing here to revive. `new Date(client_id_issued_at * 1000)` is the
+ * caller's own step.
+ *
+ * Only `client_id` and `redirect_uris` are always present: the serialiser
+ * emits every other column as `undefined` when the row does not carry it, and
+ * `JSON.stringify` then drops the key. `redirect_uris` is unconditional
+ * because the serialiser defaults it to `[]`.
+ *
+ * ⚠️ A row that carries provider `metadata` spreads those keys at the TOP
+ * level alongside the members below. They are deliberately not declared: an
+ * index signature here would erase every precise member it sits beside.
+ */
+export interface OAuthApplication {
+    /** RFC 7591 `client_id`. Always present. */
+    client_id: string;
+    /**
+     * Returned by registration ONLY. `get` strips it, and it is never on the
+     * public projection — store it at creation time or lose it.
+     */
+    client_secret?: string;
+    /**
+     * Unix epoch **seconds** at which the secret expires; `0` is RFC 7591's
+     * "never expires". Present whenever the client has a secret.
+     */
+    client_secret_expires_at?: number;
+    /** Unix epoch **seconds** at which the client was registered. */
+    client_id_issued_at?: number;
+    /** Space-delimited scope list (RFC 7591 §2), not an array. */
+    scope?: string;
+    /**
+     * Owning user. Declared `string` and not `string | null`: the serialiser
+     * folds a null column to `undefined`, so `null` is not reachable here even
+     * though the provider's own type admits it.
+     */
+    user_id?: string;
+    client_name?: string;
+    client_uri?: string;
+    logo_uri?: string;
+    contacts?: string[];
+    tos_uri?: string;
+    policy_uri?: string;
+    /** RFC 7517 JWK Set, already parsed out of its stored JSON text. */
+    jwks?: { keys: Record<string, unknown>[] };
+    jwks_uri?: string;
+    software_id?: string;
+    software_version?: string;
+    software_statement?: string;
+    /** Always present; the public projection answers an empty array. */
+    redirect_uris: string[];
+    post_logout_redirect_uris?: string[];
+    backchannel_logout_uri?: string;
+    backchannel_logout_session_required?: boolean;
+    /** Open union, as the provider declares it — the listed values autocomplete. */
+    token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt' | (string & {});
+    /** Open union, as the provider declares it — the listed values autocomplete. */
+    grant_types?: ('authorization_code' | 'client_credentials' | 'refresh_token' | (string & {}))[];
+    response_types?: 'code'[];
+    /** Not `| null`: the serialiser folds a null column to `undefined`. */
+    application_type?: 'web' | 'native';
+    disabled?: boolean;
+    skip_consent?: boolean;
+    enable_end_session?: boolean;
+    require_pkce?: boolean;
+    dpop_bound_access_tokens?: boolean;
+    subject_type?: 'public' | 'pairwise';
+    reference_id?: string;
+}
+
+/**
+ * What dynamic registration answers (HTTP **201**): an {@link OAuthApplication}
+ * plus the server-owned resources linked to the new client, when there are any.
+ *
+ * This is the one shape that carries `client_secret`.
+ */
+export interface OAuthApplicationRegistration extends OAuthApplication {
+    /** Server-owned resources linked to the registered client, when present. */
+    resources?: string[];
+}
+
+/**
+ * The PUBLIC projection of an OAuth application — what the consent screen may
+ * read about a client before the user has agreed to anything.
+ *
+ * Deliberately derived from {@link OAuthApplication} rather than restated, so
+ * the two cannot drift, and deliberately NOT `OAuthApplication` itself: the
+ * provider hand-picks these seven columns, so every other member is provably
+ * absent rather than merely optional.
+ *
+ * ⚠️ `redirect_uris` is always `[]` here. The projection does not pass the
+ * stored redirect URIs through, and the serialiser defaults the missing value
+ * to an empty array — so this member carries no information on this route and
+ * must not be read as "the client has no redirect URIs".
+ */
+export type OAuthApplicationPublic = Pick<
+    OAuthApplication,
+    | 'client_id'
+    | 'client_name'
+    | 'client_uri'
+    | 'logo_uri'
+    | 'contacts'
+    | 'tos_uri'
+    | 'policy_uri'
+    | 'redirect_uris'
+>;
+
+/**
+ * What submitting a consent decision answers — for BOTH decisions.
+ *
+ * Accepting and denying return the same shape and the same HTTP 200; the
+ * outcome is carried inside `url`, which on a denial is the client's
+ * `redirect_uri` with RFC 6749 §4.1.2.1 `error=access_denied` appended. So
+ * `redirect` is `true` on every success and is not the accept/deny signal —
+ * read `url`.
+ */
+export interface OAuthConsentResult {
+    /** Always `true`; the provider's own type declares the literal. */
+    redirect: true;
+    /** Absolute URL the caller must navigate the user agent to. */
+    url: string;
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -3033,7 +3163,7 @@ export class ObjectStackClient {
         tos_uri?: string;
         policy_uri?: string;
         metadata?: Record<string, unknown>;
-      }) => {
+      }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
         // (authenticated dynamic registration). The legacy `/oauth2/register`
@@ -3051,7 +3181,7 @@ export class ObjectStackClient {
        * Get a single OAuth application by its `client_id`.
        * GET /api/v1/auth/oauth2/get-client?client_id=...
        */
-      get: async (clientId: string) => {
+      get: async (clientId: string): Promise<OAuthApplication> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(
           `${this.baseUrl}${route}/oauth2/get-client?client_id=${encodeURIComponent(clientId)}`,
@@ -3064,7 +3194,7 @@ export class ObjectStackClient {
        * once the user has signed in). Used by the consent screen.
        * GET /api/v1/auth/oauth2/public-client?client_id=...
        */
-      getPublic: async (clientId: string) => {
+      getPublic: async (clientId: string): Promise<OAuthApplicationPublic> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(
           `${this.baseUrl}${route}/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
@@ -3093,6 +3223,22 @@ export class ObjectStackClient {
        *
        * Tokens and consents referencing the client cascade-delete via the
        * better-auth schema's `onDelete: cascade` foreign keys.
+       *
+       * ⚠️ NOT YET BOUND, and deliberately so — this is the one method of the
+       * `oauth.*` family that #14312 left at `Promise<any>`, with its
+       * `exported-any-returns.json` entry still open.
+       *
+       * Measured against a real server: the route answers **HTTP 200 with a
+       * ZERO-BYTE body** (its handler returns nothing; the provider declares
+       * it `void`) under a `content-type: application/json` header. So the
+       * `res.json()` below rejects with `SyntaxError: Unexpected end of JSON
+       * input` on every successful delete — the delete itself has already
+       * committed server-side by then.
+       *
+       * No declared return type can be honest while that call stands: any
+       * annotation here would promise a value this method never resolves.
+       * Binding it therefore needs a behaviour change, which is a decision
+       * beyond the type-narrowing this family was scoped to — see #14312.
        */
       delete: async (clientId: string) => {
         const route = this.getRoute('auth');
@@ -3113,7 +3259,7 @@ export class ObjectStackClient {
      * carries the signed authorization request that the consent endpoint
      * verifies before issuing the authorization code.
      */
-    consent: async (req: { accept: boolean; scope?: string; oauth_query?: string }) => {
+    consent: async (req: { accept: boolean; scope?: string; oauth_query?: string }): Promise<OAuthConsentResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/oauth2/consent`, {
         method: 'POST',
