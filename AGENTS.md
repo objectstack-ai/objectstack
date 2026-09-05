@@ -833,6 +833,7 @@ their output is current; the wrapper reports that each run rather than staying s
 | `apps/docs/**` | Docs Engineer | Fumadocs + Next.js, MDX |
 | `examples/**` | Example Author | Minimal, runnable, uses `defineStack` |
 | `content/docs/**` | Technical Writer | Respect auto-gen boundaries |
+| `examples/**` app metadata vs `packages/**` capability | Scope Triage | Could this be written from the metadata alone, with no knowledge of this company? No ⇒ the app; yes ⇒ the platform, and a **gap** until it does. Full rule, publication test and both anti-patterns: `.claude/skills/pm-dispatch/references/app-platform-boundary.md` |
 | `../objectui/**` (sibling repo) | Studio UI Engineer | React + Shadcn + Tailwind, dark mode default |
 
 ---
