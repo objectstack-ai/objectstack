@@ -753,11 +753,11 @@ The screen is treated as answered only when **all** of these hold:
   row id a launch carries does **not** count as naming a field: both dispatch
   doors seed it into the params bag under `recordId` and the camelCase
   `<object>Id` alias (and under an action's declared `recordIdParam`), and none
-  of those is the caller supplying a screen value. The two fixed names are
-  refused outright, and any value equal to the launched row's id is refused
-  whatever key carries it — so **a screen field named `recordId` or `<object>Id`
-  is always collected interactively**, even from a headless caller. Name a field
-  you want a headless caller to fill something else;
+  of those is the caller supplying a screen value.
+
+  **Accepted cost, precisely:** a field is never treated as caller-supplied when it is named `recordId` or `<object>Id`, or when its value equals what the bag carries under `recordId`, `<object>Id`, or `record.id` (normally the launched row's id); a required such field is therefore always collected interactively, an optional one simply does not count as answering the screen.
+
+  Name a field you want a headless caller to fill something else;
 - every `required` field has a value (an empty or blank string is no value),
   supplied by that caller. A value that came from the trigger record, from an
   earlier node or from a declared `defaultValue` does not answer a `required`
