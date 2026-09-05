@@ -197,16 +197,21 @@ describe('#14877 pin 4 — each disposition is what composeStacks actually does'
     expect(concatKeys).toContain('packages');
     expect(concatKeys).toContain('requires');
 
-    const a = raw({ manifest: manifestA, ...Object.fromEntries(concatKeys.map((key) => [key, [`${key}:a`]])) });
-    const b = raw({ manifest: manifestB, ...Object.fromEntries(concatKeys.map((key) => [key, [`${key}:b`]])) });
+    // Elements are named objects with distinct names per side: composition
+    // walks some collections' contents after the concat pass (a cross-stack
+    // `actions` name collision is refused), so the marker must be a legal,
+    // non-colliding element for every key, not a bare string.
+    const element = (key: string, side: 'a' | 'b') => ({ name: `${key}_${side}` });
+    const a = raw({ manifest: manifestA, ...Object.fromEntries(concatKeys.map((key) => [key, [element(key, 'a')]])) });
+    const b = raw({ manifest: manifestB, ...Object.fromEntries(concatKeys.map((key) => [key, [element(key, 'b')]])) });
     const composed = composeStacks([a, b]) as unknown as Record<string, unknown>;
 
     for (const key of concatKeys) {
-      expect(composed[key], `'${key}' must concatenate in stack order`).toEqual([`${key}:a`, `${key}:b`]);
+      expect(composed[key], `'${key}' must concatenate in stack order`).toEqual([element(key, 'a'), element(key, 'b')]);
     }
     // Zero warnings: every concat key hit a DECLARED rule, not the
     // undeclared-key default that happens to concatenate arrays too.
-    expect(warnSpy.mock.calls.map((c) => String(c[0]))).toEqual([]);
+    expect(warnSpy.mock.calls.map((c: readonly unknown[]) => String(c[0]))).toEqual([]);
   });
 
   it("every 'single' key passes through when identical and refuses, naming the key, when different", () => {
@@ -228,7 +233,7 @@ describe('#14877 pin 4 — each disposition is what composeStacks actually does'
     for (const key of singleKeys) {
       expect(composed[key], `'${key}' must pass through when identical`).toEqual(same[key]);
     }
-    expect(warnSpy.mock.calls.map((c) => String(c[0]))).toEqual([]);
+    expect(warnSpy.mock.calls.map((c: readonly unknown[]) => String(c[0]))).toEqual([]);
 
     // Different → refused, naming the key — one key at a time so the message is attributable.
     for (const key of singleKeys) {
