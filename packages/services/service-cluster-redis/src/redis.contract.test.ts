@@ -6,39 +6,59 @@
  * There is no live-Redis path in this file: every suite below runs on the
  * mock. (An earlier version of this header promised `RUN_REAL_REDIS=1` +
  * `REDIS_URL` and "conditional `describe.skipIf` blocks at the bottom" —
- * no such blocks were ever here, and the two names appeared nowhere in
- * this package outside that sentence.)
+ * no such blocks were ever here. Scanning the whole package, not just
+ * `src/`: `RUN_REAL_REDIS` and `skipIf` occur nowhere outside that
+ * sentence, so the escape hatch never existed. `REDIS_URL` does occur, at
+ * `README.md:42` — but as the env var a caller feeds to
+ * `createRedisClient()`, which is unrelated to any test path.)
  *
  * ## The double is one major version behind the client it doubles
  *
  * This package depends on `ioredis@^6`, while `ioredis-mock@8.13.1`
- * declares `peerDependencies: { ioredis: "^5" }` — so `pnpm install`
- * prints an unmet-peer warning for it. That gap is real, and it is
+ * declares `peerDependencies: { ioredis: "^5" }` — so a resolving
+ * `pnpm install` prints an unmet-peer warning for it (a frozen re-link
+ * prints nothing). That gap is real, and it is
  * declared here rather than closed, because it was measured to be inert
  * on the surface these suites actually drive. Measured against ioredis
  * 5.11.1 (newest release satisfying the mock's `^5` peer) and 6.0.0 (the
  * version resolved in this workspace):
  *
  *   - Every Redis command issued by this package's `src/*.ts` — get, set,
- *     del, incr, incrby, pttl, watch, unwatch, multi, exec, publish,
- *     subscribe, unsubscribe, quit, eval — carries all of its v5
- *     overloads verbatim into v6's `RedisCommander.d.ts`. `set` is a
- *     strict superset there (v6 adds the IFEQ/IFNE/IFDEQ/IFDNE tokens);
- *     nothing used here was removed or re-shaped.
- *   - v6's one substantive change reachable from this package is RESP3
- *     reply mapping, and it is opt-in: the class is declared with a
- *     `ReplyMapping` parameter defaulting to "legacy", `ChainableCommander`
- *     defaults to "resp2", and `duplicate()` with no override inherits the
- *     caller's mapping. This package never passes `replyMapping`, so every
- *     reply shape it sees is still the v5 one.
+ *     del, incr, incrby, pttl, watch, unwatch, exec, publish, subscribe,
+ *     unsubscribe, quit, eval — carries all of its v5 overloads verbatim
+ *     into v6's `RedisCommander.d.ts`. `set` is a strict superset there
+ *     (v6 adds the IFEQ/IFNE/IFDEQ/IFDNE tokens); nothing used here was
+ *     removed or re-shaped.
+ *   - `multi()` is deliberately not in that list: it is declared on
+ *     `Transaction` (`transaction.d.ts`) and appears in
+ *     `RedisCommander.d.ts` in neither version. Measured separately, it
+ *     DID change — all four overloads went from returning
+ *     `ChainableCommander` to `ChainableCommander` parameterised by a
+ *     mapping. It is inert here because the parameter defaults to "resp2"
+ *     and a client built without `replyMapping` reaches it as such: the
+ *     class defaults to "legacy" and extends `Transaction` at "resp2".
+ *     So this package's `multi()` resolves to the non-RESP3 instantiation,
+ *     and `exec()`'s own declaration is byte-identical across the pair.
+ *   - v6's one substantive change reachable from the surface these suites
+ *     drive is RESP3 reply mapping, and it is opt-in: the class is
+ *     declared with a `ReplyMapping` parameter defaulting to "legacy",
+ *     `ChainableCommander` defaults to "resp2", and `duplicate()` with no
+ *     override inherits the caller's mapping. This package never passes
+ *     `replyMapping`, so every reply shape these suites see is the v5 one.
+ *     ⚠️ Scoped deliberately: v6 also changes connection defaults that are
+ *     NOT opt-in — `protocol: 3` (no such option in v5) and `keepAlive`
+ *     0 -> 30000. Those are reached in production through
+ *     `createRedisClient()`, which no suite here calls (see below), so
+ *     they are changed-but-unexercised rather than absent.
  *   - The three `RedisOptions` keys client.ts sets — lazyConnect,
  *     maxRetriesPerRequest, enableAutoPipelining — are declared
  *     identically in both versions.
  *
  * That named set is the whole basis for the claim; it is not a statement
  * about ioredis 5 vs 6 in general. If the `ioredis` or `ioredis-mock`
- * range in package.json moves, this paragraph expires and the diff has to
- * be re-taken.
+ * range in package.json moves — OR if the version either one RESOLVES to
+ * moves under an unchanged caret range, which a lockfile bump alone will
+ * do — this paragraph expires and the diff has to be re-taken.
  *
  * ## What these suites therefore do NOT certify
  *
