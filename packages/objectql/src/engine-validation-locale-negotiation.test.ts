@@ -143,7 +143,10 @@ async function makeEngine(i18n?: { t: (k: string, l: string) => string; getLocal
  * PATH A — the authored validation message. One `PATCH`-shaped write that
  * trips `returned_needs_note`, with nothing varying but `accept-language`.
  */
-async function refusalFor(header: string, i18n: ReturnType<typeof servedI18n>): Promise<string> {
+async function refusalEnvelopeFor(
+  header: string,
+  i18n: ReturnType<typeof servedI18n>,
+): Promise<{ code: string; field: string; message: string }> {
   const ql = await makeEngine(i18n);
   const locale = preferredLocaleFromHeader(header);
   try {
@@ -153,9 +156,14 @@ async function refusalFor(header: string, i18n: ReturnType<typeof servedI18n>): 
       { context: { locale } } as any,
     );
   } catch (e: any) {
-    return String(e?.fields?.[0]?.message ?? e?.message ?? '');
+    const f = e?.fields?.[0] ?? {};
+    return { code: String(f.code), field: String(f.field), message: String(f.message ?? e?.message ?? '') };
   }
   throw new Error('expected the write to be rejected');
+}
+
+async function refusalFor(header: string, i18n: ReturnType<typeof servedI18n>): Promise<string> {
+  return (await refusalEnvelopeFor(header, i18n)).message;
 }
 
 /** PATH B — the cross-path control: a document translator, same bundle, same header. */
@@ -190,6 +198,35 @@ describe('#15757 the validation-message bridge negotiates the locale like every 
       zh: AUTHORED_ZH,               // THE DEFECT: was AUTHORED_EN
       en: AUTHORED_EN,               // control: the fallback is right
     });
+  });
+
+  /**
+   * The MACHINE-READABLE half of the envelope is what a client ACTS on, and it
+   * is untouched: the write is refused in exactly the same cases, with the same
+   * `code` and the same `field`, for every one of the four headers. Only the
+   * sentence's LANGUAGE moved — no request is newly accepted, and none is newly
+   * rejected.
+   */
+  it('changes the language of a refusal and nothing about the refusal', async () => {
+    const i18n = servedI18n(BUNDLE);
+    const envelopes = [];
+    for (const header of ['zh-CN', 'zh-CN,zh;q=0.9', 'zh', 'en', 'de']) {
+      envelopes.push(await refusalEnvelopeFor(header, i18n));
+    }
+    // Every header is refused, and refused identically where it counts.
+    expect(envelopes.map((e) => e.code)).toEqual(
+      ['rule_violation', 'rule_violation', 'rule_violation', 'rule_violation', 'rule_violation'],
+    );
+    expect(envelopes.map((e) => e.field)).toEqual(
+      ['return_note', 'return_note', 'return_note', 'return_note', 'return_note'],
+    );
+    // A record that satisfies the rule is still accepted, in every locale.
+    for (const locale of ['zh-CN', 'zh', 'en', 'de']) {
+      const ql = await makeEngine(i18n);
+      await expect(
+        ql.update('duly_duty', { id: 'r1', status: 'returned', return_note: 'why' }, { context: { locale } } as any),
+      ).resolves.toBeDefined();
+    }
   });
 
   /**
