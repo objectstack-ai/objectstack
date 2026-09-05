@@ -912,6 +912,8 @@ os migrate summary-nulls                    # Dry run: full report, writes nothi
 os migrate summary-nulls --apply            # Recompute and write (prompts)
 os migrate summary-nulls --apply --yes --json   # CI / scripts
 os migrate summary-nulls --object project       # Restrict to one object (repeatable)
+os migrate summary-nulls --apply --recompute-undefined-on-empty customer.last_follow_up_at
+                                                # Also fill a min/max/avg column you know was never computed
 ```
 
 **Each affected row is recomputed, not set to 0.** A pre-upgrade parent that
@@ -920,9 +922,25 @@ them — writing 0 there would replace a missing value with a wrong one, and the
 next child write would change it back. The report separates the two: `N NULL
 row(s), M with real child data`.
 
-`min` / `max` / `avg` are **never touched**. They are undefined on an empty set,
-so a `null` there is the correct reading of "no child rows"; the report lists
-them as deliberately skipped.
+`min` / `max` / `avg` are **never touched by default**. They are undefined on an
+empty set, so a `null` there is the correct reading of "no child rows"; the
+report lists them as deliberately skipped.
+
+The one case that reading gets wrong is a summary field **declared after its
+parent rows already existed**: nothing has ever computed it — the insert-time
+seed is create-time, the recompute runs only on a child write — so every
+pre-existing parent reads `NULL` whether or not it has children, and a flow
+built on the column matches nothing. The migration cannot tell that `NULL`
+from a legitimate one; the operator (or the publish path) who just declared
+the column can. Name it with `--recompute-undefined-on-empty object.field`
+(repeatable) and it is walked like a `count`: every `NULL` parent is recomputed
+through the same aggregate the engine writes, a parent with no child rows keeps
+`NULL` (that is the aggregate's own value, and it is neither counted nor
+written), and the report lists the column under "recomputed on request". A
+name that is not a roll-up this run walks — a typo, a plain field, or an object
+`--object` left out — is refused before any row is read. Naming a `count` /
+`sum` is accepted and changes nothing, so a caller can pass every column it
+just declared.
 
 Idempotent — every write turns a `NULL` into a number, so a second run finds
 nothing and writes nothing. Re-running until the report says zero *is* the
