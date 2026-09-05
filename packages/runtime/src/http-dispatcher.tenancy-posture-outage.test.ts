@@ -14,8 +14,8 @@
  *   2. the dispatcher's `getService` facade — `resolveService`, a capability
  *      PROBE whose fallback chain absorbs every rejection at every step and
  *      hands back `undefined`, so the resolver's catch was never even reached;
- *   3. `resolveRequestScope`'s `catch { /* anonymous */ }` around the whole
- *      identity step.
+ *   3. `resolveRequestScope`'s bare `catch` ("anonymous request") around the
+ *      whole identity step.
  *
  * With all three in place a tenancy service that was REGISTERED AND FAILED TO
  * BUILD read as "no wall": both posture-conditional API-key refusals were
