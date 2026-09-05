@@ -309,18 +309,25 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
   });
 
   it('a READONLY lookup is not the caller\'s to answer for', async () => {
-    // By construction, not by exemption: `stripReadonlyFields` /
-    // `stripReadonlyForInsert` remove a non-system caller's value from a
-    // readonly field before the write, so anything still there was written by
-    // the PLATFORM — outside this check's stated scope.
+    // By construction, not by exemption: `stripReadonlyFields` removes a
+    // non-system caller's value from a readonly field before the write — on
+    // BOTH write paths since #14147 — so anything still there was written by
+    // the PLATFORM, outside this check's stated scope.
     //
     // The real case that found this: `sys_metadata_history.recorded_by` is a
     // `lookup('sys_user', { readonly: true })` the metadata repository fills
     // with `actor ?? 'system'` — a SENTINEL STRING, not a user id — on a write
     // that carries no `isSystem`. Checking it rejected ordinary metadata
     // authoring (package create / publish / clone) in the dogfood gate.
+    //
+    // [#14147] The fixture is `sys_`-NAMED, as the real object is, and that is
+    // now load-bearing rather than cosmetic: the create-side static strip
+    // leaves platform objects to their own field guards (ADR-0086 / #3004), so
+    // a `sys_` row is exactly where a readonly lookup still HOLDS a
+    // caller-supplied value when this check runs. The author-object half is
+    // the sibling case below.
     engine.registry.registerObject({
-      name: 'ref_history',
+      name: 'sys_ref_history',
       label: 'History',
       fields: {
         id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
@@ -333,9 +340,36 @@ describe('[#4441] a lookup id that resolves to nothing is refused', () => {
     } as any);
 
     const row: any = await engine.insert(
-      'ref_history', { note: 'n', recorded_by: 'system' }, { context: userCtx } as any,
+      'sys_ref_history', { note: 'n', recorded_by: 'system' }, { context: userCtx } as any,
     );
     expect(row.recorded_by).toBe('system');
+  });
+
+  it('[#14147] on an AUTHOR object the same value is STRIPPED, so the check never sees it', async () => {
+    // The same conclusion — "not the caller's to answer for" — reached one step
+    // EARLIER. Before #14147 a non-system `engine.insert` wrote the readonly
+    // lookup verbatim and this narrowing was the only thing standing between
+    // that value and a `reference_not_found` refusal; now the create-side strip
+    // takes it first, exactly as the update path always did. Both halves are
+    // pinned because they fail differently: a lost narrowing REJECTS a platform
+    // write, a lost strip ACCEPTS a forged one.
+    engine.registry.registerObject({
+      name: 'ref_audit_note',
+      label: 'Audit Note',
+      fields: {
+        id: { name: 'id', label: 'ID', type: 'text' as const, primaryKey: true },
+        note: { name: 'note', label: 'Note', type: 'text' as const },
+        recorded_by: {
+          name: 'recorded_by', label: 'Recorded By',
+          type: 'lookup' as const, reference: 'ref_permission_set', readonly: true,
+        },
+      },
+    } as any);
+
+    const row: any = await engine.insert(
+      'ref_audit_note', { note: 'n', recorded_by: 'ps_does_not_exist' }, { context: userCtx } as any,
+    );
+    expect(row.recorded_by, 'stripped before the reference check, not refused by it').toBeUndefined();
   });
 
   it('…and the issue\'s own fields are NOT readonly, so they stay enforced', () => {

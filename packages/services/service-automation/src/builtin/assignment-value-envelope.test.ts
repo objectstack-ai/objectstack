@@ -38,8 +38,20 @@ import {
   isExpressionEnvelopeShaped,
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
 } from '@objectstack/spec/automation';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
+import { ExpressionEngine } from '@objectstack/formula';
 import { AutomationEngine } from '../engine.js';
 import { registerLogicNodes } from './logic-nodes.js';
+
+/** The thrown error, so a pin can assert its message substance rather than `toThrow()` alone. */
+function catchError(fn: () => unknown): Error {
+  try {
+    fn();
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error('expected the call to throw');
+}
 
 function createTestLogger() {
   return {
@@ -80,6 +92,11 @@ const MALFORMED: ReadonlyArray<{ label: string; envelope: Record<string, unknown
   // it. Its presence in this list IS the argument for composing both halves.
   { label: 'no `source` at all', envelope: { dialect: 'cel' } },
   { label: 'an empty `source`', envelope: { dialect: 'cel', source: '' } },
+  // The two shapes the persistence contract accepts while no engine can run
+  // them, refused since #15430 by the spec's evaluated-slot rule — here the
+  // shape half catches them too, so they never reach the run that faulted.
+  { label: 'an `ast`-only envelope', envelope: { dialect: 'cel', ast: { op: 'value' } } },
+  { label: 'a whitespace-only `source`', envelope: { dialect: 'cel', source: '   ' } },
   { label: 'a non-`cel` dialect', envelope: { dialect: 'template', source: 'Hello {name}' } },
   // The one the CEL half catches and the shape half cannot.
   { label: 'CEL that does not parse', envelope: { dialect: 'cel', source: 'rows.map(r,' } },
@@ -240,46 +257,59 @@ describe('assignment value envelope — one notion of malformed (#15137)', () =>
     expect(result.error).toContain('rows.map(r, r.subject)');
   });
 
-  it('an `ast`-only envelope faults with the engine\'s own prescription, not a wrong value', () => {
-    // `ExpressionSchema` accepts `source`-or-`ast`, so this passes both
-    // validators; the CEL engine evaluates `source` only. Refused loudly at the
-    // one layer that can see it. (Reported upward as a spec-lane finding — the
-    // contract accepts a shape no engine evaluates.)
-    expect(() => engine.evaluateValueEnvelope({ dialect: 'cel', ast: { op: 'value' } }, new Map(), 'assignments.digest'))
-      .toThrow(/AST-only evaluation not yet supported/);
+  it('an `ast`-only envelope is refused at the shape door with the spec\'s own sentence — the engine\'s fault is no longer reachable (#15430)', () => {
+    // FLIPPED. `ExpressionSchema` accepts `source`-or-`ast`, but this slot is
+    // EVALUATED: `AssignmentExpressionValueSchema` composes the spec's
+    // `EvaluatedExpressionSchema`, which requires a non-blank `source` — what
+    // the CEL engine actually evaluates. So the shape half refuses it, located
+    // at `source`, and `evaluateValueEnvelope` (which runs that same shape
+    // pass first) never hands it to the engine. The engine's own arm — "AST-only
+    // evaluation not yet supported; persist `source`" — is reachable only by
+    // calling `ExpressionEngine.evaluate` directly, bypassing every schema;
+    // pinned below as defence in depth, not as a path metadata can take.
+    const error = catchError(() => engine.evaluateValueEnvelope({ dialect: 'cel', ast: { op: 'value' } }, new Map(), 'assignments.digest'));
+    expect(error.message).toContain('assignments.digest');
+    expect(error.message).toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+    expect(error.message).toContain('`source`: ' + EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    expect(error.message).not.toContain('AST-only evaluation not yet supported');
+  });
+
+  it('defence in depth — the engine itself, reached with no schema in front of it, still refuses an `ast`-only envelope', () => {
+    // Not a path authored metadata can take (both validators and the executor
+    // run the schema first); kept so the last layer never silently answers a
+    // value if a future caller bypasses the door.
+    const result = ExpressionEngine.evaluate({ dialect: 'cel', ast: { op: 'value' } }, {});
+    // `EvalResult` is a discriminated union — `error` exists only on the
+    // `ok: false` arm, so narrow on the discriminant before reading it.
+    if (result.ok) throw new Error('expected the engine to refuse an `ast`-only envelope, got a value');
+    expect(result.error.message).toContain('AST-only evaluation not yet supported');
   });
 
   /**
-   * The BOUND of the property above, pinned rather than papered over (found by
-   * the #15137 contract review).
+   * FLIPPED by #15430 — this used to pin the BOUND of the property: a
+   * whitespace-only `source` passed `ExpressionSchema.source`'s `min(1)`,
+   * `validateExpression` trimmed it to empty and answered `ok: true` ("not
+   * authored"), the flow REGISTERED, and the run faulted because the CEL engine
+   * parses the string untrimmed. The file said the fix did not belong here (a
+   * trim rule of the engine's own would be a third notion of "malformed"), but
+   * where the shape rule is declared — and that is where it landed: the spec's
+   * `EvaluatedExpressionSchema` requires a non-blank `source` on an evaluated
+   * slot, with the engine's own notion of blank (`.trim()`).
    *
-   * A whitespace-only `source` REGISTERS — `ExpressionSchema.source` is
-   * `z.string().min(1)`, so `'   '` passes the shape rule, and
-   * `validateExpression` trims it to empty and answers `ok: true` ("not
-   * authored") — and then faults at run time, because the CEL engine parses the
-   * string untrimmed.
-   *
-   * So the true statement of the property is narrower than "a registered flow
-   * can never fault": registration and evaluation refuse the same set THE TWO
-   * PUBLISHED VALIDATORS DEFINE, and the shapes both of them accept while no
-   * engine can run them fault loudly at run time rather than assigning a wrong
-   * value. Same seam class as the `ast`-only case above, tracked in the same
-   * finding (#15430).
-   *
-   * ⛔ Not fixable here by adding a trim rule of the engine's own: a third,
-   * locally-invented notion of "malformed" is exactly what this file exists to
-   * prevent. The fix belongs where the shape rule is declared.
+   * So the property is now the unqualified one: registration and evaluation
+   * refuse the same set, and that set includes every shape no engine can run.
+   * The refusal is the SHAPE half's, at the value's own `source`, led by the
+   * published sentence — and the same call refuses it at run time (the
+   * `it.each(MALFORMED)` pin above holds both halves for this envelope too).
    */
-  it('a whitespace-only `source` registers and then faults loudly — the bound of the property (#15430)', async () => {
+  it('a whitespace-only `source` is refused at registration by the schema, located at the value\'s `source` (#15430)', () => {
     const flow = assignmentFlow({ assignments: { digest: { dialect: 'cel', source: '   ' } } });
-    expect(() => engine.registerFlow('assign_flow', flow), 'both validators accept it').not.toThrow();
-
-    const result = await engine.execute('assign_flow', {} as any);
-    expect(result.success).toBe(false);
-    // Loud, located and carrying the source — never a silent `undefined` in the
-    // variable, which is the property that does hold for every shape.
-    expect(result.error).toContain('assignments.digest');
-    expect(result.error).toContain('failed to evaluate as CEL');
+    const error = catchError(() => engine.registerFlow('assign_flow', flow));
+    expect(error.message).toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+    expect(error.message).toContain('`source`: ' + EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    expect(error.message).toContain('assignments.digest');
+    // Not the engine's parse fault any more — the run never happens.
+    expect(error.message).not.toContain('failed to evaluate as CEL');
   });
 });
 
