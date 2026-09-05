@@ -228,7 +228,13 @@ function kernelFor(wiring: Wiring): ObjectKernel | undefined {
 }
 
 interface Harness {
-  app: { fetch: (req: Request) => Promise<Response> };
+  /**
+   * The raw Hono app, typed off the adapter's own accessor rather than
+   * restated as a narrower `{ fetch }` shape — Hono's `fetch` takes an env and
+   * an execution context after the request, so a hand-written signature is a
+   * type error, not a simplification.
+   */
+  app: ReturnType<HonoHttpServer['getRawApp']>;
   /** Every datasource row the fixture holds, in insertion order. */
   store: () => DatasourceRow[];
   service: ReturnType<typeof createServiceDouble>;
