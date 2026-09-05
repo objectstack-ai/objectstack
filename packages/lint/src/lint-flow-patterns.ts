@@ -162,6 +162,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
 import { stripRegions, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
+import { recordsOf } from './object-graph.js';
 
 export interface FlowLintFinding {
   where: string;
@@ -183,12 +184,6 @@ export interface FlowLintFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  return [];
-}
 
 /** Extract the raw predicate source from a `condition` (string or Expression envelope). */
 function conditionSource(raw: unknown): string {
@@ -1380,7 +1375,7 @@ function scanTryCatchWithoutCatch(
  */
 export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
-  for (const flow of asArray(stack.flows)) {
+  for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
     const edges = Array.isArray(flow.edges) ? (flow.edges as AnyRec[]) : [];
