@@ -266,7 +266,7 @@ describe('NoSQL Driver Protocol', () => {
           },
         ],
         options: {
-          timeout: 10000,
+          timeoutMs: 10000,
         },
       };
       
@@ -364,5 +364,30 @@ describe('NoSQL Driver Protocol', () => {
       expect(NoSQLTransactionOptionsSchema.parse({ readConcern: 'snapshot' })).toBeTruthy();
       expect(NoSQLTransactionOptionsSchema.parse({ readConcern: 'linearizable' })).toBeTruthy();
     });
+  });
+});
+
+// #15680 (stack card 5/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. The shape is not strict, so without the
+// tombstone a query authored with `timeout` would have run with NO deadline at
+// all — the failure a driver timeout exists to prevent — and reported nothing.
+describe('NoSQLQueryOptions.timeout carries its unit (#15680)', () => {
+  it('REFUSES the retired `timeout` with the rename in the message', () => {
+    const result = NoSQLQueryOptionsSchema.safeParse({ timeout: 5000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`NoSQLQueryOptions.timeout` was renamed to `timeoutMs`');
+  });
+
+  it('accepts `timeoutMs` at the same magnitude and still refuses a non-positive one', () => {
+    expect(NoSQLQueryOptionsSchema.parse({ timeoutMs: 5000 }).timeoutMs).toBe(5000);
+    expect(NoSQLQueryOptionsSchema.safeParse({ timeoutMs: 0 }).success).toBe(false);
+  });
+
+  it('leaves the neighbouring `batchSize` alone — it is a COUNT of documents, not a duration', () => {
+    expect(NoSQLQueryOptionsSchema.parse({ batchSize: 100 }).batchSize).toBe(100);
   });
 });

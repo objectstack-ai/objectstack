@@ -112,3 +112,35 @@ describe('TursoDriverSpec', () => {
     expect(Object.keys(json.properties ?? {})).toContain('url');
   });
 });
+
+// #15680 (stack card 5/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()` — this shape IS `strictObject`, so a bare throw
+// assertion passes identically on the unrecognized-key error, which is precisely
+// the error that cannot carry a FROM → TO mapping.
+describe('TursoConfig.timeout carries its unit (#15680)', () => {
+  const base = { url: 'libsql://app.turso.io' };
+
+  it('REFUSES the retired `timeout` with the rename in the message', () => {
+    const result = TursoConfigSchema.safeParse({ ...base, timeout: 30000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`turso config.timeout` was renamed to `timeoutMs`');
+  });
+
+  it('accepts `timeoutMs` at the same magnitude and still refuses a non-positive one', () => {
+    expect(TursoConfigSchema.parse({ ...base, timeoutMs: 30000 }).timeoutMs).toBe(30000);
+    expect(TursoConfigSchema.safeParse({ ...base, timeoutMs: 0 }).success).toBe(false);
+  });
+
+  it('leaves `sync.intervalSeconds` alone — it already carried its unit, and is the neighbour that made the bare `timeout` a collision', () => {
+    const parsed = TursoConfigSchema.parse({
+      ...base,
+      syncUrl: 'libsql://replica.turso.io',
+      sync: { intervalSeconds: 60 },
+    });
+    expect(parsed.sync!.intervalSeconds).toBe(60);
+  });
+});

@@ -29,6 +29,10 @@ import {
   HealthCheckConfigSchema,
   CircuitBreakerConfigSchema,
   ConnectorHealthSchema,
+
+  // Trigger (declared-but-unread, #3197 — the pin block at the bottom judges
+  // its unit-carrying key name, not a runtime it does not have)
+  ConnectorTriggerSchema,
   
   // Types
   type Connector,
@@ -1471,5 +1475,45 @@ describe('[#14676] ADR-0087 registration', () => {
     // the chain has a seam) — a chain-replay red on its fixture reads as
     // "not wired", never as "transform broken" (playbook §3).
     expect(step.conversionIds).toContain('connector-error-mapping-removed');
+  });
+});
+
+// #15680 (stack card 5/6 of #14478) — ruling B. Both old spellings are
+// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. Neither shape is strict, so without the
+// tombstones the old keys would be STRIPPED in silence: a breaker would fall
+// back to its 60-second default window while the author believed they had
+// widened it, and a polling trigger would lose its cadence entirely.
+describe('connector durations carry their unit (#15680)', () => {
+  it('REFUSES the retired `monitoringWindow` with the rename in the message', () => {
+    const result = CircuitBreakerConfigSchema.safeParse({ enabled: true, monitoringWindow: 120000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'monitoringWindow');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs`');
+  });
+
+  it('REFUSES the retired trigger `interval` with the rename in the message', () => {
+    const result = ConnectorTriggerSchema.safeParse({
+      key: 'new_invoice', label: 'New invoice', type: 'polling', interval: 60,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'interval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`ConnectorTrigger.interval` was renamed to `intervalSeconds`');
+  });
+
+  it('accepts both new spellings and keeps the 60000 breaker default', () => {
+    expect(CircuitBreakerConfigSchema.parse({ enabled: true }).monitoringWindowMs).toBe(60000);
+    expect(CircuitBreakerConfigSchema.parse({ enabled: true, monitoringWindowMs: 120000 }).monitoringWindowMs).toBe(120000);
+    expect(ConnectorTriggerSchema.parse({
+      key: 'new_invoice', label: 'New invoice', type: 'polling', intervalSeconds: 60,
+    }).intervalSeconds).toBe(60);
+  });
+
+  it('leaves `resetTimeoutMs` alone — it already carried its unit, and is the neighbour that made the bare `monitoringWindow` a collision', () => {
+    expect(CircuitBreakerConfigSchema.parse({ enabled: true }).resetTimeoutMs).toBe(30000);
   });
 });
