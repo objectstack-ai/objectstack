@@ -66,7 +66,12 @@ export class ObjectKernel {
     private pluginLoader: PluginLoader;
     private config: ObjectKernelConfig;
     private startedPlugins: Set<string> = new Set();
-    private pluginStartTimes: Map<string, number> = new Map();
+    /**
+     * Plugin name -> elapsed milliseconds that plugin's `start()` took. These
+     * are DURATIONS, never start instants; the old spelling `pluginStartTimes`
+     * said the opposite of what it held.
+     */
+    private pluginStartupDurations: Map<string, number> = new Map();
     private shutdownHandlers: Array<() => Promise<void>> = [];
     /**
      * Name of the plugin whose init() is currently executing (Phase 1 is
@@ -534,10 +539,23 @@ export class ObjectKernel {
     }
 
     /**
+     * Per-plugin startup durations: plugin name -> elapsed milliseconds that
+     * plugin's `start()` took. Not start instants -- see
+     * {@link PluginStartupResult.duration}.
+     */
+    getPluginStartupDurations(): Map<string, number> {
+        return new Map(this.pluginStartupDurations);
+    }
+
+    /**
      * Get plugin startup metrics
+     *
+     * @deprecated Renamed to {@link ObjectKernel.getPluginStartupDurations},
+     * which states what the values are. Retained as a delegating alias so
+     * nothing has to change on this release; slated for removal.
      */
     getPluginMetrics(): Map<string, number> {
-        return new Map(this.pluginStartTimes);
+        return this.getPluginStartupDurations();
     }
 
     /**
@@ -684,13 +702,16 @@ export class ObjectKernel {
 
             const duration = Date.now() - startTime;
             this.startedPlugins.add(plugin.name);
-            this.pluginStartTimes.set(plugin.name, duration);
+            this.pluginStartupDurations.set(plugin.name, duration);
             
             this.logger.debug(`Plugin started: ${plugin.name} (${duration}ms)`);
             
             return {
                 success: true,
                 pluginName: plugin.name,
+                duration,
+                // Deprecated alias carrying the same elapsed value; see
+                // PluginStartupResult.startTime.
                 startTime: duration,
             };
         } catch (error) {
@@ -701,6 +722,9 @@ export class ObjectKernel {
                 success: false,
                 pluginName: plugin.name,
                 error: error as Error,
+                duration,
+                // Deprecated alias carrying the same elapsed value; see
+                // PluginStartupResult.startTime.
                 startTime: duration,
                 timedOut: isTimeout,
             };

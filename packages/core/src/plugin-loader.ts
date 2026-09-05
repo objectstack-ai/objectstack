@@ -91,6 +91,26 @@ export interface PluginLoadResult {
 export interface PluginStartupResult {
     success: boolean;
     pluginName: string;
+    /**
+     * Elapsed milliseconds the plugin's `start()` took.
+     *
+     * Named for the member the spec contract this result implements already
+     * declares -- `PluginStartupResultSchema.duration` in
+     * `packages/spec/src/kernel/startup-orchestrator.zod.ts` ("Time taken to
+     * start the plugin in milliseconds") -- and matching `PluginLoadResult.loadTime`
+     * above: the same `Date.now() - startTime` computation under a name that
+     * does not lie.
+     */
+    duration?: number;
+    /**
+     * The same elapsed milliseconds as {@link PluginStartupResult.duration}.
+     *
+     * @deprecated Misnamed: this has never held an instant, so a reader who
+     * correctly takes `startTime` for one and writes `Date.now() - result.startTime`
+     * gets an age near the epoch instead of a wait. Read `duration` instead.
+     * Still populated so nothing has to change on this release (ADR-0087 L1 --
+     * the old shape keeps working while the fleet moves); slated for removal.
+     */
     startTime?: number;
     error?: Error;
     timedOut?: boolean;

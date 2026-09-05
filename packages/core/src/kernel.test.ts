@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectKernel } from './kernel';
 import { ServiceLifecycle, PluginMetadata } from './plugin-loader';
+import type { PluginStartupResult } from './plugin-loader';
 import type { Plugin, PluginContext } from './types';
 import { recordGuards, stillPinningTheLoop } from '@objectstack/refd-timer-testkit';
 
@@ -581,6 +582,73 @@ describe('ObjectKernel', () => {
             expect(metrics.has('no-start')).toBe(false);
 
             await kernel.shutdown();
+        });
+
+        // These two pin the MEANING of the number, not merely that one is
+        // present. The result member carrying it was spelled `startTime` while
+        // holding `Date.now() - start`, so a reader who correctly took it for an
+        // instant and wrote `Date.now() - result.startTime` got an age near the
+        // epoch. `toBeGreaterThan(0)` cannot tell the two readings apart -- an
+        // epoch-millisecond instant passes it too. A ceiling can: any instant
+        // today is ~1.7e12, orders of magnitude above any plugin's start().
+        const INSTANT_FLOOR_MS = 1_000_000_000; // ~11.5 days as a duration; well below any real epoch-ms instant
+
+        it('getPluginStartupDurations reports elapsed durations, not start instants', async () => {
+            const plugin: Plugin = {
+                name: 'timed-plugin',
+                version: '1.0.0',
+                init: async () => {},
+                start: async () => {
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                },
+            };
+
+            await kernel.use(plugin);
+            await kernel.bootstrap();
+
+            const durations = kernel.getPluginStartupDurations();
+            const value = durations.get('timed-plugin');
+
+            expect(value).toBeGreaterThan(0);
+            expect(value).toBeLessThan(INSTANT_FLOOR_MS);
+            // The deprecated alias is the same map, so it must agree.
+            expect(kernel.getPluginMetrics().get('timed-plugin')).toBe(value);
+
+            await kernel.shutdown();
+        });
+
+        it('PluginStartupResult.duration is an elapsed duration on both the success and the failure path', async () => {
+            const callStart = (meta: PluginMetadata): Promise<PluginStartupResult> =>
+                (kernel as unknown as {
+                    startPluginWithTimeout(p: PluginMetadata): Promise<PluginStartupResult>;
+                }).startPluginWithTimeout(meta);
+
+            const ok = await callStart({
+                name: 'ok-plugin',
+                version: '1.0.0',
+                start: async () => {
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                },
+            } as PluginMetadata);
+
+            expect(ok.success).toBe(true);
+            expect(ok.duration).toBeGreaterThan(0);
+            expect(ok.duration).toBeLessThan(INSTANT_FLOOR_MS);
+            // The deprecated alias carries the same elapsed value, not an instant.
+            expect(ok.startTime).toBe(ok.duration);
+
+            const failed = await callStart({
+                name: 'failing-plugin',
+                version: '1.0.0',
+                start: async () => {
+                    throw new Error('boom');
+                },
+            } as PluginMetadata);
+
+            expect(failed.success).toBe(false);
+            expect(failed.duration).toBeGreaterThanOrEqual(0);
+            expect(failed.duration).toBeLessThan(INSTANT_FLOOR_MS);
+            expect(failed.startTime).toBe(failed.duration);
         });
     });
 
