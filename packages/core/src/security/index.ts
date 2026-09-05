@@ -75,11 +75,19 @@ export {
   type ResourceUsage,
 } from './sandbox-runtime.js';
 
-export {
-  PluginSecurityScanner,
-  type ScanTarget,
-  type SecurityIssue,
-} from './security-scanner.js';
+// `./security-scanner.js` was RETIRED in #14919 (ADR-0049 enforce-or-remove).
+// `PluginSecurityScanner` and its two companion types (`ScanTarget`,
+// `SecurityIssue`) shipped on this barrel and on `@objectstack/core`'s root
+// barrel with zero constructors anywhere in this repo, in objectui at the
+// pinned sha, or in any runtime, CLI or plugin-loader path -- the only one
+// ever written stood in `packages/core/examples/phase2-integration.ts`, a
+// demonstration. Four of its five scan methods could not return an issue at
+// all, and the fifth read a vulnerability database whose
+// only writer (`addVulnerability`) had zero callers -- so a `scan()` answered
+// `status: 'passed'` for every plugin ever handed to it, including a malicious
+// one. Plugin security scanning is NOT a platform capability; there is no
+// replacement export. Repairing it -- a real vulnerability scanner -- is a
+// feature with a design surface, and was refused rather than deferred.
 
 export {
   API_KEY_PREFIX,

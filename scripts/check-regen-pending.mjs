@@ -928,10 +928,40 @@ function fixtureSelfTest() {
       'node -e "console.error(\'stub-gate: PREREQUISITE NOT MET — the dependency yaml is not installed\'); process.exit(3)"',
   };
 
+  /**
+   * The pnpm the fixture's stub gate runs under, pinned to the repository's own.
+   *
+   * `runCheck` spawns every gate with `pnpm -s`, and CI reaches pnpm through
+   * Corepack (`.github/actions/setup-pnpm`). Corepack resolves the version from
+   * the project it is invoked IN, so a fixture carrying no `packageManager` field
+   * does not inherit this repo's pin and does not get "whatever the machine has"
+   * either — it gets the registry's `latest` dist-tag, re-resolved on every run.
+   * That made this throwaway fixture a canary for whatever pnpm major npm had
+   * published that morning: the day `latest` moved to a major whose CLI rejects
+   * `-s`, the "clean" stub exited 2 without ever running, and every case that
+   * reads the stub's own exit code went red on a tree nobody had touched. It is
+   * the FIXTURE that was unpinned, never production — the real hook runs `pnpm -s`
+   * in this repository, which is pinned.
+   *
+   * Read off the ROOT manifest rather than written as a literal, so the fixture
+   * cannot drift from the pnpm this repo pins. The case below asserts both halves,
+   * because a missing field on either side would compare equal and silently
+   * restore the bug.
+   */
+  const rootPackageManager = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).packageManager;
+
   const runHook = (gate, args = []) => {
     writeFileSync(
       join(dir, 'package.json'),
-      `${JSON.stringify({ name: 'os-regen-fixture', scripts: { 'check:spec-changes': GATE_STUBS[gate] } }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          name: 'os-regen-fixture',
+          packageManager: rootPackageManager,
+          scripts: { 'check:spec-changes': GATE_STUBS[gate] },
+        },
+        null,
+        2,
+      )}\n`,
     );
     // `spawnSync`, not `execFileSync`: every message this script prints goes to
     // STDERR, which execFileSync returns only on the failure path — capturing the
@@ -1000,6 +1030,20 @@ function fixtureSelfTest() {
     writeFileSync(marker, `${pendingPath}\n`);
 
     const merge = runHook('stale');
+
+    // The fixture's OWN prerequisite, asserted before any verdict is read out of a
+    // gate's exit code: every case below spawns `pnpm -s` inside this directory, so
+    // an unpinned fixture grades the registry's `latest` pnpm instead of the one
+    // this repository pins, and the failure lands on cases that have nothing to do
+    // with pnpm. ⛔ Not `=== rootPackageManager` on its own: were the root manifest
+    // to lose the field, both sides would read `undefined`, this case would pass,
+    // and the fixture would be back to resolving `latest` in silence.
+    const fixtureManifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    check("the fixture pins the ROOT's packageManager, so Corepack cannot resolve `latest`",
+      typeof rootPackageManager === 'string'
+        && /^pnpm@\d/.test(rootPackageManager)
+        && fixtureManifest.packageManager === rootPackageManager);
+
     check('a MERGE commit with stale artifacts is ACCEPTED as a deferral', merge.code === 0);
     check('  …and says so — "DEFERRED", not a silent pass', /DEFERRED to the next commit/.test(merge.out));
     check('  …and points at the sanctioned procedure, never at skipping the hook',
