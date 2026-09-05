@@ -535,7 +535,18 @@ function pushDerived(
   source: ExpectedEntry['source'],
   extra?: EntryScope,
 ): void {
-  out.push({ path, sourceValue: seed, ...authoredEvidence(authored), source, ...extra });
+  const evidence = authoredEvidence(authored);
+  // `inline` is spelled out rather than spread, so a derived entry keeps the
+  // key present-with-`undefined` it has always had — `toMatchObject` in the
+  // existing pins reads the property's PRESENCE, not just its value.
+  out.push({
+    path,
+    sourceValue: seed,
+    inline: evidence.inline,
+    ...(evidence.inlineLocales ? { inlineLocales: evidence.inlineLocales } : {}),
+    source,
+    ...extra,
+  });
 }
 
 /**
