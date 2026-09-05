@@ -27,13 +27,39 @@ import { describe, it, expect } from 'vitest';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { isSubscribableChannel } from '@objectstack/spec/api';
 import type { IRealtimeService } from '@objectstack/spec/contracts';
-// The occupant a stock boot really registers (`RealtimeServicePlugin.init`).
-// Imported rather than re-described: the fact under test is that the SHIPPED
-// implementation names no channel route, and a hand-written stand-in could
-// only re-state this file's own assumption about it.
-import { InMemoryRealtimeAdapter } from '@objectstack/service-realtime';
 
 const PREFIX = '/api/v1';
+
+/**
+ * The shape a stock boot registers: an in-process pub/sub bus that names no
+ * channel route.
+ *
+ * ⭐ Deliberately a stand-in rather than an import of the real
+ * `InMemoryRealtimeAdapter`, and the reason is structural rather than
+ * stylistic. Reaching for the real class made `@objectstack/runtime`
+ * type-resolve `@objectstack/service-realtime` through its `dist/*.d.ts`, and
+ * three of this repo's own ratchets refuse that from three directions:
+ * `check:type-source-resolution` reds on the dist-resolved type import; its
+ * registry is SHRINK-ONLY and its re-baseline limb is open only to a change
+ * that ONBOARDED the program (this package's `typecheck` script already named
+ * `tsconfig.test.json`, so it did not); and the mandated `paths` remedy pulls
+ * that package's file graph into a program whose `rootDir` is `./src`, which
+ * `tsconfig.test.json` states it will not widen — 13 `TS6059` billed to a
+ * ledger `service-realtime` cannot see, the same shape PR #12570 measured.
+ *
+ * Nothing is lost by declaring it here, because the claim about the SHIPPED
+ * occupant is not this file's to make: it is pinned against the real class, in
+ * the package that owns it, by
+ * `packages/services/service-realtime/src/no-channel-route.pin.test.ts`. That
+ * pin plus these compose to the stock-boot reading — this file pins that the
+ * PRODUCER derives its answer from whatever the occupant names, and that one
+ * pins what the shipped occupant names.
+ */
+const inProcessBus: IRealtimeService = {
+    publish: async () => {},
+    subscribe: async () => 'sub_1',
+    unsubscribe: async () => {},
+};
 
 /** A dispatcher whose kernel resolves exactly the one slot under test. */
 function dispatcherWithRealtime(realtime: unknown): HttpDispatcher {
@@ -52,16 +78,13 @@ function dispatcherWithRealtime(realtime: unknown): HttpDispatcher {
  * case has to be composed here.
  */
 const mountedChannel: IRealtimeService = {
-    publish: async () => {},
-    subscribe: async () => 'sub_1',
-    unsubscribe: async () => {},
+    ...inProcessBus,
     getChannelRoute: () => `${PREFIX}/realtime`,
 };
 
 describe('[#14646] discovery and the one definition of a subscribable channel (dispatcher producer)', () => {
-    it('does NOT advertise the shipped in-process bus as a channel', async () => {
-        const info = await dispatcherWithRealtime(new InMemoryRealtimeAdapter())
-            .getDiscoveryInfo(PREFIX);
+    it('does NOT advertise an in-process realtime bus as a channel', async () => {
+        const info = await dispatcherWithRealtime(inProcessBus).getDiscoveryInfo(PREFIX);
         const realtime = info.services.realtime;
 
         // The retraction the ruling asks for: `enabled` no longer says "the
@@ -108,7 +131,7 @@ describe('[#14646] discovery and the one definition of a subscribable channel (d
         // to be two constants that happened to agree; now both are
         // `isSubscribableChannel` over the same entry, so no composition can
         // make them disagree — including one this file did not think of.
-        for (const occupant of [new InMemoryRealtimeAdapter(), mountedChannel, null]) {
+        for (const occupant of [inProcessBus, mountedChannel, null]) {
             const info = await dispatcherWithRealtime(occupant).getDiscoveryInfo(PREFIX);
             const verdict = isSubscribableChannel(info.services.realtime);
             expect(info.services.realtime.enabled, 'services.realtime.enabled').toBe(verdict);
