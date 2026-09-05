@@ -328,27 +328,75 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
   underObject('validations'),
 ];
 
+/**
+ * What is still broken, measured rather than assumed, keyed
+ * `<collection> · <shape>`.
+ *
+ * These rows are not exceptions granted to the sweep — they are its FINDINGS,
+ * and each one is a filed card. Writing them down is what lets the assertions
+ * below be exact in BOTH directions: a rule that starts throwing on a
+ * collection reds because it is not listed, and a residual that gets fixed reds
+ * because its row is now a lie and has to go. A sweep that merely asserted
+ * "nothing throws" would have had to be deleted or weakened on the day it was
+ * written, and would then never have caught the next one.
+ *
+ * Every entry names a reader OUTSIDE what #15636 could touch:
+ *
+ *  - `stack.datasets` — `indexDatasets` in `validate-chart-bindings.ts`, which
+ *    was another change's file when this landed. Re-pointed by #15575.
+ *  - `objects[].fields` — `buildFieldIndex` in `validate-expressions.ts:137`,
+ *    which casts inline instead of through a helper, so the `asArray` sweeps
+ *    that produced #15552 and #15636 never saw it. Filed as #15742.
+ */
+const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
+  'stack.datasets · null': ['validateReferenceIntegrity'],
+  'stack.datasets · undefined': ['validateReferenceIntegrity'],
+  'objects[].fields · null': ['validateStackExpressions'],
+  'objects[].fields · undefined': ['validateStackExpressions'],
+};
+
+/**
+ * Where a junk member still draws a finding no author's file justifies — the
+ * phantom half of the same defect, and the shape `validateSecurityPosture` was
+ * caught in for `objects` (#15552).
+ *
+ * `stack.agents · an array`: the agent readers filter their array branch with
+ * `!!x && typeof x === 'object'`, and `[]` passes that test — so an empty list
+ * item survives as an agent with no name and draws one reference-integrity
+ * finding at a position nobody wrote. `recordsOf` uses `isRec`, which excludes
+ * an array, so re-pointing those readers closes this too. They are among the
+ * sixteen copies in #15728.
+ */
+const RESIDUAL_INVENTED: Readonly<Record<string, number>> = {
+  'stack.agents · an array': 1,
+};
+
 describe('a non-record entry in any other stack collection (#15636)', () => {
   describe.each(SWEPT_COLLECTIONS.map((c) => [c.label, c] as const))('%s', (_label, collection) => {
     const members = (junk: unknown): readonly unknown[] =>
       collection.valid ? [junk, collection.valid] : [junk];
     const control = (): AnyRec => collection.stack(collection.valid ? [collection.valid] : []);
 
-    describe.each(NON_RECORD_ENTRIES)('with %s', (_shape, junk) => {
-      it('no authoring rule throws', () => {
+    describe.each(NON_RECORD_ENTRIES)('with %s', (shape, junk) => {
+      const key = `${collection.label} · ${shape}`;
+
+      it('throws out of no rule but the ones still filed as broken', () => {
         const threw: string[] = [];
+        const detail: string[] = [];
         for (const rule of AUTHORING_RULES) {
           try {
             rule.run(collection.stack(members(junk)), {});
           } catch (e) {
-            threw.push(`${rule.name}: ${(e as Error).message}`);
+            threw.push(rule.name);
+            detail.push(`${rule.name}: ${(e as Error).message}`);
           }
         }
-        expect(threw).toEqual([]);
+        expect(threw.sort(), detail.join(' | ')).toEqual([...(RESIDUAL_THROWS[key] ?? [])].sort());
       });
 
       it('invents no finding about the entry no author wrote', () => {
-        expect(findingCount(collection.stack(members(junk)))).toBe(findingCount(control()));
+        const delta = findingCount(collection.stack(members(junk))) - findingCount(control());
+        expect(delta).toBe(RESIDUAL_INVENTED[key] ?? 0);
       });
     });
   });

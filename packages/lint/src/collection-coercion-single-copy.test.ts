@@ -24,12 +24,13 @@
 // `translations`, and the per-object sub-collections).
 //
 // The 39 copies were not identical, which is the part worth pinning. Twelve had
-// already grown the array-branch filter LOCALLY, in two different spellings,
-// and four more read only the list shape and lean on an `if (!page) continue`
-// three lines down — a fix applied to some copies and not their siblings, which
-// is the whole failure mode restated as evidence. A predicate with N copies is N
-// chances to fix one and leave N-1, and no reviewer counts to 39. So the count
-// is asserted here instead.
+// already grown the array-branch filter LOCALLY, in two different spellings;
+// four more read only the list shape and lean on an `if (!page) continue` three
+// lines down; and two are load-bearing for a finding PATH rather than for a
+// crash. A fix applied to some copies and not their siblings is the whole
+// failure mode restated as evidence: a predicate with N copies is N chances to
+// fix one and leave N-1, and no reviewer counts to 39. So the count is asserted
+// here instead.
 //
 // ## The three clauses, and what each one refuses
 //
@@ -94,6 +95,15 @@ const COPY_LEDGER: Readonly<Record<string, string>> = {
   // 2026-09-05 — #15575's hot file on the day #15636 landed; re-pointed there,
   // not here, so the two changes do not collide inside the same reader.
   'validate-chart-bindings.ts': '#15575',
+  // 2026-09-05 — the two reference-integrity members #15494 deliberately left
+  // walking the RAW array. Their own loop guards each member with `isRec`, so
+  // neither ever threw; what the copy buys them is the INDEX, because
+  // `reference-integrity-suite.test.ts` pins their finding paths
+  // (`objects[1].highlightFields[1]`) against the author's file and `recordsOf`
+  // renumbers past a dropped member. Re-pointing them is blocked on an
+  // index-preserving reader, not on anyone's attention (#15740).
+  'validate-object-field-refs.ts': '#15740',
+  'validate-list-view-field-refs.ts': '#15740',
   // 2026-09-05 — the sixteen copies that do not crash today: twelve grew a
   // local array-branch filter and four read only the list shape behind a
   // call-site `if (!page) continue`. They are not #15636's defect; they are its
@@ -128,6 +138,10 @@ const COPY_LEDGER: Readonly<Record<string, string>> = {
 const UNGUARDED_ALLOWANCE: Readonly<Record<string, string>> = {
   // 2026-09-05 — removed by #15575.
   'validate-chart-bindings.ts': '#15575',
+  // 2026-09-05 — removed by #15740, which needs an index-preserving reader
+  // first; both guard every member with `isRec` at the call site.
+  'validate-object-field-refs.ts': '#15740',
+  'validate-list-view-field-refs.ts': '#15740',
   // 2026-09-05 — removed by #15728.
   'validate-jsx-pages.ts': '#15728',
   'validate-page-source-styling.ts': '#15728',
