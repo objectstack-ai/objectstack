@@ -66,6 +66,43 @@
  * talking about time. `--list` still prints the unit-nowhere keys so the
  * population stays visible; closing it is a describe-by-describe decision.
  *
+ * ## The two exemptions, DECLARED ON THE SCHEMA (#15676, ruling B)
+ *
+ * The rule governs every authored and every runtime-emitted duration MINUS two
+ * structural classes, and the ruling is explicit about the mechanism: they are
+ * "declared ON THE SCHEMA, never in a gate ledger". So neither of them appears
+ * in this file as a key, a path or a name. What appears here is the ability to
+ * READ a declaration the schema itself carries.
+ *
+ * 1. **Epoch instants** — a key whose value IS the shared {@link INSTANT_ROOT}
+ *    schema (`EpochMs`, `src/shared/epoch.zod.ts`) is an INSTANT, not a
+ *    duration. An instant is numerically the same shape and its describe names
+ *    the same unit, but it is a different confusion: renaming `startTime` to
+ *    `startTimeMs` would move it into the `*Ms` DURATION family (measured on
+ *    this package's authorable surface: all 51 distinct `*Ms` keys are
+ *    durations, all 51 distinct `*At` keys are instants), which is the opposite
+ *    of what the rule is for. The instant is spelled `*At` and typed `EpochMs`.
+ *
+ * 2. **External-standard mirrors** — a key that carries
+ *    `.meta({ externalVocabulary: '<the standard>' })` mirrors a name fixed
+ *    outside this repo (`max-age` from HTTP Cache-Control, `statement_timeout`
+ *    from PostgreSQL, better-auth's option names). Renaming it would break the
+ *    correspondence that makes it readable. The marker rides `z.toJSONSchema`
+ *    verbatim — the same channel `xRef` / `xExpression` / `xEnumDeprecated` use
+ *    — so the reference page prints the unit as "per the named standard"
+ *    (`scripts/lib/schema-section.ts`) instead of the reader having to guess.
+ *
+ * ⛔ Neither exemption is a pass on lying. A marked key still fails
+ * `name-unit-contradicts-prose` (a marker waives the RENAME, never a
+ * contradiction), and an `EpochMs` key whose describe names a unit other than
+ * milliseconds fails `instant-unit-contradicts-schema` — the schema says
+ * milliseconds, so prose that says seconds is one of the two being wrong. A
+ * declaration that could never be refused is an allowlist wearing a `.meta()`.
+ *
+ * Both classes stay VISIBLE in the census: `--list` marks them and the verdict
+ * line counts them. An exemption nobody can see is the ledger this ruling
+ * refused.
+ *
  * ## No baseline, by ruling
  *
  * Triage proposed a ratchet from the day's count with the existing keys
@@ -179,6 +216,29 @@ const DURATION_SHAPED_TOKENS = new Set([
 
 const NUMERIC_ROOTS = new Set(['z.number', 'z.int', 'z.coerce.number']);
 
+/**
+ * The shared epoch-instant schema — exemption class (i), read from the SOURCE
+ * TEXT as the identifier a property's value chain is rooted at.
+ *
+ * Recognised by NAME rather than by resolving the import, for the same reason
+ * the whole file is a syntactic scan: a detector with no module resolution
+ * cannot fail to resolve in CI. The coupling that keeps the name honest is a
+ * self-test case which reads `src/shared/epoch.zod.ts` and asserts it really
+ * exports this symbol — so renaming the schema without renaming it here is RED,
+ * not a silently-empty exemption.
+ */
+const INSTANT_ROOT = 'EpochMs';
+/** Where {@link INSTANT_ROOT} is declared — read by the self-test, not by the scan. */
+const INSTANT_ROOT_MODULE = 'src/shared/epoch.zod.ts';
+
+/**
+ * The `.meta()` key that declares exemption class (ii). A key carrying it
+ * mirrors a name fixed by an external standard, so the RENAME is waived — never
+ * the contradiction check, and never the requirement that the describe still
+ * state the unit.
+ */
+const EXTERNAL_VOCABULARY_META_KEY = 'externalVocabulary';
+
 export interface DurationKey {
   file: string;
   line: number;
@@ -191,11 +251,18 @@ export interface DurationKey {
   /** true when a sibling `unit` key sits on the same object literal */
   valueUnitPair: boolean;
   durationShaped: boolean;
+  /** true when the value chain is rooted at the shared `EpochMs` schema — exemption (i) */
+  instant: boolean;
+  /** the standard named by `.meta({ externalVocabulary })`, when one is declared — exemption (ii) */
+  externalVocabulary: string | undefined;
 }
 
 export interface Finding {
   site: DurationKey;
-  rule: 'unit-in-prose-not-in-name' | 'name-unit-contradicts-prose';
+  rule:
+    | 'unit-in-prose-not-in-name'
+    | 'name-unit-contradicts-prose'
+    | 'instant-unit-contradicts-schema';
   message: string;
 }
 
@@ -237,19 +304,57 @@ export function isDurationShaped(key: string): boolean {
 
 // ── AST ────────────────────────────────────────────────────────────────────
 
-/** Walk a `z.x().y().z()` chain to its root; return the root's dotted name and every `.describe()` string. */
-function chainInfo(expr: ts.Expression): { root: string | undefined; describes: string[] } {
+/**
+ * Walk a `z.x().y().z()` chain to its root.
+ *
+ * Returns the root's dotted name (`z.number`, `z.coerce.number`) OR, when the
+ * chain bottoms out at a plain identifier, that identifier — which is how a key
+ * declared as `EpochMs` / `EpochMs.optional().describe(…)` is recognised as
+ * exemption class (i) rather than vanishing from the population as an
+ * unresolvable root. Every OTHER identifier root (`PositiveInt.describe(…)`)
+ * stays outside the population exactly as before: `collectDurationKeys` admits
+ * only the roots it knows.
+ *
+ * Also collects, from the same single pass:
+ *   - every `.describe()` string;
+ *   - `description` and `externalVocabulary` from `.meta({ … })` — `.meta()` is
+ *     the repo's established annotation channel (`xRef`, `xExpression`,
+ *     `xEnumDeprecated`) and it MERGES with a `.describe()` earlier in the
+ *     chain rather than replacing it (measured against zod 4.4.3), so the two
+ *     spellings coexist on one key.
+ *
+ * Reading `description` out of `.meta()` closes a hole rather than adding a
+ * feature: without it, moving a describe into `.meta({ description })` would
+ * take a key out of this gate's population SILENTLY — an exemption by
+ * blindness, which is precisely what ruling B refuses. (Measured on this tree:
+ * exactly one numeric key declares its description that way — `data/Field`'s
+ * `precision`, "Decimal precision (default: 2)" — so the reading adds no
+ * offender today. It stops the next one.)
+ */
+function chainInfo(expr: ts.Expression): {
+  root: string | undefined;
+  describes: string[];
+  metaDescription: string | undefined;
+  externalVocabulary: string | undefined;
+} {
   const describes: string[] = [];
+  let metaDescription: string | undefined;
+  let externalVocabulary: string | undefined;
   let cur: ts.Expression = expr;
   for (;;) {
     if (ts.isParenthesizedExpression(cur) || ts.isAsExpression(cur) || ts.isNonNullExpression(cur)) {
       cur = cur.expression;
       continue;
     }
-    if (!ts.isCallExpression(cur)) return { root: undefined, describes };
+    if (ts.isIdentifier(cur)) {
+      // A bare schema constant, or the receiver a chain bottomed out at:
+      // `createdAt: EpochMs` / `createdAt: EpochMs.optional()`.
+      return { root: cur.text, describes, metaDescription, externalVocabulary };
+    }
+    if (!ts.isCallExpression(cur)) return { root: undefined, describes, metaDescription, externalVocabulary };
     if (!ts.isPropertyAccessExpression(cur.expression)) {
       // `someHelper(...)` — a call whose callee is not `a.b`; not a `z.` root
-      return { root: undefined, describes };
+      return { root: undefined, describes, metaDescription, externalVocabulary };
     }
     const method = cur.expression.name.text;
     if (method === 'describe' && cur.arguments.length > 0) {
@@ -257,13 +362,35 @@ function chainInfo(expr: ts.Expression): { root: string | undefined; describes: 
       const text = concatLiteral(a);
       if (text !== undefined) describes.push(text);
     }
+    if (method === 'meta' && cur.arguments.length > 0) {
+      const a = cur.arguments[0];
+      if (ts.isObjectLiteralExpression(a)) {
+        for (const prop of a.properties) {
+          if (!ts.isPropertyAssignment(prop)) continue;
+          const name = ts.isIdentifier(prop.name) || ts.isStringLiteralLike(prop.name) ? prop.name.text : undefined;
+          if (name === undefined) continue;
+          // Only a non-empty STRING LITERAL declares anything. A computed value,
+          // a template with holes or an empty string is not a standard's name,
+          // and an unverifiable claim is refused rather than assumed true — so
+          // the key stays in the population and stays judged.
+          const value = concatLiteral(prop.initializer);
+          if (name === 'description' && value !== undefined && metaDescription === undefined) {
+            metaDescription = value;
+          }
+          if (name === EXTERNAL_VOCABULARY_META_KEY && value !== undefined && value.trim() !== ''
+              && externalVocabulary === undefined) {
+            externalVocabulary = value;
+          }
+        }
+      }
+    }
     // The callee `a.b.c` — collect its dotted parts down to whatever `a` is.
     const parts: string[] = [];
     let p: ts.Expression = cur.expression;
     while (ts.isPropertyAccessExpression(p)) { parts.unshift(p.name.text); p = p.expression; }
     if (ts.isIdentifier(p) && p.text === 'z') {
       // reached `z.number(...)` / `z.coerce.number(...)`: this call is the root
-      return { root: ['z', ...parts].join('.'), describes };
+      return { root: ['z', ...parts].join('.'), describes, metaDescription, externalVocabulary };
     }
     // otherwise `p` is the receiver of this method call — keep walking down it
     cur = p;
@@ -290,13 +417,17 @@ export function collectDurationKeys(fileName: string, code: string): DurationKey
     if (ts.isPropertyAssignment(node) && ts.isObjectLiteralExpression(node.parent)) {
       const name = ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name) ? node.name.text : undefined;
       if (name) {
-        const { root, describes } = chainInfo(node.initializer);
-        if (root && NUMERIC_ROOTS.has(root)) {
+        const { root, describes, metaDescription, externalVocabulary } = chainInfo(node.initializer);
+        const instant = root === INSTANT_ROOT;
+        if (root && (NUMERIC_ROOTS.has(root) || instant)) {
           const siblings = node.parent.properties;
           const valueUnitPair = siblings.some(
             (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'unit',
           );
-          const describe = describes.length ? describes[describes.length - 1] : undefined;
+          // An explicit `.describe()` wins over a `.meta({ description })`: it is
+          // what every site in this tree writes, and where a key carries both,
+          // the describe is the one an author reads at the declaration.
+          const describe = describes.length ? describes[describes.length - 1] : metaDescription;
           out.push({
             file: fileName,
             line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
@@ -306,6 +437,8 @@ export function collectDurationKeys(fileName: string, code: string): DurationKey
             keyUnits: unitsInKey(name),
             valueUnitPair,
             durationShaped: isDurationShaped(name),
+            instant,
+            externalVocabulary,
           });
         }
       }
@@ -319,8 +452,35 @@ export function collectDurationKeys(fileName: string, code: string): DurationKey
 export function judge(site: DurationKey): Finding | undefined {
   if (site.valueUnitPair) return undefined;
   const where = `${site.file}:${site.line} \`${site.key}\``;
+
+  // Exemption (i): the value IS the shared `EpochMs` schema, so the key is an
+  // INSTANT and the duration rule does not reach it. The one thing still
+  // refused is a describe that contradicts the schema: `EpochMs` declares
+  // milliseconds, so prose naming another unit means the site and the schema
+  // disagree, and a silent exemption there would let the declaration launder a
+  // real unit bug.
+  if (site.instant) {
+    if (site.proseUnits.length > 0 && !site.proseUnits.includes('ms')) {
+      return {
+        site,
+        rule: 'instant-unit-contradicts-schema',
+        message: `${where} — typed \`${INSTANT_ROOT}\` (epoch MILLISECONDS) but the describe says `
+          + `${site.proseUnits.join('/')}. One of them is lying; either the describe is wrong or this is `
+          + `not an epoch-millisecond instant and must not be typed \`${INSTANT_ROOT}\`.`,
+      };
+    }
+    return undefined;
+  }
+
   if (site.proseUnits.length > 0) {
     if (site.keyUnits.length === 0) {
+      // Exemption (ii): the key mirrors a name fixed outside this repo, declared
+      // on the schema with `.meta({ externalVocabulary })`. It waives the RENAME
+      // and nothing else — the describe must still state the unit, which is what
+      // put this site in `proseUnits.length > 0` in the first place, and the
+      // contradiction branch below is not reachable past a `return` here because
+      // a marked key with a unit token in its NAME never takes this branch.
+      if (site.externalVocabulary !== undefined) return undefined;
       return {
         site,
         rule: 'unit-in-prose-not-in-name',
@@ -329,10 +489,16 @@ export function judge(site: DurationKey): Finding | undefined {
       };
     }
     if (!site.keyUnits.some((u) => site.proseUnits.includes(u))) {
+      // Reached by MARKED keys too, deliberately: a marker waives the rename,
+      // never a contradiction. A key spelled `maxAgeMs` whose describe says
+      // seconds is the 1000x bug whatever standard its name mirrors.
       return {
         site,
         rule: 'name-unit-contradicts-prose',
-        message: `${where} — the key name says ${site.keyUnits.join('/')} but the describe says ${site.proseUnits.join('/')}. One of them is lying; fix whichever is wrong.`,
+        message: `${where} — the key name says ${site.keyUnits.join('/')} but the describe says ${site.proseUnits.join('/')}. One of them is lying; fix whichever is wrong.`
+          + (site.externalVocabulary !== undefined
+            ? ` The \`${EXTERNAL_VOCABULARY_META_KEY}\` marker waives the RENAME, never this.`
+            : ''),
       };
     }
     return undefined;
@@ -450,6 +616,79 @@ function selfTest(): number {
     rulesOf(`const S = z.object({ a: z.number().describe('Wait 1 second'), b: z.number().describe('A 15-minute window'), c: z.number().describe('Poll every 5 min'), d: z.number().describe('Debounce of 30 ms') });`)
       .join() === 'unit-in-prose-not-in-name,unit-in-prose-not-in-name,unit-in-prose-not-in-name,unit-in-prose-not-in-name');
 
+  // ── the two DECLARED exemptions (#15676, ruling B) ───────────────────────
+  // Each class is pinned in both directions: the declaration exempts, and the
+  // declaration does NOT exempt a contradiction. A marker that could never be
+  // refused would be an allowlist wearing a `.meta()`.
+
+  expect('exempt (i): a key whose value IS `EpochMs` is an instant, not a duration',
+    rulesOf(`const S = z.object({ createdAt: EpochMs.describe('Unix timestamp in milliseconds when the scope was created') });`)
+      .join() === '');
+  expect('exempt (i): a BARE `EpochMs` key (no chain at all) is an instant',
+    rulesOf(`const S = z.object({ createdAt: EpochMs });`)
+      .join() === '');
+  expect('exempt (i): `EpochMs.optional()` — the exemption survives the chain',
+    rulesOf(`const S = z.object({ registeredAt: EpochMs.optional().describe('Unix timestamp in milliseconds when registered') });`)
+      .join() === '');
+  expect('REFUSED (i): an `EpochMs` key whose describe names a unit other than ms → instant-unit-contradicts-schema',
+    rulesOf(`const S = z.object({ startedAt: EpochMs.describe('Boot timestamp in seconds') });`)
+      .join() === 'instant-unit-contradicts-schema');
+  expect('the instant exemption is `EpochMs` ALONE — another identifier root stays outside the population',
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({ startedAt: SomeOtherSchema.describe('Boot timestamp in seconds') });`);
+      return sites.length === 0;
+    })());
+  expect('an `EpochMs` site is COUNTED in the census, not vanished from it',
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({ createdAt: EpochMs.describe('Unix timestamp in milliseconds') });`);
+      return sites.length === 1 && sites[0].instant && sites[0].proseUnits.join() === 'ms';
+    })());
+
+  expect('exempt (ii): `.meta({ externalVocabulary })` waives the rename on a bare-named mirror',
+    rulesOf(`const S = z.object({ maxAge: z.number().describe('Maximum cache age in seconds').meta({ externalVocabulary: 'HTTP Cache-Control max-age (RFC 9111)' }) });`)
+      .join() === '');
+  expect('exempt (ii): the marker rides in a `.meta()` that also carries description/title',
+    rulesOf(`const S = z.object({ statementTimeout: z.number().int().positive().optional().describe('Abort statements running longer than this (ms)').meta({ title: 'Statement timeout (ms)', externalVocabulary: 'PostgreSQL statement_timeout' }) });`)
+      .join() === '');
+  expect('REFUSED (ii): a MARKED key whose name-unit contradicts its describe is still an offender',
+    rulesOf(`const S = z.object({ maxAgeMs: z.number().describe('Maximum cache age in seconds').meta({ externalVocabulary: 'HTTP Cache-Control max-age (RFC 9111)' }) });`)
+      .join() === 'name-unit-contradicts-prose');
+  expect('REFUSED (ii): an EMPTY marker declares no standard and exempts nothing',
+    rulesOf(`const S = z.object({ maxAge: z.number().describe('Maximum cache age in seconds').meta({ externalVocabulary: '' }) });`)
+      .join() === 'unit-in-prose-not-in-name');
+  expect('REFUSED (ii): a non-literal marker value is unverifiable and exempts nothing',
+    rulesOf(`const S = z.object({ maxAge: z.number().describe('Maximum cache age in seconds').meta({ externalVocabulary: SOME_CONST }) });`)
+      .join() === 'unit-in-prose-not-in-name');
+  expect('REFUSED (ii): a marker is not a licence to drop the unit from the describe — an unmarked sibling still fails',
+    rulesOf(`const S = z.object({ maxAge: z.number().describe('Maximum cache age in seconds').meta({ externalVocabulary: 'RFC 9111' }), ttl: z.number().describe('TTL in seconds') });`)
+      .join() === ',unit-in-prose-not-in-name');
+  expect('a marked site is COUNTED in the census with its standard, not vanished from it',
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({ maxAge: z.number().describe('Maximum cache age in seconds').meta({ externalVocabulary: 'RFC 9111' }) });`);
+      return sites.length === 1 && sites[0].externalVocabulary === 'RFC 9111' && sites[0].proseUnits.join() === 'seconds';
+    })());
+
+  expect('a describe declared through `.meta({ description })` is READ — no exemption by blindness',
+    rulesOf(`const S = z.object({ timeout: z.number().meta({ description: 'Timeout in milliseconds' }) });`)
+      .join() === 'unit-in-prose-not-in-name');
+  expect('an explicit `.describe()` wins over a `.meta({ description })` on the same key',
+    (() => {
+      const sites = collectDurationKeys('fixture.ts', `const S = z.object({ ttl: z.number().describe('Cache TTL in seconds').meta({ description: 'Cache TTL in milliseconds' }) });`);
+      return sites.length === 1 && sites[0].describe === 'Cache TTL in seconds' && judge(sites[0])?.rule === 'unit-in-prose-not-in-name';
+    })());
+
+  // The instant exemption names a schema by IDENTIFIER, because this file is a
+  // syntactic scan with no module resolution. That is only honest while the
+  // identifier really is exported from where it says — otherwise the exemption
+  // would be silently empty and every instant would read as an offender (or,
+  // after a rename in the other direction, an unrelated local could inherit the
+  // exemption). Held from this side, the same coupling ROOT_DIR_WATCH_HINTS has.
+  expect(`\`${INSTANT_ROOT}\` is exported from \`${INSTANT_ROOT_MODULE}\``,
+    (() => {
+      const src = readFileSync(join(pkgRoot, INSTANT_ROOT_MODULE), 'utf8');
+      return new RegExp(`export const ${INSTANT_ROOT}\\b`).test(src);
+    })());
+
   // The declared population must be the population the scan reads (the
   // ROOT_DIR_WATCH_HINTS idiom's coupling, held from this side).
   const repoRoot = join(pkgRoot, '..', '..');
@@ -474,24 +713,44 @@ function main(argv: string[]): number {
   const { sites, findings, files } = scanTree(root ? resolve(root) : undefined);
   const durationSites = sites.filter((s) => s.proseUnits.length > 0 || s.durationShaped || s.keyUnits.length > 0);
 
+  // The two DECLARED exemptions, counted rather than hidden. A key exempted by
+  // a declaration stays in the census and stays countable — that is what makes
+  // the exemption reviewable at a glance and keeps it from becoming the ledger
+  // ruling B refused. Counted over the same `durationSites` population the
+  // verdict line reports, so the three numbers add up on the page.
+  const instants = durationSites.filter((s) => s.instant);
+  const mirrors = durationSites.filter((s) => !s.instant && s.externalVocabulary !== undefined);
+  const exemptions = `${instants.length} declared \`${INSTANT_ROOT}\` instant(s), `
+    + `${mirrors.length} declared \`${EXTERNAL_VOCABULARY_META_KEY}\` mirror(s)`;
+
   if (argv.includes('--list')) {
     for (const s of durationSites) {
-      console.log(`${s.file}:${s.line}  ${s.key}  [name: ${s.keyUnits.join('/') || '-'}] [prose: ${s.proseUnits.join('/') || '-'}]${s.valueUnitPair ? ' [value/unit pair]' : ''}  ${JSON.stringify(s.describe ?? null)}`);
+      const marks = [
+        s.valueUnitPair ? ' [value/unit pair]' : '',
+        s.instant ? ` [instant: ${INSTANT_ROOT}]` : '',
+        s.externalVocabulary !== undefined ? ` [${EXTERNAL_VOCABULARY_META_KEY}: ${s.externalVocabulary}]` : '',
+      ].join('');
+      console.log(`${s.file}:${s.line}  ${s.key}  [name: ${s.keyUnits.join('/') || '-'}] [prose: ${s.proseUnits.join('/') || '-'}]${marks}  ${JSON.stringify(s.describe ?? null)}`);
     }
-    console.log(`\n${durationSites.length} duration-shaped numeric key(s) across ${files} source file(s); ${sites.length} numeric keys in all.`);
+    console.log(`\n${durationSites.length} duration-shaped numeric key(s) across ${files} source file(s); ${sites.length} numeric keys in all; ${exemptions}.`);
   }
 
   if (findings.length === 0) {
-    console.log(`✓ check:duration-unit-keys — ${durationSites.length} duration-shaped numeric key(s) across ${files} source file(s) all carry their unit in the key name (or in a sibling \`unit\`); zero offenders, no baseline.`);
+    console.log(`✓ check:duration-unit-keys — ${durationSites.length} duration-shaped numeric key(s) across ${files} source file(s) all carry their unit in the key name (or in a sibling \`unit\`, or under a declared exemption: ${exemptions}); zero offenders, no baseline.`);
     return 0;
   }
-  console.error(`✗ check:duration-unit-keys — ${findings.length} offender(s) among ${durationSites.length} duration-shaped numeric key(s) in ${files} source file(s):\n`);
+  console.error(`✗ check:duration-unit-keys — ${findings.length} offender(s) among ${durationSites.length} duration-shaped numeric key(s) in ${files} source file(s) (${exemptions}):\n`);
   for (const f of findings) console.error(`  [${f.rule}] ${f.message}`);
   console.error(
     '\nThe unit of a duration-shaped number lives in the KEY NAME (`Ms` / `Seconds` / `Minutes` / `Hours` / `Days`)'
     + ' or in a unit-carrying VALUE (a duration literal, or a `{ value, unit }` pair) — never only in the describe prose,'
     + ' and never nowhere. There is no baseline: a published key is renamed under an ADR-0087 conversion (registry entry +'
-    + ' a loud refusal of the old spelling naming the new key); see the header of this script.',
+    + ' a loud refusal of the old spelling naming the new key); see the header of this script.'
+    + '\n\nTwo structural classes are exempt, and both are DECLARED ON THE SCHEMA — there is no list to add a key to:'
+    + `\n  - an epoch INSTANT is typed \`${INSTANT_ROOT}\` (\`${INSTANT_ROOT_MODULE}\`) and named \`*At\`;`
+    + `\n  - a key mirroring a name fixed outside this repo carries \`.meta({ ${EXTERNAL_VOCABULARY_META_KEY}: '<the standard>' })\`,`
+    + ' which the reference page prints as "unit per <the standard>".'
+    + '\nIf the offender above is neither, it is a rename.',
   );
   return 1;
 }
