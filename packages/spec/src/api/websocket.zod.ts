@@ -5,6 +5,8 @@ import { PresenceStatus } from './realtime-shared.zod';
 
 // Re-export shared PresenceStatus for backward compatibility
 import { lazySchema } from '../shared/lazy-schema';
+import { EpochMs } from '../shared/epoch.zod';
+import { retiredKey } from '../shared/retired-key';
 export { PresenceStatus } from './realtime-shared.zod';
 
 /**
@@ -445,7 +447,7 @@ export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
  *   type: 'subscribe',
  *   channel: 'record.account.123',
  *   payload: { events: ['created', 'updated'] },
- *   timestamp: Date.now()
+ *   occurredAt: Date.now()
  * }
  * ```
  * 
@@ -455,7 +457,7 @@ export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
  *   type: 'data-change',
  *   channel: 'record.account.123',
  *   payload: { id: '123', action: 'updated', data: {...} },
- *   timestamp: Date.now()
+ *   occurredAt: Date.now()
  * }
  * ```
  */
@@ -470,7 +472,19 @@ export const WebSocketEventSchema = lazySchema(() => z.object({
   ]).describe('Event type'),
   channel: z.string().describe('Channel identifier (e.g., "record.account.123", "user.456")'),
   payload: z.unknown().describe('Event payload data'),
-  timestamp: z.number().describe('Unix timestamp in milliseconds'),
+  // Renamed from `timestamp` and typed `EpochMs` (#15676, #14478 ruling B): an
+  // epoch INSTANT, not a duration. `*At` is this package's measured convention
+  // for an instant and `EpochMs` is where the millisecond unit is declared, so
+  // the unit no longer lives only in the describe prose.
+  occurredAt: EpochMs.describe('Unix timestamp in milliseconds when the event occurred'),
+
+  /** Tombstone for the rename above (#15676, ruling B on #14478). */
+  timestamp: retiredKey(
+    '`WebSocketEvent.timestamp` was renamed to `occurredAt` in @objectstack/spec 17 — the '
+    + 'event INSTANT now carries the shared `EpochMs` schema, which declares the '
+    + 'epoch-millisecond unit the bare key name left to the describe prose. Rename the key '
+    + 'to `occurredAt`; the value is unchanged (`Date.now()`).',
+  ),
 }));
 
 export type WebSocketEvent = z.input<typeof WebSocketEventSchema>;
@@ -490,7 +504,7 @@ export type WebSocketEvent = z.input<typeof WebSocketEventSchema>;
  *   userId: 'user123',
  *   userName: 'John Doe',
  *   status: 'online',
- *   lastSeen: Date.now(),
+ *   lastSeenAt: Date.now(),
  *   metadata: { currentPage: '/dashboard' }
  * }
  * ```
@@ -499,7 +513,19 @@ export const SimplePresenceStateSchema = lazySchema(() => z.object({
   userId: z.string().describe('User identifier'),
   userName: z.string().describe('User display name'),
   status: z.enum(['online', 'away', 'offline']).describe('User presence status'),
-  lastSeen: z.number().describe('Unix timestamp of last activity in milliseconds'),
+  // Renamed from `lastSeen` and typed `EpochMs` (#15676, #14478 ruling B) — an
+  // epoch instant, joining the `lastAccessedAt` / `lastUsedAt` family.
+  lastSeenAt: EpochMs.describe('Unix timestamp of last activity in milliseconds'),
+
+  /** Tombstone for the rename above (#15676, ruling B on #14478). */
+  lastSeen: retiredKey(
+    '`SimplePresenceState.lastSeen` was renamed to `lastSeenAt` in @objectstack/spec 17 — '
+    + 'the last-activity INSTANT now carries the shared `EpochMs` schema, which declares '
+    + 'the epoch-millisecond unit. Rename the key to `lastSeenAt`; the value is unchanged '
+    + '(`Date.now()`). Note the neighbouring `PresenceState.lastSeen` '
+    + '(api/realtime-shared.zod.ts) is a different key with a different type — an '
+    + 'ISO-8601 datetime STRING — and is untouched.',
+  ),
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional presence metadata (e.g., current page, custom status)'),
 }));
 

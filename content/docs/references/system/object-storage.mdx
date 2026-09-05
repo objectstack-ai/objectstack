@@ -312,7 +312,7 @@ Lifecycle policy action type
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **operation** | `Enum<'get' \| 'put' \| 'delete' \| 'head'>` | ✅ | Allowed operation |
-| **expiresIn** | `number` | ✅ | Expiration time in seconds (max 7 days) |
+| **expiresIn** | `number` | ✅ | Expiration time in seconds (max 7 days) (unit per AWS S3 presigned URL `expiresIn` (@aws-sdk/s3-request-presigner)) |
 | **contentType** | `string` | optional | Required content type for PUT operations |
 | **maxSize** | `number` | optional | Maximum file size in bytes for PUT operations |
 | **responseContentType** | `string` | optional | Override content-type for GET operations |

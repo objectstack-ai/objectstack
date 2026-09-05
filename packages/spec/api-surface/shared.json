@@ -12,6 +12,7 @@
     "CronExpressionInputSchema (const)",
     "EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS (const)",
+    "EpochMs (type)",
     "Expression (type)",
     "ExpressionDialect (type)",
     "ExpressionInput (type)",

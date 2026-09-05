@@ -120,7 +120,7 @@ HTTP method — the full routing vocabulary (`api/*` endpoints, router and REST-
 | **origins** | `string \| string[]` | optional (default: `"*"`) | Allowed origins (* for all) |
 | **methods** | `Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]` | optional | Allowed HTTP methods |
 | **credentials** | `boolean` | optional (default: `false`) | Allow credentials (cookies, authorization headers) |
-| **maxAge** | `integer` | optional | Preflight cache duration in seconds |
+| **maxAge** | `integer` | optional | Preflight cache duration in seconds (unit per CORS `Access-Control-Max-Age` (WHATWG Fetch)) |
 
 ### Nested Shape: `RouterConfig.staticMounts[number]`
 

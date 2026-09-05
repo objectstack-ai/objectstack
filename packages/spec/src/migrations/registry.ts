@@ -6619,6 +6619,67 @@ const step18: MigrationStep = {
         + 'with no `INVALID_FIELD` naming a dotted filter key, at either door.',
     },
     {
+      id: 'epoch-instant-keys-renamed',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'four epoch-instant keys whose name carried no unit: '
+        + 'WebSocketEvent.timestamp, SimplePresenceState.lastSeen, '
+        + 'KernelContext.startTime (inherited by TenantRuntimeContext) and '
+        + 'HealthStatus.timestamp',
+      replacement:
+        'the same instants named for what they mark and typed with the new shared '
+        + 'EpochMs schema (shared/epoch.zod.ts): occurredAt, lastSeenAt, startedAt '
+        + 'and checkedAt. The VALUE is unchanged in every case — still '
+        + 'milliseconds since the Unix epoch, still Date.now(). Only the key name '
+        + 'and the declared schema move',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): a '
+        + 'duration-shaped z.number() carries its unit in the key NAME, minus two '
+        + 'structural classes declared ON THE SCHEMA rather than in a gate ledger. '
+        + 'Epoch instants are the first class. They read to the rule exactly like '
+        + 'an offending duration — a bare name plus a describe that says '
+        + '"milliseconds" — but renaming them the way the rule prescribes would '
+        + 'resolve the wrong confusion: measured on this package own authorable '
+        + 'surface, all 51 distinct keys ending in Ms are durations (timeoutMs, '
+        + 'backoffMs, latencyMs, uptimeMs) and all 51 distinct keys ending in At '
+        + 'are instants (createdAt, expiresAt, lastUsedAt). Spelling an instant '
+        + 'with the Ms suffix would move it INTO the duration family. So the '
+        + 'exemption is a declaration on the contract: the value becomes EpochMs, '
+        + 'which states the epoch-millisecond unit once, and the key takes this '
+        + 'package established At convention. Two of the six instants ruling B '
+        + 'names (ServiceMetadata.registeredAt and ScopeInfo.createdAt) were '
+        + 'already correctly named and only changed schema, so they are not '
+        + 'retirements and appear in no table. A SEMANTIC entry rather than a D2 '
+        + 'conversion because all four keys are RUNTIME-EMITTED — a WebSocket '
+        + 'event and a presence payload are wire messages, a kernel context is '
+        + 'constructed by host code at boot, a health report is emitted by the '
+        + 'startup orchestrator — so none is ever stored as a sys_metadata row and '
+        + 'the conversion chain has no seam that would see one. That is the same '
+        + 'disposition kernel/KernelContext:previewMode already carries on one of '
+        + 'these very defs, and ruling B prescribes it explicitly: an ADR-0087 '
+        + 'conversion where the key is authorable, a semantic entry where it is '
+        + 'runtime-emitted. #15676, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'No producer emits the old key and no consumer reads it. All four are '
+        + 'tombstoned with retiredKey(), so each fails tsc at the construction '
+        + 'site (the key types never) and fails the parse with the rename '
+        + 'prescription. Concretely, check four places. (1) Code building a '
+        + 'WebSocketEvent: rename timestamp to occurredAt. (2) Code building a '
+        + 'SimplePresenceState: rename lastSeen to lastSeenAt — and note that the '
+        + 'neighbouring PresenceState.lastSeen (api/realtime-shared.zod.ts) is a '
+        + 'DIFFERENT key holding an ISO-8601 datetime string, which is untouched '
+        + 'and must not be renamed with it. (3) Host boot code composing a '
+        + 'KernelContext or a TenantRuntimeContext: rename startTime to startedAt. '
+        + '(4) Code building a kernel HealthStatus: rename timestamp to checkedAt. '
+        + 'In every case the value is carried across unchanged. One behavioural '
+        + 'note: WebSocketEvent.timestamp and SimplePresenceState.lastSeen were '
+        + 'declared z.number() with no integer constraint and EpochMs is '
+        + 'z.number().int(), so a fractional epoch that used to parse is now '
+        + 'refused at those two sites — a tightening, and Date.now() has always '
+        + 'satisfied it.',
+    },
+    {
       id: 'event-name-schema-retired',
       surface:
         '`EventNameSchema` and its `EventName` type '
@@ -9270,6 +9331,37 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // consumers through this tombstone plus the D3 semantic entry
     // `session-user-language-retired`.
     'api/SessionUser:language',
+    // #15676 — the epoch-instant half of #14478 ruling B.
+    // `SimplePresenceState.lastSeen` is an epoch INSTANT: it moved onto the shared
+    // `EpochMs` schema and was renamed `lastSeenAt`, joining this package's
+    // `lastAccessedAt` / `lastUsedAt` family.
+    //
+    // ⚠️ Not to be confused with `api/PresenceState:lastSeen`
+    // (`api/realtime-shared.zod.ts`), a DIFFERENT key of a different type — an
+    // ISO-8601 datetime string — which is untouched and stays live.
+    //
+    // Semantic entry rather than a D2 conversion, and registered under 18 rather
+    // than 17, for the reasons the sibling `api/WebSocketEvent:timestamp` entry
+    // records: a presence payload is runtime-emitted, never a stored metadata row.
+    'api/SimplePresenceState:lastSeen',
+    // #15676 — the epoch-instant half of #14478 ruling B. `WebSocketEvent.timestamp`
+    // is an epoch INSTANT, not a duration: it moved onto the shared `EpochMs` schema
+    // (which declares the millisecond unit) and was renamed `occurredAt`, because
+    // every `*Ms` key in this package is a duration and spelling an instant that way
+    // would put it in the family the rule exists to separate it from.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, the
+    // `kernel/KernelContext:previewMode` reasoning: a WebSocket event is a RUNTIME
+    // wire payload emitted by the transport, never a stack collection member and
+    // never stored as a `sys_metadata` row, so a MetadataConversion would be a
+    // transform with no seam that ever runs. The prescription reaches consumers
+    // through the tombstone plus the D3 semantic entry `epoch-instant-keys-renamed`
+    // — which is exactly what ruling B prescribes for a runtime-emitted key.
+    //
+    // Registered under 18, not 17, for the reason the previewMode entry records:
+    // v17.0.0 was cut before this landed, so the change ships on the 17.x line and
+    // the prescription lives at the major boundary `migrate meta` users look at.
+    'api/WebSocketEvent:timestamp',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
@@ -9346,6 +9438,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
     // See `18.integration__Connector__errorMapping.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:errorMapping',
+    // #15676 — the epoch-instant half of #14478 ruling B. `HealthStatus.timestamp`
+    // is the instant the health check RAN: it moved onto the shared `EpochMs` schema
+    // and was renamed `checkedAt`, which also states what the instant marks.
+    //
+    // Semantic entry rather than a D2 conversion, and registered under 18 rather
+    // than 17, for the reasons the sibling `api/WebSocketEvent:timestamp` entry
+    // records: a health report is emitted by the startup orchestrator at runtime,
+    // never authored into a metadata document.
+    'kernel/HealthStatus:timestamp',
     // #12428 — ADR-0049 enforce-or-remove, one symbol over from #12340 (PR #12425)
     // in the same file and on the same per-key test. `HotReloadManager.startWatching`
     // contained NO watcher: a guard plus `logger.info('File watching started',
@@ -9409,6 +9510,18 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8495 / PR #8666 precedent).
     'kernel/KernelContext:previewMode',
+    // #15676 — the epoch-instant half of #14478 ruling B. `KernelContext.startTime`
+    // is the boot INSTANT: it moved onto the shared `EpochMs` schema and was renamed
+    // `startedAt`.
+    //
+    // Semantic entry rather than a D2 conversion, the same disposition
+    // `kernel/KernelContext:previewMode` already carries on this very def: a kernel
+    // context is constructed by HOST CODE at boot — not a stack collection member
+    // (`PLURAL_TO_SINGULAR` has no entry for it), never stored as a `sys_metadata`
+    // row — so the conversion chain has no seam that would ever see one.
+    //
+    // Registered under 18, not 17, for the reason that sibling entry records.
+    'kernel/KernelContext:startTime',
     // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
     // top-level containers (triage graded 2026-08-23; cloud leg measured clean
     // 2026-08-29 on #12400 with positive controls). The census found ZERO reads
@@ -9905,6 +10018,12 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // precedent). See the base entry for the full record and the
     // no-D2-conversion reasoning.
     'kernel/TenantRuntimeContext:previewMode',
+    // #15676 — the walked-shape copy of `kernel/KernelContext:startTime`.
+    // `TenantRuntimeContextSchema` extends `KernelContextSchema`, so it inherits
+    // both the renamed `startedAt` key and the tombstone; the authorable-surface
+    // ratchet records the two copies separately, so both are declared here. The
+    // `previewMode` retirement registered its two copies the same way.
+    'kernel/TenantRuntimeContext:startTime',
     // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key

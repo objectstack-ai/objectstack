@@ -2,6 +2,7 @@
   "title": "Shared Protocol",
   "pages": [
     "enums",
+    "epoch",
     "expression",
     "http",
     "identifiers",

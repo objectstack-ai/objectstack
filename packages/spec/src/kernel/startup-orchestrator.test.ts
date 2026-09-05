@@ -49,7 +49,7 @@ describe('Startup Orchestrator Protocol', () => {
     it('should validate healthy status', () => {
       const healthyStatus = {
         healthy: true,
-        timestamp: Date.now(),
+        checkedAt: Date.now(),
         details: {
           databaseConnected: true,
           memoryUsage: 45.2,
@@ -63,7 +63,7 @@ describe('Startup Orchestrator Protocol', () => {
     it('should validate unhealthy status with message', () => {
       const unhealthyStatus = {
         healthy: false,
-        timestamp: Date.now(),
+        checkedAt: Date.now(),
         message: 'Database connection failed',
       };
 
@@ -111,7 +111,7 @@ describe('Startup Orchestrator Protocol', () => {
         duration: 1250,
         health: {
           healthy: true,
-          timestamp: Date.now(),
+          checkedAt: Date.now(),
         },
       };
 
