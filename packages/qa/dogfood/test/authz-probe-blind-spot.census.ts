@@ -450,7 +450,18 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 0,
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
-    controls: { RealtimeService: 10, 'async init(': 1 },
+    // ⚠️ `RealtimeService` read 10 until #14646 added a comment to that file
+    // recording why its occupant names no discovery channel route. The pattern
+    // is a bare `/RealtimeService/g`, so it matches inside `IRealtimeService`
+    // and PROSE about the symbol moves the symbol's count exactly as code
+    // does — the mirror image of a retirement whose count goes UP because the
+    // codebase started documenting an absence. Re-measured here rather than
+    // reworded there: this control's job is to prove the file is still present
+    // and readable (the non-zero assertion), and shrinking a comment to hold a
+    // counter still is how the documentation gets worse to keep a number.
+    // Nothing else in the row moves — the file still mounts no HTTP route, so
+    // population / reachable / blindSpot / keys stay 0.
+    controls: { RealtimeService: 11, 'async init(': 1 },
     // The designed-silence decision is the #2992 realtime-transport tripwire record.
     note: 'Tripwire only. Zero keys is the designed reading: no end-user realtime transport is wired.',
   },

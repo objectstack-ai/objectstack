@@ -45,13 +45,50 @@
  * still declares `ts-morph` under `dependencies` before symlinking, because the
  * copy this file hands over is a copy a real consumer would never receive.
  *
+ * ## Names are not shapes — why a consumer-side `tsc` runs here too (#15630)
+ *
+ * `declaredExports()` below reads the packed `.d.ts` for exported NAMES and
+ * star re-exports. That is the barrel question, and it is not the contract
+ * question: three changes that break every consumer of this newly-public
+ * surface leave all four names in place, so a name-only pin passes green
+ * through each of them — a signature change to any ratified export, a renamed
+ * field on `ExtractedBody`, and a member dropped from the `HookBodyRefusalKind`
+ * union. The last is the sharpest: those members became a public type the
+ * moment these subpaths were ratified, so removing one is a breaking change to
+ * a published union that the pin existing to hold this surface would not
+ * notice.
+ *
+ * So a fixture is compiled by a real `tsc` from the consumer directory,
+ * against the PACKED `.d.ts` reached through the `exports` map — never the
+ * source tree. The distinction is the same one this file already draws for
+ * resolution, and it is not a formality: the source tree can be correct while
+ * the shipped `.d.ts` is not, and a `types` condition that stops resolving is
+ * invisible to every workspace-internal check. The fixture has two halves,
+ * because a type-level pin that cannot fail is worth nothing:
+ *
+ *   - **assertions** — invariant type identity (`Equals`) against the ratified
+ *     shape, so a widening reds exactly as loudly as a narrowing;
+ *   - **controls** — `@ts-expect-error` directives over deliberately wrong
+ *     expectations, one per failure mode above. Each MUST error; a directive
+ *     that stops firing is itself reported (TS2578). That is what keeps the
+ *     assertions from going vacuous should the packed types ever resolve to
+ *     `any`, and it carries this card's ablation into CI permanently rather
+ *     than leaving it in a PR body.
+ *
+ * ⛔ The fixture is a STRING written into the consumer directory, not a `.ts`
+ * file under `test/`. A file there is compiled by this package's own
+ * `tsconfig.test.json`, where the same import resolves through the workspace —
+ * i.e. to a build artifact, which `check:type-source-resolution` refuses — so
+ * checking it in would answer a different question under the same name.
+ *
  * ## What this file deliberately does NOT do
  *
  * It does not assert the extractor's behaviour beyond one clean body and two
  * classified refusals — `test/extract-hook-body.test.ts` owns that, over the
  * source. What this file owns is the DOOR: that the ratified subpath resolves
  * under both `require` and `import` conditions, that it exposes exactly the
- * four ratified names and nothing the internal module may grow next, that the
+ * four ratified names and nothing the internal module may grow next, that
+ * those four still carry the SHAPES a consumer compiles against, that the
  * deep `dist/` path STAYS sealed, and that the extractor which answers from the
  * packed copy is the platform's own (its refusal is a `HookBodyExtractionError`
  * carrying `kind`, not a bare `Error`). ⚠️ That refusal is a build-time class,
@@ -71,6 +108,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -172,6 +210,149 @@ try {
 process.stdout.write(JSON.stringify(out));
 `;
 
+/**
+ * The consumer's `tsconfig.json`. Three options carry the whole question:
+ *
+ *   - `moduleResolution: nodenext` is what makes this a test of the PUBLISHED
+ *     door — it reads the `exports` map's `types` condition, so a condition
+ *     that stops resolving is `TS2307` here, exactly as it would be for a real
+ *     dependent. `bundler` would answer a laxer question under the same name.
+ *   - `strict` — a shape assertion under a non-strict program is a weaker
+ *     assertion, and `strictNullChecks` in particular is load-bearing for the
+ *     optional-parameter half of the constructor pin.
+ *   - `skipLibCheck` — the consumer directory installs this ONE tarball, so the
+ *     `.d.ts` files of the workspace dependencies it references are absent by
+ *     construction. Checking them would report their absence, which is a fact
+ *     about the fixture's cupboard and not about the ratified surface. It does
+ *     not weaken anything asserted below: `conformance.ts` is not a declaration
+ *     file, so every diagnostic in IT is still reported.
+ *
+ * `types: []` keeps `@types/node` out of the program — the fixture reaches for
+ * no Node global, and a missing ambient package would otherwise red for a
+ * reason that has nothing to do with this surface.
+ */
+const CONSUMER_TSCONFIG = JSON.stringify(
+  {
+    compilerOptions: {
+      strict: true,
+      noEmit: true,
+      skipLibCheck: true,
+      target: 'es2022',
+      lib: ['ES2022'],
+      module: 'nodenext',
+      moduleResolution: 'nodenext',
+      types: [],
+    },
+    include: ['conformance.ts'],
+  },
+  null,
+  2,
+);
+
+/**
+ * The consumer the `.d.ts` is compiled for (#15630). Written into the consumer
+ * directory rather than checked in under `test/` — this file's header says why.
+ *
+ * `Equals` is the invariant identity check, not an assignability check: two
+ * types satisfy it only when tsc considers them THE SAME, so a member added to
+ * a union reds as loudly as one removed. An assignability pin would let every
+ * widening through, and a widening on a published union is the half that breaks
+ * an exhaustive `switch` in a dependent.
+ *
+ * ⛔ Every `@ts-expect-error` below is a CONTROL and must stay unsatisfiable-on
+ * -purpose. If a real change makes one of them legal, the directive goes unused
+ * and tsc reports TS2578 — which is the pin telling you the contract moved, not
+ * a lint to silence.
+ */
+const CONFORMANCE_FIXTURE = `
+import type { ExtractedBody, HookBodyRefusalKind } from '@objectstack/cli/hook-body';
+import { HookBodyExtractionError, extractHookBody } from '@objectstack/cli/hook-body';
+
+type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+type Expect<T extends true> = T;
+
+// --- HookBodyRefusalKind: the exact union, member for member ---------------
+type RefusalKindIsExactlyTheThreeRatifiedMembers = Expect<Equals<HookBodyRefusalKind, 'unparseable' | 'forbidden-token' | 'free-identifiers'>>;
+
+// --- ExtractedBody: the exact field set, then the exact whole shape --------
+// The keyof assertion is redundant against the whole-shape one and kept
+// anyway: a renamed field reds on BOTH, and the keyof diagnostic names the
+// field, which is the sentence a reader needs first.
+type ExtractedBodyHasExactlyTheseThreeFields = Expect<Equals<keyof ExtractedBody, 'source' | 'capabilities' | 'isExpression'>>;
+type ExtractedBodyMembersKeepTheirRatifiedTypes = Expect<
+  Equals<
+    ExtractedBody,
+    { source: string; capabilities: Array<'api.read' | 'api.write' | 'crypto.uuid' | 'log'>; isExpression: boolean }
+  >
+>;
+
+// --- extractHookBody: the exact signature ---------------------------------
+type ExtractHookBodyKeepsItsRatifiedSignature = Expect<Equals<typeof extractHookBody, (fn: (...a: unknown[]) => unknown, originLabel: string) => ExtractedBody>>;
+
+// --- HookBodyExtractionError: what it adds to Error, and how it is built ---
+type RefusalErrorAddsExactlyTheseFourMembers = Expect<Equals<Exclude<keyof HookBodyExtractionError, keyof Error>, 'kind' | 'originLabel' | 'freeIdentifiers' | 'nodeOnlyIdentifiers'>>;
+type RefusalErrorMembersKeepTheirRatifiedTypes = Expect<
+  Equals<
+    Pick<HookBodyExtractionError, 'kind' | 'originLabel' | 'freeIdentifiers' | 'nodeOnlyIdentifiers'>,
+    {
+      readonly kind: HookBodyRefusalKind;
+      readonly originLabel: string;
+      readonly freeIdentifiers: readonly string[];
+      readonly nodeOnlyIdentifiers: readonly string[];
+    }
+  >
+>;
+type RefusalErrorIsStillAnError = Expect<HookBodyExtractionError extends Error ? true : false>;
+type RefusalErrorConstructorKeepsItsRatifiedParameters = Expect<Equals<ConstructorParameters<typeof HookBodyExtractionError>, [HookBodyRefusalKind, string, string, (readonly string[])?, (readonly string[])?]>>;
+
+// --- The consumer limb: code a real dependent writes, compiled for real ----
+// The assertions above answer "did the shape move". This answers the question
+// the shape exists for — can a dependent still WRITE the ordinary thing.
+export function describeExtraction(fn: (...a: unknown[]) => unknown, label: string): string {
+  try {
+    const body: ExtractedBody = extractHookBody(fn, label);
+    return body.isExpression ? 'expr:' + body.source : 'block:' + body.capabilities.join(',');
+  } catch (err) {
+    if (err instanceof HookBodyExtractionError) {
+      const kind: HookBodyRefusalKind = err.kind;
+      return kind + '@' + err.originLabel + ':' + err.freeIdentifiers.join(',') + '/' + err.nodeOnlyIdentifiers.join(',');
+    }
+    throw err;
+  }
+}
+
+// --- Controls: one per failure mode the name-only pin passed green through --
+// Each directive below MUST fire. An unused one is TS2578, so these are what
+// keep the assertions above from going vacuous — if the packed types ever
+// resolved to \`any\`, or \`Equals\` stopped discriminating, every control here
+// turns red at once.
+
+// @ts-expect-error CONTROL — a member dropped from the union must not satisfy the identity check
+type MemberDroppedFromUnionMustRed = Expect<Equals<HookBodyRefusalKind, 'forbidden-token' | 'free-identifiers'>>;
+// @ts-expect-error CONTROL — a renamed field must not satisfy the identity check
+type FieldRenamedOnExtractedBodyMustRed = Expect<Equals<keyof ExtractedBody, 'source' | 'capabilities' | 'isExpr'>>;
+// @ts-expect-error CONTROL — a dropped parameter must not satisfy the identity check
+type SignatureChangeMustRed = Expect<Equals<typeof extractHookBody, (fn: (...a: unknown[]) => unknown) => ExtractedBody>>;
+
+// The same three, met the way a dependent meets them rather than through a
+// type-level identity check — a value assignment, a call and a field read.
+// @ts-expect-error CONTROL — 'unparsable' is not a member of the ratified union
+const notAMemberOfTheUnion: HookBodyRefusalKind = 'unparsable';
+// @ts-expect-error CONTROL — originLabel is a REQUIRED second parameter
+const callWithoutOriginLabel = extractHookBody(() => undefined);
+// @ts-expect-error CONTROL — ExtractedBody declares isExpression, never isExpr
+type ReadOfARenamedField = ExtractedBody['isExpr'];
+// @ts-expect-error CONTROL — the refusal's identifier lists are readonly to a consumer
+const writeToAReadonlyMember = (e: HookBodyExtractionError): void => { e.freeIdentifiers = []; };
+`;
+
+/** The fixture, line-numbered, so a tsc diagnostic's line points at something. */
+function numbered(source: string): string {
+  const lines = source.split('\n');
+  const width = String(lines.length).length;
+  return lines.map((line, i) => `${String(i + 1).padStart(width, ' ')} | ${line}`).join('\n');
+}
+
 interface Resolution {
   ok: boolean;
   path?: string;
@@ -260,6 +441,8 @@ let scratch: string;
 let packedFiles: string[];
 let installedRoot: string;
 let probe: ProbeResult;
+let typecheckDir: string;
+let conformance: { status: number; diagnostics: string; programFiles: string[] };
 
 beforeAll(() => {
   const rootEntry = MANIFEST.exports['.'];
@@ -315,6 +498,45 @@ beforeAll(() => {
   });
   if (run.status !== 0) throw new Error(`probe exited ${run.status}\n--- stderr ---\n${run.stderr}\n--- stdout ---\n${run.stdout}`);
   probe = JSON.parse(run.stdout) as ProbeResult;
+
+  // #15630 — the SHAPE half. A sibling directory, not `consumer` itself: its
+  // own `package.json` declares `type: module` so `nodenext` classifies the
+  // fixture as ESM (this package IS ESM-only, and a CJS-classified fixture
+  // would red with TS1479 — a fact about the fixture's own manifest, not about
+  // the ratified surface). Nothing of the probe's environment changes.
+  typecheckDir = join(consumer, 'typecheck');
+  mkdirSync(typecheckDir);
+  writeFileSync(
+    join(typecheckDir, 'package.json'),
+    JSON.stringify({ name: 'objectstack-cli-hook-body-consumer', private: true, type: 'module' }, null, 2),
+  );
+  writeFileSync(join(typecheckDir, 'tsconfig.json'), CONSUMER_TSCONFIG);
+  writeFileSync(join(typecheckDir, 'conformance.ts'), CONFORMANCE_FIXTURE);
+  // The compiler is resolved from THIS package (a consumer brings its own tsc;
+  // the version question is not what this file pins), but it is spawned with
+  // the consumer directory as cwd, so what it RESOLVES it resolves from there.
+  const tscEntry = createRequire(import.meta.url).resolve('typescript/lib/tsc.js');
+  // `--listFiles` is not decoration: a clean tsc run and a tsc run that
+  // compiled NOTHING both print nothing and both exit 0, so "no diagnostics"
+  // is only evidence once the program is known to contain the fixture AND the
+  // packed `.d.ts` it is supposed to be judging. The file list is what
+  // separates those two, and it is asserted below rather than assumed here.
+  const tsc = spawnSync(process.execPath, [tscEntry, '--pretty', 'false', '--listFiles', '-p', 'tsconfig.json'], {
+    cwd: typecheckDir,
+    encoding: 'utf8',
+    env: childEnv(),
+  });
+  if (tsc.error) throw new Error(`tsc could not start: ${tsc.error.message}`);
+  // tsc interleaves the file list with the diagnostics on stdout. A listed
+  // file is a path that EXISTS; a diagnostic is `path(l,c): error TSxxxx: …`,
+  // which never does — so the split is by disk, not by a regex over prose.
+  const lines = `${tsc.stdout ?? ''}${tsc.stderr ?? ''}`.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  const listed = new Set(lines.filter((l) => existsSync(l)));
+  conformance = {
+    status: tsc.status ?? -1,
+    diagnostics: lines.filter((l) => !listed.has(l)).join('\n'),
+    programFiles: [...listed].map((p) => realpathSync(p)),
+  };
 }, 120_000);
 
 afterAll(() => {
@@ -383,6 +605,42 @@ describe('the ratified surface is exactly four names', () => {
     const { names, starReExports } = declaredExports(join(installedRoot, 'dist', 'hook-body.d.ts'));
     expect(starReExports, 'a star re-export ratifies whatever the internal module grows next').toBe(0);
     expect(names).toEqual(RATIFIED_SURFACE);
+  });
+});
+
+describe('the ratified surface still has the SHAPES a consumer compiles against (#15630)', () => {
+  // ⛔ This assertion comes FIRST on purpose. Zero diagnostics is the verdict
+  // the next test reads, and zero diagnostics is also what a program that
+  // compiled nothing prints — so the population has to be established before
+  // the silence over it means anything.
+  it('put the fixture AND the packed .d.ts in the program — not the workspace source, not nothing', () => {
+    const real = (p: string): string => realpathSync(p);
+    expect(conformance.programFiles, 'the fixture itself was never compiled').toContain(
+      real(join(typecheckDir, 'conformance.ts')),
+    );
+    expect(
+      conformance.programFiles,
+      'the ratified entry was not reached — a `types` condition that stops resolving lands here',
+    ).toContain(real(join(installedRoot, 'dist', 'hook-body.d.ts')));
+    expect(
+      conformance.programFiles,
+      'the shapes were read from somewhere other than the PACKED tarball',
+    ).toContain(real(join(installedRoot, 'dist', 'utils', 'extract-hook-body.d.ts')));
+    // Nothing of this workspace may be in that program: a source-tree file
+    // would make every shape below a verdict about the checkout instead of
+    // about what ships.
+    expect(conformance.programFiles.filter((p) => p.startsWith(`${realpathSync(PACKAGE_ROOT)}/`))).toEqual([]);
+  });
+
+  it('compiles a real consumer against the PACKED .d.ts, reached through the exports map', () => {
+    expect(
+      conformance.diagnostics,
+      'tsc reported diagnostics compiling the conformance fixture against the packed .d.ts. Either the ratified ' +
+        'shape moved — in which case this is a BREAKING change to a published surface and the fixture is updated ' +
+        'deliberately, with a changeset — or a CONTROL stopped firing (TS2578), which says the same thing from the ' +
+        `other side. The fixture, numbered:\n${numbered(CONFORMANCE_FIXTURE)}`,
+    ).toBe('');
+    expect(conformance.status, 'tsc exited non-zero').toBe(0);
   });
 });
 

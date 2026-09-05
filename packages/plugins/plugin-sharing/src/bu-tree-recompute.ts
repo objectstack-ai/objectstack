@@ -24,7 +24,7 @@
  * ## Which recipient kinds this covers, measured rather than assumed
  *
  * `SharingRuleService.expandRecipient` is the one switch that decides, and it
- * reads the BU tree for TWO of the six kinds:
+ * reads the BU tree for TWO of the seven kinds:
  *
  * | recipient_type          | resolver                                    | reads the BU tree |
  * |-------------------------|---------------------------------------------|---|
@@ -34,6 +34,7 @@
  * | `position`              | `PositionGraphService` (`sys_user_position`, `sys_member`) | no |
  * | `unit_and_subordinates` | `BusinessUnitGraphService.expandUsers`      | YES |
  * | `queue`                 | returns `[]` (no `sys_queue` yet)           | no |
+ * | `field`                 | the matched record's own user column, per record (#15072; `expandRecipientForRecord`, never rule-wide) | no |
  *
  * `business_unit` stays in that set after #7807 narrowed it to exactly one
  * unit's members. The divergence this file originally noted — `expandRecipient`
@@ -110,7 +111,7 @@ export const BU_TREE_RECOMPUTE_PACKAGE = 'plugin-sharing:bu-tree-recompute';
  * The recipient kinds whose expansion reads the business-unit graph.
  *
  * This set is the non-regression guarantee. A rule recipient that never reads
- * the BU tree (`user` / `team` / `position` / `queue`) is not recomputed by a
+ * the BU tree (`user` / `team` / `position` / `queue` / `field`) is not recomputed by a
  * BU write at all — not more cheaply, not at all — so a deployment whose rules
  * are all `user`-recipient pays one `sys_sharing_rule` read per BU write and
  * nothing else.
