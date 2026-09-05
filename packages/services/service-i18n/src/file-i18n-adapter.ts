@@ -235,6 +235,24 @@ export class FileI18nAdapter implements II18nService {
   }
 
   /**
+   * The locale `t()` consults after the requested one — the `fallbackLocale`
+   * this adapter was constructed with, which `I18nServicePlugin` receives
+   * from the stack's `i18n` config (`fallbackLocale || defaultLocale || 'en'`,
+   * collapsed by the `os serve` / dev-plugin boot).
+   *
+   * [#14882] Exposed so the REST metadata reads pass the SAME locale to the
+   * document translators' `fallbackChain` that `t()` falls back to; without
+   * it the translators defaulted to `['en']` and a `zh-CN` workspace's
+   * courtesy `en` bundle outranked its authored Chinese labels.
+   * `undefined` when the adapter was constructed without one.
+   *
+   * @see II18nService.getFallbackLocale
+   */
+  getFallbackLocale(): string | undefined {
+    return this.fallbackLocale;
+  }
+
+  /**
    * Load all JSON translation files from a directory.
    * Each file should be named `{locale}.json`.
    */
