@@ -501,7 +501,7 @@ function selfTest() {
     const m = dualManifest('@fixture/cluster');
     eq(
       'the sweep reports exactly the paths the shared derivation names',
-      sweep(redRoot, [{ dir: 'packages/cluster', manifest: m }]).findings[0].missing.map((x) => x.path),
+      (sweep(redRoot, [{ dir: 'packages/cluster', manifest: m }]).findings[0]?.missing ?? []).map((x) => x.path),
       missingDeclarations(declaredDeclarationPaths(m), () => null).map((x) => x.path),
     );
     eq(
