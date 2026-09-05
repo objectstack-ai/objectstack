@@ -357,7 +357,10 @@ describe('§3 the gate resolves AFTER canonicalizeMetaRequestType', () => {
             });
             expect(overlayLabel(res), spelling).toBe(`${ORG} greeting`);
             expect(res.overlayScope, spelling).toBe('org');
-            expect(partitions(findOnes), spelling).toEqual([null, ORG]);
+            // ONLY the org partition: the org row wins, so the `overlay ===
+            // null` env fallback never runs. Gated on the raw segment this
+            // list is `[null]` instead — the partition split #10340 measured.
+            expect(partitions(findOnes), spelling).toEqual([ORG]);
         }
     });
 
