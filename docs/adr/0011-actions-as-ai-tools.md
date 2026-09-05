@@ -314,3 +314,5 @@ ships next.
 * `packages/spec/src/ui/action.zod.ts` — `ActionSchema` + `ActionAiSchema`
 * `packages/spec/src/contracts/ai-service.ts` — `AIToolDefinition`
 * `packages/services/service-ai/src/tools/action-tools.ts` — the bridge
+  *(Path note, 2026-09: historical and deliberately unlinked — `service-ai` was removed whole under
+  ADR-0025 S2, `21d4f8901`, 2026-06-25; the open edition is MCP-only.)*
