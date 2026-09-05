@@ -517,7 +517,49 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // count changes if the mask does.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // [#15608] ⭐ THE WHOLE-REPO WALK, declared for the root the incident came
+      // from. `envelope-caller-census.test.ts` resolves the workspace root and
+      // walks EVERY `.ts` / `.tsx` / `.js` / `.mjs` / `.cjs` file in the tree at
+      // module load, so its inputs are the repo -- but the two globs above name
+      // only the mask it imports, and `turbo ls --affected` reaches this package
+      // from the dependency graph alone. A diff under `scripts/` therefore
+      // selected this package for NOTHING, and the census could not report until
+      // the merge queue.
+      //
+      // Measured, not modelled: PR #13596 added a gate refusal MESSAGE containing
+      // two of the four SDK call shapes the census counts. It masks comments and
+      // leaves string literals intact by design (#13874, suspended and NOT
+      // reopened here -- what it counts is unchanged), so it counted them:
+      // `expected 21 to be 19`. That PR touched `scripts/` and nothing else, so
+      // no PR-side run could have reddened; it reddened in the merge queue, where
+      // speculative stacking ejected five PRs, four of them bystanders inheriting
+      // the same count off the stacked tree.
+      //
+      // `scripts/**` and not the whole census radius, and the difference is a
+      // PRICE, not an oversight. Layer B mirrors every glob here into
+      // `@objectstack/client#test` inputs, so a declared `packages/**` would
+      // re-run this suite on virtually every commit -- the bound that test's
+      // header has recorded as declined since #13079, and this entry does not
+      // buy it. `scripts/**` is the root where a QUOTED example lives (refusal
+      // messages, usage banners, embedded fixtures) and the one the incident
+      // came from; it also needs no ci.yml `crosspkg:` filter change, because
+      // `@objectstack/spec` already declares it verbatim, so Layer C reaches it
+      // today. What stays uncovered stays recorded in that test's header.
+      'scripts/**',
     ],
+    heldBy: {
+      // `scripts/**` is rostered TODAY through the census's own
+      // `scripts/js-comment-mask.mjs` import, so this witness is not what makes
+      // the glob held -- it is what keeps the glob attributed to the read that
+      // actually needs it. The walk is seeded from a recognised expression and
+      // then descends on a LOOP VARIABLE, so it resolves an escape verdict and
+      // NO name (`pathExpression`): if the mask import ever moves, the roster
+      // loses `scripts/` entirely while the whole-repo walk goes right on
+      // reading it, and #10566's limb would name this glob rather than the read.
+      // The witness is checked -- this test must still be one of this package's
+      // escaping tests -- so it cannot rot into prose.
+      'scripts/**': ['packages/client/src/envelope-caller-census.test.ts'],
+    },
   },
   '@objectstack/lint': {
     // authoring-rule-wiring / validate-rule-compilability /
