@@ -44,7 +44,7 @@
  * fixed in the OPPOSITE direction — see the `describe` at the end of the file.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
@@ -459,6 +459,15 @@ describe('#15597 — settleSelfRegistrationGrant refuses on a malformed row inst
     const lines: string[] = [];
     await settle(engine, 'portal_user', lines);
 
+    // Reverse-verified by ablation (recorded because the pre-fix behaviour is
+    // the whole argument): with the old trailing filter restored and nothing
+    // else changed, this case goes red with a granted row —
+    // `permission_set_id: 'ps_global'`, `organization_id: null` — i.e. the
+    // self-registrant really was handed the global set. The sibling case above
+    // goes red at the same time with `Cause: no active sys_permission_set row
+    // named 'portal_user' resolves`, which is the false cause. The other two
+    // cases in this describe stay GREEN under that ablation, by design: they
+    // are the no-regression and boundary guards, not the discriminators.
     // Refused, and in particular NOT granted the global set.
     const rows = await grants(engine);
     expect(rows, `granted anyway: ${JSON.stringify(rows)}`).toEqual([]);
