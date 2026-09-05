@@ -76,9 +76,18 @@ describe('ObjectStackProtocolImplementation - Dynamic Service Discovery', () => 
 
     // Check realtime — honest capabilities (ADR-0076 D12, #2462): the
     // realtime service is an in-process bus with NO HTTP surface, so it is
-    // registered/enabled but degraded, with no advertised route (a route
-    // would 404).
-    expect(discovery.services.realtime.enabled).toBe(true);
+    // registered but degraded, with no advertised route (a route would 404).
+    //
+    // [#14646] `enabled` is `false` here, and that is the substance of the
+    // change rather than a cosmetic flip: `realtime` is a CHANNEL SLOT, so its
+    // `enabled` is `isSubscribableChannel` — `handlerReady: true` AND a
+    // connectable route — not "the slot is filled". It used to read `true`
+    // beside this entry's own "no HTTP/WS surface is mounted" message, both
+    // true at once, and a console client keying on it subscribed to nothing.
+    // The slot is still REGISTERED, which is what `status: 'degraded'` and the
+    // message below go on saying. Full pins:
+    // `metadata-protocol/src/discovery-realtime-channel.pin.test.ts`.
+    expect(discovery.services.realtime.enabled).toBe(false);
     expect(discovery.services.realtime.status).toBe('degraded');
     expect(discovery.services.realtime.handlerReady).toBe(false);
     expect(discovery.services.realtime.route).toBeUndefined();
