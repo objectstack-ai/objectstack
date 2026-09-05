@@ -625,7 +625,12 @@ function main({ prePush = false } = {}) {
     reportPrerequisiteNotMet(
       import.meta.url,
       prerequisiteVerdict(unmeasured),
-      `${subjects.join(', ')} ${subjects.length === 1 ? 'is' : 'are'} stale`,
+      // Named while there are few enough to read; counted past that. The frame
+      // inlines this into a sentence it does not wrap, and a fourteen-path list
+      // there buries the clause that carries the whole reading.
+      subjects.length <= 3
+        ? `${subjects.join(', ')} ${subjects.length === 1 ? 'is' : 'are'} stale`
+        : `the ${subjects.length} artifacts marked NOT MEASURED above are stale`,
     );
   }
 
