@@ -26,6 +26,8 @@
  * `data.records.deleted`, carrying `matched` and NO `recordId`.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { BulkDataEventSchema, DataEventSchema } from '@objectstack/spec/api';
 import type { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
@@ -631,5 +633,322 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
     // The org-less row omits rather than inheriting a sibling's or the
     // caller's — one event per record means one organization per record.
     expect(hasOrgKey(2)).toBe(false);
+  });
+});
+
+/**
+ * #15225 — the producer half of `BulkDataEvent.organizationId`: the bulk
+ * sibling of the #14970 block above, and the remaining half of the
+ * cross-tenant webhook leak (#13566) whose single-record half #14970 closed.
+ *
+ * `BulkDataEventSchema.organizationId` (PR #15218) is ONE organization for the
+ * whole batch, asserted by the producer from the tenant wall the predicate
+ * write was composed under, or absent. ⚠️ `absent` means the OPPOSITE of what
+ * it means one block up: on a `DataEvent` it is a statement about the ROW
+ * ("belongs to no organization"); here it is a statement about PRODUCER
+ * KNOWLEDGE ("no single organization was asserted for this batch"). A pin
+ * written with the single-record intuition would assert the wrong thing, so
+ * every absence pin below names WHY the producer could not assert.
+ *
+ * What makes these pins discriminate rather than pass against the live
+ * defect ("the key is absent on every event" — an absence-only suite reported
+ * 25/25 green against exactly that on #14970):
+ *
+ *  1. **The wall, not the active organization.** Under `group` the wall is the
+ *     caller's MEMBERSHIP SET, so the positive `group` pin sets an active
+ *     organization the caller is NOT asserting and expects the set's only
+ *     member; the negative `group` pin keeps an active organization and two
+ *     memberships and expects OMISSION — substituting `tenantId` fails both.
+ *  2. **The wall, not the rows.** The stub driver composes no wall at all, so
+ *     the rows a sweep touches are whatever was seeded; the negative pins
+ *     seed rows across two organizations on purpose, and the answer is still
+ *     decided by the wall's inputs (posture, context), never by a row read.
+ *  3. **Absence is asserted as OMISSION** (`hasOwnProperty === false`), never
+ *     `=== undefined`: the schema refuses `''` outright (a fabricated empty
+ *     value would throw at the publish site and drop the event), and an
+ *     explicit `undefined` survives `parse` as a PRESENT key.
+ *
+ * The posture the wall enforces reaches the engine the way SecurityPlugin
+ * hands it over in a real composition — `setTenancyPostureProvider` — and an
+ * engine that was handed none is pinned as "no wall to vouch for".
+ */
+describe('#15225 — a published BulkDataEvent names the organization the tenant WALL named', () => {
+  /** Tenant-scoped: the kernel-injected `organization_id` is declared. */
+  const invoice = {
+    name: 'invoice',
+    label: 'Invoice',
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      amount: { name: 'amount', type: 'text' as const },
+      status: { name: 'status', type: 'text' as const },
+      organization_id: { name: 'organization_id', type: 'text' as const },
+    },
+  };
+
+  const ACTIVE_ORG = 'org_acme';
+  const OTHER_ORG = 'org_globex';
+  /** System context: the only caller that may seed rows into ANY organization. */
+  const sysCtx = { isSystem: true, tenantId: ACTIVE_ORG, userId: 'usr_admin' };
+  /** An ordinary resolved session under `isolated`: rung carried, active org set. */
+  const member = { userId: 'usr_member', tenantId: ACTIVE_ORG, posture: 'MEMBER' };
+
+  let engine: ObjectQL;
+  let published: RealtimeEventPayload[];
+  let realtime: IRealtimeService;
+  /** What SecurityPlugin's injected provider answers; each pin sets it. */
+  let enforcedPosture: string | undefined;
+
+  const payloadOf = (i = 0) => published[i].payload as Record<string, unknown>;
+  const hasOrgKey = (i = 0) =>
+    Object.prototype.hasOwnProperty.call(payloadOf(i), 'organizationId');
+  const bulkEvent = (i = 0) => BulkDataEventSchema.parse(payloadOf(i));
+
+  const seed = async (rows: Array<Record<string, unknown>>) => {
+    await engine.insert('invoice', rows, { context: sysCtx } as any);
+    published.length = 0;
+  };
+  const sweepUpdate = (context: Record<string, unknown>, object = 'invoice') =>
+    engine.update(object, { amount: '0' }, { multi: true, where: { status: 'open' }, context } as any);
+  const sweepDelete = (context: Record<string, unknown>) =>
+    engine.delete('invoice', { multi: true, where: { status: 'open' }, context } as any);
+
+  beforeEach(async () => {
+    published = [];
+    realtime = {
+      publish: vi.fn(async (event: RealtimeEventPayload) => { published.push(event); }),
+      subscribe: vi.fn(async () => 'sub-1'),
+      unsubscribe: vi.fn(async () => undefined),
+    };
+    engine = new ObjectQL();
+    const { driver } = makeStubDriver();
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(invoice);
+    engine.registry.registerObject(task);
+    engine.setRealtimeService(realtime);
+    enforcedPosture = 'isolated';
+    engine.setTenancyPostureProvider(() => enforcedPosture);
+    vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
+  });
+
+  it('isolated: a member\'s predicate UPDATE names the caller\'s organization — the wall\'s equality term', async () => {
+    await seed([
+      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '2', status: 'open', organization_id: ACTIVE_ORG },
+    ]);
+
+    await sweepUpdate(member);
+
+    expect(published).toHaveLength(1);
+    expect(published[0].type).toBe('data.records.updated');
+    const event = bulkEvent();
+    expect(event.matched).toBe(2);
+    // PRESENT, and the wall's term: under `isolated` the Layer 0 wall is
+    // `organization_id = <active organization>`, so every affected row is in it.
+    expect(hasOrgKey()).toBe(true);
+    expect(event.organizationId).toBe(ACTIVE_ORG);
+  });
+
+  it('isolated: the predicate DELETE path stamps it too — the branch with no post-state', async () => {
+    await seed([
+      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '2', status: 'kept', organization_id: ACTIVE_ORG },
+    ]);
+
+    await sweepDelete(member);
+
+    expect(published).toHaveLength(1);
+    expect(published[0].type).toBe('data.records.deleted');
+    expect(bulkEvent().matched).toBe(1);
+    expect(hasOrgKey()).toBe(true);
+    expect(bulkEvent().organizationId).toBe(ACTIVE_ORG);
+  });
+
+  it('group with a SINGLETON membership names that member — not the caller\'s active organization', async () => {
+    enforcedPosture = 'group';
+    // The discriminating case: the active organization is one the caller is
+    // NOT asserting for the batch. Under `group` the wall is the membership
+    // SET (`organization_id IN accessible_org_ids`), and `tenantId` is only the
+    // default write target — reading it here would name the wrong organization.
+    const plantAdmin = {
+      userId: 'usr_plant',
+      tenantId: 'org_hq',
+      accessible_org_ids: ['org_plant_a'],
+      posture: 'MEMBER',
+    };
+    await seed([{ amount: '1', status: 'open', organization_id: 'org_plant_a' }]);
+
+    await sweepUpdate(plantAdmin);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(true);
+    expect(bulkEvent().organizationId).toBe('org_plant_a');
+    expect(bulkEvent().organizationId).not.toBe('org_hq');
+  });
+
+  it('group: a membership set that repeats its one organization still names exactly one', async () => {
+    enforcedPosture = 'group';
+    const ctx = { userId: 'usr_plant', tenantId: 'org_plant_a', accessible_org_ids: ['org_plant_a', 'org_plant_a'], posture: 'MEMBER' };
+    await seed([{ amount: '1', status: 'open', organization_id: 'org_plant_a' }]);
+
+    await sweepUpdate(ctx);
+
+    expect(hasOrgKey()).toBe(true);
+    expect(bulkEvent().organizationId).toBe('org_plant_a');
+  });
+
+  it('group across TWO memberships publishes it ABSENT — never the active organization as a stand-in', async () => {
+    enforcedPosture = 'group';
+    // The option-C mislabel (PR #14635 open question 1, rejected): the caller
+    // HAS an active organization, and it must not label a sweep that the wall
+    // let reach two organizations' rows.
+    const hqAnalyst = {
+      userId: 'usr_hq',
+      tenantId: 'org_plant_a',
+      accessible_org_ids: ['org_plant_a', 'org_plant_b'],
+      posture: 'MEMBER',
+    };
+    await seed([
+      { amount: '1', status: 'open', organization_id: 'org_plant_a' },
+      { amount: '2', status: 'open', organization_id: 'org_plant_b' },
+    ]);
+
+    await sweepUpdate(hqAnalyst);
+
+    expect(published).toHaveLength(1);
+    expect(bulkEvent().matched).toBe(2);
+    // OMITTED, asserted as omission — "not asserted", not "no organization".
+    expect(hasOrgKey()).toBe(false);
+    expect(bulkEvent().organizationId).toBeUndefined();
+  });
+
+  it('a system-context predicate write publishes it ABSENT — the middleware composes no wall for it', async () => {
+    // `isSystem` short-circuits the whole security middleware, so no Layer 0
+    // wall was composed and the sweep may reach every organization's rows —
+    // which is exactly what this seed makes it do. The caller's `tenantId` is
+    // set and must not be substituted.
+    await seed([
+      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '2', status: 'open', organization_id: OTHER_ORG },
+    ]);
+
+    await sweepUpdate(sysCtx);
+
+    expect(published).toHaveLength(1);
+    expect(bulkEvent().matched).toBe(2);
+    expect(hasOrgKey()).toBe(false);
+    expect(bulkEvent().organizationId).toBeUndefined();
+  });
+
+  it('single posture (no wall) publishes it ABSENT even though the caller has an active organization', async () => {
+    enforcedPosture = 'single';
+    await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
+
+    await sweepUpdate(member);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('no enforcement layer injected a posture ⇒ ABSENT — a lean embedding has no wall anywhere to vouch for', async () => {
+    // An engine no SecurityPlugin ever handed a posture: Layer 0 was never
+    // composed, and the memory driver reads no `DriverOptions.tenantId`
+    // either, so nothing constrained this sweep to one organization —
+    // whatever the operator's env says. The env fallback the #8844 write
+    // refusal consults is deliberately NOT consulted here.
+    const bare = new ObjectQL();
+    const { driver } = makeStubDriver();
+    bare.registerDriver(driver, true);
+    await bare.init();
+    bare.registry.registerObject(invoice);
+    bare.setRealtimeService(realtime);
+    vi.spyOn((bare as any).logger, 'warn').mockImplementation(() => undefined);
+    await bare.insert('invoice', [{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }], { context: sysCtx } as any);
+    published.length = 0;
+
+    await bare.update('invoice', { amount: '0' }, { multi: true, where: { status: 'open' }, context: member } as any);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('a carried PLATFORM_ADMIN rung publishes it ABSENT — the batch may have crossed the wall', async () => {
+    // ADR-0095 D3: a true PLATFORM_ADMIN crosses the wall where the object's
+    // posture permits. The engine holds the rung but not the superuser bypass
+    // bit the exemption also needs, so it declines to assert rather than
+    // guess which side of the wall this sweep ran on.
+    const platformAdmin = { userId: 'usr_platform', tenantId: ACTIVE_ORG, posture: 'PLATFORM_ADMIN' };
+    await seed([
+      { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
+      { amount: '2', status: 'open', organization_id: OTHER_ORG },
+    ]);
+
+    await sweepUpdate(platformAdmin);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('a context carrying NO rung publishes it ABSENT — the exemption is decided by a probe the engine cannot see', async () => {
+    // A hand-built context (no `posture`) is one the security plugin decides
+    // by a capability probe over its resolved permission sets. The engine has
+    // no view of that probe, so it asserts nothing. Every session context the
+    // authz resolver assembles carries the rung, so this is the hand-built
+    // population only.
+    const rungless = { userId: 'usr_member', tenantId: ACTIVE_ORG };
+    await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
+
+    await sweepUpdate(rungless);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('an object that is not tenant-scoped publishes it ABSENT under the same wall', async () => {
+    // `task` declares no `organization_id`: Layer 0 contributes nothing on it
+    // (`objectHasOrgIdField === false`), so there is no wall to name.
+    await engine.insert('task', [{ title: 'a', status: 'open' }], { context: sysCtx } as any);
+    published.length = 0;
+
+    await sweepUpdate(member, 'task');
+
+    expect(published).toHaveLength(1);
+    expect(published[0].type).toBe('data.records.updated');
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('an empty active organization OMITS the key AND still publishes — the empty string never reaches the validator', async () => {
+    // `''` is refused by `z.string().min(1)`: handed to the publish site's
+    // `parse` it would throw and the event would be dropped altogether. The
+    // gate is in the resolver, not the error handler — same rule as the
+    // per-record block.
+    const orgless = { userId: 'usr_member', tenantId: '', posture: 'MEMBER' };
+    await seed([{ amount: '1', status: 'open', organization_id: ACTIVE_ORG }]);
+
+    await sweepUpdate(orgless);
+
+    expect(published).toHaveLength(1);
+    expect(hasOrgKey()).toBe(false);
+    expect(() => bulkEvent()).not.toThrow();
+  });
+
+  it('BulkDataEventSchema.parse at the publish site stays the validator, and the key is fed THROUGH it', () => {
+    // A source pin, on the same terms as the #7809 vocabulary weld next door:
+    // the runtime pins above prove the key is emitted; this one proves it is
+    // emitted INSIDE the `parse` call — a stamp added onto the envelope after
+    // validation would pass every pin above while bypassing the contract.
+    const testPath = expect.getState().testPath;
+    if (!testPath) throw new Error('vitest did not report a testPath — cannot locate engine.ts');
+    const src = readFileSync(join(dirname(testPath), 'engine.ts'), 'utf8');
+    const start = src.indexOf('private async publishBulkDataEvent(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n  }\n', start));
+    const parseCalls = body.match(/BulkDataEventSchema\.parse\(\{[\s\S]*?\n\s*\}\);/g) ?? [];
+    expect(parseCalls).toHaveLength(1);
+    expect(parseCalls[0]).toContain('organizationId');
+    // And the value is resolved by the wall-based helper, never the row helper
+    // (there is no row) and never `tenantId` on its own.
+    expect(body).toContain('bulkEventOrganizationId(');
+    expect(body).not.toContain('eventOrganizationId(');
   });
 });
