@@ -2094,22 +2094,47 @@ function lookupObjectFieldOption(
 }
 
 /**
- * Built-in labels for the platform-injected system fields (the ObjectQL
- * registry stamps `owner_id` / `created_*` / `updated_*` onto every object
- * with English labels). Custom objects carry no per-object translation
- * entries for these, so without a fallback every localized surface — list
- * headers, export files, import templates — leaks the English default (e.g.
- * an otherwise fully-Chinese import template with an `Owner` column).
+ * Built-in labels for the platform-injected system fields — the full set
+ * `injectedSystemColumnDefs` (`../data/injected-system-column-provenance`)
+ * spreads onto every eligible object with English labels: the tenant scope
+ * anchor `organization_id`, the audit family `created_*` / `updated_*`,
+ * `owner_id` and `owning_business_unit_id`. Custom objects carry no
+ * per-object translation entries for these, so without a fallback every
+ * localized surface — list headers, export files, import templates, the
+ * `/meta` read exits — leaks the English default (e.g. an otherwise
+ * fully-Chinese import template with an `Owner` column, or an
+ * `Organization` field on every business object of a zh-CN tenant).
+ *
+ * The identity-stable definitions themselves are never localised in place:
+ * the ObjectQL registry and the served-document strip read them by exact
+ * identity, so display-name resolution is a read-exit concern that lives
+ * HERE, keyed by field name, and applies only while the served label still
+ * equals the definition's English default (see `builtinSystemFieldLabel`).
+ * A row's `en` therefore MUST equal the definition's `label` byte for byte
+ * — one that drifts silently stops matching and the column leaks English
+ * again; `i18n-resolver.test.ts` pins the pairing from the provenance
+ * module's own definitions.
  *
  * Wording matches the generated platform bundles (`*.objects.generated.ts`)
  * so a system field reads the same on custom and platform objects.
+ * `owning_business_unit_id` has no bundle leaf of its own (injected, hidden,
+ * declared by no platform object), so its wording composes the bundles'
+ * `sys_business_unit` label with the ownership qualifier their
+ * `sys_user.primary_business_unit_id` leaves use.
  */
 const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
+  organization_id: { en: 'Organization', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organización' },
   owner_id: { en: 'Owner', 'zh-CN': '所有者', 'ja-JP': '所有者', 'es-ES': 'Propietario' },
   created_at: { en: 'Created At', 'zh-CN': '创建时间', 'ja-JP': '作成日時', 'es-ES': 'Creado el' },
   created_by: { en: 'Created By', 'zh-CN': '创建人', 'ja-JP': '作成者', 'es-ES': 'Creado por' },
   updated_at: { en: 'Last Modified At', 'zh-CN': '更新时间', 'ja-JP': '更新日時', 'es-ES': 'Actualizado el' },
   updated_by: { en: 'Last Modified By', 'zh-CN': '更新人', 'ja-JP': '更新者', 'es-ES': 'Actualizado por' },
+  owning_business_unit_id: {
+    en: 'Owning Business Unit',
+    'zh-CN': '所属业务单元',
+    'ja-JP': '所属ビジネスユニット',
+    'es-ES': 'Unidad de negocio propietaria',
+  },
 };
 
 /**

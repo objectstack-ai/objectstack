@@ -2212,6 +2212,122 @@ describe('translateObject system-field label fallback', () => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// translateObject — EVERY platform-injected column, per shipped locale
+// (objectstack#14972)
+// ────────────────────────────────────────────────────────────────────────────
+
+import { injectedSystemColumnDefs } from '../data/injected-system-column-provenance';
+
+describe('translateObject localises every platform-injected column (objectstack#14972)', () => {
+  // The column definitions come from the provenance module itself — the same
+  // objects `applySystemFields` spreads at registration and the `/meta` read
+  // exits serve — so the English defaults this block starts from cannot drift
+  // from the shipped tables through a retyped label. The document is a custom
+  // object that ships no translation entries of its own, and the bundle is
+  // absent: only the built-in table can answer.
+  const injected = injectedSystemColumnDefs({ name: 'contracts', fields: { title: { type: 'text' } } });
+  const doc = {
+    name: 'contracts',
+    label: 'Contract',
+    fields: {
+      title: { name: 'title', type: 'text', label: '合同名称' },
+      ...(injected as Record<string, any>),
+    },
+  };
+  const SHIPPED_LOCALES = ['en', 'zh-CN', 'ja-JP', 'es-ES'] as const;
+  const labelsFor = (locale: string): Record<string, string> => {
+    const out = translateObject(doc, undefined, { locale, fallbackChain: [locale] });
+    const fields = out.fields as Record<string, any>;
+    return Object.fromEntries(Object.keys(injected).map((name) => [name, fields[name].label]));
+  };
+
+  it('starts from all seven injected columns carrying their shipped English defaults', () => {
+    expect(Object.keys(injected).sort()).toEqual([
+      'created_at',
+      'created_by',
+      'organization_id',
+      'owner_id',
+      'owning_business_unit_id',
+      'updated_at',
+      'updated_by',
+    ]);
+    // An `en` request leaves every label exactly as the definition ships it.
+    expect(labelsFor('en')).toEqual({
+      organization_id: 'Organization',
+      created_at: 'Created At',
+      created_by: 'Created By',
+      updated_at: 'Last Modified At',
+      updated_by: 'Last Modified By',
+      owner_id: 'Owner',
+      owning_business_unit_id: 'Owning Business Unit',
+    });
+  });
+
+  it('zh-CN: every injected column reads Chinese, in the platform bundles\' wording', () => {
+    expect(labelsFor('zh-CN')).toEqual({
+      organization_id: '组织',
+      created_at: '创建时间',
+      created_by: '创建人',
+      updated_at: '更新时间',
+      updated_by: '更新人',
+      owner_id: '所有者',
+      owning_business_unit_id: '所属业务单元',
+    });
+  });
+
+  it('ja-JP: every injected column reads Japanese, in the platform bundles\' wording', () => {
+    expect(labelsFor('ja-JP')).toEqual({
+      organization_id: '組織',
+      created_at: '作成日時',
+      created_by: '作成者',
+      updated_at: '更新日時',
+      updated_by: '更新者',
+      owner_id: '所有者',
+      owning_business_unit_id: '所属ビジネスユニット',
+    });
+  });
+
+  it('es-ES: every injected column reads Spanish, in the platform bundles\' wording', () => {
+    expect(labelsFor('es-ES')).toEqual({
+      organization_id: 'Organización',
+      created_at: 'Creado el',
+      created_by: 'Creado por',
+      updated_at: 'Actualizado el',
+      updated_by: 'Actualizado por',
+      owner_id: 'Propietario',
+      owning_business_unit_id: 'Unidad de negocio propietaria',
+    });
+  });
+
+  it('a tenant that relabelled the organization column keeps its label on every locale', () => {
+    // The guard is comparison-based: the built-in row applies only while the
+    // served label still equals the definition's English default. A label the
+    // tenant (or the author) wrote is authored data and wins on every locale,
+    // the `en` request included.
+    const renamed = {
+      ...doc,
+      fields: {
+        ...doc.fields,
+        organization_id: { ...(injected.organization_id as Record<string, any>), label: '所属公司' },
+      },
+    };
+    for (const locale of SHIPPED_LOCALES) {
+      const out = translateObject(renamed, undefined, { locale, fallbackChain: [locale] });
+      expect((out.fields as any).organization_id.label, locale).toBe('所属公司');
+      // The untouched columns still localise around it.
+      expect((out.fields as any).owner_id.label, locale).toBe(labelsFor(locale).owner_id);
+    }
+  });
+
+  it('never mutates the input document or the shipped definitions', () => {
+    labelsFor('zh-CN');
+    expect((doc.fields as any).organization_id.label).toBe('Organization');
+    expect((doc.fields as any).owning_business_unit_id.label).toBe('Owning Business Unit');
+    expect(injected.organization_id.label).toBe('Organization');
+  });
+});
+
 describe('translateObject inline actions (objectstack#3370)', () => {
   // The `sys_approval_request` shape: decision actions declared inline on the
   // object. The plugin ships `_actions` translations for them, but the object

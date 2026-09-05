@@ -71,7 +71,7 @@
 // design.
 //
 // ⛔ One direction is deliberately NOT fatal: a module export that the
-// declaration omits. `check-regen-pending.mjs` exports seven functions and
+// declaration omits. `check-regen-pending.mjs` exports eight functions and
 // declares three, on purpose -- its declaration says "The surface is three
 // functions". That partial mirror cannot fail green: a consumer importing an
 // undeclared name gets `TS2305`, which is loud, red and immediate. Failing on

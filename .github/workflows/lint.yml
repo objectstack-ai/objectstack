@@ -5014,6 +5014,19 @@ jobs:
       - name: Build the ledgered packages' dependencies
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
+
       # ⚠️ `NODE_OPTIONS` here is HALF of the heap ceiling this gate runs tsc
       # under, and the two halves ship together or not at all (#14569, ruled
       # 2026-09-03). The other half is `CI_TSC_HEAP_CEILING_MB` in
@@ -5188,6 +5201,19 @@ jobs:
       # above, so in practice it is cache hits plus the remainder (~13s in CI).
       - name: Build the nested packages the consumer gates resolve through
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
+
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck
