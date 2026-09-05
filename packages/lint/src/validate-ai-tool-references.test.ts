@@ -172,4 +172,43 @@ describe('validate-ai-tool-references', () => {
       validateAiToolReferences({ skills: [null, { tools: [7, null, 'query_records'] }] } as never),
     ).toEqual([]);
   });
+
+  /**
+   * [#15444] The declarative `operation: 'update'` action materialises a tool.
+   *
+   * `materialisesAsTool` mirrors the runtime's headless-invocability door, and
+   * that door learned `operation` before `type` in #15079 — the declarative
+   * single-record field write (#14092) is invokable with NEITHER a `target`
+   * nor a `body`, because `ActionSchema` refuses both beside
+   * `operation: 'update'` and the platform action route performs the write.
+   * While this mirror still read `type` only, its `script` arm answered
+   * `false`: `action_mark_done` was reported as a fictional tool reference and
+   * the action was offered in the near-miss hint as one that never
+   * materialises — for metadata the runtime lists and runs.
+   */
+  it('materialises a tool for a declarative `operation: \'update\'` action (no target, no body)', () => {
+    const markDone = {
+      name: 'mark_done',
+      operation: 'update',
+      patch: { status: 'done' },
+      ai: { exposed: true, description: 'Mark the current task done.' },
+    };
+    const stack = {
+      objects: [{ name: 'todo_task', actions: [markDone] }],
+      skills: [{ name: 's', tools: ['action_mark_done'] }],
+    };
+    expect(validateAiToolReferences(stack)).toEqual([]);
+
+    // Positive control, same rule and same shape: an AI-exposed `script`
+    // action with no `operation` and nothing to dispatch on still does NOT
+    // materialise, so a reference to it is still reported. Without this a
+    // predicate hard-wired to `true` would pass the assertion above.
+    const wiredToNothing = { ...markDone, operation: undefined, patch: undefined };
+    const control = validateAiToolReferences({
+      objects: [{ name: 'todo_task', actions: [wiredToNothing] }],
+      skills: [{ name: 's', tools: ['action_mark_done'] }],
+    });
+    expect(control).toHaveLength(1);
+    expect(control[0].path).toBe('skills[0].tools[0]');
+  });
 });
