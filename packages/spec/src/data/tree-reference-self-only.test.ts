@@ -39,7 +39,15 @@ describe('[#14892] a `tree` field\'s `reference` must name the declaring object'
     // is a relation and its cascade default is exactly the intended meaning.
     expect(parsed.data.fields.f_tree.deleteBehavior).toBe('set_null');
 
-    const created = ObjectSchema.create(zoo('showcase_field_zoo') as never);
+    // The authoring door, spelled as an author spells it (the literal keeps
+    // `create()`'s generic inferable, so `fields.f_tree` is typed).
+    const created = ObjectSchema.create({
+      name: 'showcase_field_zoo',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        f_tree: { type: 'tree', label: 'Tree', reference: 'showcase_field_zoo' },
+      },
+    });
     expect(created.fields.f_tree.reference).toBe('showcase_field_zoo');
   });
 
@@ -75,7 +83,13 @@ describe('[#14892] a `tree` field\'s `reference` must name the declaring object'
     expect(issue.message).toContain('`lookup`');
 
     // The authoring door throws the same located issue.
-    expect(() => ObjectSchema.create(zoo('showcase_category') as never)).toThrow(/showcase_category/);
+    expect(() => ObjectSchema.create({
+      name: 'showcase_field_zoo',
+      fields: {
+        name: { type: 'text', label: 'Name' },
+        f_tree: { type: 'tree', label: 'Tree', reference: 'showcase_category' },
+      },
+    })).toThrow(/showcase_category/);
   });
 
   it('judges each `tree` field on its own: one foreign pointer beside a self-reference is one issue', () => {
