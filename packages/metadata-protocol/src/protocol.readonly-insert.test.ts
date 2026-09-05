@@ -16,10 +16,14 @@
 // DELETED rather than kept as a second implementation.
 //
 // ⇒ What this file may still pin is DELEGATION, and only that:
-//   - every create face hands the caller's payload to `engine.insert` WHOLE;
-//   - every create face surfaces the ENGINE's `onFieldsDropped` as the response
-//     `droppedFields`, which is the channel the ingress used to FAKE with a
-//     before/after payload diff.
+//   - every create face hands the caller's payload to `engine.insert` WHOLE —
+//     `createData`, `cloneData`, `createManyData`, `insertManyData`, and
+//     `batchData`'s `create` rows AND both arms of `upsert` that create;
+//   - every create face whose RESPONSE carries `droppedFields` surfaces the
+//     ENGINE's `onFieldsDropped` there, which is the channel the ingress used
+//     to FAKE with a before/after payload diff. `cloneData` is the one face
+//     that does not: `CloneDataResponseSchema` declares no such member (pinned
+//     in the firing-control block at the bottom).
 // The enforcement itself is pinned where it now runs, against a real engine:
 // `packages/objectql/src/engine-insert-static-readonly-strip.test.ts`. This
 // package does not depend on `@objectstack/objectql`, so a strip assertion here
@@ -89,7 +93,10 @@ function makeProtocol(schema: any = SCHEMA) {
     // (`check:engine-double-contract`).
     findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => {
       assertEngineFindOnePredicate(object, query);
-      return { id: 'src-1', title: 'Source', approval_status: 'approved' };
+      // The clone source exists; any other id names no row, which is what sends
+      // `batchData`'s upsert fork (`probeRecord`, #5099) down its CREATE arm.
+      const id = (query as any)?.where?.id;
+      return id === 'src-1' ? { id: 'src-1', title: 'Source', approval_status: 'approved' } : null;
     }),
   };
   const p = new ObjectStackProtocolImplementation(engine as any);
@@ -165,6 +172,39 @@ describe('#14147 — the create ingress DELEGATES the readonly strip to engine.i
     ]);
   });
 
+  it('batchData upsert-CREATE (row with no id) forwards the row whole and hangs the engine’s event on that row', async () => {
+    const { p, inserts } = makeProtocol();
+    const res: any = await p.batchData({
+      object: 'approval_case',
+      request: { operation: 'upsert', records: [{ data: { title: 'A', approval_status: 'approved' } }] },
+    } as any);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].data).toEqual({ title: 'A', approval_status: 'approved' });
+    expect(res.results[0].success).toBe(true);
+    expect(res.results[0].droppedFields).toEqual([
+      { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
+    ]);
+  });
+
+  it('batchData upsert-CREATE (id names no row) forwards `{ id, ...data }` whole and hangs the engine’s event on that row', async () => {
+    const { p, engine, inserts } = makeProtocol();
+    const res: any = await p.batchData({
+      object: 'approval_case',
+      request: { operation: 'upsert', records: [{ id: 'new-1', data: { title: 'A', approval_status: 'approved' } }] },
+    } as any);
+    // The fork asked existence first (#5099) and was answered null, so this is
+    // the CREATE arm — pinned, because the update arm five lines above it in
+    // `runBatchDataLoop` already reported drops and would make this green for
+    // the wrong reason.
+    expect(engine.findOne).toHaveBeenCalledTimes(1);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].data).toEqual({ id: 'new-1', title: 'A', approval_status: 'approved' });
+    expect(res.results[0].success).toBe(true);
+    expect(res.results[0].droppedFields).toEqual([
+      { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
+    ]);
+  });
+
   it('insertManyData forwards every row whole and keeps ROW precision from the union', async () => {
     const { p, inserts } = makeProtocol();
     const res: any = await p.insertManyData({
@@ -182,7 +222,12 @@ describe('#14147 — the create ingress DELEGATES the readonly strip to engine.i
 });
 
 describe('#14147 — engine listener wiring (the firing control for every assertion above)', () => {
-  it('every create face passes an onFieldsDropped listener to the engine', async () => {
+  // The faces enumerated here are the ones whose RESPONSE carries
+  // `droppedFields`: `CreateDataResponse`, `CreateManyDataResponse`, and the
+  // per-row results of `insertManyData` / `batchData`. `cloneData` is
+  // deliberately NOT among them — its contract has no such member; the case
+  // after this one pins that exclusion so "every" stays true of what is listed.
+  it('every create face whose response carries droppedFields passes an onFieldsDropped listener to the engine', async () => {
     const { p, inserts } = makeProtocol();
     await p.createData({ object: 'approval_case', data: { title: 'A' } });
     await p.createManyData({ object: 'approval_case', records: [{ title: 'A' }] });
@@ -190,11 +235,35 @@ describe('#14147 — engine listener wiring (the firing control for every assert
       object: 'approval_case',
       request: { operation: 'create', records: [{ data: { title: 'A' } }] },
     } as any);
+    await p.batchData({
+      object: 'approval_case',
+      request: { operation: 'upsert', records: [{ data: { title: 'A' } }] },
+    } as any);
+    await p.batchData({
+      object: 'approval_case',
+      request: { operation: 'upsert', records: [{ id: 'new-1', data: { title: 'A' } }] },
+    } as any);
     await p.insertManyData({ object: 'approval_case', records: [{ title: 'A' }] });
-    expect(inserts).toHaveLength(4);
+    expect(inserts, 'createData · createManyData · batchData create · batchData upsert-create ×2 (no id / unknown id) · insertManyData')
+      .toHaveLength(6);
     for (const call of inserts) {
       expect(typeof call.options?.onFieldsDropped, 'a face with no listener reports a silent drop').toBe('function');
     }
+  });
+
+  it('cloneData is the one create face that passes NO listener — its response contract declares no droppedFields', async () => {
+    // `CloneDataResponseSchema` (#11924, declared AS PRODUCED) is exactly
+    // `{ object, id, sourceId, record }`; `search-clone-schema-conformance.test.ts`
+    // holds the producer to that key set and asserts `droppedFields` in
+    // particular is absent. So a listener here would have nowhere contracted
+    // to report to. The engine still strips a copied-over or overridden
+    // readonly column and still logs the `warn` line — the clone simply does
+    // not carry the event on the wire. Reporting it means a new response key,
+    // which is a spec change with its own card, not a delegation detail.
+    const { p, inserts } = makeProtocol();
+    await p.cloneData({ object: 'approval_case', id: 'src-1' } as any);
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0].options?.onFieldsDropped).toBeUndefined();
   });
 
   it('a create that drops NOTHING reports no droppedFields at all', async () => {

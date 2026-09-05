@@ -204,12 +204,18 @@ export const READONLY_HOOK_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusion[
 const APPLICABLE_PATTERN_IDS: ReadonlySet<string> = new Set(READONLY_HOOK_WRITE_PATTERN_IDS);
 
 /**
- * `ctx.api` write methods whose payload is subject to the update-path strip.
+ * `ctx.api` write methods whose payload this rule judges against the strip.
  *
- * `insert` / `create` are absent BY DECISION, not by omission: the engine
- * exempts INSERT from the author-declared static-`readonly` strip so a create
- * may legitimately seed read-only columns (#3043/#3413), which is the same
- * reason the flow sibling never looks at a `create_record` node.
+ * `insert` / `create` are absent as a SCAN GAP, not by decision. This docblock
+ * used to say the opposite — that the engine exempts INSERT from the
+ * author-declared static-`readonly` strip so a create may legitimately seed
+ * read-only columns (#3043/#3413). The maintainer ruling of 2026-09-03
+ * (option C, #14147) superseded that row — the header above carries the full
+ * reading: `engine.insert` now runs the same strip under the same `isSystem`
+ * gate, so a non-system hook `insert` of a static-`readonly` column is a
+ * silent no-op this rule does not yet report. Widening the set is filed as its
+ * own change rather than ridden in here, and the flow sibling's `create_record`
+ * gap is the same finding one surface over.
  */
 const STRIP_SUBJECT_METHODS: ReadonlySet<string> = new Set(['update', 'updateById']);
 

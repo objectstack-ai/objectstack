@@ -9614,21 +9614,28 @@ export class ObjectQL implements IObjectQLEngine {
    * (no number-range gaps from a rejected batch).
    */
   // [#3407 / #5126] BOTH members of `WriteObservabilityOptions` are live here,
-  // for exactly ONE strip: the runtime-owned (`autonumber`) strip added by
-  // #5503, wired at its strip site below. Each arrived carrying the same
+  // for TWO strips that share one report site (`insertDropped`, below): the
+  // runtime-owned (`autonumber`) strip added by #5503, and — since the
+  // maintainer ruling of 2026-09-03 (option C, #14147) — the AUTHOR-declared
+  // static-`readonly` strip, the same `stripReadonlyFields` the update path
+  // runs, under the same `isSystem` gate. Each member arrived carrying the same
   // standing condition — #3407's "if insert ever gains a silent strip, wire the
   // listener at that strip site", #5126's "it is inert here only because insert
   // strips nothing; if insert ever gains a strip, both members wire up together
-  // at that site". #5503 is that strip, so both are discharged together:
-  // quiet-and-observable by default (`onFieldsDropped`), refused outright under
-  // `strictReadonlyWrites` — the same one-per-call choice update offers.
+  // at that site". #5503 was the first such strip and #14147 the second; both
+  // discharge through the one site: quiet-and-observable by default
+  // (`onFieldsDropped`), refused outright under `strictReadonlyWrites` — the
+  // same one-per-call choice update offers.
   //
-  // INSERT remains deliberately exempt from the AUTHOR-declared
-  // readonly/readonlyWhen strips (a create may legitimately seed read-only
-  // columns; the #3043 ingress strip covers external callers instead), and the
-  // FLS write gate throws rather than stripping. So neither member reports on
-  // those here — only on what this path actually strips. Any FURTHER strip added
-  // here must wire both members at its own site too.
+  // What INSERT still does NOT strip: `readonlyWhen` (a conditional lock has no
+  // prior record to evaluate on a create — the update-path note below says
+  // "INSERT stays exempt" for exactly that strip), and the FLS write gate throws
+  // rather than stripping. So neither member reports on those here — only on
+  // what this path actually strips. The 2026-07-24 row "INSERT (all callers)
+  // exempt" this note used to rest on is SUPERSEDED, and the metadata-protocol
+  // ingress copy it pointed external callers at is deleted: there is one
+  // create-side enforcement point, and it is this one. Any FURTHER strip added
+  // here must feed `insertDropped` (or wire both members at its own site) too.
   /**
    * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
    * over candidate rows and report it, WITHOUT persisting anything.

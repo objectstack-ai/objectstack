@@ -158,7 +158,7 @@ The largest single consumer — **17 of the 105 sites**.
 | 47 | Object API-exposure gate bypassed (`apiEnabled` / `apiMethods`) | runtime | Get: internal self-writes ignore exposure declarations — these govern **external** exposure, not engine self-writes | `action-execution.ts:138` |
 | 48 | Action `requiredPermissions` bypassed | runtime | Get: engine self-invocation runs any action | `action-execution.ts:401` |
 | 49 | `manage_metadata` bypassed on metadata writes | runtime, rest | Get: schema writes without the capability | `domains/meta.ts:471`, `:874`, `rest-server.ts:4967`, `:6381`, `:6629`, `:7060`, `:7253` |
-| 50 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 50's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
+| 50 | The shared metadata-write verdict itself returns `allowed` | metadata-core | Get: the one function all of row 49's doors consult answers yes before any capability is examined | `meta-write-capability.ts:134` |
 | 51 | Anonymous-deny seam satisfied on the domain dispatchers and the package/federation routes | runtime, rest | Get: passes with no `userId` | `domains/actions.ts:421`, `domains/ai.ts:60`, `domains/automation.ts:989`, `domains/meta.ts:232`, `domains/security.ts:78`, `domains/packages.ts:422`, `external-datasource-routes.ts:302`, `package-routes.ts:97` |
 | 52 | MCP principal check satisfied | runtime | Get: MCP surface reachable with no user | `domains/mcp.ts:61` |
 | 53 | Package REST route capability gate bypassed | rest | Get: package read/write over REST without `manage_metadata` / `studio.access` / `setup.access` | `package-routes.ts:102` |
@@ -234,7 +234,7 @@ should recognise it instead of re-deriving it.
    a **bug**, because a sharing rule's declared semantics is a published
    promise and `isSystem` names the operator, never a consequence that need not
    happen. Both materialisation skips and the notice that announced them are
-   gone; row 30 is now the `afterDelete` skip alone, which survives on the
+   gone; row 29 is now the `afterDelete` skip alone, which survives on the
    separate ground that another subscriber delivers that payload.
 
    ⚠️ The observability half of that reading is worth keeping in mind
@@ -243,11 +243,11 @@ should recognise it instead of re-deriving it.
    see it?". A compensating path that exists but that nobody can be expected to
    know about is not a compensating path.
 
-3. **Strict write observability is inert under elevation.** Row 22: a caller
+3. **Strict write observability is inert under elevation.** Row 21: a caller
    that asked to be told loudly about dropped fields is told nothing, because
    nothing was dropped. The two facts are indistinguishable from the outside.
 
-4. **`revoke()` skips its own conflict guard.** Row 34 is correct for the rule
+4. **`revoke()` skips its own conflict guard.** Row 33 is correct for the rule
    evaluator and surprising for anything else: a system caller can delete a
    rule-materialised grant that the next reconcile silently restores.
 
@@ -419,4 +419,4 @@ that introduces it — CI will say so if it is not.
 - [Authorization Architecture](/docs/permissions/authorization) — the six-gate enforcement chain this flag short-circuits
 - [Security & Access Control](/docs/protocol/objectql/security) — the `readonly` write strip and its exemptions
 - [State Machine](/docs/protocol/objectql/state-machine) — `skipStateMachine`, `preserveAudit`, `treatAsHistorical`
-- [Sharing Rules](/docs/permissions/sharing-rules) — what row 30 is skipping
+- [Sharing Rules](/docs/permissions/sharing-rules) — what row 29 is skipping

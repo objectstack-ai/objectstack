@@ -11433,12 +11433,15 @@ export class ObjectStackProtocolImplementation implements
         this.assertObjectRegistered(object); // [#3770]
         const { operation, records, options } = batchReq;
 
-        // [#3043] The batch endpoint is an external ingress: strip forged
-        // read-only columns on create. [#3455] It DOES resolve an execution
-        // context (threaded by REST); thread it to every engine call so RLS/FLS
-        // and `readonlyWhen` run under the caller, and pass it to the strip so a
-        // system caller is correctly exempt (the pre-#3455 code hard-coded the
-        // strip context to `undefined`, treating every batch create as non-system).
+        // [#3043 → #14147] The batch endpoint is an external ingress, and it
+        // used to strip forged read-only columns on create HERE; that strip is
+        // `engine.insert`'s since the 2026-09-03 ruling, reported back per row
+        // through `onFieldsDropped`. [#3455] It DOES resolve an execution
+        // context (threaded by REST); thread it to every engine call so RLS/FLS,
+        // `readonlyWhen` AND the create-side readonly strip run under the
+        // caller, so a system caller is correctly exempt (the pre-#3455 code
+        // hard-coded the strip context to `undefined`, treating every batch
+        // create as non-system).
         const batchSchema = this.engine.registry?.getObject(object);
 
         // ADR-0119 D4 — `atomic` is REAL or REFUSED, never silent best-effort.
@@ -11594,14 +11597,14 @@ export class ObjectStackProtocolImplementation implements
         let failed = 0;
 
         // Spread form for options objects that already carry `where`/`onFieldsDropped`
-        // (`{}` spread is a safe no-op); arg form for the upsert branch's `insert`,
-        // whose whole options arg is `undefined` when there is no context.
-        // [#14147] The `create` branch no longer uses the arg form: the readonly
-        // strip it reports moved into `engine.insert` and reaches it only through
-        // `onFieldsDropped`, so it always builds an options object — the same
-        // shape createData uses.
+        // (`{}` spread is a safe no-op). [#14147] EVERY `engine.insert` in this
+        // loop — `create`, and both arms of `upsert` that create — builds an
+        // options object: the readonly strip they report moved into
+        // `engine.insert` and reaches this seam only through `onFieldsDropped`,
+        // so the arg form (`undefined` when there is no context) is gone from
+        // here. A create-shaped arm that passed no listener reported a silent
+        // drop — the upsert arms did exactly that until the patch round.
         const ctxOpt = context !== undefined ? { context } : {};
-        const insertCtx = context !== undefined ? { context } : undefined;
 
         // [#4793] `index` is the row's position in the REQUEST array — the
         // correlation a caller needs for failure rows that carry no id.
@@ -11671,14 +11674,28 @@ export class ObjectStackProtocolImplementation implements
                                 omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                             } else {
-                                const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
+                                // [#14147] The upsert's CREATE arm is a create face
+                                // too: same listener, same per-row `droppedFields`,
+                                // as `case 'create'` above and the update arm just up.
+                                const rowDropped: DroppedFieldsEvent[] = [];
+                                const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, {
+                                    ...ctxOpt,
+                                    onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
+                                } as any);
                                 omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                                results.push({ id: created.id, success: true, data: created, index });
+                                const ev = mergeDroppedFieldEvents(rowDropped);
+                                results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
                             }
                         } else {
-                            const created = await this.engine.insert(object, record.data || record, insertCtx as any);
+                            // [#14147] Same: an id-less upsert row IS a create.
+                            const rowDropped: DroppedFieldsEvent[] = [];
+                            const created = await this.engine.insert(object, record.data || record, {
+                                ...ctxOpt,
+                                onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
+                            } as any);
                             omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                            results.push({ id: created.id, success: true, data: created, index });
+                            const ev = mergeDroppedFieldEvents(rowDropped);
+                            results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
                         }
                         succeeded++;
                         break;
