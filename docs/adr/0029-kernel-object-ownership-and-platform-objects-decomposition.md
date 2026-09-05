@@ -189,7 +189,7 @@ contributions follow ADR-0028's naming model (`sys.audit_log`, etc.).
 A kernel object is more than its schema: it has **localized labels, field help,
 and list-view names**. Today these live in `platform-objects` as generated
 bundles (`src/apps/translations/*.objects.generated.ts`, produced by
-`os i18n extract` against `scripts/i18n-extract.config.ts`, loaded at runtime by
+`os i18n extract` against `packages/platform-objects/scripts/i18n-extract.config.ts`, loaded at runtime by
 the `platform-objects` plugin). The generated entries are keyed by **object
 name** (`sys_webhook: {...}`) and loaded globally, so they keep working at
 runtime regardless of which package owns the object — but their **source of
@@ -202,7 +202,7 @@ Therefore object migration must carry the i18n resources, not just the schema:
   bundle(s), and contributes them at runtime (e.g. via `i18n.loadTranslations`
   or `manifest.translations`), exactly as `platform-objects` does today.
 - When an object leaves `platform-objects`, it is removed from
-  `scripts/i18n-extract.config.ts`; **regenerating before the plugin owns its
+  `packages/platform-objects/scripts/i18n-extract.config.ts`; **regenerating before the plugin owns its
   extraction would silently drop locales** — so the plugin-side i18n extraction
   must land in the same step (or the object stays in the extract set
   transitionally, explicitly tracked).
@@ -783,7 +783,7 @@ does to it:
 ### 8. Anchors
 
 `packages/objectql/src/registry.ts` is registered against ADR-0029 in
-`scripts/adr-anchors.json` by this change. It was **unanchored**, which is the
+`scripts/adr-anchors/` by this change. It was **unanchored**, which is the
 recurrence shape Prime Directive #13 names and the same one #6825's amendment
 found for ADR-0005: the file that implements D3 (the `own` splice at `packages/objectql/src/registry.ts`,
 `assertSingleOwnerPerObject` at `#assertSingleOwnerPerObject`, the extender guard at) never said

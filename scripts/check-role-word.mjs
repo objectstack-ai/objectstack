@@ -39,6 +39,14 @@
 // marker in place. Both pin the WORDING, not the act — the flag takes either
 // direction from whoever runs it.
 //
+// That message also NAMES the one shape that reads as a new boundary and is not
+// one — a pure RELOCATION, where a split or move carried already-baselined
+// occurrences to a new path — and states the evidence a reviewer checks for it.
+// Wording only: a relocation is still reported as NEW-use rows plus a
+// ratchet-DOWN row, and the gate still does not net those halves against each
+// other. See `relocationClause()` for why that netting is REFUSED rather than
+// merely unimplemented.
+//
 // Scope: content/docs (hand-written; its `references/` tree is generated from
 // spec and excluded BY PATH — the spec source is the fix site there) and
 // skills/, walked whole, `references/` included: that tree is published catalog
@@ -775,6 +783,98 @@ function ratchetRemedyCarriesAuthority(message) {
 }
 
 /**
+ * The ratchet-DOWN verdict's distinctive phrase, shared by the messages below
+ * rather than re-typed in each.
+ *
+ * `relocationClause()` sends a relocating author looking for THIS row in the
+ * same run, so the two strings have to move together: a rewording on one side
+ * that left the other naming a sentence the gate no longer prints would send
+ * that author hunting for a signal that is not there, and the message would
+ * still read as correct. The self-test asserts the clause quotes it and that the
+ * emitted ratchet-DOWN message really carries it.
+ */
+const RATCHET_DOWN_PHRASE = 'baselined file is clean/gone';
+
+/**
+ * The relocation paragraph of the NEW-use verdict, named and pure for the same
+ * reason the messages around it are: the wording IS the deliverable here, so the
+ * self-test has to reach the exact sentences the author reads.
+ *
+ * ## The case it names
+ *
+ * The ledger is path-keyed, so a split or move re-addresses occurrences without
+ * adding one, and the run reports the moved occurrences as NEW use at their new
+ * paths AND a ratchet-DOWN at the old path. The only remedy offered for the
+ * first half is the `⛔ MAINTAINER-ONLY` one — the loudest, most-gated path in
+ * this gate's vocabulary, whose warning is written for a genuine new boundary.
+ * Nothing in the message told a relocating author their case apart from that
+ * one, so the argument that it is safe — the occurrences only changed address,
+ * and the baseline diff touches nothing else — was re-derived by hand, by the
+ * author and again by the reviewer, on every split.
+ *
+ * ## Why this is a MESSAGE and not a verdict
+ *
+ * Teaching the gate to net the two halves was considered and refused. A
+ * total-preserving reading admits the case it cannot tell from a relocation: a
+ * file that GAINS an occurrence while a sibling loses an unrelated one passes
+ * it, so a real new use arrives green paired with an unrelated removal. The
+ * ratchet's whole value is that it is keyed to WHERE, and this is a gate there
+ * is structural reason to want quieter — a tolerance that makes a genuine
+ * regression indistinguishable from a move must not be bought with "the total
+ * did not move".
+ *
+ * ⛔ Which is also why this clause is GENERIC and interpolates nothing about the
+ * run in hand. To name the actual old path and its counts the gate would have to
+ * pair NEW-use rows with vanished baseline rows and sum across files — the
+ * refused verdict arriving as advice, computed in the same place and believed
+ * the same way. So the message states the TEST; the author states the answer, in
+ * the diff, where a reviewer can check it and the ledger records what was
+ * agreed.
+ *
+ * @returns {string}
+ */
+function relocationClause() {
+  return (
+    'One shape reads as a new boundary and is NOT one: a pure RELOCATION, where a split or move '
+    + 'carried already-baselined occurrences to a new path. You are in that case only if THIS '
+    + `run also reports \`${RATCHET_DOWN_PHRASE}\` (or an improved count) on the path they came `
+    + 'from, and those rows account for every occurrence reported here. The gate will not net '
+    + 'those two halves against each other, and is not being taught to: the ratchet is keyed to '
+    + 'WHERE the word is, so a file that GAINS an occurrence while a sibling loses an unrelated '
+    + 'one has to stay distinguishable from a move. So the path is still this one and still '
+    + `${RATCHET_AUTHORITY_MARKER} — what a relocation changes is only that the maintainer's `
+    + 'question is cheap to answer, so answer it in the diff: re-baselining a pure move touches '
+    + 'nothing but the paths involved, the old row removed and the new rows added summing back '
+    + 'to it — `- "OLD_PATH": 2` replaced by `+ "NEW_PATH_A": 1` and `+ "NEW_PATH_B": 1`. Any '
+    + 'OTHER row in that diff is `--update` re-baselining something else in the same stroke, '
+    + 'which is the act the marker is on, and what you are showing is then not a relocation.'
+  );
+}
+
+/**
+ * The second half of the same convention: a message that hands the author the
+ * baseline-expanding path must also name the one case that path is wrong for.
+ *
+ * A predicate rather than a substring compare at the assertion site, for the
+ * reason `ratchetRemedyCarriesAuthority` is one — the self-test can then prove
+ * it DISCRIMINATES, and a check that approved every long message would keep the
+ * pin green with the clause gone.
+ *
+ * Keyed on the SAME offer detector as the authority marker, so the two rules
+ * have one subject: a message offering no baseline-expanding path is unaffected,
+ * and in particular the ratchet-DOWN messages — whose case this clause is about
+ * — must not be forced to carry a paragraph addressed to someone reading a
+ * NEW-use row.
+ *
+ * @param {string} message
+ * @returns {boolean}
+ */
+function newUseOfferNamesRelocation(message) {
+  if (!RATCHET_EXPANSION_OFFER.test(message)) return true;
+  return message.includes(RATCHET_DOWN_PHRASE) && message.includes('pure RELOCATION');
+}
+
+/**
  * The NEW-use verdict's text, named and pure so the self-test can assert on the
  * exact string the author reads. A message built inline is a message no
  * assertion can reach.
@@ -797,7 +897,8 @@ function newUseMessage(file, count) {
     + 'is that ACT, not the file — `--update` rewrites the whole baseline from the current tree, '
     + 'so it admits your occurrence and re-baselines every other file in one stroke. The baseline '
     + 'is shrink-only, so this weakens a ratchet and needs a maintainer to agree the boundary is '
-    + 'genuine first — do not take this path to get CI green.'
+    + 'genuine first — do not take this path to get CI green. '
+    + relocationClause()
   );
 }
 
@@ -825,6 +926,42 @@ function grewMessage(file, allowed, count) {
     + `\`${markerFor(extensionOf(file), '<vendor>')}\` on the line directly above the opening `
     + `fence (declared boundaries: ${[...VENDOR_BOUNDARIES].join(', ')}). Prose — including a `
     + 'route path written into a sentence — stays ratcheted; put the wire shape in the fence.'
+  );
+}
+
+/**
+ * The two ratchet-DOWN verdicts, named and pure for the reason `grewMessage` was
+ * made so: a message built inline is a message no assertion can reach — and
+ * these two are now QUOTED by `relocationClause()` as the signal a relocating
+ * author is told to look for, which is a coupling only a reachable string can
+ * pin. The text each emits is unchanged.
+ *
+ * ⛔ Neither offers the baseline-EXPANDING path, so neither carries the
+ * maintainer-only marker and neither may acquire one: ratcheting down is
+ * squarely the author's own remedy, and `RATCHET_EXPANSION_OFFER` is keyed so
+ * that it does not reach these.
+ *
+ * @param {string} file
+ * @param {number} allowed
+ * @returns {string}
+ */
+function cleanOrGoneMessage(file, allowed) {
+  return (
+    `${file}: ${RATCHET_DOWN_PHRASE} (was ${allowed}) — ratchet DOWN: run `
+    + '`node scripts/check-role-word.mjs --update` and commit the baseline.'
+  );
+}
+
+/**
+ * @param {string} file
+ * @param {number} allowed
+ * @param {number} now
+ * @returns {string}
+ */
+function improvedMessage(file, allowed, now) {
+  return (
+    `${file}: role-word count improved ${allowed} → ${now} — ratchet DOWN: run `
+    + '`node scripts/check-role-word.mjs --update` and commit the baseline.'
   );
 }
 
@@ -1123,6 +1260,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'The scan population: which `references/` the skip means (#15061)': 5,
   'The ratchet-remedy authority convention (#8435)': 4,
+  'The NEW-use message names the relocation case (#14659)': 7,
   'The green body reports what was READ (#9910)': 5,
   'A missing ROOT is REFUSED, per root (#9932)': 8,
   'The dispatch-gates declaration (#9964\'s pattern)': 4,
@@ -1137,7 +1275,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1255,6 +1393,65 @@ function selfTest() {
   expect('#8435 — the detector does NOT match the ratchet-DOWN message, which also names --update '
     + '(marking the improvement path maintainer-only would teach the opposite of the rule)',
     !RATCHET_EXPANSION_OFFER.test(ratchetDown) && ratchetRemedyCarriesAuthority(ratchetDown));
+
+  // ── The NEW-use message names the relocation case (#14659) ─────────────────
+  //
+  // Seven assertions over the clause the ledger's path-keying makes necessary. A
+  // split moves baselined occurrences to new paths, so the run reports them as
+  // NEW use and the old path as a ratchet-DOWN, and the author is routed down
+  // the maintainer-only path by a warning written for a different case.
+  //
+  // (3) is the load-bearing one, and it is not the obvious one. The risk this
+  // wording carries is not that it disappears — (1) and (2) cover that — but
+  // that a later edit SOFTENS it into an apology for the gate. The refused
+  // verdict (net the two halves out and call it a relocation) is exactly what a
+  // reader re-argues from a message that reads as tolerance, so the refusal and
+  // its reason have to be pinned as text, not left to the paragraph's tone.
+  battery('The NEW-use message names the relocation case (#14659)');
+  const clause = relocationClause();
+  expect('#14659 — the relocation clause is REACHED by the real NEW-use message (else every '
+    + 'assertion below is about a string no author is ever shown)',
+    real.includes(clause));
+  expect('#14659 — the NEW-use message satisfies newUseOfferNamesRelocation(): a message offering '
+    + 'the baseline-expanding path names the one case that path is wrong for',
+    newUseOfferNamesRelocation(real));
+
+  expect('#14659 — the clause REFUSES the netting in writing and gives the reason (keyed to '
+    + 'WHERE), so the wording cannot be read as the tolerance that was refused — a gained '
+    + 'occurrence paired with an unrelated loss must stay distinguishable from a move',
+    clause.includes('will not net') && clause.includes('not being taught to')
+      && clause.includes('keyed to WHERE') && clause.includes('unrelated'));
+
+  // The signal the clause sends the author looking for has to be one the gate
+  // really prints. Read off the EMITTED messages on both sides, so a rewording
+  // of either fails here rather than in a reader's terminal.
+  const emittedGone = cleanOrGoneMessage('content/docs/example.mdx', 2);
+  const emittedImproved = improvedMessage('content/docs/example.mdx', 4, 2);
+  expect('#14659 — both ratchet-DOWN rows the clause tells the author to look for are rows the '
+    + 'gate actually emits (the recognition signal has to exist to be looked for)',
+    clause.includes(RATCHET_DOWN_PHRASE) && emittedGone.includes(RATCHET_DOWN_PHRASE)
+      && clause.includes('improved count') && emittedImproved.includes('count improved'));
+
+  // The evidence a reviewer checks, pinned as ARITHMETIC rather than as a
+  // quotation: an example edited into rows that do not sum would teach the wrong
+  // audit while every substring assertion above stayed green.
+  const removedRow = /`- "[A-Z_]+": (\d+)`/.exec(clause);
+  const addedRows = [...clause.matchAll(/`\+ "[A-Z_]+": (\d+)`/g)];
+  expect('#14659 — the clause carries the baseline-diff shape a pure relocation produces: ONE '
+    + 'removed row, MORE THAN ONE added row, and the added rows summing back to the removed one',
+    removedRow !== null && addedRows.length > 1
+      && addedRows.reduce((sum, m) => sum + Number(m[1]), 0) === Number(removedRow[1]));
+
+  // Discrimination, the same shape as #8435's own (3) and for the same reason:
+  // without it, a predicate that approved everything would keep assertion (2)
+  // green with the clause gone. The fixture is the synthetic offer already built
+  // for #8435 — an offer carrying no relocation wording at all.
+  expect('#14659 — newUseOfferNamesRelocation() REJECTS a baseline-expanding offer that does not '
+    + 'name the case (proves the predicate discriminates rather than approving every message)',
+    !newUseOfferNamesRelocation(unmarkedOffer));
+  expect('#14659 — newUseOfferNamesRelocation() leaves the ratchet-DOWN message alone: it is an '
+    + 'offer-scoped rule, not a vocabulary requirement on every message this gate prints',
+    newUseOfferNamesRelocation(ratchetDown) && newUseOfferNamesRelocation(emittedGone));
 
   // ── The green body reports what was READ (#9910) ──────────────────────
   //
@@ -2067,7 +2264,11 @@ function selfTest() {
     + 'directions pinned from the WALK, never from a typed count, so a skip that empties the '
     + 'published half and one that swallows the generated half each name themselves. '
     + 'The NEW-use remedy marks baseline expansion as maintainer-only, the predicate '
-    + 'rejects an unmarked offer, the ratchet-DOWN remedy stays the author\'s own, and both '
+    + 'rejects an unmarked offer, the ratchet-DOWN remedy stays the author\'s own, and that '
+    + 'same remedy NAMES the pure-relocation case, quotes a ratchet-DOWN row the gate really '
+    + 'prints as its recognition signal, carries a baseline diff whose rows are pinned to SUM, '
+    + 'and refuses the netting in writing — so the wording tells a relocating author apart from '
+    + 'a new boundary without the gate ever reading one row against another. Both '
     + 'success texts report what was READ \u2014 so a scanned tree and an unscanned one cannot print '
     + 'the same result once the ledger is empty. Every separator-less ROOT also declares the '
     + 'subtree spelling dispatch-gates derives from, and declares nothing this gate does not '
@@ -2205,9 +2406,9 @@ for (const [file, count] of Object.entries(current)) {
 for (const [file, allowed] of Object.entries(baseline)) {
   const now = current[file];
   if (now === undefined) {
-    errors.push(`${file}: baselined file is clean/gone (was ${allowed}) — ratchet DOWN: run \`node scripts/check-role-word.mjs --update\` and commit the baseline.`);
+    errors.push(cleanOrGoneMessage(file, allowed));
   } else if (now < allowed) {
-    errors.push(`${file}: role-word count improved ${allowed} → ${now} — ratchet DOWN: run \`node scripts/check-role-word.mjs --update\` and commit the baseline.`);
+    errors.push(improvedMessage(file, allowed, now));
   }
 }
 

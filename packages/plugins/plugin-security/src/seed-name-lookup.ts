@@ -281,13 +281,20 @@ async function readNamePage(
   } catch {
     return { ok: false, cause: 'unreadable', budget };
   }
-  // Some drivers wrap the page (`{ records }`) — a wrapped array is still an
-  // answer. Anything else (undefined/null/a scalar) is not.
-  const page: any[] | null = Array.isArray(rows)
-    ? rows
-    : Array.isArray(rows?.records)
-      ? (rows.records as any[])
-      : null;
+  // `ObjectQL.find` resolves a BARE array — MEASURED, not read off the
+  // declared type. `IDataEngine.find` says `Promise<any[]>`, and a declared type
+  // is not proof here: this repo's own `ObjectStackAdapter.find()` resolves a
+  // `QueryResult` envelope and never an array. So the engine behind this seam
+  // was booted for real (a real `ObjectQL` over a real `SqlDriver`) and driven,
+  // and it answered `[object Array]` with no own `records` key on a populated
+  // page and on an empty one alike — see `engine-find-bare-array.pin.test.ts`,
+  // which pins this seam. The `{ records }` limb this used to carry was
+  // therefore unreachable: dead code that read as a contract.
+  //
+  // What is NOT changed: a non-array is still `null` here, and `null` is still
+  // `unreadable` below. Removing a dead limb must not quietly convert a seam
+  // that GAPS into one that invents an empty answer.
+  const page: any[] | null = Array.isArray(rows) ? rows : null;
   if (page === null) return { ok: false, cause: 'unreadable', budget };
   if (page.length > budget) return { ok: false, cause: 'truncated', budget };
   return { ok: true, rows: page };
@@ -325,7 +332,11 @@ function perItemIndex(
       } catch {
         return UNKNOWN;
       }
-      const list = Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : null;
+      // Bare array, driven — the same measurement `readNamePage` above records,
+      // taken at THIS seam too (`engine-find-bare-array.pin.test.ts` drives the
+      // per-item path separately, because one seam's reading is not the other's).
+      // A non-array stays `UNKNOWN`: a read that did not answer is never "absent".
+      const list = Array.isArray(rows) ? rows : null;
       if (list === null) return UNKNOWN;
       return resolveForOrganization(list, organizationId);
     },

@@ -25,7 +25,7 @@ Project concept entirely. As a consequence:
   `branch`. The column physically named `project_id` on `sys_metadata`
   is treated as a legacy alias and will be renamed/dropped in the
   ADR-0008 PR-10 migration.
-- All references to `this.projectId` in `packages/objectql/src/protocol.ts`
+- All references to `this.projectId` in `packages/metadata-protocol/src/protocol.ts`
   are deprecated. New code must consult `organization_id` (and, in M1,
   the branch ref) only.
 - The `(type, name, project_id)` UNIQUE index is superseded by
@@ -143,7 +143,7 @@ Three different things were tangled into one place:
 
 ### Storage shape
 
-`sys_metadata` schema (`packages/platform-objects/src/metadata/sys-metadata.object.ts`) is the storage substrate. No schema changes needed in Phase 1:
+`sys_metadata` schema (`packages/metadata-core/src/objects/sys-metadata.object.ts`) is the storage substrate. No schema changes needed in Phase 1:
 
 | column | role |
 |---|---|
@@ -194,7 +194,9 @@ Five files in `packages/platform-objects/src/metadata/` duplicate a Zod schema t
 
 `sys-metadata.object.ts` and `sys-metadata-history.object.ts` are retained — they are the storage substrate, not duplicates of any metadata type.
 
-`MetadataProjector` (`packages/metadata/src/projection/metadata-projector.ts`) becomes dead code under this ADR. It is left in place for one release as a no-op safety net, and removed in the next major along with the deprecated objects.
+`MetadataProjector` (`packages/metadata/src/projection/metadata-projector.ts` — *Path note, 2026-09:
+the module was deleted in `516f48ca9`, the same change that implemented this ADR; the name survives
+only in `packages/metadata/src/migrations/drop-projection-tables.ts`*) becomes dead code under this ADR. It is left in place for one release as a no-op safety net, and removed in the next major along with the deprecated objects.
 
 ## Consequences
 
@@ -231,7 +233,7 @@ Five files in `packages/platform-objects/src/metadata/` duplicate a Zod schema t
 
 ## References
 
-- `packages/objectql/src/protocol.ts` — `getMetaItem`, `saveMetaItem`, `deleteMetaItem`, `loadMetaFromDb` (this ADR's primary site)
+- `packages/metadata-protocol/src/protocol.ts` — `getMetaItem`, `saveMetaItem`, `deleteMetaItem`, `loadMetaFromDb` (this ADR's primary site)
 - `packages/rest/src/rest-server.ts` — `PUT/GET/DELETE /api/v1/meta/:type/:name` routes
 - `packages/spec/src/api/protocol.zod.ts` — `ObjectStackProtocol` interface (`deleteMetaItem` added)
 - `packages/spec/src/kernel/metadata-plugin.zod.ts` — `MetadataTypeRegistryEntrySchema.supportsOverlay` (future hook for the whitelist)
@@ -247,7 +249,7 @@ Two implementation issues were discovered during browser E2E verification with t
 
 ### 1. List endpoint did not include overlay rows in project kernels
 
-`getMetaItems(type)` in `packages/objectql/src/protocol.ts` was gated by
+`getMetaItems(type)` in `packages/metadata-protocol/src/protocol.ts` was gated by
 `if (this.projectId === undefined)` before consulting `sys_metadata`. Project
 kernels — which are precisely where overlays live — therefore returned only
 artifact entries. `GET /api/v1/meta/view` listed 16 artifact items and zero
@@ -315,7 +317,7 @@ change, any JSON shape was accepted and stored verbatim, surfacing as
 runtime errors only at read time when the merged effective metadata was
 fed into the UI engine.
 
-Implementation (`packages/objectql/src/protocol.ts`):
+Implementation (`packages/metadata-protocol/src/protocol.ts`):
 
 - `resolveOverlaySchema(type, item)` dispatches by metadata type:
   - `view` → `ListViewSchema` or `FormViewSchema` (picked by the `type`
@@ -359,7 +361,7 @@ types fall through, plural type strings normalize correctly.
 
 ### Registry-driven opt-in (was: hard-coded whitelist)
 
-`packages/objectql/src/protocol.ts` previously gated `PUT/DELETE
+`packages/metadata-protocol/src/protocol.ts` previously gated `PUT/DELETE
 /api/v1/meta/:type/:name` against a **hard-coded** `Set` of allowed types
 (`OVERLAY_ALLOWED_TYPES = new Set(['view', 'dashboard'])`). Any new metadata
 type that wanted to participate in the overlay system had to find and edit
@@ -453,7 +455,7 @@ idempotent migration is provided and run automatically by
 >    place: the `allowOrgOverride` boolean on its
 >    `DEFAULT_METADATA_TYPE_REGISTRY` entry.
 > 3. The **overlay validator** lives in exactly one place:
->    `resolveOverlaySchema()` in `packages/objectql/src/protocol.ts`.
+>    `resolveOverlaySchema()` in `packages/metadata-protocol/src/protocol.ts`.
 >
 > Do **not** re-declare the same shape as a `*.object.ts` (the
 > projection-table pattern is removed; see Addendum 2026-05-16 (b)).
@@ -652,7 +654,7 @@ coverage:
 
 ### Admin UX: field-level Code-vs-Effective diff
 
-The Layers tab in the metadata editor (`packages/app-shell/.../LayeredDiff.tsx`
+The Layers tab in the metadata editor (`objectui:packages/app-shell/src/views/metadata-admin/LayeredDiff.tsx`
 in `objectui`) now defaults to a **Diff** view that compares
 `layered.code` (artifact baseline) against `layered.effective` (merged)
 field-by-field. Each top-level key renders as a row with a colour-coded
@@ -680,7 +682,7 @@ the present), so this section is where the present tense lives.
 
 | Addendum (d) says | Today | Superseded by |
 |:---|:---|:---|
-| "`addSysMetadataOverlayIndex(driver)` — exported from `@objectstack/metadata/migrations`" | **Deleted.** The export and its module are gone; `packages/metadata/src/migrations/index.ts` carries a tombstone in their place that records the measurement and forbids re-introducing a producer for `idx_sys_metadata_overlay_active` in that package. | #6771 (PR #6824, merged 2026-08-08); `.changeset/overlay-index-single-producer.md` |
+| "`addSysMetadataOverlayIndex(driver)` — exported from `@objectstack/metadata/migrations`" | **Deleted.** The export and its module are gone; `packages/metadata/src/migrations/index.ts` carries a tombstone in their place that records the measurement and forbids re-introducing a producer for `idx_sys_metadata_overlay_active` in that package. | #6771 (PR #6824, merged 2026-08-08); `.changeset/overlay-index-single-producer.md` (since consumed by the release, `24c1b91e4`) |
 | "a new idempotent migration is provided and run automatically by `DatabaseLoader.ensureSchema()`" | **No overlay-index DDL is issued from that method at all**, on either of its two paths — both call sites went with the export. What `ensureSchema()` still runs is the `project_id` → `environment_id` forward migration, which is a different concern. | #6771 (PR #6824) |
 | "Drivers ignore `indexes` declarations on synced tables today" | **False** — and this one is *not* a consequence of #6771. `SqlDriver.syncDeclaredIndexes` materializes every declared index, through knex's `table.unique(fields, { indexName })` / `table.index(fields, name)`, skipping by name for idempotence. | The driver itself. The spec records the same fact where the `IDataDriver` capability bit `indexes` was retired for having no reader: "Declared indexes are materialised by the driver itself during schema sync (`SqlDriver.syncDeclaredIndexes`)". |
 
@@ -745,7 +747,7 @@ form from being re-imposed over it.
 
 ### Anchors
 
-Both files above are registered in `scripts/adr-anchors.json` against ADR-0005, so
+Both files above are registered in `scripts/adr-anchors/` against ADR-0005, so
 the next author to edit either one is told which decision they are standing on.
 That is the recurrence guard Prime Directive #13 names and the one thing this
 amendment adds beyond prose: the producer that was deleted had no anchor, and

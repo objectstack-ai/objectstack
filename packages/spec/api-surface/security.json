@@ -74,6 +74,8 @@
     "TENANCY_POSTURES (const)",
     "TenancyPosture (type)",
     "TenancyPostureSchema (const)",
+    "TenantLayer0Verdict (type)",
+    "TenantLayer0VerdictSchema (const)",
     "defineCapability (function)",
     "definePermissionSet (function)",
     "defineSharingRule (function)",

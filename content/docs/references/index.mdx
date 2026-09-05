@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1590 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1592 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -21,19 +21,19 @@ counts are sums of the rows they head. Regenerate with
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 31 | 436 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 13 | 72 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Automation Protocol](/docs/references/automation) | 13 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 166 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 24 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 162 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
-| [Security Protocol](/docs/references/security) | 5 | 29 | Permission sets, row-level security, sharing rules, tenancy posture. |
+| [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 8 | 27 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 36 | 291 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1590** | 14 protocol modules |
+| **Total** | **200** | **1592** | 14 protocol modules |
 
 ---
 
@@ -103,7 +103,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 72 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 73 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
@@ -111,7 +111,7 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 | :--- | :--- |
 | [`approval.zod.ts`](/docs/references/automation/approval) | `ApprovalDecision`, `ApprovalEscalation`, `ApprovalNodeApprover`, `ApprovalNodeConfig`, `ApproverType`, `DecisionOutputDef` |
 | [`bpmn-interop.zod.ts`](/docs/references/automation/bpmn-interop) | `BpmnDiagnostic`, `BpmnElementMapping`, `BpmnExportOptions`, `BpmnImportOptions`, `BpmnInteropResult`, `BpmnUnmappedStrategy`, `BpmnVersion` |
-| [`builtin-node-config.zod.ts`](/docs/references/automation/builtin-node-config) | `AssignmentConfig`, `AssignmentExpressionValue`, `AssignmentValue`, `CreateRecordConfig`, `DeleteRecordConfig`, `GetRecordConfig`, `MapConfig`, `ScreenConfig`, `ScreenFieldConfig`, `UpdateRecordConfig` |
+| [`builtin-node-config.zod.ts`](/docs/references/automation/builtin-node-config) | `AssignmentConfig`, `AssignmentExpressionValue`, `AssignmentValue`, `CreateRecordConfig`, `DeleteRecordConfig`, `EndConfig`, `GetRecordConfig`, `MapConfig`, `ScreenConfig`, `ScreenFieldConfig`, `UpdateRecordConfig` |
 | [`control-flow.zod.ts`](/docs/references/automation/control-flow) | `FlowRegion`, `LoopConfig`, `ParallelBranch`, `ParallelConfig`, `RetryPolicy`, `TryCatchConfig`, `TryCatchErrorValue` |
 | [`execution.zod.ts`](/docs/references/automation/execution) | `Checkpoint`, `ConcurrencyPolicy`, `ExecutionError`, `ExecutionErrorSeverity`, `ExecutionLog`, `ExecutionStatus`, `ExecutionStepLog`, `ExecutionStepMetrics`, `ExecutionStepSkipReason`, `FlowRunGateSummary`, `FlowRunNodeSummary`, `FlowRunSummary`, `ScheduleState` |
 | [`flow.zod.ts`](/docs/references/automation/flow) | `Flow`, `FlowEdge`, `FlowNode`, `FlowNodeAction`, `FlowVariable`, `FlowVersionHistory` |
@@ -270,14 +270,14 @@ Declarative test suites — scenarios, steps, actions and assertions.
 
 ## Security Protocol
 
-**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 29 schemas**
+**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 30 schemas**
 
 Permission sets, row-level security, sharing rules, tenancy posture.
 
 | File | Schemas |
 | :--- | :--- |
 | [`explain.zod.ts`](/docs/references/security/explain) | `AccessMatrix`, `AccessMatrixEntry`, `AuthzPosture`, `ExplainDecision`, `ExplainLayer`, `ExplainMatchedRule`, `ExplainOperation`, `ExplainRecordAttribution`, `ExplainRequest` |
-| [`misc`](/docs/references/security/misc) *(no single source file)* | `CapabilityDeclaration`, `OrgScopingEntitlement`, `PlatformGlobalObjects`, `TenancyPosture` |
+| [`misc`](/docs/references/security/misc) *(no single source file)* | `CapabilityDeclaration`, `OrgScopingEntitlement`, `PlatformGlobalObjects`, `TenancyPosture`, `TenantLayer0Verdict` |
 | [`permission.zod.ts`](/docs/references/security/permission) | `AdminScope`, `EffectiveObjectPermission`, `FieldPermission`, `ObjectAccessScope`, `ObjectPermission`, `PermissionSet` |
 | [`rls.zod.ts`](/docs/references/security/rls) | `RLSEvaluationResult`, `RLSOperation`, `RLSUserContext`, `RowLevelSecurityPolicy` |
 | [`sharing.zod.ts`](/docs/references/security/sharing) | `CriteriaSharingRule`, `OWDModel`, `ShareRecipientType`, `SharingLevel`, `SharingRule`, `SharingRuleType` |
