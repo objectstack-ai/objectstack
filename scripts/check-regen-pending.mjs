@@ -462,8 +462,8 @@ function prerequisiteVerdict(unmeasured) {
     kind: first.kind,
     pkg: '',
     headline: unmeasured.length === 1
-      ? `\`${unmeasured[0].check}\` could not run — ${first.headline}`
-      : `${unmeasured.length} of this run's gates could not run — ${first.headline}`,
+      ? `\`${unmeasured[0].check}\` could not run: ${first.headline}`
+      : `${unmeasured.length} of this run's gates could not run: ${first.headline}`,
     detail: [
       'This check neither regenerates nor compares bytes: for each deferred artifact it',
       'SPAWNS the `check:` gate that proves the artifact current, and reads the verdict.',
