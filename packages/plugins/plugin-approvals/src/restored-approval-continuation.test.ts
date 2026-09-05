@@ -44,6 +44,7 @@ import { AutomationEngine, InMemorySuspendedRunStore } from '@objectstack/servic
 // dispatch predicates rather than a hand-mirrored copy.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
 import { strandedDecisionDetails } from '@objectstack/types';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
@@ -66,6 +67,20 @@ function makeFakeEngine() {
     async find(object: string, opts: any = {}) {
       const where = opts.where ?? opts.filter ?? {};
       const out = rows(object).filter(r => matches(r, where));
+      // ⚠️ `orderBy` is honoured, and that is load-bearing rather than polish:
+      // `assertLatestForRun` selects the newest request with
+      // `orderBy [{field:'created_at', order:'desc'}], limit 1`. A double that
+      // ignored it returned the OLDEST row, so the guard passed on every input
+      // and a pin naming it would have measured nothing — the phantom-check
+      // shape. SortNode's key is `order`, not `direction` (spec/data/query.zod.ts).
+      if (Array.isArray(opts.orderBy)) {
+        for (const sort of [...opts.orderBy].reverse()) {
+          const field = sort?.field;
+          if (!field) continue;
+          const dir = sort?.order === 'desc' ? -1 : 1;
+          out.sort((a, b) => (a[field] < b[field] ? -1 : a[field] > b[field] ? 1 : 0) * dir);
+        }
+      }
       // The caller's bound is honoured by PRESENCE, never truthiness.
       const start = opts.offset ?? 0;
       const page = typeof opts.limit === 'number' ? out.slice(start, start + opts.limit) : out.slice(start);
@@ -125,6 +140,55 @@ const DEAL_APPROVAL = {
 const DOWNSTREAM_FAILURE =
   'update_record(crm_leave_request) failed: Record 9SEmlyRfw8D9-J7Z not found';
 
+/**
+ * TWO approval nodes in sequence. The run parks at `a2` after `a1` is decided,
+ * so `a1`'s terminal request coexists with a live pause that is NOT its own —
+ * the shape that separates "a pause exists on this run" from "this request's
+ * pause is back".
+ */
+const TWO_STEP = {
+  name: 'two_step', label: 'Two Step', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'a1', type: 'approval', label: 'Manager', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+    { id: 'a2', type: 'approval', label: 'Finance', config: { approvers: [{ type: 'user', value: 'u2' }] } },
+    { id: 'done', type: 'mark', label: 'Done' },
+    { id: 'nope', type: 'mark', label: 'Nope' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'a1' },
+    { id: 'e2', source: 'a1', target: 'a2', label: 'approve' },
+    { id: 'e3', source: 'a1', target: 'nope', label: 'reject' },
+    { id: 'e4', source: 'a2', target: 'done', label: 'approve' },
+    { id: 'e5', source: 'a2', target: 'nope', label: 'reject' },
+    { id: 'e6', source: 'done', target: 'end' },
+    { id: 'e7', source: 'nope', target: 'end' },
+  ],
+};
+
+/** ADR-0044 revise window: send-back parks the run at a node the approval request never gated. */
+const REVISE_FLOW = {
+  name: 'revise_flow', label: 'Revise Flow', type: 'autolaunched',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'review', type: 'approval', label: 'Review', config: { approvers: [{ type: 'user', value: 'u1' }] } },
+    { id: 'wait_revision', type: APPROVAL_REVISE_NODE_TYPE, label: 'Awaiting Revision' },
+    { id: 'on_approved', type: 'mark', label: 'Approved' },
+    { id: 'on_rejected', type: 'mark', label: 'Rejected' },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'review' },
+    { id: 'e2', source: 'review', target: 'on_approved', label: 'approve' },
+    { id: 'e3', source: 'review', target: 'on_rejected', label: 'reject' },
+    { id: 'e4', source: 'review', target: 'wait_revision', label: 'revise' },
+    { id: 'e5', source: 'wait_revision', target: 'review', label: 'resubmit', type: 'back' },
+    { id: 'e6', source: 'on_approved', target: 'end' },
+    { id: 'e7', source: 'on_rejected', target: 'end' },
+  ],
+};
+
 describe('#15389 — a restored approval suspension has an issuer again', () => {
   let data: ReturnType<typeof makeFakeEngine>;
   let service: ApprovalService;
@@ -144,6 +208,8 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
       },
     } as never);
     automation.registerFlow('deal_approval', DEAL_APPROVAL as never);
+    automation.registerFlow('two_step', TWO_STEP as never);
+    automation.registerFlow('revise_flow', REVISE_FLOW as never);
     service.attachAutomation(automation);
     return automation;
   }
@@ -285,12 +351,149 @@ describe('#15389 — a restored approval suspension has an issuer again', () => 
       .map((a: any) => a.action);
     expect(actions.filter((a: string) => a === 'reject')).toHaveLength(1);
 
-    // ⛔ And the guard this verb exists to avoid weakening is still shut: the
-    // terminal row cannot be decided again through the front door.
-    const reDecide = await service
-      .decide(req.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX)
+    // ⛔ POPULATION: all FOUR `pending`-guarded doors, each asserted here by
+    // name. The earlier revision of this pin asserted `decide` alone while its
+    // prose claimed all four — a pin cited for a wider population than its
+    // cases, which is the shape that lets a real regression through.
+    const refusals = {
+      decide: await service.decide(req.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX)
+        .then(() => null, (e: Error) => e.message),
+      recall: await service.recall(req.id, { actorId: 'submitter' }, SYSTEM_CTX)
+        .then(() => null, (e: Error) => e.message),
+      sendBack: await service.sendBack(req.id, { actorId: 'u1', comment: 'redo' } as any, SYSTEM_CTX)
+        .then(() => null, (e: Error) => e.message),
+      resubmit: await service.resubmit(req.id, { actorId: 'submitter' } as any, SYSTEM_CTX)
+        .then(() => null, (e: Error) => e.message),
+    };
+    expect(refusals.decide).toBe('INVALID_STATE: request is rejected');
+    expect(refusals.recall, 'recall refuses a terminal row').toMatch(/INVALID_STATE|FORBIDDEN/);
+    expect(refusals.sendBack, 'send-back refuses a terminal row').toMatch(/INVALID_STATE|FORBIDDEN/);
+    expect(refusals.resubmit, 'resubmit refuses a non-returned row').toMatch(/INVALID_STATE|FORBIDDEN/);
+  });
+
+  it('PIN 6 — GUARD 1 (superseded): a terminal request cannot drive a pause its run moved on to', async () => {
+    // POPULATION: two approval nodes in sequence, `a1` decided and `a2` live.
+    // Before this guard, request 1's continuation walked a2's `approve` edge
+    // and completed the run while request 2 sat `pending` with no decision.
+    const automation = boot();
+    await automation.execute('two_step', {
+      object: 'crm_deal', record: { id: 'd9', amount: 5 }, userId: 'submitter',
+    } as never);
+    const req1 = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    await service.decide(req1.id, { decision: 'approve', actorId: 'u1' }, SYSTEM_CTX);
+
+    const req2 = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    expect(req2.id, 'the run moved on to a SECOND approval').not.toBe(req1.id);
+    expect(await automation.hasSuspendedRun(req1.flow_run_id), 'a pause exists on the run').toBe(true);
+
+    const refused = await service.continueRestoredRun(req1.id).then(() => null, (e: Error) => e);
+    // Two identity guards independently reject this shape; the pin asserts the
+    // OUTCOME and names which one spoke, rather than pretending to isolate.
+    expect(refused?.message).toMatch(/^INVALID_STATE: (a newer approval request supersedes this one|run '.*' is parked at node 'a2')/);
+
+    // ⭐ The point of the refusal: a2's pending approval was NOT advanced.
+    const after = (await data.find('sys_approval_request', { where: { id: req2.id } }))[0];
+    expect(after.status, 'still awaiting a real decision').toBe('pending');
+    expect(marks, 'and no downstream node ran').toEqual([]);
+    expect(await automation.hasSuspendedRun(req1.flow_run_id)).toBe(true);
+
+    // GUARD 1 IN ISOLATION. The shape above is also caught by guard 3, so the
+    // supersede check is driven on its own here: a newer row on the SAME node,
+    // with `created_at` controlled so the ordering is the thing under test and
+    // not the clock's resolution.
+    await data.insert('sys_approval_request', {
+      id: 'areq_newer', flow_run_id: req1.flow_run_id, flow_node_id: 'a1',
+      status: 'pending', created_at: '2099-01-01T00:00:00.000Z', node_config_json: '{}',
+    });
+    const superseded = await service.continueRestoredRun(req1.id).then(() => null, (e: Error) => e);
+    expect(superseded?.message, 'guard 1, driven and asserted alone')
+      .toBe('INVALID_STATE: a newer approval request supersedes this one');
+  });
+
+  it('PIN 7 — GUARD 3 (node identity): a pause at another node is refused, and a retry cannot re-walk', async () => {
+    // POPULATION (a): a `recalled` request whose run is parked at the
+    // revise-window node — a pause this request never gated. Before this guard
+    // the verb issued `reject` there and opened a NEW pending round on a
+    // request somebody deliberately withdrew.
+    const automation = boot();
+    await automation.execute('revise_flow', {
+      object: 'crm_deal', record: { id: 'd7', amount: 3 }, userId: 'submitter',
+    } as never);
+    const rev = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    await service.sendBack(rev.id, { actorId: 'u1', comment: 'fix it' } as any, SYSTEM_CTX);
+
+    const parked = await automation.listSuspendedRunsDurable();
+    expect(parked.find(r => r.runId === rev.flow_run_id)?.nodeId,
+      'the run is parked at the revise window, not at the approval node').toBe('wait_revision');
+
+    const refusedNode = await service.continueRestoredRun(rev.id).then(() => null, (e: Error) => e);
+    expect(refusedNode?.message).toMatch(/is parked at node 'wait_revision', not at request .* own node 'review'/);
+    const rounds = await data.find('sys_approval_request', { where: { flow_run_id: rev.flow_run_id } });
+    expect(rounds, '⭐ no new pending round was opened').toHaveLength(1);
+
+    // POPULATION (b): a plain RETRY of the verb — the ordinary shape of using
+    // an operator tool, not a hostile construction. The first call consumes the
+    // re-armed pause; a second must not walk whatever the run parked on next.
+    const second = boot();
+    rejectBranchThrows = DOWNSTREAM_FAILURE;
+    await second.execute('two_step', {
+      object: 'crm_deal', record: { id: 'd8', amount: 4 }, userId: 'submitter',
+    } as never);
+    const r1 = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    // Strand a1's approve continuation by making the run's next step throw.
+    await second.restoreConsumedSuspension(r1.flow_run_id);
+    const firstCall = await service.continueRestoredRun(r1.id).then(r => r, (e: Error) => e);
+    const retry = await service.continueRestoredRun(r1.id).then(() => null, (e: Error) => e);
+    expect(retry, 'a retry must not silently advance something else').toBeTruthy();
+    expect(retry?.message).toMatch(/INVALID_STATE/);
+    void firstCall;
+  });
+
+  it('PIN 8 — B2: `returned` is discriminated by the resubmit row, and `recalled` is refused', async () => {
+    // POPULATION (a): a `returned` row whose LAST continuation was a resubmit,
+    // with the journal removed to force the rebuild path — the pre-ship
+    // population. One status writer, two issuers; rebuilding both as `revise`
+    // sent a stranded resubmit down the wrong edge, and the engine's
+    // unmatched-label fallback (#4414) let it proceed rather than fail loudly.
+    const automation = boot();
+    await automation.execute('revise_flow', {
+      object: 'crm_deal', record: { id: 'd6', amount: 2 }, userId: 'submitter',
+    } as never);
+    const req = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    await service.sendBack(req.id, { actorId: 'u1', comment: 'redo' } as any, SYSTEM_CTX);
+    // The row is `returned`; record the resubmit action the real door writes.
+    await data.insert('sys_approval_action', {
+      id: 'aact_resub_1', request_id: req.id, action: 'resubmit', step_index: 0,
+    });
+    const rebuilt = await (service as any).resolveRecordedContinuation(
+      (await data.find('sys_approval_request', { where: { id: req.id } }))[0], req.id,
+    );
+    expect(rebuilt.source).toBe('reconstructed');
+    expect(rebuilt.signal.decision, '⭐ resubmit, NOT revise').toBe('resubmit');
+    expect(rebuilt.signal.branchLabel).toBe('resubmit');
+    expect(rebuilt.signal.output).toEqual({ resubmitted: true, requestId: req.id });
+
+    // POPULATION (b): the same row with NO resubmit action row rebuilds as the
+    // send-back — the reverse control that keeps (a) from being a constant.
+    const other = boot();
+    await other.execute('revise_flow', {
+      object: 'crm_deal', record: { id: 'd5', amount: 1 }, userId: 'submitter',
+    } as never);
+    const req2 = (await data.find('sys_approval_request', { where: { status: 'pending' } }))[0];
+    await service.sendBack(req2.id, { actorId: 'u1', comment: 'redo' } as any, SYSTEM_CTX);
+    const rebuilt2 = await (service as any).resolveRecordedContinuation(
+      (await data.find('sys_approval_request', { where: { id: req2.id } }))[0], req2.id,
+    );
+    expect(rebuilt2.signal.decision, 'no resubmit row ⇒ the send-back').toBe('revise');
+    expect(rebuilt2.signal.branchLabel).toBe('revise');
+
+    // POPULATION (c): `recalled` with no journal is REFUSED, not guessed —
+    // two status writers, three behaviours, two issuing no continuation.
+    const recalledRow = { id: 'areq_r', status: 'recalled', flow_run_id: 'run_r', flow_node_id: 'review', node_config_json: '{}' };
+    const refused = await (service as any).resolveRecordedContinuation(recalledRow, 'areq_r')
       .then(() => null, (e: Error) => e);
-    expect(reDecide?.message).toBe('INVALID_STATE: request is rejected');
+    expect(refused?.message).toMatch(/is 'recalled' and carries no journalled continuation/);
+    expect(refused?.message, 'and it names what the operator can do instead').toMatch(/cancelRun/);
   });
 
   it('PIN 4 — REVERSE CONTROLS: it refuses when there is no re-armed pause to continue', async () => {

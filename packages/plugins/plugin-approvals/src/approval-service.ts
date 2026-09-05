@@ -160,6 +160,23 @@ export interface ApprovalResumeSurface {
    * engine that does not implement it simply gets no pre-flight.
    */
   hasSuspendedRun?(runId: string): Promise<boolean>;
+  /**
+   * [#15389] Where each suspended run is currently parked. Read by
+   * {@link ApprovalService.continueRestoredRun} to prove a re-armed pause is
+   * THIS request's pause and not merely some live pause on the same run —
+   * `hasSuspendedRun` answers a boolean and cannot tell the two apart.
+   *
+   * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
+   * (`listSuspendedRunsDurable`); it widens no engine surface. Durable-first,
+   * so it sees a pause parked by another replica or before a restart.
+   *
+   * Optional, and its absence is FAIL-CLOSED: a caller that cannot prove node
+   * identity refuses the continuation rather than proceeding on the weaker
+   * check. The engine degrades a store outage to its in-memory list rather
+   * than throwing, and that degradation is safe HERE for the same reason — a
+   * pause it cannot see is a pause this verb will not act on.
+   */
+  listSuspendedRunsDurable?(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>>;
 }
 
 /**
@@ -4361,27 +4378,25 @@ export class ApprovalService implements IApprovalService {
    * suspension snapshot — so a repair verb that only served future strands
    * would miss the population the card was filed for.
    *
-   * ## Why the rebuild is exact, and where it refuses instead
+   * ## Which statuses it rebuilds, which it discriminates, and which it refuses
    *
-   * Each accepted status is written by exactly ONE door, which always resumes
-   * with one signal, so the rebuild is a lookup and not a guess:
+   * ⛔ A status is NOT the same thing as a continuation. Three of the four
+   * terminal statuses have more than one writer or more than one issuer, so
+   * "one status, one signal" is false and is not what this relies on. Each row
+   * below states its own population and its own discriminator:
    *
-   * | status | door | branch | output |
+   * | status | writers / issuers | rebuilt as | how it is decided |
    * |---|---|---|---|
-   * | `approved` | `decide` | `approve` | accumulated decision outputs + `decision` |
-   * | `rejected` | `decide` | `reject` | accumulated decision outputs + `decision` |
-   * | `returned` | `sendBack` | `revise` | `decision: 'revise'` |
-   * | `recalled` | `recall` | `reject` | `decision: 'recall'` |
+   * | `approved` | 1 (`decide`; escalation auto-approve routes through it) | `approve` | unambiguous |
+   * | `rejected` | 2 (`decide`; ADR-0044 revision-limit auto-reject) | `reject`, or REFUSED | a `revise` action row means the auto-reject arm is possible |
+   * | `returned` | 1 writer, 2 issuers (`sendBack` → `revise`; a later `resubmit` → `resubmit`, writing no status) | `resubmit` or `revise` | a `resubmit` action row, whose sole writer is `resubmit` |
+   * | `recalled` | 2 writers, 3 behaviours, 2 issuing NO continuation | REFUSED | nothing on the row distinguishes them |
    *
-   * ⚠️ **The one shape it refuses.** `rejected` has a SECOND writer: ADR-0044's
-   * revision-limit auto-rejection, which resumes down the same `reject` edge
-   * but carries `autoRejected: true` in the output. Replaying it as a plain
-   * rejection would hand the flow a payload it never had. The two are
-   * distinguishable in the audit trail and only there — the auto-reject arm
-   * inserts its `revise` action row unconditionally BEFORE it can reach the
-   * limit check, so a `rejected` request with no `revise` action row cannot
-   * have taken it. With one, this refuses rather than guessing; the journal is
-   * what makes that shape recoverable going forward.
+   * ⚠️ **Both refusals are deliberate and neither is best-effort.** The failure
+   * mode of a wrong rebuild is a flow advanced down a branch nobody chose —
+   * strictly worse than the dead end this verb exists to open. Where the signal
+   * cannot be proved, this refuses and names what the operator can do instead;
+   * the journal is what makes both shapes recoverable going forward.
    *
    * ⛔ `pending` and `cancelled` are refused outright: neither names a recorded
    * outcome to replay. A `pending` request's continuation is an ordinary
@@ -4432,6 +4447,34 @@ export class ApprovalService implements IApprovalService {
     }
 
     if (status === 'returned') {
+      // ⚠️ ONE status writer, TWO continuation issuers. `sendBack` writes
+      // `returned` and resumes down `revise`; a later `resubmit` on that same
+      // row resumes down `resubmit` and writes NO status, so the row still
+      // reads `returned` when its resume is the one that stranded. Rebuilding
+      // both as `revise` sends a stranded resubmit down the wrong edge — and it
+      // does not even fail loudly, because the engine's unmatched-label
+      // fallback (#4414) warns and evaluates every out-edge, so the flow
+      // proceeds with `{decision:'revise'}` where `{resubmitted:true}` was owed.
+      //
+      // The discriminator is exact and structural: `action: 'resubmit'` has
+      // exactly ONE writer in this file (`resubmit`), it is inserted before
+      // that resume, and a resubmit opens the next round as a NEW row — so at
+      // most one such action row exists per request, and its presence means
+      // the last continuation this row issued was the resubmit.
+      const resubmitted = await this.engine.find('sys_approval_action', {
+        where: { request_id: requestId, action: 'resubmit' }, limit: 1, context: SYSTEM_CTX,
+      });
+      if (Array.isArray(resubmitted) && resubmitted.length) {
+        return {
+          source: 'reconstructed',
+          signal: {
+            branchLabel: APPROVAL_BRANCH_LABELS.resubmit,
+            output: { resubmitted: true, requestId },
+            decision: 'resubmit',
+            what: 'the resubmit',
+          },
+        };
+      }
       return {
         source: 'reconstructed',
         signal: {
@@ -4443,16 +4486,31 @@ export class ApprovalService implements IApprovalService {
       };
     }
 
+    // ⛔ `recalled` is REFUSED on the rebuild path, deliberately, and this is
+    // the one status where this verb declines rather than reconstructs.
+    //
+    // Two status writers and THREE continuation behaviours, two of which issue
+    // no continuation at all: `recall` on a `pending` request resumes down
+    // `reject`; `recall` inside a revision window calls `cancelRun` instead
+    // (there is no reject edge at a revise-window node); and the dead-run sweep
+    // marks a request `recalled` for a run that is already gone. Nothing on the
+    // row distinguishes which of the three wrote it, and the two silent ones
+    // have no branch that SHOULD be walked — so any rebuild here is a guess
+    // whose failure mode is opening a fresh pending round on a request somebody
+    // deliberately withdrew, which was measured on the pre-guard build.
+    //
+    // A recall stranded by a build that HAS the journal replays exactly, from
+    // the stash above; this refusal is the pre-journal population only, and it
+    // names what the operator can do instead.
     if (status === 'recalled') {
-      return {
-        source: 'reconstructed',
-        signal: {
-          branchLabel: APPROVAL_BRANCH_LABELS.reject,
-          output: { decision: 'recall', requestId },
-          decision: 'recall',
-          what: 'the recall',
-        },
-      };
+      throw new Error(
+        `INVALID_STATE: request ${requestId} is 'recalled' and carries no journalled continuation, so the ` +
+        `signal cannot be rebuilt: a recall reaches this state three ways (resumed down 'reject', ` +
+        `terminally cancelled inside a revision window, or swept as a dead run) and two of them issue no ` +
+        `continuation at all — replaying the wrong one would re-open a request that was deliberately ` +
+        `withdrawn. Refusing to guess: cancel the run with the engine's cancelRun('${raw.flow_run_id}') if ` +
+        `the withdrawal should stand, or resume it by hand with the signal the flow expects.`,
+      );
     }
 
     throw new Error(
@@ -4499,9 +4557,20 @@ export class ApprovalService implements IApprovalService {
    * still stamped in exactly one place.
    * ⛔ It grants no capability that in-process code did not already have:
    * `RESUME_AUTHORITY_SERVICE` is importable by anything in the host, so the
-   * raw form of this call was always available. What this adds is the guarded
-   * form — the one that checks the pause is actually re-armed and that the
-   * signal matches what was recorded.
+   * raw form of this call was always available. What this adds is the GUARDED
+   * form, and the guards are the substance of it — three, each with its own
+   * reverse-control pin, because the raw marker is not a guard and an
+   * unguarded repair verb advances flows nobody decided:
+   *
+   *  1. {@link assertLatestForRun} — this request is still the newest on its
+   *     run, so a superseded row cannot drive a later round or a later node;
+   *  2. `hasSuspendedRun` — a pause exists at all (strict: an unreadable store
+   *     throws rather than reading as "not suspended");
+   *  3. node identity — that pause is parked at THIS request's own node.
+   *
+   * Guard 3 is not redundant with guard 2: existence is not identity, and a
+   * boolean cannot tell this request's re-armed pause from any other live
+   * pause on the same run.
    *
    * ## Posture, and why it takes no `ExecutionContext`
    *
@@ -4539,16 +4608,23 @@ export class ApprovalService implements IApprovalService {
       );
     }
 
-    // The signal FIRST, so a request this verb cannot serve is refused before
-    // it asks the suspension store anything.
+    // ── GUARD 1. This request must still be the newest on its run.
+    // A run outlives any one request: later rounds and later approval nodes
+    // each mint their own. Without this, a superseded row's continuation walks
+    // whatever pause the run is sitting on NOW — measured advancing a later
+    // node's pending approval with no decision recorded on it, and orphaning a
+    // next round. Same guard `recall`-in-revise-window and `resubmit` already
+    // use, for the same reason.
+    await this.assertLatestForRun(raw);
+
+    // The signal, before the store is asked anything — a request this verb
+    // cannot serve is refused without a suspension read.
     const { signal, source } = await this.resolveRecordedContinuation(raw, requestId);
 
-    // The pause must actually be back. This is what separates a continuation
-    // from a second resume of a live decision: without a re-armed suspension
-    // there is nothing to continue, and the operator's missing step is the
-    // restore itself. `hasSuspendedRun` THROWS on an unreadable store, and that
-    // throw is deliberately not caught — a caller about to resume a run must
-    // not read an outage as "not suspended".
+    // ── GUARD 2. A pause must exist at all. `hasSuspendedRun` is STRICT — it
+    // throws on an unreadable store — and that throw is deliberately not
+    // caught: a caller about to resume must not read an outage as "not
+    // suspended".
     if (typeof this.automation?.hasSuspendedRun === 'function') {
       const parked = await this.automation.hasSuspendedRun(runId);
       if (!parked) {
@@ -4558,6 +4634,44 @@ export class ApprovalService implements IApprovalService {
           `restoreConsumedSuspension('${runId}'), which is what re-arms a consumed approval suspension`,
         );
       }
+    }
+
+    // ── GUARD 3. The pause must be THIS REQUEST'S node.
+    // Guards 1 and 2 together still admit a run parked somewhere this request
+    // never gated: a recall taken during a revision window leaves the row
+    // `recalled` while the run sits at the revise-window node, and issuing this
+    // request's `reject` there was measured opening a NEW pending round for a
+    // recalled request. Existence is not identity, so identity is checked.
+    //
+    // FAIL-CLOSED in every direction: no reader, no listing, no matching entry,
+    // or an entry at another node — all refuse. The engine degrades a store
+    // outage to its in-memory list instead of throwing, so a pause this cannot
+    // see is a pause this verb declines to act on. A false refusal costs the
+    // operator a retry; a false admission advances a flow nobody decided.
+    const expectedNode: string | null = raw.flow_node_id ?? raw.current_step ?? null;
+    if (!expectedNode) {
+      throw new Error(
+        `INVALID_STATE: request ${requestId} records no approval node, so the pause on run '${runId}' ` +
+        `cannot be proved to be this request's — refusing rather than resuming a pause that may belong ` +
+        `to another node`,
+      );
+    }
+    if (typeof this.automation?.listSuspendedRunsDurable !== 'function') {
+      throw new Error(
+        `INVALID_STATE: this automation engine cannot report WHERE run '${runId}' is parked ` +
+        `(no listSuspendedRunsDurable), so the pause cannot be proved to be request ${requestId}'s own ` +
+        `— refusing, because continuing the wrong pause advances a flow with no decision behind it`,
+      );
+    }
+    const parkedAt = (await this.automation.listSuspendedRunsDurable())
+      .find(r => String(r.runId) === String(runId))?.nodeId;
+    if (parkedAt !== expectedNode) {
+      throw new Error(
+        `INVALID_STATE: run '${runId}' is parked at ` +
+        `${parkedAt ? `node '${parkedAt}'` : 'no node this engine can see'}, not at request ${requestId}'s ` +
+        `own node '${expectedNode}' — this pause is not the one this request's outcome was refused on, and ` +
+        `continuing it would advance a step nobody decided`,
+      );
     }
 
     this.logger?.warn?.(
