@@ -46,7 +46,8 @@
 //     `use`. A recipe nobody opts into is dead text a runner may still replay.
 //     Both directions together are what the trap vocabulary beside them has
 //     always had — used implies documented, documented implies used.
-//   - every SYMBOL ANCHOR (`path/to/file.ts#symbolName`) resolves: the cited
+//   - every SYMBOL ANCHOR (`<dir>/<file>.ts#<symbol>`, the spelling
+//     `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines) resolves: the cited
 //     file is in the tree and the cited symbol is still in it, comments masked
 //     — a symbol surviving only in a docblock is ABSENT. A shrink-never floor
 //     per family file keeps the population from being emptied one deleted

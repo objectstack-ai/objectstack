@@ -25,7 +25,7 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
 // authoring accepted. See `resolveTriggerBinding`.
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { predicateSlotRefusal, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
 // `AssignmentValueSchema` (spec, #14149 — it refuses a non-`cel` dialect and the
@@ -7171,6 +7171,40 @@ export class AutomationEngine implements IAutomationService {
             }
         };
 
+        /**
+         * [#15662] The STRUCTURAL condition surfaces — `config.condition` on any
+         * node and `edge.condition` — refused on SHAPE before anything tries to
+         * read a source out of them.
+         *
+         * ⚠️ Not `predicateSlotRefusal`, the ledger arm's rule, and the
+         * difference is measured rather than assumed: `FlowEdgeSchema.condition`
+         * is `ExpressionInputSchema`, whose string arm transforms into
+         * `{ dialect: 'cel', source }`, so after `FlowSchema.parse` EVERY
+         * authored edge condition is an envelope — the ledger rule here would
+         * refuse every conditional edge in every flow. An envelope written at a
+         * node's `config.condition` is likewise passed through verbatim by the
+         * open `z.record` and evaluated correctly (#4336). Both are legitimate;
+         * `structuralConditionRefusal` admits them.
+         *
+         * What it refuses is the value that is neither text nor an expression.
+         * `evaluateCondition` reads `expression?.source ?? ''` and the
+         * empty-source arm answers `false` — "an unauthored branch must not
+         * open", applied to a value that was authored — so `42` / `true` /
+         * `['a']` registered clean and ran silently, on the same key the start
+         * node's trigger gate is read from. Same severity as a malformed
+         * predicate (this throws): the reject set of registration and the reject
+         * set of evaluation must be one set.
+         */
+        const checkStructuralCondition = (where: string, raw: unknown): void => {
+            if (raw == null) return;
+            const shapeRefusal = structuralConditionRefusal(raw);
+            if (shapeRefusal) {
+                failures.push(`  • ${where}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);
+                return;
+            }
+            check(where, raw);
+        };
+
         // #4347 — every graph in the flow, not just the top-level arrays. An
         // ADR-0031 container keeps a whole sub-graph in its `config`, so
         // iterating `flow.nodes`/`flow.edges` checked PART of the flow while
@@ -7183,7 +7217,7 @@ export class AutomationEngine implements IAutomationService {
             for (const node of graph.nodes) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 // start-node trigger gate + decision/branch predicates live in config.condition
-                check(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
+                checkStructuralCondition(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
 
                 // Descriptor-declared expression slots (#4027). The ledger names them
                 // per node type and carries the dialect each one takes, so a declared
@@ -7240,7 +7274,7 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
             for (const edge of graph.edges) {
-                check(`${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
+                checkStructuralCondition(`${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
             }
         }
 
