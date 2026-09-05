@@ -468,7 +468,7 @@ export function resolveDocsPage(contentRoot, pathname) {
  * `file` is the repo-root-relative posix path of the document, so the base is
  * its own directory -- the same base GitHub uses to resolve a relative href in
  * a rendered blob. Fragment and query are stripped before resolving
- * (`../a.md#L10` targets `../a.md`) and the path is percent-decoded, because
+ * (`../<sibling>.md#L10` targets `../<sibling>.md`) and the path is percent-decoded, because
  * `%20` in an href is a space in a filename.
  *
  * Four outcomes rather than two. `escapes` is separated from `missing` because
