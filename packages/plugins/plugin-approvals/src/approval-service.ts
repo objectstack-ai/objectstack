@@ -163,8 +163,10 @@ export interface ApprovalResumeSurface {
   /**
    * [#15389] Where each suspended run is currently parked. Read by
    * {@link ApprovalService.continueRestoredRun} to prove a re-armed pause is
-   * THIS request's pause and not merely some live pause on the same run —
-   * `hasSuspendedRun` answers a boolean and cannot tell the two apart.
+   * the pause THIS request's recorded outcome was refused on, and not merely
+   * some live pause on the same run — `hasSuspendedRun` answers a boolean and
+   * cannot tell the two apart. Which node that is depends on the signal, not
+   * only on the row: see {@link ApprovalService.expectedPauseNode}.
    *
    * ⚠️ Declares a method `AutomationEngine` ALREADY implements publicly
    * (`listSuspendedRunsDurable`); it widens no engine surface. Durable-first,
@@ -4520,6 +4522,95 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * WHERE the pause a recorded continuation was refused on actually sits
+   * (#15389) — the expected node guard 3 compares the run's parked node against.
+   *
+   * ⚠️ This is signal-aware, and that is the whole point of it. "This request's
+   * own node" is the right answer for three of the four signals and the WRONG
+   * answer for the fourth:
+   *
+   * | signal | issued from | why |
+   * |---|---|---|
+   * | `approve` / `reject` | the request's own approval node | the decision is taken at the pause it gates |
+   * | `revise` (send-back) | the request's own approval node | send-back resumes that same pause down the `revise` edge |
+   * | `recall` | the request's own approval node | recall-on-pending resumes that same pause down `reject` |
+   * | `resubmit` | the **revise window** the request's `revise` edge leads to | by construction: a resubmit is only reachable AFTER a send-back moved the run there, and it resumes THAT pause down the `resubmit` back-edge |
+   *
+   * Measured before this existed: a `returned` row whose resubmit stranded was
+   * refused by guard 3 on both the journal and the rebuild paths — the pause
+   * re-armed at the revise window while the row's `flow_node_id` still read the
+   * approval node — and the refusal told the operator the pause was not this
+   * request's when it was exactly this request's. A refusal may ship; a refusal
+   * that names a cause the code did not take may not.
+   *
+   * ⛔ It stays FAIL-CLOSED: the revise window is derived from the flow
+   * definition the same way {@link ApprovalService.assertReviseEdge} derives it
+   * — a `revise` out-edge of this request's node into a node the flow declares
+   * as `{@link APPROVAL_REVISE_NODE_TYPE}`, which is the pause only this service
+   * can continue. No engine, no flow, no such edge, or more than one candidate
+   * ⇒ refuse. It needs no automation surface `assertReviseEdge` did not already
+   * use (`getFlow`), and no engine change.
+   *
+   * ⚠️ It does not widen what guard 3 admits beyond that one signal: for every
+   * other decision the answer is byte-identical to the row's own node, so the
+   * recall-in-revise-window shape (row `recalled`, run at the revise window)
+   * stays refused — its journalled signal is `recall`, not `resubmit`.
+   */
+  private async expectedPauseNode(
+    raw: any,
+    signal: StrandedContinuationSignal,
+    requestId: string,
+    runId: string,
+  ): Promise<{ nodeId: string; describe: string }> {
+    const ownNode: string | null = raw.flow_node_id ?? raw.current_step ?? null;
+    if (!ownNode) {
+      throw new Error(
+        `INVALID_STATE: request ${requestId} records no approval node, so the pause on run '${runId}' ` +
+        `cannot be proved to be the one ${signal.what} was refused on — refusing rather than resuming a ` +
+        `pause that may belong to another node`,
+      );
+    }
+    if (signal.decision !== 'resubmit') {
+      return { nodeId: ownNode, describe: `its own approval node '${ownNode}'` };
+    }
+
+    const processName = String(raw.process_name ?? '');
+    const flowName = processName.startsWith('flow:') ? processName.slice('flow:'.length) : '';
+    if (!flowName || typeof this.automation?.getFlow !== 'function') {
+      throw new Error(
+        `INVALID_STATE: ${signal.what} on request ${requestId} was issued from the revise window that ` +
+        `approval node '${ownNode}' sends back to, and this service cannot read the owning flow ` +
+        `definition to say which node that is — refusing, because continuing a pause it cannot identify ` +
+        `advances a step nobody decided`,
+      );
+    }
+    const flow: any = await this.automation.getFlow(flowName);
+    const nodeTypeById = new Map<string, string>(
+      (Array.isArray(flow?.nodes) ? flow.nodes : [])
+        .filter((n: any) => typeof n?.id === 'string')
+        .map((n: any) => [n.id as string, typeof n.type === 'string' ? n.type : '']),
+    );
+    const windows = Array.from(new Set(
+      (Array.isArray(flow?.edges) ? flow.edges : [])
+        .filter((e: any) => e?.source === ownNode && e?.label === APPROVAL_BRANCH_LABELS.revise)
+        .map((e: any) => (typeof e?.target === 'string' ? e.target : ''))
+        .filter((t: string) => t && nodeTypeById.get(t) === APPROVAL_REVISE_NODE_TYPE),
+    )) as string[];
+    if (windows.length !== 1) {
+      throw new Error(
+        `INVALID_STATE: ${signal.what} on request ${requestId} was issued from the revise window that ` +
+        `approval node '${ownNode}' sends back to, and flow '${flowName}' declares ` +
+        `${windows.length === 0 ? 'no such window' : `${windows.length} of them (${windows.join(', ')})`} ` +
+        `— refusing, because a pause this service cannot identify must not be continued`,
+      );
+    }
+    return {
+      nodeId: windows[0],
+      describe: `the revise window '${windows[0]}' that its approval node '${ownNode}' sends back to`,
+    };
+  }
+
+  /**
    * Re-issue the continuation for a run an operator has re-armed with
    * `AutomationEngine.restoreConsumedSuspension` — the missing half of that
    * repair verb, for approvals (#15389).
@@ -4566,7 +4657,12 @@ export class ApprovalService implements IApprovalService {
    *     run, so a superseded row cannot drive a later round or a later node;
    *  2. `hasSuspendedRun` — a pause exists at all (strict: an unreadable store
    *     throws rather than reading as "not suspended");
-   *  3. node identity — that pause is parked at THIS request's own node.
+   *  3. node identity — that pause is parked where THIS request's recorded
+   *     outcome was issued from: its own approval node for `approve`,
+   *     `reject`, `revise` and `recall`, and — for a `resubmit`, which is only
+   *     reachable from a revise window — the `approval_revise` node its own
+   *     `revise` edge leads to. {@link ApprovalService.expectedPauseNode}
+   *     derives it, fail-closed.
    *
    * Guard 3 is not redundant with guard 2: existence is not identity, and a
    * boolean cannot tell this request's re-armed pause from any other live
@@ -4636,41 +4732,42 @@ export class ApprovalService implements IApprovalService {
       }
     }
 
-    // ── GUARD 3. The pause must be THIS REQUEST'S node.
-    // Guards 1 and 2 together still admit a run parked somewhere this request
-    // never gated: a recall taken during a revision window leaves the row
-    // `recalled` while the run sits at the revise-window node, and issuing this
-    // request's `reject` there was measured opening a NEW pending round for a
-    // recalled request. Existence is not identity, so identity is checked.
+    // ── GUARD 3. The pause must be the one THIS SIGNAL was refused on.
+    // Guards 1 and 2 together still admit a run parked somewhere this request's
+    // outcome never gated: a recall taken during a revision window leaves the
+    // row `recalled` while the run sits at the revise-window node, and issuing
+    // this request's `reject` there was measured opening a NEW pending round
+    // for a recalled request. Existence is not identity, so identity is checked.
+    //
+    // ⚠️ The expected node is SIGNAL-AWARE, not simply the row's own node — see
+    // {@link ApprovalService.expectedPauseNode}. A `resubmit` is issued from the
+    // revise window by construction, so comparing it against the row's approval
+    // node refused the one population the journal was built to serve, with a
+    // message that named a cause the code had not taken.
     //
     // FAIL-CLOSED in every direction: no reader, no listing, no matching entry,
-    // or an entry at another node — all refuse. The engine degrades a store
-    // outage to its in-memory list instead of throwing, so a pause this cannot
-    // see is a pause this verb declines to act on. A false refusal costs the
-    // operator a retry; a false admission advances a flow nobody decided.
-    const expectedNode: string | null = raw.flow_node_id ?? raw.current_step ?? null;
-    if (!expectedNode) {
-      throw new Error(
-        `INVALID_STATE: request ${requestId} records no approval node, so the pause on run '${runId}' ` +
-        `cannot be proved to be this request's — refusing rather than resuming a pause that may belong ` +
-        `to another node`,
-      );
-    }
+    // an entry at another node, or an expected node this service cannot derive
+    // — all refuse. The engine degrades a store outage to its in-memory list
+    // instead of throwing, so a pause this cannot see is a pause this verb
+    // declines to act on. A false refusal costs the operator a retry; a false
+    // admission advances a flow nobody decided.
+    const expected = await this.expectedPauseNode(raw, signal, requestId, runId);
     if (typeof this.automation?.listSuspendedRunsDurable !== 'function') {
       throw new Error(
         `INVALID_STATE: this automation engine cannot report WHERE run '${runId}' is parked ` +
-        `(no listSuspendedRunsDurable), so the pause cannot be proved to be request ${requestId}'s own ` +
-        `— refusing, because continuing the wrong pause advances a flow with no decision behind it`,
+        `(no listSuspendedRunsDurable), so the pause cannot be proved to be the one ${signal.what} on ` +
+        `request ${requestId} was refused on — refusing, because continuing the wrong pause advances a ` +
+        `flow with no decision behind it`,
       );
     }
     const parkedAt = (await this.automation.listSuspendedRunsDurable())
       .find(r => String(r.runId) === String(runId))?.nodeId;
-    if (parkedAt !== expectedNode) {
+    if (parkedAt !== expected.nodeId) {
       throw new Error(
         `INVALID_STATE: run '${runId}' is parked at ` +
-        `${parkedAt ? `node '${parkedAt}'` : 'no node this engine can see'}, not at request ${requestId}'s ` +
-        `own node '${expectedNode}' — this pause is not the one this request's outcome was refused on, and ` +
-        `continuing it would advance a step nobody decided`,
+        `${parkedAt ? `node '${parkedAt}'` : 'no node this engine can see'}, but ${signal.what} on ` +
+        `request ${requestId} was issued from ${expected.describe} — this re-armed pause is not the one ` +
+        `that outcome was refused on, and continuing it would advance a step nobody decided`,
       );
     }
 
