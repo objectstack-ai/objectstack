@@ -707,8 +707,8 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     await engine.insert('invoice', rows, { context: sysCtx } as any);
     published.length = 0;
   };
-  const sweepUpdate = (context: Record<string, unknown>, object = 'invoice') =>
-    engine.update(object, { amount: '0' }, { multi: true, where: { status: 'open' }, context } as any);
+  const sweepUpdate = (context: Record<string, unknown>) =>
+    engine.update('invoice', { amount: '0' }, { multi: true, where: { status: 'open' }, context } as any);
   const sweepDelete = (context: Record<string, unknown>) =>
     engine.delete('invoice', { multi: true, where: { status: 'open' }, context } as any);
 
@@ -904,13 +904,30 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     expect(hasOrgKey()).toBe(false);
   });
 
-  it('an object that is not tenant-scoped publishes it ABSENT under the same wall', async () => {
-    // `task` declares no `organization_id`: Layer 0 contributes nothing on it
-    // (`objectHasOrgIdField === false`), so there is no wall to name.
-    await engine.insert('task', [{ title: 'a', status: 'open' }], { context: sysCtx } as any);
+  it('an object that opted OUT of tenancy publishes it ABSENT under the same wall', async () => {
+    // ⚠️ Not `task`: registering an object INJECTS the kernel `organization_id`
+    // column (registry.ts, `TENANT_SCOPE_FIELD_DEF`), and the security plugin
+    // reads that same injected field set — so a registered `task` IS walled.
+    // The declared way out is `tenancy: { enabled: false }` (ADR-0066): no
+    // column is injected, `resolveTenantFieldName` answers null, and Layer 0
+    // contributes nothing (`tenancyDisabled`) — there is no wall to name.
+    const globalSetting = {
+      name: 'global_setting',
+      label: 'Global setting',
+      tenancy: { enabled: false },
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        key: { name: 'key', type: 'text' as const },
+        status: { name: 'status', type: 'text' as const },
+      },
+    };
+    engine.registry.registerObject(globalSetting as any);
+    // Measured, not recalled: the opt-out really withheld the injected column.
+    expect((engine.registry.getObject('global_setting') as any).fields.organization_id).toBeUndefined();
+    await engine.insert('global_setting', [{ key: 'a', status: 'open' }], { context: sysCtx } as any);
     published.length = 0;
 
-    await sweepUpdate(member, 'task');
+    await engine.update('global_setting', { key: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
 
     expect(published).toHaveLength(1);
     expect(published[0].type).toBe('data.records.updated');
