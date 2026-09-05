@@ -7809,12 +7809,106 @@ export class ObjectStackProtocolImplementation implements
         deletable: boolean;
         resettable: boolean;
     }> {
-        const orgId = request.organizationId;
-
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The
         // three-layer diagnostic must answer for ONE namespace, or `code` and
         // `overlay` can be read from two.
         request = canonicalizeMetaRequestType(request);
+
+        // ── [#14907] The registry read gate, resolved AFTER the fold ─────────
+        //
+        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
+        // read doors have applied since #9454, twin of the write side's
+        // `organizationIdForMetaWrite` (#6190 / #7018) and the same gate
+        // `getMetaItems` (#14683) and `getMetaItem` (#14770) now carry. Until
+        // this line `getMetaItemLayered` — the third `/meta` read verb —
+        // applied NO gate of its own: whatever organization arrived was spent
+        // on whatever type arrived.
+        //
+        // ⛔ THE BINDING MOVED, and that reorder IS the fix. It used to sit
+        // ABOVE the fold, so dropping the sibling verbs' one-liner in place
+        // would have gated on the RAW type. #10340 measured what that costs:
+        // `declaresOrgOverride` tolerates the MANIFEST plurals but not the
+        // URL-only ones (`translations` / `email_templates` have no manifest
+        // key), so a raw segment splits one item across two partitions. Both
+        // REST callers below hand this method an unfolded `/meta/:type`
+        // segment, so gating before the fold would have been wrong on exactly
+        // the types the gate exists to admit.
+        //
+        // ⭐ THE HARM IS A FALSE POSITIVE CUSTOMIZATION CLAIM — which is why
+        // this verb was graded on its own rather than inheriting either twin's.
+        // On the plural verb a phantom can only ADD a row; on the singular verb
+        // it REPLACES the served document. Here the affected value is the
+        // `overlay` layer of a three-layer diagnostic whose entire purpose is
+        // to answer "what did this tenant customize", so a pre-#6190 phantom
+        // org-scoped row of an `allowOrgOverride: false` type is rendered by
+        // the Studio "Code default vs Overlay vs Effective" diff tab as
+        // evidence of a customization that does not exist. It compounds at the
+        // two doors that return the `overlay` layer AS the response: there the
+        // phantom is not merely displayed, it is served.
+        //
+        // ── The idempotence proof, discharged over THIS door's callers ──────
+        //
+        // Let `f(t, o) = organizationIdForMetaRead(t, o)`. `f` answers `o` when
+        // the registry declares `t` per-org overridable and `undefined`
+        // otherwise, so `f(t, undefined) === undefined` and
+        // `f(t, f(t, o)) === f(t, o)` for every `t` and `o`. #14683's and
+        // #14770's proofs do NOT carry: the #14683 ruling discharges this per
+        // door over that door's OWN caller population, and this verb's is a
+        // different set. Enumerated by grepping every `getMetaItemLayered(`
+        // invocation in the repo and tracing each `organizationId` argument to
+        // its source — no caller is denied a partition it can legitimately
+        // read:
+        //
+        //  • `rest-server.ts`'s `/meta/:type/:name/layers` door (and the
+        //    deprecated `?layers=` flag, which delegates to the same helper)
+        //    computes `organizationIdForMetaRead(canonicalMetaUrlType(
+        //    req.params.type), ctx?.tenantId)` and then passes `type:
+        //    req.params.type`, the RAW segment. The fold above IS
+        //    `canonicalMetaUrlType`, so `request.type` here is the identical
+        //    STRING the door gated on — the algebraic no-op.
+        //  • Four of the five `plugin-security` invocations name no
+        //    organization at all (`packaged-permission-set-lock-gate.ts`'s
+        //    authoring gate, and three of `permission-set-projection.ts`'s
+        //    reads), so `f(t, undefined) === undefined` leaves them reading
+        //    exactly what they read today. `permission-set-overlay-discard.ts`
+        //    only feature-detects this method and delegates to
+        //    `projectPermissionMutation`; it is not a call site.
+        //
+        // ⇒ THREE callers move, and each one is the defect. ⚠️ Only the first
+        // was named by the enumeration this repair was dispatched with, which
+        // asserted that the runtime dispatcher was the ONLY reachable site,
+        // that BOTH REST doors already gated, and that every `plugin-security`
+        // site passed no organization. The last two were measured false here —
+        // in the direction that adds callers to this gate, never one that
+        // removes them:
+        //
+        //  • `runtime/src/domains/meta.ts` — `resolveActiveOrganizationId`
+        //    straight into the request, on a `type` taken off the URL, so it is
+        //    not confined to the overridable five. Its `if (layered?.overlay !=
+        //    null)` branch returns the overlay layer AS the response.
+        //  • `rest-server.ts`'s `/meta/:type/:name/published` door — the REST
+        //    twin of that dispatcher branch, and the door recorded as already
+        //    gating. It passes `publishedCtx.tenantId` RAW and then
+        //    `res.json(layered.overlay)`. Its own comment argues the raw tenant
+        //    "is right for a READ" because the overlay lookup is
+        //    org-first-then-env, so "nothing that resolves today stops
+        //    resolving" — precisely the argument {@link
+        //    organizationIdForMetaRead} was written to refute: failing open in
+        //    that direction is what RESURRECTS the phantoms, which is why
+        //    #6190 stopped minting them and why boot hydration walks past the
+        //    survivors.
+        //  • `permission-set-projection.ts`'s post-mutation read forwards
+        //    `evt.organizationId` — a raw active organization on
+        //    `type: 'permission'`, which is `allowOrgOverride: false`. Moving
+        //    it makes the projection read the partition boot hydration
+        //    actually serves: the same correction, one caller further out.
+        //
+        // ⚠️ ONE resolution for BOTH overlay arms, deliberately — the
+        // org-scoped read and the env-wide fallback below both spend this
+        // binding, and gating only the first would leave `overlayScope: 'org'`
+        // reachable for a type with no per-org read channel.
+        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
+
         // ── code layer: MetadataService.get + registry, BYPASSING overlay ──
         let code: unknown | null = null;
         let codeDegraded: { degraded: boolean; errors: string[] } | undefined;

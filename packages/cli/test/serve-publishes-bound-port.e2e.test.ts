@@ -62,6 +62,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { runtimeStateFileName } from '../src/commands/serve.js';
 import {
   CLI,
   TSX,
@@ -79,12 +80,19 @@ export default {};
 `;
 
 /**
- * `serve.ts`'s OWN default for the environment id (`OS_ENVIRONMENT_ID ??
- * 'env_local'`), which is what names the runtime state file. The variable is
- * UNSET for every child below rather than pinned to a value of this file's
- * own, so the name asserted here is the one a plain `os serve` writes.
+ * The state file the child under test writes, asked of the writer's OWN naming
+ * function.
+ *
+ * `OS_ENVIRONMENT_ID` is UNSET for every child below rather than pinned to a
+ * value of this file's own, so `'env_local'` here is `serve.ts`'s own default
+ * and the name is the one a plain `os serve` writes. The second half is the
+ * PROJECT: the name is keyed by the served app's root as well as the
+ * environment (#15733), so two projects on one machine stop addressing one
+ * file — and spelling it out as a literal here would be a second copy of that
+ * rule, free to keep passing against a writer that had drifted off it.
  */
-const RUNTIME_FILE = 'runtime.env_local.json';
+const runtimeStatePath = (home: string, projectRoot: string): string =>
+  join(home, runtimeStateFileName('env_local', projectRoot));
 
 /** How long a connect probe waits before calling a port unreachable. */
 const CONNECT_TIMEOUT_MS = 2_000;
@@ -238,7 +246,7 @@ function bootServe(cwd: string, args: string[], home: string): Promise<Booted> {
 /** The three channels, read out of one boot. */
 function channelsOf(booted: Booted): { ipc: unknown; banner: unknown; runtimeFile: unknown } {
   const banner = boundPortFromBanner(booted.stdout + booted.stderr);
-  const state = JSON.parse(readFileSync(join(booted.home, RUNTIME_FILE), 'utf8'));
+  const state = JSON.parse(readFileSync(runtimeStatePath(booted.home, bareDir), 'utf8'));
   return {
     ipc: booted.ipc?.port,
     banner: banner.state === 'bound' ? banner.port : banner,
@@ -317,7 +325,7 @@ describe('#13062 `os serve --port 0` — the request that can never be the answe
         // `{ port: 0 }`, `API: http://localhost:0/`, `"port": 0`.
         expect(ipc, 'the IPC message still announces the REQUESTED port').not.toBe(0);
         expect(banner, 'the ready banner still names http://localhost:0').not.toBe(0);
-        expect(runtimeFile, 'runtime.env_local.json still records port 0').not.toBe(0);
+        expect(runtimeFile, 'the runtime state file still records port 0').not.toBe(0);
 
         // One number, not three that happen to be non-zero.
         expect(banner).toBe(ipc);
