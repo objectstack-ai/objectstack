@@ -392,9 +392,9 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
  * `serve` used to publish the port it was ASKED for on all three of the
  * channels that ANNOUNCE an address — the `objectstack:listening` IPC message,
  * the ready banner's `API:` row (through {@link resolveAuthBaseUrl}), and
- * `runtime.<environment>.json`. For every port but one the requested and the
- * bound value coincide, which is why it stayed invisible; for `0` they CANNOT
- * coincide. `MIN_PORT = 0` is legal on purpose — `utils/port-contract.ts` says
+ * `runtime.<environment>.<project>.json`. For every port but one the requested
+ * and the bound value coincide, which is why it stayed invisible; for `0` they
+ * CANNOT coincide. `MIN_PORT = 0` is legal on purpose — `utils/port-contract.ts` says
  * so in its own words, from its own measurement, that 0 is "a REQUEST, not an
  * error", and `listen(0)` binds a kernel-assigned port. So `os serve --port 0`
  * announced `{ port: 0 }`, printed `API: http://localhost:0/` and wrote
@@ -460,8 +460,8 @@ export interface ListeningMessage {
  */
 export interface BoundPortChannels {
   /**
-   * Writes `runtime.<environment>.json`. ⛔ Must COMPLETE before either
-   * announcement below: it is the file both of them send a consumer to.
+   * Writes `runtime.<environment>.<project>.json`. ⛔ Must COMPLETE before
+   * either announcement below: it is the file both of them send a consumer to.
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
   /** Sends {@link ListeningMessage}, when an IPC channel is open. */
@@ -476,14 +476,14 @@ export interface BoundPortChannels {
  * ## The bug this shape exists to make impossible
  *
  * `os serve` announces its address on three channels: the runtime state file
- * `runtime.<environment>.json`, the `objectstack:listening` IPC message, and
- * the ready banner. Two of those are ANNOUNCEMENTS a consumer reacts to; the
- * third is the FILE those consumers then open. Published in the order they
+ * `runtime.<environment>.<project>.json`, the `objectstack:listening` IPC
+ * message, and the ready banner. Two of those are ANNOUNCEMENTS a consumer
+ * reacts to; the third is the FILE those consumers then open. Published in the order they
  * happened to be written — banner, IPC, file — every consumer that believes an
  * announcement races a file that is not there yet:
  *
  * ```text
- * banner  ─▶ a supervisor sees "ready" and opens runtime.env_local.json
+ * banner  ─▶ a supervisor sees "ready" and opens runtime.env_local.<project>.json
  * IPC     ─▶ the `os dev` parent sees the port
  * file    ─────────────────────────▶ ...written here. The ENOENT already happened.
  * ```
@@ -492,10 +492,11 @@ export interface BoundPortChannels {
  * claim (`serve-publishes-bound-port.e2e.test.ts`) is an ORDINARY consumer — it
  * waits for the banner AND the IPC message, then reads the file — and it
  * ejected 14 PRs from the shared merge queue in a rolling 24 hours (10
- * independent hits, #13158) with `ENOENT: ... runtime.env_local.json`. A real
- * supervisor written the same way loses the same race; all a loaded machine
- * does is deschedule the child between the announcement and the write, which is
- * why it read as a flake for a day.
+ * independent hits, #13158) with `ENOENT: ... runtime.env_local.json` — the
+ * name that file carried then, before {@link runtimeStateFileName} keyed it by
+ * project as well. A real supervisor written the same way loses the same race;
+ * all a loaded machine does is deschedule the child between the announcement
+ * and the write, which is why it read as a flake for a day.
  *
  * ⛔ The repair is NOT to make the reader poll. A consumer that must poll after
  * being told "ready" was told "ready" too early — polling spreads the defect
@@ -572,6 +573,17 @@ export function publishBoundPort(boundPort: number, channels: BoundPortChannels)
  * spelling gets its own file, and each is internally consistent). Two boots of
  * the SAME project also still share a file — that is the same-project case,
  * which is #15374's in-process watch, not this one.
+ *
+ * ⚠️ Second boundary, and the one an OUT-OF-TREE reader has to replicate to
+ * find the record: WHICH root this is handed is {@link servedAppRootOrCwd},
+ * which {@link anchorServedApp} sets to the CONFIG'S OWN DIRECTORY only when
+ * that config exists and that directory carries a `package.json`, and to
+ * `process.cwd()` otherwise. So one app served from two working directories
+ * with no manifest beside its config keys TWO files, and a supervisor that
+ * reconstructs the name out of tree has to apply that same rule rather than
+ * assume the config's directory. That fallback is #11185's and is deliberate:
+ * a directory that declares nothing is not anchored at, because anchoring
+ * there could only turn a working boot into an `undeclared` refusal.
  */
 export function projectStateKey(servedAppRoot: string): string {
   const absolute = path.resolve(servedAppRoot);
@@ -4741,9 +4753,9 @@ export default class Serve extends Command {
       // ── The port this process ACTUALLY bound (#13062) ─────────────
       // Read ONCE, here, and handed to every channel that announces an address:
       // the ready banner below, the `objectstack:listening` IPC message and
-      // `runtime.<environment>.json`. Those three were three outputs of ONE
-      // number, and that number was the port that had been REQUESTED — equal to
-      // the bound one for every value except the one where it can never be
+      // `runtime.<environment>.<project>.json`. Those three were three outputs
+      // of ONE number, and that number was the port that had been REQUESTED
+      // — equal to the bound one for every value except the one where it can never be
       // (`--port 0`), which is how all three came to announce `localhost:0`
       // with nothing erroring.
       //
