@@ -16,16 +16,9 @@
  */
 
 import type { AccessMatrixParsed, AccessMatrixEntry } from '@objectstack/spec/security';
+import { recordsOf } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 /** Build the sorted access matrix for a normalized stack. */
 export function buildAccessMatrix(stack: AnyRec): AccessMatrixParsed {
@@ -33,14 +26,14 @@ export function buildAccessMatrix(stack: AnyRec): AccessMatrixParsed {
   if (!stack || typeof stack !== 'object') return { version: 1, entries };
 
   const owdByObject = new Map<string, string>();
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = typeof obj.name === 'string' ? obj.name : '';
     if (!name) continue;
     const owd = (obj.sharingModel ?? (obj.security as AnyRec | undefined)?.sharingModel) as string | undefined;
     if (typeof owd === 'string') owdByObject.set(name, owd);
   }
 
-  for (const ps of asArray(stack.permissions)) {
+  for (const ps of recordsOf(stack.permissions)) {
     const psName = typeof ps.name === 'string' ? ps.name : '';
     if (!psName) continue;
     const objects = (ps.objects && typeof ps.objects === 'object' ? ps.objects : {}) as AnyRec;
