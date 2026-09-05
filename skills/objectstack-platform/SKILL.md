@@ -236,6 +236,12 @@ what the platform owns.
 - **Business features belong in the app; capability belongs in the platform.**
   A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
   upstream. Raise it there; do not compensate for it here.
+- **Could this be written by something that has only the metadata, and no
+  knowledge of this company?** *No* — it encodes this company's own judgement (a
+  discount ceiling, who a case is assigned to, how won/lost is booked) ⇒ the
+  app. *Yes* — it only asks whether the metadata is self-consistent (reference
+  integrity, translation coverage, view rosters, sharing-rule coverage, CRUD
+  round-trips, RLS probes per declared position) ⇒ the platform.
 - **A platform defect means waiting for the platform fix.** No defensive coding,
   no shape tolerance, no hand-written predicate re-implementing a platform rule,
   and never "land the half we can" — that spends the contract-first option and
