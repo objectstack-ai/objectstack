@@ -101,6 +101,50 @@
 //   • Direction B is asserted only for codes with ≥1 derived producer. A code
 //     with none is not silently passed: it lands in the unpinned census below.
 //
+// ## A code the DOOR TRANSLATES is not a wire producer
+//
+// `DuplicateRecordError` (`packages/objectql/src/duplicate-record-error.ts`)
+// declares `readonly code = 'DUPLICATE_RECORD'` beside `readonly status = 409`,
+// and R1 read that pair as "the runtime can emit HTTP 409 for
+// DUPLICATE_RECORD" — so direction A required some scanned page to publish 409
+// for a code that never crosses HTTP. The maintainer ruling on #14723
+// (2026-09-03) is that a unique-constraint refusal has ONE wire spelling on
+// every route, `UNIQUE_VIOLATION`: the class's code is the ENGINE's thrown
+// identity, in-process only, and the REST door translates it at the boundary
+// (`structuredCodeAnswer`'s arm in `packages/rest/src/error-response.ts`; the
+// row derivations `toRowApiError` / `toFailedResult` apply the identical
+// two-part gate to a batch row and an import row). The consequence was
+// backwards: this gate was GREEN only because `error-catalog.mdx` published a
+// 409 wire claim for an in-process constant, so correcting the page is what
+// turned the gate red (#15749).
+//
+// `deriveDoorTranslations` reads those arms out of the DOOR'S OWN SOURCE — a
+// guard testing `error?.code === 'FROM'` (and, when the arm names one, the
+// throwing class's `error?.name === 'Class'`) whose `{ status, body: { code:
+// 'TO' } }` terminal answers a DIFFERENT code. A hand-written list of
+// translated codes would be exactly the second copy of a table this file's
+// header argues against, needing its own drift tripwire.
+//
+// Three bounds keep the exclusion narrow, and each is pinned in `--self-test`:
+//
+//   • It applies to R1 ONLY — the rule that reads a THROWING CLASS, which is
+//     the half the arm's guard names. Any other producer of the same code (a
+//     `sendError` door, a `{ code, status }` terminal, an assignment pair)
+//     keeps it a wire producer, which is what "EVERY path from its throw to
+//     HTTP goes through a translating arm" means in the only terms a deriver
+//     can read.
+//   • When the arm names a class, both halves must match: a DIFFERENT class
+//     declaring the same code is a different producer speaking a member of the
+//     vocabulary (the same two-part gate `isEngineDuplicateRecordEnvelope`
+//     applies at both boundaries) and keeps its producer.
+//   • The excluded declaration is REPORTED on every run in the `translated`
+//     census, never dropped — a deriver that goes quietly blind is the same
+//     failure one layer down. A translated code is also kept OUT of the
+//     unpinned census below: that census exists for a doc claim NOTHING pins,
+//     and here the door pins the answer — it just spells it `UNIQUE_VIOLATION`.
+//     The census line says when a scanned page still publishes a status for the
+//     translated code, so the stale claim keeps being stated.
+//
 // ## The unpinned census — "no in-package declaration" as a finding, not a pass
 //
 // #8880 recorded the honest complication: `ValidationError` declares no status
@@ -157,11 +201,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '23 — R5b: the body span is brace-BALANCED, and the braces it counts are': 3,
   '24 — R6, the ASSIGNMENT form, and the two bounds that keep it honest.': 4,
   '25 — `z.enum([...])` members: the ONE extra segment `lookup` walks, and the': 3,
+  '26 — a code the DOOR TRANSLATES away is not a wire producer: derived from': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 26;
+const SELF_TEST_BATTERY_FLOOR = 27;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -456,15 +501,85 @@ function assignmentPairs(src, structural) {
 }
 
 /**
+ * The door's TRANSLATING ARMS, derived from the door's own source: which thrown
+ * `(code, class)` a boundary answers with a DIFFERENT wire code.
+ *
+ * The shape read is the one `packages/rest/src/error-response.ts` writes — a
+ * guard on the thrown value's declared contract, and a `{ status, body: { code
+ * } }` terminal:
+ *
+ *     if (error?.code === 'DUPLICATE_RECORD' && error?.name === 'DuplicateRecordError') {
+ *         return { status: 409, body: { …, code: 'UNIQUE_VIOLATION', … } };
+ *     }
+ *
+ * An arm whose body answers `code: error.code` (the capability gates) produces
+ * NO literal and is therefore no translation — read, and correctly found to
+ * translate nothing. Braces are walked on the STRUCTURAL projection for the
+ * reason `matchingBrace` exists: the arms build their bodies with conditional
+ * spreads, and a brace-free character class skipped every one of them.
+ *
+ * A guard naming several codes (`'FEEDS_DISABLED' || 'FILES_DISABLED'`) yields
+ * one entry per code; a guard naming several classes yields one entry per
+ * class, so the pairing is never WIDER than the guard the door actually wrote.
+ *
+ * @param {Map<string, string>} sources path → source text
+ * @returns {{ fromCode: string, className: string|undefined, toCode: string, status: number, where: string }[]}
+ */
+export function deriveDoorTranslations(sources) {
+  const out = [];
+  for (const [path, raw] of sources) {
+    if (!/\.code\s*===/.test(raw)) continue;
+    const { src, structural } = projections(raw);
+    for (const m of src.matchAll(/\bif\s*\(([^{}]*)\)\s*\{/g)) {
+      const codes = [...m[1].matchAll(/(?:\?\.|\.)code\s*===\s*'([A-Z][A-Z0-9_]*)'/g)].map((g) => g[1]);
+      if (!codes.length) continue;
+      const names = [...m[1].matchAll(/(?:\?\.|\.)name\s*===\s*'([A-Za-z_$][\w$]*)'/g)].map((g) => g[1]);
+      const open = m.index + m[0].length - 1;
+      const close = matchingBrace(structural, open);
+      if (close < 0) continue;
+      for (const t of src.slice(open, close + 1).matchAll(/\bstatus\s*:\s*(\d{3})\s*,\s*body\s*:\s*\{/g)) {
+        const bodyOpen = open + t.index + t[0].length - 1;
+        const bodyClose = matchingBrace(structural, bodyOpen);
+        if (bodyClose < 0) continue;
+        const answered = /\bcode\s*:\s*'([A-Z][A-Z0-9_]*)'/.exec(src.slice(bodyOpen + 1, bodyClose));
+        if (!answered) continue;
+        for (const fromCode of codes) {
+          if (answered[1] === fromCode) continue;
+          for (const className of names.length ? names : [undefined]) {
+            out.push({ fromCode, className, toCode: answered[1], status: Number(t[1]), where: `${path}:${lineOf(src, m.index)}` });
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The arm that translates this class's thrown code away, if the door wrote one.
+ * A code-only arm (the door named no class) translates every thrower of that
+ * code; an arm that named a class translates that class only.
+ */
+function translationFor(translations, code, className) {
+  return translations.find((t) => t.fromCode === code && (t.className === undefined || t.className === className));
+}
+
+/**
  * Every (code, status) pair the scanned sources prove reachable, with the
  * evidence that proves it.
  *
  * @param {Map<string, string>} sources path → source text
- * @returns {{ emitted: Map<string, Map<number, string[]>>, unresolved: string[], sites: number }}
+ * @param {{ fromCode: string, className: string|undefined, toCode: string, where: string }[]} translations
+ *        the door's translating arms (`deriveDoorTranslations`). A class whose
+ *        thrown code a door translates away is NOT a wire producer; the
+ *        declaration is reported in `translated`, never dropped.
+ * @returns {{ emitted: Map<string, Map<number, string[]>>, unresolved: string[],
+ *             translated: object[], sites: number }}
  */
-export function deriveRuntimeStatuses(sources, index) {
+export function deriveRuntimeStatuses(sources, index, translations = []) {
   const emitted = new Map();
   const unresolved = [];
+  const translated = [];
   let sites = 0;
   const record = (code, status, where) => {
     sites++;
@@ -490,6 +605,14 @@ export function deriveRuntimeStatuses(sources, index) {
       const code = resolveString(codeM[1], index);
       const status = resolveStatus(statusM[1], index);
       if (code === undefined || status === undefined) { refuse(`${path} class ${name}`, codeM[1], statusM[1]); continue; }
+      // The door translates this class's code away before it reaches HTTP, so
+      // the declaration is an IN-PROCESS contract, not a wire producer. R1 only
+      // — see the header: any other rule's producer for the same code stands.
+      const arm = translationFor(translations, code, name);
+      if (arm) {
+        translated.push({ code, status, className: name, toCode: arm.toCode, where: `${path}: class ${name}`, arm: arm.where });
+        continue;
+      }
       record(code, status, `${path}: class ${name}`);
     }
     // R2 — the `@objectstack/types` envelope door: sendError(res, status, code, message).
@@ -558,7 +681,7 @@ export function deriveRuntimeStatuses(sources, index) {
       record(code, status, where);
     }
   }
-  return { emitted, unresolved, sites };
+  return { emitted, unresolved, translated, sites };
 }
 
 /**
@@ -771,10 +894,16 @@ const evidence = (map, code, status) => (map.get(code)?.get(status) ?? []).join(
 /**
  * The set comparison, in both directions, over the reconciled vocabulary.
  *
+ * `translatedCodes` are the codes a door translates away (see the header): they
+ * have no wire producer BY DERIVATION, so they are not admitted to the unpinned
+ * census — that census is for a doc claim nothing pins, and the door pins this
+ * one under its wire spelling. They are reported by the `translated` census
+ * instead, which also says when a page still publishes a status for them.
+ *
  * @returns {{ emittedNotDocumented: object[], documentedNotReachable: object[],
  *             unpinned: string[], reconciledCodes: number, reconciledPairs: number }}
  */
-export function reconcile({ vocabulary, emitted, claimed, covered, documented }) {
+export function reconcile({ vocabulary, emitted, claimed, covered, documented, translatedCodes = new Set() }) {
   const emittedNotDocumented = [];
   const documentedNotReachable = [];
   const unpinned = [];
@@ -810,7 +939,7 @@ export function reconcile({ vocabulary, emitted, claimed, covered, documented })
           where: evidence(claimed, code, status),
         });
       }
-    } else if (documented.has(code)) {
+    } else if (documented.has(code) && !translatedCodes.has(code)) {
       unpinned.push(code);
     }
   }
@@ -956,13 +1085,69 @@ export function registerPackageRoutes() {
 }
 `;
 
+/**
+ * The REST door's translating arm, reduced to the shape the deriver reads:
+ * `structuredCodeAnswer`'s `DuplicateRecordError` arm
+ * (`packages/rest/src/error-response.ts`), guard and terminal intact —
+ * including the conditional spreads, because a brace-free scan skipped exactly
+ * those (see R5b).
+ */
+const TRANSLATING_DOOR = `
+export function structuredCodeAnswer(error, object) {
+  if (error?.code === 'DUPLICATE_RECORD' && error?.name === 'DuplicateRecordError') {
+    return {
+      status: 409,
+      body: {
+        error: 'A record with this value already exists',
+        code: 'UNIQUE_VIOLATION',
+        ...(object ? { object } : {}),
+      },
+    };
+  }
+  return undefined;
+}
+`;
+
+/** The engine's in-process envelope: the class whose code the door translates. */
+const TRANSLATED_CLASS = `
+export class DuplicateRecordError extends Error {
+  readonly code = 'DUPLICATE_RECORD';
+  readonly status = 409;
+}
+`;
+
+/** The positive control, in the SAME fixture: a code no door translates. */
+const WIRE_CROSSING_CLASS = `
+export class TimeoutError extends Error {
+  readonly code = 'TIMEOUT';
+  readonly status = 504;
+}
+`;
+
+/** The catalog still publishing the in-process spelling — main's state today. */
+const TRANSLATION_CATALOG = [
+  '## Conflict Errors (409)',
+  '',
+  '### `DUPLICATE_RECORD`',
+  '**Cause:** the engine\'s in-process spelling, still catalogued.  ',
+  '',
+  '### `UNIQUE_VIOLATION`',
+  '**Cause:** the spelling that crosses HTTP.  ',
+].join('\n');
+
+const TRANSLATION_HANDLING = '#### `TIMEOUT`\n**HTTP Status:** 504  \n';
+
+const TRANSLATION_MEMBERS = ['DUPLICATE_RECORD', 'UNIQUE_VIOLATION', 'TIMEOUT'];
+
 function runFixture({ files, handling, catalog, members }) {
   const sources = new Map(Object.entries(files));
   const index = buildConstantIndex(sources);
-  const derived = deriveRuntimeStatuses(sources, index);
+  const translations = deriveDoorTranslations(sources);
+  const derived = deriveRuntimeStatuses(sources, index, translations);
   const doc = parseDocumentedStatuses({ handling, catalog });
   const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
-  const result = reconcile({ vocabulary, emitted: derived.emitted, ...doc });
+  const translatedCodes = new Set(derived.translated.map((t) => t.code));
+  const result = reconcile({ vocabulary, emitted: derived.emitted, translatedCodes, ...doc });
   return {
     ...result,
     vocabulary,
@@ -970,6 +1155,8 @@ function runFixture({ files, handling, catalog, members }) {
     unreadableHeadings: doc.unreadableHeadings,
     ungraded: ungradedEntries(doc),
     unresolved: derived.unresolved,
+    translations,
+    translated: derived.translated,
     emitted: derived.emitted,
     documented: doc.documented,
   };
@@ -1459,7 +1646,84 @@ function selfTest() {
     JSON.stringify([resolveString('StandardErrorCode.enum.TIMEOUT', enumIndex),
       resolveString('StandardErrorCode.TIMEOUT', enumIndex)]));
 
-  const CASES = 50;
+  // 26 — a code the DOOR TRANSLATES away is not a wire producer: derived from
+  //      the door's own arm, scoped to the class the guard names, reported
+  //      rather than dropped, and with the negative control (no arm ⇒ the same
+  //      class IS a producer) and the positive control (an untranslated code is
+  //      untouched) in the same battery. See the header section "A code the
+  //      DOOR TRANSLATES is not a wire producer".
+  battery('26 — a code the DOOR TRANSLATES away is not a wire producer: derived from');
+  const TRANSLATION_FILES = {
+    'a/duplicate-record-error.ts': TRANSLATED_CLASS,
+    'a/timeout-error.ts': WIRE_CROSSING_CLASS,
+    'a/error-response.ts': TRANSLATING_DOOR,
+  };
+  const withArm = runFixture({
+    files: TRANSLATION_FILES,
+    handling: TRANSLATION_HANDLING, catalog: TRANSLATION_CATALOG, members: TRANSLATION_MEMBERS,
+  });
+  check('26 a class whose code the door translates is NOT a wire producer',
+    withArm.emitted.has('DUPLICATE_RECORD') === false,
+    JSON.stringify([...withArm.emitted.keys()]));
+  check('26b the excluded declaration is REPORTED, with the arm that translates it',
+    withArm.translated.length === 1
+    && withArm.translated[0].code === 'DUPLICATE_RECORD'
+    && withArm.translated[0].className === 'DuplicateRecordError'
+    && withArm.translated[0].toCode === 'UNIQUE_VIOLATION'
+    && withArm.translated[0].arm.startsWith('a/error-response.ts:'),
+    JSON.stringify(withArm.translated));
+  // The page still catalogues the in-process code (main's state until #15631
+  // lands). It must NOT become a new unpinned finding: nothing is unpinned
+  // here — the door pins the answer, under its wire spelling.
+  check('26c a still-catalogued translated code is kept OUT of the unpinned census',
+    !withArm.unpinned.includes('DUPLICATE_RECORD')
+    && withArm.emittedNotDocumented.length === 0 && withArm.documentedNotReachable.length === 0,
+    JSON.stringify([withArm.unpinned, withArm.emittedNotDocumented, withArm.documentedNotReachable]));
+  check('26d the WIRE code the arm answers keeps its producer at the arm\'s status',
+    withArm.emitted.get('UNIQUE_VIOLATION')?.has(409) === true,
+    JSON.stringify([...(withArm.emitted.get('UNIQUE_VIOLATION')?.keys() ?? [])]));
+  check('26e POSITIVE CONTROL: an untranslated code keeps its producer and reconciles',
+    withArm.emitted.get('TIMEOUT')?.has(504) === true && withArm.reconciledPairs >= 2,
+    JSON.stringify([[...(withArm.emitted.get('TIMEOUT')?.keys() ?? [])], withArm.reconciledPairs]));
+  // NEGATIVE CONTROL — the same class with NO arm anywhere. If this passed too,
+  // the exclusion would be unconditional rather than derived from the door.
+  const noArm = runFixture({
+    files: { 'a/duplicate-record-error.ts': TRANSLATED_CLASS, 'a/timeout-error.ts': WIRE_CROSSING_CLASS },
+    handling: TRANSLATION_HANDLING, catalog: TRANSLATION_CATALOG, members: TRANSLATION_MEMBERS,
+  });
+  check('26f NEGATIVE CONTROL: with no translating arm the same class IS a wire producer',
+    noArm.emitted.get('DUPLICATE_RECORD')?.has(409) === true && noArm.translated.length === 0,
+    JSON.stringify([[...(noArm.emitted.get('DUPLICATE_RECORD')?.keys() ?? [])], noArm.translated]));
+  // The arm's guard names the CODE and the CLASS, so both halves are load
+  // bearing: a DIFFERENT class speaking the same registered code is a different
+  // producer (the two-part gate `isEngineDuplicateRecordEnvelope` applies at
+  // every boundary) and keeps its producer.
+  const otherClass = runFixture({
+    files: {
+      ...TRANSLATION_FILES,
+      'a/hook-error.ts': "export class HookDuplicateError extends Error {\n  readonly code = 'DUPLICATE_RECORD';\n  readonly status = 409;\n}",
+    },
+    handling: TRANSLATION_HANDLING, catalog: TRANSLATION_CATALOG, members: TRANSLATION_MEMBERS,
+  });
+  check('26g the guard\'s CLASS is load-bearing: another class speaking the code keeps its producer',
+    otherClass.emitted.get('DUPLICATE_RECORD')?.has(409) === true && otherClass.translated.length === 1,
+    JSON.stringify([[...(otherClass.emitted.get('DUPLICATE_RECORD')?.keys() ?? [])], otherClass.translated.length]));
+  // An arm answering `code: error.code` — the capability gates — publishes no
+  // literal, so it translates NOTHING. Read, and correctly found to translate
+  // nothing: the alternative is a deriver that calls every arm a translation.
+  const passthroughDoor = runFixture({
+    files: {
+      'a/e.ts': "export class FeedsDisabledError extends Error {\n  readonly code = 'FEEDS_DISABLED';\n  readonly status = 403;\n}",
+      'a/door.ts': "export function answer(error, object) {\n  if (error?.code === 'FEEDS_DISABLED') {\n    return { status: 403, body: { error: 'disabled', code: error.code } };\n  }\n}",
+    },
+    handling: '#### `FEEDS_DISABLED`\n**HTTP Status:** 403  \n', catalog: '', members: ['FEEDS_DISABLED'],
+  });
+  check('26h an arm that answers `code: error.code` translates nothing',
+    passthroughDoor.translations.length === 0
+    && passthroughDoor.emitted.get('FEEDS_DISABLED')?.has(403) === true,
+    JSON.stringify([passthroughDoor.translations, [...passthroughDoor.emitted.keys()]]));
+
+  const CASES = 58;
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1519,7 +1783,10 @@ function selfTest() {
     + 'the docs publish a status for is reconciled in both directions while one no page publishes stays out of '
     + 'the vocabulary, an entry heading in an unrecognised shape is reported instead of silently dropped, the '
     + 'baseline-expanding remedy stays maintainer-only, a baselined code leaving the unpinned census is '
-    + 'named a producer or a removed doc entry — never the wrong one of the two — and a `z.enum([...])` member resolves through `NAME.enum.MEMBER` while a name that array does not list stays unresolved.',
+    + 'named a producer or a removed doc entry — never the wrong one of the two, a `z.enum([...])` member resolves '
+    + 'through `NAME.enum.MEMBER` while a name that array does not list stays unresolved, and a class whose code a '
+    + 'DOOR TRANSLATES away is no wire producer — reported, kept out of the unpinned census, with the arm-less '
+    + 'negative control still producing and an untranslated code untouched.',
   );
   selfTestReachedVerdict = true;
   process.exit(0);
@@ -1551,7 +1818,8 @@ function main() {
   const errorsZod = readFileSync(ERRORS_ZOD, 'utf8');
   const members = parseStandardErrorCodes(errorsZod);
   const index = buildConstantIndex(sources);
-  const derived = deriveRuntimeStatuses(sources, index);
+  const translations = deriveDoorTranslations(sources);
+  const derived = deriveRuntimeStatuses(sources, index, translations);
   for (const { code, status } of deriveDoorMap(errorsZod)) {
     if (!derived.emitted.has(code)) derived.emitted.set(code, new Map());
     const perStatus = derived.emitted.get(code);
@@ -1566,7 +1834,8 @@ function main() {
     catalog: readFileSync(DOC_CATALOG, 'utf8'),
   });
   const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
-  const result = reconcile({ vocabulary, emitted: derived.emitted, ...doc });
+  const translatedCodes = new Set(derived.translated.map((t) => t.code));
+  const result = reconcile({ vocabulary, emitted: derived.emitted, translatedCodes, ...doc });
 
   const baseline = existsSync(BASELINE_PATH)
     ? JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
@@ -1630,6 +1899,19 @@ function main() {
     + `${result.reconciledPairs} (code, status) pair(s) matched against the docs.`,
   );
   console.log(`  unpinned: ${result.unpinned.length} documented code(s) with no derivable producer (baselined: ${baselined.size}).`);
+  if (derived.translated.length) {
+    console.log(
+      `  translated: ${derived.translated.length} class declaration(s) a door translates away before HTTP, so the `
+      + 'thrown code is an in-process contract and NOT a wire producer (reported, and kept out of the unpinned '
+      + 'census — the door pins the answer under its wire spelling) —',
+    );
+    for (const t of derived.translated) {
+      console.log(
+        `      ${t.code} (declared ${t.status} at ${t.where}) → ${t.toCode} at ${t.arm}`
+        + `${doc.documented.has(t.code) ? ` — NOTE: a scanned page still publishes an entry for ${t.code}` : ''}`,
+      );
+    }
+  }
   const ungraded = ungradedEntries(doc);
   if (ungraded.length) {
     console.log(
