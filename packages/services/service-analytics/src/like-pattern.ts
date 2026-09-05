@@ -201,15 +201,22 @@ const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
  *
  * ## The dialect this assumes, stated so it can go red rather than stale
  *
- * Postgres, like everything else these three compilers emit — the claim this
- * file's header already makes and `__tests__/like-metacharacter-escape.test.ts`
- * pins. `translate()` is Postgres/Oracle; SQLite has no such function. So the
- * warning in the header applies to this helper WORD FOR WORD: if these compilers
- * ever emit for SQLite or MySQL, this expression does not merely over-match, it
- * fails to parse. The remedy is the per-dialect construct table `driver-sql`'s
- * `textMatchPredicate` already carries — nested `REPLACE` for the dialects
- * without `translate` — not a quiet fallback to `LOWER()`, which would silently
- * restore the Unicode fold this function exists to avoid.
+ * Postgres. `translate()` is Postgres/Oracle; SQLite has no such function — and
+ * [#15684] MEASURED that these compilers' statements do reach SQLite, so the
+ * warning this paragraph used to write in the conditional is now a live defect,
+ * filed as #15780: on sql.js 1.14.1, `SELECT translate('ABC','ABC','abc')`
+ * answers `no such function: translate`, so an `$icontains` in an analytics
+ * `where` or in an RLS read scope over a SQLite datasource does not merely
+ * over-match — it fails to parse.
+ *
+ * ⛔ Do NOT close that by falling back to `LOWER()`, which would silently
+ * restore the Unicode fold this function exists to avoid. The remedy is one
+ * more arm on `text-match-sql.ts`'s per-dialect table, whose shapes
+ * `driver-sql`'s `textMatchPredicate` already carries: `lower(col) GLOB
+ * lower(?)` on SQLite (measured ASCII-only there — `lower('CAFÉ')` is
+ * `cafÉ`), nested `REPLACE` over `CAST(… AS BINARY)` on MySQL. #15684
+ * deliberately did not build it: its scope was the case-EXACT four, and its
+ * suite pins THIS expression as the control that must stay unchanged.
  *
  * The caller must apply it to BOTH sides of the comparison. Folding only the
  * comparand compares a folded needle against a raw column and matches just the

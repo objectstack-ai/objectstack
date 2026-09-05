@@ -55,8 +55,10 @@
  * `$icontains` (#6520) keeps its own construct on every dialect: it folds BOTH
  * sides through `asciiLowerSqlExpr`, and the assertions below pin that the
  * emitted text is untouched by the dialect. That fold is `translate()`, which
- * SQLite does not have — so those statements are pinned as TEXT and are NOT
- * executed here; that is a separate defect, not this card's, and it is filed.
+ * SQLite does not have (measured: `no such function: translate` on sql.js
+ * 1.14.1) — so those statements are pinned as TEXT and are NOT executed here.
+ * That is a separate defect, filed as #15780, and this suite's `$icontains`
+ * assertions are the control that must stay unchanged while it is open.
  * Escaping (#5567) is likewise unchanged for every `LIKE` arm; the GLOB arm
  * brings its OWN escaped character class (`*`, `?`, `[`), which is why the
  * second fixture below exists.
