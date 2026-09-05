@@ -298,7 +298,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(9) the blog root\'s OWN keys, each observed firing': 16,
   '(10) ROOTS is pinned to `apps/docs/source.config.ts`': 8,
   '(8) WIRING: the gate and its self-test really run in CI': 2,
-  '(11) an unmet prerequisite REFUSES, it does not blame the battery': 12,
+  '(11) an unmet prerequisite REFUSES, it does not blame the battery': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -956,9 +956,9 @@ export function docsExtractorPrerequisite(root) {
   const notAShrunkenBattery = [
     ``,
     `⛔ This is NOT a shrunken battery. Battery (7) registers its cases only once the`,
-    `extractor is in hand, so with the extractor unreadable there is nothing to count --`,
-    `and reporting that as "cases that used to run no longer do" sends the reader hunting`,
-    `for a deleted case that was never deleted.`,
+    `extractor is in hand, so with it unreadable there is nothing to count -- and a floor`,
+    `reported against that count sends the reader hunting for a deleted case that was never`,
+    `deleted.`,
     ``,
     `NO battery ran, including the ones that never touch \`${DOCS_APP}\`: the refusal is raised`,
     `before the first case registers, so the "nothing was measured" clause below is literal.`,
@@ -1769,8 +1769,10 @@ export async function selfTest() {
       `observed firing on a mapping and a number while absence stays clean and neither root's keys leak onto the ` +
       `other, main() returning 1 rather ` +
       `than throwing on both a violation and a refusal, extraction cross-checked against the docs build's own ` +
-      `extractor, ROOTS pinned against every defineDocs call in source.config.ts, and the CI wiring read out of ` +
-      `lint.yml.`,
+      `extractor, ROOTS pinned against every defineDocs call in source.config.ts, the CI wiring read out of ` +
+      `lint.yml, and an \`${DOCS_APP}\` whose extractor cannot be read observed REFUSING end to end with ` +
+      `exit ${EXIT_PREREQUISITE_NOT_MET} \`PREREQUISITE NOT MET\` -- the misleading floor diagnosis absent from ` +
+      `what it prints.`,
   );
   selfTestReachedVerdict = true;
   return 0;
