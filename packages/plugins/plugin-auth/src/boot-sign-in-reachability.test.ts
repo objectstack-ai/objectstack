@@ -26,7 +26,18 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  AUDIENCE_POSTURES,
+  SystemObjectName,
+  type AudiencePosture,
+} from '@objectstack/spec/system';
 import { AuthPlugin } from './auth-plugin';
+import { AuthManager } from './auth-manager';
+import {
+  decideAudienceAdmission,
+  EMAIL_DOMAIN_NOT_ALLOWED,
+  SELF_REGISTRATION_CLOSED,
+} from './audience-posture';
 import {
   NO_SIGN_IN_ACCOUNT_AT_BOOT,
   HUMAN_POPULATION_PROBE_LIMIT,
@@ -117,13 +128,34 @@ describe('#14353 — the dead-end shape reports, by name, with consequence AND r
     expect(msg).toContain('401');
   });
 
-  it('the report NAMES BOTH REMEDIES — the card is only closed if it is actionable', () => {
+  it('[#15588] NAMES THE REMEDY THAT WORKS, and warns off the two that do not', () => {
     const msg = resolveNoSignInAccountReport(DEAD_END)!;
-    expect(msg).toContain('PROVISION AN ACCOUNT OUT OF BAND');
-    expect(msg).toContain('OPEN THE AUDIENCE POSTURE');
+    // The primary way out, spelled as the one row an operator has to write.
+    expect(msg).toContain('INVITE ONE ADDRESS');
+    expect(msg).toContain(SystemObjectName.INVITATION);
+    expect(msg).toContain("'pending'");
+    expect(msg).toContain('expires_at');
+    expect(msg).toContain('inviter_id');
+    // The two that LOOK like remedies. The self-silencing clause is the one
+    // that must never be dropped for brevity: an operator who is going to
+    // hand-write a row anyway needs to know it blinds the probe.
+    expect(msg).toContain('SILENCES THIS REPORT');
+    expect(msg).toContain('EMAIL_NOT_VERIFIED');
     // Real posture spellings from the spec vocabulary, not invented ones.
     expect(msg).toContain("'open'");
     expect(msg).toContain("'email_domain'");
+  });
+
+  it('[#15588] says NOTHING about what a SEEDED person\u2019s own re-registration answers', () => {
+    // That response is #15587's surface and is being changed (a sign-up for an
+    // address that already carries a `sys_user` row currently answers 200 and
+    // persists nothing; it is becoming an explicit refusal). A boot line that
+    // asserted either behaviour would be stale the day that lands, so this
+    // message is written to be true on BOTH sides of it and this pin holds it
+    // there.
+    const msg = resolveNoSignInAccountReport(DEAD_END)!;
+    expect(msg).not.toContain('USER_ALREADY_EXISTS');
+    expect(msg).not.toMatch(/persists nothing|answers 200|silently|no new row/i);
   });
 
   it('names WHY the bootstrap carve-out does not rescue this deployment', () => {
@@ -160,6 +192,155 @@ describe('#14353 — the controls: every other shape is SILENT', () => {
     expect(
       resolveNoSignInAccountReport({ humanUsers: 'present', signInAccounts: 'unknown' }),
     ).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#15588] The remedy clauses, pinned against the BEHAVIOUR each one describes
+//
+// A `toContain` on this message proves only that somebody typed the words —
+// and the defect this card closes was a message whose sentences were FALSE
+// while every string assertion around them stayed green. So each pin below
+// drives the mechanism its sentence rests on. Each one fails the day that
+// remedy stops working, which is precisely the day the sentence has to be
+// rewritten.
+//
+// ⛔ Nothing here changes an admission decision: these call the existing
+// pure decision function and the existing probe, and assert.
+// ---------------------------------------------------------------------------
+
+describe('#15588 — the named remedy WORKS: a pending invitation is admitted under EVERY posture', () => {
+  /**
+   * A self-serve sign-up by the invited address, judged by the real gate.
+   * The `email_domain` allowlist deliberately holds a DIFFERENT domain, so an
+   * admission under that posture can only have come from the invitation
+   * carve-out and never from the domain list.
+   */
+  const invitedSignUp = (posture: AudiencePosture, hasPendingInvitation: boolean) =>
+    decideAudienceAdmission({
+      audience: { posture, allowedEmailDomains: ['not-the-invitee.example'] },
+      creationClass: 'self-serve',
+      email: 'recovery@example.com',
+      hasPendingInvitation,
+      isBootstrap: false,
+    });
+
+  it('every posture in the vocabulary admits it — the message says "under EVERY audience posture"', () => {
+    // Reading the vocabulary rather than listing it: a posture added later is
+    // covered on the day it is added, and the message's "EVERY" stays honest.
+    expect(AUDIENCE_POSTURES.length).toBeGreaterThan(1);
+    for (const posture of AUDIENCE_POSTURES) {
+      expect(invitedSignUp(posture, true), `posture ${posture}`).toMatchObject({ admit: true });
+    }
+  });
+
+  it('CONTROL — the same sign-up WITHOUT the invitation row is refused', () => {
+    // Without this, the pin above would read green on a gate that admitted
+    // everybody, and the message would be recommending a row nobody needs.
+    expect(invitedSignUp('invite_only', false)).toMatchObject({
+      admit: false,
+      code: SELF_REGISTRATION_CLOSED,
+    });
+    expect(invitedSignUp('email_domain', false)).toMatchObject({
+      admit: false,
+      code: EMAIL_DOMAIN_NOT_ALLOWED,
+    });
+  });
+
+  it('CONTROL — the carve-out is what admits it, not the creation class', () => {
+    // `self-serve` is the posture-gated class; an operator/provider creation
+    // is exempt for its own reason and would mask a dead carve-out.
+    expect(invitedSignUp('invite_only', true)).toMatchObject({ admit: true });
+    expect(
+      decideAudienceAdmission({
+        audience: { posture: 'invite_only', allowedEmailDomains: [] },
+        creationClass: 'self-serve',
+        email: 'recovery@example.com',
+        hasPendingInvitation: false,
+        isBootstrap: false,
+      }),
+    ).toMatchObject({ admit: false });
+  });
+});
+
+describe('#15588 — the WARNING is true: ANY hand-written `sys_account` row silences this report', () => {
+  it('one credential row — plaintext password and all — turns the report OFF', async () => {
+    // This is the sentence "writing ANY sys_account row SILENCES THIS REPORT,
+    // which asks only whether such a row EXISTS". If the probe is ever
+    // tightened (a separate card — it would move #14353's diagnostic
+    // semantics), this pin fails and the message clause must be rewritten.
+    const handWritten = {
+      id: 'acc_handwritten',
+      user_id: 'usr_1',
+      provider_id: 'credential',
+      password: 'a-plaintext-password-that-authenticates-nothing',
+    };
+    const { engine } = engineOver({ users: HUMANS, accounts: [handWritten] });
+    const facts = await probeSignInReachability(engine);
+    expect(facts).toEqual({ humanUsers: 'present', signInAccounts: 'present' });
+    expect(resolveNoSignInAccountReport(facts)).toBeNull();
+  });
+
+  it('CONTROL — the identical store WITHOUT that row still reports', async () => {
+    const { engine } = engineOver({ users: HUMANS, accounts: [] });
+    const facts = await probeSignInReachability(engine);
+    expect(facts).toEqual({ humanUsers: 'present', signInAccounts: 'absent' });
+    expect(resolveNoSignInAccountReport(facts)).toContain(NO_SIGN_IN_ACCOUNT_AT_BOOT);
+  });
+});
+
+describe('#15588 — the WARNING is true: widening the posture FORCES email verification on', () => {
+  const SECRET = 'test-secret-at-least-32-chars-long!!';
+  const managerWith = (audience?: Record<string, unknown>) =>
+    new AuthManager({
+      secret: SECRET,
+      baseUrl: 'http://localhost:3000',
+      dataEngine: engineOver({}).engine,
+      ...(audience ? { audience } : {}),
+    } as never);
+
+  it('`email_domain` and `open` both wire requireEmailVerification ON', () => {
+    // The manager forces it from `audiencePermitsSelfRegistration(posture)` and
+    // `getPublicConfig()` mirrors the wired flag, so this is the same fact the
+    // message reports: a login registered under a widened posture cannot sign
+    // in until a mail transport delivers the link.
+    for (const posture of ['email_domain', 'open'] as const) {
+      const manager = managerWith({
+        posture,
+        ...(posture === 'email_domain' ? { allowedEmailDomains: ['acme.example'] } : {}),
+        selfRegistrationPermissionSet: 'member_default',
+      });
+      expect(
+        manager.getPublicConfig().emailPassword.requireEmailVerification,
+        `posture ${posture}`,
+      ).toBe(true);
+    }
+  });
+
+  it('CONTROL — the default `invite_only` posture does NOT force it', () => {
+    // The forcing is a property of WIDENING, not a constant `true` the pin
+    // above would be satisfied by either way.
+    expect(managerWith().getPublicConfig().emailPassword.requireEmailVerification).toBe(false);
+  });
+
+  it("every posture other than 'invite_only' is one that widens — the message's exact claim", () => {
+    // The message says "every posture other than 'invite_only'". A fourth
+    // posture that did NOT permit self-registration would make that sentence
+    // wrong, and this is where that is caught.
+    for (const posture of AUDIENCE_POSTURES) {
+      expect(
+        (managerWith(
+          posture === 'invite_only'
+            ? undefined
+            : {
+                posture,
+                ...(posture === 'email_domain' ? { allowedEmailDomains: ['acme.example'] } : {}),
+                selfRegistrationPermissionSet: 'member_default',
+              },
+        ).getPublicConfig().emailPassword.requireEmailVerification),
+        `posture ${posture}`,
+      ).toBe(posture !== 'invite_only');
+    }
   });
 });
 

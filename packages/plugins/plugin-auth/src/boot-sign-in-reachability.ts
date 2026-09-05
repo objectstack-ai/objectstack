@@ -29,6 +29,45 @@
  * stays shut and the remedy is out-of-band provisioning". The message below
  * says exactly that.
  *
+ * ## [#15588] Why the remedy names an INVITATION, and warns off the other two
+ *
+ * The first version of this line ended with two remedies, and measured on the
+ * exact population this report fires on, NEITHER did what its sentence said.
+ * The message is the only thing that changed for #15588 — no admission
+ * semantics move, exactly as #14353 scoped itself — but each clause it now
+ * carries is a claim about behaviour, and each is pinned in the sibling suite
+ * rather than merely string-matched:
+ *
+ *  - **The invitation row is the way out.** `decideAudienceAdmission` short-
+ *    circuits on `hasPendingInvitation` BEFORE the posture switch, so a
+ *    self-serve creation holding a pending, unexpired `sys_invitation`
+ *    (`audience-posture.ts`, "The invitation carve-out") is admitted under
+ *    every posture in `AUDIENCE_POSTURES`. No door is widened and no mail
+ *    transport is involved. Pinned across the whole posture vocabulary, with
+ *    the un-invited `invite_only` refusal as its control.
+ *  - **A hand-written credential row blinds this very check.**
+ *    {@link probeSignInAccountsPresence} asks only whether ANY
+ *    `sys_account` row exists, so the operator's first attempt at "provision
+ *    an account out of band" turns the loud dead end back into the silent one
+ *    this report was written to end — while a plaintext `password` column
+ *    still authenticates nothing. ⛔ TIGHTENING THE PROBE IS NOT THIS CARD:
+ *    that would move #14353's diagnostic semantics. The message tells the
+ *    truth about today's probe instead, and the pin fails the day the probe
+ *    changes — which is the day this sentence must be rewritten.
+ *  - **Widening the posture forces email verification on.**
+ *    `audiencePermitsSelfRegistration(posture)` drives `createAuthInstance()`
+ *    to wire `requireEmailVerification: true` (mirrored by
+ *    `getPublicConfig()`), so a login registered under `open`/`email_domain`
+ *    is refused `EMAIL_NOT_VERIFIED` at first sign-in — no login at all on a
+ *    deployment with no mail transport, which is the shape a locked-out
+ *    self-hosted install usually is.
+ *
+ * The message deliberately does NOT describe what a SEEDED person's own
+ * re-registration answers: that response is #15587's surface and is being
+ * changed. Every clause above holds on both sides of that landing.
+ * `content/docs/deployment/self-hosting.mdx` (#14495) is the long form of the
+ * same three facts; this line and that page must keep agreeing.
+ *
  * ## Why this is `error` and the walled-owner neighbour is `warn`
  *
  * AGENTS.md → "Degradation log levels" decides with one question: after the
@@ -218,13 +257,24 @@ export function resolveNoSignInAccountReport(facts: SignInReachabilityFacts): st
     `(maintainer ruling 2026-09-02, option A — the door stays shut); self-registration is refused with ` +
     `${SELF_REGISTRATION_CLOSED} under the default 'invite_only' audience posture; and no administrator ` +
     'exists who could send an invitation. Boot continues and this deployment will keep LOOKING healthy — ' +
-    'its only symptom is a 401 on credentials nobody holds. Fix it from OUTSIDE the running product, ' +
-    `either: (1) PROVISION AN ACCOUNT OUT OF BAND — write a '${SystemObjectName.ACCOUNT}' credential row ` +
-    `for one of the existing '${SystemObjectName.USER}' rows directly against the store, or re-run the ` +
-    'provisioning job that seeded those people so it seeds their logins too; or (2) OPEN THE AUDIENCE ' +
-    "POSTURE — set `audience.posture` to 'open', or to 'email_domain' with your directory's domain " +
-    'allowlisted, so an existing person can register their own login, then close it again. Neither ' +
-    'happens by itself.'
+    'its only symptom is a 401 on credentials nobody holds. RECOVER IT FROM OUTSIDE THE RUNNING ' +
+    'PRODUCT, and the path that works is ONE ROW: INVITE ONE ADDRESS — write a pending ' +
+    `'${SystemObjectName.INVITATION}' row directly against the store ('email' an address this ` +
+    `directory does NOT already hold, 'status' 'pending', a future 'expires_at', 'inviter_id' the id ` +
+    `of any existing '${SystemObjectName.USER}' row), then have that person register through the ` +
+    'ordinary sign-up endpoint. The invitation carve-out admits that ONE creation under EVERY ' +
+    'audience posture, so no door is widened and no mail transport is needed; on the ' +
+    "'single' tenancy posture the next boot then promotes that account holder to platform admin. " +
+    'Afterwards, re-run the provisioning job that seeded these people so it seeds their logins too. ' +
+    'TWO THINGS THAT LOOK LIKE REMEDIES AND ARE NOT: (a) HAND-WRITING A CREDENTIAL ROW — a ' +
+    `'${SystemObjectName.ACCOUNT}' row's 'password' column must carry a secret in the platform's own ` +
+    'hash format, so a plaintext password authenticates nothing (INVALID_EMAIL_OR_PASSWORD), and ' +
+    `writing ANY '${SystemObjectName.ACCOUNT}' row SILENCES THIS REPORT, which asks only whether such ` +
+    'a row EXISTS — the deployment stops being loudly broken and becomes quietly broken; and (b) ' +
+    "OPENING THE AUDIENCE POSTURE — every posture other than 'invite_only' ('open', 'email_domain') " +
+    'FORCES email verification ON, so a login registered that way is refused EMAIL_NOT_VERIFIED at ' +
+    'its first sign-in until a mail transport delivers the link, and a locked-out self-hosted ' +
+    'install usually has none. Nothing here happens by itself.'
   );
 }
 
