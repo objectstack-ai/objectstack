@@ -80,7 +80,9 @@ afterEach(() => {
 
 const optionsHandedToBackfill = () => {
   expect(vi.mocked(backfillSummaryNulls)).toHaveBeenCalledTimes(1);
-  return vi.mocked(backfillSummaryNulls).mock.calls[0][2];
+  const options = vi.mocked(backfillSummaryNulls).mock.calls[0][2];
+  expect(options).toBeDefined();
+  return options!;
 };
 
 describe('os migrate summary-nulls', () => {
@@ -140,7 +142,7 @@ describe('os migrate summary-nulls', () => {
 
     expect(isExitSignal(err)).toBe(true);
     expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
-    const emitted = stdout.mock.calls.map((c) => String(c[0])).join('');
+    const emitted = stdout.mock.calls.map((c: unknown[]) => String(c[0])).join('');
     const payload = JSON.parse(emitted);
     expect(payload).toMatchObject({ code: 'FIELD_NOT_FOUND' });
     expect(payload.error).toContain('customer.nope');
