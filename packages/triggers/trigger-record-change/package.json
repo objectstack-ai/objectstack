@@ -42,7 +42,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/objectstack-ai/objectstack.git",
-    "directory": "packages/plugins/plugin-trigger-record-change"
+    "directory": "packages/triggers/trigger-record-change"
   },
   "homepage": "https://objectstack.ai/docs",
   "bugs": "https://github.com/objectstack-ai/objectstack/issues",

@@ -191,8 +191,8 @@ other contract-ahead-of-runtime surfaces.
 
 - Engine seam: `packages/services/service-automation/src/engine.ts`
   (`FlowTrigger`, `registerTrigger`, `activateFlowTrigger`)
-- Shipped triggers: `packages/plugins/plugin-trigger-record-change`,
-  `packages/plugins/plugin-trigger-schedule`
+- Shipped triggers: `packages/triggers/trigger-record-change`,
+  `packages/triggers/trigger-schedule`
 - Reserved surface: `FlowSchema.type` enum (`packages/spec/src/automation/flow.zod.ts`)
 - Auto-wiring: `packages/cli/src/commands/serve.ts` (trigger `nameMatch` table)
 - Related: ADR-0018 (descriptor pattern this extends), ADR-0030 (outbox),
