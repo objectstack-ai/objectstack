@@ -8,6 +8,32 @@
 //   node scripts/check-published-readme-exports.mjs --self-test
 //   node scripts/check-published-readme-exports.mjs --unread-report
 //
+// ## Exit codes -- and why an UNBUILT CLOSURE has one of its own
+//
+//   0  every published document was read against a BUILT type surface, and
+//      every symbol it documents exists there.
+//   1  a FINDING: a README disagrees with a type entry that EXISTS, or the
+//      baseline went stale. A claim about the tree.
+//   3  PREREQUISITE NOT MET. The built type entries this gate reads are not
+//      there, so nothing was measured and the run says NOTHING about any
+//      README. NOT a pass, and NOT a finding.
+//
+// The split is the sibling convention, not a local invention:
+// `check-type-check-coverage.mjs` publishes the identical table and
+// `check-dual-build-cjs-loads.mjs` answers the IDENTICAL condition -- a gate
+// that reads built output, run against a tree with no `dist/` -- with 3. This
+// gate used to answer it with 1, one line per import statement: on an unbuilt
+// worktree that is 198 `Build first` lines under the exit code reserved for "a
+// README is wrong", naming only READMEs the reader never touched. Measured
+// twice in one day on one seat, by two agents who each had to read the lines to
+// decide the red was not theirs. The cost past the reading is the one that
+// matters: an agent that learns to discount this gate's 1 has un-gated it.
+//
+// ⛔ The boundary, deliberately. Exit 3 is for what the CHECKOUT lacks, never
+// for what the repo publishes. A subpath whose `exports` declares no types at
+// all, and a type entry that EXISTS but cannot be read as a module, stay
+// findings at 1 -- `pnpm build` repairs neither, so neither is a prerequisite.
+//
 // ## The bug it exists to prevent (#9532, from #9517)
 //
 // `packages/plugins/plugin-audit/README.md` documented a `PluginAudit` class
@@ -98,9 +124,12 @@
 // That makes this gate build-dependent, and build-dependent gates have a
 // characteristic failure: on a fresh checkout `dist/` is absent, the scan
 // reads nothing, and a green result means "not measured" while looking exactly
-// like "measured and clean" (#4690). ⇒ A missing type entry is a HARD ERROR
-// naming the build command, never a skip. The gate runs in the workflow job
-// that has already built the workspace, next to the other dist-reading checks.
+// like "measured and clean" (#4690). ⇒ An absent type entry is never a skip.
+// It is answered UP FRONT -- before the type surface is built and before one
+// document is judged -- and with the code for "nothing was measured" rather
+// than the one for "a README is wrong": see the exit-code table above. The gate
+// runs in the workflow job that has already built the workspace, next to the
+// other dist-reading checks, where that state does not arise.
 //
 // ## The population axis, and the FOUR refusals on it (#9911, #10417)
 //
@@ -286,7 +315,8 @@
 //   `--self-test` exercises the branch in BOTH directions over a fixture, so
 //   the coverage is real at a tree population of 0.
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import process from 'node:process';
 import { requireDefaultExport } from './import-prerequisite.mjs';
@@ -305,6 +335,15 @@ import {
 const ROOT = resolve(import.meta.dirname, '..');
 const SELF = 'scripts/check-published-readme-exports.mjs';
 const BASELINE_REL = 'scripts/published-readme-exports.baseline.json';
+
+// The three answers this gate can give, named rather than typed as a literal at
+// each `return`. The whole value of the exit-code split is that a reader -- a CI
+// step, a wrapper, an agent reconciling a gate family -- classifies a run from
+// the number alone, and four hand-typed numbers are one careless edit away from
+// two states sharing one meaning.
+const EXIT_OK = 0;
+const EXIT_FINDINGS = 1;
+const EXIT_PREREQUISITE_NOT_MET = 3;
 
 /**
  * ⛔ THIS GATE DECLARES NO WORKSPACE POPULATION, DELIBERATELY (#10542).
@@ -940,7 +979,7 @@ export function resolveTypesEntry(manifest, subpath) {
  * inherited them and gone from 2 matched files to 5397 — precisely the
  * fabricated population the docblock above measured and refused.
  */
-const workspaceDirs = () => workspacePackageDirs(ROOT);
+const workspaceDirs = (root = ROOT) => workspacePackageDirs(root);
 
 /** Package-relative POSIX paths of every non-build file in a package. */
 function walk(absDir, prefix = '', out = []) {
@@ -954,9 +993,9 @@ function walk(absDir, prefix = '', out = []) {
 }
 
 /** The published markdown of a package, minus the excluded-by-design set. */
-function publishedMarkdown(dir, files) {
+function publishedMarkdown(dir, files, root = ROOT) {
   const matchers = files.map(filesMatcher);
-  return walk(join(ROOT, dir))
+  return walk(join(root, dir))
     .filter((rel) => rel.toLowerCase().endsWith('.md'))
     .filter((rel) => !MARKDOWN_EXCLUDED.has(posix.basename(rel)))
     .filter((rel) => matchers.some((m) => m(rel)))
@@ -1337,8 +1376,8 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
 // Baseline
 // ---------------------------------------------------------------------------
 
-function loadBaseline() {
-  const abs = join(ROOT, BASELINE_REL);
+function loadBaseline(root = ROOT) {
+  const abs = join(root, BASELINE_REL);
   if (!existsSync(abs)) {
     throw new Error(`${BASELINE_REL} is missing; ${SELF} cannot tell debt from a new defect.`);
   }
@@ -1789,14 +1828,22 @@ export function reachedTargets(docs, byName) {
  * would disagree the first time a package's `files` array changed — silently,
  * each still green. So it is computed HERE and imported, never re-derived.
  *
+ * The `root` option exists for ONE caller: this gate's own self-test, which
+ * drives the whole pipeline over a scratch workspace so both directions of the
+ * exit-code split are pinned against a REAL run rather than a fake resolver
+ * (#15600). It defaults to the repo, so no production path is parameterised by
+ * anything -- the verdict still cannot depend on where the gate was invoked
+ * from, which is what the `ROOT` docblock above promises.
+ *
  * @param {string} [caller] gate name to attribute an empty-population error to
+ * @param {{root?: string}} [options] scratch root, for this gate's self-test
  * @returns {{ members: {dir: string, manifest: any}[], byName: Map<string, any>,
  *             docs: {pkg: string, file: string, text: string}[] }}
  */
-export function publishedDocs(caller = SELF) {
-  const members = workspaceDirs().map((dir) => ({
+export function publishedDocs(caller = SELF, { root = ROOT } = {}) {
+  const members = workspaceDirs(root).map((dir) => ({
     dir,
-    manifest: JSON.parse(readFileSync(join(ROOT, dir, 'package.json'), 'utf8')),
+    manifest: JSON.parse(readFileSync(join(root, dir, 'package.json'), 'utf8')),
   }));
   const byName = new Map();
   for (const m of members) if (m.manifest.name) byName.set(m.manifest.name, m);
@@ -1806,11 +1853,11 @@ export function publishedDocs(caller = SELF) {
     if (!manifest.name || manifest.private === true) continue;
     const files = Array.isArray(manifest.files) ? manifest.files : [];
     if (files.length === 0) continue; // the packaging guard owns that failure
-    for (const file of publishedMarkdown(dir, files)) {
+    for (const file of publishedMarkdown(dir, files, root)) {
       docs.push({
         pkg: manifest.name,
         file: posix.join(dir, file),
-        text: readFileSync(join(ROOT, dir, file), 'utf8'),
+        text: readFileSync(join(root, dir, file), 'utf8'),
       });
     }
   }
@@ -1855,14 +1902,101 @@ export function surfaceTarget(surface, abs) {
 }
 
 /**
- * @param {{unreadReport?: boolean}} [options] `--unread-report` prints the
+ * The type entries this run would judge that are NOT BUILT, as one row per
+ * package, sorted.
+ *
+ * PURE and exported for the reason every decision in this file is lifted out of
+ * `run`: the self-test can drive it in both directions without a tree, and the
+ * production path has exactly one copy of the predicate.
+ *
+ * ⛔ The predicate is narrow on purpose, and the two states it deliberately
+ * EXCLUDES are the boundary of the exit-3 class. A subpath whose `exports`
+ * declares no types at all, and an entry that exists but cannot be read as a
+ * module, are statements about what the repo PUBLISHES -- `pnpm build` repairs
+ * neither -- so both stay findings at 1. Only "declared, resolved to a path,
+ * and that path is not on disk" is a statement about the CHECKOUT. That is why
+ * the target carries an explicit `unbuilt` flag rather than this function
+ * re-deriving the state from the prose of `missing`: two spellings of one
+ * condition drift, and the direction they drift in here decides an exit code.
+ *
+ * @param {Map<string, {name: string, abs: string|null, unbuilt: boolean}>} targets
+ * @param {{root?: string}} [options]
+ * @returns {string[]} `<package> -> <repo-relative entry>` rows, one per package
+ */
+export function unbuiltTypeEntries(targets, { root = ROOT } = {}) {
+  const rows = new Map();
+  for (const t of targets.values()) {
+    if (!t.unbuilt) continue;
+    rows.set(t.name, `${t.name} -> ${posix.relative(root, t.abs)}`);
+  }
+  return [...rows.keys()].sort().map((name) => rows.get(name));
+}
+
+/**
+ * The refusal an unbuilt closure prints, in the words of the state it names.
+ *
+ * ⛔ ANY unbuilt entry refuses the whole run, not the packages that happen to be
+ * built. A half-measured tree cannot say "every published README agrees with its
+ * package's built surface" -- it can only say so about the half it read, which
+ * is precisely the reading (#4690) this gate exists to refuse. Naming the
+ * unbuilt packages keeps the remedy per-package for a reader who wants it.
+ *
+ * @param {string[]} unbuilt rows from `unbuiltTypeEntries`
+ * @returns {string|null} `null` when every entry the run would judge is built
+ */
+export function unbuiltClosureRefusal(unbuilt) {
+  if (unbuilt.length === 0) return null;
+  const shown = unbuilt.slice(0, 8);
+  return (
+    `${unbuilt.length} package(s) whose built type entry this run would read are not built,\n` +
+    `  so not one of the READMEs importing from them could be judged:\n\n` +
+    shown.map((row) => `    · ${row}`).join('\n') +
+    (unbuilt.length > shown.length ? `\n    · … ${unbuilt.length - shown.length} more` : '') +
+    `\n\n  Run \`pnpm build\` (or \`pnpm --filter <package> build\` for each) and re-run this gate.`
+  );
+}
+
+/**
+ * The banner a refusal prints, as a VALUE -- so the self-test can assert on the
+ * advisory without spawning a process or stubbing `process.exit`.
+ *
+ * The wording is COPIED from `check-type-check-coverage.mjs`, adapted only in
+ * the gate name, the claim it disclaims and the remedy command. That is the
+ * whole point of the class: a reader who has learned one of these banners has
+ * learned all of them, and a second wording of "nothing was measured" is a third
+ * thing to learn. The pipe advisory is not decoration -- `EXIT=$?` written after
+ * `cmd | tail -40` reads TAIL's status, and `head`/`tail` essentially never
+ * fail, so a refusal and a green run are the same `0` there: the one reading
+ * this whole exit-code split exists to make impossible.
+ *
+ * @param {string} message the refusal, in the words of the site that raised it
+ * @returns {string}
+ */
+function prerequisiteNotMetText(message) {
+  return (
+    `\ncheck-published-readme-exports: PREREQUISITE NOT MET\n\n` +
+    `${message}\n\n` +
+    `  ⛔ This is NOT a pass and NOT a finding: nothing was measured, so this run says\n` +
+    `  NOTHING about whether any published README agrees with its package's built type\n` +
+    `  surface. In particular it is NOT evidence that a README is wrong, and ⛔ no README\n` +
+    `  may be edited on it.\n` +
+    `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
+    `  \`node ${SELF} > /tmp/published-readme-exports.log 2>&1; echo "EXIT=$?"\`.\n` +
+    `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+    `  is the false green. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover this gate's own code.)`
+  );
+}
+
+/**
+ * @param {{unreadReport?: boolean, root?: string}} [options] `--unread-report` prints the
  *        `NOT read:` pair decomposed per document. ⛔ Opt-in, and visibility
  *        only: it changes no finding, no verdict and no exit code, so the CI
  *        invocation in package.json does not pass it and nothing about a run's
- *        result depends on whether it was passed.
+ *        result depends on whether it was passed. `root` is the self-test's
+ *        scratch workspace and defaults to the repo — see `publishedDocs`.
  */
-function run({ unreadReport: wantsUnreadReport = false } = {}) {
-  const { byName, docs } = publishedDocs();
+function run({ unreadReport: wantsUnreadReport = false, root = ROOT } = {}) {
+  const { byName, docs } = publishedDocs(SELF, { root });
 
   // Pass 1: which workspace type entries do the READMEs actually reach?
   const { importStatements, ownScope, unresolvable, targets: reached } = reachedTargets(
@@ -1889,26 +2023,44 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
   const unscoped = scopeRefusal({ documents: docs.length, importStatements, ownScope });
   if (unscoped) throw new Error(unscoped);
 
-  const targets = new Map(); // "<name><subpath>" -> { name, subpath, abs, declared, missing }
+  const targets = new Map(); // "<name><subpath>" -> { name, subpath, abs, declared, unbuilt, missing }
   for (const [key, { name, subpath }] of reached) {
     const { dir, manifest } = byName.get(name);
     const { entry, declared } = resolveTypesEntry(manifest, subpath);
-    const abs = entry ? join(ROOT, dir, entry.replace(/^\.\//, '')) : null;
+    const abs = entry ? join(root, dir, entry.replace(/^\.\//, '')) : null;
+    // The CHECKOUT state, flagged where it is decided rather than re-derived
+    // downstream from the prose below. `unbuiltTypeEntries` reads this flag and
+    // nothing else; its docblock owns why the other `missing` arm is excluded.
+    const unbuilt = Boolean(declared && abs && !existsSync(abs));
     targets.set(key, {
       name,
       subpath,
       declared,
       abs,
+      unbuilt,
       missing:
         declared && !abs
           ? `imports from '${name}${subpath.slice(1)}', which declares no ` +
             `TypeScript types for that entry — this gate cannot verify it.`
-          : declared && !existsSync(abs)
+          : unbuilt
             ? `imports from '${name}${subpath.slice(1)}', whose type entry ` +
-              `${posix.relative(ROOT, abs)} does not exist. Build first: ` +
+              `${posix.relative(root, abs)} does not exist. Build first: ` +
               `\`pnpm --filter ${name} build\` (or \`pnpm build\`).`
             : null,
     });
+  }
+
+  // ⛔ UP FRONT: before the type surface is built and before one document is
+  // judged. The state is a property of the CHECKOUT, and it is known here in
+  // full — every entry this run would read has just been resolved. Discovered
+  // instead inside the judging loop, the same fact arrives once per import
+  // statement (198 lines on an unbuilt worktree of this repo) under the exit
+  // code that means "a README is wrong"; an agent reading a 3 after 198 lines
+  // is barely better off than one reading a 1.
+  const unbuiltClosure = unbuiltTypeEntries(targets, { root });
+  if (unbuiltClosure.length > 0) {
+    console.error(prerequisiteNotMetText(unbuiltClosureRefusal(unbuiltClosure)));
+    return EXIT_PREREQUISITE_NOT_MET;
   }
 
   const surface = typeSurface(
@@ -1932,7 +2084,7 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
     return (
       surfaceTarget(surface, t.abs) ?? {
         declared: true,
-        entryMissing: `type entry ${posix.relative(ROOT, t.abs)} could not be read as a module.`,
+        entryMissing: `type entry ${posix.relative(root, t.abs)} could not be read as a module.`,
       }
     );
   };
@@ -1942,7 +2094,7 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
   for (const doc of docs) findings.push(...analyzeDocument(doc, resolveTarget, measured));
 
   // Reconcile against the shrink-only baseline, BOTH directions.
-  const baseline = loadBaseline();
+  const baseline = loadBaseline(root);
   const baselineById = new Map(baseline.map((e) => [e.id, e]));
   const observed = new Set(findings.map((f) => f.id));
   // A missing type entry is a statement about the CHECKOUT, not about the
@@ -1969,6 +2121,12 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
     unresolvable,
   });
 
+  // ⚠️ What still reaches here, now that the unbuilt CLOSURE is refused up front
+  // with its own code: the two states that are NOT the checkout's fault — a
+  // subpath declaring no types, and an entry that exists but cannot be read as a
+  // module. Both are findings about what the repo publishes, so both keep the
+  // finding's code and this branch's wording is left exactly as it was. ⛔ The
+  // absent-entry case can no longer arrive here at all; it returns above.
   if (unbuilt.length > 0) {
     console.error(
       `✗ check:published-readme-exports — ${unbuilt.length} package(s) are not built, so this\n` +
@@ -1977,7 +2135,7 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
     );
     for (const f of unbuilt) console.error(`    ${f.id.split('|')[1]} line ${f.line}: ${f.text}`);
     console.error('');
-    return 1;
+    return EXIT_FINDINGS;
   }
 
   // The fourth state on the population axis (#10417), decided only now because
@@ -2017,7 +2175,7 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
       successSummary({ measured, baselineCount: baseline.length, memberChecks }),
     );
     if (report) console.log(`\n${report}`);
-    return 0;
+    return EXIT_OK;
   }
 
   if (fresh.length > 0) {
@@ -2053,7 +2211,7 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
     );
   }
   if (report) console.log(report);
-  return 1;
+  return EXIT_FINDINGS;
 }
 
 // ---------------------------------------------------------------------------
@@ -2114,11 +2272,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ `--unread-report`: `NOT read:` DECOMPOSED, AND THE CHECKSUM (#10815)': 4,
   'THE POPULATION AXIS, and the third refusal on it (#9911)': 7,
   'THE FOURTH STATE ON THAT AXIS (#10417)': 4,
+  'THE UNBUILT-CLOSURE PREDICATE, and the two states it excludes (#15600)': 5,
+  'THE EXIT-CODE SPLIT, END TO END on a scratch workspace (#15600)': 8,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 25;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3512,6 +3672,180 @@ function selfTest() {
     { measured: { symbols: 0, checked: 1 }, refusal: null },
   );
 
+  // -- THE UNBUILT-CLOSURE PREDICATE, and the two states it excludes ---------
+  //
+  // The predicate decides an EXIT CODE, so its boundary is pinned in both
+  // directions on the shapes `run` really builds: a target that resolved to a
+  // path nothing wrote is the checkout's fault (3); a target that declares no
+  // types, and one whose entry exists, are the repo's (1, or nothing at all).
+  battery('THE UNBUILT-CLOSURE PREDICATE, and the two states it excludes (#15600)');
+  const unbuiltTarget = (name, over = {}) => ({
+    name,
+    subpath: '.',
+    declared: true,
+    abs: `/repo/packages/${name.split('/')[1]}/dist/index.d.ts`,
+    unbuilt: false,
+    missing: null,
+    ...over,
+  });
+  eq(
+    'unbuiltTypeEntries — an entry that resolved to a path nothing wrote is the prerequisite',
+    unbuiltTypeEntries(
+      new Map([['@objectstack/b', unbuiltTarget('@objectstack/b', { unbuilt: true })]]),
+      { root: '/repo' },
+    ),
+    ['@objectstack/b -> packages/b/dist/index.d.ts'],
+  );
+  eq(
+    'unbuiltTypeEntries — GREEN CONTROL: a built tree yields no prerequisite at all',
+    unbuiltTypeEntries(new Map([['@objectstack/b', unbuiltTarget('@objectstack/b')]]), { root: '/repo' }),
+    [],
+  );
+  eq(
+    'unbuiltTypeEntries — a subpath declaring NO types is a finding, never a prerequisite',
+    unbuiltTypeEntries(
+      new Map([
+        [
+          '@objectstack/b',
+          unbuiltTarget('@objectstack/b', {
+            abs: null,
+            missing: 'imports from ..., which declares no TypeScript types for that entry',
+          }),
+        ],
+      ]),
+      { root: '/repo' },
+    ),
+    [],
+  );
+  eq(
+    'unbuiltTypeEntries — one row per PACKAGE however many READMEs reached it, sorted',
+    unbuiltTypeEntries(
+      new Map([
+        ['@objectstack/z.', unbuiltTarget('@objectstack/z', { unbuilt: true })],
+        ['@objectstack/z./sub', unbuiltTarget('@objectstack/z', { unbuilt: true })],
+        ['@objectstack/a.', unbuiltTarget('@objectstack/a', { unbuilt: true })],
+      ]),
+      { root: '/repo' },
+    ),
+    ['@objectstack/a -> packages/a/dist/index.d.ts', '@objectstack/z -> packages/z/dist/index.d.ts'],
+  );
+  eq(
+    'unbuiltClosureRefusal — no unbuilt entry, no refusal',
+    unbuiltClosureRefusal([]),
+    null,
+  );
+
+  // -- THE EXIT-CODE SPLIT, END TO END on a scratch workspace ----------------
+  //
+  // ⭐ Driven through the PRODUCTION `run` over a real workspace on disk, so
+  // what is pinned is the number a real run returns — not a classifier's
+  // opinion about one, and not a branch a fake resolver reached. ONE fixture
+  // carries both directions and differs only in what is in `dist/`: with no
+  // built entry the run must refuse ONCE with the banner (3); with a built
+  // entry that disagrees with the README it must report the finding (1); with
+  // a built entry that agrees it must pass (0).
+  //
+  // ⛔ Both directions, deliberately. A single case pinning only the new
+  // refusal would leave the exit-1 path free to decay into a second refusal —
+  // the failure this card is about, in the mirror.
+  battery('THE EXIT-CODE SPLIT, END TO END on a scratch workspace (#15600)');
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'readme-exports-exit-split-'));
+  try {
+    const pkgDir = join(fixtureRoot, 'packages', 'fixture');
+    mkdirSync(join(pkgDir, 'dist'), { recursive: true });
+    mkdirSync(join(fixtureRoot, 'scripts'), { recursive: true });
+    writeFileSync(join(fixtureRoot, WORKSPACE_FILE), 'packages:\n  - packages/*\n');
+    writeFileSync(join(fixtureRoot, BASELINE_REL), `${JSON.stringify({ entries: [] }, null, 2)}\n`);
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      `${JSON.stringify(
+        {
+          name: '@objectstack/exit-split-fixture',
+          version: '0.0.0',
+          files: ['dist', 'README.md'],
+          exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    writeFileSync(
+      join(pkgDir, 'README.md'),
+      [
+        '# fixture',
+        '',
+        '```typescript',
+        "import { Documented } from '@objectstack/exit-split-fixture';",
+        '```',
+        '',
+      ].join('\n'),
+    );
+    const entry = join(pkgDir, 'dist', 'index.d.ts');
+    // The gate writes its verdict to the console; a self-test that asserts on
+    // an exit code alone would pass just as happily on a 3 printed as 198
+    // lines, which is the whole defect.
+    const drive = () => {
+      const printed = [];
+      const { log, error } = console;
+      console.log = (...args) => printed.push(args.join(' '));
+      console.error = (...args) => printed.push(args.join(' '));
+      try {
+        return { exit: run({ root: fixtureRoot }), text: printed.join('\n') };
+      } finally {
+        console.log = log;
+        console.error = error;
+      }
+    };
+
+    const unbuiltRun = drive();
+    eq(
+      'END TO END — an unbuilt closure exits PREREQUISITE NOT MET, not a finding',
+      unbuiltRun.exit,
+      EXIT_PREREQUISITE_NOT_MET,
+    );
+    eq(
+      'END TO END — it prints the sibling banner, verbatim in the sentence that classifies it',
+      [
+        /check-published-readme-exports: PREREQUISITE NOT MET/.test(unbuiltRun.text),
+        /NOT a pass and NOT a finding: nothing was measured/.test(unbuiltRun.text),
+      ],
+      [true, true],
+    );
+    eq(
+      'END TO END — it answers ONCE: no per-import `Build first` line survives',
+      /Build first/.test(unbuiltRun.text),
+      false,
+    );
+    eq(
+      'END TO END — the refusal names the package whose entry is not built',
+      /@objectstack\/exit-split-fixture -> packages\/fixture\/dist\/index\.d\.ts/.test(unbuiltRun.text),
+      true,
+    );
+
+    writeFileSync(entry, 'export declare const Undocumented: string;\n');
+    const disagreeing = drive();
+    eq(
+      'END TO END — a BUILT entry the README disagrees with is still a FINDING',
+      disagreeing.exit,
+      EXIT_FINDINGS,
+    );
+    eq(
+      'END TO END — the finding names the symbol the README invented',
+      /documents `import \{ Documented \}/.test(disagreeing.text),
+      true,
+    );
+    eq(
+      'END TO END — a finding is never dressed as a prerequisite',
+      /PREREQUISITE NOT MET/.test(disagreeing.text),
+      false,
+    );
+
+    writeFileSync(entry, 'export declare const Documented: string;\n');
+    eq('END TO END — GREEN CONTROL: a README that agrees passes', drive().exit, EXIT_OK);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+
   // The authority convention (#8435): the baseline path must never be offered
   // as a co-equal author remedy.
   const remedy = freshRemedy();
@@ -3632,7 +3966,13 @@ function selfTest() {
       '  refusal too, measured off a fixture by `reachedTargets` — a tree of purely foreign\n' +
       '  imports reads statements and no scoped specifier — and the header prints the scoped\n' +
       '  population as resolved/total, so a recogniser that stops matching shows up as a\n' +
-      '  denominator that fell rather than as a defect count that never moved.',
+      '  denominator that fell rather than as a defect count that never moved.\n' +
+      '  THE EXIT-CODE SPLIT (#15600) is pinned END TO END through the production `run` over a\n' +
+      '  scratch workspace, in all three directions one fixture can carry: no built entry\n' +
+      '  refuses ONCE with the sibling banner and exit 3 (and no `Build first` line survives),\n' +
+      '  a built entry the README disagrees with is still the finding at exit 1 and is never\n' +
+      '  dressed as a prerequisite, and a built entry it agrees with passes — so neither\n' +
+      '  direction of the split can decay while the other keeps this line printing.',
   );
 
   return SELF_TEST_VERDICT;
