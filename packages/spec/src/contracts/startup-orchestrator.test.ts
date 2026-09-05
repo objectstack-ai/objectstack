@@ -51,17 +51,17 @@ describe('Startup Orchestrator Contract', () => {
     it('should allow a minimal health status', () => {
       const status: HealthStatus = {
         healthy: true,
-        timestamp: Date.now(),
+        checkedAt: Date.now(),
       };
 
       expect(status.healthy).toBe(true);
-      expect(status.timestamp).toBeGreaterThan(0);
+      expect(status.checkedAt).toBeGreaterThan(0);
     });
 
     it('should allow a full health status with details', () => {
       const status: HealthStatus = {
         healthy: false,
-        timestamp: Date.now(),
+        checkedAt: Date.now(),
         details: { connections: 0, maxConnections: 10 },
         message: 'No database connections available',
       };
@@ -109,7 +109,7 @@ describe('Startup Orchestrator Contract', () => {
         duration: 50,
         health: {
           healthy: true,
-          timestamp: Date.now(),
+          checkedAt: Date.now(),
           details: { uptime: 1000 },
         },
       };
@@ -131,7 +131,7 @@ describe('Startup Orchestrator Contract', () => {
         rollback: async (_startedPlugins) => {},
         checkHealth: async (_plugin) => ({
           healthy: true,
-          timestamp: Date.now(),
+          checkedAt: Date.now(),
         }),
       };
 
@@ -155,7 +155,7 @@ describe('Startup Orchestrator Contract', () => {
           }));
         },
         rollback: async () => {},
-        checkHealth: async () => ({ healthy: true, timestamp: Date.now() }),
+        checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
       };
 
       const results = await orchestrator.orchestrateStartup(plugins, { timeout: 5000 });
@@ -168,7 +168,7 @@ describe('Startup Orchestrator Contract', () => {
       const orchestrator: IStartupOrchestrator = {
         orchestrateStartup: async () => [],
         rollback: async () => {},
-        checkHealth: async () => ({ healthy: true, timestamp: Date.now() }),
+        checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
         startWithTimeout: async (_plugin, _context, _timeoutMs) => {},
       };
 
@@ -188,7 +188,7 @@ describe('Startup Orchestrator Contract', () => {
             rolledBack.push(p.name);
           }
         },
-        checkHealth: async () => ({ healthy: true, timestamp: Date.now() }),
+        checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
       };
 
       await orchestrator.rollback([

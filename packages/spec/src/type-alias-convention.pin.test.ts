@@ -2159,7 +2159,7 @@ describe('ADR-0122 type-alias convention', () => {
     // earlier: `ElementRecordPickerPropsParsed` declared, the Iso819 pin
     // deleted. -1 converted to an `XParsed` pair; the Iso number stays vacant
     // (ids are claims about pins, not positions).
-    expect(pins).toHaveLength(825);
+    expect(pins).toHaveLength(826);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
