@@ -753,7 +753,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cronExpression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression for schedule |
+| **cronExpression** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression for schedule |
 | **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
 
 ### Nested Shape: `ScheduleExportRequest.delivery`
@@ -831,7 +831,7 @@ Type: `{ sourceField: string; targetField: string; targetLabel?: string; transfo
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **cronExpression** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression for schedule |
+| **cronExpression** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | ✅ | Cron expression for schedule |
 | **timezone** | `string` | optional (default: `"UTC"`) | IANA timezone |
 
 ### Nested Shape: `ScheduledExport.delivery`

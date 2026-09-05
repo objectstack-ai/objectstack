@@ -280,7 +280,7 @@ Circuit breaker configuration
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
 | **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
@@ -626,7 +626,7 @@ Connector type
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
 | **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
@@ -763,7 +763,7 @@ Connector type
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'upsert' \| 'append_only'>` | optional (default: `"incremental"`) | Synchronization strategy |
 | **direction** | `Enum<'import' \| 'export' \| 'bidirectional'>` | optional (default: `"import"`) | Sync direction |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled sync — cron`0 */15 * * *` |
 | **realtimeSync** | `boolean` | optional (default: `false`) | Enable real-time sync |
 | **timestampField** | `string` | optional | Field to track last modification time |
 | **conflictResolution** | `Enum<'source_wins' \| 'target_wins' \| 'latest_wins' \| 'manual'>` | optional (default: `"latest_wins"`) | Conflict resolution strategy |
