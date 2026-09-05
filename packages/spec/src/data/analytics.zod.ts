@@ -296,7 +296,11 @@ export const AnalyticsQuerySchema = lazySchema(() => strictObject(
    * { where: { is_active: true, stage: { $nin: ['lost'] } } }
    * ```
    */
-  where: FilterConditionSchema.optional().describe('Filtering criteria (canonical Query DSL FilterCondition)'),
+  where: FilterConditionSchema.optional().describe(
+    'Filtering criteria (canonical Query DSL FilterCondition). An authored `FilterArray` is '
+    + 'lowered by `parseFilterAST` on the client before the wire; this field admits only the '
+    + 'lowered `FilterCondition` (see `FilterArray` in `data/filter.zod.ts`).'
+  ),
 
   /**
    * Time-bucketed dimensions. Strict as of #4001 batch D — and this item is
