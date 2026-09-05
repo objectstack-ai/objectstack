@@ -383,7 +383,7 @@ async function mount(tenancy: Tenancy): Promise<Mounted> {
   };
 }
 
-function invoke(m: Mounted, route: string, req: Partial<IHttpRequest>) {
+async function invoke(m: Mounted, route: string, req: Partial<IHttpRequest>) {
   const handler = m.http.routes.get(route)!;
   const state: { status: number; body?: any } = { status: 200 };
   const res = {
@@ -392,7 +392,8 @@ function invoke(m: Mounted, route: string, req: Partial<IHttpRequest>) {
     status: vi.fn((code: number) => { state.status = code; return res; }),
     header: vi.fn(() => res),
   } as unknown as IHttpResponse;
-  return handler({ query: {}, params: {}, headers: {}, ...req } as IHttpRequest, res).then(() => state);
+  await handler({ query: {}, params: {}, headers: {}, ...req } as IHttpRequest, res);
+  return state;
 }
 
 const put = (m: Mounted, headers: Record<string, string>, value = 'ObjectStack') =>
