@@ -202,8 +202,15 @@ describe('over-denial controls — the diagnostic is not a blanket refusal (#110
     it('NOW()/TODAY() whole-token macros are unchanged', () => {
         expect(String(tpl('NOW()'))).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
         expect(String(tpl('TODAY()'))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        // #14852: the ORACLE has to be spelled on one calendar too. With
+        // `setDate`/`getDate` it re-stated the very two-calendar defect it was
+        // checking against, so across a DST transition it would have FOLLOWED
+        // the implementation instead of catching it. Indistinguishable at
+        // TZ=UTC, which is why it read as correct for as long as it did; the
+        // transition windows themselves are pinned in
+        // `template-date-offset-dst.test.ts`.
         const plus90 = new Date();
-        plus90.setDate(plus90.getDate() + 90);
+        plus90.setUTCDate(plus90.getUTCDate() + 90);
         expect(tpl('TODAY() + 90')).toBe(plus90.toISOString().slice(0, 10));
     });
 
