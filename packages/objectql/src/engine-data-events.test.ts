@@ -28,7 +28,7 @@
 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { BulkDataEventSchema, DataEventSchema } from '@objectstack/spec/api';
 import type { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import { ObjectQL } from './engine.js';
@@ -731,6 +731,17 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   });
 
+  /**
+   * The env-fallback pin below sets `OS_TENANCY_POSTURE` on purpose; put it
+   * back whatever happened, so no later file in this process inherits a
+   * walled posture it never asked for.
+   */
+  const savedPosture = process.env.OS_TENANCY_POSTURE;
+  afterEach(() => {
+    if (savedPosture === undefined) delete process.env.OS_TENANCY_POSTURE;
+    else process.env.OS_TENANCY_POSTURE = savedPosture;
+  });
+
   it('isolated: a member\'s predicate UPDATE names the caller\'s organization — the wall\'s equality term', async () => {
     await seed([
       { amount: '1', status: 'open', organization_id: ACTIVE_ORG },
@@ -850,12 +861,22 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     expect(hasOrgKey()).toBe(false);
   });
 
-  it('no enforcement layer injected a posture ⇒ ABSENT — a lean embedding has no wall anywhere to vouch for', async () => {
+  it('no enforcement layer injected a posture ⇒ ABSENT even with OS_TENANCY_POSTURE=isolated in the env — the env fallback is not consulted', async () => {
     // An engine no SecurityPlugin ever handed a posture: Layer 0 was never
     // composed, and the memory driver reads no `DriverOptions.tenantId`
     // either, so nothing constrained this sweep to one organization —
     // whatever the operator's env says. The env fallback the #8844 write
-    // refusal consults is deliberately NOT consulted here.
+    // refusal consults (`resolveEnginePosture`) is deliberately NOT consulted
+    // here.
+    //
+    // ⚠️ The env is set to the WALLED posture on purpose. With it unset the
+    // test process resolves to `single`, and substituting
+    // `resolveEnginePosture()` at the publish site left every pin green
+    // (measured by the R1 contract review: 38/38 under the substitution).
+    // Under `isolated` in the env that substitution stamps the key, and
+    // THIS pin goes red — the only thing that makes "deliberately not the
+    // env fallback" a guarantee rather than a comment.
+    process.env.OS_TENANCY_POSTURE = 'isolated';
     const bare = new ObjectQL();
     const { driver } = makeStubDriver();
     bare.registerDriver(driver, true);
@@ -928,6 +949,148 @@ describe('#15225 — a published BulkDataEvent names the organization the tenant
     published.length = 0;
 
     await engine.update('global_setting', { key: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
+
+    expect(published).toHaveLength(1);
+    expect(published[0].type).toBe('data.records.updated');
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('`systemFields.tenant: false` + an author-declared `organization_id` publishes it ABSENT — the wall composes nothing there (P1)', async () => {
+    // The R1 contract review's P1 probe. Layer 0's `tenancyDisabled` input
+    // folds `systemFields.tenant === false` in beside `tenancy.enabled ===
+    // false` (`getObjectSecurityMeta`, security-plugin.ts), so on this object
+    // `computeTenantLayer0Filter` returns null — NO wall — while the column
+    // the author declared is a perfectly readable `organization_id`. R1 read
+    // the column and stamped the caller's organization onto a batch that
+    // touched another organization's row: a MISLABEL, the one direction
+    // this card must never take. The object exit is now the wall's own
+    // predicate (`carriesTenantScopeColumn`), which answers "not walled".
+    const sharedCatalog = {
+      name: 'shared_catalog',
+      label: 'Shared catalog',
+      systemFields: { tenant: false },
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        status: { name: 'status', type: 'text' as const },
+        organization_id: { name: 'organization_id', type: 'text' as const },
+      },
+    };
+    engine.registry.registerObject(sharedCatalog as any);
+    // Measured: the opt-out withheld the INJECTED column and the author's
+    // declaration survived — the column is there to be misread.
+    expect((engine.registry.getObject('shared_catalog') as any).fields.organization_id).toBeDefined();
+    await engine.insert('shared_catalog', [
+      { status: 'open', organization_id: ACTIVE_ORG },
+      { status: 'open', organization_id: OTHER_ORG },
+      { status: 'open' },
+    ], { context: sysCtx } as any);
+    published.length = 0;
+
+    await engine.update('shared_catalog', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
+
+    expect(published).toHaveLength(1);
+    expect(bulkEvent().matched).toBe(3);
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('a FEDERATED object (`external` binding) publishes it ABSENT — the wall discounts the platform\'s phantom anchor', async () => {
+    // [#7835] The registry injects `organization_id` on an external object
+    // too, but the platform provisions no storage for it, so plugin-security
+    // reads that anchor as PHANTOM and Layer 0 composes no wall
+    // (`objectHasOrgIdField: false`). A key here would name an organization
+    // no wall constrained the batch to — the mislabel direction — so the
+    // producer answers absent on `external != null`. That exit is a SUPERSET
+    // of the wall's provenance test: a federated object whose author declared
+    // a real remote `organization_id` keeps its wall and is answered absent
+    // too (under-delivery, never a mislabel). That variant is deliberately
+    // NOT pinned: a future exact provenance predicate may legitimately answer
+    // it present, and a pin here would forbid that.
+    const remoteCustomer = {
+      name: 'remote_customer',
+      label: 'Remote customer',
+      external: { remoteName: 'customers', writable: true },
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        status: { name: 'status', type: 'text' as const },
+      },
+    };
+    engine.registry.registerObject(remoteCustomer as any);
+    // Measured: the anchor IS there (injected) — absence is decided by the
+    // binding, never by a missing column.
+    expect((engine.registry.getObject('remote_customer') as any).fields.organization_id).toBeDefined();
+    await engine.insert('remote_customer', [{ status: 'open', organization_id: ACTIVE_ORG }], { context: sysCtx } as any);
+    published.length = 0;
+
+    await engine.update('remote_customer', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
+
+    expect(published).toHaveLength(1);
+    expect(published[0].type).toBe('data.records.updated');
+    expect(hasOrgKey()).toBe(false);
+  });
+
+  it('a custom `tenancy.tenantField` is NOT an exit by itself — PRESENT while the object still carries `organization_id`, the column the wall keys on', async () => {
+    // The wall never reads `tenancy.tenantField`: Layer 0 keys on the literal
+    // `organization_id` (`objectHasOrgIdField`). An object that declares a
+    // custom tenant column and still carries the kernel-injected
+    // `organization_id` is walled on `organization_id = <active org>`, so
+    // the batch IS one organization's and the producer says so. R1 answered
+    // absent here (an under-delivery); the wall's own predicate answers
+    // present. ⚠️ A claim about what the wall AND-composed, not about the
+    // driver's native scoping column.
+    const workspaceDoc = {
+      name: 'workspace_doc',
+      label: 'Workspace doc',
+      tenancy: { tenantField: 'workspace_id' },
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        status: { name: 'status', type: 'text' as const },
+        workspace_id: { name: 'workspace_id', type: 'text' as const },
+      },
+    };
+    engine.registry.registerObject(workspaceDoc as any);
+    // Measured: the registry still injected the kernel column beside the
+    // custom one — the declaration does not withhold it.
+    expect((engine.registry.getObject('workspace_doc') as any).fields.organization_id).toBeDefined();
+    await engine.insert('workspace_doc', [
+      { status: 'open', workspace_id: 'ws_1', organization_id: ACTIVE_ORG },
+      { status: 'open', workspace_id: 'ws_2', organization_id: ACTIVE_ORG },
+    ], { context: sysCtx } as any);
+    published.length = 0;
+
+    await engine.update('workspace_doc', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
+
+    expect(published).toHaveLength(1);
+    expect(bulkEvent().matched).toBe(2);
+    expect(hasOrgKey()).toBe(true);
+    expect(bulkEvent().organizationId).toBe(ACTIVE_ORG);
+  });
+
+  it('a custom `tenancy.tenantField` on an object that carries NO `organization_id` publishes it ABSENT — the custom column is never a substitute', async () => {
+    // `systemFields: false` is the hard opt-out: the registry injects
+    // nothing, and — the #8608 shape the registry's predicate exists for —
+    // plugin-security does NOT read it as `tenancyDisabled`, so the wall is
+    // decided by the column clause alone: no `organization_id`
+    // (`objectHasOrgIdField: false`) ⇒ no wall ⇒ nothing to assert. The
+    // declared `workspace_id` is not read as a stand-in: the wall does not
+    // key on it either.
+    const workspaceNote = {
+      name: 'workspace_note',
+      label: 'Workspace note',
+      systemFields: false,
+      tenancy: { tenantField: 'workspace_id' },
+      fields: {
+        id: { name: 'id', type: 'text' as const, primaryKey: true },
+        status: { name: 'status', type: 'text' as const },
+        workspace_id: { name: 'workspace_id', type: 'text' as const },
+      },
+    };
+    engine.registry.registerObject(workspaceNote as any);
+    // Measured: no kernel column arrived.
+    expect((engine.registry.getObject('workspace_note') as any).fields.organization_id).toBeUndefined();
+    await engine.insert('workspace_note', [{ status: 'open', workspace_id: ACTIVE_ORG }], { context: sysCtx } as any);
+    published.length = 0;
+
+    await engine.update('workspace_note', { status: 'swept' }, { multi: true, where: { status: 'open' }, context: member } as any);
 
     expect(published).toHaveLength(1);
     expect(published[0].type).toBe('data.records.updated');

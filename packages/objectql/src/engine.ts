@@ -133,7 +133,6 @@ import {
   carriesOrganization,
   SystemWriteOrganizationRequiredError,
   ORGANIZATION_OBJECT,
-  DEFAULT_TENANT_FIELD,
 } from './tenancy/system-write-organization.js';
 // [#13491] The per-object tenancy inventory that replaced the blanket
 // namespace exemption — the ONE reading both narrowed gates consult.
@@ -177,7 +176,11 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
+// [#15225] `carriesTenantScopeColumn` is the wall's own object predicate —
+// "does Layer 0 key on this object?" — read from the registry's binding of it
+// rather than re-spelled here (the R1 re-spelling mirrored one clause of three
+// and mislabelled a batch; see `bulkEventOrganizationId`).
+import { SchemaRegistry, computeFQN, carriesTenantScopeColumn, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -2299,7 +2302,9 @@ function eventOrganizationValue(value: unknown): string | undefined {
  * enforcement layer told this engine it enforces.
  *
  * **What is read, and what the answer is** (the posture table on the card,
- * mirrored input-for-input against `computeTenantLayer0Filter`):
+ * read against `computeTenantLayer0Filter`'s inputs — an exact mirror on the
+ * POSTURE and CONTEXT inputs, a PARTIAL one on the OBJECT input; the object
+ * bullet below says which clauses are mirrored and which the seam carries):
  *
  *  - `enforcedPosture` is the SecurityPlugin-injected posture
  *    ({@link ObjectQL.enforcedTenancyPosture}), ⛔ never the env fallback
@@ -2309,10 +2314,32 @@ function eventOrganizationValue(value: unknown): string | undefined {
  *    ANYWHERE to vouch for. `single` (no wall) ⇒ absent.
  *  - `isSystem` short-circuits the whole security middleware ⇒ no wall ⇒
  *    absent. Same for an absent context.
- *  - The wall keys on the kernel-injected `organization_id` column literally
- *    (`objectHasOrgIdField`), and only on a local, tenancy-enabled object —
- *    so the object must resolve to exactly that column and not be federated
- *    (a federated anchor is discounted as phantom, #7835) ⇒ else absent.
+ *  - The OBJECT exit. Layer 0 composes nothing when its `tenancyDisabled`
+ *    input is true or the object carries no `organization_id`
+ *    (`objectHasOrgIdField`), and `getObjectSecurityMeta`
+ *    (`security-plugin.ts`) folds THREE clauses into `tenancyDisabled`:
+ *    ① `tenancy.enabled === false`, ② `systemFields.tenant === false`,
+ *    ③ `orgScopingEnabled && platformGlobalObjects.has(object)` — the
+ *    deployment's #12699 carve-out. This producer reads
+ *    {@link carriesTenantScopeColumn}, the registry's binding of the wall's
+ *    predicate (2026-08-14 triage ruling: the wall's derivation is
+ *    authoritative) — clauses ① and ② plus the column clause — so an
+ *    object the wall does not key on answers absent, and a custom
+ *    `tenancy.tenantField` is NOT an exit by itself (the wall never reads
+ *    it; the object is walled iff it carries `organization_id`). ⛔ What is
+ *    NOT mirrored: clause ③ is deployment-declared and invisible to the
+ *    engine — no `platformGlobalObjects` reading exists here — so a
+ *    deployment-exempted object under an armed wall is still stamped with
+ *    the caller's organization while Layer 0 composed no wall. That
+ *    population is the seam #15706 rules on, and the reason this producer's
+ *    PR is Blocked-by it. The wall's fourth object input, the federated
+ *    phantom anchor (#7835: an `external` object's injected
+ *    `organization_id` is a column no storage carries, so
+ *    `objectHasOrgIdField` is false), is answered by the superset
+ *    `external != null` ⇒ absent — conservative for a federated object whose
+ *    author declared a real remote column (the wall stands there; this
+ *    under-delivers rather than re-spelling plugin-security's provenance
+ *    test).
  *  - The Layer 0 EXEMPTION: a true `PLATFORM_ADMIN` crosses the wall where
  *    the object's posture permits (ADR-0095 D3). The engine holds the carried
  *    rung (`ExecutionContext.posture`) but not the superuser write-bypass bit
@@ -2342,8 +2369,9 @@ function bulkEventOrganizationId(
 ): string | undefined {
   if (enforcedPosture === undefined || !postureEnforcesWall(enforcedPosture)) return undefined;
   if (!execCtx || execCtx.isSystem === true) return undefined;
-  if (resolveTenantFieldName(objectSchema) !== DEFAULT_TENANT_FIELD) return undefined;
-  if ((objectSchema as { external?: unknown } | null | undefined)?.external != null) return undefined;
+  if (!objectSchema || typeof objectSchema !== 'object') return undefined;
+  if (!carriesTenantScopeColumn(objectSchema as ServiceObject)) return undefined;
+  if ((objectSchema as { external?: unknown }).external != null) return undefined;
   const rung = AuthzPostureSchema.safeParse(execCtx.posture);
   if (!rung.success || rung.data === 'PLATFORM_ADMIN') return undefined;
   if (postureUsesUnionScope(enforcedPosture)) {
