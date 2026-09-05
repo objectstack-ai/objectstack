@@ -4,6 +4,8 @@
 
 feat(driver-memory)!: the file-persistence auto-save interval names its unit (#15680, ruling B on #14478)
 
+<!-- adr-0087: registered memory-persistence-auto-save-interval-to-ms -->
+
 **BREAKING** — `InMemoryDriverOptions.persistence.autoSaveInterval` and
 `FileSystemPersistenceAdapter`'s `autoSaveInterval` constructor option are both
 renamed to **`autoSaveIntervalMs`**, following the `@objectstack/spec` rename of
