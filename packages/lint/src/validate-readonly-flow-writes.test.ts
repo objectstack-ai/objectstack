@@ -308,8 +308,10 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings[0].path).toBe('flows[0].nodes[0].config.body.nodes[0].config.fields.amount');
   });
 
-  // create_record stays exempt on BOTH branches under elevation: a
-  // `readonlyWhen` predicate has no prior record to evaluate on an insert.
+  // create_record under elevation is clean on BOTH branches, for two different
+  // reasons: the static strip is skipped by `runAs:'system'` (elevation, not
+  // INSERT — see the block below), and a `readonlyWhen` predicate has no prior
+  // record to evaluate on an insert.
   it('does NOT flag create_record writing a readonlyWhen field under runAs:system', () => {
     const flow = {
       name: 'seed_opp_system',
@@ -324,8 +326,18 @@ describe('validateReadonlyFlowWrites', () => {
     expect(validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [flow] })).toEqual([]);
   });
 
-  // ── clean: create_record is engine-exempt from the readonly strip ─────
-  it('does NOT flag create_record writing a readonly field', () => {
+  // ── clean TODAY: create_record is a SCAN GAP, not an exemption (#15394) ──
+  // [#14147] This case used to be justified by "create_record is engine-exempt
+  // from the readonly strip". The maintainer ruling of 2026-09-03 (option C)
+  // SUPERSEDED that row: `engine.insert` runs the static-`readonly` strip for a
+  // non-system caller, and a `create_record` node without `runAs:'system'` is
+  // exactly that caller — the write below is a silent no-op at run time
+  // (measured end to end in `create-record-readonly-drop.test.ts`,
+  // service-automation). The verdict is kept because it is still TRUE of what
+  // this rule scans (`update_record` only); the reason is that the scan gap is
+  // filed as #15394, not that the engine exempts anything. When that lands,
+  // this case flips to RED with severity `error`.
+  it('does NOT flag create_record writing a readonly field — the #15394 scan gap, not an exemption', () => {
     const flow = {
       name: 'seed_opp',
       type: 'record_change',
