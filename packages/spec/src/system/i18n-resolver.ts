@@ -31,8 +31,8 @@
  *   globalActions.<action_name>.label / .description / .confirmText /
  *     .successMessage / .params.<param_name>.*
  *
- * Lookup order: requested locale → each entry of `fallbackChain` (defaults to
- * `['en']`) → literal `label` from the metadata. Helpers never throw — they
+ * Lookup order: requested locale → each entry of `fallbackChain` → literal
+ * `label` from the metadata. Helpers never throw — they
  * always return at minimum the metadata literal so unconfigured languages
  * gracefully degrade.
  *
@@ -194,7 +194,20 @@ export interface ResolveOptions {
   locale?: string;
   /**
    * Ordered fallback locales to consult after `locale` and before returning
-   * the literal label. Defaults to `['en']`.
+   * the literal label.
+   *
+   * [#14882] This is the deployment's DECLARED chain, supplied by the caller
+   * that can see the declaration: the serving layer reads
+   * `II18nService.getFallbackLocale()` (`i18n.fallbackLocale`, else
+   * `defaultLocale` — the collapse both boot paths perform) and passes it
+   * here, so a `zh-CN` workspace resolves `zh-CN → zh-CN → authored label`
+   * and a courtesy `en` bundle is consulted only when `en` is requested.
+   * Every entry is consulted BEFORE the authored label, so an entry the
+   * deployment did not declare is a locale that can outrank the author.
+   *
+   * Defaults to `['en']` only when the caller declares nothing at all
+   * (no `fallbackChain` key); an explicit `[]` means "requested locale, then
+   * the authored label".
    */
   fallbackChain?: string[];
 }
