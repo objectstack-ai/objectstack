@@ -29,11 +29,20 @@ import type { ConformanceRow } from '@objectstack/verify';
 // complete classification while carrying zero `cron` and zero `template` rows.
 // The claim above was FALSE for two whole dialects, and read as true, which is
 // the failure a ratchet is supposed to make impossible. Two limits survive and
-// are worth knowing before trusting a green run: discovery still cannot see a
-// slot typed with a schema nobody registered (the hazard is structural, not
-// spent), and a ratchet key is `file:field`, so several declarations of one key
-// name in one file share a single row — see the `discoverSurfaces` docblock and
-// #15500.
+// One limit survives and is worth knowing before trusting a green run:
+// discovery still cannot see a slot typed with a schema nobody registered (the
+// hazard is structural, not spent).
+//
+// The OTHER limit is spent as of #15500. A ratchet key was `file:field`, so
+// several declarations of one field name in one file shared a single row and
+// one classification silently spoke for all of them — including pairs that were
+// opposites, like the server-enforced `FieldSchema.requiredWhen` gate and the
+// `InlineGridColumnSchema.requiredWhen` cell whose own describe says nothing on
+// the write path reads it. Keys are `file:Schema.field` now, and a key shared by
+// two declaring POSITIONS is a hard test failure rather than a silent merge —
+// see the `discoverDeclarations` docblock. The rows split out by that change are
+// `cel-select-option-visible`, `cel-inline-grid-cell` and
+// `cel-field-group-section`.
 
 export type ExprMode = 'compile' | 'interpret';
 /**
@@ -56,7 +65,7 @@ export interface ExprSurface extends ConformanceRow {
   failPolicy: FailPolicy;
   /** Runtime evaluator / compiler site (ConformanceRow.enforcement, required here). */
   enforcement: string;
-  /** `file:field` surfaces (relative to packages/spec/src) this row classifies — the ratchet keys. */
+  /** `file:Schema.field` surfaces (relative to packages/spec/src) this row classifies — the ratchet keys. */
   covers: string[];
 }
 
@@ -67,7 +76,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     summary: 'RLS `using` read / pre-image predicate',
     dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'plugin-security/rls-compiler.ts → @objectstack/formula compileCelToFilter (legacy SQL bridged); AND-injected by security-plugin computeRlsFilter + service-analytics read-scope-sql',
-    covers: ['security/rls.zod.ts:using'],
+    covers: ['security/rls.zod.ts:RowLevelSecurityPolicySchema.using'],
     proof: 'packages/qa/dogfood/test/rls-fixture.dogfood.test.ts',
   },
   {
@@ -75,7 +84,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     summary: 'RLS `check` write post-image validation (ADR-0058 D4)',
     dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'plugin-security/security-plugin.ts step 3.6 → compileCelToFilter + @objectstack/formula matchesFilterCondition',
-    covers: ['security/rls.zod.ts:check'],
+    covers: ['security/rls.zod.ts:RowLevelSecurityPolicySchema.check'],
     proof: 'packages/plugins/plugin-security/src/security-plugin.test.ts',
   },
   {
@@ -83,7 +92,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     summary: 'sharing-rule `condition` → criteria_json (ADR-0058 D3, closes #1887)',
     dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'plugin-sharing/bootstrap-declared-sharing-rules.ts celToFilter → compileCelToFilter; matched by sharing-rule-service findMatchingRecords',
-    covers: ['security/sharing.zod.ts:condition'],
+    covers: ['security/sharing.zod.ts:CriteriaSharingRuleSchema.condition'],
     proof: 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts',
   },
 
@@ -93,14 +102,14 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     summary: 'object validation predicate (condition / when)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret) via the validation runner',
-    covers: ['data/validation.zod.ts:condition', 'data/validation.zod.ts:when'],
+    covers: ['data/validation.zod.ts:ScriptValidationSchema.condition', 'data/validation.zod.ts:CrossFieldValidationSchema.condition', 'data/validation.zod.ts:ConditionalValidationSchema.when'],
   },
   {
     id: 'cel-hook',
     summary: 'hook gate condition',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret) via the hook runner',
-    covers: ['data/hook.zod.ts:condition'],
+    covers: ['data/hook.zod.ts:HookSchema.condition'],
   },
   {
     id: 'cel-formula',
@@ -117,12 +126,12 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // rather than re-pointed — and the summary drops "+ mapping expressions"
     // with it, since nothing on that side is left to interpret.
     covers: [
-      'data/field.zod.ts:expression',
+      'data/field.zod.ts:FieldSchema.expression',
     ],
   },
   {
     id: 'cel-field-rule',
-    summary: 'field UI rules (requiredWhen / readonlyWhen / visibleWhen)',
+    summary: 'FIELD-level conditional rules (Field.requiredWhen / readonlyWhen / visibleWhen)',
     // `fail-soft-log` remains the tier for this row: a predicate that is BROKEN
     // on the record (undeclared key, null overload, parse fault) is logged and
     // skipped, on all three slots. One case is carved out and is not
@@ -134,10 +143,45 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: '@objectstack/formula celEngine (interpret) — console (objectui) + server (rule-validator `readonlyWhen` strip binds `record`/`previous`, plus the master-detail header as `parent`)',
     covers: [
-      'data/field.zod.ts:requiredWhen',
-      'data/field.zod.ts:readonlyWhen',
-      'data/field.zod.ts:visibleWhen',
+      'data/field.zod.ts:FieldSchema.requiredWhen',
+      'data/field.zod.ts:FieldSchema.readonlyWhen',
+      'data/field.zod.ts:FieldSchema.visibleWhen',
     ],
+  },
+  {
+    // Split out of `cel-field-rule` by #15500. Both keys used to be spelled
+    // `data/field.zod.ts:visibleWhen` and were therefore ONE ratchet key, so
+    // this per-OPTION predicate was classified by the row describing the
+    // FIELD-level one. The ledger had already made exactly this distinction on
+    // the action-param side (`cel-action-param-option-visible`, "a SEPARATE row
+    // from `cel-ui` because the evaluator differs"); the field side never got
+    // it, because discovery could not hand the ratchet a second key to be
+    // unclassified about. The server-side enforcement itself is objectui#2284.
+    id: 'cel-select-option-visible',
+    summary: 'choice-field per-option gating (SelectOption.visibleWhen) — the one visibility predicate the SERVER also enforces',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
+    enforcement:
+      'objectql/src/validation/rule-validator.ts per-option enforcement → `ExpressionEngine.evaluate` against the merged `record` + `previous` + `current_user`, re-evaluated ON WRITE for the PICKED value(s) of a written select/multiselect/radio/checkboxes field: a clean FALSE pushes an `invalid_option` field error and the write is refused. Unchanged persisted values are left alone. A predicate that cannot be evaluated (missing referenced field, or an unbound `current_user` on a system write) is FAIL-OPEN — logged with the reason and allowed through — so a broken cascade predicate never bricks a write, and authorization gating depends on the engine binding `current_user`. The console evaluates the same predicate to hide the option, which is UX only: a caller can still submit a hidden value, which is why the server re-checks',
+    covers: ['data/field.zod.ts:SelectOptionSchema.visibleWhen'],
+    proof: 'packages/objectql/src/validation/rule-validator.option-visibility.test.ts',
+  },
+  {
+    // Split out of `cel-field-rule` by #15500 — the pair that made the card.
+    // `InlineGridColumnSchema.requiredWhen` and `FieldSchema.requiredWhen` were
+    // one key, so one row classified a server-enforced transition gate and a
+    // cell flag together, and the row described only the field story. A
+    // declared-but-unwired predicate that says so IN ITS OWN describe string
+    // was invisible to the ledger built to surface exactly that class.
+    id: 'cel-inline-grid-cell',
+    summary: 'inline-grid COLUMN cell predicates (InlineGridColumn.readonlyWhen / requiredWhen) — presentation-side copies of the child field rules',
+    dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'fail-soft-log',
+    enforcement:
+      'NOT MEASURED IN THIS REPO. `InlineGridColumnSchema` has zero consumers outside `packages/spec/src` (measured 2026-09-05), and the evaluator its own describe names — the objectui inline-grid renderer, per row with the row as `record` and the master-detail header as `parent` — is in the sibling repo, which is not in this checkout',
+    covers: [
+      'data/field.zod.ts:InlineGridColumnSchema.readonlyWhen',
+      'data/field.zod.ts:InlineGridColumnSchema.requiredWhen',
+    ],
+    note: "EXPERIMENTAL, and deliberately NOT `enforced`: the same posture as `template-title-format`, for the same reason — marking a row `enforced` on a second-hand reading is the invented cell this ledger exists to prevent. What IS measured here is the write path, and it is the point of the split: `requiredWhen` on a column is PRESENTATION ONLY by its own describe — \"this flags the cell inline-invalid in the grid; nothing on the write path reads it ... declaring the requirement here alone enforces nothing\" — while `Field.requiredWhen` (row `cel-field-rule`) is a server-enforced transition gate refused by `evaluateValidationRules`. The server-enforced contract for a grid cell is the CHILD FIELD's own rule, which hydration copies onto an identity-only column; the `parent` binding in `cel-field-rule`'s enforcement is the master-detail header bound for a DETAIL OBJECT's fields, not for these column declarations. Re-state as `enforced` when someone measures the objectui grid site, or as `removed` under ADR-0049 if the presentation copies are retired.",
   },
   {
     id: 'cel-ui',
@@ -151,18 +195,18 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // was removed by ADR-0085 §3 — declared but never consumed anywhere
       // (enforce-or-remove, ADR-0049). Re-add the row when the key returns
       // WITH an enforcement path.
-      'ui/action.zod.ts:visible',
-      'ui/app.zod.ts:visible',
+      'ui/action.zod.ts:ActionParamSchema.visible',
+      'ui/app.zod.ts:BaseNavItemSchema.visible',
       // ADR-0089: `visibleWhen` is the canonical conditional-visibility key on
       // page components and view form sections/fields; `visibility` (page) and
       // `visibleOn` (view) stay accepted as deprecated aliases, normalized to
       // `visibleWhen` at parse. Both spellings are live CEL surfaces until the
       // aliases are removed in a future major, so both carry a ledger row.
-      'ui/page.zod.ts:visibleWhen',
-      'ui/page.zod.ts:visibility',
-      'ui/view.zod.ts:condition',
-      'ui/view.zod.ts:visibleWhen',
-      'ui/view.zod.ts:visibleOn',
+      'ui/page.zod.ts:PageComponentSchema.visibleWhen',
+      'ui/page.zod.ts:PageComponentSchema.visibility',
+      'ui/view.zod.ts:ListViewShapeSchema.condition',
+      'ui/view.zod.ts:FormFieldBaseSchema.visibleWhen', 'ui/view.zod.ts:FormSectionSchema.visibleWhen',
+      'ui/view.zod.ts:FormFieldBaseSchema.visibleOn', 'ui/view.zod.ts:FormSectionSchema.visibleOn',
       // `ui/component.zod.ts:onSubmit` (element:form's submit CEL) sat here
       // until #9249 retired the whole `element:form` element under ADR-0049
       // (no renderer ever shipped, so nothing ever evaluated the predicate).
@@ -173,7 +217,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
       // Canonical ADR-0089 `visibleWhen` from day one (no deprecated alias on
       // this new surface). Interpreted by the objectui page:tabs renderer to
       // omit the whole tab (header + panel) when FALSE.
-      'ui/component.zod.ts:visibleWhen',
+      'ui/component.zod.ts:PageTabsProps.visibleWhen',
       // `system/settings-manifest.zod.ts:visible` used to sit here. It never
       // belonged: this row's dialect is `cel` and its enforcement is the
       // SchemaRenderer + celEngine, and the settings slot is evaluated by
@@ -195,7 +239,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'settings-visibility', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement:
       'service-settings `evaluateVisibility` (visibility-eval.ts), called from `SettingsService.validatePatch` — a closed grammar: single root `data`, one-level member access, `|| && !`, `=== !== == != >= <= > <`, parens, and string/number/bool/null literals, optionally `${…}`-wrapped, as a bare string or a `{dialect, source}` envelope. Fail-closed since #7310: a predicate outside the grammar REFUSES the save (SettingsValidationError, HTTP 400) instead of skipping the specifier — `visible` gates every other check on the key (`required`, `options`, `pattern`, `valueDomain`, the value window), so skipping it switched all of them off at once. The console evaluates the same string client-side through `new Function(...)`. Since #7327 the spec DECLARES that same grammar (`SettingsVisibilityInputSchema`), so it is refused at publish/parse too',
-    covers: ['system/settings-manifest.zod.ts:visible'],
+    covers: ['system/settings-manifest.zod.ts:SpecifierSchema.visible', 'system/settings-manifest.zod.ts:SettingsManifestSchema.visible'],
     // Proof is the producer/consumer pin rather than a runtime fixture: the
     // failure mode this surface actually has is the two sides disagreeing about
     // what parses, which is what that file measures — over the real bundled
@@ -216,7 +260,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // inside the field widgets.
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: 'console (objectui) ActionParamDialog → paramToField → SelectField / MultiSelectField / RadioField / CheckboxesField → useCascadingOptions → resolveCascadingOptions (core/evaluator/optionRules.ts) → evalFieldPredicate → @objectstack/formula celEngine (interpret), evaluated per OPTION against the live param bag + current_user; a value no longer offered is dropped from the param. UI gating only — `enforceActionParams` (ADR-0104 D2) validates the submitted value against the declared option VALUES and does not evaluate this predicate, so access-control gating must also be enforced by the action body / permissions',
-    covers: ['ui/action.zod.ts:visibleWhen'],
+    covers: ['ui/action.zod.ts:ActionParamSchema.visibleWhen'],
   },
   {
     id: 'cel-bulk-action-visible',
@@ -227,21 +271,34 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // all along, but it lived inside `bulkActionDefs: z.array(z.record(z.any()))`,
     // so the conformance walk had no declared surface to see. Typing the def is
     // what made it visible — which is the argument for typing it in one line.
-    covers: ['ui/bulk-action.zod.ts:visible'],
+    covers: ['ui/bulk-action.zod.ts:BulkActionDefSchema.visible'],
+  },
+  {
+    // Split out of `cel-row-crud-visible` by #15500. Both were spelled
+    // `data/object.zod.ts:visibleWhen`, so ONE key covered them and the row
+    // describing built-in row Edit/Delete buttons silently classified the
+    // field-GROUP section predicate too. The card listed this pair as
+    // "unmeasured"; measuring it made a fourth genuinely-different collapse.
+    id: 'cel-field-group-section',
+    summary: 'field-group SECTION visibility (ObjectFieldGroup.visibleWhen, ADR-0085 §5) — hides the whole group, header included',
+    dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
+    enforcement:
+      "spec/src/data/field-group-layout.ts `deriveFieldGroupLayout` (ADR-0085 §5) is the measurable seam in this repo: it reads the group's `visibleWhen` and passes it through VERBATIM onto the derived section (bare CEL string or Expression envelope, unnormalized). The predicate itself is evaluated by the console (objectui) form renderer's section-gating contract against the record in scope — FALSE, or a faulting predicate, hides the WHOLE group including its header. Fail-CLOSED is what separates this row from `cel-ui`, whose form-view section/field predicates fault OPEN",
+    covers: ['data/object.zod.ts:ObjectFieldGroupSchema.visibleWhen'],
   },
   {
     id: 'cel-row-crud-visible',
-    summary: 'built-in row Edit/Delete per-record visibility (userActions.{edit,delete}.visibleWhen, objectui#2614)',
+    summary: 'built-in row Edit/Delete per-record visibility (RowCrudActionOverride.visibleWhen, objectui#2614)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement: 'console (objectui) RowActionMenu BuiltinRowActionItem + data-table DataTableBuiltinRowActionItem → useRowPredicate → @objectstack/formula celEngine (interpret); FALSE/fault hides the row button (UI gating only — write enforcement stays with permissions/hooks)',
-    covers: ['data/object.zod.ts:visibleWhen'],
+    covers: ['data/object.zod.ts:RowCrudActionOverrideSchema.visibleWhen'],
   },
   {
     id: 'cel-row-crud-disabled',
     summary: 'built-in row Edit/Delete per-record disabling (userActions.{edit,delete}.disabledWhen, objectui#2614)',
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-soft-log',
     enforcement: 'console (objectui) RowActionMenu BuiltinRowActionItem + data-table DataTableBuiltinRowActionItem → useRowPredicate → @objectstack/formula celEngine (interpret); TRUE renders the button disabled, a fault leaves it enabled (server hooks are the real boundary)',
-    covers: ['data/object.zod.ts:disabledWhen'],
+    covers: ['data/object.zod.ts:RowCrudActionOverrideSchema.disabledWhen'],
   },
   {
     id: 'cel-flow',
@@ -249,7 +306,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'throw',
     enforcement: '@objectstack/formula celEngine (interpret) via the automation runtime',
     covers: [
-      'automation/flow.zod.ts:condition',
+      'automation/flow.zod.ts:FlowEdgeSchema.condition',
       // `automation/sync.zod.ts:condition` (custom validation predicates on
       // the L1 "Simple Sync" DataSyncConfig) left with the whole file in
       // #4738 — the L1 layer was narrative-only, so no engine ever evaluated
@@ -281,7 +338,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // is the library behind the adapter.
     enforcement:
       'runtime/job-schedule.ts `toBoundaryJobSchedule` — the authoring→boundary seam: it lowers the parsed `{dialect:"cron",source}` envelope to the bare cron string the adapter takes, and THROWS naming the job on a non-cron dialect, an AST-only envelope, or a missing/blank source. Called from runtime/app-plugin.ts `start`; the boundary value reaches service-job/cron-job-adapter.ts `CronJobAdapter.schedule` → **croner** `Cron` (db-job-adapter.ts routes the cron variant there and persists the shape onto sys_job). The throw is CONTAINED at the call site, deliberately and visibly: AppPlugin catches per job, logs `Background job FAILED TO SCHEDULE — it will never run` at ERROR with the `jobScheduleFailuresTotal` counter, then reports the failed count — boot continues and the job does not run. Cron SYNTAX is not judged on this path at all: `toBoundaryJobSchedule` only checks dialect/source shape, and a syntactically invalid pattern throws later inside croner, into the same catch',
-    covers: ['system/job.zod.ts:expression'],
+    covers: ['system/job.zod.ts:CronScheduleSchema.expression'],
     proof: 'packages/runtime/src/job-schedule.test.ts',
     note: 'The ONE cron slot in the spec with a measured evaluator. `@objectstack/formula` cronEngine is NOT on this path — see `cron-declared-unwired` for what that means for the rest.',
   },
@@ -292,7 +349,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cron', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
     enforcement:
       'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"cron",source}`; nothing evaluates the result. service-knowledge/knowledge-service.ts reads `refresh.onRecordChange` and NEVER `refresh.cron` (measured: the only `refresh` reads in that package are the two `onRecordChange` sites)',
-    covers: ['ai/knowledge-source.zod.ts:cron'],
+    covers: ['ai/knowledge-source.zod.ts:KnowledgeRefreshPolicySchema.cron'],
     note: 'EXPERIMENTAL by DESIGN, and separated from `cron-declared-unwired` for that reason: the key documents its own hand-off — service-knowledge surfaces the value so an automation flow / external scheduler can call `reindexSource`, and the field docblock says so. Nothing in this repo schedules it, which is the intended state rather than an undelivered one. It still has no evaluator, so it is not `enforced`.',
   },
   {
@@ -304,13 +361,13 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     enforcement:
       'PARSE ONLY — `CronExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to the envelope; NO EVALUATOR FOUND for any of these five keys. Reader hunt, per key, walking out from each declaration (2026-09-04, `61821e54cf5`): `api/export.zod.ts:cronExpression` — the whole `ExportJobApiContracts` family has zero consumers and rest-server serves no `/api/v1/data/export` route, so `POST /api/v1/data/export/schedules` is a declared contract nothing implements; `IExportService` has no provider binding, which its own source already records. `automation/execution.zod.ts:cronExpression` — `ScheduleStateSchema` has no consumer outside packages/spec; the schedule TRIGGER that does work reads a flow start node `config.schedule` through trigger-schedule/schedule-trigger.ts `normalizeSchedule`, a different shape this key never reaches. `integration/connector.zod.ts:schedule` — `syncConfig` has no reader outside packages/spec. `system/cache.zod.ts:schedule` (CacheWarmup) and `system/disaster-recovery.zod.ts:schedule` (BackupConfig + the DR `testing` block) — neither schema has any consumer outside packages/spec',
     covers: [
-      'api/export.zod.ts:cronExpression',
-      'automation/execution.zod.ts:cronExpression',
-      'integration/connector.zod.ts:schedule',
-      'system/cache.zod.ts:schedule',
-      'system/disaster-recovery.zod.ts:schedule',
+      'api/export.zod.ts:ScheduledExportSchema.cronExpression', 'api/export.zod.ts:ScheduleExportRequestSchema.cronExpression',
+      'automation/execution.zod.ts:ScheduleStateSchema.cronExpression',
+      'integration/connector.zod.ts:DataSyncConfigSchema.schedule',
+      'system/cache.zod.ts:CacheWarmupSchema.schedule',
+      'system/disaster-recovery.zod.ts:BackupConfigSchema.schedule', 'system/disaster-recovery.zod.ts:DisasterRecoveryPlanSchema.schedule',
     ],
-    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these keys each cover TWO declaring positions, because a ratchet key is `file:field`: `api/export.zod.ts:cronExpression` is `:576` (ScheduledExport) and `:706` (ScheduleExportRequest), and `system/disaster-recovery.zod.ts:schedule` is `:57` (BackupConfig) and `:238` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — but see the sibling card on ratchet-key GRANULARITY, where the same collapse hides surfaces that are NOT the same. ⚠️ The `failPolicy` on this row is `compile-error` because the PARSE is the only thing that ever refuses one of these values; it is not a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. And per the sibling finding on the dialect union, the envelope arm of `CronExpressionInputSchema` accepts any declared dialect, so even the parse does not pin these to `cron`.',
+    note: 'EXPERIMENTAL — five declared cron slots with no runtime evaluator (ADR-0049 enforce-or-remove candidates; each wants its own look, and the card that surfaced them says so rather than proposing a sweep). ⚠️ TWO of these surfaces are declared TWICE: `api/export.zod.ts` `cronExpression` on `ScheduledExportSchema` and on `ScheduleExportRequestSchema`, and `system/disaster-recovery.zod.ts` `schedule` on `BackupConfigSchema` and on `DisasterRecoveryPlanSchema` (the DR `testing` block). Both pairs are genuinely the same surface twice, so one row is honest here — and now that each declaring position carries its OWN key, that judgement is written out as two `covers` entries instead of being assumed by a collapse. ⚠️ The `failPolicy` on this row is `compile-error` because the PARSE is the only thing that ever refuses one of these values; it is not a claim that cron SYNTAX is checked. It is not: `@objectstack/formula` cronEngine validates 5/6-field patterns and `@` aliases, and has ZERO consumers outside packages/formula — nothing routes these slots through it. And per the sibling finding on the dialect union, the envelope arm of `CronExpressionInputSchema` accepts any declared dialect, so even the parse does not pin these to `cron`.',
   },
 
   // ── TEMPLATE dialect (#15027) ─────────────────────────────────────────────
@@ -322,8 +379,8 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     enforcement:
       'PARSE ONLY — `TemplateExpressionInputSchema` refuses a blank/non-string, non-envelope value and normalizes to `{dialect:"template",source}`; NO EVALUATOR FOUND. `PromptTemplateSchema` has no consumer outside packages/spec (measured 2026-09-04), so nothing interpolates the `{{var}}` holes and nothing checks that the declared `variables` match them',
     covers: [
-      'ai/model-registry.zod.ts:system',
-      'ai/model-registry.zod.ts:user',
+      'ai/model-registry.zod.ts:PromptTemplateSchema.system',
+      'ai/model-registry.zod.ts:PromptTemplateSchema.user',
     ],
     note: 'EXPERIMENTAL — declared prompt templates with no runtime evaluator (ADR-0049). Ownership was checked before classifying rather than assumed: the card that appeared to own these keys is closed as completed, and its delivered diff (`d355c361157`) touched exactly one file, `skills/objectstack-ai/SKILL.md` — it corrected a prose clause that called these keys CEL, and never owned a ledger row. No open card owns them.',
   },
@@ -333,7 +390,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'template', mode: 'interpret', state: 'experimental', failPolicy: 'compile-error',
     enforcement:
       'PARSE ONLY in this repo — `TemplateExpressionInputSchema` refuses a blank/non-string, non-envelope value. The KEY has a build-time reader that is NOT an evaluator: lint/validate-record-title.ts `validateRecordTitle` (wired into authoring-rules.ts, run by `os build` / `os lint` / the MCP authoring surface) reports every declaration as `title-format-retired`, an advisory WARNING steering the author to `nameField` — it reads that the key is present and never looks at the template text. The server-side title resolver deliberately does NOT read it: spec/src/data/display-name.ts `objectTitleCompleteness` / `resolveRecordDisplayName` resolve `nameField` then the `displayNameField` alias then a derivation, and ADR-0079 states the reason (render-only; the server can neither return nor query it)',
-    covers: ['data/object.zod.ts:titleFormat'],
+    covers: ['data/object.zod.ts:ObjectSchemaBase.titleFormat'],
     note: 'EXPERIMENTAL, and the state is a deliberate split between two questions. `packages/spec/liveness/object.json` classifies the KEY `live` with the note "objectui ({{record.field}} interpolation)" — that ledger asks whether anything READS the key, and the answer is yes. THIS ledger asks what EVALUATES the expression and under which fail policy, and the only interpolation site named is in the sibling repo objectui, which is not in this checkout: ⛔ NOT measured here, so it is not written into `enforcement` as if it had been. Marking the row `enforced` on a second-hand reading is exactly the invented cell this ledger exists to prevent; marking it `removed` would contradict a governed ledger that measured more than I could. Re-state as `enforced` when someone measures the objectui site — or as `removed` when ADR-0079 retires the key.',
   },
   {
@@ -342,8 +399,8 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     dialect: 'cel', mode: 'interpret', state: 'experimental', failPolicy: 'fail-closed',
     enforcement: '(no runtime consumer yet)',
     covers: [
-      'kernel/plugin-security-advanced.zod.ts:condition',
-      'kernel/plugin-versioning.zod.ts:condition',
+      'kernel/plugin-security-advanced.zod.ts:PluginPermissionSchema.condition',
+      'kernel/plugin-versioning.zod.ts:MultiVersionSupportSchema.condition',
     ],
     note: 'EXPERIMENTAL — declared policy conditions with no runtime evaluator yet (ADR-0056 D8 / ADR-0049 tracking).',
   },
