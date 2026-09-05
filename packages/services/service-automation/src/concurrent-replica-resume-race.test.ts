@@ -45,35 +45,55 @@
  * The per-process `this.resuming` stays as the cheap first gate; it is not
  * replaced.
  *
- * ## REVERT-PROOF — three mutations, all measured on the committed tree
+ * ## REVERT-PROOF — five mutations, all measured on the committed tree
  *
  * Each was confirmed ON DISK before a single result was read (anchored counts
  * plus the blob hash) and restored inside a `trap ... EXIT INT TERM`, with the
  * restore proven by an empty `git diff HEAD` and a blob hash equal to HEAD's.
  * The population is these three files: this one, `suspended-run-store.test.ts`
- * and `multi-replica-resume-staleness.test.ts` — 61 tests.
+ * and `multi-replica-resume-staleness.test.ts` — 62 tests.
  *
- * **(E) the engine stops asking.** Replace the `claimAdvance` call in
- * `resumeInternal` with the unconditional `forgetSuspendedRun(run, 'resumed')`
- * it had before this card: `Tests 9 failed | 52 passed (61)`. Seven here
- * (SHAPE A and SHAPE B on `expected [ 'notify', 'notify' ] to deeply equal
- * [ 'notify' ]`, SIZED on `{ trials: 25, doubled: 25, extraOpens: 25 }`, both
- * CONDITION cases, the loser's `debug` trace and the declared degradation) and
- * two in `suspended-run-store.test.ts` (the two-engines race over the durable
- * store, and the throwing claim). `multi-replica-resume-staleness.test.ts`
- * stays 8/8: the mutation is targeted, and #13617's own ledger is untouched.
+ * ⚠️ RE-MEASURED IN FULL at #14956, on `origin/main` `d4f9b2a9d`. The counts
+ * below are that run's, not #14333's: the third CONDITION case added there
+ * joins the population, so every total moved by one and one leg — (C-node) —
+ * turned out to have been reported wrong. Splitting (C) into its three
+ * separate deletions is the point of that card; see the CONDITION block below.
+ *
+ * **(E) the engine stops asking.** Make `resumeInternal` never consult the
+ * store: pin its `claim` to a kind that is none of `claimed` / `lost` /
+ * `unavailable`, so no branch fires and `forgetSuspendedRun(run, 'resumed')`
+ * deletes unconditionally — the pre-#14333 shape. `Tests 10 failed |
+ * 52 passed (62)`. Eight here (SHAPE A and SHAPE B on `expected
+ * [ 'notify', 'notify' ] to deeply equal [ 'notify' ]`, SIZED on
+ * `{ trials: 25, doubled: 25, extraOpens: 25 }`, all THREE CONDITION cases,
+ * the loser's `debug` trace and the declared degradation) and two in
+ * `suspended-run-store.test.ts` (the two-engines race over the durable store,
+ * and the throwing claim). `multi-replica-resume-staleness.test.ts` stays
+ * 8/8: the mutation is targeted, and #13617's own ledger is untouched.
  *
  * **(C) the condition stops being a condition.** Delete BOTH comparisons from
  * `InMemorySuspendedRunStore.claimSuspension`, leaving an existence-only
- * consume: `Tests 2 failed | 59 passed (61)` — exactly the two CONDITION cases
- * below, and nothing else. That is the point of them. Every other race in this
- * file lets the loser lose by finding no row at all, which an existence check
- * satisfies too; before those two existed this mutation was measured GREEN
- * across the whole branch.
+ * consume: `Tests 3 failed | 59 passed (62)` — exactly the three CONDITION
+ * cases below, and nothing else. That is the point of them. Every other race
+ * in this file lets the loser lose by finding no row at all, which an
+ * existence check satisfies too; before those cases existed this mutation was
+ * measured GREEN across the whole branch.
+ *
+ * **(C-node) only `run.nodeId !== parkedAt.nodeId`.** `Tests 1 failed |
+ * 61 passed (62)`, and the one red is the correlation-less CONDITION case.
+ * ⛔ Before that case existed this leg was `61 passed (61)` — ZERO red, on the
+ * comparison the maintainer's ruling names verbatim ("delete only if still
+ * parked at node N"). Both other CONDITION cases re-park with a NEW
+ * correlation, so the correlation comparison rejects the stale claim first and
+ * masks this one entirely.
+ *
+ * **(C-corr) only the correlation comparison.** `Tests 1 failed | 61 passed
+ * (62)`, the one red being the CONDITION (correlation) case. Unchanged by
+ * #14956 — this half was falsifiable all along.
  *
  * **(C2) the production store loses its predicate.** Delete `multi: true` from
  * the one `delete` call in `ObjectStoreSuspendedRunStore.claimSuspension`:
- * `Tests 7 failed | 54 passed (61)`, every one of them in
+ * `Tests 7 failed | 55 passed (62)`, every one of them in
  * `suspended-run-store.test.ts`, failing with the PRODUCER's own refusal —
  * "Delete names one row by primary key, but options.where also carries
  * predicate keys 'node_id', 'correlation' ... For a conditional
@@ -387,9 +407,10 @@ describe('#14333 concurrent resumes of one run on two replicas advance it exactl
     // `multi-replica-resume-staleness.test.ts`), deleting from
     // `InMemorySuspendedRunStore.claimSuspension`:
     //
-    //   both comparisons  -> 2 red (both cases below)
-    //   correlation alone -> 1 red (the CONDITION (correlation) case)
-    //   node alone        -> 0 red   ⛔ UNTIL THE THIRD CASE BELOW EXISTS
+    //                       WITHOUT the third case   WITH it (today)
+    //   both comparisons       2 red / 61 tests         3 red / 62 tests
+    //   correlation alone      1 red                    1 red
+    //   node alone          ⛔ 0 RED                     1 red
     //
     // The third case is what makes the node comparison falsifiable: a
     // CORRELATION-LESS parking, the shape `SuspensionParkedAt` documents as
