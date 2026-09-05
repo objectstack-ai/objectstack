@@ -76,6 +76,15 @@ import { isRowActive } from './row-active.js';
 /** The transport-agnostic authorization envelope produced from a request. */
 export interface ResolvedAuthzContext {
   userId?: string;
+  /**
+   * The ACTIVE organization this request operates in.
+   *
+   * ⚠️ [#15409] For a session principal under a wall-enforcing posture this is
+   * a VETTED value, never the stored `activeOrganizationId` as read: a claim
+   * that is not in {@link accessible_org_ids} is dropped and the context
+   * resolves with no active organization at all. Absent here is the fail-closed
+   * state, not a missing lookup — Layer 0 denies on it.
+   */
   tenantId?: string;
   email?: string;
   accessToken?: string;
@@ -210,6 +219,57 @@ function warnApiKeyRefusal(details: {
   );
 }
 
+/**
+ * [#15409 — maintainer ruling 2026-09-05, option B] Say a DROPPED session
+ * organization claim out loud, on the SERVER side, where the drop is decided —
+ * the session mirror of {@link warnApiKeyRefusal} (#15256 / 2A).
+ *
+ * ## Why the operator needs this and the caller must not get it
+ *
+ * The drop is deliberately INVISIBLE on the wire: the principal stays
+ * authenticated, no status code moves, no response field is added and no reason
+ * travels. What the user sees is a session with no active organization — Layer
+ * 0's existing fail-closed branch (`!organizationId ⇒ RLS_DENY_FILTER` in
+ * `plugin-security/src/tenant-layer.ts`) — which is indistinguishable from
+ * never having selected one. That is right for the caller and useless for the
+ * operator, who otherwise has no way to learn that an offboarded member's live
+ * session was still naming the organization they left.
+ *
+ * ## What may appear here
+ *
+ * The `sys_session` ROW id, the owner, the claimed organization, the reason.
+ * ⛔ NEVER `sys_session.token` — that column's own field comment records a
+ * replay-proven impersonation (a leaked token is `Authorization: Bearer` for
+ * that user), so it is the one value this line must never carry. The row `id`
+ * is a separate column and is derived from neither the token nor its hash.
+ *
+ * ## Volume
+ *
+ * One line per request that drops a claim — bounded by real sessions whose
+ * membership ended, not by traffic. An anonymous or bogus cookie never reaches
+ * here (no `userId`, no claim), so a prober writes nothing. Deliberately not
+ * rate-limited: the burst — every request of a removed member's still-live
+ * session, for up to the session's remaining lifetime — is exactly what the
+ * operator needs to see.
+ *
+ * `console.warn` and not an injected logger, for the same reason the API-key
+ * line is: this resolver is kernel-agnostic and takes no host wiring.
+ */
+function warnSessionOrganizationClaimDropped(details: {
+  reason: 'organization_membership_ended';
+  sessionId?: string;
+  userId?: string;
+  organizationId?: string;
+}): void {
+  const { reason, sessionId, userId, organizationId } = details;
+  console.warn(
+    `[security] Session organization claim dropped (${reason}): `
+    + `session=${sessionId ?? '<unknown>'} principal=${userId ?? '<unknown>'} `
+    + `organization=${organizationId ?? '<none>'}. `
+    + 'The session stays authenticated with NO active organization — the wire is unchanged.',
+  );
+}
+
 async function tryFind(
   ql: any,
   object: string,
@@ -324,6 +384,12 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
 
   let userId: string | undefined;
   let tenantId: string | undefined;
+  /**
+   * [#15409] The `sys_session` ROW id, kept only so a dropped organization
+   * claim can name the session it was dropped from. ⛔ Never
+   * `sessionData.session.token` — see {@link warnSessionOrganizationClaimDropped}.
+   */
+  let sessionId: string | undefined;
 
   // 1. API key (explicit opt-in via header) takes precedence over session.
   const admission = await resolveApiKeyAdmission(ql, headers, input.nowMs, input.tenancyPosture);
@@ -359,6 +425,10 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
       const sessionData = await input.getSession(headers);
       userId = sessionData?.user?.id ?? sessionData?.session?.userId;
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
+      // [#15409] Identity of the session, for the dropped-claim log line below.
+      // ⛔ The ROW id, never `session.token` — the token is the credential.
+      const rawSessionId = sessionData?.session?.id;
+      sessionId = typeof rawSessionId === 'string' && rawSessionId ? rawSessionId : undefined;
       ctx.accessToken = sessionData?.session?.token ?? ctx.accessToken;
       if (sessionData?.user?.email) ctx.email = String(sessionData.user.email);
     } catch {
@@ -379,7 +449,7 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // `sys_member` / `sys_user_position` / `sys_*_permission_set`, so a non-HTTP
   // surface that already knows the user id (a `runAs:'user'` automation run,
   // #3356) can build the SAME envelope without re-implementing any of it.
-  const grants = await resolveUserAuthzGrants(ql, userId, {
+  let grants = await resolveUserAuthzGrants(ql, userId, {
     tenantId,
     nowMs: input.nowMs,
     seedPermissions: ctx.permissions,
@@ -430,6 +500,87 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
         },
       };
     }
+  }
+
+  // ── [#15409 — maintainer ruling 2026-09-05, option B] The SESSION arm ─────
+  //
+  // The block above asks "is this stamped organization still backed by a
+  // membership?" and, until this card, asked it ONLY of an API key. A browser
+  // session's `activeOrganizationId` reached `ctx.tenantId` unread: measured on
+  // a live `isolated` boot with the real cloud-private `Organizations` plugin,
+  // a session whose owner had been removed through better-auth's OWN
+  // `/organization/remove-member` (driven by the org owner, 200, the
+  // `sys_member` row really deleted) went on READING that organization's rows
+  // and WRITING into it — the written row read back out of the sqlite file
+  // carrying the left organization and the removed user as author, for up to
+  // the session's remaining lifetime (7 days by default).
+  //
+  // The resolver already HELD the fact: `get-session` reported positions
+  // `["user","org_member"]` while the membership was intact and `["user"]` on
+  // the very next request — off the same `sys_member` read that builds
+  // `accessible_org_ids`. Nothing was missing but this comparison.
+  //
+  // ⚠️ Why the claim is DROPPED and the principal is NOT refused (option B,
+  // ruled; ⛔ not option A, which is the API-key arm's shape):
+  //
+  //   An API key IS its organization binding, so refusing the whole credential
+  //   is right there (#15256, decision 1A). A session is a PERSON, who may hold
+  //   legitimate memberships elsewhere. Refusing the principal would sign them
+  //   out of every organization because one stored claim went stale; dropping
+  //   the claim leaves them signed in, with no active organization, free to
+  //   switch to one they are actually in.
+  //
+  // ⛔ No second refusal mechanism is added: with no active organization, Layer
+  // 0 is ALREADY fail-closed — `!input.organizationId ⇒ RLS_DENY_FILTER` in
+  // `plugin-security/src/tenant-layer.ts`'s `isolated` branch, and an empty
+  // `accessible_org_ids` denies under `group`. This uses the branch that exists.
+  //
+  // ⛔ And no session revocation: revoking on a membership change is an EVENT
+  // trigger, covering exactly the removal paths someone remembered to wire — a
+  // direct row delete, a seed replay, a bulk or control-plane operation fails
+  // it OPEN, silently. This test runs on EVERY request, at the point the
+  // decision is made, so it covers every removal path by construction. Session
+  // revocation is filed separately, as the courtesy an admin expects when they
+  // click "Remove member", never as the wall.
+  //
+  // Free, like its API-key sibling: `resolveUserAuthzGrants` has just read
+  // `sys_member` for this user, so the test itself is a set membership check on
+  // data in hand. The RE-resolution below is not free, but it is reached only
+  // by a request that presented an unbacked claim — never on a healthy one.
+  //
+  // Re-resolved rather than hand-edited on purpose: "resolves with NO active
+  // organization" is an existing, well-defined state (a session that has not
+  // selected one), and the honest way to reach it is to ask the same resolver
+  // for it. Editing `ctx.tenantId` alone would leave the envelope's other
+  // tenant-scoped derivations computed under the claim that was just rejected —
+  // `org_user_ids`, the fellow-org peer list Layer 1 scopes identity tables
+  // with, would still enumerate the members of the organization the user left.
+  //
+  // Session-only by construction: an admitted API key sets `userId`, which
+  // makes the session branch above unreachable, so a non-empty `tenantId` here
+  // with no `keyPrincipal` can only have come from the session claim.
+  if (
+    !keyPrincipal
+    && tenantId
+    && input.tenancyPosture
+    && postureEnforcesWall(input.tenancyPosture)
+    && !grants.accessible_org_ids.includes(tenantId)
+  ) {
+    // [#15256 / 2A, mirrored] The one decision point where the drop is decided.
+    warnSessionOrganizationClaimDropped({
+      reason: 'organization_membership_ended',
+      sessionId,
+      userId,
+      organizationId: tenantId,
+    });
+    tenantId = undefined;
+    delete ctx.tenantId;
+    grants = await resolveUserAuthzGrants(ql, userId, {
+      tenantId,
+      nowMs: input.nowMs,
+      seedPermissions: ctx.permissions,
+      seedEmail: ctx.email,
+    });
   }
 
   ctx.positions = grants.positions;
