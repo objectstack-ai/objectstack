@@ -7409,6 +7409,212 @@ const step18: MigrationStep = {
         + '(deployment routing, never identity).',
     },
     {
+      id: 'kernel-event-bus-retention-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the two event-bus retention windows whose name carried no unit: '
+        + 'EventPersistence.retention (kernel/events/handlers.zod.ts) and '
+        + 'EventSourcingConfig.retention (kernel/events/queue.zod.ts)',
+      replacement: 'retentionDays on both — rename each key; both values are unchanged, and so is '
+        + 'the 365 default on EventSourcingConfig',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'What makes these two one entry rather than two is the neighbour they share and the one '
+        + 'they do not. Both hang off EventBusConfig, so an author configuring a bus met the same '
+        + 'bare word twice and had to learn the unit twice; and on EventSourcingConfig the bare '
+        + 'retention sits two keys below snapshotRetention, which is a COUNT of snapshots to keep, '
+        + 'not a span of time. `retention: 365` and `snapshotRetention: 10` read as the same kind '
+        + 'of number and are not. Suffixing the duration separates the families at the authoring '
+        + 'site; snapshotRetention keeps its name, because a count has no unit to carry. Both are '
+        + 'retiredKey() tombstones — neither shape is strict, so a bare deletion would strip in '
+        + 'silence. Why a semantic entry and not a D2 conversion: an EventBusConfig is the event '
+        + 'bus construction argument a host builds in code (stack.zod.ts declares no eventBus key '
+        + 'and no metadata kind is bound to one), so it is never a stack collection member and '
+        + 'never a stored sys_metadata row, and the conversion chain has no seam that would see '
+        + 'one. That is what ruling B prescribes for a key that is not authorable metadata, and '
+        + 'the disposition the epoch-instant renames on this same kernel took '
+        + '(epoch-instant-keys-renamed). #15678, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every EventPersistenceSchema.parse(…) / EventSourcingConfigSchema.parse(…) site and every '
+        + 'literal handed to an event bus spells retentionDays; authoring either old spelling fails '
+        + 'to compile (input type `never`) and fails to parse with the rename prescription. '
+        + 'Behaviour is unchanged in both cases: a bus configured with `retentionDays: 90` keeps '
+        + 'events for ninety days exactly as `retention: 90` did, and a config that omits the key '
+        + 'still gets the 365 default on EventSourcingConfig. The positive-integer bound rides '
+        + 'along with the renamed key, so a zero or negative window is still refused — the pin '
+        + 'covering that in kernel/events.test.ts was moved onto the new spelling rather than '
+        + 'dropped.',
+    },
+    {
+      id: 'kernel-package-lifecycle-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the three package and version lifecycle durations whose name carried no unit: '
+        + 'UpgradePlan.estimatedDuration (kernel/package-upgrade.zod.ts), '
+        + 'PackageDependencyResolutionResult.resolvedIn (kernel/plugin-security.zod.ts) and '
+        + 'MultiVersionSupport.rollout.duration (kernel/plugin-versioning.zod.ts)',
+      replacement: 'estimatedDurationSeconds, resolvedInMs and durationMs — rename each key; every '
+        + 'value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'These three are one entry because they are one story told to one audience — a package '
+        + 'being planned, resolved and rolled out — and because the group is precisely where the '
+        + 'unit SPLITS: estimatedDuration is SECONDS while resolvedIn and rollout.duration are '
+        + 'MILLISECONDS, three adjacent measurements of the same install, two units, none of them '
+        + 'named. A reader who learned the unit from one of these three learned it wrongly for the '
+        + 'other two. The rollout case adds a second confusion of its own: duration sat directly '
+        + 'beside the unit-less percentage, so one block carried a proportion and a span as '
+        + 'indistinguishable bare numbers; percentage keeps its name, because a proportion has no '
+        + 'time unit to carry. All three are retiredKey() tombstones; no shape here is strict, so '
+        + 'a bare deletion would strip in silence. Why a semantic entry and not a D2 conversion: '
+        + 'an UpgradePlan is GENERATED by IPackageService.planUpgrade() before an upgrade runs, a '
+        + 'PackageDependencyResolutionResult is emitted by a resolution run, and MultiVersionSupport '
+        + 'is a version-routing argument a host constructs — none is a stack collection member or '
+        + 'a stored sys_metadata row, so the conversion chain has no seam that would see one. That '
+        + 'is what ruling B prescribes for a key that is not authorable metadata. #15678, #14478, '
+        + 'ADR-0087.',
+      acceptanceCriteria:
+        'Every IPackageService.planUpgrade() implementation returns estimatedDurationSeconds and '
+        + 'every caller reads it under that name; every dependency-resolution producer returns '
+        + 'resolvedInMs; every multi-version rollout literal spells durationMs. Authoring any old '
+        + 'spelling fails to compile (input type `never`) and fails to parse with the rename '
+        + 'prescription. Behaviour is unchanged in every case, and the unit split is the thing to '
+        + 'check by hand rather than by search-and-replace: estimatedDurationSeconds: 120 is two '
+        + 'MINUTES, while durationMs: 3600000 is one HOUR — a mechanical rename that moved a value '
+        + 'between the two would be a thousand-fold error the parse cannot catch, since both '
+        + 'bounds accept any non-negative integer.',
+    },
+    {
+      id: 'kernel-plugin-health-report-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the two plugin health-report metrics whose name carried no unit: '
+        + 'PluginHealthReport.metrics.uptime and PluginHealthReport.metrics.responseTime '
+        + '(kernel/plugin-lifecycle-advanced.zod.ts)',
+      replacement: 'uptimeMs and responseTimeMs — rename each key; both values are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'uptime is the case this rule was written for, and this repo had already paid for it in '
+        + 'documentation: the platform serves a SECONDS-valued uptime on GET /health and stores a '
+        + 'MILLISECONDS-valued uptime on this report, so the protocol lifecycle page carried a '
+        + 'standing paragraph whose whole job was telling the two apart ("metrics.uptime is in '
+        + 'milliseconds, unlike the seconds-valued uptime of GET /health above"). A prose warning '
+        + 'that has to exist is the symptom; the key name is where the fix belongs. responseTime '
+        + 'moves with it because it is a sibling in the same metrics block and because the '
+        + 'identical bare name means HOURS on '
+        + 'PluginSecurityManifest.vulnerabilityDisclosure.responseTime, renamed by this same card. '
+        + 'The other metrics keep their names, deliberately: memoryUsage is bytes, cpuUsage is a '
+        + 'percentage, activeConnections is a count and errorRate is a rate — none is a duration, '
+        + 'and this rule reaches durations only. Both are retiredKey() tombstones inside the live '
+        + 'metrics block, whose siblings must keep parsing. Why a semantic entry and not a D2 '
+        + 'conversion: a health report is EMITTED by the monitor each round '
+        + '(packages/core/src/health-monitor.ts) and kept in memory — never authored into a '
+        + 'metadata document, never a stored sys_metadata row — so the conversion chain has no '
+        + 'seam that would see one, the same disposition HealthStatus.timestamp took '
+        + '(epoch-instant-keys-renamed). #15678, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every producer of a PluginHealthReport spells uptimeMs and responseTimeMs — concretely '
+        + 'packages/core/src/health-monitor.ts, the one production writer, whose metrics block now '
+        + 'reads `uptimeMs: Date.now() - startTime`. Every consumer reading result.metrics?.uptime '
+        + 'moves to result.metrics?.uptimeMs. Authoring either old spelling fails to compile '
+        + '(input type `never`) and fails to parse with the rename prescription. Behaviour is '
+        + 'unchanged: the value is still Date.now() - startTime in milliseconds, and a report that '
+        + 'omits metrics entirely is still valid. ⚠️ Two identically-spelled keys NEARBY are not '
+        + 'part of this and must not be renamed with it: the seconds-valued uptime of the '
+        + 'GET /health response body, and the free-form HealthStatus.details record, which is a '
+        + 'z.record whose contents this rule does not reach.',
+    },
+    {
+      id: 'kernel-plugin-security-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the four plugin-security durations whose name carried no unit: '
+        + 'SandboxConfig.process.timeout, KernelSecurityPolicy.authentication.tokenExpiration, '
+        + 'KernelSecurityPolicy.auditLog.retention and '
+        + 'PluginSecurityManifest.vulnerabilityDisclosure.responseTime '
+        + '(kernel/plugin-security-advanced.zod.ts)',
+      replacement: 'timeoutMs, tokenExpirationSeconds, retentionDays and responseTimeHours — '
+        + 'rename each key; every value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'These four are one entry because they are one document — everything here hangs off a '
+        + 'PluginSecurityManifest — and because together they are this rule\'s clearest case in '
+        + 'the whole spec: FOUR durations on one manifest carried FOUR DIFFERENT units '
+        + '(milliseconds, seconds, days, hours) and not one of them said so in its name. The '
+        + 'sharpest pair is responseTime. On this manifest it means HOURS (how fast a publisher '
+        + 'promises to answer a vulnerability report); on PluginHealthReport.metrics, renamed by '
+        + 'the same card, the identical bare name meant MILLISECONDS. So `responseTime: 24` was a '
+        + 'day on one kernel shape and a fortieth of a second on another, with nothing at the '
+        + 'authoring site to tell them apart. The policy was already inconsistent with itself, '
+        + 'too: its rate-limit window two blocks above tokenExpiration was ALREADY spelled '
+        + 'windowMs, so one security policy carried both conventions. All four are retiredKey() '
+        + 'tombstones inside live blocks whose siblings must keep parsing; no shape here is '
+        + 'strict, so a bare deletion would strip in silence. Why a semantic entry and not a D2 '
+        + 'conversion: a PluginSecurityManifest is a package artifact a publisher ships and a '
+        + 'SandboxConfig is the isolation argument a host constructs, so neither is a stack '
+        + 'collection member or a stored sys_metadata row and the conversion chain has no seam '
+        + 'that would see one. That is what ruling B prescribes for a key that is not authorable '
+        + 'metadata. One key deliberately left alone: RuntimeConfig.resourceLimits.timeout on this '
+        + 'same file names its unit only in the JSDoc above it ("Execution timeout in '
+        + 'milliseconds"), a channel the gate does not read: it reads `.describe()` and '
+        + '`.meta({ description })`, and that key\'s describe ("Maximum execution time") names '
+        + 'none. So the gate lists it among the duration-shaped keys without judging it — neither '
+        + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap is '
+        + '#15939. #15678, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every SandboxConfigSchema.parse(…), KernelSecurityPolicySchema.parse(…) and '
+        + 'PluginSecurityManifestSchema.parse(…) site, and every literal handed to a plugin '
+        + 'sandbox or security manifest, spells the suffixed keys; authoring any old spelling '
+        + 'fails to compile (input type `never`) and fails to parse with the rename prescription. '
+        + 'Behaviour is unchanged in every case: a sandbox given `timeoutMs: 30000` kills a spawned '
+        + 'process after thirty seconds exactly as `timeout: 30000` did, a policy with '
+        + '`tokenExpirationSeconds: 3600` still expires tokens hourly, `retentionDays: 90` still '
+        + 'keeps ninety days of audit log, and `responseTimeHours: 24` still promises a '
+        + 'twenty-four-hour disclosure response. Every integer bound rides along with its renamed '
+        + 'key. Verify the sharp pair explicitly: a manifest and a health report in the same '
+        + 'codebase must now read responseTimeHours and responseTimeMs respectively, and neither '
+        + 'accepts the bare name.',
+    },
+    {
+      id: 'kernel-startup-orchestrator-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the three startup-orchestration durations whose name carried no unit: '
+        + 'StartupOptions.timeout, PluginStartupResult.duration and '
+        + 'StartupOrchestrationResult.totalDuration (kernel/startup-orchestrator.zod.ts)',
+      replacement: 'timeoutMs, durationMs and totalDurationMs — rename each key; every value is '
+        + 'unchanged, and so is the 30000 default on StartupOptions',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'These three are one entry because they are one boundary: a host passes StartupOptions '
+        + 'in, and the orchestrator hands PluginStartupResult and StartupOrchestrationResult back '
+        + 'from the same call. The file already contained its own counter-example — '
+        + 'IStartupOrchestrator.startWithTimeout(plugin, context, timeoutMs) named its parameter '
+        + 'timeoutMs while the options object beside it said timeout, so one contract carried both '
+        + 'conventions and the suffixed one was already the honest half. totalDuration is the sum '
+        + 'of the per-plugin durations, so the two had to move together or the aggregate would '
+        + 'have been spelled unlike its parts. All three are retiredKey() tombstones; none of '
+        + 'these shapes is strict, so a bare deletion would strip in silence. Why a semantic entry '
+        + 'and not a D2 conversion: StartupOptions is a boot-time call argument and the two result '
+        + 'shapes are emitted measurements, so none is ever a stack collection member or a stored '
+        + 'sys_metadata row and the conversion chain has no seam that would see one — the same '
+        + 'disposition HealthStatus.timestamp took on this very file '
+        + '(epoch-instant-keys-renamed), and what ruling B prescribes for a runtime-emitted key. '
+        + '#15678, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Host boot code calling orchestrateStartup(plugins, options) spells timeoutMs; every '
+        + 'implementation that BUILDS a PluginStartupResult spells durationMs and every one that '
+        + 'builds a StartupOrchestrationResult spells totalDurationMs. Authoring any old spelling '
+        + 'fails to compile (input type `never`) and fails to parse with the rename prescription. '
+        + 'Behaviour is unchanged in every case: an orchestrator given `timeoutMs: 5000` waits '
+        + 'five seconds per plugin exactly as `timeout: 5000` did, an omitted key still defaults '
+        + 'to 30000, and the non-negative bounds ride along with the renamed keys so a negative '
+        + 'timeout or a negative duration is still refused. One thing this rename deliberately '
+        + 'does NOT touch: packages/core/src/plugin-loader.ts declares its own local '
+        + 'PluginStartupResult interface — a different type, carrying startTime rather than any '
+        + 'duration key — which is not a reader of this schema and is unchanged.',
+    },
+    {
       id: 'memory-persistence-placeholder-refused',
       surface: 'memory driver config `persistence.path` (file persistence and the `auto` ' +
         'override) and `persistence.key` (localStorage and the `auto` override) — values ' +
@@ -9710,6 +9916,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `${defKey}:${name}` membership per def, never by radiating from a neighbour.
     // See `18.integration__Connector__errorMapping.ts` for the retirement record.
     'integration/DeclarativeConnectorEntry:errorMapping',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `EventPersistence.retention`
+    // said "Days to retain persisted events" in prose and nothing else. Renamed to
+    // `retentionDays`; the value is unchanged. Tombstoned with `retiredKey()`. No
+    // D2 conversion: an `EventPersistence` hangs off `EventBusConfig`, the event
+    // bus's construction argument — never a stack collection member (`stack.zod.ts`
+    // declares no `eventBus` key) and never a stored sys_metadata row, so the
+    // conversion chain has no seam that would see one. The semantic entry
+    // `kernel-event-bus-retention-unit-in-key` carries the prescription.
+    'kernel/EventPersistence:retention',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `EventSourcingConfig.retention`
+    // said "Days to retain events" in prose and nothing else — two keys above the
+    // count-valued `snapshotRetention`, so `retention: 365` and
+    // `snapshotRetention: 10` read as the same kind of number and are not. Renamed
+    // to `retentionDays`; the value is unchanged, and `snapshotRetention` keeps its
+    // name because a count has no unit to carry. Tombstoned with `retiredKey()`.
+    // No D2 conversion, for the reason the sibling `EventPersistence:retention`
+    // entry records; `kernel-event-bus-retention-unit-in-key` is the prescription.
+    'kernel/EventSourcingConfig:retention',
     // #15676 — the epoch-instant half of #14478 ruling B. `HealthStatus.timestamp`
     // is the instant the health check RAN: it moved onto the shared `EpochMs` schema
     // and was renamed `checkedAt`, which also states what the instant marks.
@@ -9794,6 +10018,23 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     //
     // Registered under 18, not 17, for the reason that sibling entry records.
     'kernel/KernelContext:startTime',
+    // #15678 (stack card 3/6 of #14478) — ruling B.
+    // `KernelSecurityPolicy.auditLog.retention` said "Log retention in days" in
+    // prose and nothing else. Renamed to `retentionDays`; the value is unchanged.
+    // Tombstoned with `retiredKey()`. This is the THIRD bare `retention` this card
+    // renames and the second unit-bearing one to land on `retentionDays` — the
+    // spelling is now uniform across the kernel. No D2 conversion; see
+    // `kernel-plugin-security-durations-unit-in-key`.
+    'kernel/KernelSecurityPolicy:auditLog.retention',
+    // #15678 (stack card 3/6 of #14478) — ruling B.
+    // `KernelSecurityPolicy.authentication.tokenExpiration` said "Token expiration
+    // in seconds" in prose and nothing else — on a policy whose rate-limit window
+    // two blocks above was ALREADY spelled `windowMs`, so one policy document
+    // carried both conventions. Renamed to `tokenExpirationSeconds`; the value is
+    // unchanged. Tombstoned with `retiredKey()`. No D2 conversion: a
+    // `KernelSecurityPolicy` is a plugin security manifest's policy block, never a
+    // stack collection member. See `kernel-plugin-security-durations-unit-in-key`.
+    'kernel/KernelSecurityPolicy:authentication.tokenExpiration',
     // #11332 — ADR-0049 enforce-or-remove on the plugin manifest's three dead
     // top-level containers (triage graded 2026-08-23; cloud leg measured clean
     // 2026-08-29 on #12400 with positive controls). The census found ZERO reads
@@ -10123,6 +10364,24 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // through the tombstone (`tsc` + the parse) and the D3 semantic entry
     // `metadata-customization-protocol-retired`.
     'kernel/MetadataPluginConfig:mergeStrategy',
+    // #15678 (stack card 3/6 of #14478) — ruling B.
+    // `MultiVersionSupport.rollout.duration` said "Rollout duration in
+    // milliseconds" in prose and nothing else, directly beside the unit-less
+    // `percentage` — two bare numbers on one block, one a proportion and one a
+    // span. Renamed to `durationMs`; the value is unchanged, and `percentage`
+    // keeps its name because a proportion has no time unit to carry. Tombstoned
+    // with `retiredKey()`. No D2 conversion: `MultiVersionSupport` is a plugin
+    // version-routing configuration a host constructs, never a stack collection
+    // member. See `kernel-package-lifecycle-durations-unit-in-key`.
+    'kernel/MultiVersionSupport:rollout.duration',
+    // #15678 (stack card 3/6 of #14478) — ruling B.
+    // `PackageDependencyResolutionResult.resolvedIn` said "Time taken to resolve
+    // dependencies in milliseconds" in prose and nothing else. Renamed to
+    // `resolvedInMs`; the value is unchanged. Tombstoned with `retiredKey()`. No
+    // D2 conversion: the result is EMITTED by a dependency resolution run, never
+    // authored into a metadata document. See
+    // `kernel-package-lifecycle-durations-unit-in-key`.
+    'kernel/PackageDependencyResolutionResult:resolvedIn',
     // #12032 — ADR-0049 enforce-or-remove, one class over from #12428 (PR #12571)
     // and #12340 (PR #12425) in the same host-driven lifecycle library, and for a
     // sharper reason than either: this key HAD a reader that acted, and what it did
@@ -10282,6 +10541,77 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // registration-time refusal in `PluginHealthMonitor.registerPlugin` is the door
     // for the audience that exists.
     'kernel/PluginHealthCheck:restartBackoff',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `PluginHealthReport.metrics.responseTime`
+    // said "Average response time in ms" in prose and nothing else. Renamed to
+    // `responseTimeMs`; the value is unchanged. Tombstoned with `retiredKey()`.
+    // ⚠️ Not to be confused with `PluginSecurityManifest.vulnerabilityDisclosure.responseTime`,
+    // the identically-named key this same card renames to `responseTimeHours` —
+    // same bare name, different unit, which is the confusion ruling B removes. No
+    // D2 conversion; `kernel-plugin-health-report-durations-unit-in-key` carries
+    // the prescription.
+    'kernel/PluginHealthReport:metrics.responseTime',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `PluginHealthReport.metrics.uptime`
+    // said "Plugin uptime in milliseconds" in prose and nothing else, while this
+    // same platform serves a SECONDS-valued `uptime` on `GET /health` (the protocol
+    // lifecycle page had to spend a paragraph telling the two apart). Renamed to
+    // `uptimeMs`; the value is unchanged. Tombstoned with `retiredKey()` inside the
+    // live `metrics` block — a tombstone whose siblings must keep parsing. No D2
+    // conversion: a health report is emitted by the monitor at runtime
+    // (`packages/core/src/health-monitor.ts`), never authored. See
+    // `kernel-plugin-health-report-durations-unit-in-key`.
+    'kernel/PluginHealthReport:metrics.uptime',
+    // #15678 (stack card 3/6 of #14478) — ruling B.
+    // `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` said "Expected
+    // response time in hours" in prose and nothing else. Renamed to
+    // `responseTimeHours`; the value is unchanged. This is the card's sharpest
+    // case: `PluginHealthReport.metrics.responseTime` carried the SAME bare name
+    // for a MILLISECOND value, so `responseTime: 24` meant a day on one kernel
+    // shape and 24ms on another. Tombstoned with `retiredKey()`. No D2 conversion:
+    // a security manifest is a package artifact a publisher ships, never a stack
+    // collection member. See `kernel-plugin-security-durations-unit-in-key`.
+    'kernel/PluginSecurityManifest:vulnerabilityDisclosure.responseTime',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `PluginStartupResult.duration`
+    // said "Time taken to start the plugin in milliseconds" in prose and nothing
+    // else. Renamed to `durationMs`; the value is unchanged. Tombstoned with
+    // `retiredKey()`. No D2 conversion: the result is EMITTED by the orchestrator
+    // per plugin at boot, never authored.
+    //
+    // ⚠️ Note for anyone grepping: `packages/core/src/plugin-loader.ts` declares
+    // its OWN local `PluginStartupResult` interface — a DIFFERENT type
+    // (`{ success, pluginName, startTime?, error?, timedOut? }`) with no
+    // `duration` key at all. It is not a reader of this schema, it is untouched by
+    // this rename, and the divergence between the two shapes is filed separately.
+    // See `kernel-startup-orchestrator-durations-unit-in-key`.
+    'kernel/PluginStartupResult:duration',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `SandboxConfig.process.timeout`
+    // said "Process timeout in ms" in prose and nothing else. Renamed to
+    // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()` inside
+    // the live `process` block. ⚠️ Note for anyone grepping this file: the
+    // neighbouring `RuntimeConfig.resourceLimits.timeout` is a DIFFERENT key whose
+    // describe names no unit at all, so it is outside the gate's population and is
+    // untouched here. No D2 conversion: a `SandboxConfig` is the isolation
+    // argument a host or a plugin security manifest constructs, never a stack
+    // collection member or a stored row. See
+    // `kernel-plugin-security-durations-unit-in-key`.
+    'kernel/SandboxConfig:process.timeout',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `StartupOptions.timeout` said
+    // "Maximum time in milliseconds to wait for each plugin to start" in prose and
+    // nothing else — while the very contract that consumes it,
+    // `IStartupOrchestrator.startWithTimeout(plugin, context, timeoutMs)`, already
+    // named its own parameter `timeoutMs`. One boundary, two spellings. Renamed to
+    // `timeoutMs`; the value and the 30000 default are unchanged. Tombstoned with
+    // `retiredKey()`. No D2 conversion: `StartupOptions` is the argument a host
+    // passes to `orchestrateStartup()` at boot, never a stack collection member or
+    // a stored row. See `kernel-startup-orchestrator-durations-unit-in-key`.
+    'kernel/StartupOptions:timeout',
+    // #15678 (stack card 3/6 of #14478) — ruling B.
+    // `StartupOrchestrationResult.totalDuration` said "Total time taken for all
+    // plugins in milliseconds" in prose and nothing else. Renamed to
+    // `totalDurationMs`; the value is unchanged, and it now agrees with the
+    // per-plugin `durationMs` it sums. Tombstoned with `retiredKey()`. No D2
+    // conversion: the result is EMITTED at the end of a boot, never authored. See
+    // `kernel-startup-orchestrator-durations-unit-in-key`.
+    'kernel/StartupOrchestrationResult:totalDuration',
     // #11846 — the `TenantRuntimeContextSchema` copy of
     // `kernel/KernelContext:previewMode`: the def is `KernelContextSchema.extend(…)`,
     // so the tombstone lands in this walked shape too and `authorable-surface/`
@@ -10296,6 +10626,15 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // ratchet records the two copies separately, so both are declared here. The
     // `previewMode` retirement registered its two copies the same way.
     'kernel/TenantRuntimeContext:startTime',
+    // #15678 (stack card 3/6 of #14478) — ruling B. `UpgradePlan.estimatedDuration`
+    // said "Estimated upgrade duration in seconds" in prose and nothing else — and
+    // SECONDS is the minority unit in this package, which is exactly why the bare
+    // name misleads. Renamed to `estimatedDurationSeconds`; the value is unchanged.
+    // Tombstoned with `retiredKey()`. No D2 conversion: an `UpgradePlan` is
+    // GENERATED by `IPackageService.planUpgrade()` before an upgrade runs and
+    // carried on the `UpgradeResult`, never authored into a metadata document. The
+    // semantic entry `kernel-package-lifecycle-durations-unit-in-key` carries it.
+    'kernel/UpgradePlan:estimatedDuration',
     // #12497 — the RESPONSE-side face of `security/ObjectPermission:allowPurge`
     // (see that entry for the full rationale: ADR-0049 enforce-or-remove,
     // maintainer ruling 2026-08-26 accepting #1883's recommendation B; the key

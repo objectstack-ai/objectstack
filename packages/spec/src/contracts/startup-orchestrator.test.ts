@@ -17,14 +17,14 @@ describe('Startup Orchestrator Contract', () => {
       const options: StartupOptions = {};
 
       expect(options).toBeDefined();
-      expect(options.timeout).toBeUndefined();
+      expect(options.timeoutMs).toBeUndefined();
       expect(options.rollbackOnFailure).toBeUndefined();
     });
 
     it('parses the input tier into the defaulted StartupOptions tier', () => {
       const parsed: StartupOptionsParsed = StartupOptionsSchema.parse({});
 
-      expect(parsed.timeout).toBe(30000);
+      expect(parsed.timeoutMs).toBe(30000);
       expect(parsed.rollbackOnFailure).toBe(true);
       expect(parsed.healthCheck).toBe(false);
       expect(parsed.parallel).toBe(false);
@@ -32,14 +32,14 @@ describe('Startup Orchestrator Contract', () => {
 
     it('should allow full options', () => {
       const options: StartupOptions = {
-        timeout: 30000,
+        timeoutMs: 30000,
         rollbackOnFailure: true,
         healthCheck: true,
         parallel: false,
         context: { db: 'postgres' },
       };
 
-      expect(options.timeout).toBe(30000);
+      expect(options.timeoutMs).toBe(30000);
       expect(options.rollbackOnFailure).toBe(true);
       expect(options.healthCheck).toBe(true);
       expect(options.parallel).toBe(false);
@@ -78,11 +78,11 @@ describe('Startup Orchestrator Contract', () => {
       const result: PluginStartupResult = {
         plugin,
         success: true,
-        duration: 150,
+        durationMs: 150,
       };
 
       expect(result.success).toBe(true);
-      expect(result.duration).toBe(150);
+      expect(result.durationMs).toBe(150);
       expect(result.error).toBeUndefined();
     });
 
@@ -91,7 +91,7 @@ describe('Startup Orchestrator Contract', () => {
       const result: PluginStartupResult = {
         plugin,
         success: false,
-        duration: 30000,
+        durationMs: 30000,
         // The kernel schema declares the serializable projection, not a live
         // Error instance — what a wire/log consumer of the result can carry.
         error: { name: 'Error', message: 'Timeout' },
@@ -106,7 +106,7 @@ describe('Startup Orchestrator Contract', () => {
       const result: PluginStartupResult = {
         plugin,
         success: true,
-        duration: 50,
+        durationMs: 50,
         health: {
           healthy: true,
           checkedAt: Date.now(),
@@ -125,7 +125,7 @@ describe('Startup Orchestrator Contract', () => {
           return plugins.map((p) => ({
             plugin: p,
             success: true,
-            duration: 10,
+            durationMs: 10,
           }));
         },
         rollback: async (_startedPlugins) => {},
@@ -151,14 +151,14 @@ describe('Startup Orchestrator Contract', () => {
           return pluginList.map((p) => ({
             plugin: p,
             success: true,
-            duration: options.timeout ? 10 : 20,
+            durationMs: options.timeoutMs ? 10 : 20,
           }));
         },
         rollback: async () => {},
         checkHealth: async () => ({ healthy: true, checkedAt: Date.now() }),
       };
 
-      const results = await orchestrator.orchestrateStartup(plugins, { timeout: 5000 });
+      const results = await orchestrator.orchestrateStartup(plugins, { timeoutMs: 5000 });
       expect(results).toHaveLength(2);
       expect(results[0].success).toBe(true);
       expect(results[1].plugin.name).toBe('auth');

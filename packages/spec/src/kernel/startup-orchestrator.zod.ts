@@ -22,7 +22,7 @@ import { z } from 'zod';
  * 
  * @example
  * {
- *   "timeout": 30000,
+ *   "timeoutMs": 30000,
  *   "rollbackOnFailure": true,
  *   "healthCheck": false,
  *   "parallel": false
@@ -36,8 +36,18 @@ export const StartupOptionsSchema = lazySchema(() => z.object({
    * Maximum time (ms) to wait for each plugin to start
    * @default 30000 (30 seconds)
    */
-  timeout: z.number().int().min(0).optional().default(30000)
+  // Renamed from `timeout` (#15678, #14478 ruling B): the unit lived only in the
+  // describe prose. The contract's own `startWithTimeout(plugin, ctx, timeoutMs)`
+  // parameter already spelled it this way.
+  timeoutMs: z.number().int().min(0).optional().default(30000)
     .describe('Maximum time in milliseconds to wait for each plugin to start'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  timeout: retiredKey(
+    '`StartupOptions.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
+  ),
   
   /**
    * Whether to rollback (destroy) already-started plugins on failure
@@ -134,7 +144,7 @@ export type HealthStatus = z.input<typeof HealthStatusSchema>;
  * {
  *   "plugin": { "name": "crm-plugin", "version": "1.0.0" },
  *   "success": true,
- *   "duration": 1250,
+ *   "durationMs": 1250,
  *   "health": {
  *     "healthy": true,
  *     "timestamp": 1706659200000
@@ -158,7 +168,16 @@ export const PluginStartupResultSchema = lazySchema(() => z.object({
   /**
    * Time taken to start (milliseconds)
    */
-  duration: z.number().min(0).describe('Time taken to start the plugin in milliseconds'),
+  // Renamed from `duration` (#15678, #14478 ruling B): the unit lived only in the
+  // describe prose.
+  durationMs: z.number().min(0).describe('Time taken to start the plugin in milliseconds'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  duration: retiredKey(
+    '`PluginStartupResult.duration` was renamed to `durationMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged.',
+  ),
   
   /**
    * Error if startup failed
@@ -189,10 +208,10 @@ export type PluginStartupResult = z.input<typeof PluginStartupResultSchema>;
  * @example
  * {
  *   "results": [
- *     { "plugin": { "name": "plugin1" }, "success": true, "duration": 1200 },
- *     { "plugin": { "name": "plugin2" }, "success": true, "duration": 850 }
+ *     { "plugin": { "name": "plugin1" }, "success": true, "durationMs": 1200 },
+ *     { "plugin": { "name": "plugin2" }, "success": true, "durationMs": 850 }
  *   ],
- *   "totalDuration": 2050,
+ *   "totalDurationMs": 2050,
  *   "allSuccessful": true
  * }
  */
@@ -205,7 +224,16 @@ export const StartupOrchestrationResultSchema = lazySchema(() => z.object({
   /**
    * Total time taken for all plugins (milliseconds)
    */
-  totalDuration: z.number().min(0).describe('Total time taken for all plugins in milliseconds'),
+  // Renamed from `totalDuration` (#15678, #14478 ruling B): the unit lived only
+  // in the describe prose.
+  totalDurationMs: z.number().min(0).describe('Total time taken for all plugins in milliseconds'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  totalDuration: retiredKey(
+    '`StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `totalDurationMs`; the value (milliseconds) is unchanged.',
+  ),
   
   /**
    * Whether all plugins started successfully
