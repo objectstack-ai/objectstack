@@ -278,9 +278,11 @@ describe('assignment value envelope — one notion of malformed (#15137)', () =>
     // Not a path authored metadata can take (both validators and the executor
     // run the schema first); kept so the last layer never silently answers a
     // value if a future caller bypasses the door.
-    const result = ExpressionEngine.evaluate({ dialect: 'cel', ast: { op: 'value' } }, {} as never);
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toContain('AST-only evaluation not yet supported');
+    const result = ExpressionEngine.evaluate({ dialect: 'cel', ast: { op: 'value' } }, {});
+    // `EvalResult` is a discriminated union — `error` exists only on the
+    // `ok: false` arm, so narrow on the discriminant before reading it.
+    if (result.ok) throw new Error('expected the engine to refuse an `ast`-only envelope, got a value');
+    expect(result.error.message).toContain('AST-only evaluation not yet supported');
   });
 
   /**
