@@ -49,8 +49,9 @@
 // Both allowances are DATED and name the change that deletes them, and both are
 // exact in both directions: the day an allowed file is re-pointed, this test
 // fails until its row goes, so an allowance cannot outlive its reason by being
-// forgotten. `validate-chart-bindings.ts` is here because it was another
-// change's hot file on the day this landed, not because its copy is acceptable.
+// forgotten. That is load-bearing, not decoration — `validate-chart-bindings.ts`
+// was carried in both lists for one change, #15741 re-pointed it, and both of
+// its rows came out because this test went red, not because anyone remembered.
 //
 // Scope: `src/*.ts` excluding tests. A coercion inside a test file is a fixture,
 // not a reader, and no tenant stack reaches it.
@@ -92,9 +93,6 @@ const CANONICAL_NAME = 'recordsOf';
  * exists to refuse. Every row is asserted to still be true below.
  */
 const COPY_LEDGER: Readonly<Record<string, string>> = {
-  // 2026-09-05 — #15575's hot file on the day #15636 landed; re-pointed there,
-  // not here, so the two changes do not collide inside the same reader.
-  'validate-chart-bindings.ts': '#15575',
   // 2026-09-05 — the two reference-integrity members #15494 deliberately left
   // walking the RAW array. Their own loop guards each member with `isRec`, so
   // neither ever threw; what the copy buys them is the INDEX, because
@@ -128,16 +126,15 @@ const COPY_LEDGER: Readonly<Record<string, string>> = {
 
 /**
  * The coercions still spelling the array branch unchecked, dated and named by
- * the change that removes each. Two groups, and they differ in what they risk:
- * `validate-chart-bindings.ts` reads `stack.datasets` and its sub-collections
- * straight into a dereference (#15636's own defect, deferred only because the
- * file was #15575's), while the four page walks are unchecked at the coercion
- * and guarded at the call site, so a junk member costs them nothing today. Both
- * are copies of a predicate that has a home; neither may grow a sibling.
+ * the change that removes each. What remains is unchecked at the COERCION and
+ * guarded at the CALL SITE — the two reference-integrity members re-test every
+ * member with `isRec` inside their loop, and the four page walks skip on
+ * `if (!page) continue` three lines down — so a junk member costs none of them
+ * anything today. That is a guard standing somewhere the reader does not
+ * promise it, which is why they are allowed rather than accepted: each is still
+ * a copy of a predicate that has a home, and none may grow a sibling.
  */
 const UNGUARDED_ALLOWANCE: Readonly<Record<string, string>> = {
-  // 2026-09-05 — removed by #15575.
-  'validate-chart-bindings.ts': '#15575',
   // 2026-09-05 — removed by #15740, which needs an index-preserving reader
   // first; both guard every member with `isRec` at the call site.
   'validate-object-field-refs.ts': '#15740',
