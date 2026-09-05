@@ -3439,7 +3439,12 @@ describe('AuthManager', () => {
     // platform admin (a sys_user_permission_set row pointing at the
     // admin_full_access permission set with no organization scope).
     const makeDataEngine = (opts: { platformAdmin: boolean }) => ({
-      find: vi.fn(async (object: string) => {
+      // Two parameters because the seam has two: `IDataEngine.find(objectName,
+      // query?, options?)`, and every production read reaching this double goes
+      // through `resolve-authz-context.ts` `tryFind`, which always calls
+      // `ql.find(object, { where, limit, context })`. Declaring one parameter
+      // would force a delegating override to drop an argument the seam passes.
+      find: vi.fn(async (object: string, _query?: any) => {
         if (object === 'sys_user_permission_set') {
           return opts.platformAdmin
             ? [{ user_id: 'u-1', permission_set_id: 'ps-admin', organization_id: null }]
@@ -3474,50 +3479,83 @@ describe('AuthManager', () => {
       return plugin._fn as (input: { user: any; session: any }) => Promise<any>;
     };
 
-    it('returns positions=[] for a regular user with no stored role', async () => {
+    // [#15136 — maintainer ruling 2026-09-05, option A] These four cases used to
+    // pin the OPPOSITE contract: that the better-auth `sys_user.role` scalar,
+    // split on commas, WAS `positions[]`. That is the derivation the ruling
+    // removed — `positions[]` is the security axis on every surface — so they
+    // are migrated fixtures, not evidence against it. Each one now asserts the
+    // scalar is ABSENT from the array while remaining untouched on the payload,
+    // which is the half of ADR-0068 D2 that did not change.
+    it('carries the ADR-0090 D5 `everyone` anchor for a regular user with no stored role', async () => {
       const callback = await getSessionCallback(makeDataEngine({ platformAdmin: false }));
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com' },
         session: {},
       });
       expect(result.user.role).toBeUndefined();
-      expect(result.user.positions).toEqual([]);
+      expect(result.user.positions).toEqual(['everyone']);
     });
 
-    it('splits a stored role string into positions for a non-admin user', async () => {
+    it('does NOT project the stored role scalar into positions[]', async () => {
       const callback = await getSessionCallback(makeDataEngine({ platformAdmin: false }));
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'manager' },
         session: {},
       });
-      // No promotion: `role` keeps its stored value.
+      // The scalar keeps its stored value — it is simply not an authorization
+      // axis, so it no longer appears in the array authored predicates read.
       expect(result.user.role).toBe('manager');
-      expect(result.user.positions).toEqual(['manager']);
+      expect(result.user.positions).not.toContain('manager');
+      expect(result.user.positions).toEqual(['everyone']);
     });
 
-    it('appends platform_admin to positions[] without overwriting role when promoting a platform admin', async () => {
+    it('derives platform_admin without overwriting role and without the scalar', async () => {
       const callback = await getSessionCallback(makeDataEngine({ platformAdmin: true }));
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'manager' },
         session: {},
       });
       // ADR-0068: NO `role:'admin'` overwrite footgun. The deprecated scalar
-      // keeps its stored value; the canonical platform_admin identity is added
-      // to roles[], and isPlatformAdmin is a derived alias.
+      // keeps its stored value; the canonical platform_admin identity is on
+      // positions[], and isPlatformAdmin is a derived alias of it.
       expect(result.user.role).toBe('manager');
-      expect(result.user.positions).toEqual(['manager', 'platform_admin']);
+      expect(result.user.positions).toContain('platform_admin');
+      expect(result.user.positions).not.toContain('manager');
       expect(result.user.isPlatformAdmin).toBe(true);
     });
 
-    it('splits a multi-token stored role and appends platform_admin without duplicates', async () => {
+    it('ignores a multi-token stored role entirely while still deriving platform_admin', async () => {
       const callback = await getSessionCallback(makeDataEngine({ platformAdmin: true }));
       const result = await callback({
         user: { id: 'u-1', email: 'a@b.com', role: 'admin,manager' },
         session: {},
       });
       expect(result.user.role).toBe('admin,manager');
-      expect(result.user.positions).toEqual(['admin', 'manager', 'platform_admin']);
+      expect(result.user.positions).toContain('platform_admin');
+      for (const token of ['admin', 'manager']) {
+        expect(result.user.positions).not.toContain(token);
+      }
       expect(result.user.isPlatformAdmin).toBe(true);
+    });
+
+    it('carries an ADR-0057 D4 `sys_user_position` assignment — the axis the payload was missing', async () => {
+      const engine = makeDataEngine({ platformAdmin: false });
+      const inner = engine.find;
+      engine.find = vi.fn(async (object: string, q?: any) => {
+        if (object === 'sys_user_position') {
+          return [{ user_id: 'u-1', position: 'demo_reviewer', organization_id: null }];
+        }
+        return inner(object, q);
+      }) as any;
+
+      const callback = await getSessionCallback(engine);
+      const result = await callback({
+        user: { id: 'u-1', email: 'a@b.com', role: 'manager' },
+        session: {},
+      });
+      expect(result.user.positions).toContain('demo_reviewer');
+      // Still not the scalar — the two axes do not blend.
+      expect(result.user.positions).not.toContain('manager');
     });
 
     it('returns the payload untouched when the user has no id', async () => {
