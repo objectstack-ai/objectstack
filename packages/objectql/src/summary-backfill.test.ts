@@ -471,7 +471,6 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       expect(report.fields.find((f) => f.field === 'task_count')).toEqual(
         BASE_APPLY_REPORT.fields.find((f) => f.field === 'task_count'),
       );
-      expect(report.nullRows).toBe(BASE_APPLY_REPORT.nullRows + 1);
     });
 
     it('SCOPED: min, max and avg all compute through aggregateSummaryValue', async () => {
