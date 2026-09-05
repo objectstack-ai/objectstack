@@ -301,7 +301,9 @@ deriving it from this page.
 
 #### `INVALID_FIELD`
 **HTTP Status:** 400  
-**Meaning:** Field value has wrong type
+**Meaning:** A field name in the request does not exist on the target object — a name that
+resolves to nothing, not a value of the wrong type. On a list read it also covers an
+unreserved query parameter, which `GET /data/:object` reads as a field filter.
 
 **Example:**
 ```json
@@ -309,16 +311,19 @@ deriving it from this page.
   "success": false,
   "error": {
     "code": "INVALID_FIELD",
-    "message": "Field 'age' must be a number",
+    "message": "Unknown field 'age' on object 'contact'",
     "details": {
       "field": "age",
-      "expected_type": "number",
-      "actual_type": "string",
-      "value": "twenty-five"
+      "object": "contact"
     }
   }
 }
 ```
+
+The [error catalog's `INVALID_FIELD` entry](/docs/api/error-catalog#invalid_field) carries
+the authoritative cause text — it enumerates every read axis this one code answers on
+(`select`, `expand`, `searchFields`, `groupBy`, `aggregations[].field`) and the
+off-request `backfillSummaryNulls` case.
 
 ### Resource Errors
 
