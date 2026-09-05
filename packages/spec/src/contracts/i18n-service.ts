@@ -47,6 +47,13 @@ export interface II18nService {
 
     /**
      * Get the current default locale
+     *
+     * [#15711] Also the language the deployment's metadata labels are
+     * authored in: the serving layer threads it into the document
+     * translators' `ResolveOptions.defaultLocale` (`@objectstack/spec/system`),
+     * so a request for the default locale answers with the authored label
+     * instead of walking the declared fallback chain — the authored label IS
+     * the default locale's text. Absent, no request is treated as the default.
      * @returns BCP-47 locale code
      */
     getDefaultLocale?(): string;
@@ -80,7 +87,9 @@ export interface II18nService {
      * second. `undefined` means NOTHING was declared — a provider that has no
      * fallback of its own omits the method or answers `undefined`, and the
      * serving layer then leaves the resolver's own default in place rather
-     * than inventing a chain.
+     * than inventing a chain. [#15711] That default is `[]` (requested
+     * locale, then the authored label), and a request for
+     * {@link getDefaultLocale} never walks this chain at all.
      *
      * @returns BCP-47 locale code, or `undefined` when no fallback is declared
      */
