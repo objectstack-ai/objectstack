@@ -2243,6 +2243,8 @@ const ObjectSchemaBase = strictObject(
    * provided, the plugin allows `link_only` audience + `view` permission
    * (the safest combination — caller still needs the URL to access).
    *
+   * @see {@link isPublicSharingEnabled} — the ONE reading of `enabled`,
+   *      exported below beside this declaration.
    * @see packages/plugins/plugin-sharing/src/share-link-service.ts
    */
   publicSharing: strictObject({
@@ -2367,6 +2369,37 @@ const ObjectSchemaBase = strictObject(
   // `create()`'s unknown-key walk are untouched; see the helper's docblock.
   refuseForeignTreeReference(object.name, object.fields, ctx);
 });
+
+/**
+ * [#14935] Is `publicSharing` switched ON for this object schema?
+ *
+ * The ONE reading of the standing switch declared in the `publicSharing` block
+ * above, exported here beside the declaration so that every surface gating on
+ * it asks the same question. Two packages read it today — the share-link
+ * service and the route probe above it (`@objectstack/plugin-sharing`), and the
+ * `/share-links` dispatcher domain (`@objectstack/runtime`) — and the second
+ * carried a documented copy of this expression, because the plugin is only a
+ * DEV dependency of the runtime. That copy was never structurally forced: both
+ * packages already depend on THIS one, so the shared home existed all along.
+ * One policy read spelled twice, held equal by a comment and by two pins, is a
+ * contract defect even while the two spellings agree.
+ *
+ * Fail-CLOSED, and the three unreadable cases are ONE answer, `false`: an absent
+ * `publicSharing` block, an absent schema, and an engine that cannot answer
+ * `getSchema` at all. `enabled` defaults to off, so a surface that cannot read
+ * the policy must refuse rather than answer from the share-link row — a
+ * distinguishable "sharing is off for this object" is an existence oracle for a
+ * caller holding nothing but a token. Only the boolean `true` enables: the
+ * strict comparison is deliberate, so a truthy `'true'` or `1` that never went
+ * through this schema does not publish records.
+ *
+ * The same shape as {@link isTenancyDisabled} — an object posture the spec owns
+ * precisely because more than one package must not re-derive it independently.
+ */
+export function isPublicSharingEnabled(schema: unknown): boolean {
+  return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
+    ?.publicSharing?.enabled === true;
+}
 
 /**
  * Converts a snake_case name to a human-readable Title Case label.
