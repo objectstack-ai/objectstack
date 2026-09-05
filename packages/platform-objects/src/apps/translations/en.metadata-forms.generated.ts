@@ -120,6 +120,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Min Length",
         helpText: "Min characters"
       },
+      "fields.valueDomain": {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+      },
       "fields.rows": {
         label: "Rows",
         helpText: "Inline editor height (text rows)"
@@ -383,6 +387,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       maxLength: {
         label: "Max Length",
         helpText: "Maximum character length"
+      },
+      valueDomain: {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
       },
       rows: {
         label: "Rows",
@@ -932,7 +940,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       gap: {
         label: "Gap",
-        helpText: "Grid gap (Tailwind units)"
+        helpText: "Space between widgets, in steps of 0.25rem (4 = 1rem)"
       },
       refreshInterval: {
         label: "Refresh Interval",

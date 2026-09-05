@@ -48,6 +48,7 @@
     "check:docs-single-h1": "node scripts/check-docs-single-h1.mjs --self-test && node scripts/check-docs-single-h1.mjs",
     "check:docs-audit-scope": "node scripts/docs-audit/affected-docs.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs --self-test && node scripts/docs-audit/check-audit-scope.mjs",
     "check:docs-redirects": "node scripts/check-docs-redirects.mjs --self-test && node scripts/check-docs-redirects.mjs",
+    "check:docs-transcript-drift": "node scripts/docs-audit/check-docs-transcript-drift.mjs --self-test && node scripts/docs-audit/check-docs-transcript-drift.mjs",
     "check:docs-locale-catch-all": "node scripts/check-docs-locale-catch-all.mjs --self-test && node scripts/check-docs-locale-catch-all.mjs",
     "check:docs-image-tag": "node scripts/check-docs-image-tag.mjs --self-test && node scripts/check-docs-image-tag.mjs",
     "check:docs-image-tag-sync": "node scripts/sync-docs-image-tags.mjs --self-test",
@@ -91,6 +92,7 @@
     "check:cli-test-child-env": "node scripts/check-cli-test-child-env.mjs --self-test && node scripts/check-cli-test-child-env.mjs",
     "check:vendor-version-stamps": "node scripts/check-vendor-version-stamps.mjs --self-test && node scripts/check-vendor-version-stamps.mjs",
     "check:cli-command-ids": "node scripts/check-cli-command-ids.mjs --self-test && node scripts/check-cli-command-ids.mjs",
+    "check:cli-examples-parity": "node scripts/check-cli-examples-parity.mjs --self-test && node scripts/check-cli-examples-parity.mjs",
     "check:authz-resolver": "node scripts/check-single-authz-resolver.mjs --self-test && node scripts/check-single-authz-resolver.mjs",
     "check:slot-lookup": "node scripts/check-slot-lookup-ratchet.mjs --self-test && node scripts/check-slot-lookup-ratchet.mjs",
     "check:query-options-erasure": "node scripts/check-query-options-erasure-ratchet.mjs --self-test && node scripts/check-query-options-erasure-ratchet.mjs",
@@ -134,6 +136,7 @@
     "check:examples-live-imports": "node scripts/check-examples-live-imports.mjs --self-test && node scripts/check-examples-live-imports.mjs",
     "examples:live-imports": "node scripts/check-examples-live-imports.mjs --list",
     "check:test-source-alias": "node scripts/check-test-source-alias.mjs --self-test && node scripts/check-test-source-alias.mjs",
+    "check:registry-log-declared": "node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs",
     "check:refd-timer-probe": "node scripts/check-refd-timer-probe.mjs --self-test && node scripts/check-refd-timer-probe.mjs",
     "check:type-source-resolution": "node scripts/check-type-source-resolution.mjs --self-test && node scripts/check-type-source-resolution.mjs",
     "check:undeclared-dep-imports": "node scripts/check-undeclared-dep-imports.mjs --self-test && node scripts/check-undeclared-dep-imports.mjs",
@@ -142,6 +145,7 @@
     "check:published-readme-exports": "node scripts/check-published-readme-exports.mjs --self-test && node scripts/check-published-readme-exports.mjs",
     "check:published-readme-links": "node scripts/check-published-readme-links.mjs --self-test && node scripts/check-published-readme-links.mjs",
     "check:dual-build-cjs-loads": "node scripts/check-dual-build-cjs-loads.mjs --self-test && node scripts/check-dual-build-cjs-loads.mjs",
+    "check:dts-closure": "node scripts/check-dts-closure.mjs --self-test && node scripts/check-dts-closure.mjs",
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
     "check:type-check-debt": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs --re-measure",
     "check:driver-conformance": "node scripts/check-driver-conformance.mjs --self-test && node scripts/check-driver-conformance.mjs",
@@ -157,7 +161,9 @@
     "check:stall-guard-headroom": "node scripts/measure-stall-guard-headroom.mjs --self-test",
     "check:swallow-census-controls": "node scripts/measure-durability-swallow-family.mjs --self-test=gated",
     "gen:system-context-census": "node scripts/check-system-context-census.mjs --fix",
-    "check:system-context-census": "node scripts/check-system-context-census.mjs --self-test && node scripts/check-system-context-census.mjs"
+    "check:system-context-census": "node scripts/check-system-context-census.mjs --self-test && node scripts/check-system-context-census.mjs",
+    "gen:platform-object-tenancy-census": "node scripts/platform-object-tenancy-census.mjs --write",
+    "check:platform-object-tenancy-census": "node scripts/check-platform-object-tenancy-census.mjs --self-test && node scripts/check-platform-object-tenancy-census.mjs"
   },
   "keywords": [
     "objectstack",

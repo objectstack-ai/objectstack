@@ -345,12 +345,12 @@ export const NON_READ_ANCHORS = [
   {
     file: 'packages/plugins/plugin-sharing/src/sharing-service.ts',
     needle: "if (row.source != null && row.source !== 'manual') {",
-    why: 'row 33 -- the CONFLICT guard `revoke()` deletes in front of',
+    why: 'row 34 -- the CONFLICT guard `revoke()` deletes in front of',
   },
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
     needle: 'stampSystemInsertOwner(fields, dataCtx, data, objectName);',
-    why: 'row 59 -- the call site of the compensating owner stamp',
+    why: 'row 60 -- the call site of the compensating owner stamp',
   },
   {
     file: 'packages/objectql/src/registry.ts',

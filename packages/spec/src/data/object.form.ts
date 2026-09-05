@@ -1,6 +1,25 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { defineForm } from '../ui/view.zod';
+import { ValueDomainSchema, type ValueDomain } from '../shared/value-domain.zod';
+
+/**
+ * The `valueDomain` control's choices, DERIVED from the closed vocabulary
+ * (#14168). The labels are a `Record` over the union, so a member added to
+ * `ValueDomainSchema` without a label here fails to compile rather than
+ * silently reaching Studio as a machine word — the same exhaustiveness the
+ * membership table beside the schema uses.
+ */
+const VALUE_DOMAIN_LABELS: Readonly<Record<ValueDomain, string>> = {
+  iana_time_zone: 'IANA time zone',
+  iso_4217_currency: 'ISO 4217 currency code',
+  iso_3166_alpha2: 'ISO 3166-1 alpha-2 country code',
+};
+
+const VALUE_DOMAIN_OPTIONS = ValueDomainSchema.options.map((value) => ({
+  label: VALUE_DOMAIN_LABELS[value],
+  value,
+}));
 
 /**
  * Form Layout for Object Metadata Type
@@ -134,6 +153,22 @@ export const objectForm = defineForm({
             // to stop at 9 types (`code` was the one it was missing); it moves
             // with the set, exactly like the row above.
             { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']" },
+            // #14168 (maintainer ruling 2026-09-02, option A) — `valueDomain`
+            // is shown for exactly the types the schema accepts it on
+            // (VALUE_DOMAIN_FIELD_TYPES in field.zod.ts — `text` alone); this
+            // visibleWhen moves with the set, and the offered choices are
+            // DERIVED from the vocabulary rather than re-typed here, so this
+            // control cannot become a second opinion on what the closed
+            // vocabulary is (the #12017 two-copies shape). Shown in the same
+            // stroke that the write path starts refusing a non-member and the
+            // liveness row flips `live` — declared = enforced = shown.
+            {
+              field: 'valueDomain',
+              type: 'select',
+              helpText: 'Standard the written value must belong to; a write carrying a non-member is refused',
+              visibleWhen: "data.type in ['text']",
+              options: VALUE_DOMAIN_OPTIONS,
+            },
             // objectui#6140 (maintainer ruling 2026-08-25, Option A) — `rows`
             // is shown for exactly the multiline editor types the schema
             // accepts it on (MULTILINE_EDITOR_FIELD_TYPES in field.zod.ts);

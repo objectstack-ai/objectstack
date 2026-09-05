@@ -33,7 +33,7 @@ const result = DashboardSchema.parse(data);
 | **header** | `{ showTitle: boolean; showDescription: boolean; actions?: object[] }` | optional | Dashboard header configuration |
 | **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
-| **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
+| **gap** | `integer` | optional | Space between widgets, in steps of 0.25rem (4 = 1rem) |
 | **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
 | **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
 | **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |

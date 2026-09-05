@@ -9,6 +9,13 @@ import { SCOPE_ROOTS } from '@objectstack/formula';
 import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
+// [#15137] The published refusal sentence a `value`-slot finding must lead
+// with — asserted from the spec's own export, never re-spelled in a test.
+import {
+  ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
+  PREDICATE_SLOT_STRING_REFUSAL,
+  STRUCTURAL_CONDITION_SHAPE_REFUSAL,
+} from '@objectstack/spec/automation';
 
 import {
   validateStackExpressions,
@@ -2114,6 +2121,69 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues.filter(i => i.where.includes('conditions'))).toHaveLength(0);
     });
 
+    /**
+     * [#15572] The same slot, authored as a CEL **envelope** rather than as the
+     * bare CEL text it is declared to hold (`DecisionConditionSchema.expression`
+     * is `z.string()`). Before this, `objectstack validate` reported nothing:
+     * the ledger's `predicate` arm emitted strings only, skipping the envelope
+     * as "a type violation for the schema pass to report" — and `decision`
+     * publishes no descriptor `configSchema`, so no schema pass ever ran.
+     *
+     * ⚠️ Read the RED CONTROL below before trusting any zero here. The reading
+     * this card was filed on used a second envelope as its control — a control
+     * that could itself have been the answer, which makes it no control at all
+     * — so this test drives a form that DOES report (the brace-trap string, on
+     * this very slot, through this very call) in the same run as the forms
+     * under test. Without it, a harness that reached the slot and a harness
+     * that reached nothing would read identically.
+     */
+    describe('a predicate slot authored as an expression envelope (#15572)', () => {
+      const atSlot = (expression: unknown) =>
+        validateStackExpressions(decisionFlow(expression as string))
+          .filter(i => i.where.includes('conditions[0].expression'));
+
+      it('RED CONTROL — the brace-trap string on this slot still reports', () => {
+        // Not an envelope, so it cannot be "the answer" to what is being
+        // measured; it proves only that this call reaches this slot and can
+        // emit. If this ever goes to zero, every zero below is void.
+        const control = atSlot("{lead_record.status} == 'converted'");
+        expect(control).toHaveLength(1);
+        expect(control[0].severity).toBe('error');
+        expect(control[0].message).toContain('template brace');
+      });
+
+      it('reports a `{ dialect, source }` envelope, whatever the source says', () => {
+        for (const envelope of [
+          { dialect: 'cel', source: '   ' },            // the silent-`false` shape
+          { dialect: 'cel', source: 'rows.map(r,' },    // the throwing shape
+          { dialect: 'cel', ast: { kind: 'const' } },   // no `source` at all
+        ]) {
+          const found = atSlot(envelope);
+          expect(found).toHaveLength(1);
+          expect(found[0].severity).toBe('error');
+          expect(found[0].message.startsWith(PREDICATE_SLOT_STRING_REFUSAL)).toBe(true);
+          expect(found[0].where).toContain('decision branch expression');
+        }
+      });
+
+      it('attributes the finding to the envelope’s own source when it has one', () => {
+        expect(atSlot({ dialect: 'cel', source: 'rows.map(r,' })[0].source).toBe('rows.map(r,');
+        expect(atSlot({ dialect: 'cel', ast: { kind: 'const' } })[0].source).toBe('');
+      });
+
+      it('reports every other non-string on the same rule, naming what it found', () => {
+        expect(atSlot(42)[0].message).toContain('Found a number');
+        expect(atSlot(['a > 1'])[0].message).toContain('Found an array');
+      });
+
+      it('leaves string predicates alone — including the whitespace-only one', () => {
+        // The card states this boundary explicitly so nobody "fixes" it: a
+        // whitespace-only STRING is "not authored" on both sides and stays so.
+        expect(atSlot('   ')).toHaveLength(0);
+        expect(atSlot("lead_record.status == 'converted'")).toHaveLength(0);
+      });
+    });
+
     it('leaves a correct single-brace loop collection alone', () => {
       // `loop.collection` is the single-brace `{var}` flow-interpolation dialect,
       // where braces are CORRECT. It is recorded in the ledger as `flow-template`
@@ -2842,6 +2912,17 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // here would have been excused into masking a genuine
       // `validations[].message` read.
       'verdict', 'diagnostic',
+      // [#15137] The Zod `safeParse` result for a `value`-slot envelope. Its
+      // keys are `success` / `error`, SafeParseResult's own — never metadata
+      // keys; the metadata keys it judges are `AssignmentValueSchema`'s, read
+      // by the schema and not by name here.
+      'shape',
+      // [#15572] The spec's shared refusal for a non-string in a predicate
+      // slot. Its keys are that helper's own `{ message, source }` — never
+      // metadata keys — and it is named to stay clear of the `message` /
+      // `source` receivers for the reason the entry above it records: a local
+      // called `message` here would be excused into masking a genuine read.
+      'shapeRefusal',
       // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
       // import specifier, which this scan cannot tell from `scope.j…`. The two
       // entries above it in this set (`fields`, `guards`) are the same artefact
@@ -3619,5 +3700,223 @@ describe('cross-site unprovisioned-anchor convergence (#8405)', () => {
       expect(text).toContain('ADR-0015');
       expect(text.toLowerCase()).toContain('storage');
     }
+  });
+});
+
+
+/**
+ * ── `assignment` value envelopes (#15137) ───────────────────────────────────
+ *
+ * The `objectstack validate` half of the executor card: the ledger's `value`
+ * role (`assignment.assignments.*`, #14149) reaches this pass as a LOCATED
+ * finding at `error` severity, matching what `registerFlow` throws on. Build
+ * and run time must agree about which flows are acceptable — a build that
+ * passes what registration refuses is the worst of both.
+ *
+ * The refusal notion is not re-derived here: `checkDeclaredValue` composes the
+ * same two published primitives the engine does, in the same order.
+ */
+describe('assignment value envelope — located findings (#15137)', () => {
+  const assignmentFlow = (assignments: unknown) => ({
+    flows: [{
+      name: 'nightly_digest',
+      nodes: [
+        { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+        { id: 'set_1', type: 'assignment', config: { assignments } },
+      ],
+      edges: [],
+    }],
+  });
+  const valueIssues = (assignments: unknown) =>
+    validateStackExpressions(assignmentFlow(assignments)).filter((i) => i.where.includes('assignment value'));
+
+  it.each([
+    ['no `source` — the shape only the spec schema catches', { dialect: 'cel' }],
+    ['an empty `source`', { dialect: 'cel', source: '' }],
+    ['a non-`cel` dialect', { dialect: 'template', source: 'Hello {name}' }],
+    ['CEL that does not parse', { dialect: 'cel', source: 'rows.map(r,' }],
+    ['an unknown function', { dialect: 'cel', source: 'nosuchfn(rows)' }],
+  ] as const)('reports %s, located at the author\'s own variable name', (_label, envelope) => {
+    const issues = valueIssues({ digest: envelope });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('error');
+    expect(issues[0]!.where).toContain("flow 'nightly_digest'");
+    expect(issues[0]!.where).toContain("node 'set_1'");
+    // The `*` wildcard resolves to the variable the author named, so the
+    // finding points at the assignment, not at "somewhere in this node".
+    expect(issues[0]!.where).toContain('config.assignments.digest');
+    expect(issues[0]!.message).toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+  });
+
+  it('passes a well-formed envelope, and every shape that is not an envelope', () => {
+    expect(valueIssues({
+      digest: { dialect: 'cel', source: 'joinNonEmpty(rows.map(r, r.subject), "\\n")' },
+      greeting: 'Hello {name}',
+      count: 3,
+      flags: { enabled: true },
+      // Envelope-SHAPED only by a non-string dialect — data, not an expression.
+      decoy: { dialect: 7, source: 'x' },
+    })).toHaveLength(0);
+  });
+
+  it('is silent on a whitespace-only `source` — the seam this pass cannot see (#15430)', () => {
+    // `ExpressionSchema.source` is `z.string().min(1)`, so `'   '` passes the
+    // shape rule, and `validateExpression` trims it to empty and answers
+    // `ok: true` ("not authored"). Build says nothing; the CEL engine parses it
+    // untrimmed and the run faults loudly (pinned in `service-automation`'s
+    // `assignment-value-envelope.test.ts`). Pinned as the BOUND of the
+    // build/run agreement, not as desired behaviour — ⛔ do not close it with a
+    // trim rule invented here: that is a third notion of "malformed", which is
+    // the defect this arm exists to avoid. The fix belongs in the shape rule.
+    expect(valueIssues({ digest: { dialect: 'cel', source: '   ' } })).toHaveLength(0);
+  });
+
+  it('says nothing about the legacy array form — it is not a declared slot', () => {
+    // The seat's ask-3 disposition, from the lint side: refusing the array form
+    // would fail builds that pass today, and that refusal is a ruling rather
+    // than a lane's call. The ledger's `*` walk returns early on an array, so
+    // there is no wiring to leave out.
+    expect(valueIssues([{ variable: 'digest', value: { dialect: 'cel' } }])).toHaveLength(0);
+  });
+
+  it('a value envelope is not shadow-checked — that diagnostic is about field reads', () => {
+    // `warnShadowedFieldReads` stays on `predicate` slots: a value envelope is
+    // evaluated in the flow-variable scope by design, so there is no field
+    // reading for a variable to displace.
+    const issues = validateStackExpressions({
+      objects: [{ name: 'crm_lead', fields: { status: { type: 'text' } } }],
+      flows: [{
+        name: 'nightly_digest',
+        variables: [{ name: 'status', type: 'text' }],
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'set_1', type: 'assignment', config: { assignments: { digest: { dialect: 'cel', source: 'status' } } } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(issues.filter((i) => i.where.includes('assignment value'))).toHaveLength(0);
+  });
+});
+
+/**
+ * [#15662] The STRUCTURAL condition arm at author time — `objectstack
+ * validate`'s half of the refusal `registerFlow` throws.
+ *
+ * The gap: `evaluateCondition` reads its source as
+ * `typeof expression === 'string' ? expression : (expression?.source ?? '')`,
+ * so a value that is neither a string nor envelope-shaped lands in the
+ * empty-source arm and returns a silent `false`. Measured on `main`: `42`,
+ * `true` and `['a']` at a node's `config.condition` registered clean and ran
+ * `success: true` with nothing reported anywhere — on the same key the start
+ * node's TRIGGER GATE is read from.
+ *
+ * ⚠️ The rule is deliberately NOT `PREDICATE_SLOT_STRING_REFUSAL`. That arm's
+ * slots are declared `z.string()`; these are not. `FlowEdgeSchema.condition` is
+ * `ExpressionInputSchema`, so an envelope is a first-class authored spelling
+ * here, and a node's open `z.record` config passes one through verbatim. The
+ * controls below are those two shapes staying green.
+ */
+describe('structural condition shape (#15662)', () => {
+  const objects = [
+    { name: 'crm_lead', fields: { rating: { type: 'number' }, status: { type: 'text' } } },
+  ];
+
+  const flowWith = (opts: { startCondition?: unknown; decisionCondition?: unknown; edgeCondition?: unknown }) => ({
+    objects,
+    flows: [{
+      name: 'gate_flow',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: {
+            objectName: 'crm_lead',
+            ...('startCondition' in opts ? { condition: opts.startCondition } : {}),
+          },
+        },
+        {
+          id: 'branch', type: 'decision',
+          config: { ...('decisionCondition' in opts ? { condition: opts.decisionCondition } : {}) },
+        },
+      ],
+      edges: [{
+        id: 'e1', source: 'start', target: 'branch',
+        ...('edgeCondition' in opts ? { condition: opts.edgeCondition } : {}),
+      }],
+    }],
+  });
+
+  const condIssues = (opts: Parameters<typeof flowWith>[0], site: string) =>
+    validateStackExpressions(flowWith(opts)).filter((i) => i.where.includes(site));
+
+  it('RED CONTROL — the brace-trap string on this very arm still reports', () => {
+    // Not a shape violation, so it cannot be "the answer" to what is measured
+    // below; it proves this call reaches this slot and can emit. If it ever
+    // goes to zero, every zero in this block is void.
+    const control = condIssues({ decisionCondition: '{record.rating} >= 4' }, "node 'branch'");
+    expect(control).toHaveLength(1);
+    expect(control[0].severity).toBe('error');
+    expect(control[0].message).toContain('template brace');
+  });
+
+  it('reports every measured silent value on a node condition, naming what it found', () => {
+    for (const [value, found] of [[42, 'Found a number'], [true, 'Found a boolean'], [['a'], 'Found an array']] as const) {
+      const issues = condIssues({ decisionCondition: value }, "node 'branch'");
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+      expect(issues[0].message).toContain(found);
+      expect(issues[0].where).toContain("flow 'gate_flow'");
+    }
+  });
+
+  it('reports the same on the START node trigger gate', () => {
+    const issues = condIssues({ startCondition: 42 }, "node 'start'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+  });
+
+  it('reports the same on an edge condition', () => {
+    const issues = condIssues({ edgeCondition: ['a'] }, "edge 'e1'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+  });
+
+  it('refuses an object that is neither text nor an expression', () => {
+    const issues = condIssues({ decisionCondition: { source: 1 } }, "node 'branch'");
+    expect(issues).toHaveLength(1);
+    expect(issues[0].message).toContain('neither a string `source` nor an `ast`');
+    // A non-string `source` is what is being refused, so it is never the
+    // attribution.
+    expect(issues[0].source).toBe('');
+  });
+
+  it('refuses ONCE — the value-reading passes do not re-report it as an empty condition', () => {
+    expect(condIssues({ decisionCondition: 42 }, 'condition')).toHaveLength(1);
+  });
+
+  describe('CONTROLS — the shapes that must stay accepted', () => {
+    it('an expression ENVELOPE on a node condition is legitimate here', () => {
+      expect(condIssues({ decisionCondition: { dialect: 'cel', source: 'record.rating >= 4' } }, "node 'branch'"))
+        .toHaveLength(0);
+      // No dialect — `evaluateCondition` reads it as CEL, so does this.
+      expect(condIssues({ decisionCondition: { source: 'record.rating >= 4' } }, "node 'branch'"))
+        .toHaveLength(0);
+    });
+
+    it('an envelope on an EDGE is legitimate — every parsed edge condition is one', () => {
+      expect(condIssues({ edgeCondition: { dialect: 'cel', source: 'record.rating >= 4' } }, "edge 'e1'"))
+        .toHaveLength(0);
+      expect(condIssues({ edgeCondition: 'record.rating >= 4' }, "edge 'e1'")).toHaveLength(0);
+    });
+
+    it('a whitespace-only STRING is untouched — ruled correct, not a defect', () => {
+      expect(condIssues({ decisionCondition: '   ' }, "node 'branch'")).toHaveLength(0);
+      expect(condIssues({ edgeCondition: '   ' }, "edge 'e1'")).toHaveLength(0);
+    });
+
+    it('a clean bare-CEL condition still passes', () => {
+      expect(condIssues({ decisionCondition: 'record.rating >= 4' }, "node 'branch'")).toHaveLength(0);
+    });
   });
 });

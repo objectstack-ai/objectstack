@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The hazard `bin/stderr-nonblocking.mjs` exists for, MANUFACTURED rather than
+ * The hazard `src/utils/stderr-nonblocking.ts` exists for, MANUFACTURED rather than
  * waited for — driven by `run-dev-stderr-nonblocking.e2e.test.ts`.
  *
  * ⚠️ The reason this fixture exists at all is that the real occurrence is
@@ -33,15 +33,24 @@
  * blocked. The markers are what let the harness tell "froze at the write" from
  * "was still booting", so its verdict never rests on wall clock alone.
  *
- * argv: `<marker file> guarded|unguarded`
+ * argv: `<marker file> guarded|unguarded <guard module>`
  */
 
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
-import { keepStderrNonBlocking } from '../../bin/stderr-nonblocking.mjs';
+const [, , MARKS, ARM, GUARD] = process.argv;
 
-const [, , MARKS, ARM] = process.argv;
+// ⚠️ The guard's module PATH is handed in rather than written here, and that is
+// what keeps this fixture buildless. The guard is TypeScript under `src/`
+// (`bin/run.js` needs it compiled into `dist/` to reach a published install),
+// and a bare `node` process cannot load a `.ts` file — while running this
+// fixture under `tsx` instead would spawn the esbuild service and perturb the
+// very hazard it manufactures. So the harness transpiles the source to a temp
+// module and names it here; `published-entry-stderr-nonblocking.e2e.test.ts` is
+// where the SHIPPED `dist/` copy is exercised, through the real entry point.
+const { keepStderrNonBlocking } = await import(pathToFileURL(GUARD).href);
 const mark = (line) => appendFileSync(MARKS, `${line}\n`);
 
 /**

@@ -88,12 +88,43 @@
  * `return /(^|[^a-z])dist\//` is written today. The self-test pins shapes
  * someone thought of, the sweep finds shapes the tree actually contains, and
  * neither substitutes for the other.
+ *
+ * ## The regex recogniser is SHARED; its position rule is NOT (#15487)
+ *
+ * "Does a `/` here open a RegularExpressionLiteral?" is two questions, and they
+ * have different numbers of right answers.
+ *
+ * The WALK -- the character class, the backslash sequences, the line-terminator
+ * refusal, the flags, and the `REGEX_AFTER_KEYWORD` set a position rule reads --
+ * has exactly one right answer, ECMA-262's. A second copy of it can therefore
+ * only drift, and the paragraph above measures what a drifted copy costs here:
+ * dropping `return` from that set passes all 23 pinned cases and is caught only
+ * by the corpus sweep. So the walk lives ONCE, in `walkRegexBody` below, and
+ * `check-dispatcher-error-vocabulary.mjs` -- which grew its own copy closing
+ * #14742 -- imports it rather than keeping one.
+ *
+ * The POSITION RULE has two right answers, because its two consumers fail in
+ * deliberately opposite directions. This module MASKS, so it over-masks safely:
+ * `}`, a bare `<`/`>` and `++`/`--` are read as regex positions, and a `/` whose
+ * body does not close on its line still costs the rest of that line (198 such
+ * positions on this tree, every one a JSX closing tag). That gate SCANS, and a
+ * scanner that skips a span it invented desynchronises silently, so it reads
+ * every undecidable position as division. Neither rule is the better one; each
+ * is the right one for its consumer. Extracting either would hand the other
+ * consumer a failure direction it was written to avoid.
+ *
+ * ⇒ the walk is imported, the rule is a PARAMETER (`makeRegexRecogniser`), and
+ * this module's own rule stays inline in `scanSource` where its state machine
+ * already lives. `--self-test` drives the exported recogniser in BOTH
+ * directions, and the gate's `--self-test` still pins the two RULES against
+ * each other -- on the fixtures where they must agree, and on the divergence
+ * itself.
  */
 
-/** A character that can end an identifier -- i.e. a value, so `/` is division. */
 import { isEntrypoint } from './invoked-as.mjs';
 
-const IDENT_CHAR = /[\w$]/;
+/** A character that can end an identifier -- i.e. a value, so `/` is division. */
+export const IDENT_CHAR = /[\w$]/;
 
 /**
  * Keywords after which a `/` opens a REGEX, not a division. `return /x/` reads
@@ -101,10 +132,128 @@ const IDENT_CHAR = /[\w$]/;
  * apart. Measured cost of omitting this: a gate whose corpus contained
  * `return /["`]/.test(s)` fabricated hits out of every comment below it.
  */
-const REGEX_AFTER_KEYWORD = new Set([
+export const REGEX_AFTER_KEYWORD = new Set([
   'return', 'typeof', 'instanceof', 'in', 'of', 'case', 'delete', 'void',
   'yield', 'await', 'new', 'do', 'else', 'throw',
 ]);
+
+/**
+ * LineTerminator -- the four the grammar names, not just `\n`.
+ *
+ * `RegularExpressionNonTerminator` EXCLUDES one, which is why a `/` whose body
+ * does not close on its line was never a regex literal.
+ */
+export const isRegexLineTerminator = (c) =>
+  c === '\n' || c === '\r' || c === '\u2028' || c === '\u2029';
+
+/**
+ * [#15487] The SHARED half of "does a `/` here open a RegularExpressionLiteral?"
+ * -- the literal WALK: the character class, the backslash sequences, the
+ * line-terminator refusal and the flags.
+ *
+ * `at` is the index of a `/` the CALLER has already decided sits in a position
+ * where an expression may begin. That decision is the half this function does
+ * NOT make, and the reason it does not is the whole design:
+ *
+ *   the walk is one algorithm with one right answer, so a second copy of it can
+ *   only drift; the POSITION RULE has two right answers, because the two
+ *   consumers fail in deliberately opposite directions.
+ *
+ * A MASKER fails safe by over-masking: reading a division as a regex costs it a
+ * span of over-masked bytes, and it under-reports loudly the next time someone
+ * re-derives its scope. A SCANNER that skips a span it invented desynchronises
+ * silently, which is strictly worse -- so `check-dispatcher-error-vocabulary`
+ * reads every undecidable position as division. Extracting one of those two
+ * rules into here would hand one consumer the other's failure direction.
+ *
+ * ## The outcome, not a verdict
+ *
+ * `closed: true` means `end` is the index of the closing `/`. `closed: false`
+ * means the body ran into a LineTerminator or EOF and `end` is where it
+ * stopped -- and the caller decides what THAT means, for the same reason:
+ * `scanSource` below over-masks to `end` and reads on (198 positions on this
+ * tree, every one a JSX closing tag in a `.tsx` file), while a scanner answers
+ * "not a regex at all" and skips nothing. A shared function that returned only
+ * a verdict would have picked one of those two, silently, for both.
+ *
+ * @param {string} src
+ * @param {number} at index of the opening `/`
+ * @returns {{ end: number, closed: boolean }}
+ */
+export function walkRegexBody(src, at) {
+  const n = src.length;
+  const first = src[at + 1];
+  // RegularExpressionFirstChar admits neither `*` nor `/` -- the grammar's own
+  // reason `/*` and `//` are comments and can never open a regex literal.
+  if (first === undefined || first === '*' || first === '/') return { end: at + 1, closed: false };
+  let inClass = false;
+  for (let i = at + 1; i < n; i += 1) {
+    const c = src[i];
+    if (isRegexLineTerminator(c)) return { end: i, closed: false };
+    if (c === '\\') {
+      // RegularExpressionBackslashSequence :: `\` RegularExpressionNonTerminator
+      if (i + 1 >= n || isRegexLineTerminator(src[i + 1])) return { end: i, closed: false };
+      i += 1;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue; // a `/`, a quote or a backtick in here is an ORDINARY CHARACTER
+    }
+    if (c === '[') { inClass = true; continue; }
+    if (c === '/') return { end: i, closed: true }; // flags are IdentifierPartChars -- code bytes
+  }
+  return { end: n, closed: false };
+}
+
+/**
+ * [#15487] Bind a POSITION RULE to the shared walk above, once, and get back
+ * the recogniser a caller can then use without repeating its own rule at every
+ * call site.
+ *
+ *   const regexLiteralAt = makeRegexRecogniser({ mayBeginAt: myPositionRule });
+ *   regexLiteralAt(src, at)  // -> index of the closing `/`, or -1
+ *
+ * A FACTORY rather than a per-call `regexLiteralAt(src, at, { mayBeginAt })`
+ * option: `check-dispatcher-error-vocabulary.mjs` calls its recogniser from
+ * fifteen places, and an option threaded through fifteen call sites is fifteen
+ * chances to pass the other consumer's rule -- the drift this consolidation
+ * exists to end, re-created one layer up. Binding it once makes "this module's
+ * position rule is THIS one" a fact about the module rather than a convention
+ * its call sites have to keep.
+ *
+ * There is no default rule, and omitting one throws: a default would be one of
+ * the two failure directions, silently handed to whichever caller forgot.
+ *
+ * @param {{ mayBeginAt: (src: string, at: number) => boolean }} options
+ * @returns {(src: string, at: number) => number}
+ */
+export function makeRegexRecogniser(options) {
+  // ⛔ No `= {}` default on this parameter, and the reason is mechanical:
+  // `Function.length` counts the parameters BEFORE the first defaulted one, so a
+  // default here reports this function as taking ZERO required arguments and
+  // `check-declaration-mirrors` reds the hand-written `.d.mts` next door for
+  // declaring one. The DECLARATION is the honest side -- the options really are
+  // required, since there is no default rule -- so the guard is written longhand
+  // rather than destructured, which also keeps the message below instead of
+  // letting a bare destructuring TypeError replace it with one that explains
+  // nothing.
+  const mayBeginAt = options == null ? undefined : options.mayBeginAt;
+  if (typeof mayBeginAt !== 'function') {
+    throw new TypeError(
+      'makeRegexRecogniser({ mayBeginAt }) needs a position rule, and there is no default: the two '
+        + 'consumers of this walk answer the undecidable positions in deliberately OPPOSITE directions '
+        + '(a masker over-masks safely, a scanner must never skip a span it invented), so a default '
+        + 'would hand one of them the other\'s failure mode without a diff to notice it.',
+    );
+  }
+  return function regexLiteralAt(src, at) {
+    if (src[at] !== '/') return -1;
+    if (!mayBeginAt(src, at)) return -1;
+    const { end, closed } = walkRegexBody(src, at);
+    return closed ? end : -1;
+  };
+}
 
 /**
  * One left-to-right pass over a JS source, flagging every character as COMMENT
@@ -231,24 +380,19 @@ export function scanSource(source) {
       i++;
       continue;
     }
+    // A regex literal: a `/` after anything that is not a value. THIS is this
+    // module's position rule and it stays here (#15487) -- `}`, a bare `<`/`>`
+    // and `++`/`--` are read as regex positions, which over-masks safely and is
+    // the OPPOSITE of what `check-dispatcher-error-vocabulary.mjs` needs. The
+    // WALK is shared; see `walkRegexBody` for why exactly that line is drawn.
     if (c === '/' && !(IDENT_CHAR.test(prev) || prev === ')' || prev === ']')) {
-      i++; // regex literal: `/` after anything that is not a value
-      let inClass = false;
-      while (i < n && source[i] !== '\n') {
-        const ch = source[i];
-        if (ch === '\\' && i + 1 < n) {
-          literal[i] = 1;
-          literal[++i] = 1;
-          i++;
-          continue;
-        }
-        if (ch === '[') inClass = true;
-        else if (ch === ']') inClass = false;
-        else if (ch === '/' && !inClass) break;
-        literal[i] = 1;
-        i++;
-      }
-      if (i < n && source[i] === '/') i++;
+      const { end, closed } = walkRegexBody(source, i);
+      // The body is content; the delimiters are code, so a caller can pair them.
+      for (let k = i + 1; k < end; k++) literal[k] = 1;
+      // Unclosed on its line -> resume AT the terminator and read on, having
+      // over-masked the rest of the line. That is this module's failure
+      // direction, not the walk's opinion.
+      i = closed ? end + 1 : end;
       prev = 'x';
       word = '';
       continue;
@@ -397,6 +541,39 @@ export function maskComments(source) {
   return blank(source, scanSource(source).comment);
 }
 
+/**
+ * The source with its COMMENT spans AND its LITERAL content both blanked --
+ * offsets and line numbers both survive, exactly as under `maskComments`.
+ *
+ * The THIRD projection, and the one to reach for when the signal is a bare
+ * CODE position: `new SchemaRegistry(`, a property key, a call to a named
+ * member. `maskComments` deliberately leaves strings, templates and regex
+ * literals intact, so under it a spelling inside quoted text still satisfies
+ * such a signal and the gate FABRICATES a finding out of a string. Only the
+ * position the language would EXECUTE survives this one.
+ *
+ * ## Picking between the two, which is the same question `stripComments` asks
+ *
+ * Ask what the signal IS, not what the source contains. The signal is itself
+ * quoted text -- an import specifier, an error code, a level name -- ->
+ * `maskComments`, which MUST leave literals intact or it erases the thing
+ * being looked for. The signal is a code position -> this one.
+ *
+ * A caller that needs both at once gets them for free: both preserve offsets,
+ * so a range brace-matched on this mask indexes `maskComments`'s output
+ * identically (`check-registry-log-declared.mjs` reads a level VALUE -- a
+ * string, blanked here -- out of a block it located with this mask).
+ *
+ * Literal DELIMITERS are not literal content (see `scanSource`), so the quotes
+ * themselves survive and a caller can still pair them.
+ */
+export function maskCommentsAndLiterals(source) {
+  const { comment, literal } = scanSource(source);
+  const flags = new Uint8Array(comment.length);
+  for (let k = 0; k < flags.length; k++) flags[k] = comment[k] | literal[k];
+  return blank(source, flags);
+}
+
 // ---------------------------------------------------------------------------
 // Self-test -- the shapes, not the corpus
 // ---------------------------------------------------------------------------
@@ -487,6 +664,54 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
 const SELF_TEST_BATTERY_FLOOR = 23;
+
+// ── The SHARED RECOGNISER section's own roster and floor (#15487) ──────────
+//
+// The `interpolation` assertions below the corpus loop are pushed onto `extra`
+// by `x(...)` calls, so a roster taken from them would be DERIVED and a deleted
+// call would delete its own floor. The header says that section is owed the
+// literal-roster treatment; the section added here does not inherit the debt —
+// it declares its rows the way the table does, as a LITERAL this file is
+// checked against, so a deleted or renamed assertion names ITSELF in the
+// refusal instead of quietly lowering the count.
+const SELF_TEST_RECOGNISER_BATTERIES = Object.freeze({
+  'the exported walk closes a quote-bearing regex at its final `/`': 1,
+  '...and that is exactly the span scanSource flagged literal': 1,
+  'a character class hides `/` and every quote from the walk': 1,
+  'the walk REPORTS an unclosed body rather than deciding what it means': 1,
+  'RegularExpressionFirstChar excludes `*` and `/`, whatever the position rule says': 1,
+  'OVER-MASKING mode reads a `/` after `}` as a regex literal': 1,
+  'NEVER-SKIP mode reads the same `/` as division': 1,
+  'both modes agree wherever the WALK is what decides': 1,
+  'omitting mayBeginAt throws instead of defaulting to a failure direction': 1,
+});
+const SELF_TEST_RECOGNISER_FLOOR = 9;
+
+// -- The COMMENTS+LITERALS PROJECTION's own roster and floor (#15594) -------
+//
+// Declared as a LITERAL for the same reason as the two rosters above: a
+// deleted or renamed row must name ITSELF in the refusal rather than quietly
+// lowering a count it also supplies.
+//
+// This section exists instead of rows in the `cases` table because the table
+// asserts the OPPOSITE property for quoted text. There `REAL` code inside a
+// string MUST survive -- `maskComments` and `stripComments` leave literals
+// intact by design, and a row that removed one would be reporting a bug. Under
+// `maskCommentsAndLiterals` that same spelling must NOT survive. One table
+// cannot state both directions about the same fixture, so the projection is
+// driven here, against a fixture whose signal is a bare CODE position.
+const SELF_TEST_PROJECTION_BATTERIES = Object.freeze({
+  'the fixture spells one bare-code signal four times': 1,
+  'a code signal inside a COMMENT does not survive the projection': 1,
+  '...nor one inside a STRING': 1,
+  '...nor one inside a TEMPLATE': 1,
+  '...while the REAL code position DOES survive': 1,
+  'the control: under maskComments the string and template spellings both survive': 1,
+  'the projection IS blank(source, comment OR literal), recomputed independently here': 1,
+  '...and that equality holds on every row of the corpus table too': 1,
+  'offsets and line count survive, so a caller can index the original text': 1,
+});
+const SELF_TEST_PROJECTION_FLOOR = 9;
 
 export function selfTest() {
   const BT = String.fromCharCode(96); // backtick, kept out of the literal below
@@ -646,7 +871,159 @@ export function selfTest() {
     if (!ok) failed++;
     console.log(`  ${ok ? '\u2713' : '\u2717'} ${name}${ok ? '' : ' -- ' + JSON.stringify(detail)}`);
   }
-  const total = cases.length + extra.length;
+  // \u2500\u2500 the SHARED RECOGNISER, driven in BOTH position modes (#15487) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  //
+  // `walkRegexBody` is the half that has ONE right answer, so it is asserted
+  // without reference to any position rule. `makeRegexRecogniser` is the half
+  // that has TWO, so it is driven twice — once in each of the directions the
+  // two consumers of this module deliberately fail in. The pair is the point:
+  // an assertion in one mode alone would pass on a recogniser that ignored its
+  // parameter entirely, which is the drift this consolidation exists to end.
+  //
+  // The two rules below are DEMONSTRATIONS, not copies of either consumer's:
+  // each is the smallest rule that differs at the character under test, so
+  // nothing here can go stale when a real rule is re-argued. `scanSource`'s own
+  // rule stays inline in `scanSource`, and the scanner's stays in
+  // `check-dispatcher-error-vocabulary.mjs`, which is the whole design.
+  const recog = [];
+  const xr = (name, ok, detail) => recog.push([name, Boolean(ok), detail]);
+
+  const overMasking = makeRegexRecogniser({ mayBeginAt: () => true });
+  const neverSkip = makeRegexRecogniser({
+    mayBeginAt: (src, at) => {
+      let k = at - 1;
+      while (k >= 0 && /\s/.test(src[k])) k -= 1;
+      return src[k] !== '}';
+    },
+  });
+
+  const cls = 'x = /[' + BT + "'\"]/.test(s);";
+  const clsAt = cls.indexOf('/[');
+  const clsClose = cls.indexOf('/.test');
+  xr('the exported walk closes a quote-bearing regex at its final `/`',
+    walkRegexBody(cls, clsAt).closed && walkRegexBody(cls, clsAt).end === clsClose,
+    [walkRegexBody(cls, clsAt), clsClose]);
+  // The masker RUNS this walk, so its flags and the walk's answer are one fact
+  // stated twice. If they ever part, `scanSource` has grown a second walk.
+  const clsLit = scanSource(cls).literal;
+  let lastLit = -1;
+  for (let k = 0; k < cls.length; k++) if (clsLit[k]) lastLit = k;
+  xr('...and that is exactly the span scanSource flagged literal',
+    lastLit + 1 === clsClose && clsLit[clsAt] === 0 && clsLit[clsClose] === 0, [lastLit, clsClose]);
+  // `/[`'"/]/g` — the class holds a `/`, and the walk must not close on it.
+  const klass = '/[' + BT + "'\"/]/g";
+  xr('a character class hides `/` and every quote from the walk',
+    walkRegexBody(klass, 0).closed && walkRegexBody(klass, 0).end === klass.lastIndexOf('/'),
+    [walkRegexBody(klass, 0), klass.lastIndexOf('/')]);
+
+  const unclosed = 'x = /never closed\ny;';
+  const walkedOff = walkRegexBody(unclosed, 4);
+  xr('the walk REPORTS an unclosed body rather than deciding what it means',
+    walkedOff.closed === false && walkedOff.end === unclosed.indexOf('\n')
+      && overMasking(unclosed, 4) === -1,
+    walkedOff);
+  xr('RegularExpressionFirstChar excludes `*` and `/`, whatever the position rule says',
+    overMasking('x = // not a regex\ny;', 4) === -1 && overMasking('x = /* not a regex */ y;', 4) === -1
+      && walkRegexBody('x = /* c */ y;', 4).closed === false,
+    [overMasking('x = // not a regex\ny;', 4), overMasking('x = /* not a regex */ y;', 4)]);
+
+  // The DIVERGENCE, in both directions. After a `}` the language cannot decide
+  // without parser state: a masker answers "regex" and over-masks a span, a
+  // scanner answers "division" and skips nothing. Both answers are correct for
+  // their consumer, which is why this is a parameter and not a bug.
+  const brace = 'if (x) { f() }\n/re/.test(y);';
+  const braceAt = brace.indexOf('\n') + 1;
+  xr('OVER-MASKING mode reads a `/` after `}` as a regex literal',
+    overMasking(brace, braceAt) === braceAt + 3, overMasking(brace, braceAt));
+  xr('NEVER-SKIP mode reads the same `/` as division',
+    neverSkip(brace, braceAt) === -1, neverSkip(brace, braceAt));
+  xr('both modes agree wherever the WALK is what decides',
+    overMasking(cls, clsAt) === clsClose && neverSkip(cls, clsAt) === clsClose,
+    [overMasking(cls, clsAt), neverSkip(cls, clsAt), clsClose]);
+
+  // Three facts, one row: it throws with NO argument, it throws on a non-function
+  // rule, and the message is this module's own rather than a destructuring
+  // TypeError. The ARITY is pinned here too — `makeRegexRecogniser.length` is
+  // what `check-declaration-mirrors` compares against the `.d.mts`, and a `= {}`
+  // default silently drops it to 0. That was a real CI red, and it belongs in
+  // the module's own self-test rather than only in a gate one layer away.
+  const caught = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const noArg = caught(() => makeRegexRecogniser());
+  const junkRule = caught(() => makeRegexRecogniser({ mayBeginAt: 'yes' }));
+  const names = (e) => e instanceof TypeError && e.message.includes('needs a position rule');
+  xr('omitting mayBeginAt throws instead of defaulting to a failure direction',
+    names(noArg) && names(junkRule) && makeRegexRecogniser.length === 1,
+    [noArg && noArg.message, junkRule && junkRule.message, makeRegexRecogniser.length]);
+
+  for (const [name, ok, detail] of recog) {
+    if (!ok) failed++;
+    console.log(`  ${ok ? '\u2713' : '\u2717'} ${name}${ok ? '' : ' -- ' + JSON.stringify(detail)}`);
+  }
+
+  // -- the COMMENTS+LITERALS projection (#15594) ----------------------------
+  //
+  // The fixture spells ONE bare-code signal four times -- in prose, in a
+  // string, in a template, and once for real -- and every row is asserted at
+  // the signal's own OFFSET rather than by counting occurrences, so a mask that
+  // moved bytes could not be read as one that removed the right ones.
+  const proj = [];
+  const xp = (name, ok, detail) => proj.push([name, Boolean(ok), detail]);
+
+  const SIG = 'new SchemaRegistry(';
+  const projSrc = [
+    '// ' + SIG + 'ghostInProse);',
+    "const HINT = '" + SIG + "ghostInString)';",
+    'const TPL = ' + BT + SIG + 'ghostInTemplate)' + BT + ';',
+    'const registry = ' + SIG + 'realCode);',
+  ].join('\n');
+  const sigOffsets = [];
+  for (let k = projSrc.indexOf(SIG); k !== -1; k = projSrc.indexOf(SIG, k + 1)) sigOffsets.push(k);
+  const projMasked = maskCommentsAndLiterals(projSrc);
+  const survives = sigOffsets.map((k) => projMasked.startsWith(SIG, k));
+
+  xp('the fixture spells one bare-code signal four times', sigOffsets.length === 4, sigOffsets);
+  xp('a code signal inside a COMMENT does not survive the projection', survives[0] === false, projMasked);
+  xp('...nor one inside a STRING', survives[1] === false, projMasked);
+  xp('...nor one inside a TEMPLATE', survives[2] === false, projMasked);
+  xp('...while the REAL code position DOES survive', survives[3] === true, projMasked);
+
+  // The CONTROL, and the reason this fixture can fail: under the
+  // comments-only projection the string and template spellings DO survive.
+  // Without it every row above would also pass on a mask that blanked the
+  // whole file, and the corpus table's own rows would not notice -- none of
+  // them puts a bare-code signal inside a literal.
+  const projComments = maskComments(projSrc);
+  const survivesComments = sigOffsets.map((k) => projComments.startsWith(SIG, k));
+  xp('the control: under maskComments the string and template spellings both survive',
+    survivesComments[0] === false && survivesComments[1] === true
+      && survivesComments[2] === true && survivesComments[3] === true,
+    survivesComments);
+
+  // The projection RESTATED, computed here from the two flag arrays with the
+  // other spelling (`||` over a plain array, which is how one of the two
+  // converted callers wrote it). An oracle re-derived on purpose: pinning the
+  // export against itself would pin nothing.
+  const orView = (src) => {
+    const { comment, literal } = scanSource(src);
+    return blank(src, comment.map((c, i) => c || literal[i]));
+  };
+  xp('the projection IS blank(source, comment OR literal), recomputed independently here',
+    maskCommentsAndLiterals(projSrc) === orView(projSrc), [projMasked, orView(projSrc)]);
+  const corpusDisagreement = cases.find(([, src]) => maskCommentsAndLiterals(src) !== orView(src));
+  xp('...and that equality holds on every row of the corpus table too',
+    corpusDisagreement === undefined, corpusDisagreement && corpusDisagreement[0]);
+
+  xp('offsets and line count survive, so a caller can index the original text',
+    projMasked.length === projSrc.length
+      && projMasked.split('\n').length === projSrc.split('\n').length,
+    [projSrc.length, projMasked.length]);
+
+  for (const [name, ok, detail] of proj) {
+    if (!ok) failed++;
+    console.log(`  ${ok ? '\u2713' : '\u2717'} ${name}${ok ? '' : ' -- ' + JSON.stringify(detail)}`);
+  }
+
+  const total = cases.length + extra.length + recog.length + proj.length;
 
   // ── The floor: every declared row RAN, and ran its case (#13489) ───────
   //
@@ -696,6 +1073,60 @@ export function selfTest() {
           `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
     );
   }
+  // The same treatment for the shared-recogniser section (#15487).
+  const declaredRecogniser = Object.keys(SELF_TEST_RECOGNISER_BATTERIES);
+  if (declaredRecogniser.length < SELF_TEST_RECOGNISER_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_RECOGNISER_BATTERIES declares ${declaredRecogniser.length} assertions, below the pinned ` +
+        `${SELF_TEST_RECOGNISER_FLOOR} — an assertion deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const recogniserRan = recog.map(([name]) => name);
+  for (const name of recogniserRan) {
+    if (declaredRecogniser.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `shared-recogniser assertion "${name}" ran but is not declared in ` +
+        'SELF_TEST_RECOGNISER_BATTERIES — an assertion attributed to no declared row is one nothing floors.',
+    );
+  }
+  for (const name of declaredRecogniser) {
+    if (recogniserRan.filter((n) => n === name).length >= SELF_TEST_RECOGNISER_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      `shared-recogniser assertion "${name}" DID NOT RUN — the verdict below would have claimed the ` +
+        'exported walk and its position parameter are both pinned when one of them is not.',
+    );
+  }
+
+  // The same treatment for the comments+literals projection section (#15594).
+  const declaredProjection = Object.keys(SELF_TEST_PROJECTION_BATTERIES);
+  if (declaredProjection.length < SELF_TEST_PROJECTION_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_PROJECTION_BATTERIES declares ${declaredProjection.length} assertions, below the pinned ` +
+        `${SELF_TEST_PROJECTION_FLOOR} — an assertion deleted from the roster takes its own floor with it.`,
+    );
+  }
+  const projectionRan = proj.map(([name]) => name);
+  for (const name of projectionRan) {
+    if (declaredProjection.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `comments+literals assertion "${name}" ran but is not declared in ` +
+        'SELF_TEST_PROJECTION_BATTERIES — an assertion attributed to no declared row is one nothing floors.',
+    );
+  }
+  for (const name of declaredProjection) {
+    if (projectionRan.filter((n) => n === name).length >= SELF_TEST_PROJECTION_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      `comments+literals assertion "${name}" DID NOT RUN — the verdict below would have claimed that a ` +
+        'code signal inside prose and inside a string are both masked when one of them is not.',
+    );
+  }
+
   if (floorBreached) {
     floorFailure(
       'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
@@ -708,7 +1139,11 @@ export function selfTest() {
     console.error(`\u2717 js-comment-mask self-test: ${failed} failure(s) (cases and floor).`);
     process.exit(1);
   }
-  console.log(`\u2713 js-comment-mask self-test: ${total} cases pass (${cases.length} mask/strip corpus, ${extra.length} interpolation view).`);
+  console.log(
+    `\u2713 js-comment-mask self-test: ${total} cases pass (${cases.length} mask/strip corpus, `
+      + `${extra.length} interpolation view, ${recog.length} shared recogniser, `
+      + `${proj.length} comments+literals projection).`,
+  );
 
   return SELF_TEST_VERDICT;
 }

@@ -60,14 +60,18 @@
  * asserted here, now for the ruling's own reason — ⛔「不单独修一个到不了的
  * 路径」 — and they were measured byte-identical across this repair too.
  *
- * ⚠️ A null COMPARAND in an ORDERING position (`{$gte: null}`) is absent for
- * the ORIGINAL reason, and it is the one such position the contract still
- * ACCEPTS: the 2026-08-31 ruling refused the three siblings and #5332's
- * landing had already recorded this one in writing as a position "no ruling
- * covers". #13553's guard is scoped to leave those cells exactly where it
- * found them, so pinning them here — in either direction — would prejudge a
- * ruling nobody has made. The invariance is proven in the PR, not asserted
- * here.
+ * ⚠️ A null COMPARAND in an ORDERING position (`{$gte: null}`) is likewise
+ * ABSENT from this file. When #13553 landed it was the one such position the
+ * contract still ACCEPTED (the 2026-08-31 ruling had refused the three
+ * siblings, and #5332's landing had recorded this one in writing as "no
+ * ruling covers"), so #13553's guard was scoped to leave those cells exactly
+ * where it found them rather than prejudge a ruling. The maintainer ruled it
+ * on 2026-09-01 (option A, #14080): the shape is now REFUSED at the
+ * contract's validation entrance, the same door as the list positions, with
+ * the negative pin in `memory-null-ordering-comparand-unreachable.test.ts`.
+ * Its cells stay unasserted here, now for the ruling's own reason — ⛔「不单独修
+ * matcher(死代码)」— and no ordering-vs-null semantics is defined anywhere,
+ * so nothing here says what either face would have answered.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';

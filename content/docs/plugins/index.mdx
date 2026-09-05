@@ -78,17 +78,29 @@ Plugins follow a strict three-phase lifecycle (`init()` → `start()` → `destr
 The fastest way to create a plugin is with the CLI scaffolding:
 
 ```bash
-# Create a new plugin project
+# Create a new plugin project in the current directory
 os create plugin my-feature
 
 # This creates:
-# packages/plugins/plugin-my-feature/
+# plugin-my-feature/
 # ├── package.json
 # ├── tsconfig.json
 # ├── README.md
+# ├── pnpm-workspace.yaml
 # └── src/
 #     └── index.ts
+
+cd plugin-my-feature
+pnpm install
+pnpm build
 ```
+
+The scaffold is a **standalone** project: its `package.json` depends on the
+published `@objectstack/*` releases that match the CLI which generated it, and
+its `tsconfig.json` extends nothing outside the project — so it installs and
+builds wherever you put it. Add `--in-repo` only when you are scaffolding into
+a checkout of the ObjectStack monorepo itself; that placement emits
+`workspace:*` dependencies and installs nowhere else.
 
 For the full walkthrough — implementing the `Plugin` interface, registering services and hooks, testing, and registering with the kernel — see the [Plugin Development](/docs/plugins/development) tutorial.
 

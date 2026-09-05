@@ -147,6 +147,7 @@ import {
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
 import { buildReadonlyIndex } from './validate-readonly-flow-writes.js';
+import { recordsOf } from './object-graph.js';
 
 export type ReadonlyHookWriteSeverity = 'error' | 'warning';
 
@@ -235,18 +236,6 @@ function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
-
 /**
  * Validate L2 hook-body `ctx.api` writes against target-object readonly
  * declarations. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
@@ -254,7 +243,7 @@ function asArray(v: unknown): AnyRec[] {
  */
 export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFinding[] {
   const findings: ReadonlyHookWriteFinding[] = [];
-  const hooks = asArray(stack.hooks);
+  const hooks = recordsOf(stack.hooks);
   if (hooks.length === 0) return findings;
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.
@@ -294,7 +283,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
     );
     if (writes.length === 0) return;
 
-    roIndex ??= buildReadonlyIndex(asArray(stack.objects));
+    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
     const where = `hook "${hookName}" > body`;

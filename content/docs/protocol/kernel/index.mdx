@@ -381,24 +381,31 @@ All system configuration lives in Git:
 
 ### Plugin Development
 ```bash
-# Scaffold new plugin (created under packages/plugins/plugin-<name>/)
+# Scaffold new plugin (created as ./plugin-<name>/ in the current directory)
 os create plugin slack-integration
 
 # Generated structure:
-packages/plugins/plugin-slack-integration/
-  package.json     # name, version, dependencies (@objectstack/spec, zod)
-  tsconfig.json
+plugin-slack-integration/
+  package.json          # name, version, dependencies (@objectstack/spec, zod)
+  tsconfig.json         # self-contained, extends nothing outside the project
+  pnpm-workspace.yaml   # the pnpm build approvals a fresh install needs
   src/
-    index.ts       # default-export Plugin object (name, version, initialize, destroy)
+    index.ts            # default-export Plugin object (name, version, init, destroy)
   README.md
 ```
 
-<Callout type="warn">
-  The scaffold still emits an `initialize` method. The kernel's plugin contract
-  only invokes `init` / `start` / `destroy`, and `init` is **required** — rename
-  `initialize` to `init` in the generated `src/index.ts` or `kernel.use()`
-  rejects the plugin outright with
+The emitted dependencies are published semver ranges pinned to the CLI that
+generated them, so `pnpm install && pnpm build` works in the new directory
+without a workspace around it. `os create plugin --in-repo` is the opt-in for
+platform work inside an ObjectStack checkout; it emits `workspace:*` instead.
+
+<Callout type="info">
+  The scaffold emits `init` and `destroy`. `init` is the **required** phase —
+  `kernel.use()` rejects a plugin without it, with
   `Failed to load plugin: slack-integration - Plugin init function is required`.
+  `start` is optional and is called after every plugin has initialized; add it
+  when your plugin needs the rest of the graph to be up first. See
+  [Plugin Anatomy](/docs/plugins/anatomy#plugin-lifecycle) for the phase model.
 </Callout>
 
 ### Configuration Management

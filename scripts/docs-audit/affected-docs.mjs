@@ -221,7 +221,7 @@ import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'the ADR-0049 ledger-entry exclusion (#12966)': 33,
-  'the WALK\'s admission decision, against a fake tree (#11866)': 67,
+  'the WALK\'s admission decision, against a fake tree (#11866)': 80,
   'the container qualifier every anchor case below runs under (#13713)': 10,
   'anchor PROVENANCE (#12824)': 12,
   'CONTAINER-QUALIFIED DATA-PROPERTY ANCHORS (option D, #13713)': 20,
@@ -248,7 +248,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the sdk bridge\'s REACH over the declared surface (#9572)': 11,
   '#11178: WHY a row is unreachable, and the two causes that printed as one': 28,
   '`causes` GETS THE SAME TREATMENT, AT BOTH ENDS (#11867)': 16,
-  'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 23,
+  'the ROUTE SOURCE concept: two kinds, and the runtime-registration guard (#11857)': 24,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2061,9 +2061,36 @@ function walkSourceFiles(root, readDir = readdirSync) {
     let entries;
     try { entries = readDir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
-      if (e.name === 'node_modules' || e.name === 'dist' || e.name === '.turbo') continue;
+      // ⛔ BUILD RESIDUE IS PRUNED AS A CLASS, NOT AS A ROSTER (#15446 / #15457).
+      //
+      // `node_modules` and `dist` are the two named build outputs. Every OTHER tree this
+      // walk has ever had to keep out is a DOT-DIRECTORY: `.turbo` was the first, and
+      // `check:skill-examples` writes three more — `packages/spec/.examples-build/`,
+      // `packages/spec/.examples-build-src/` and `packages/client-react/.examples-build/`
+      // (`.gitignore:66-70` is the source of truth for the set). Those hold ~235 emitted
+      // `.ts` files, five of which declare a `path:` beside an HTTP method and were
+      // therefore admitted by `scanRouteSurface`'s kind (b) as CONTRACT route sources —
+      // reddening this file's own live pin (`every contract declaration admitted is a
+      // packages/spec API declaration`) in any working tree where that gate had run.
+      // CI was green only because `check:docs-audit-scope` happens to run BEFORE
+      // `check:skill-examples` in `lint.yml`; the coupling was latent, not designed.
+      //
+      // Naming the two (three) directories would fix today and leave the next emitted
+      // tree to be discovered the same way, so the rule is the class. It is safe because
+      // it is MEASURED, not assumed: on `6b8c67778`,
+      //   git ls-files 'packages/**' | grep -cE '(^|/)\.[^/]+/'   →   0
+      // no TRACKED file under `packages/**` lives in a dot-directory at all, so this
+      // prunes residue and nothing else. That premise is not left to age quietly — the
+      // live pin in `--self-test` re-measures it on every run and reds the day a tracked
+      // source file appears under one.
+      //
+      // Applied to DIRECTORIES only: a dotfile that is somehow a `.ts` source is still
+      // the file arms' business, not this one's.
       const p = join(dir, e.name);
-      if (e.isDirectory()) { walkSrc(p); continue; }
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === 'dist' || e.name.startsWith('.')) continue;
+        walkSrc(p); continue;
+      }
       if (!e.isFile() || !e.name.endsWith('.ts')) continue;
       // The PATH, never `e.name` — see above.
       const rel = relative(root, p);
@@ -2928,6 +2955,29 @@ function selfTest() {
     // still reach the registrar list. Without it the exclusion could widen to all of
     // `migrations/` and every check here would stay green.
     'packages/foo/src/migrations/runner-route.ts',
+    // #15446 / #15457. THE BUILD-RESIDUE CLASS, and it is non-vacuous by construction
+    // like every fixture above it: not one of these carries a test infix, lives under a
+    // test directory, or is a ledger entry, so under the previous prune roster
+    // (`node_modules` / `dist` / `.turbo` BY NAME) every one of them was walked and
+    // entered `sourceFiles` — which is the population `scanRouteSurface`'s kind (b) reads
+    // for a `path:` beside an HTTP method. That is how ~235 emitted example files became
+    // five CONTRACT route sources and reddened this file's own live pin. All three trees
+    // `check:skill-examples` writes are represented, plus `.turbo` — the arm the class
+    // REPLACED, kept here so the rewrite cannot quietly lose what the roster covered.
+    'packages/spec/.examples-build/docs__api_declarative-endpoints__1.ts',
+    'packages/spec/.examples-build/docs__api_environment-route__1.ts',
+    'packages/spec/.examples-build-src/spec__index__1.ts',
+    'packages/client-react/.examples-build/docs__client__1.ts',
+    'packages/foo/.turbo/route.ts',
+    // ⭐ THE OTHER DIRECTION, and the reason the residue rows above are not vacuous: the
+    // SAME declaration under `packages/spec/src/` is exactly what the walk exists to
+    // reach, so it must still arrive. Excluding the residue by any rule that also took
+    // this file would trade one broken population for another.
+    'packages/spec/src/api/declarative-endpoints.ts',
+    // ⭐ THE OVER-REACH CONTROL for `startsWith('.')` specifically: a directory whose name
+    // merely CONTAINS a dot is ordinary source and must survive. Without it the rule
+    // could widen to "any dotted directory name" and every check here would stay green.
+    'packages/foo/src/api.v2/real-route.ts',
   ];
   const fakeRoot = '/repo';
   const fakeDirs = new Map();
@@ -2950,9 +3000,9 @@ function selfTest() {
   const walked = walkSourceFiles(fakeRoot, fakeReadDir);
   const sorted = (a) => [...a].sort().join(' | ');
   check('walkSourceFiles', 'a registrar-NAMED file under __tests__/ is NOT a registrar — the walk tests the path',
-    'conventionFiles', 'packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.conventionFiles));
+    'conventionFiles', 'packages/foo/src/api.v2/real-route.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.conventionFiles));
   check('walkSourceFiles', 'and the three test directories contribute nothing to the CEILING population either',
-    'sourceFiles', 'packages/foo/src/engine.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts', sorted(walked.sourceFiles));
+    'sourceFiles', 'packages/foo/src/api.v2/real-route.ts | packages/foo/src/engine.ts | packages/foo/src/migrations/runner-route.ts | packages/foo/src/real-route.ts | packages/spec/src/api/declarative-endpoints.ts', sorted(walked.sourceFiles));
   // Per-fixture, so a regression NAMES the arm that came back rather than only the totals.
   const excludedFixtures = [
     ['packages/foo/src/__tests__/x-route.ts', 'a __tests__/ file matching CALL_SITE_FILE_RE'],
@@ -2974,6 +3024,17 @@ function selfTest() {
       'an ADR-0049 semantic entry matching CALL_SITE_FILE_RE'],
     ['packages/foo/src/migrations/entries/semantic/18.plain-rename.ts',
       'a ledger entry with no registrar name — excluded from the CEILING too'],
+    // #15446 / #15457, one row per residue tree so a regression NAMES which one came back.
+    ['packages/spec/.examples-build/docs__api_declarative-endpoints__1.ts',
+      'a check:skill-examples emitted example under packages/spec/.examples-build/'],
+    ['packages/spec/.examples-build/docs__api_environment-route__1.ts',
+      'the same, with a basename that ALSO matches CALL_SITE_FILE_RE'],
+    ['packages/spec/.examples-build-src/spec__index__1.ts',
+      'the SECOND emitted tree, packages/spec/.examples-build-src/ (.gitignore:69)'],
+    ['packages/client-react/.examples-build/docs__client__1.ts',
+      'the THIRD emitted tree, packages/client-react/.examples-build/ (.gitignore:70)'],
+    ['packages/foo/.turbo/route.ts',
+      '.turbo — the named arm the dot-directory CLASS replaced, still pruned'],
   ];
   for (const [rel, label] of excludedFixtures) {
     check('walkSourceFiles', `${label} is walked at all`, rel, false, walked.sourceFiles.includes(rel));
@@ -2984,6 +3045,18 @@ function selfTest() {
   check('walkSourceFiles', 'a migrations/ registrar OUTSIDE entries/ survives — the exclusion is the DIRECTORY class, not the word',
     'packages/foo/src/migrations/runner-route.ts', true,
     walked.conventionFiles.includes('packages/foo/src/migrations/runner-route.ts'));
+  // #15446 / #15457, the admitting direction of the residue pair above: the residue copy
+  // is out, the real declaration under `packages/spec/src/` is in. Deleting the prune
+  // reds the exclusion rows; widening it past dot-directories reds this one.
+  check('walkSourceFiles', 'the SAME declaration under packages/spec/src/ IS still admitted — the prune is the RESIDUE, not the name',
+    'packages/spec/src/api/declarative-endpoints.ts', true,
+    walked.sourceFiles.includes('packages/spec/src/api/declarative-endpoints.ts'));
+  check('walkSourceFiles', 'a directory whose name merely CONTAINS a dot is not residue — the rule is the LEADING dot',
+    'packages/foo/src/api.v2/real-route.ts', true,
+    walked.sourceFiles.includes('packages/foo/src/api.v2/real-route.ts'));
+  check('walkSourceFiles', 'and that same file still reaches the registrar list',
+    'packages/foo/src/api.v2/real-route.ts', true,
+    walked.conventionFiles.includes('packages/foo/src/api.v2/real-route.ts'));
   check('walkSourceFiles', 'a .test.ts file is still excluded by the FILE arm', 'packages/foo/src/engine.test.ts',
     false, walked.sourceFiles.includes('packages/foo/src/engine.test.ts'));
   check('walkSourceFiles', 'node_modules/ and dist/ are still pruned', 'packages/foo/{node_modules,dist}/route.ts',
@@ -5579,6 +5652,20 @@ function selfTest() {
     }
     check('scanRouteSurface', 'no route LEDGER declares a route tail — so excluding ledgers from kind (a) moved nothing',
       'tails declared by the live route ledgers', 0, ledgerTails);
+
+    // (4) THE PREMISE OF THE DOT-DIRECTORY PRUNE (#15446 / #15457), RE-MEASURED rather
+    // than quoted. `walkSourceFiles` prunes every dot-directory under `packages/**` as
+    // build residue; that is a safe rule only while no TRACKED source lives in one —
+    // zero of them do, measured on `6b8c67778`. Written as a comment the measurement
+    // would age in silence and the walk would start dropping real source with nothing
+    // saying so. Asserted here it reds on the first tracked file under a dot-directory,
+    // and the remedy is then a choice made deliberately: move the file, or go back to
+    // pruning the residue trees by name.
+    const trackedDotDirFiles = sh('git ls-files packages')
+      .split('\n')
+      .filter((f) => /(^|\/)\.[^/]+\//.test(f));
+    check('walkSourceFiles', 'no TRACKED file under packages/** lives in a dot-directory — the premise the prune rests on',
+      'git ls-files packages, filtered to dot-directories', 0, trackedDotDirFiles.length);
   }
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───

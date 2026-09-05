@@ -1122,6 +1122,20 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             '\'max_scale\' is one of them. It reaches `ApiError.details.fields[].code`, never `error.code`, so ' +
             'no ledger row can be owed for it (ADR-0112 D6).',
     },
+    {
+        code: 'value_domain',
+        file: 'packages/objectql/src/validation/record-validator.ts',
+        shape: 'objlithelper',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'record-validator\'s `fail(code: FieldErrorCode, …)` builds one `{ field, code, def, constraint, ' +
+            'messageKey, options, value }` per violated constraint. Its `code` parameter is typed `code: ' +
+            'FieldErrorCode`, so the value is a member of the closed ADR-0114 D2 catalog by construction; ' +
+            '\'value_domain\' is one of them — the field-level `valueDomain` write-path refusal. It ' +
+            'reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed for it ' +
+            '(ADR-0112 D6).',
+    },
     // fallback() — rule-validator.ts
     {
         code: 'invalid_initial_state',

@@ -5328,7 +5328,17 @@ const step18: MigrationStep = {
     'the three defs — `integration/ErrorMappingConfig`, `integration/ErrorMappingRule` and the ' +
     'orphaned `integration/ConnectorErrorCategory` enum — leave via RETIRED_DEFS_BY_MAJOR, and ' +
     'the mechanical conversion strips the block from `connectors[]` (pure lossless delete; ' +
-    'it never had an effect to lose).',
+    'it never had an effect to lose). ' +
+    'It also retires the fourteen hour/minute/day-shaped deadline keys of the ' +
+    'incident-response, training and change-management families (#14477, ADR-0049 ' +
+    'enforce-or-remove; maintainer ruling 2026-09-02): six on the incident-response ' +
+    'schemas, five on the training schemas and three nested in the change-management ' +
+    'schemas, every one on the published surface and read by nothing — the schemas are ' +
+    'mounted by no stack key and registered as no metadata type — so a compliance author ' +
+    'who wrote `triageDeadlineHours: 4` held a deadline the platform never kept. All ' +
+    'fourteen are retiredKey tombstones (the schemas are not strict; a bare deletion ' +
+    'would be a silent strip) with no D2 conversion, for the additionalTypes reason: ' +
+    'none of these schemas is a stack collection member, so the chain has no seam.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5720,6 +5730,43 @@ const step18: MigrationStep = {
         + '`ObjectSchema.create(...): field ... declares required: false on a master_detail '
         + 'reference under sharingModel: controlled_by_parent`. Stored metadata keeps loading '
         + 'byte-identically (`safeParse` green, `required` unrewritten).',
+    },
+    {
+      id: 'change-management-duration-keys-retired',
+      surface:
+        'change-management duration keys: `ChangeImpact.downtime.durationMinutes`, '
+        + '`RollbackPlan.steps[].estimatedMinutes`, '
+        + '`ChangeRequest.implementation.steps[].estimatedMinutes`',
+      replacement:
+        'nothing to re-declare — delete the keys. No change-management engine exists on the '
+        + 'platform: nothing schedules a maintenance window, executes or times an implementation '
+        + 'or rollback step, or compares an estimate with what happened, so there is no live '
+        + 'mechanism to declare a duration to',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+        + 'family). Three minute-shaped keys, at three nested sites, sat in the exported '
+        + 'change-management schemas and in the generated reference docs — an author could write '
+        + '`estimatedMinutes: 15` on a rollback step and reasonably expect it to feed a schedule — '
+        + 'and read by NOTHING: the schemas are exported from `@objectstack/spec/system`, mounted '
+        + 'by no stack key, registered as no metadata type, absent from the 2026-06 liveness '
+        + 'ledgers, and the reader census over every package outside `packages/spec` (tests and '
+        + 'changelogs excluded) and over objectui at the pinned sha returned zero hits for every '
+        + 'key. All three sites are NESTED (`downtime.durationMinutes`, `steps[].estimatedMinutes` '
+        + 'twice), so the authorable-surface ratchet — which walks top-level def properties — never '
+        + 'listed them; their `RETIRED_KEYS_BY_MAJOR[18]` entries carry the nested spelling for the '
+        + 'spec-changes / upgrade-guide projection. Why D3 semantic and not a D2 conversion: the '
+        + 'chain walks a normalized STACK and `applyConversionsToStoredItem` maps a metadata type '
+        + 'onto one of its collections; none of these schemas is either, so a conversion would be '
+        + 'a transform with no seam that ever runs (the '
+        + '`kernel/MetadataPluginConfig:additionalTypes` precedent).',
+      acceptanceCriteria:
+        'No `ChangeImpact.downtime` block carries `durationMinutes`, and no implementation or '
+        + 'rollback step — in a `RollbackPlan` or inside a `ChangeRequest` — carries '
+        + '`estimatedMinutes`. TypeScript authors get the refusal at compile time (each key is '
+        + 'typed `never`); a value reaching the parse is refused with the prescription '
+        + '(`invalid_type` at the nested path of the key, e.g. `rollbackPlan.steps.0.estimatedMinutes`). '
+        + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: nothing '
+        + 'ever read the keys, so removing them removes no behaviour.',
     },
     {
       id: 'cli-command-contribution-retired',
@@ -6416,6 +6463,56 @@ const step18: MigrationStep = {
         + 'objectui#6206.',
     },
     {
+      id: 'element-record-picker-filter-rule-array',
+      surface:
+        "`element:record_picker` component props — `filter` (the FORM: the MongoDB-style "
+        + '`FilterConditionSchema` record vs the `ViewFilterRule` array)',
+      replacement:
+        '`z.array(ViewFilterRuleSchema)` — the rule array `[{ field, operator, value }, ...]` '
+        + "the map's array-declared `filter` doors already carry (`record:related_list`, its nested "
+        + 'Add-affordance picker, `element:number`; the four `object-*` blocks declare `filter` as '
+        + '`z.unknown()`, #15449). A record-form filter '
+        + "`{ status: 'active' }` becomes `[{ field: 'status', operator: 'equals', value: 'active' }]`; "
+        + "an operator object `{ amount: { $gt: 100 } }` becomes "
+        + "`[{ field: 'amount', operator: 'greater_than', value: 100 }]`; several keys become "
+        + 'several rules (they AND). Legacy operator shorthands (`eq`, `gt`, `notIn`, …) are '
+        + 'accepted and normalized on parse. The binding-level `dataSource.filter` on the same node '
+        + 'is a different key (`ElementDataSourceSchema`) and is not moved by this entry',
+      reason:
+        'One filter orthography platform-wide (objectui#6206, maintainer batch adjudication '
+        + "2026-08-25, verbatim 「同意」, Option B). `ComponentPropsMap['element:record_picker'].filter` "
+        + 'was the LAST `filter` input in the map still declared as the MongoDB-style record '
+        + '(`FilterConditionSchema`) after `element:number` converged (#12039 Key 2): the three '
+        + 'array-declared doors (`record:related_list`, its nested Add-affordance picker, '
+        + '`element:number`) carried the `ViewFilterRule` array and the four `object-*` doors '
+        + 'declare `z.unknown()` (#15449), so the filter a list view stores and renders was refused '
+        + 'by the picker beside them, and a lone holdout is the state where the next author copies '
+        + 'the wrong form. Sequenced measurement-first, as that convergence had to be (the 2026-08-25 '
+        + 'Option-A ordering ruling, #14406): at the objectui pin `00d3f09c` the renderer hands '
+        + '`filter` to `query.$filter` and calls `adapter.find()` '
+        + '(`components/src/renderers/basic/record-picker.tsx`); `ObjectStackAdapter.convertQueryParams` '
+        + 'lowers an ARRAY `$filter` through `translateFilterArray` into filter AST tuples '
+        + '(`data-objectstack/src/index.ts`), the same door every list view\'s stored rule array '
+        + 'already takes, and the engine lowers the tuples before the driver '
+        + '(`engine-filter-array-lowering.test.ts`); nothing on that path parses `properties` '
+        + 'against the installed spec. The pin and objectui `main` (`f7cf7e8`) are byte-identical on '
+        + 'every read-path file. The ruled migration check ran with the change: the sweep of '
+        + 'first-party corpora (examples/, skills/, content/docs/, docs/, packages/**, .changeset/) '
+        + 'found ONE `element:record_picker` author writing a record-form `filter` — a spec test '
+        + 'fixture, rewritten to the array form in the same change — and zero outside the spec '
+        + 'package; this entry carries the prescription for authors outside the repo.',
+      acceptanceCriteria:
+        "`ComponentPropsMap['element:record_picker'].safeParse({ object, filter: [{ field: "
+        + "'status', operator: 'equals', value: 'active' }] })` succeeds and the parsed `filter` is "
+        + "the same rule array; a record-form `filter: { status: 'active' }` is refused at the "
+        + '`filter` path (`invalid_type`, expected array). At runtime the picker offers exactly the '
+        + 'rows the array selects — the same filter a list view renders. Downstream (objectui, after '
+        + "a released spec version reaches the pin): the registry's `inputs.filter` entry for "
+        + "`element:record_picker` (`type: 'object'`, `record-picker.tsx`) flips to the array arm and "
+        + 'the `record-picker-inputs-spec-parity.test.ts` pins that assert the record form follow — '
+        + 'objectui#7663, filed from #14406 with a Blocked-by line.',
+    },
+    {
       id: 'engine-dotted-filter-refused',
       surface:
         'a `where` / filter whose KEY is a dotted path with a relation, virtual-`formula` or '
@@ -7002,6 +7099,48 @@ const step18: MigrationStep = {
         + '⚠️ Runtime behaviour is deliberately UNCHANGED: nothing ever '
         + 'read the schema, so removing it removes no behaviour — mint and verify '
         + 'work byte-identically before and after.',
+    },
+    {
+      id: 'incident-response-deadline-keys-retired',
+      surface:
+        'incident-response deadline keys: `IncidentResponsePhase.targetHours`, '
+        + '`IncidentNotificationRule.withinMinutes` / `regulatorDeadlineHours`, '
+        + '`IncidentNotificationMatrix.escalationTimeoutMinutes`, '
+        + '`IncidentResponsePolicy.triageDeadlineHours` / `retentionDays`',
+      replacement:
+        'nothing to re-declare — delete the keys. No incident-response engine exists on the '
+        + 'platform: nothing tracks a phase against a clock, sends or times an incident '
+        + 'notification, notifies a regulator, walks the escalation chain on a timer or sweeps '
+        + 'incident records on a schedule, so there is no live mechanism to declare a deadline '
+        + 'to. Retention of stored records is the object-level `lifecycle` block (ADR-0057), '
+        + 'declared on the object that stores the records and enforced by the LifecycleService — '
+        + 'not a number on this policy document',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+        + 'family). Six hour/minute/day-shaped keys sat on the published authorable surface and '
+        + 'in the generated reference docs — an author could write `triageDeadlineHours: 4` and '
+        + 'reasonably expect the platform to escalate after four hours — and read by NOTHING: '
+        + 'the schemas are exported from `@objectstack/spec/system`, mounted by no stack key, '
+        + 'registered as no metadata type, absent from the 2026-06 liveness ledgers, and the '
+        + 'reader census over every package outside `packages/spec` (tests and changelogs '
+        + 'excluded) and over objectui at the pinned sha returned zero hits for every key. Three '
+        + 'of the six carried defaults (30 minutes, 1 hour, 2555 days) that were materialized '
+        + 'into every parsed document without ever being consulted. A compliance-shaped deadline '
+        + 'that fails silently is the worst form of the declared-but-unenforced shape ADR-0049 '
+        + 'names; tagging it `[EXPERIMENTAL — not enforced]` was the fallback the ruling did not '
+        + 'take. Why D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections; none '
+        + 'of these schemas is either, so a conversion would be a transform with no seam that '
+        + 'ever runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent).',
+      acceptanceCriteria:
+        'No `IncidentResponsePhase`, `IncidentNotificationRule`, `IncidentNotificationMatrix` or '
+        + '`IncidentResponsePolicy` literal — standalone or nested in an `Incident` — carries '
+        + '`targetHours`, `withinMinutes`, `regulatorDeadlineHours`, `escalationTimeoutMinutes`, '
+        + '`triageDeadlineHours` or `retentionDays`. TypeScript authors get the refusal at compile '
+        + 'time (each key is typed `never`); a value reaching the parse is refused with the '
+        + 'prescription (`invalid_type` at the path of the key). Parsed documents no longer carry '
+        + 'the three former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
+        + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
     },
     {
       id: 'kernel-context-preview-mode-retired',
@@ -8123,6 +8262,39 @@ const step18: MigrationStep = {
         + 'the contract. Runtime behaviour is unchanged: the bridge\'s #11833 '
         + 'parse-and-refuse accepts and rejects exactly the same sets before and after, '
         + 'and no stored metadata or document needs editing.',
+    },
+    {
+      id: 'training-deadline-keys-retired',
+      surface:
+        'training duration and deadline keys: `TrainingCourse.durationMinutes` / `validityDays`, '
+        + '`TrainingPlan.recertificationIntervalDays` / `gracePeriodDays` / `reminderDaysBefore`',
+      replacement:
+        'nothing to re-declare — delete the keys. No training-management engine exists on the '
+        + 'platform: nothing schedules or times a course, computes a certification expiry, '
+        + 're-assigns training on an interval, escalates an expired certification or sends a '
+        + 'reminder, so there is no live mechanism to declare a duration or deadline to',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-02 on #14477 (ruled A: retire per '
+        + 'family). Five minute/day-shaped keys sat on the published authorable surface and in the '
+        + 'generated reference docs — an author could write `validityDays: 365` and reasonably '
+        + 'expect a certificate to expire — and read by NOTHING: the schemas are exported from '
+        + '`@objectstack/spec/system`, mounted by no stack key, registered as no metadata type, '
+        + 'absent from the 2026-06 liveness ledgers, and the reader census over every package '
+        + 'outside `packages/spec` (tests and changelogs excluded) and over objectui at the pinned '
+        + 'sha returned zero hits for every key. Three of the five carried defaults (365, 30 and 14 '
+        + 'days) that were materialized into every parsed plan without ever being consulted. Why '
+        + 'D3 semantic and not a D2 conversion: the chain walks a normalized STACK and '
+        + '`applyConversionsToStoredItem` maps a metadata type onto one of its collections; none of '
+        + 'these schemas is either, so a conversion would be a transform with no seam that ever '
+        + 'runs (the `kernel/MetadataPluginConfig:additionalTypes` precedent).',
+      acceptanceCriteria:
+        'No `TrainingCourse` or `TrainingPlan` literal — standalone or as a `courses[]` entry — '
+        + 'carries `durationMinutes`, `validityDays`, `recertificationIntervalDays`, '
+        + '`gracePeriodDays` or `reminderDaysBefore`. TypeScript authors get the refusal at compile '
+        + 'time (each key is typed `never`); a value reaching the parse is refused with the '
+        + 'prescription (`invalid_type` at the path of the key). Parsed plans no longer carry the '
+        + 'three former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
+        + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
     },
     {
       id: 'ui-cloud-connection-widgets-unknown-keys-refused',
@@ -9732,6 +9904,321 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion `permission-allow-restore-purge-removed`, which strips the
     // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only, so no `[RETIRED]` row exists for it and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `kernel/Manifest:contributes.actions` and
+    // `api/BatchEndpointsConfig:operations.upsertMany` are.
+    // D3 semantic entry: `change-management-duration-keys-retired`.
+    'system/ChangeImpact:downtime.durationMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only, so no `[RETIRED]` row exists for it and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `kernel/Manifest:contributes.actions` and
+    // `api/BatchEndpointsConfig:operations.upsertMany` are.
+    // D3 semantic entry: `change-management-duration-keys-retired`.
+    'system/ChangeRequest:implementation.steps.estimatedMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentNotificationMatrix:escalationTimeoutMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentNotificationRule:regulatorDeadlineHours',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentNotificationRule:withinMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentResponsePhase:targetHours',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentResponsePolicy:retentionDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `incident-response-deadline-keys-retired`.
+    'system/IncidentResponsePolicy:triageDeadlineHours',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    //
+    // A NESTED site: the authorable-surface ratchet walks top-level def
+    // properties only, so no `[RETIRED]` row exists for it and gate (b) of
+    // `build-schemas.ts` neither demands nor refuses this entry — it is here for
+    // the spec-changes / upgrade-guide projection, spelled the way
+    // `kernel/Manifest:contributes.actions` and
+    // `api/BatchEndpointsConfig:operations.upsertMany` are.
+    // D3 semantic entry: `change-management-duration-keys-retired`.
+    'system/RollbackPlan:steps.estimatedMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingCourse:durationMinutes',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingCourse:validityDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingPlan:gracePeriodDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingPlan:recertificationIntervalDays',
+    // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
+    // retire per family). One of the hour/minute/day-shaped deadline keys of the
+    // incident-response / training / change-management families: declared on the
+    // published authorable surface, read by NOTHING — the schemas are mounted by
+    // no stack key and registered as no metadata type, and the reader census over
+    // every package outside `packages/spec` (and objectui at the pinned sha)
+    // returned zero hits — so an author who wrote it held a deadline the platform
+    // never kept.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: the conversion chain
+    // walks a normalized STACK and none of these schemas is a stack collection
+    // member, so a MetadataConversion would be a transform with no seam that ever
+    // runs. The prescription reaches authors through the tombstone (`tsc` + the
+    // parse) and the D3 semantic entry named below.
+    // D3 semantic entry: `training-deadline-keys-retired`.
+    'system/TrainingPlan:reminderDaysBefore',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"

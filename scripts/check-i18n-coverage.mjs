@@ -48,6 +48,22 @@
 // different questions of different inputs, and folding a kernel boot into an
 // `os lint` loop would make neither readable.
 //
+// The Setup nav is not the only surface in that class, and the second one is
+// worth naming here because its `0` is the same `0`. `platform-objects` ships
+// three record pages -- `sys_user_detail`, `sys_organization_detail`,
+// `sys_position_detail` -- contributed at runtime by plugin-auth and
+// plugin-security. Its extract config declares no `pages` key, so they are not
+// in this gate's population, and its baselined `0` says nothing about them.
+// Declaring them would not be enough either: all three author `regions: []`
+// with every component under `slots.*`, and the walk behind `os lint` roots at
+// `regions[].components[]`, so the three page-level `label`s are the only keys
+// that exist for them -- 45 further authored copy sites are inline locale maps
+// with no bundle face at all. Their owner is
+// `packages/cli/test/platform-page-i18n-parity.test.ts`, which judges the
+// bundle entries AND the inline maps directly off the page documents. Same
+// rule as the nav half: do not extend this script to cover it, and do not read
+// its `0` as a verdict on those pages.
+//
 // That requirement is now CHECKED, not merely declared (#5862). It used to be the
 // sentence above and nothing else, and in an installed-but-unbuilt worktree the
 // gate answered with an uncaught exception plus a node stack:

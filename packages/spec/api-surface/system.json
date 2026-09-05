@@ -444,6 +444,7 @@
     "MutualTLSConfig (type)",
     "MutualTLSConfigParsed (type)",
     "MutualTLSConfigSchema (const)",
+    "NOTIFICATION_EVENT_MIGRATION_ID (const)",
     "NavNodeLike (interface)",
     "NotificationChannel (type)",
     "NotificationChannelSchema (const)",

@@ -143,6 +143,7 @@
     "ElementNumberPropsParsed (type)",
     "ElementNumberPropsSchema (const)",
     "ElementRecordPickerProps (type)",
+    "ElementRecordPickerPropsParsed (type)",
     "ElementRecordPickerPropsSchema (const)",
     "ElementTextInputPropsSchema (const)",
     "ElementTextPropsSchema (const)",

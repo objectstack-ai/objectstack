@@ -318,8 +318,8 @@
  *       own state model (maintainer ruling 2026-08-19/20, verbatim: 「同意 并
  *       存」) has it COEXIST with the card's standing `pm:*` label rather than
  *       replace it: the objecting seat applies it alongside its evidence
- *       comment, and the triage Routine — which re-judges every `pm:retriage`
- *       card each fire, high priority (SKILL.md) — is the only remover. That
+ *       comment, and the triage Routine — which answers every `pm:retriage`
+ *       card's question each fire (SKILL.md) — is the only remover. That
  *       division of duties is H13's healing-loop shape again: a label nobody
  *       re-checks for age is the next "state nobody is watching", and without
  *       this item nothing here would say so. Aged past one cycle the row names
@@ -329,11 +329,11 @@
  *       disputed grading is unidentifiable (异议对象不明) from the label set
  *       alone. Age is read from `updated_at`, the same proxy H13 uses for the
  *       same reason: this sweep makes no per-card timeline fetch for the
- *       label-APPLICATION event, and every triage re-judgement (grade kept or
- *       changed) bumps `updated_at`, so a stale reading means nothing touched
- *       the card since some triage pass — which is exactly the failure this
- *       item exists to name. Report-only and NOT loud, like H14–H16: the
- *       remedy is the triage Routine's next fire, never a label written here.
+ *       label-APPLICATION event, and every triage answer (whatever it decides)
+ *       bumps `updated_at`, so a stale reading means nothing touched the card
+ *       since some triage pass — which is exactly the failure this item exists
+ *       to name. Report-only and NOT loud, like H14–H16: the remedy is the
+ *       triage Routine's next fire, never a label written here.
  *
  * ## H19 — the question that ENDS a block
  *
@@ -3086,17 +3086,17 @@ function readTrackedFiles() {
 
 /**
  * H18 threshold — one triage-Routine cycle, the same reasoning as
- * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and re-judges
- * every `pm:retriage` card "each fire, high priority" (SKILL.md, 「`pm:retriage`
- * 重判每 fire 高优先处理」), so a card still carrying the label after 2h has
- * survived at least one re-judgement pass it should not have. Age is read
- * from `updated_at` rather than a per-card timeline fetch for the
- * label-APPLICATION event: this sweep makes that fetch for no item (H13's
- * same proxy choice, for the same reason — see `h13DomainWithoutPmState`),
- * and every triage write on the card (grade kept or changed) bumps
- * `updated_at`, so a stale reading here means nothing touched the card since
- * any triage pass at all, which is exactly the failure this item exists to
- * name.
+ * `DOMAIN_HALF_STATE_STALE_HOURS`: the Routine fires HOURLY and ANSWERS the
+ * question on every `pm:retriage` card each fire (SKILL.md, 「`pm:retriage` 每
+ * fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」), so a card
+ * still carrying the label after 2h has survived at least one answer pass it
+ * should not have. Age is read from `updated_at` rather than a per-card
+ * timeline fetch for the label-APPLICATION event: this sweep makes that fetch
+ * for no item (H13's same proxy choice, for the same reason — see
+ * `h13DomainWithoutPmState`), and every triage write on the card (whatever
+ * the answer) bumps `updated_at`, so a stale reading here means nothing
+ * touched the card since any triage pass at all, which is exactly the failure
+ * this item exists to name.
  */
 export const RETRIAGE_STALE_HOURS = 2;
 
@@ -3127,10 +3127,11 @@ export function h18RetriageAged(issue, nowMs = Date.now()) {
       ? `alongside its standing ${coexisting.map((l) => `\`${l}\``).join(', ')}`
       : 'ALONE, with no coexisting standing `pm:*` label — the disputed grading is unidentifiable (异议对象不明)';
   return (
-    `\`pm:retriage\` carried ${carrying}, ${reading} — the objecting seat's grade is still undecided past ` +
-    `one triage cycle. The triage Routine re-judges every \`pm:retriage\` card each fire (SKILL.md); a card ` +
-    `still here past the threshold is a re-judgement pass that did not run, not inventory: resolve the ` +
-    `grade (keep or change) and drop the label in the same write, oldest first.`
+    `\`pm:retriage\` carried ${carrying}, ${reading} — the question the objecting seat put to triage is ` +
+    `still unanswered past one triage cycle. The triage Routine answers every \`pm:retriage\` card's ` +
+    `question each fire (SKILL.md); a card still here past the threshold is an answer pass that did not ` +
+    `run, not inventory: answer what the comment asks and drop the label in the same write (an answer that ` +
+    `needs the maintainer goes to the inbox with the label still removed), oldest first.`
   );
 }
 
@@ -4081,10 +4082,10 @@ export function h21NegatedClosingKeyword(pr) {
  *                 itself, whose label is what makes the seat list page a board.
  *                 A closed seat card keeps it as identity, not as state.
  *   `pm:epic`     a delegation marker on a parent, the same kind of identity.
- *   `pm:retriage` a request for re-judgement. Plausibly residue too, and it did
- *                 not appear in the census — so it stays out until something
- *                 measures it, rather than being widened in on a hunch. The
- *                 set is one edit away when that measurement exists.
+ *   `pm:retriage` a question put to the triage seat. Plausibly residue too, and
+ *                 it did not appear in the census — so it stays out until
+ *                 something measures it, rather than being widened in on a
+ *                 hunch. The set is one edit away when that measurement exists.
  */
 export const PM_RESIDUE_LABELS = [
   'pm:dispatched',
@@ -5563,6 +5564,30 @@ export function h32NeedsSeatComments(issue) {
   if (!labelNames(issue ?? {}).includes('pm:seat')) return false;
   if (!seatIsHeld(issue)) return false;
   return !seatLane(issue).foreign;
+}
+
+/**
+ * H44's seat leg — a SIBLING of the gate above, not a change to it (#14929).
+ *
+ * H32 needs a lane INVENTORY to say anything, and `seatLane`'s `foreign` flag is
+ * an honest statement that a `repo:*` or lane-less seat has no `domain:*` label
+ * on this board to count one against. That argument is H32's and it holds.
+ *
+ * ⚠️ It is not H44's. "Does this post state a reading with no time on it" needs
+ * no inventory at all — it needs the post's own comments. Inheriting H32's gate
+ * would leave the row blind to exactly the threads the filing card is about:
+ * measured on the live board while this row was written, H32's gate fetched 4 of
+ * 13 open seat posts, and the 9 it skipped included the TRIAGE seat — carrier of
+ * the round-open marker that is this card's worked example — and the SKILLS
+ * seat. So this gate keeps the `pm:seat` + HELD legs and drops the lane test.
+ *
+ * The cost is stated where it is paid: +6 comment pages per run at that board.
+ * ⛔ H32's population is untouched, and H38 — which inherited the same gate for
+ * the same reason — takes this widening under its own card, not here.
+ */
+export function h44NeedsSeatComments(issue) {
+  if (!labelNames(issue ?? {}).includes('pm:seat')) return false;
+  return seatIsHeld(issue);
 }
 
 /**
@@ -7765,6 +7790,817 @@ export function renderDanglingReferences(report, { markdown = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// H43 — an open GOVERNED-SURFACE PR that has asked NEITHER approver to look
+// (#14967).
+//
+// ## The state nothing could read, and the question that found it
+//
+// The maintainer asked, verbatim: 「pr清单中哪些是需要我审核的,比如adr这些,为什
+// 么我没看到审核请求,是skills的问题吗?」 — and the director sweep behind that
+// question measured, across the four governed repos, TEN open PRs hitting the
+// governed register, of which SEVEN had never asked `os-zhuang` and TWO had
+// asked nobody at all. Two of them were ADR records. They had waited two days.
+//
+// ⭐ The protocol TEXT is not the defect and this row does not touch it: the
+// dispatch skill's ACCEPT path already says to request BOTH accounts, and a
+// request to `os-zhuang` succeeded during that same sweep. What was missing is
+// a READING. The three instruments that look at governed PRs each answer a
+// different question: the queue guard asks whether an AUTHORIZED APPROVAL
+// exists at enqueue time (too late, and a governed PR is not supposed to reach
+// the queue at all), the governed-merge audit is post-hoc, and every row in
+// this file keyed on `pm:*` labels cannot see a pull request — PRs carry none.
+//
+// ## Why ONE requested account is worse than it looks, which is the whole row
+//
+// `hotlong` is also the login the maintainer's own sessions run as, AND the
+// author of some governed PRs. A request addressed only to it either lands in
+// the account that made it, or cannot be made at all — GitHub answers a review
+// request naming the PR's own author with 422. Meanwhile the account the
+// maintainer actually reads is never asked. So "requested one of the two" is
+// not half a channel; on an approver-authored PR it is frequently zero.
+//
+// ⇒ Coverage here is a UNION over three fields, and each term is load-bearing:
+//
+//   requested_reviewers   the request itself, the channel the protocol names.
+//   assignees             the DOCUMENTED FALLBACK for the author-identity case
+//                         — assign the approver who cannot be requested, and
+//                         request the other. ⛔ Authorship alone never counts:
+//                         the fallback is covered only when it was TAKEN, which
+//                         is exactly the case that silently produced zero.
+//   submitted reviews     GitHub REMOVES a pending request the moment that
+//                         reviewer submits a review, so without this leg the
+//                         healthiest possible governed PR — one an approver has
+//                         already reviewed — fires this row forever. Measured
+//                         live while this row was written: one open governed PR
+//                         carried `requested_reviewers = [hotlong]` with a
+//                         submitted review by `os-zhuang`, and the two-field
+//                         union alone reported it as unasked.
+//
+// ## Report-only, and pointedly so
+//
+// ⛔ Nothing can ship wrong through this gap: the queue guard still refuses an
+// unapproved governed enqueue and a human merge is still the review record. The
+// failure is THROUGHPUT and VISIBILITY — 「一个只有在被保护的人自己发现它缺席时
+// 才显形的治理通道,不是通道」 — so the remedy is a REQUEST (or the assign
+// fallback), never a label written from here and never a gate. A governed PR
+// sitting as a DRAFT is the CORRECT terminal state of this regime, so draft
+// status neither fires this row nor silences it.
+//
+// ## The register is IMPORTED, never restated — and never fatally
+//
+// `GOVERNED_SURFACES`/`governedPathsIn` (the one file-list matcher, shared with
+// the queue guard and with the pre-arm `--test` verdict a seat runs before it
+// flips ready) and `GOVERNED_APPROVERS` (the 2026-08-27 authorized set) are the
+// single source for both halves of this predicate. A third matcher here would
+// be a register that can drift from the one the guard enforces.
+//
+// ⚠️ But this file TRAVELS. Its adopt list is "copy these files, unchanged"
+// into each sibling repo, and a sibling install carries the sweeper and its
+// `invoked-as` helper and nothing else — measured while this row was written:
+// objectui's `scripts/pm/` holds this file alone. A static `import` of the
+// governed pair would therefore not degrade that install, it would KILL it:
+// `ERR_MODULE_NOT_FOUND` at module load, exit 1, before a single predicate
+// runs — which is precisely the incident the patrol workflow's own adopt list
+// records against `invoked-as.mjs`, and it would take H1–H42 down with it to
+// buy H43. So the register is loaded LAZILY and its absence is NAMED: this row
+// alone reports NOT MEASURED, with the reason and the remedy, and the rest of
+// the sweep is untouched. #4690's rule decides the wording — an input that
+// could not be read must never render as an input that was clean.
+//
+// ## What it costs per run, and the two bounds
+//
+// ZERO extra changed-file requests: the pages are H36's, already fetched for
+// the population this row needs (`h36NeedsFiles` is wider than governed). The
+// one request this row buys is the submitted-review leg, and only for a
+// governed PR whose request∪assignment union is ALREADY short — on the live
+// board this landed against, 30 open PRs, 29 file pages already in hand, 8
+// governed, 5 review probes. Both bounds are honest about what they hide: a
+// candidate past `H43_REVIEW_PROBE_CAP` (oldest-first, because the oldest
+// unasked PR is the worst one) and a probe that failed both leave the row on
+// the two-field union with a sentence that SAYS so, and a PR whose file page
+// went unread is not judged here at all — the coverage clause carries both.
+// ---------------------------------------------------------------------------
+
+/**
+ * The review pages this row reads per run, and one page's size. The cap is the
+ * request budget, not a render budget: the governed slice of an open board has
+ * been ~8 of 30 with ~5 short of coverage, so 25 is several times the measured
+ * worst case and still bounds a pathological board to one page each.
+ */
+export const H43_REVIEW_PROBE_CAP = 25;
+export const H43_REVIEWS_PAGE_SIZE = 100;
+
+/** Approvers named inline before the sentence degrades to a count. */
+export const H43_SURFACE_LIST_CAP = 4;
+
+/**
+ * Why the register would not load, as a sentence a sibling install can act on.
+ * Pure, so the self-test pins the wording that a live absence would otherwise
+ * only produce on a repo nobody is looking at.
+ */
+export function governedRegisterFailure(err) {
+  if (String(err?.code ?? '') === 'ERR_MODULE_NOT_FOUND') {
+    return (
+      'the governed register is not installed beside this file — H43 needs `check-governed-merges.mjs` ' +
+      '(the `GOVERNED_SURFACES` matcher) and `check-governed-queue-guard.mjs` (`GOVERNED_APPROVERS`), ' +
+      'which a sibling-repo copy of this sweeper does not carry. Copy the pair to enable this row; ' +
+      'every other row is unaffected'
+    );
+  }
+  return `the governed register would not load: ${String(err?.message ?? err ?? 'unknown error')}`;
+}
+
+/**
+ * The register, resolved once per process and never fatally. Injectable so a
+ * caller can drive it without touching the filesystem; the default resolves
+ * both specifiers relative to THIS file, which is what makes the sibling-repo
+ * absence a catchable `ERR_MODULE_NOT_FOUND` rather than a load-time death.
+ */
+export async function loadGovernedRegister(load = (specifier) => import(specifier)) {
+  try {
+    const [merges, guard] = await Promise.all([
+      load('./check-governed-merges.mjs'),
+      load('./check-governed-queue-guard.mjs'),
+    ]);
+    const matcher = merges?.governedPathsIn;
+    const approvers = guard?.GOVERNED_APPROVERS;
+    if (typeof matcher !== 'function' || !Array.isArray(approvers) || approvers.length === 0) {
+      return {
+        available: false,
+        matcher: null,
+        approvers: [],
+        reason:
+          'the governed register loaded but did not export what this row reads — `governedPathsIn` ' +
+          'and a non-empty `GOVERNED_APPROVERS`. A rename is the likely cause, and this row is the ' +
+          'reader that noticed',
+      };
+    }
+    return { available: true, matcher, approvers, reason: null };
+  } catch (err) {
+    return { available: false, matcher: null, approvers: [], reason: governedRegisterFailure(err) };
+  }
+}
+
+/**
+ * Resolved at module evaluation, so the offline self-test can drive the real
+ * register rather than a fabricated approver list — a rename in either sibling
+ * reddens HERE, where a reader is looking, instead of going quiet on the four
+ * scheduled runs a day that nobody watches.
+ */
+export const GOVERNED_REGISTER = await loadGovernedRegister();
+
+/**
+ * The two fields a PR LIST row already carries. No request buys this, which is
+ * why the review leg below is bought only when this set is already short.
+ */
+export function h43CheapCoverage(pr) {
+  const logins = new Set();
+  for (const u of pr?.requested_reviewers ?? []) if (u?.login) logins.add(String(u.login));
+  for (const u of pr?.assignees ?? []) if (u?.login) logins.add(String(u.login));
+  return logins;
+}
+
+/**
+ * The gathering policy, H16's idiom: answerable from the LIST row plus the
+ * file page already in hand, and never NARROWER than the population it feeds.
+ * A governed PR whose two cheap fields already cover every approver is DECIDED
+ * — no row can fire — so its review page is a request nobody needs.
+ */
+export function h43NeedsReviewProbe(pr, governedCount, approvers) {
+  if (!(governedCount > 0)) return false;
+  const cheap = h43CheapCoverage(pr);
+  return (approvers ?? []).some((a) => !cheap.has(a));
+}
+
+/**
+ * The row. `governed` is the matched slice from the imported matcher (empty ⇒
+ * out of scope); `reviewed` is the logins that have SUBMITTED a review, or
+ * `null` when that leg was not read — three input states, never two (#4690):
+ * covered, uncovered, and uncovered-on-the-cheap-union-alone, which says so.
+ */
+export function h43GovernedReviewRequestGap(pr, governed, approvers, reviewed = null) {
+  const surfaces = governed ?? [];
+  const list = approvers ?? [];
+  if (surfaces.length === 0 || list.length === 0) return null;
+  const cheap = h43CheapCoverage(pr);
+  const submitted = reviewed == null ? null : new Set([...reviewed].map((l) => String(l)));
+  const missing = list.filter((a) => !cheap.has(a) && !(submitted?.has(a) ?? false));
+  if (missing.length === 0) return null;
+
+  const author = String(pr?.user?.login ?? '');
+  const hits = surfaces.reduce((n, s) => n + (s.files?.length ?? 0), 0);
+  const named = surfaces
+    .slice(0, H43_SURFACE_LIST_CAP)
+    .map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`)
+    .join(', ');
+  const more = surfaces.length > H43_SURFACE_LIST_CAP ? `, +${surfaces.length - H43_SURFACE_LIST_CAP} more` : '';
+  const named43 = missing.map((a) => `\`${a}\``).join(', ');
+  const asked =
+    missing.length === list.length
+      ? `has asked NOBODY — none of the ${list.length} account(s) in \`GOVERNED_APPROVERS\` (${named43}) ` +
+        'is requested, assigned, or has submitted a review'
+      : `has not asked ${named43} — not requested, not assigned, no submitted review`;
+  const authorClause = missing.includes(author)
+    ? ` ⭐ \`${author}\` is this PR's own AUTHOR, so a review request naming it is IMPOSSIBLE — GitHub ` +
+      'answers that with 422 — and the documented fallback is the one that was not taken: ASSIGN ' +
+      `\`${author}\` and request the other approver. Authorship alone is never read as coverage here, ` +
+      'because "the author would surely look" is exactly the assumption that produced zero.'
+    : '';
+  const legClause =
+    submitted == null
+      ? ' ⚠️ The submitted-review leg was NOT read for this PR (probe budget or a failed request), so ' +
+        'this row stands on the request∪assignment union alone — an approver who has already SUBMITTED ' +
+        'a review would clear it, and that reading is missing rather than negative.'
+      : '';
+  return (
+    `open and GOVERNED (${hits} changed file(s) on the register: ${named}${more}), and ${asked}. ` +
+    'Being a DRAFT is neither why this fires nor why it would go quiet — a governed PR waiting as a ' +
+    'draft for the human merge is the CORRECT terminal state of this regime, and it is still a state ' +
+    'in which nobody has been asked to look.' +
+    authorClause +
+    ' Report-only patrol INPUT, not a verdict and not a gate: nothing can ship through this gap (the ' +
+    'queue guard still refuses an unapproved governed enqueue), so what is missing is only that the ' +
+    'person the regime protects was never asked. Remedy is the request itself, or the assign fallback ' +
+    'above — ⛔ never a label, and ⛔ never an approving review from a seat.' +
+    legClause
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H44 — a protocol artefact stating a board/tree/queue reading with NO time at
+// which the reading was taken (#14929, report-only).
+//
+// ## The rule, and the gap that is NOT in the rule
+//
+// `.claude/skills/pm-dispatch/SKILL.md:164` carries a maintainer ruling of
+// 2026-09-02 (「其他同意」): 「板面/树/队列读数自带取数时刻:写进认领、派发令、
+// 复核、轮次报告、座位贴段落的读数恒带 UTC 时间戳(形如 `2026-03T00:21Z`),树读
+// 数另带 ref 或 tip;无时间戳的读数是格式错误不是现值,读者按未取处理」.
+//
+// ⛔ This row adds no rule and does not touch that text. The filing card's
+// measurement is that NOTHING READ IT: a `git grep` for the rule across
+// `scripts/` and `.github/` returned ZERO files, and its first live test failed
+// 2h37m after it landed — the round-open marker that opened the very next round
+// stated a `finding`-box census as a table of counts with no time on it. Two
+// further recurrences were then measured in a SECOND session a day later. Beside
+// the rule the same skill ranks the remedies: (a) delete the construct that
+// permits the error → (b) make the correct form the protocol's only spelling →
+// (c) add one more thing to remember, and 「(c) 型屡复发、(a) 型守住」. A patrol
+// row that NAMES the malformed reading is the cheapest (a)-shaped hold there is:
+// it asks nobody to remember anything, it reads.
+//
+// ## The predicate is STRUCTURAL and carries NO roster — deliberately
+//
+// ⚠️ The obvious first draft is "a comment authored by a seat account", and it
+// was measured and abandoned before this row was written. Keep the reason: there
+// is no seat roster in this repo (the only frozen account list is
+// `GOVERNED_APPROVERS`, which is the APPROVER set); the seat-post sticker login
+// this file already parses does NOT match comment authorship (a card assigned
+// `os-steve` carries a claim authored by `claude[bot]`); and one account is
+// simultaneously a seat and the maintainer's own login — stated in H43's header
+// above — so an author test cannot separate a seat's reading from the
+// maintainer's prose. It is not merely unavailable, it is ill-posed.
+//
+// ⇒ So this row recognises the ARTEFACT, exactly as `CLAIM_COMMENT_MARKER`, H33,
+// H34 and H37 already do, and filters by nothing else. That is also what the
+// rule itself says: it is scoped to 「认领、派发令、复核、轮次报告、座位贴段落」
+// — five artefacts — and says nothing whatever about who typed them.
+//
+// ## The fragment grammar, written down because it IS the false-positive control
+//
+// A comment fires only if some paragraph carries a READING-SHAPED fragment and
+// no timestamp. Four shapes, each pinned in the self-test, each a regex with no
+// `g` flag (a sticky `lastIndex` across calls would make this row's answer
+// depend on how many comments preceded it):
+//
+//   count       a number bound to a card/PR noun — `92 open cards`, `4 PRs`.
+//   tally       a check-run score — `18/19 checks`, `all 21 gates green`.
+//   position    a queue or page position — `page 747`, `queue position 3`.
+//   tree        a TIP: a 7–40 char hex token carrying BOTH a letter and a
+//               digit. ⛔ A ref NAME is not a tree reading, and this was
+//               measured rather than assumed: a first flight of this row that
+//               also matched `origin/main` fired on 17 of 51 carriers, and
+//               every one of them was the claim protocol's own worktree recipe
+//               (`git worktree add --no-track … origin/main`) or a heading of
+//               the form 「Premise re-check on `origin/main`」. A ref name
+//               asserts NO tree state — the rule reads 「树读数另带 ref 或
+//               tip」, making ref-or-tip a supplement to a reading, not the
+//               thing that makes one — so only a tip is read here. `defaced`
+//               and `effaced` are hex-shaped English words and the DIGIT
+//               requirement is what excludes them.
+//   tableCount  a table row whose last cell is a bare, optionally bolded
+//               integer. This is the card's OWN worked example — a census
+//               rendered as a table is the shape that failed first — and in one
+//               of these five artefacts a table of bare numbers is a board
+//               reading essentially always.
+//
+// ## Three narrowings, each of which can only make the row QUIETER
+//
+// 1. A paragraph carrying a timestamp is clean, and the timestamp shape is
+//    `HH:MM[:SS]Z`. ⚠️ The optional SECONDS field is a deliberate widening of
+//    the `\d{2}:\d{2}Z` the card's remedy names: a full ISO stamp
+//    (`2026-09-03T10:37:51Z`) is that rule obeyed with more precision, and the
+//    narrow form would fire on the most careful readings on the board. It admits
+//    strictly MORE paragraphs as clean, so it cannot manufacture a finding.
+// 2. Fenced code blocks are removed before paths are read. A reading pasted as
+//    evidence inside a fence is a transcript, not an assertion of current state.
+//    Fenced lines are blanked rather than deleted, so they still SEPARATE
+//    paragraphs and cannot silently weld two of them together.
+// 3. ⛔ No comment-length floor. The fragment requirement is a stronger filter
+//    than a character count, and a length constant with no measurement behind it
+//    is a number nobody can defend later.
+//
+// ## Cost, and the residual this row DECLARES rather than hides
+//
+// The corpus is the comment threads `commentCache` already holds when this pass
+// runs — every open `pm:dispatched` card, every assigned pm-tracked card, the
+// hold/blocked/restart threads and H37's fold members — so the base cost is
+// ZERO requests, on H37's and H38's placement argument.
+//
+// One leg is bought. `h32NeedsSeatComments` fetches a seat post only when its
+// lane parses as a `domain:*` label on this board, which was 4 of 13 open seat
+// posts when this row was written — and the 9 it excludes include the TRIAGE
+// seat, whose thread carries the round-open markers this card was filed about,
+// and the SKILLS seat. So `h44NeedsSeatComments` beside it widens the fetch to
+// every HELD seat post regardless of lane shape: +6 requests per run at that
+// board, 4 runs a day. ⛔ H32's own population and lane gate are untouched — its
+// exclusion is argued from a lane INVENTORY it cannot count, which is a real
+// argument for H32 and not this row's to overturn. H38 takes the same widening
+// under its own card.
+//
+// ⚠️ DECLARED RESIDUAL: a verdict posted on a PULL REQUEST is not read here at
+// all. Every listing that feeds `commentCache` filters `!i.pull_request`, so PR
+// comment pages are not in hand — 0 of 30 open PRs when this row was written,
+// and covering them is +30 requests per run. That leg is deliberately NOT bought
+// in this row's first flight, and the summary clause says so on every run: the
+// count is a LOWER BOUND, never a clean board.
+// ---------------------------------------------------------------------------
+
+/**
+ * The timestamp that makes a paragraph clean. See narrowing 1 in the banner —
+ * the seconds field is optional so a full ISO stamp counts as the rule obeyed.
+ */
+export const H44_READING_TIMESTAMP = /\b\d{2}:\d{2}(?::\d{2})?Z\b/;
+
+/**
+ * The reading grammar, as data so the self-test can drive every shape by name
+ * and a reader can check the banner against the regexes. ⛔ No `g` flag on any
+ * of them: `exec` on a sticky regex carries `lastIndex` between calls, and this
+ * row runs the same regex over thousands of paragraphs.
+ */
+export const H44_READING_FRAGMENTS = Object.freeze([
+  Object.freeze({
+    kind: 'count',
+    what: 'a count of cards or PRs',
+    re: /\b\d+\s+(?:more\s+|further\s+|open\s+|closed\s+|merged\s+|governed\s+|remaining\s+)*(?:cards?|issues?|PRs?|pull[\s-]?requests?|findings?|entries|rows?|commits?)\b/i,
+  }),
+  Object.freeze({
+    kind: 'tally',
+    what: 'a check-run tally',
+    re: /\b(?:all\s+)?\d+\s*(?:\/|of)\s*\d+\s+(?:checks?|gates?|green|passing|runs?|jobs?)\b/i,
+  }),
+  Object.freeze({
+    kind: 'position',
+    what: 'a queue or page position',
+    re: /\b(?:queue\s+)?(?:page|position|slot|rank|place)\s+#?\d+\b/i,
+  }),
+  Object.freeze({
+    kind: 'tree',
+    what: 'a tree tip',
+    re: /\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/,
+  }),
+  Object.freeze({
+    kind: 'tableCount',
+    what: 'a table row holding a bare count',
+    re: /^[ \t]*\|.*\|[ \t]*(?:\*\*)?\d+(?:\*\*)?[ \t]*(?:\([^)]*\))?[ \t]*\|[ \t]*$/m,
+  }),
+]);
+
+/**
+ * Fenced blocks blanked out, line for line. Blanking rather than deleting keeps
+ * the paragraph structure honest — a fence between two paragraphs must not weld
+ * them into one, which would let a timestamp on one side clean the other.
+ */
+export function h44StripFences(text) {
+  let open = false;
+  return String(text ?? '')
+    .split('\n')
+    .map((line) => {
+      if (/^[ \t]*(?:`{3,}|~{3,})/.test(line)) {
+        open = !open;
+        return '';
+      }
+      return open ? '' : line;
+    })
+    .join('\n');
+}
+
+/**
+ * Which of the protocol artefacts this comment is, or null for ordinary prose.
+ *
+ * `onSeatPost` is the CARRIER leg: the rule names 「座位贴段落」, and a section
+ * of a seat post is edited or posted as a comment on that post, so the carrier
+ * decides it rather than any marker in the body. The three body markers are
+ * ordered so the most specific spelling names the row.
+ *
+ * ⛔ Verdict words are matched UPPERCASE ONLY: the protocol writes ACCEPT /
+ * REJECT / REWORK in caps, and a case-insensitive match would read the ordinary
+ * English verb in any sentence that happens to open with it.
+ */
+export const H44_VERDICT_MARKER = /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*(?:ACCEPT|REJECT|REWORK)\b/m;
+
+/** A round-open marker: `R+118 open`, however it is decorated. */
+export const H44_ROUND_OPEN_MARKER = /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*R\+\d+[ \t]+open\b/im;
+
+export function h44ArtefactShape(body, onSeatPost = false) {
+  const text = String(body ?? '');
+  if (CLAIM_COMMENT_MARKER.test(text)) return 'a claim';
+  if (H44_ROUND_OPEN_MARKER.test(text)) return 'a round-open marker';
+  if (H44_VERDICT_MARKER.test(text)) return 'an ACCEPT/REJECT/REWORK verdict';
+  if (onSeatPost) return 'a seat-post section';
+  return null;
+}
+
+/**
+ * H44's predicate — null when the comment is clean or out of scope, else the
+ * first reading-shaped fragment that carries no time.
+ *
+ * @param {string} body — the comment body.
+ * @param {boolean} onSeatPost — is the carrier a `pm:seat` post?
+ * @returns {{ shape: string, kind: string, what: string, fragment: string }|null}
+ */
+export function h44UntimestampedReading(body, onSeatPost = false) {
+  const shape = h44ArtefactShape(body, onSeatPost);
+  if (!shape) return null;
+  for (const paragraph of h44StripFences(body).split(/\n[ \t]*\n/)) {
+    if (!paragraph.trim()) continue;
+    if (H44_READING_TIMESTAMP.test(paragraph)) continue;
+    for (const fragment of H44_READING_FRAGMENTS) {
+      const m = fragment.re.exec(paragraph);
+      if (m) {
+        return { shape, kind: fragment.kind, what: fragment.what, fragment: m[0].trim().slice(0, H44_FRAGMENT_ECHO_CAP) };
+      }
+    }
+  }
+  return null;
+}
+
+/** How much of the offending fragment is echoed into the row. */
+export const H44_FRAGMENT_ECHO_CAP = 120;
+
+/**
+ * The row. Report-only, and it names the comment so the remedy is an EDIT of a
+ * known artefact rather than a hunt.
+ *
+ * @param {object} hit — `h44UntimestampedReading`'s result.
+ * @param {object} comment — the REST comment row (id, html_url, created_at).
+ * @param {number} total — how many comments on this carrier carry the defect.
+ */
+export function h44UntimestampedReadingRow(hit, comment, total = 1) {
+  if (!hit) return null;
+  const id = String(comment?.id ?? 'an unread id');
+  const more = total > 1 ? ` ${total - 1} further comment(s) on this carrier carry the same defect; this is the OLDEST.` : '';
+  return (
+    `${hit.shape} (comment \`${id}\`) states ${hit.what} with NO time it was taken — the first such ` +
+    `fragment is \`${hit.fragment}\`, and no \`HH:MM[:SS]Z\` stamp appears anywhere in its paragraph. ` +
+    'Under the 2026-09-02 ruling at `.claude/skills/pm-dispatch/SKILL.md` a reading without its 取数时刻 ' +
+    'is MALFORMED rather than merely terse, and a reader is instructed to treat it as UNTAKEN — so the ' +
+    'cost is not tidiness: a decision made downstream on this line rests on a board state nobody can ' +
+    'date.' +
+    more +
+    ' Remedy is an EDIT of that comment adding the time the reading was taken (a tree reading also ' +
+    'carries its ref or tip) — ⛔ never a re-measurement written as if it were the original, which ' +
+    'would date the artefact to a board it never read. Report-only patrol INPUT, not a verdict and ' +
+    'not a gate: nothing is blocked by this row and no gate reads it.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H45 — `pm:epic` and `pm:queue` on ONE card (reserved and handed over at once).
+//
+// H3's shape and H3's cost: a pure label intersection, no threshold, no
+// timestamp. `pm:epic` says a named epic PM has reserved the card and no domain
+// seat may take it; `pm:queue` says it has been handed over and any seat may.
+// Both at once and each reader is right about the label it read, which is the
+// shape that lets one card be implemented twice.
+//
+// The carriers are listed BY CONSTRUCTION: every card carrying `pm:queue` is on
+// the `pm:queue` label page this sweep already pages, so the row buys no
+// request and needs no gathering policy.
+//
+// ⚠️ This half's own silence is CLOSED, and the paragraph that stated it is
+// gone rather than merely amended: the reading it deferred — a `pm:epic` card
+// whose PARENT does not carry `pm:epic` — is the second half below, with the
+// two prices it named (the whole `label:pm:epic` index, and a sub-issues
+// `parent` read per carrier, an endpoint family nothing in this file called)
+// now paid and declared. Nothing about the pair above changes: same predicate,
+// same sentence, same free population.
+// ---------------------------------------------------------------------------
+
+/** H45 — true when one card is reserved by an epic and offered to the queue at once. */
+export function h45EpicAndQueued(issue) {
+  const labels = labelNames(issue);
+  return labels.includes('pm:epic') && labels.includes('pm:queue');
+}
+
+// ---------------------------------------------------------------------------
+// H45's SECOND HALF — a `pm:epic` card reserved under nothing delegated.
+//
+// `pm:epic` is a TWO-NODE fact, and the label alone cannot say which node it is
+// on. The epic lane in `.claude/skills/pm-dispatch/SKILL.md` puts it on the
+// delegated 父单 AND on every sub-issue beneath it — 「`label:pm:epic`
+// 即父子保留全集」 — so the index is parents and children together, and the
+// reservation it publishes (「已由 epic PM 保留;其它 PM 永不取」) is the SAME
+// sentence at both ends. A child is withheld from every domain seat because a
+// parent is being run by a named epic PM. When that parent is not delegated,
+// the child is withheld on the strength of nothing — and the label is
+// indistinguishable, to a reader and to every candidate query alike, from a
+// live reservation.
+//
+// ## What is judged, in the order the predicate asks it
+//
+//   1. the card carries `pm:epic`, or nothing is read at all;
+//   2. the parent read ANSWERED, or the card is UNJUDGED — never clean;
+//   3. a parent carrying `pm:epic` is the delegated node -> clean;
+//   4. a parent NOT carrying it -> FINDING, naming the parent;
+//   5. NO parent (the documented 404) -> the card must then be the delegated
+//      node itself, which `h45DelegationNodeSignals` is what decides;
+//   6. no parent AND the card's own payload names one -> the two channels
+//      DISAGREE, reported rather than silently read as parentless.
+//
+// ## Why a top-level carrier is usually CLEAN, and what makes one a finding
+//
+// A parent IS the delegated node by construction, so a top-level `pm:epic` card
+// is normally the epic itself and reporting it would be noise. Two free signals
+// say so and EITHER is enough:
+//
+//   sub-issues     `sub_issues_summary.total > 0` — it demonstrably heads a
+//                  subtree, which is what a 父单 is.
+//   registration   its body carries a `session_…` identifier — the machine
+//                  half of the paired delegation signal 「父单打 `pm:epic` +
+//                  正文写会话 ID 与声明的文件领地」, and the same registration
+//                  the zombie rule reads (「父单正文有登记」).
+//
+// The OR is deliberate, and it is what the live population forced: a chartered
+// epic whose legs live in its BODY rather than in filed sub-issues carries a
+// live owner registration and zero sub-issues, and a sub-issue-only reading
+// reports it as abandoned. The other direction occurs too — a parent heading
+// twenty sub-issues whose body names no session — so neither signal alone
+// covers the population, and an AND would report both halves of it.
+//
+// ⚠️ The body half is a LOOSE anchor on purpose, and its looseness is safe in
+// exactly ONE direction: it can only make this row go QUIET. It never fires a
+// finding, so a body that merely mentions a session id costs a silence — an
+// unread surface, stated here — and can never produce a phantom accusation,
+// which is the failure direction that keeps the seat-sticker BODY half out of
+// this file entirely.
+//
+// ## What it costs, and the population it deliberately is NOT
+//
+// One `label:pm:epic` page, plus one `GET /repos/{owner}/{repo}/issues/{n}/parent`
+// per carrier — a NEW fetch class in this file, declared here, used nowhere
+// else, and bounded by the size of the `pm:epic` index rather than by the
+// board. A 404 on it is the documented answer for a parentless card, not a
+// transport failure, and it is counted as an ANSWER by the coverage pair.
+//
+// ⛔ That page is enumerated SEPARATELY and its rows NEVER enter `seen`. `seen`
+// is the input every row judged in the main loop is drawn from — and it is
+// also, transitively, what the corpus rows read: the comment cache the
+// untimestamped-reading row scans and the referrer set the dangling-reference
+// row builds are both "whatever the rows above already fetched". Folding a
+// `pm:epic` page into `seen` would therefore not merely add carriers; it would
+// move what those rows report, which is a change to EXISTING rows wearing an
+// addition's uniform. `SEEN_LABEL_PAGES` is the pinned list, and `pm:epic` is
+// not in it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The machine half of an epic delegation registration, read off a `pm:epic`
+ * carrier's OWN body.
+ *
+ * Deliberately loose — any `session_…` identifier, anywhere in the body, code
+ * span or prose. It is consulted ONLY to excuse a top-level carrier, so its
+ * error direction is silence and never accusation. See the banner.
+ */
+export const EPIC_REGISTRATION_MARKER = /session_[A-Za-z0-9]{4,}/;
+
+/**
+ * Which card buys the parent read: a `pm:epic` carrier, and nothing else.
+ *
+ * Exported for the reason every gathering policy in this file is — a policy
+ * that decides what gets READ AT ALL is where a silent hole would live.
+ */
+export function h45NeedsParentRead(issue) {
+  return labelNames(issue).includes('pm:epic');
+}
+
+/**
+ * The two free signals that a top-level `pm:epic` card is the DELEGATED NODE.
+ * Both are read off the listing row already in hand; neither costs a request.
+ *
+ * @returns {{ subIssues: boolean, registration: boolean }}
+ */
+export function h45DelegationNodeSignals(issue) {
+  const total = Number(issue?.sub_issues_summary?.total ?? 0);
+  return {
+    subIssues: Number.isFinite(total) && total > 0,
+    registration: EPIC_REGISTRATION_MARKER.test(String(issue?.body ?? '')),
+  };
+}
+
+/**
+ * Whether the CARD's own payload claims a parent — the second channel, and the
+ * only thing that can contradict a 404 from the parent read.
+ */
+function epicCardNamesParent(issue) {
+  return Boolean(issue?.parent) || Boolean(issue?.parent_issue_url);
+}
+
+/**
+ * H45's second half — null when the carrier is clean, else the finding
+ * sentence.
+ *
+ * `parent` carries THREE input states, never two:
+ *
+ *   an issue object   the parent read answered with the parent row, whose
+ *                     labels decide;
+ *   `null`            it answered 404 `No parent issue found` — parentless,
+ *                     which is a real answer and the documented one;
+ *   `undefined`       it was not read at all (not a carrier, or the request
+ *                     failed) — UNJUDGED, never clean, and the summary line's
+ *                     coverage pair is what says how many.
+ */
+export function h45EpicUnderUndelegatedParent(issue, parent) {
+  if (!h45NeedsParentRead(issue)) return null;
+  if (parent === undefined) return null;
+
+  if (parent === null) {
+    if (epicCardNamesParent(issue)) {
+      return (
+        'carries `pm:epic` and its OWN payload names a parent, while the sub-issues parent read answers ' +
+        '404 `No parent issue found` — the two channels DISAGREE about whether this card is a sub-issue, ' +
+        'so it is reported rather than read as parentless and quietly excused. ⛔ Nothing here asserts ' +
+        'which channel is right: a stale payload field and a parent relation removed between the two ' +
+        'reads are indistinguishable from this sweep, and 「could not tell」 must never render as clean. ' +
+        'Remedy is a re-read of the card — if the relation really is gone, this is a top-level carrier ' +
+        'and the next sweep judges it as one. Report-only patrol INPUT, not a verdict and not a gate.'
+      );
+    }
+    const signals = h45DelegationNodeSignals(issue);
+    if (signals.subIssues || signals.registration) return null;
+    return (
+      'carries `pm:epic` and has NO parent — reserved under nothing delegated. A top-level carrier is ' +
+      'normally the delegated 父单 itself and is clean, but this one declares NEITHER free signal that ' +
+      'would say so: `sub_issues_summary.total` is 0, so it heads no subtree, and its body carries no ' +
+      '`session_…` registration — the machine half of 「父单打 `pm:epic` + 正文写会话 ID ' +
+      '与声明的文件领地」. So the card is withheld from every domain seat ' +
+      '(「已由 epic PM 保留;其它 PM 永不取」) while nothing declares an epic session to be ' +
+      'running it. Remedy is whichever is TRUE: write the owner registration into the body if the ' +
+      'delegation is live, file the subtree it heads, or drop `pm:epic` and re-grade the card. ' +
+      '⚠️ The body read is deliberately loose and can only EXCUSE a carrier, never accuse one, so this ' +
+      'row is a LOWER BOUND on the shape. Report-only patrol INPUT, not a verdict and not a gate.'
+    );
+  }
+
+  if (labelNames(parent).includes('pm:epic')) return null;
+  const number = parent?.number ?? 'an unread number';
+  return (
+    `carries \`pm:epic\` while its PARENT #${number} does NOT — reserved under a parent that is not ` +
+    'delegated. The label withholds this card from every domain seat ' +
+    '(「已由 epic PM 保留;其它 PM 永不取」) on the strength of a delegation the parent ' +
+    'does not declare, and a candidate query reading the `pm:epic` index cannot tell this from a live ' +
+    'reservation. Remedy is ONE label write, whichever way the subtree really stands: put `pm:epic` on ' +
+    "the parent if the epic is live, or take it off this child and re-grade the card (`pm:queue` if it " +
+    'is anyone\'s to take now). ⛔ Never both on this card at once — `pm:epic` + `pm:queue` is this ' +
+    'row\'s FIRST half. Report-only patrol INPUT, not a verdict and not a gate.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H46 — an OPEN pull request implementing a card that never became this
+// branch's to implement.
+//
+// The body binds a closing keyword to an open card, and the card is in one of
+// two states that say the work was never taken:
+//
+//   (a) it still carries `pm:queue` — published as available to every seat
+//       while this PR is already set to close it, so a second lawful claim
+//       produces a second implementation;
+//   (b) no comment on it is a `Claim:` whose `Branch:` line names this PR's
+//       head branch — the implementation is attributable to no claim on the
+//       card it closes.
+//
+// Both are fixable only while the PR is OPEN, because the merge is what closes
+// the card, so drafts are in scope exactly as they are for H7 and H21.
+//
+// `Part of #N` is NOT a closing keyword and never fires this row: a body that
+// declares itself part of a card is not telling GitHub to finish it.
+//
+// ## Everything here is READ, never re-spelled
+//
+// The keyword extraction is `closingKeywordTargets` — H7's and H21's, so the
+// three rows can never disagree about what GitHub will act on. The claim half
+// is `CLAIM_COMMENT_MARKER` and the branch half is `claimedBranches`, the same
+// pair `check-clause2-carriers.mjs` reads.
+//
+// ## What it costs, and the silences that buys
+//
+// The PR side is the open-PR listing already in hand; the card side is `seen` ∪
+// the unscoped open listing, every open card already paged. Only leg (b) buys
+// anything — one comment page per BOUND, non-`pm:queue` open card, on the same
+// shared cache every other comment reader here uses, so a card another row
+// already fetched costs nothing.
+//
+//   ⚠️ A bound number this sweep cannot see as an OPEN card is UNJUDGED, not
+//   clean: a closed card, a PR number and an open card beyond the listing
+//   ceiling are indistinguishable here and none of them is judged.
+//   ⚠️ A thread that could not be READ is unjudged too (#4690) — leg (b) is a
+//   statement about comments in hand, and the coverage pair on the summary line
+//   is what says how many that was.
+//   ⚠️ `claimedBranches` reads protocol-shaped refs (`claude/issue-<n>-<slug>`)
+//   only, so a PR whose head is any other shape can be named by no claim at all
+//   and leg (b) fires on it. That is the row working rather than a gap: an
+//   implementation on an unnameable branch is as unattributable as one with no
+//   claim written.
+// ---------------------------------------------------------------------------
+
+/** How many bound cards one row names before it counts the rest — H19's budget, same grounds. */
+export const H46_CARD_LIST_CAP = 4;
+
+/**
+ * Which bound card buys a comment page. Leg (a) is answered by labels alone, so
+ * a `pm:queue` carrier is judged without touching the network; everything else
+ * needs its thread. Exported for the reason every gathering policy here is: a
+ * policy that decides what gets READ AT ALL is where a silent hole would live.
+ */
+export function h46NeedsCardComments(issue) {
+  return !labelNames(issue ?? {}).includes('pm:queue');
+}
+
+/**
+ * Is any comment here a `Claim:` whose `Branch:` line names `branch`?
+ *
+ * Both halves are the shipped predicates and neither is re-spelled: the claim
+ * marker tolerates the documented blockquote and the `Branch:` line tolerates
+ * the decoration a line meant to be grepped attracts. An empty branch is
+ * unanswerable rather than unclaimed, and returns false only after the caller
+ * has declined to judge on it.
+ */
+export function h46ClaimNamesBranch(commentBodies, branch) {
+  const ref = String(branch ?? '');
+  if (!ref) return false;
+  return (Array.isArray(commentBodies) ? commentBodies : []).some(
+    (body) => CLAIM_COMMENT_MARKER.test(String(body ?? '')) && claimedBranches(body).includes(ref),
+  );
+}
+
+/**
+ * H46 — null when the PR is clean, else the finding sentence.
+ *
+ * Bound PER CARD NUMBER exactly as H7 binds: a PR that lawfully closes a
+ * claimed card and also names an unclaimed one reports only the second.
+ *
+ * @param {{ number?: number, body?: string, head?: { ref?: string } }} pr
+ * @param {Map<number, { issue: object, comments?: string[]|null }>} cards — the
+ *   OPEN cards this sweep holds. An absent number is UNJUDGED; `comments`
+ *   `undefined` is a thread unconsulted and `null` one unreadable, and leg (b)
+ *   declines on both (#4690).
+ */
+export function h46ImplementedWithoutClaim(pr, cards) {
+  const head = String(pr?.head?.ref ?? '');
+  const rows = [];
+  for (const [n, keyword] of closingKeywordTargets(pr?.body ?? '')) {
+    const entry = cards instanceof Map ? cards.get(Number(n)) : null;
+    if (!entry?.issue) continue;
+    if (labelNames(entry.issue).includes('pm:queue')) {
+      rows.push(
+        `body carries \`${keyword} #${n}\` while #${n} still carries \`pm:queue\` — the card is ` +
+          `published as available to every seat while this PR is already set to close it, so a ` +
+          `second lawful claim on it lands a second implementation. Take the card as the protocol ` +
+          `says (drop \`pm:queue\` in the write that claims it, then post the \`Claim:\` comment ` +
+          `naming this branch), or weaken this body to \`Part of #${n}\` so the merge does not ` +
+          `close it`,
+      );
+      continue;
+    }
+    if (!head) continue;
+    const comments = entry.comments;
+    if (!Array.isArray(comments)) continue;
+    if (h46ClaimNamesBranch(comments, head)) continue;
+    rows.push(
+      `body carries \`${keyword} #${n}\` but no comment on #${n} is a \`Claim:\` whose \`Branch:\` ` +
+        `line names \`${head}\` — merging attributes the card to a branch the card itself never ` +
+        `records as claimed, so nothing on the board stopped a second seat taking it. Post the ` +
+        `claim comment naming \`${head}\` on #${n}, or weaken this body to \`Part of #${n}\``,
+    );
+  }
+  if (rows.length === 0) return null;
+  const shown = rows.slice(0, H46_CARD_LIST_CAP);
+  const more = rows.length > shown.length ? `; +${rows.length - shown.length} further bound card(s)` : '';
+  return `${shown.join('; ')}${more}. Report-only patrol INPUT: nothing here is blocked and no label is written.`;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -7872,6 +8708,15 @@ export const SWEEP_COUNT_KEYS = [
   'conflictProbed',
   'sharedFileCandidates',
   'sharedFileProbed',
+  // H43's coverage triple and its fourth state (#14967) — the register that
+  // did not load. `governedRegisterReason` is a STRING, not a counter, and it
+  // rides the same contract for the same reason: without it the clause would
+  // render a NOT-MEASURED row as `0 of 0`, which is the exact confusion the
+  // enumeration above exists to end.
+  'governedPrs',
+  'governedReviewCandidates',
+  'governedReviewProbed',
+  'governedRegisterReason',
   'liveFolds',
   'memberReadCandidates',
   'memberReadProbed',
@@ -7887,6 +8732,27 @@ export const SWEEP_COUNT_KEYS = [
   'crossRepoUnreadable',
   'seatCandidates',
   'seatMarkersRead',
+  // H44's corpus pair and its widened seat leg (#14929). `readingComments` is
+  // what was READ, not what fired: a quiet H44 has to be separable from a pass
+  // that judged nothing, and the PR residual makes every count here a lower
+  // bound rather than a census.
+  'readingThreads',
+  'readingComments',
+  'readingSeatCandidates',
+  'readingSeatRead',
+  // H46's coverage pair. `claimlessCandidates` is how many BOUND, non-`pm:queue`
+  // open cards leg (b) had to read a thread for, and `claimlessProbed` how many
+  // of them it got — the pair that keeps a row that judged nothing separable
+  // from a board with nothing to judge.
+  'claimlessCandidates',
+  'claimlessProbed',
+  // H45's second half. `epicParentCandidates` is the size of the SEPARATE
+  // `pm:epic` enumeration and `epicParentProbed` how many of those parent reads
+  // ANSWERED — a 404 counting as an answer, because parentless is what it
+  // means. The pair keeps a row that judged nothing separable from an index
+  // with nothing to judge.
+  'epicParentCandidates',
+  'epicParentProbed',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -8168,6 +9034,22 @@ export function summaryLine(counts, findingCount) {
     `Shared-file holds (H36): changed-file page read on ${counts.sharedFileProbed ?? 0} of ` +
     `${counts.sharedFileCandidates ?? 0} open PR(s) — a pair needs both sides read, so a shortfall ` +
     'can only MISS a hold, never invent one. ' +
+    // H43's coverage clause (#14967). It is UNCONDITIONAL, like every other
+    // window's: this row can be quiet for three different reasons — no governed
+    // PR is short of coverage, no file page was read, or the register itself
+    // did not load — and only the first is a clean board. The register's own
+    // availability leads the clause because it is the one that silences the
+    // whole row rather than bounding it.
+    `Governed review requests (H43): ${
+      counts.governedRegisterReason
+        ? `NOT MEASURED — ${counts.governedRegisterReason}`
+        : `${counts.governedPrs ?? 0} of the open PR(s) whose changed-file page was read hit the ` +
+          `governed register, and the submitted-review leg answered on ${counts.governedReviewProbed ?? 0} ` +
+          `of ${counts.governedReviewCandidates ?? 0} that the request/assignment union already left ` +
+          `short (oldest-first, ${H43_REVIEW_PROBE_CAP} per run). An unread review leg leaves its row ` +
+          'standing on the two cheap fields and the row says so; a PR whose file page went unread is ' +
+          'not judged by this item at all'
+    }. ` +
     `Family folds (H37): ${counts.liveFolds ?? 0} live shared branch(es) claimed by more than their ` +
     `own chain head, and a member comment page read on ${counts.memberReadProbed ?? 0} of ` +
     `${counts.memberReadCandidates ?? 0} open \`pm:queue\` card(s) — that second read is bought ONLY ` +
@@ -8202,6 +9084,37 @@ export function summaryLine(counts, findingCount) {
     `${refDangling} do(es) not resolve and ${refUnjudged} could not be judged — ⛔ only HTTP 404 is ` +
     'read as unresolvable, a CLOSED card resolves normally and is never a finding, and no cause is ' +
     'asserted for any of them. Suppressed content is invisible, so every count here is a LOWER BOUND. ' +
+    // H44's disclosure (#14929). UNCONDITIONAL, like every other window's, and
+    // it carries a bound the other clauses do not: this row's corpus is whatever
+    // OTHER rows already fetched, so "no untimestamped reading" can mean the
+    // board is clean OR that the artefact was posted somewhere nothing reads.
+    // The PR leg is the named half of that — 0 comment pages are fetched for
+    // pull requests by any listing in this file.
+    `Untimestamped readings (H44): ${counts.readingComments ?? 0} comment(s) across ` +
+    `${counts.readingThreads ?? 0} thread(s) ALREADY in hand were read for the five artefact shapes, ` +
+    `and the seat leg widened the fetch to ${counts.readingSeatRead ?? 0} of ` +
+    `${counts.readingSeatCandidates ?? 0} HELD seat post(s) — every held seat, whatever its lane ` +
+    'spelling, which is wider than H32\'s own population and deliberately so. ⛔ A verdict posted on a ' +
+    'PULL REQUEST is NOT in this corpus: no listing here fetches a PR comment page, so this row\'s ' +
+    'silence about PRs is an unread surface and never a clean one, and every count above is a LOWER ' +
+    'BOUND. ' +
+    // H46's coverage pair. UNCONDITIONAL like every other window's: a `0 of 0`
+    // reading is a run where no open PR bound a closing keyword to a
+    // non-`pm:queue` open card, never a row that went quiet.
+    `Claim-less implementations (H46): ${counts.claimlessProbed ?? 0} of ` +
+    `${counts.claimlessCandidates ?? 0} bound card thread(s) were read for a \`Claim:\` naming the ` +
+    "PR's head branch. A bound number this sweep cannot see as an OPEN card — closed, a PR, or " +
+    'beyond the listing ceiling — is UNJUDGED rather than clean, so this count is a LOWER BOUND. ' +
+    // H45's second half. UNCONDITIONAL like every other window's, and it
+    // carries the one disclosure this row owes beyond its own count: the
+    // population it reads is enumerated SEPARATELY, so a reader can check that
+    // no other row's input moved to buy it.
+    `Epic parent reads (H45): ${counts.epicParentProbed ?? 0} of ` +
+    `${counts.epicParentCandidates ?? 0} open \`pm:epic\` card(s) had their sub-issues parent read ` +
+    'answered — a 404 `No parent issue found` IS an answer here, because parentless is what it means. ' +
+    'That index is enumerated as its own population and kept OUT of the label pages every other row is ' +
+    'judged over (`SEEN_LABEL_PAGES`), so this row buys one page plus one read per carrier and moves no ' +
+    "other row's input. A carrier whose parent read did not answer is UNJUDGED rather than clean. " +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -8246,8 +9159,12 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h32Seats', 'Seat liveness (H32): '],
   ['h35GatePatrol', 'Gate-removal patrol (H35): '],
   ['h36SharedFiles', 'Shared-file holds (H36): '],
+  ['h43GovernedReviews', 'Governed review requests (H43): '],
   ['h37Folds', 'Family folds (H37): '],
   ['h40References', 'Dangling references (H40): '],
+  ['h44Readings', 'Untimestamped readings (H44): '],
+  ['h46Claimless', 'Claim-less implementations (H46): '],
+  ['h45EpicParents', 'Epic parent reads (H45): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -8562,7 +9479,8 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
  *   stall     the card is stopped and no later sweep frees it: a block that
  *             outlived or mis-names its blocker (H19/H26/H28), a dispatch that
  *             never reached a branch or whose claimant is gone (H20/H27/H33),
- *             a PR that cannot land (H12/H16/H36), a seat or lane not moving
+ *             a PR that cannot land (H12/H16/H36), a governed PR that nobody
+ *             was asked to look at (H43), a seat or lane not moving
  *             (H32/H38), a `pm:blocked` card with no machine-readable line at
  *             all (H4).
  *   state     the board contradicts itself on a live card, and the repair is
@@ -8590,6 +9508,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H33: 'stall',
   H36: 'stall',
   H38: 'stall',
+  H43: 'stall',
 
   H1: 'state',
   H2: 'state',
@@ -8608,6 +9527,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H30: 'state',
   H34: 'state',
   H37: 'state',
+  H44: 'state',
+  H45: 'state',
+  H46: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -8654,11 +9576,12 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (64) × ~48 B ≈ 3.1 KB
  *   trim callout                  ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~26 B + prose
  *   unregistered callout          ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~8 B + prose
- *   computed-0 line               ≤ registry size (36) × ~8 B + prose
+ *   computed-0 line               ≤ registry size (38) × ~8 B + prose
  *
  * Measured on the constructed worst case: 2,285 B with every one of the
- * registered families carrying 999 rows (37 of them when measured; 36 since
- * #14072 removed H22, so the measurement is an upper bound on today's set),
+ * registered families carrying 999 rows (37 of them when measured; 36 after
+ * #14072 removed H22, 38 with H45/H46 — the ROW CAP below, not the registry
+ * size, is what bounds the table, so the measured figure still stands),
  * 3,754 B with enough unregistered
  * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
  * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
@@ -9853,6 +10776,33 @@ export function pmLabelListingPath(repo, label, page) {
   return `/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`;
 }
 
+/**
+ * The path of the ONE new fetch class this file takes: the sub-issues PARENT
+ * read, one call per `pm:epic` carrier (H45's second half).
+ *
+ * Named and pinned for exactly the reason `pmLabelListingPath` above is — a
+ * request shape inlined in a loop body can be asserted only by re-typing it,
+ * and a re-typed assertion pins the copy rather than the call.
+ *
+ * ## What its 404 means, and why that is not an error path
+ *
+ * `No parent issue found` is the endpoint's DOCUMENTED answer for a card that
+ * is not a sub-issue. It is the reading the row needs most often, so the caller
+ * counts it as a probe that ANSWERED and hands the predicate `null`; only some
+ * OTHER failure leaves the carrier unjudged. Reading the 404 as a failed read
+ * would make every top-level epic look unreadable and the row would go quiet
+ * over the whole population.
+ *
+ * ⛔ No other member of the sub-issues family is called. The child listing
+ * (`/issues/{n}/sub_issues`) would be a SECOND fetch class and buys nothing
+ * this row asks: the carriers are already enumerated by the `pm:epic` index,
+ * and how many children a card has arrives free on its own listing row as
+ * `sub_issues_summary`.
+ */
+export function subIssueParentPath(repo, number) {
+  return `/repos/${repo}/issues/${number}/parent`;
+}
+
 async function listIssues(label, stats = {}) {
   const out = [];
   let exhausted = false;
@@ -9893,6 +10843,14 @@ async function sweep(options = {}) {
     // mode as H16's detail pass, so it owes the same `read X of Y`.
     sharedFileCandidates: 0,
     sharedFileProbed: 0,
+    // H43's coverage triple (#14967) — the governed slice of the PRs whose
+    // file page H36 already read, how many of those the cheap union left
+    // short, and how many review pages answered. `governedRegisterReason` is
+    // the fourth state: the row did not run at all, and why.
+    governedPrs: 0,
+    governedReviewCandidates: 0,
+    governedReviewProbed: 0,
+    governedRegisterReason: null,
     fallbackCandidates: 0,
     fallbackProbed: 0,
     // H9's coverage pair — `pm:on-hold` cards whose verdict the comment
@@ -11026,15 +11984,40 @@ async function listAllOpenIssues(stats = {}) {
   return out;
 }
 
+/**
+ * The label pages whose rows become `seen` — the input EVERY row judged in the
+ * main sweep loop is drawn from, and transitively the corpus the
+ * untimestamped-reading and dangling-reference rows read.
+ *
+ * `pm:awaiting-maintainer` is listed like every other state label (#11196
+ * fix 5). H25's exclusivity carriers would be reachable through the label
+ * they wrongly coexist with, but a card in the state ALONE would otherwise be
+ * swept by nothing at all — no H2 claim check, no H11 parked inventory — and
+ * "the patrol's input set is narrower than the states the board produces" is
+ * the defect this whole family is about. One label page per sweep, four
+ * sweeps a day, against a 15,000/h core quota.
+ *
+ * ⛔ `pm:epic` is deliberately NOT here, and the omission is load-bearing
+ * rather than an oversight. H45's second half reads that index as a population
+ * of its OWN (see its banner): adding it here would widen what every row above
+ * is judged over and what the corpus rows fetch, which is a change to existing
+ * rows rather than an addition beside them. The self-test pins the exclusion.
+ *
+ * Exported so that exclusion is checkable from outside this function — a list
+ * inlined in a loop body can only be asserted by re-typing it.
+ */
+export const SEEN_LABEL_PAGES = Object.freeze([
+  'pm:dispatched',
+  'pm:queue',
+  'pm:blocked',
+  'pm:seat',
+  'pm:on-hold',
+  AWAITING_MAINTAINER_LABEL,
+  'priority:p0',
+]);
+
 async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
-  // `pm:awaiting-maintainer` is listed like every other state label (#11196
-  // fix 5). H25's exclusivity carriers would be reachable through the label
-  // they wrongly coexist with, but a card in the state ALONE would otherwise be
-  // swept by nothing at all — no H2 claim check, no H11 parked inventory — and
-  // "the patrol's input set is narrower than the states the board produces" is
-  // the defect this whole family is about. One label page per sweep, four
-  // sweeps a day, against a 15,000/h core quota.
-  for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', AWAITING_MAINTAINER_LABEL, 'priority:p0']) {
+  for (const label of SEEN_LABEL_PAGES) {
     for (const issue of await listIssues(label, stats)) seen.set(issue.number, issue);
   }
 
@@ -11120,6 +12103,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     }
     if (h3QueueAndDispatched(issue)) {
       findings.push([issue, 'H3', '`pm:queue` and `pm:dispatched` both present']);
+    }
+    // H45 — H3's neighbour and H3's cost. Its population is covered here BY
+    // CONSTRUCTION: a carrier holds `pm:queue`, and that label page is one this
+    // loop consumes, so the row can never be about a card the sweep did not list.
+    if (h45EpicAndQueued(issue)) {
+      findings.push([
+        issue,
+        'H45',
+        '`pm:epic` and `pm:queue` both present — reserved by a named epic PM and offered to every ' +
+          'seat at once, so a lawful claim on it lands a second implementation. Drop whichever half ' +
+          'is wrong in ONE write: `pm:epic` if the card really was handed over, `pm:queue` if it is ' +
+          "still the epic's.",
+      ]);
     }
     // H24 + H25 — two field/label intersections over cards this loop already
     // holds, so neither costs a request. H24's population is the `pm:queue`
@@ -11363,6 +12359,70 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   }
   for (const [pr, hold36] of h36SharedFileHolds([...seenPrs.values()], filesByPr)) {
     findings.push([pr, 'H36', hold36]);
+  }
+
+  // H43 (#14967) — the governed-surface review-request gap, read off the SAME
+  // changed-file pages H36 just fetched: this row buys ZERO extra file
+  // requests. Its own request is the submitted-review leg, and only for a
+  // governed PR whose request/assignment union is already short — without that
+  // leg a PR an approver has ALREADY reviewed fires forever, because GitHub
+  // drops the pending request the moment the review lands.
+  //
+  // A register that would not load skips the pass and NAMES itself on the
+  // summary line (#4690): a sibling-repo copy of this sweeper carries no
+  // governed pair, and the alternative — a static import — would end that
+  // install's whole patrol at module load rather than this one row.
+  if (!GOVERNED_REGISTER.available) {
+    stats.governedRegisterReason = GOVERNED_REGISTER.reason;
+  } else {
+    const governedByPr = new Map();
+    for (const pr of seenPrs.values()) {
+      const files = filesByPr.get(pr.number);
+      if (!files) continue;
+      const governed = GOVERNED_REGISTER.matcher(files.paths ?? []);
+      if (governed.length > 0) governedByPr.set(pr.number, governed);
+    }
+    stats.governedPrs = governedByPr.size;
+
+    // Oldest-first, because the PR nobody has asked about for longest is the
+    // one the cap must not be the reason nobody hears about.
+    const shortOfCoverage = [...seenPrs.values()]
+      .filter((pr) =>
+        h43NeedsReviewProbe(pr, governedByPr.get(pr.number)?.length ?? 0, GOVERNED_REGISTER.approvers),
+      )
+      .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')));
+    stats.governedReviewCandidates = shortOfCoverage.length;
+
+    const reviewedByPr = new Map();
+    for (const pr of shortOfCoverage.slice(0, H43_REVIEW_PROBE_CAP)) {
+      let reviews;
+      try {
+        reviews = await rest(`/repos/${OWNER_REPO}/pulls/${pr.number}/reviews?per_page=${H43_REVIEWS_PAGE_SIZE}`);
+      } catch {
+        // Per-PR and never fatal, H16's posture: the row still fires, carrying
+        // the sentence that says this leg is MISSING rather than negative. An
+        // all-failed pass needs no rethrow here — unlike H16's and H36's, this
+        // row's finding survives the failure instead of vanishing with it.
+        continue;
+      }
+      stats.governedReviewProbed = (stats.governedReviewProbed ?? 0) + 1;
+      reviewedByPr.set(
+        pr.number,
+        (Array.isArray(reviews) ? reviews : []).map((r) => String(r?.user?.login ?? '')).filter(Boolean),
+      );
+    }
+
+    for (const pr of seenPrs.values()) {
+      const governed = governedByPr.get(pr.number);
+      if (!governed) continue;
+      const gap = h43GovernedReviewRequestGap(
+        pr,
+        governed,
+        GOVERNED_REGISTER.approvers,
+        reviewedByPr.get(pr.number) ?? null,
+      );
+      if (gap) findings.push([pr, 'H43', gap]);
+    }
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -11699,6 +12759,87 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (stale) findings.push([issue, 'H38', stale]);
   }
 
+  // H44 (#14929) — the untimestamped-reading patrol. Placed HERE, last of the
+  // comment readers, for H37's and H38's reason: `commentCache` is at its
+  // fullest, so the base corpus costs NO request. Only the seat leg is bought,
+  // and it is bought BEFORE the judging loop so the widened posts are in the
+  // cache the loop iterates.
+  //
+  // A seat post this leg cannot read is one post unexamined, never a report
+  // worth discarding (H32's posture); the coverage pair in the summary is what
+  // states the gap.
+  const h44Seats = [...seen.values()].filter((issue) => h44NeedsSeatComments(issue));
+  stats.readingSeatCandidates = h44Seats.length;
+  for (const issue of h44Seats) {
+    try {
+      await commentRowsFor(issue);
+      stats.readingSeatRead = (stats.readingSeatRead ?? 0) + 1;
+    } catch {
+      // Deliberately silent per-post; the pair above is the disclosure.
+    }
+  }
+  // One row per CARRIER, naming the OLDEST offending comment and counting the
+  // rest. A per-comment row would put a hundred lines on the anchor for a single
+  // seat post, and the remedy is the same edit either way.
+  let h44Read = 0;
+  for (const [number, rows] of commentCache) {
+    const carrier = seen.get(number) ?? seenUnscoped.get(number);
+    if (!carrier) continue;
+    const onSeatPost = labelNames(carrier).includes('pm:seat');
+    let first = null;
+    let total = 0;
+    for (const row of rows ?? []) {
+      h44Read += 1;
+      const hit = h44UntimestampedReading(row?.body ?? '', onSeatPost);
+      if (!hit) continue;
+      total += 1;
+      if (!first) first = { hit, row };
+    }
+    if (first) {
+      findings.push([carrier, 'H44', h44UntimestampedReadingRow(first.hit, first.row, total)]);
+    }
+  }
+  stats.readingThreads = commentCache.size;
+  stats.readingComments = h44Read;
+
+  // H46 — the claim-less implementation. Placed HERE, AFTER H44, deliberately:
+  // leg (b) adds threads to `commentCache`, and H44's corpus is whatever the
+  // rows above it already fetched. Judging this row first would widen H44's
+  // input and change what an existing row reports, which this addition must not
+  // do. Everything else it reads is already in hand — the open-PR listing, and
+  // the open-card union H37 built for the same reason.
+  const h46OpenCards = new Map();
+  for (const [number, issue] of seenUnscoped) h46OpenCards.set(number, issue);
+  for (const [number, issue] of seen) h46OpenCards.set(number, issue);
+  const h46Bound = new Map();
+  for (const pr of seenPrs.values()) {
+    for (const bound of closingKeywordTargets(pr?.body ?? '').keys()) {
+      const number = Number(bound);
+      const issue = h46OpenCards.get(number);
+      // An unresolvable number is UNJUDGED here, never clean — H40 owns the
+      // question of whether it resolves at all.
+      if (!issue || h46Bound.has(number)) continue;
+      h46Bound.set(number, { issue, comments: undefined });
+    }
+  }
+  // The only request this row buys, and only for the cards leg (a) cannot
+  // answer. A failed page leaves `comments` null: that card drops out of leg
+  // (b) — a MISS, never an invention — and the coverage pair says so.
+  for (const entry of h46Bound.values()) {
+    if (!h46NeedsCardComments(entry.issue)) continue;
+    stats.claimlessCandidates = (stats.claimlessCandidates ?? 0) + 1;
+    try {
+      entry.comments = await commentsFor(entry.issue);
+      stats.claimlessProbed = (stats.claimlessProbed ?? 0) + 1;
+    } catch {
+      entry.comments = null;
+    }
+  }
+  for (const pr of seenPrs.values()) {
+    const claimless = h46ImplementedWithoutClaim(pr, h46Bound);
+    if (claimless) findings.push([pr, 'H46', claimless]);
+  }
+
   // H19 — blocker liveness. Last, because it is the only pass that reads a
   // card this sweep did not list: every other item answers from a listing
   // already in hand, while "is the target still open" is a fact about an
@@ -11923,6 +13064,37 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     stats.refDeferred = references.report.deferred;
     stats.refFloor = references.report.floor;
     stats.refBeyond = references.report.beyond;
+  }
+
+  // H45's second half — the `pm:epic` index, read as its own population.
+  //
+  // LAST in the sweep, and that placement is the mechanism rather than a
+  // preference: every row above has finished judging by the time this listing
+  // exists, so there is no path by which a `pm:epic` row could reach `seen`,
+  // the comment cache, or the reference corpus. The rows it produces are pushed
+  // straight into `findings` and nothing else is touched.
+  //
+  // The parent read is the one new fetch class in this file. Its 404 is the
+  // documented ANSWER for a parentless card — counted as a probe that answered
+  // — while any other failure leaves the carrier UNJUDGED, which the predicate
+  // reads off `undefined` and the coverage pair reports.
+  for (const issue of await listIssues('pm:epic', stats)) {
+    if (!h45NeedsParentRead(issue)) continue;
+    stats.epicParentCandidates = (stats.epicParentCandidates ?? 0) + 1;
+    let parent;
+    try {
+      parent = await rest(subIssueParentPath(OWNER_REPO, issue.number));
+      stats.epicParentProbed = (stats.epicParentProbed ?? 0) + 1;
+    } catch (err) {
+      if (err?.status === 404) {
+        parent = null;
+        stats.epicParentProbed = (stats.epicParentProbed ?? 0) + 1;
+      } else {
+        parent = undefined;
+      }
+    }
+    const undelegated = h45EpicUnderUndelegatedParent(issue, parent);
+    if (undelegated) findings.push([issue, 'H45', undelegated]);
   }
 }
 
@@ -13136,6 +14308,16 @@ function selfTest() {
   t('H18: …and the finding names the threshold', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes(`${RETRIAGE_STALE_HOURS}h`), true);
   t('H18: …and names the coexisting standing label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('`pm:queue`'), true);
   t('H18: multiple coexisting labels are all named', h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocked`') && h18row(domainCard(['pm:retriage', 'pm:blocked', 'pm:blocking'], hoursAgo(3)), NOW).includes('`pm:blocking`'), true);
+  // The label is a QUESTION put to the triage seat, not a request to re-grade
+  // (SKILL.md 「`pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘」):
+  // the row says the question is unanswered, and the remedy is to answer what
+  // the objection comment asks and drop the label in the same write.
+  t('H18: the row reads the label as an unanswered question', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('is still unanswered past one triage cycle'), true);
+  t('H18: …and the remedy is answer + drop the label in the same write', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('answer what the comment asks and drop the label in the same write'), true);
+  t('H18: …and an answer that needs the maintainer still drops the label', h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW).includes('needs the maintainer goes to the inbox with the label still removed'), true);
+  // The retired re-grade vocabulary is gone from BOTH row shapes.
+  t('H18: no re-grade vocabulary in the coexisting row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(3)), NOW)), false);
+  t('H18: …nor in the ALONE row', /re-judg|grade \(keep or change\)/.test(h18row(domainCard(['pm:retriage'], hoursAgo(3)), NOW)), false);
   // Under-threshold: fresh objection is normal intake latency, not a finding.
   t('H18: retriage under the threshold -> clean', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(1)), NOW), null);
   t('H18: exactly at the threshold -> clean (strictly beyond fires)', h18RetriageAged(domainCard(['pm:retriage', 'pm:queue'], hoursAgo(RETRIAGE_STALE_HOURS)), NOW), null);
@@ -16996,6 +18178,455 @@ function selfTest() {
   t('H40 summary: the lower-bound caveat survives into the sentence', saidBy('h40References', summaryLine({}, 0)).includes('LOWER BOUND'), true);
   t('H40 summary: a bare line renders numbers, never `undefined`', saidBy('h40References', summaryLine({}, 0)).includes('undefined'), false);
   t('H40 summary: every count key rides the enumerated contract', ['refDistinct', 'refCards', 'refThreads', 'refFree', 'refAttempted', 'refResolved', 'refDangling', 'refUnjudged', 'refDeferred', 'refFloor', 'refBeyond'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // -- H43 — the governed-surface review-request gap (#14967, report-only) ---
+  //
+  // The predicate is driven with the governed slice AS DATA and with the
+  // approver set INJECTED, which is also the point: no account name and no
+  // surface path is hardcoded in the predicate, so a case can prove the row is
+  // fully register-driven. The real register is pinned separately, below.
+  const h43pr = (number, extra = {}) => ({
+    number,
+    html_url: `https://github.com/o/r/pull/${number}`,
+    draft: extra.draft ?? true,
+    created_at: extra.created_at ?? '2026-09-01T10:00:00Z',
+    user: { login: extra.author ?? 'claude[bot]' },
+    requested_reviewers: (extra.requested ?? []).map((login) => ({ login })),
+    assignees: (extra.assigned ?? []).map((login) => ({ login })),
+  });
+  const APP43 = ['os-zhuang', 'hotlong'];
+  const GOV43 = [{ id: 'adr', glob: 'docs/adr/**', what: 'architecture decision records', files: ['docs/adr/0121-x.md'] }];
+  const h43row = (...args) => String(h43GovernedReviewRequestGap(...args) ?? '');
+
+  // ① The healthy governed PR: both accounts asked. This is the case the row
+  // must stay quiet on forever, or the anchor grows a permanent row.
+  t('H43: both approvers requested -> clean', h43GovernedReviewRequestGap(h43pr(1, { requested: APP43 }), GOV43, APP43, []), null);
+  t('H43: …assignment covers just as well as a request', h43GovernedReviewRequestGap(h43pr(1, { assigned: APP43 }), GOV43, APP43, []), null);
+  t('H43: …and a mix of the two fields covers', h43GovernedReviewRequestGap(h43pr(1, { requested: ['os-zhuang'], assigned: ['hotlong'] }), GOV43, APP43, []), null);
+
+  // ② One account asked — the measured majority shape (7 of 10 governed PRs at
+  // the director sweep). The row must NAME the account nobody asked.
+  t('H43: one approver requested -> finding', typeof h43GovernedReviewRequestGap(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []), 'string');
+  t('H43: …naming the account that was never asked', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`os-zhuang`'), true);
+  t('H43: …and NOT accusing the one that was', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`hotlong`'), false);
+  t('H43: …and naming the register hit that makes it governed', h43row(h43pr(2, { requested: ['hotlong'] }), GOV43, APP43, []).includes('`docs/adr/**`×1'), true);
+
+  // ③ Nobody asked at all — two of the ten, both ADR records.
+  t('H43: nobody requested -> finding', typeof h43GovernedReviewRequestGap(h43pr(3), GOV43, APP43, []), 'string');
+  t('H43: …and it says NOBODY rather than listing a partial gap', h43row(h43pr(3), GOV43, APP43, []).includes('has asked NOBODY'), true);
+  t('H43: …still naming BOTH accounts, so the remedy needs no lookup', /`os-zhuang`[\s\S]*`hotlong`/.test(h43row(h43pr(3), GOV43, APP43, [])), true);
+
+  // ④ + ⑤ The author-identity case, which is the one that silently produces
+  // ZERO coverage: a request naming the PR's own author is a 422, so the
+  // documented fallback is to ASSIGN that account and request the other.
+  t('H43: approver-authored WITH the assign fallback taken -> clean', h43GovernedReviewRequestGap(h43pr(4, { author: 'hotlong', assigned: ['hotlong'], requested: ['os-zhuang'] }), GOV43, APP43, []), null);
+  t('H43: approver-authored WITHOUT it -> finding', typeof h43GovernedReviewRequestGap(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []), 'string');
+  t('H43: …⛔ authorship alone is never coverage', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('`hotlong`'), true);
+  t('H43: …and the sentence says the request is impossible, not forgotten', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('422'), true);
+  t('H43: …naming the fallback that WAS documented and was not taken', h43row(h43pr(5, { author: 'hotlong' }), GOV43, APP43, []).includes('ASSIGN'), true);
+  // The other half of the same PR: the non-author approver is an ordinary miss
+  // and must not inherit the author sentence.
+  t('H43: a non-author approver gets no 422 clause', h43row(h43pr(6, { author: 'someone-else', requested: ['hotlong'] }), GOV43, APP43, []).includes('422'), false);
+
+  // ⑥ A SUBMITTED review counts as coverage — and it must, because GitHub
+  // removes the pending request the moment the review lands. Measured live
+  // while this row was written: an open governed PR requesting `hotlong` with a
+  // submitted review by `os-zhuang` reads as fully covered, and the two-field
+  // union alone called it unasked.
+  t('H43: a submitted review covers its author\'s approver slot', h43GovernedReviewRequestGap(h43pr(7, { requested: ['hotlong'] }), GOV43, APP43, ['os-zhuang']), null);
+  t('H43: …and an unrelated reviewer covers nothing', typeof h43GovernedReviewRequestGap(h43pr(7, { requested: ['hotlong'] }), GOV43, APP43, ['some-dev']), 'string');
+
+  // ⑦ Not governed: out of scope entirely, however empty the request list is.
+  t('H43: a non-governed PR with nobody requested -> clean', h43GovernedReviewRequestGap(h43pr(8), [], APP43, []), null);
+
+  // Three input states, never two (#4690): the review leg can be MISSING, and
+  // a row that stands on the cheap union alone says so rather than asserting.
+  t('H43: an unread review leg is declared, not assumed negative', h43row(h43pr(9), GOV43, APP43, null).includes('NOT read'), true);
+  t('H43: …and a read one makes no such claim', h43row(h43pr(9), GOV43, APP43, []).includes('NOT read'), false);
+
+  // Draft status decides nothing in either direction — a governed PR waiting as
+  // a draft for the human merge is the regime's CORRECT terminal state.
+  t('H43: a ready governed PR fires the same as a draft', h43row(h43pr(10, { draft: false }), GOV43, APP43, []), h43row(h43pr(10, { draft: true }), GOV43, APP43, []));
+  t('H43: …and the row says being a draft is not the point', h43row(h43pr(10), GOV43, APP43, []).includes('DRAFT'), true);
+
+  // ⛔ No name and no surface is hardcoded: an entirely different approver set
+  // drives the row, which is what "imported, never restated" has to mean.
+  t('H43: the approver set is INJECTED, never baked in', h43GovernedReviewRequestGap(h43pr(11, { requested: ['some-other-account'] }), GOV43, ['some-other-account'], []), null);
+  t('H43: an empty approver set can never fire', h43GovernedReviewRequestGap(h43pr(11), GOV43, [], []), null);
+
+  // The gathering policy: a request is bought only for a governed PR the cheap
+  // fields already leave short. Never narrower than the population it feeds.
+  t('H43 policy: a non-governed PR buys no review page', h43NeedsReviewProbe(h43pr(12), 0, APP43), false);
+  t('H43 policy: a governed PR already covered buys none either', h43NeedsReviewProbe(h43pr(12, { requested: APP43 }), 1, APP43), false);
+  t('H43 policy: a governed PR short of coverage does', h43NeedsReviewProbe(h43pr(12, { requested: ['hotlong'] }), 1, APP43), true);
+  t('H43 policy: …and one with nobody asked, obviously', h43NeedsReviewProbe(h43pr(12), 1, APP43), true);
+  t('H43: the cheap union reads BOTH list fields', [...h43CheapCoverage(h43pr(13, { requested: ['a'], assigned: ['b'] }))].sort().join(','), 'a,b');
+
+  // The row is a `stall`, not a gate: nothing ships wrong through this gap —
+  // the queue guard still refuses an unapproved governed enqueue — but the PR
+  // is stopped and no other sweep moves it.
+  t('H43 band: registered as a stall', familyBand('H43'), 'stall');
+  t('H43 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H43'), true);
+  t('H43: the row states its report-only posture', h43row(h43pr(14), GOV43, APP43, []).includes('not a verdict and not a gate'), true);
+
+  // The REGISTER, pinned against the real imported modules rather than a
+  // fabricated pair. ⚠️ This is the positive control that a rename in either
+  // sibling reddens here instead of going quiet on four unattended runs a day;
+  // an install that copied this sweeper WITHOUT the governed pair answers with
+  // its own NOT MEASURED reason instead, which is the correct signal for it.
+  const register43 = GOVERNED_REGISTER.available
+    ? `${GOVERNED_REGISTER.matcher(['docs/adr/0121-x.md']).length > 0}/${GOVERNED_REGISTER.matcher(['packages/core/src/x.ts']).length > 0}/${GOVERNED_REGISTER.approvers.length >= 2}`
+    : `NOT MEASURED — ${GOVERNED_REGISTER.reason}`;
+  t('H43 register: the imported matcher answers governed and clear, and the approver set is non-empty', register43, 'true/false/true');
+  t('H43 register: the load is three-state — resolved, or a NAMED reason, never silently absent', GOVERNED_REGISTER.available || typeof GOVERNED_REGISTER.reason === 'string', true);
+  t('H43 register: a missing sibling names the two files to copy', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('check-governed-queue-guard.mjs'), true);
+  t('H43 register: …and says the rest of the sweep is unaffected', governedRegisterFailure({ code: 'ERR_MODULE_NOT_FOUND' }).includes('every other row is unaffected'), true);
+  t('H43 register: any other load failure carries its own message', governedRegisterFailure(new Error('boom')).includes('boom'), true);
+
+  // The coverage clause, both branches, cut out of the summary line so only
+  // H43's own words can answer for H43.
+  // ⚠️ The forwarding contract, and the reason this case exists at all: the
+  // live sweep on the day this row landed rendered `0 of the open PR(s) …`
+  // while filing FOUR H43 rows, because the counters were computed and never
+  // copied into `counts`. That is the documented failure this enumeration was
+  // built to end — `counts.x ?? 0` renders a missing key and a real zero
+  // identically — and it reappears the moment a new row forgets the list.
+  t('H43: every count key rides the enumerated forwarding contract', ['governedPrs', 'governedReviewCandidates', 'governedReviewProbed', 'governedRegisterReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H43 summary: the triple is reported', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('8 of the open PR(s)'), true);
+  t('H43 summary: …with the review leg named as a subset', saidBy('h43GovernedReviews', summaryLine({ governedPrs: 8, governedReviewCandidates: 5, governedReviewProbed: 5 }, 0)).includes('answered on 5 of 5'), true);
+  t('H43 summary: an unloadable register reports NOT MEASURED, never 0 of 0', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('NOT MEASURED — the pair is not installed'), true);
+  t('H43 summary: …and then claims no governed population at all', saidBy('h43GovernedReviews', summaryLine({ governedRegisterReason: 'the pair is not installed' }, 0)).includes('hit the governed register'), false);
+
+
+  // -- H44 — a reading with no 取数时刻 (#14929, report-only) -----------------
+  //
+  // The predicate takes a BODY and a carrier flag and nothing else: there is no
+  // author argument to inject, because the roster the first draft wanted does
+  // not exist and is ill-posed where it could be applied (see the row's banner).
+  // So the negative that would have been "a non-seat author is clean" is pinned
+  // here in the form the evidence supports — ordinary prose is clean no matter
+  // who wrote it, and being on a seat post is a CARRIER fact, not an identity.
+  const h44hit = (body, onSeat = false) => h44UntimestampedReading(body, onSeat);
+  const h44frag = (body, onSeat = false) => String(h44hit(body, onSeat)?.fragment ?? '');
+  const h44kind = (body, onSeat = false) => String(h44hit(body, onSeat)?.kind ?? '');
+
+  // ① The card's own worked example, quoted from the round-open marker that
+  // failed the rule 2h37m after it landed. ⚠️ The FIRST untimestamped reading in
+  // it is not the census table everyone quotes — it is the page position two
+  // paragraphs above, and the row reports what it finds first.
+  const ROUND_OPEN_14929 = `**R+118 open** — triage seat, dual-repo (objectstack + objectui). ⛔ Scan / classify / label / route only.
+
+Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 close brief (\`5523649981\`). No competing round-open.
+
+| \`finding\` box, OPEN | count |
+|:--|--:|
+| objectstack | **2** (#14917, #13562) |
+| objectui | **92** |
+
+⇒ Governed audit from \`objectstack=a6d278ba263f\` / \`objectui=1f31d3af698e\`.`;
+  t('H44: the card\'s own round-open marker fires', typeof h44hit(ROUND_OPEN_14929), 'object');
+  t('H44: …named as a round-open marker', h44hit(ROUND_OPEN_14929).shape, 'a round-open marker');
+  t('H44: …and the FIRST fragment is the page position, not the famous table', h44kind(ROUND_OPEN_14929), 'position');
+  t('H44: …echoed verbatim so the remedy needs no hunt', h44frag(ROUND_OPEN_14929), 'page 747');
+
+  // The census table on its own — the shape the card quotes — reached once the
+  // paragraph above it is gone.
+  const TABLE_ONLY = `**R+118 open** — triage seat.
+
+| \`finding\` box, OPEN | count |
+|:--|--:|
+| objectstack | **2** (#14917, #13562) |
+| objectui | **92** |`;
+  t('H44: a round-open census table with no time fires', h44kind(TABLE_ONLY), 'tableCount');
+  // The FIRST table row holding a bare count wins, which is the objectstack row
+  // rather than the `**92**` everyone quotes — the row reports what it reaches
+  // first, and pinning the famous number here would pin a scan order that is
+  // not the one the code has.
+  t('H44: …on the FIRST row that holds a bare count', h44frag(TABLE_ONLY).includes('**2**'), true);
+  t('H44: …and the table header, whose last cell is a word, never matches', h44frag(TABLE_ONLY).includes('count |'), false);
+
+  // ② A claim stating a count. The dispatch's headline hit.
+  const CLAIM_COUNT = 'Claim: PM loop round 5 — the skills lane.\n\nQueue depth read at open: 12 open cards and 4 PRs on this lane.';
+  t('H44: a claim stating a count with no time fires', h44kind(CLAIM_COUNT), 'count');
+  t('H44: …named as a claim', h44hit(CLAIM_COUNT).shape, 'a claim');
+  // …and the SAME text with a stamp in that paragraph is clean. This is the
+  // control that proves the row reads the timestamp and not the artefact.
+  t('H44: the same claim with a stamp in the paragraph is clean', h44hit(CLAIM_COUNT.replace('read at open:', 'read at open 19:38Z:')), null);
+  t('H44: …and a FULL ISO stamp counts, which the narrow HH:MMZ shape would not', h44hit(CLAIM_COUNT.replace('read at open:', 'read at open 2026-09-03T19:38:12Z:')), null);
+  t('H44: a stamp in a DIFFERENT paragraph does not clean this one', typeof h44hit(`Claim: x\n\nTaken 19:38Z.\n\n12 open cards on this lane.`), 'object');
+
+  // ③ An ACCEPT verdict with a check-run tally.
+  const ACCEPT_TALLY = '**ACCEPT** — governed in-seat review of PR #15536.\n\nChecks: 18 of 19 checks green, the last still queued.';
+  t('H44: an ACCEPT verdict with a check tally and no time fires', h44kind(ACCEPT_TALLY), 'tally');
+  t('H44: …named as a verdict', h44hit(ACCEPT_TALLY).shape, 'an ACCEPT/REJECT/REWORK verdict');
+  t('H44: REJECT and REWORK are the same artefact', h44ArtefactShape('REWORK — see below'), 'an ACCEPT/REJECT/REWORK verdict');
+  // ⛔ Uppercase only: the ordinary English verb must never make a verdict.
+  t('H44: ⛔ lower-case prose is NOT a verdict', h44ArtefactShape('accept the 12 open cards as given'), null);
+
+  // ④ A tree reading: a ref or a tip, never a bare mention of the branch.
+  t('H44: a claim naming a sha with no time fires', h44kind('Claim: x\n\nBased on 5bc2f2727ae as of the merge.'), 'tree');
+  // ⛔ A ref NAME is not a reading, and this negative is measured rather than
+  // stipulated: with `origin/main` in the grammar, the row's first live flight
+  // fired on 17 of 51 carriers and every one was the claim protocol's own
+  // worktree recipe or a `Premise re-check on origin/main` heading.
+  t('H44: ⛔ `origin/main` alone is NOT a tree reading', h44hit('Claim: x\n\nRebased onto origin/main just now.'), null);
+  t('H44: ⛔ …not even in the worktree recipe every claim carries', h44hit('Claim: x\n\n`git worktree add --no-track ../w -b b origin/main`'), null);
+  t('H44: ⛔ a bare `main` in prose is NOT a tree reading either', h44hit('Claim: x\n\nThis PR targets main as every PR does.'), null);
+  t('H44: …but a TIP beside that ref still fires', h44kind('Claim: x\n\nRebased onto origin/main at 5bc2f2727ae.'), 'tree');
+  t('H44: ⛔ a hex-shaped English word is not a sha (no digit)', h44hit('Claim: x\n\nThe anchor was defaced and effaced.'), null);
+  t('H44: ⛔ a long bare number is not a sha (no letter)', h44hit('Claim: x\n\nComment 5524293471 refers.'), null);
+
+  // ⑤ THE DECLARED NEGATIVES — each one a shape a reader would expect to fire.
+  // A fenced reading is a transcript, not an assertion of current state.
+  t('H44: a reading inside a fenced block is clean', h44hit('Claim: x\n\n```\n92 open cards\n```'), null);
+  t('H44: …and a tilde fence is the same', h44hit('Claim: x\n\n~~~\n92 open cards\n~~~'), null);
+  t('H44: …while the same text unfenced fires, so the fence is what did it', h44kind('Claim: x\n\n92 open cards'), 'count');
+  // Fences BLANK rather than delete, so they cannot weld a stamped paragraph
+  // onto an unstamped one and clean it by accident.
+  t('H44: a fence between two paragraphs does not weld them', typeof h44hit('Claim: x\n\nTaken 19:38Z.\n```\ncode\n```\n12 open cards on the lane.'), 'object');
+  // Not one of the five artefacts: clean, whoever wrote it. This is the negative
+  // that replaces "a non-seat author is clean" — see the block header.
+  t('H44: ordinary prose stating a count is clean — no artefact, no row', h44hit('The board holds 92 open cards today.'), null);
+  t('H44: …and that is true however long it is', h44hit(`Notes.\n\n${'a'.repeat(4000)}\n\n92 open cards.`), null);
+  // ⛔ No length floor: a two-word artefact with no reading is clean because it
+  // states no reading, NOT because it is short.
+  t('H44: a short comment with no reading is clean', h44hit('Claim: taking this.'), null);
+  t('H44: …and a short comment WITH a reading fires, so length decides nothing', h44kind('Claim: 12 open cards.'), 'count');
+  // Inline code naming a file path is not a count, even though it holds digits.
+  t('H44: inline code naming a file path is not a reading', h44hit('Claim: x\n\nTouches `scripts/pm/check-half-states.mjs` and `docs/adr/0121-x.md`.'), null);
+  t('H44: …nor is a bare issue reference', h44hit('Claim: x\n\nSupersedes #14929 and #15536.'), null);
+
+  // ⑥ The CARRIER leg. A seat-post section is decided by the post, not by any
+  // marker in the body — the rule names 「座位贴段落」.
+  t('H44: a seat-post comment with a count fires on the carrier alone', h44kind('Lane inventory now 7 open cards.', true), 'count');
+  t('H44: …named as a seat-post section', h44hit('Lane inventory now 7 open cards.', true).shape, 'a seat-post section');
+  t('H44: …and the identical body OFF a seat post is clean', h44hit('Lane inventory now 7 open cards.', false), null);
+
+  // ⑦ The seat GATE — a sibling of H32's, wider by exactly the lane test, and
+  // H32's own gate is asserted UNCHANGED beside it.
+  const seat44 = (title, labels = ['pm:seat']) => ({ number: 6015, title, labels: labels.map((name) => ({ name })), assignees: [{ login: 'os-zhuang' }] });
+  const TRIAGE = seat44('[PM seat] triage (objectstack-wide) — 🟢 os-zhuang');
+  const LANE = seat44('[PM seat] domain:spec — 🟢 os-zhuang');
+  t('H44 gate: a held lane-less seat IS fetched', h44NeedsSeatComments(TRIAGE), true);
+  t('H44 gate: ⛔ …and H32 still does not fetch it — that gate is untouched', h32NeedsSeatComments(TRIAGE), false);
+  t('H44 gate: a held `domain:*` seat is fetched by BOTH', h44NeedsSeatComments(LANE) && h32NeedsSeatComments(LANE), true);
+  t('H44 gate: a `repo:*` seat is fetched by this one', h44NeedsSeatComments(seat44('[PM seat] repo:cloud — 🟢 os-zhuang')), true);
+  t('H44 gate: a VACANT seat is fetched by neither', h44NeedsSeatComments(seat44('[PM seat] domain:devx — ⏳ vacant')), false);
+  t('H44 gate: a non-seat card is out of scope', h44NeedsSeatComments(seat44('[PM seat] domain:spec — 🟢 os-zhuang', ['pm:queue'])), false);
+
+  // ⑧ Grammar hygiene. A `g` flag would carry `lastIndex` between calls and make
+  // this row's answer depend on how many comments preceded it.
+  t('H44 grammar: ⛔ no fragment regex is sticky', H44_READING_FRAGMENTS.every((f) => !f.re.global), true);
+  t('H44 grammar: every declared shape is reachable', H44_READING_FRAGMENTS.length, 5);
+  t('H44 grammar: the timestamp accepts the ruled HH:MMZ', H44_READING_TIMESTAMP.test('19:38Z'), true);
+  t('H44 grammar: …and the seconds field, which is the same rule obeyed harder', H44_READING_TIMESTAMP.test('2026-09-03T10:37:51Z'), true);
+  t('H44 grammar: …but not a bare clock with no zone', H44_READING_TIMESTAMP.test('19:38'), false);
+  t('H44 fences: an unterminated fence swallows to the end rather than reopening', h44StripFences('a\n```\n92 open cards').trim(), 'a');
+
+  // ⑨ The row sentence: it names the comment, the fragment, and its posture.
+  const row44 = h44UntimestampedReadingRow(h44hit(CLAIM_COUNT), { id: 5524293471 }, 3);
+  t('H44 row: names the comment id so the remedy is an edit, not a hunt', row44.includes('`5524293471`'), true);
+  t('H44 row: echoes the offending fragment', row44.includes('12 open cards'), true);
+  t('H44 row: counts the rest and says which one this is', row44.includes('2 further comment(s)') && row44.includes('OLDEST'), true);
+  t('H44 row: a lone offender gets no count clause', h44UntimestampedReadingRow(h44hit(CLAIM_COUNT), { id: 1 }, 1).includes('further comment'), false);
+  t('H44 row: states the ruling\'s consequence — untaken, not untidy', row44.includes('UNTAKEN'), true);
+  t('H44 row: ⛔ the remedy is an edit, never a re-measurement passed off as the original', row44.includes('never a re-measurement'), true);
+  t('H44 row: states its report-only posture', row44.includes('not a verdict and ' + 'not a gate'), true);
+  t('H44 row: a null hit renders nothing', h44UntimestampedReadingRow(null, { id: 1 }, 0), null);
+
+  // ⑩ Registration — the band, the registry scan, the forwarding contract, and
+  // the summary clause. H43's flight named the trap these four close.
+  t('H44 band: registered as a state row', familyBand('H44'), 'state');
+  t('H44 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H44'), true);
+  t('H44: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H44: every count key rides the enumerated forwarding contract', ['readingThreads', 'readingComments', 'readingSeatCandidates', 'readingSeatRead'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H44 summary: the corpus pair is reported', saidBy('h44Readings', summaryLine({ readingComments: 411, readingThreads: 37 }, 0)).includes('411 comment(s) across 37 thread(s)'), true);
+  t('H44 summary: …and the widened seat leg with it', saidBy('h44Readings', summaryLine({ readingSeatRead: 10, readingSeatCandidates: 10 }, 0)).includes('10 of 10 HELD seat post(s)'), true);
+  t('H44 summary: the PR residual is declared on EVERY run, not just interesting ones', saidBy('h44Readings', summaryLine({}, 0)).includes('PULL REQUEST is NOT in this corpus'), true);
+  t('H44 summary: …and says the counts are a lower bound', saidBy('h44Readings', summaryLine({}, 0)).includes('LOWER BOUND'), true);
+  t('H44 summary: a bare line renders numbers, never `undefined`', saidBy('h44Readings', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H45 — reserved and handed over at once (#15667, report-only) ----------
+  // Both directions of a pure label intersection. The neighbour cases pin that
+  // H45 takes the pair H3 cannot see and leaves H3's own pair alone.
+  t('H45: `pm:epic` alone -> clean', h45EpicAndQueued(issue(['pm:epic'])), false);
+  t('H45: `pm:epic` + `pm:dispatched` -> clean — a claimed epic card is the normal shape', h45EpicAndQueued(issue(['pm:epic', 'pm:dispatched'])), false);
+  t('H45: `pm:queue` alone -> clean', h45EpicAndQueued(issue(['pm:queue'])), false);
+  t('H45: a card with no pm label at all -> clean', h45EpicAndQueued(issue(['domain:skills'])), false);
+  t('H45: `pm:epic` + `pm:queue` -> finding', h45EpicAndQueued(issue(['pm:epic', 'pm:queue'])), true);
+  t('H45: …in either label order, since the read is a set', h45EpicAndQueued(issue(['pm:queue', 'pm:epic'])), true);
+  t('H45: …and a third state alongside does not excuse the pair', h45EpicAndQueued(issue(['pm:epic', 'pm:queue', 'pm:blocked'])), true);
+  t('H45 adjacency: ⛔ H3 stays silent on it — its pair is `pm:queue` + `pm:dispatched`', h3QueueAndDispatched(issue(['pm:epic', 'pm:queue'])), false);
+  t('H45 adjacency: …and H45 stays silent on H3\'s pair', h45EpicAndQueued(issue(['pm:queue', 'pm:dispatched'])), false);
+  t('H45 band: registered as a state row', familyBand('H45'), 'state');
+  t('H45 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H45'), true);
+
+  // -- H45's SECOND HALF — reserved under nothing delegated (report-only) ----
+  //
+  // Fixtures carry the two payload members this half reads beyond labels: the
+  // free `sub_issues_summary` that rides every listing row, and the card's OWN
+  // parent field — the second channel, and the only thing that can contradict
+  // a 404 from the parent read.
+  const epicCard = (extra = {}) => ({
+    ...issue(['pm:epic']),
+    number: 700,
+    sub_issues_summary: { total: 0, completed: 0, percent_completed: 0 },
+    ...extra,
+  });
+  const epicParent = { number: 600, labels: [{ name: 'pm:epic' }, { name: 'tracking' }] };
+  const plainParent = { number: 601, labels: [{ name: 'tracking' }, { name: 'priority:p1' }] };
+  const REGISTERED_BODY = 'Owner: `domain:services` seat, session `session_0194kbQJxUvv2yvsGRtuXpP5`.';
+  const h45prow = (...args) => String(h45EpicUnderUndelegatedParent(...args) ?? '');
+
+  // The clean direction: a child under a parent that really is delegated.
+  t('H45 parent: a `pm:epic` child whose parent carries `pm:epic` -> clean', h45EpicUnderUndelegatedParent(epicCard(), epicParent), null);
+
+  // The finding direction the row exists for.
+  t('H45 parent: a `pm:epic` child whose parent LACKS `pm:epic` -> finding', typeof h45EpicUnderUndelegatedParent(epicCard(), plainParent), 'string');
+  t('H45 parent: …and the row names the parent a reader has to fix', h45prow(epicCard(), plainParent).includes('PARENT #601'), true);
+  t('H45 parent: …and says WHICH of the two shapes it is', h45prow(epicCard(), plainParent).includes('reserved under a parent that is not delegated'), true);
+  t('H45 parent: …and asks for ONE label write, not both', h45prow(epicCard(), plainParent).includes('ONE label write'), true);
+
+  // The parent itself. A 404 is parentless, and a top-level carrier is the
+  // delegated node when EITHER free signal says so — measured in both
+  // directions on the live index, which is why it is an OR and not an AND.
+  t('H45 parent: a top-level carrier HEADING a subtree is the delegated node -> clean', h45EpicUnderUndelegatedParent(epicCard({ sub_issues_summary: { total: 3, completed: 1 } }), null), null);
+  t('H45 parent: …and one whose BODY carries the owner registration, likewise', h45EpicUnderUndelegatedParent(epicCard({ body: REGISTERED_BODY }), null), null);
+  t('H45 parent: a top-level carrier with NEITHER signal -> finding', typeof h45EpicUnderUndelegatedParent(epicCard(), null), 'string');
+  t('H45 parent: …and the sentence says no parent, never a bad parent', h45prow(epicCard(), null).includes('has NO parent — reserved under nothing delegated'), true);
+  t('H45 parent: …and never claims a parent number it did not read', h45prow(epicCard(), null).includes('PARENT #'), false);
+  t('H45 parent: …and states that the loose body read makes the row a LOWER BOUND', h45prow(epicCard(), null).includes('LOWER BOUND'), true);
+
+  // The two signals are read independently — the pin that keeps the OR an OR.
+  t('H45 parent: the delegation signals read a subtree on its own', JSON.stringify(h45DelegationNodeSignals(epicCard({ sub_issues_summary: { total: 20 } }))), '{"subIssues":true,"registration":false}');
+  t('H45 parent: …a body registration on its own', JSON.stringify(h45DelegationNodeSignals(epicCard({ body: REGISTERED_BODY }))), '{"subIssues":false,"registration":true}');
+  t('H45 parent: …and neither, which is the only shape that fires', JSON.stringify(h45DelegationNodeSignals(epicCard())), '{"subIssues":false,"registration":false}');
+  t('H45 parent: ⛔ a body mentioning no session id is not a registration', h45DelegationNodeSignals(epicCard({ body: 'Owner: the services seat. Legs below.' })).registration, false);
+
+  // The contradiction: the parent read says parentless while the card's own
+  // payload says otherwise. Reported rather than excused, and no side taken.
+  t('H45 parent: a 404 against the card\'s own `parent` object -> finding', typeof h45EpicUnderUndelegatedParent(epicCard({ parent: { number: 600 } }), null), 'string');
+  t('H45 parent: …and `parent_issue_url` is the same channel', typeof h45EpicUnderUndelegatedParent(epicCard({ parent_issue_url: 'https://api.github.com/repos/o/r/issues/600' }), null), 'string');
+  t('H45 parent: …named as a DISAGREEMENT, with neither channel called right', h45prow(epicCard({ parent: { number: 600 } }), null).includes('DISAGREE'), true);
+  t('H45 parent: …and the contradiction OUTRANKS the delegation excuse', typeof h45EpicUnderUndelegatedParent(epicCard({ parent: { number: 600 }, sub_issues_summary: { total: 9 } }), null), 'string');
+
+  // A card without `pm:epic` is never read — the gathering policy and the
+  // predicate agree, so neither can quietly widen the population alone.
+  t('H45 parent: a card without `pm:epic` buys no parent read', h45NeedsParentRead(issue(['pm:queue', 'domain:skills'])), false);
+  t('H45 parent: …and this row declines to judge it even when handed a parent', h45EpicUnderUndelegatedParent(issue(['pm:queue']), plainParent), null);
+  t('H45 parent: a `pm:epic` carrier is the one shape that buys the read', h45NeedsParentRead(issue(['pm:epic'])), true);
+
+  // An unread parent files NO row — and the coverage pair is what keeps that
+  // separable from a clean carrier (#4690's duty, discharged on the line).
+  t('H45 parent: an unread parent files no row', h45EpicUnderUndelegatedParent(epicCard(), undefined), null);
+  t('H45 parent: …and the summary says such a carrier is UNJUDGED rather than clean', saidBy('h45EpicParents', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+
+  // Adjacency with the first half: one row id, two sentences, no overlap.
+  t('H45 adjacency: the FIRST half stays silent on the parent relation', h45EpicAndQueued(epicCard()), false);
+  t('H45 adjacency: …and the SECOND stays silent on the first half\'s pair when the parent is delegated', h45EpicUnderUndelegatedParent({ ...epicCard(), labels: [{ name: 'pm:epic' }, { name: 'pm:queue' }] }, epicParent), null);
+  t('H45 adjacency: ⛔ no `H45b` row id is invented — every registry key is `H<digits>`', Object.keys(HALF_STATE_FAMILY_BAND).some((k) => !/^H\d+$/.test(k)), false);
+
+  // The fetch class, pinned at the shape that was measured live.
+  t('H45 parent: the new fetch class is the measured path', subIssueParentPath('objectstack-ai/objectstack', 13890), '/repos/objectstack-ai/objectstack/issues/13890/parent');
+
+  // The SEPARATION. `pm:epic` is not a page that feeds `seen`, and the seven
+  // that do are the seven that always did.
+  t('H45 population: ⛔ `pm:epic` is not a page that feeds `seen`', SEEN_LABEL_PAGES.includes('pm:epic'), false);
+  t('H45 population: …and `seen` is fed by exactly the pages it was fed by before', SEEN_LABEL_PAGES.join('|'), 'pm:dispatched|pm:queue|pm:blocked|pm:seat|pm:on-hold|pm:awaiting-maintainer|priority:p0');
+
+  // Ruling-2's proof as a fixture, in the only shape that can fail: the
+  // CONTROL says an epic carrier folded into the judged population really
+  // would fire an existing row, and the pin says the verdicts over the pages
+  // that DO feed `seen` are unchanged. Without the control the second line is
+  // satisfied by a population that could never have mattered.
+  const existingRowVerdicts = (cards) =>
+    cards
+      .map((c) => [h1DispatchedNoAssignee(c), h3QueueAndDispatched(c), h24QueuedWithAssignee(c) !== null, h29PmStateExclusivity(c) !== null].join(','))
+      .join(';');
+  const seenBoard45 = [issue(['pm:dispatched'], []), issue(['pm:queue'], ['os-x'])];
+  const epicPopulation45 = [epicCard(), epicCard({ labels: [{ name: 'pm:epic' }, { name: 'pm:dispatched' }] })];
+  t('H45 population control: an epic carrier folded INTO the judged population would fire an existing row', existingRowVerdicts(epicPopulation45).includes('true'), true);
+  t('H45 population: …while the verdicts over the pages that feed `seen` are untouched', existingRowVerdicts(seenBoard45), 'true,false,false,false;false,false,true,false');
+
+  // The count keys and the clause.
+  t('H45 parent: both count keys ride the enumerated forwarding contract', ['epicParentCandidates', 'epicParentProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H45 summary: the coverage pair is reported', saidBy('h45EpicParents', summaryLine({ epicParentProbed: 4, epicParentCandidates: 5 }, 0)).includes('4 of 5 open `pm:epic` card(s)'), true);
+  t('H45 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h45EpicParents', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H45 summary: …and says a 404 is an ANSWER, not a failed read', saidBy('h45EpicParents', summaryLine({}, 0)).includes('IS an answer here'), true);
+  t('H45 summary: …and names the separation the row rests on', saidBy('h45EpicParents', summaryLine({}, 0)).includes('SEEN_LABEL_PAGES'), true);
+  t('H45 summary: a bare line renders numbers, never `undefined`', saidBy('h45EpicParents', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H46 — implemented without a claim (#15667, report-only) ---------------
+  // Fixtures: one PR on a protocol branch, and a one-card map standing for the
+  // open-card union the sweep hands the predicate.
+  const HEAD46 = 'claude/issue-15667-half-states';
+  const pr46 = (body, ref = HEAD46) => ({ number: 900, body, head: { ref } });
+  const cards46 = (labels, comments) => new Map([[15667, { issue: issue(labels), comments }]]);
+  const CLAIM46 = [`Claim: PM loop round R1\nBranch: \`${HEAD46}\``];
+  const h46row = (...args) => String(h46ImplementedWithoutClaim(...args) ?? '');
+
+  // The clean direction: a dispatched card whose claim names this very branch.
+  t('H46: a claimed card whose `Claim:` names this branch -> clean', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], CLAIM46)), null);
+  t('H46: …and the documented blockquote claim reads the same', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], [`> Claim: PM loop wave 9\n> Branch: \`${HEAD46}\``])), null);
+  t('H46: …and `Claimed:` with `Branches:` reads too — the shipped spellings, unrespelled', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], [`Claimed: x\nBranches: \`${HEAD46}\``])), null);
+
+  // Leg (a): the card is still published as available.
+  t('H46: a `pm:queue` card -> finding', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:queue'], CLAIM46)), 'string');
+  t('H46: …and it names the label that makes it one', h46row(pr46('Fixes #15667'), cards46(['pm:queue'], CLAIM46)).includes('still carries `pm:queue`'), true);
+  t('H46: …leg (a) fires WITHOUT reading the thread at all', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:queue'], undefined)), 'string');
+
+  // Leg (b): a claim exists, but for someone else's branch.
+  t('H46: a card whose only `Claim:` names another branch -> finding', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['Claim: x\nBranch: `claude/issue-15667-someone-else`'])), 'string');
+  t('H46: …and the row names the head branch the reader must post', h46row(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['Claim: x\nBranch: `claude/issue-15667-someone-else`'])).includes(`\`${HEAD46}\``), true);
+  t('H46: a card with no claim comment at all -> finding', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['looks good to me'])), 'string');
+  t('H46: ⛔ a `Branch:` line NOT on a `Claim:` comment is not a claim', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], [`Rebased. Branch: \`${HEAD46}\``])), 'string');
+  t('H46: ⛔ a `Claim:` with no `Branch:` line is not a claim on THIS branch', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], ['Claim: PM loop round R1'])), 'string');
+
+  // `Part of` is not a closing keyword, and the keyword grammar is H7's.
+  t('H46: a body with `Part of` only -> clean', h46ImplementedWithoutClaim(pr46('Part of #15667'), cards46(['pm:queue'], undefined)), null);
+  t('H46: …and every closing spelling fires, since the extractor is H7\'s', ['Closes #15667', 'closed #15667', 'Resolves: #15667'].every((b) => typeof h46ImplementedWithoutClaim(pr46(b), cards46(['pm:queue'], undefined)) === 'string'), true);
+  t('H46: a keyword in backticks is not a keyword — the code-stripped read', h46ImplementedWithoutClaim(pr46('`Fixes #15667` is deliberately not used here'), cards46(['pm:queue'], undefined)), null);
+
+  // The three unjudged states, each silent rather than clean.
+  t('H46: a bound number this sweep holds no OPEN card for is unjudged', h46ImplementedWithoutClaim(pr46('Fixes #15667'), new Map()), null);
+  t('H46: an unconsulted thread is unjudged, never "no claim"', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], undefined)), null);
+  t('H46: an UNREADABLE thread is unjudged too (#4690)', h46ImplementedWithoutClaim(pr46('Fixes #15667'), cards46(['pm:dispatched'], null)), null);
+  t('H46: a PR with no head ref cannot be judged on leg (b)', h46ImplementedWithoutClaim(pr46('Fixes #15667', ''), cards46(['pm:dispatched'], ['looks good'])), null);
+  t('H46: …but leg (a) still fires on it, because it needs no branch', typeof h46ImplementedWithoutClaim(pr46('Fixes #15667', ''), cards46(['pm:queue'], undefined)), 'string');
+
+  // Bound PER CARD NUMBER, exactly as H7 binds.
+  const twoCards46 = new Map([
+    [15667, { issue: issue(['pm:dispatched']), comments: CLAIM46 }],
+    [15666, { issue: issue(['pm:queue']), comments: undefined }],
+  ]);
+  t('H46: a lawful close beside an unlawful one reports only the second', h46row(pr46('Fixes #15667 and closes #15666'), twoCards46).includes('#15666'), true);
+  t('H46: …and never accuses the card that WAS claimed', h46row(pr46('Fixes #15667 and closes #15666'), twoCards46).includes('#15667'), false);
+
+  // The gathering policy — what decides which card buys a request.
+  t('H46 gate: a `pm:queue` card buys no thread — leg (a) answers from labels', h46NeedsCardComments(issue(['pm:queue'])), false);
+  t('H46 gate: every other bound card does', h46NeedsCardComments(issue(['pm:dispatched'])), true);
+  t('H46 gate: …including one with no pm label at all', h46NeedsCardComments(issue([])), true);
+
+  // The claim reader, asserted directly in both directions.
+  t('H46 claim: the pair must be on ONE comment', h46ClaimNamesBranch(['Claim: x', `Branch: \`${HEAD46}\``], HEAD46), false);
+  t('H46 claim: …and on one comment it reads', h46ClaimNamesBranch([`Claim: x\nBranch: \`${HEAD46}\``], HEAD46), true);
+  t('H46 claim: an empty branch is unanswerable, never claimed', h46ClaimNamesBranch([`Claim: x\nBranch: \`${HEAD46}\``], ''), false);
+  t('H46 claim: a prefix of the branch does not count as naming it', h46ClaimNamesBranch(['Claim: x\nBranch: `claude/issue-15667-half`'], HEAD46), false);
+
+  // The row's own contract.
+  t('H46 row: states its report-only posture', h46row(pr46('Fixes #15667'), cards46(['pm:queue'], undefined)).includes('Report-only patrol INPUT'), true);
+  t('H46 row: a clean PR renders nothing', h46ImplementedWithoutClaim(pr46('Refs #15667'), cards46(['pm:queue'], undefined)), null);
+  const many46 = new Map(Array.from({ length: H46_CARD_LIST_CAP + 2 }, (_, i) => [900 + i, { issue: issue(['pm:queue']), comments: undefined }]));
+  t('H46 row: past the list cap it counts the rest rather than growing', h46row(pr46(Array.from({ length: H46_CARD_LIST_CAP + 2 }, (_, i) => `Fixes #${900 + i}`).join('\n')), many46).includes('2 further bound card(s)'), true);
+
+  t('H46 band: registered as a state row', familyBand('H46'), 'state');
+  t('H46 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H46'), true);
+  t('H45/H46: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H46: both count keys ride the enumerated forwarding contract', ['claimlessCandidates', 'claimlessProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H46 summary: the coverage pair is reported', saidBy('h46Claimless', summaryLine({ claimlessProbed: 3, claimlessCandidates: 4 }, 0)).includes('3 of 4 bound card thread(s)'), true);
+  t('H46 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h46Claimless', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H46 summary: …and says an unresolvable binding is unjudged, not clean', saidBy('h46Claimless', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H46 summary: a bare line renders numbers, never `undefined`', saidBy('h46Claimless', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

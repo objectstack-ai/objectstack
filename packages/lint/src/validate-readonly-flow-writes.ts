@@ -57,6 +57,7 @@
 // flows are held to the same bar.
 
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
+import { recordsOf } from './object-graph.js';
 
 export type ReadonlyFlowWriteSeverity = 'error' | 'warning';
 
@@ -76,18 +77,6 @@ export const FLOW_UPDATE_READONLY_FIELD = 'flow-update-readonly-field';
 export const FLOW_UPDATE_READONLY_WHEN_FIELD = 'flow-update-readonly-when-field';
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
 
 export interface FieldReadonlyMeta {
   /** Static `readonly: true`. */
@@ -156,10 +145,10 @@ function readLiteralObjectName(config: AnyRec): string | undefined {
  */
 export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFinding[] {
   const findings: ReadonlyFlowWriteFinding[] = [];
-  const flows = asArray(stack.flows);
+  const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
-  const roIndex = buildReadonlyIndex(asArray(stack.objects));
+  const roIndex = buildReadonlyIndex(recordsOf(stack.objects));
 
   flows.forEach((flow, flowIndex) => {
     // `runAs` defaults to 'user' (schema default). Only an explicit 'system'
