@@ -255,19 +255,24 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # and list-page scans. A hand-set instance is mislabeling — the sweep
   # corrects it against the index.
   gh label create pm:blocking         -R "$R" -c 8250df -d "Derived cache from the Blocked-by reverse index: open card with open dependents — never hand-set" 2>/dev/null || true
-  # pm:retriage COEXISTS with the standing pm:* label and ⛔ never replaces it
+  # pm:retriage is a QUESTION put to the triage seat (a re-grade, a lane for a
+  # cross-domain PR, a re-route, a split, a disposition fork a dev report left
+  # open); it COEXISTS with the standing pm:* label and ⛔ never replaces it
   # (maintainer ruling 2026-08-19/20, 「同意 并存」): the objecting seat sets it in
-  # the same write as its evidence comment, and the triage Routine is the only
-  # remover — hanging and removing belong to two different parties, which is
-  # what makes the state safe. Named consumers: the dispatchable-candidate
-  # query (a pm:queue card carrying it is skipped — objection undecided, no
-  # dispatch) and the triage round's high-priority re-judgement pass. It is in
-  # this five-repo loop because the state-model row requires the label to exist
-  # in all five; where a first application already auto-created the object,
-  # creation here is a no-op and `--reconcile` is what gives it this colour and
-  # description (measured 2026-08-20: grey with an empty description in
-  # objectstack, and absent entirely from objectui).
-  gh label create pm:retriage         -R "$R" -c d4c5f9 -d "Awaiting triage re-judgement — coexists with the standing pm:* label; queued cards skip dispatch" 2>/dev/null || true
+  # the same write as its objection comment, which states what it asks, and the
+  # triage Routine is the only remover — hanging and removing belong to two
+  # different parties, which is what makes the state safe. Named consumers: the
+  # dispatchable-candidate query (a pm:queue card carrying it is skipped — the
+  # question is unanswered, no dispatch) and the triage round's answer pass,
+  # which answers what the objection comment asks each fire and drops the label
+  # in the same write (SKILL.md 「`pm:retriage` 每 fire 先答异议评论所求,答后同笔
+  # 摘标;须维护者答的进收件箱,标照摘」). It is in this five-repo loop because the
+  # state-model row requires the label to exist in all five; where a first
+  # application already auto-created the object, creation here is a no-op and
+  # `--reconcile` is what gives it this colour and description (measured
+  # 2026-08-20: grey with an empty description in objectstack, and absent
+  # entirely from objectui).
+  gh label create pm:retriage         -R "$R" -c d4c5f9 -d "Question for triage, answered each fire; coexists with the standing pm:* label; no dispatch" 2>/dev/null || true
   gh label create finding             -R "$R" -c c2e0c6 -d "Recorded observation — held, not dispatchable until the findings triage round grades it" 2>/dev/null || true
   gh label create pm:epic             -R "$R" -c 5319e7 -d "Reserved by a dedicated epic PM, parent or sub-issue; other PMs never take it; never with pm:queue" 2>/dev/null || true
 done
