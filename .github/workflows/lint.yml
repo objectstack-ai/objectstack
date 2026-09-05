@@ -1593,6 +1593,54 @@ jobs:
           node scripts/check-tenant-audit-census.mjs --self-test
           node scripts/check-tenant-audit-census.mjs
 
+      # #14957 platform-object tenancy census.
+      # `scripts/platform-object-tenancy-census.json` carries which
+      # platform-namespace objects the tenancy machinery can REACH, and the
+      # declaration on each excluded object's own schema that puts it outside.
+      #
+      # ⭐ It exists because the same census was PROSE, in the header of
+      # `packages/objectql/src/tenancy/platform-object-tenancy.ts`, and failed in
+      # both available directions inside one month. First a wrong REASON behind a
+      # right total: the parenthetical named `sys_sso_provider` as an addition to
+      # the `managedBy: 'better-auth'` set it was already in, and `24 + 1 = 25`
+      # stayed right, which is why neither a reader nor a gate caught it — that
+      # count reached a PR body and a filed card, and two independent
+      # re-measurements were spent proving a correct file correct. Then a stale
+      # TOTAL: PR #15155 declared `systemFields: { tenant: false }` on
+      # `sys_metadata_activation`, the object left the machinery's reach, and the
+      # ungated prose kept the old digits while the same commit updated the GATED
+      # page next door. CI was green throughout both.
+      #
+      # ⚠️ The PREDICATE is the deliverable and the number is a by-product:
+      # `resolveTenantFieldName` answering non-null on the REGISTERED schema
+      # (after `applySystemFields` injects the tenant column). A gate that
+      # re-derives the number without stating the predicate would recreate the
+      # same trap with fresher digits, and `managedBy` — the thing the prose
+      # counted as if the resolver read it — is not the predicate.
+      #
+      # ⭐ Its third verdict is the one worth having: an object outside the reach
+      # with NO declared mechanism to explain it is an ERROR, not a default. That
+      # is what fires on a new exclusion mechanism the day it lands, instead of
+      # letting it be absorbed into an existing bucket's total.
+      #
+      # It is a DRIFT gate, not an anchor gate: the artefact carries no line
+      # numbers, so displacement cannot move it, and there is exactly one
+      # mechanical repair path (`node scripts/platform-object-tenancy-census.mjs
+      # --write`). It lives in this job, with no paths filter, because the PRs
+      # that move this population are code-only ones that add or re-declare an
+      # object. The `--self-test` invocation is what `check:self-test-wired`
+      # requires and is the only instrument on this gate's two matching rules;
+      # a clean tree cannot tell a working rule from a weakened one.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. TypeScript transpile
+      # of the predicate's import graph plus every tracked object declaration,
+      # no build and no spawns; ~10s.
+      - name: Platform-object tenancy census matches the tree
+        run: |
+          node scripts/check-platform-object-tenancy-census.mjs --self-test
+          node scripts/check-platform-object-tenancy-census.mjs
+
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
       # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
       # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside
@@ -3139,6 +3187,23 @@ jobs:
       # Self-test first, then the real scan; reads ~72 manifests; sub-second.
       - name: Console-intercept disarm
         run: node scripts/check-console-intercept-disarm.mjs --self-test && node scripts/check-console-intercept-disarm.mjs
+
+      # Declared registry log level (#15425, origin #13517). objectql's
+      # SchemaRegistry logs one `[Registry] Registered …` line per registered
+      # item per construction, at its shipped `info` default; a suite that boots
+      # app stacks pays items x boots of that on a shard log nobody reads.
+      # PR #13985 and PR #14016 declared `OS_REGISTRY_LOG` in four harnesses and
+      # removed ~47,900 lines — and nothing held them there, so deleting the
+      # line restored five figures of output with every suite still green. This
+      # asserts the declaration in every package whose OWN TEST SOURCES boot the
+      # engine, a DERIVED population (registry construction / `bootStack` /
+      # example-app import), not a roster: the tree's own audit
+      # (docs/audits/2026-09-test-log-volume-census.md) measures packages/rest at
+      # 528 residual `[Registry]` lines, so a roster of the four that already
+      # declared would have shipped a known-incomplete list. Self-test first,
+      # then the real scan; reads ~72 manifests and their test sources.
+      - name: Declared registry log level
+        run: node scripts/check-registry-log-declared.mjs --self-test && node scripts/check-registry-log-declared.mjs
 
       # Live-server database isolation (#10382). CI provisions ONE Postgres and
       # ONE MySQL for the whole temporal-conformance job and points every live

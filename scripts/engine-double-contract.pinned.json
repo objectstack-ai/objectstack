@@ -92,6 +92,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -158,6 +173,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2097,6 +2127,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3043,6 +3083,11 @@
     },
     {
       "file": "packages/rest/src/rest-server-meta-read-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-declarative-update.test.ts",
       "verb": "update",
       "pinned": 1
     },

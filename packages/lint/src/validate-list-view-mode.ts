@@ -34,6 +34,8 @@
 // tsc rejects it at author time on top of all of that. See objectui #2338 and
 // ADR-0047.
 
+import { recordsOf } from './object-graph.js';
+
 export type ListViewModeSeverity = 'error' | 'warning';
 
 export interface ListViewModeFinding {
@@ -51,18 +53,6 @@ export interface ListViewModeFinding {
 export const LIST_VIEW_FILTERS_IN_VIEWS_MODE = 'list-view-filters-in-views-mode';
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
 
 /** Emit a finding for each wrong-context filter control on a single list-view def. */
 function scanView(
@@ -145,13 +135,13 @@ export function validateListViewMode(stack: AnyRec): ListViewModeFinding[] {
   const out: ListViewModeFinding[] = [];
 
   // Object built-in named views (object.zod.ts `listViews`).
-  asArray(stack.objects).forEach((obj, i) => {
+  recordsOf(stack.objects).forEach((obj, i) => {
     const label = typeof obj.name === 'string' ? `object "${obj.name}"` : `objects[${i}]`;
     scanListViews(obj.listViews, label, `objects[${i}]`, out);
   });
 
   // `defineView` aggregates (stack `views`: default `list` + named `listViews`).
-  asArray(stack.views).forEach((view, i) => {
+  recordsOf(stack.views).forEach((view, i) => {
     const named =
       typeof view.objectName === 'string'
         ? view.objectName

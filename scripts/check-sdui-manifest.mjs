@@ -50,19 +50,57 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
+/** The three files `checkTree` opens, repo-relative. */
+const READ_PATHS = {
+  artefact: 'sdui.manifest.json',
+  record: join('scripts', 'sdui-manifest.record.json'),
+  pin: '.objectui-sha',
+};
+
+/**
+ * The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `checkTree` opens exactly three files. None of them was visible to the
+ * derivation: it reads SOURCE TEXT, and a literal with no separator is refused
+ * by `hintCovers` as too generic (`sdui.manifest.json`), while `.objectui-sha`
+ * is not one of the dot-prefixed names the extractor admits and the record path
+ * is assembled with `join()`. So both of this gate's CI invocations — the scan
+ * and its `--self-test` — were scored `undetermined` for EVERY card, absent from
+ * every dispatch brief and every `--commands` harvest, while CI ran them on each
+ * pull request. That cost is sharpest here: the cards that implicate this gate
+ * are exactly the ones that move the objectui pin or regenerate the manifest.
+ *
+ * `ROOT_WATCH_HINTS` is the mixed-roots spelling of the idiom, which is what
+ * this population is: two repo-ROOT files and one under `scripts/`. The
+ * repo-root pair carries the `/**` suffix because a bare single-segment literal
+ * is refused; the collapse reduces each one back to the single file it names and
+ * to nothing else.
+ *
+ * ⛔ Not a whole-tree marker, and not `scripts/**`: three files are three files.
+ *
+ * The self-test derives the coupling from `READ_PATHS` — the same object
+ * `checkTree` reads — so a moved or added read reds here rather than leaving the
+ * declaration describing the old population.
+ */
+const ROOT_WATCH_HINTS = [
+  'sdui.manifest.json/**',
+  'scripts/sdui-manifest.record.json',
+  '.objectui-sha/**',
+];
+
 /** Gate one tree. Returns a list of problems; empty = green. */
 export function checkTree(root) {
   const problems = [];
-  const artefactPath = join(root, 'sdui.manifest.json');
-  const recordPath = join(root, 'scripts', 'sdui-manifest.record.json');
-  const pinPath = join(root, '.objectui-sha');
+  const artefactPath = join(root, READ_PATHS.artefact);
+  const recordPath = join(root, READ_PATHS.record);
+  const pinPath = join(root, READ_PATHS.pin);
 
   if (!existsSync(artefactPath)) {
     problems.push(
@@ -247,6 +285,26 @@ function selfTest() {
       for (const p of problems) console.error(`    ${p}`);
     }
   }
+  // ── The dispatch-gates population declaration ──────────────────────────
+  // Filed outside the cases table, deliberately: each table ROW is a declared
+  // battery here, so an assertion added as a row would owe a roster entry for a
+  // case that gates nothing about `checkTree`'s verdicts.
+  const declFail = (message) => { console.error(`✗ self-test: ${message}`); failures++; };
+  const readPosix = Object.values(READ_PATHS).map((f) => f.split(sep).join('/'));
+  const declared = ROOT_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  if (!readPosix.every((f) => declared.includes(f))) {
+    declFail('a file checkTree reads is not declared for dispatch-gates — an unreadable literal is how '
+      + 'this gate came to declare nothing at all, and it scores `undetermined` for every card again.');
+  }
+  if (!declared.every((h) => readPosix.includes(h))) {
+    declFail('ROOT_WATCH_HINTS declares a path this gate does not read — a declaration that has drifted '
+      + 'from the reads replaces a silent gate with a lying one.');
+  }
+  if (!ROOT_WATCH_HINTS.filter((h) => !h.replace(/\/\*+$/, '').includes('/')).every((h) => h.endsWith('/**'))) {
+    declFail('a repo-ROOT file is declared without the subtree suffix — a bare single-segment literal is '
+      + 'refused by hintCovers as too generic, so it would contribute no hint at all.');
+  }
+
   // ── The floor: every declared row RAN, and ran its case (#13489) ───────
   //
   // Evaluated after every row has had its chance and BEFORE the verdict, so the

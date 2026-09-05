@@ -64,6 +64,11 @@ import {
 } from '@objectstack/runtime';
 import { appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { devI18nPluginOptions } from '@objectstack/plugin-dev';
+import {
+  declaredPositionNames,
+  deriveCrudCases,
+  rlsProbePermissionSet,
+} from '@objectstack/verify';
 import { ObjectStackDefinitionSchema, normalizeStackInput } from '@objectstack/spec';
 
 // The lowering itself, not a copy of it — reached as SOURCE, by relative path,
@@ -88,6 +93,7 @@ import {
 import {
   PACKAGE_OWNED_COLLECTION_KEYS,
   PROBE_DEFAULT_PERMISSION_SET,
+  PROBE_FEDERATED_OBJECT,
   PROBE_FUNCTION,
   PROBE_FUNCTION_EFFECT,
 } from './option-b-collection-zoo.js';
@@ -474,6 +480,59 @@ export async function measureShape(project: unknown, projectRoot: string): Promi
   rows.push(countRow(
     'B3 · cli build union author-time rule input (os build) · every package-owned collection',
     unionItems,
+  ));
+
+  // ── B2 · `os verify`'s readers (#15229) ──────────────────────────────────
+  //
+  // `os verify` has exactly ONE door — `loadConfig` (`verify.ts:92`) — and it
+  // never opens a compiled artifact, so these rows are B2 and there is
+  // deliberately no B1 twin. A B1 row here would measure a path no command
+  // drives, which reads as coverage this probe does not have.
+  //
+  // Every row calls a reader `@objectstack/verify` SHIPS, per this file's rule.
+  // What makes these the most expensive rows in the table is what the readers
+  // are FOR: `os verify` derives its whole proof set from the app's metadata,
+  // so a collection it cannot see is not a missing feature — it is a run that
+  // asserts nothing and still prints `✓ verify passed`.
+
+  const crudCases = deriveCrudCases(project) as Array<{ object: string; blocked?: string }>;
+  rows.push(countRow(
+    'B2 · verify deriveCrudCases (CRUD round-trip case derivation) · objects',
+    crudCases.length,
+  ));
+
+  // The datasource-by-name map, watched through the ONE decision it makes: the
+  // ADR-0015 double write gate. A reader that resolved `objects` but not
+  // `datasources` still fails this row — the case comes back `blocked` as
+  // "external read-only", which is a verifier silently skipping an object the
+  // app explicitly opted into writes for.
+  const federated = crudCases.find((c) => c.object === PROBE_FEDERATED_OBJECT);
+  rows.push(row(
+    'B2 · verify deriveCrudCases federated write gate (ADR-0015 double opt-in) · datasources',
+    federated ? (federated.blocked ?? 'derived — probe insert allowed') : 'no case derived at all',
+    !federated || Boolean(federated.blocked),
+  ));
+
+  rows.push(countRow(
+    'B2 · verify declaredPositionNames (one RLS persona per declared position) · positions',
+    declaredPositionNames(project).length,
+  ));
+
+  // The probe permission set is what makes an RLS run a PROBE at all: the
+  // object grants are what stop `checkObjectPermission` answering 403 before
+  // record scope is consulted, and the owner-scoped SELECT narrowing is what
+  // puts the persona outside the record scope. Empty on either half and every
+  // verdict the run prints is about neither.
+  const probeSet = rlsProbePermissionSet(project) as unknown as {
+    objects?: Record<string, unknown>;
+    rowLevelSecurity?: unknown[];
+  };
+  const grants = Object.keys(probeSet?.objects ?? {}).length;
+  const narrowings = (probeSet?.rowLevelSecurity ?? []).length;
+  rows.push(row(
+    'B2 · verify rlsProbePermissionSet (RLS probe grants + owner narrowing) · objects',
+    `${grants} granted object(s), ${narrowings} owner-scope rule(s)`,
+    grants === 0 || narrowings === 0,
   ));
 
   // ── The booted AppPlugin, on BOTH entry paths ────────────────────────────

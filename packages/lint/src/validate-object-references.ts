@@ -69,7 +69,7 @@ import {
   PLATFORM_PROVIDED_OBJECT_NAMES,
 } from '@objectstack/spec/system';
 
-import { suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
@@ -95,17 +95,6 @@ export interface ObjectRefFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array of records,
- *  injecting `name` from the map key — mirrors the sibling authoring lints so
- *  the rule works on both the parsed (array) and normalized (map) stack shapes. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -136,7 +125,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   const findings: ObjectRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   const ownObjects = new Set<string>();
   for (const obj of objects) {
     const n = strName(obj.name);
@@ -202,7 +191,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
 
   // ── Actions (global + object-embedded) → param object targets ──
   const checkActionParams = (action: AnyRec, actionPath: string, actionLabel: string) => {
-    const params = asArray(action.params);
+    const params = recordsOf(action.params);
     for (let pi = 0; pi < params.length; pi++) {
       const param = params[pi];
       if (!param || typeof param !== 'object') continue;
@@ -225,7 +214,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
     }
   };
 
-  const globalActions = asArray(stack.actions);
+  const globalActions = recordsOf(stack.actions);
   for (let ai = 0; ai < globalActions.length; ai++) {
     const action = globalActions[ai];
     if (!action || typeof action !== 'object') continue;
@@ -236,7 +225,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
     const obj = objects[oi];
     if (!obj || typeof obj !== 'object') continue;
     const objName = strName(obj.name) ?? `#${oi}`;
-    const objActions = asArray(obj.actions);
+    const objActions = recordsOf(obj.actions);
     for (let ai = 0; ai < objActions.length; ai++) {
       const action = objActions[ai];
       if (!action || typeof action !== 'object') continue;
@@ -249,12 +238,12 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   }
 
   // ── Dashboard global filters → optionsFrom.object ──
-  const dashboards = asArray(stack.dashboards);
+  const dashboards = recordsOf(stack.dashboards);
   for (let di = 0; di < dashboards.length; di++) {
     const dash = dashboards[di];
     if (!dash || typeof dash !== 'object') continue;
     const dashName = strName(dash.name) ?? `#${di}`;
-    const filters = asArray(dash.globalFilters);
+    const filters = recordsOf(dash.globalFilters);
     for (let fi = 0; fi < filters.length; fi++) {
       const filter = filters[fi];
       if (!filter || typeof filter !== 'object') continue;
@@ -281,7 +270,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   // which live in packages a stack compiling plugin-auth alone cannot see. All
   // five resolve through `PLATFORM_PROVIDED_OBJECT_NAMES` (rung ③); a local
   // "not in this stack ⇒ error" check would have reported every one of them.
-  const datasets = asArray(stack.datasets);
+  const datasets = recordsOf(stack.datasets);
   for (let dsi = 0; dsi < datasets.length; dsi++) {
     const ds = datasets[dsi];
     if (!ds || typeof ds !== 'object') continue;
@@ -296,14 +285,14 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
   }
 
   // ── App navigation → requiresObject gates (and gated objectName) ──
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
   for (let ai = 0; ai < apps.length; ai++) {
     const app = apps[ai];
     if (!app || typeof app !== 'object') continue;
     const appName = strName(app.name) ?? `#${ai}`;
 
     const walkNav = (items: unknown, basePath: string) => {
-      const navItems = asArray(items);
+      const navItems = recordsOf(items);
       for (let ni = 0; ni < navItems.length; ni++) {
         const nav = navItems[ni];
         if (!nav || typeof nav !== 'object') continue;
@@ -337,7 +326,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
     };
 
     walkNav(app.navigation, `apps[${ai}].navigation`);
-    const areas = asArray(app.areas);
+    const areas = recordsOf(app.areas);
     for (let ri = 0; ri < areas.length; ri++) {
       walkNav(areas[ri]?.navigation, `apps[${ai}].areas[${ri}].navigation`);
     }

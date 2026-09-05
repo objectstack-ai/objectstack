@@ -5,10 +5,19 @@ import {
   assembleExecutionContext,
   resolveAuthzContext,
   resolveLocalizationContext,
+  // [#15348] The three symbols this door's tenancy-posture read is built from:
+  // the posture reader itself, plus the two halves of the classification
+  // decision 1 option A requires (#13906) — the registry's "never registered"
+  // brand, and the loud outage every other rejection has to become.
+  effectiveTenancyPosture,
+  isServiceNotRegisteredError,
+  AuthzStoreUnavailableError,
   type EntryLocalization,
+  type TenancyPostureSource,
 } from '@objectstack/core';
 import { readEnvWithDeprecation, isMcpServerEnabled, resolveMcpStdioAutoStart } from '@objectstack/types';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IAIService, IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { MCPServerRuntime } from './mcp-server-runtime.js';
 import type { MCPServerRuntimeConfig, McpMergedMetadataRead } from './mcp-server-runtime.js';
@@ -16,6 +25,84 @@ import type { ToolRegistry } from './types.js';
 import { createStdioDataBridge, enforceApiExposure, GATED_ACTIONS } from './stdio-data-bridge.js';
 import type { McpDataBridge } from './mcp-http-tools.js';
 import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
+
+/**
+ * [#15348] Resolve the deployment's EFFECTIVE tenancy posture for the stdio
+ * door — the argument BOTH posture-conditional API-key refusals are gated on
+ * (`organization_required`, in `@objectstack/core`'s `api-key.ts`, and
+ * `organization_membership_ended`, in `resolve-authz-context.ts`).
+ *
+ * Supplying none does not weaken those guards, it SKIPS them, and the resolver
+ * then admits the key carrying `sys_api_key.active_organization_id` VERBATIM —
+ * the caller's own stored claim, never vetted against current membership. So
+ * under a wall-enforcing posture a key stamped with an organization its owner
+ * has LEFT was admitted with that organization as its tenant.
+ *
+ * ## Why this door and not only the ones already wired
+ *
+ * Every caller on this transport is an API key by construction: the header map
+ * is built from `OS_MCP_STDIO_API_KEY` a few lines below and there is no
+ * session path at all. The API-key admission is therefore not one branch of
+ * this door's authorization — it IS this door's authorization, and the
+ * `tenantId` it resolves is what `assembleExecutionContext` hands the engine as
+ * the request's tenant.
+ *
+ * ## The classification, and the one shape that must not be written here
+ *
+ * [#13906 decision 1 option A] Two facts a `try { … } catch { undefined }`
+ * would collapse into one:
+ *
+ *  - **never registered** → branded (`isServiceNotRegisteredError`) → a quiet
+ *    `undefined`. The supported no-tenancy composition: a kernel assembled
+ *    without `plugin-auth` registers no `tenancy` service and enforces no
+ *    organization wall, so there is nothing for a key to be walled out of.
+ *  - **registered and FAILED to build** → unbranded → `AuthzStoreUnavailableError`
+ *    (503). A posture that could not be READ is not a posture that is ABSENT;
+ *    admitting on it is exactly the permissive-on-failure defect #13906 exists
+ *    to repair, and the reason this seam is not a one-liner.
+ *
+ * Only the ASYNC accessor carries that discriminator — the branded rejection is
+ * raised by `PluginLoader.getService`, which the sync accessor never reaches.
+ * The sync leg below is taken only on a host whose `getKernel()` yields no
+ * `getServiceAsync` (a `KernelBase`-shaped host, and the duck-typed contexts
+ * this package's own tests build). Such a host instantiates no service
+ * factories at all, so "nothing is registered under that name" is the only
+ * fault its accessor can report, and absorbing it is the SAME classification
+ * rather than a second collapse of it.
+ *
+ * ## ⚠️ Read PER CALL — deliberately not hoisted into `start()`
+ *
+ * A posture resolved once in `start()` and held would be the #11580 defect this
+ * file already paid for, pointed at a security control instead of a locale.
+ * `start()` bodies run strictly before every other plugin's `start()` and
+ * before the first `kernel:ready`; `TenancyService.posture` is a LIVE getter
+ * that probes `org-scoping` on each read and reports a wall it cannot yet
+ * enforce as `single` (ADR-0093 D4/D5). Freezing a read taken inside that
+ * window would freeze "no wall" for the life of a long-lived transport, and it
+ * would never self-correct.
+ *
+ * The localization hoist below is memoized because its resolution costs
+ * settings reads. This one costs two registry lookups and no I/O, so there is
+ * nothing to buy — and a live read is what ADR-0101 D1 already promises this
+ * door for the identity beside it: re-resolved per call, so a change takes
+ * effect on the next one.
+ */
+async function resolveStdioTenancyPosture(ctx: PluginContext): Promise<TenancyPosture | undefined> {
+  const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+  if (kernel && typeof kernel.getServiceAsync === 'function') {
+    try {
+      return effectiveTenancyPosture(await kernel.getServiceAsync<TenancyPostureSource>('tenancy'));
+    } catch (err) {
+      if (!isServiceNotRegisteredError(err)) throw new AuthzStoreUnavailableError('tenancy', err);
+      return undefined;
+    }
+  }
+  try {
+    return effectiveTenancyPosture(ctx.getService<TenancyPostureSource>('tenancy'));
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Resolve `OS_MCP_STDIO_API_KEY` into an {@link ExecutionContext} through the
@@ -44,13 +131,25 @@ import { CONNECT_AGENT_UI_BUNDLE } from './connect-ui.js';
  * window CLOSES: a call that races the boot is answered from a fresh
  * resolution that is deliberately not kept, so a pre-bind answer can never
  * become the memoized one.
+ *
+ * @param tenancyPosture [#15348] The deployment's effective posture, from
+ * {@link resolveStdioTenancyPosture}. REQUIRED rather than optional, and
+ * threaded rather than resolved here, for two separate reasons. Threaded,
+ * because this function holds no kernel handle and the posture must come from
+ * the ONE place that does (`start()`); required, because an optional parameter
+ * is how the argument came to be missing in the first place — a new call site
+ * that omits it would compile, and its two refusals would silently stop being
+ * reachable. `undefined` is a legitimate VALUE here (no `tenancy` service is
+ * registered ⇒ no wall exists ⇒ no posture-conditional refusal), and it has to
+ * be passed on purpose.
  */
 async function resolveStdioExecutionContext(
   ql: { find: (object: string, opts: unknown) => Promise<unknown> },
   apiKey: string,
   localization: EntryLocalization | undefined,
+  tenancyPosture: TenancyPosture | undefined,
 ): Promise<ExecutionContext | undefined> {
-  const authz = await resolveAuthzContext({ ql, headers: { 'x-api-key': apiKey } });
+  const authz = await resolveAuthzContext({ ql, headers: { 'x-api-key': apiKey }, tenancyPosture });
   return assembleExecutionContext({
     authz,
     // OAuth access tokens are honoured on the `/mcp` HTTP door alone
@@ -286,7 +385,19 @@ export class MCPServerPlugin implements Plugin {
       // data call, so it must not pay for settings reads whose result it would
       // discard. The localization hoist below needs its `userId`/`tenantId`,
       // which is why the probe comes first.
-      const initial = await resolveStdioExecutionContext(ql, apiKey, undefined);
+      // [#15348] The posture is read HERE too, not only per call: an ex-member's
+      // or organization-less key that this deployment's wall refuses is not a
+      // credential this transport can run under, so it takes the same
+      // fail-closed refusal-to-start the unknown/revoked/expired key takes
+      // below. A `tenancy` service that is REGISTERED AND BROKEN raises
+      // `AuthzStoreUnavailableError` out of this line — loud, and it stops the
+      // boot rather than starting a door whose admission was never decided.
+      const initial = await resolveStdioExecutionContext(
+        ql,
+        apiKey,
+        undefined,
+        await resolveStdioTenancyPosture(ctx),
+      );
       if (!initial) {
         throw new Error(
           '[MCP] OS_MCP_STDIO_API_KEY did not resolve to a valid identity (unknown / revoked / expired / owner-less). ' +
@@ -411,8 +522,18 @@ export class MCPServerPlugin implements Plugin {
         await localizationForRead();
       });
       // Re-resolve per call so a revoked/expired key stops working on the next read.
+      // [#15348] The tenancy posture is re-read on the same schedule and for the
+      // same reason: it is an input to that admission, and a membership or a
+      // wall that changed mid-session must take effect on the next call rather
+      // than at the next process restart. See `resolveStdioTenancyPosture` for
+      // why this is not hoisted next to the localization memo.
       const resolvePrincipal = async (): Promise<ExecutionContext> => {
-        const ec = await resolveStdioExecutionContext(scopedQl, apiKey, await localizationForRead());
+        const ec = await resolveStdioExecutionContext(
+          scopedQl,
+          apiKey,
+          await localizationForRead(),
+          await resolveStdioTenancyPosture(ctx),
+        );
         if (!ec) throw new Error('MCP stdio identity is no longer valid (key revoked or expired)');
         return ec;
       };

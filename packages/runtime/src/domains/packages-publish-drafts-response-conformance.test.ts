@@ -77,7 +77,7 @@ function makeDoor(opts: {
         // without it is a drifted seam, not a minimal one.
         success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
         published: [{ type: 'flow', name: 'nightly_rollup', version: 'sha256:aa11' }], failed: [],
-        probes: { issues: [], checked: { seeds: 0, views: 0, widgets: 0 } },
+        probes: { issues: [], checked: { seeds: 0, views: 0, widgets: 0, objects: 0 } },
         commitId: 'cmt_01',
     };
     const publishPackageDrafts = vi.fn().mockImplementation(async () =>
@@ -157,7 +157,7 @@ describe('publish-drafts wire payload conforms to PublishPackageDraftsResponseSc
         // The route-attached ADR-0045 receipt is ON the wire and declared.
         expect(parsed.unhiddenApps).toEqual(['crm', 'ops']);
         // Opaque probes crossed the route untouched.
-        expect(parsed.probes).toEqual({ issues: [], checked: { seeds: 0, views: 0, widgets: 0 } });
+        expect(parsed.probes).toEqual({ issues: [], checked: { seeds: 0, views: 0, widgets: 0, objects: 0 } });
         expect(parsed.commitId).toBe('cmt_01');
     });
 

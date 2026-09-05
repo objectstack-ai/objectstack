@@ -182,6 +182,19 @@
 // Exit status: the child's own code when it finishes; 75 on a declared stall;
 // 1 when the child dies on a signal this guard did not send.
 
+// ## The dispatch-gates population
+//
+// This is a RUNNER, not a scanner. Its reads are `/proc` (process state for the
+// stall verdict) and, when CI passes `--report-dir`, a runner temp directory of
+// diagnostic reports -- neither is in the repository, and no card can contain
+// either. The family CI schedules on a pull request is `check:stall-guard`,
+// which is this file's `--self-test`. So there is no path population to declare,
+// and the marker says so rather than leaving the family in the unexamined pile.
+// A card that edits THIS file is already led to `check:stall-guard-budget`,
+// which declares this path as part of its own population.
+//
+// dispatch-gates: no-path-population -- this is a process runner: it reads /proc and, when given --report-dir, a runner temp dir, never a file in the repository; check:stall-guard is its --self-test
+
 import { spawn } from 'node:child_process';
 import {
   createWriteStream,
@@ -228,14 +241,30 @@ const argv = process.argv.slice(2);
 // battery is the shape PR #14896, PR #15003 and PR #15217 landed for exactly
 // this case.
 //
+// ⚠️ What the floor deliberately does NOT count (#15317): the cases behind the
+// `const linux = existsSync('/proc')` guard — process classification, the
+// SIGTERM-trapping descendant, the source-side liveness probe and its cap. They
+// still assert exactly as they always did; they go through `checkConditional`,
+// which reports into the same `failures`/`results` sinks and registers nothing.
+// A floor over an ENVIRONMENT-CONDITIONAL battery counts what the host happens
+// to provide, so off Linux it would red for the ENVIRONMENT rather than for a
+// case that stopped running — and the remedy an author reaches for is editing
+// the floor down, the one habit these floors exist to prevent (#13797's ruling,
+// carried forward from the ALLOWLIST loops in check-whole-set-label-write.mjs).
+// The skipped block names ITSELF instead, on the `cases skipped` line printed
+// with the verdict. The floor pins the part that does not move with the host.
+//
 // ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
 // keeps a total "right" the moment a sibling grows.
 //
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+//
+// 20 = the cases that run on EVERY host, measured off a run (#15317), never
+// derived by subtracting the conditional block by hand.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'run-with-stall-guard self-test': 41,
+  'run-with-stall-guard self-test': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -822,6 +851,19 @@ async function selfTest() {
   };
   battery('run-with-stall-guard self-test');
   const dir = mkdtempSync(join(tmpdir(), 'stall-guard-selftest-'));
+  // ⚠️ THE GUARD, and why the cases behind it are OUTSIDE the roster (#15317).
+  // Every case below that needs `/proc` — process classification, the
+  // SIGTERM-trapping descendant, the source-side liveness probe and its cap —
+  // runs only where this is true, so on a host without `/proc` they do not run
+  // and a floor that counted them would red for the ENVIRONMENT rather than for
+  // a case that stopped running. That is a floor lying about what it measured,
+  // and the remedy an author would reach for is editing the floor down — the
+  // one habit these floors exist to prevent. So they go through
+  // `checkConditional` below: they assert exactly as before, and they register
+  // nothing. The floor pins the part that does not move with the environment.
+  // The skipped block still NAMES ITSELF — the `cases skipped` line printed with
+  // the verdict — so "did not run here" never reads as "ran and held".
+  // Precedent: the ALLOWLIST loops in check-whole-set-label-write.mjs (#13797).
   const linux = existsSync('/proc');
   const failures = [];
   const results = [];
@@ -831,14 +873,24 @@ async function selfTest() {
   // a fixed 5s tick — the production 10-minute window still polls every 5s.
   const WINDOW = ['--stall-minutes', '0.05'];
 
-  const check = (label, cond, detail) => {
-    registerCase();
+  const record = (label, cond, detail) => {
     if (cond) {
       results.push(`  ✓ ${label}`);
     } else {
       failures.push(label);
       results.push(`  ✗ ${label}${detail ? ` — ${detail}` : ''}`);
     }
+  };
+  const check = (label, cond, detail) => {
+    registerCase();
+    record(label, cond, detail);
+  };
+  // The sink for the `if (linux)` cases: it asserts and reports EXACTLY as
+  // `check` does — same condition, same message, same `failures` entry — and
+  // registers nothing. See the `const linux` guard above for why those cases are
+  // outside the roster.
+  const checkConditional = (label, cond, detail) => {
+    record(label, cond, detail);
   };
 
   // Arms the SIGUSR2 stack harvest in the synthetic children, exactly as the
@@ -960,9 +1012,9 @@ async function selfTest() {
       check('idle hang is not rescued by the liveness probe (plain verdict, no deferral)',
         !out.includes('STALL-CAP') && !out.includes('deferring the kill'));
       if (linux) {
-        check('idle hang is classified idle, not on-CPU',
+        checkConditional('idle hang is classified idle, not on-CPU',
           out.includes('idle -- waiting on something that never settles'));
-        check('a live event loop answers SIGUSR2 with a report',
+        checkConditional('a live event loop answers SIGUSR2 with a report',
           /SIGUSR2 -> \d+ node process\(es\), [1-9]\d* responded/.test(out));
       }
     }
@@ -982,20 +1034,20 @@ async function selfTest() {
         reportEnv(spinDir), { marker: dir },
       );
       const { code, out } = res;
-      check('sync-spinning hang: the guard exits on its own', !res.timedOut,
+      checkConditional('sync-spinning hang: the guard exits on its own', !res.timedOut,
         'the guard never exited — detection is broken');
-      check('sync-spinning hang is declared a stall', code === STALL_EXIT_CODE, `exit ${code}`);
-      check('sync-spinning hang is classified ON-CPU',
+      checkConditional('sync-spinning hang is declared a stall', code === STALL_EXIT_CODE, `exit ${code}`);
+      checkConditional('sync-spinning hang is classified ON-CPU',
         out.includes('ON-CPU -- sync-spinning or GC-thrashing'));
-      check('a blocked event loop is diagnosed by its SILENCE',
+      checkConditional('a blocked event loop is diagnosed by its SILENCE',
         out.includes('NO report -- its event loop is BLOCKED'));
       // The inversion this card exists to design out. A spinning hang pegs a
       // core, so any probe that reads CPU as liveness stops firing here -- and
       // "never fires on spin hangs" is strictly worse than the defect it would
       // be fixing, because no green run can tell it apart from success.
-      check('sync-spinning hang is NOT rescued by the probe — burning CPU is not liveness',
+      checkConditional('sync-spinning hang is NOT rescued by the probe — burning CPU is not liveness',
         !out.includes('STALL-CAP') && !out.includes('deferring the kill'));
-      check('the verdict names the source-side probe as the reason it fired',
+      checkConditional('the verdict names the source-side probe as the reason it fired',
         out.includes('FROZEN at the source'));
     }
 
@@ -1037,9 +1089,9 @@ async function selfTest() {
         '--log', join(dir, 'group.log'), ...WINDOW, '--', 'sh', script,
       ], {}, { marker: dir });
       const { code, out } = res;
-      check('SIGTERM-trapping descendant: the guard exits on its own', !res.timedOut,
+      checkConditional('SIGTERM-trapping descendant: the guard exits on its own', !res.timedOut,
         'the guard never exited — teardown is broken');
-      check('stall with a SIGTERM-trapping descendant still exits 75',
+      checkConditional('stall with a SIGTERM-trapping descendant still exits 75',
         code === STALL_EXIT_CODE, `exit ${code}`);
       // "Dead" means gone OR a zombie: SIGKILL leaves the entry in /proc until
       // the (now reparented) process is reaped, and in a container PID 1 may be
@@ -1059,9 +1111,9 @@ async function selfTest() {
         await sleep(100);
       }
       const alive = state !== null && state !== 'Z';
-      check('the descendant does not outlive the guard', !alive,
+      checkConditional('the descendant does not outlive the guard', !alive,
         `pid ${pid} still running (state=${state}) after the guard exited`);
-      check('the SIGKILL escalation is reported, not silent',
+      checkConditional('the SIGKILL escalation is reported, not silent',
         out.includes('ignored SIGTERM'));
       if (alive) {
         try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
@@ -1086,9 +1138,9 @@ async function selfTest() {
         ['--log', join(dir, 'buffered.log'), ...WINDOW, '--stall-cap-minutes', '0.5', '--', ...shape],
         {}, { marker: dir },
       );
-      check('a healthy silent-but-working run is NOT killed', saved.code === 0, `exit ${saved.code}`);
-      check('...and is never called a stall', !saved.out.includes('STALL'));
-      check('...and the deferral is announced, not silent',
+      checkConditional('a healthy silent-but-working run is NOT killed', saved.code === 0, `exit ${saved.code}`);
+      checkConditional('...and is never called a stall', !saved.out.includes('STALL'));
+      checkConditional('...and the deferral is announced, not silent',
         saved.out.includes('deferring the kill'), saved.out.trim().split('\n')[0]);
 
       // Positive control, and the reason case 8 is evidence rather than a
@@ -1098,9 +1150,9 @@ async function selfTest() {
         ['--log', join(dir, 'buffered-noprobe.log'), ...WINDOW, '--no-liveness-probe', '--', ...shape],
         {}, { marker: dir },
       );
-      check('positive control: the same run IS killed with --no-liveness-probe',
+      checkConditional('positive control: the same run IS killed with --no-liveness-probe',
         killed.code === STALL_EXIT_CODE, `exit ${killed.code}`);
-      check('positive control: and the verdict says the probe was off',
+      checkConditional('positive control: and the verdict says the probe was off',
         killed.out.includes('disabled (--no-liveness-probe)'));
     }
 
@@ -1119,12 +1171,12 @@ async function selfTest() {
         {}, { marker: dir },
       );
       const { code, out } = res;
-      check('a writing hang: the guard still exits on its own', !res.timedOut,
+      checkConditional('a writing hang: the guard still exits on its own', !res.timedOut,
         'the guard never exited — the probe inverted the defect');
-      check('a hang that keeps writing is still killed', code === STALL_EXIT_CODE, `exit ${code}`);
-      check('...at the cap, under its own distinct STALL-CAP verdict',
+      checkConditional('a hang that keeps writing is still killed', code === STALL_EXIT_CODE, `exit ${code}`);
+      checkConditional('...at the cap, under its own distinct STALL-CAP verdict',
         out.includes('STALL-CAP'), out.trim().split('\n').slice(-2).join(' | '));
-      check('...having first announced the deferral it was granted',
+      checkConditional('...having first announced the deferral it was granted',
         out.includes('deferring the kill'));
     }
 

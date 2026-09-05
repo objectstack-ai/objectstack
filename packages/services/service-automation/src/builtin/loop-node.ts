@@ -8,6 +8,7 @@ import type { AutomationEngine, StepLogEntry } from '../engine.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
 import { attachPartialSteps } from '../partial-steps.js';
+import { runInLoopIteration } from './loop-frame.js';
 
 /**
  * `loop` built-in node — a **structured iteration container** (ADR-0031).
@@ -131,16 +132,25 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
           // FAILING iteration's steps land here too — `runRegion` tags them and
           // pushes them in before it rethrows. Success returns them instead, so
           // nothing is counted twice.
-          const iterSteps = await engine.runRegion(
-            body,
-            variables,
-            context ?? ({} as AutomationContext),
-            {
-              parentNodeId: node.id,
-              iteration: i,
-              regionKind: 'loop-body',
-            },
-            childSteps,
+          // #14456: publish the row identity for the duration of this
+          // iteration's body, so a `try_catch` nested in it can attribute a
+          // CONTAINED failure to the row that produced it — `$error.iteration`
+          // / `$error.item`, and the loop's `iteration` on the try/catch
+          // region's own steps. Nothing about the iteration itself changes:
+          // `runInLoopIteration` returns and throws exactly what the body does.
+          const iterSteps = await runInLoopIteration(
+            { iteration: i, item: collection[i], scope: variables },
+            () => engine.runRegion(
+              body,
+              variables,
+              context ?? ({} as AutomationContext),
+              {
+                parentNodeId: node.id,
+                iteration: i,
+                regionKind: 'loop-body',
+              },
+              childSteps,
+            ),
           );
           childSteps.push(...iterSteps);
           iterations++;

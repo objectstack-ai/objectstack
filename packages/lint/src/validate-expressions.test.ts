@@ -9,6 +9,9 @@ import { SCOPE_ROOTS } from '@objectstack/formula';
 import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
+// [#15137] The published refusal sentence a `value`-slot finding must lead
+// with — asserted from the spec's own export, never re-spelled in a test.
+import { ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
 
 import {
   validateStackExpressions,
@@ -2842,6 +2845,11 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // here would have been excused into masking a genuine
       // `validations[].message` read.
       'verdict', 'diagnostic',
+      // [#15137] The Zod `safeParse` result for a `value`-slot envelope. Its
+      // keys are `success` / `error`, SafeParseResult's own — never metadata
+      // keys; the metadata keys it judges are `AssignmentValueSchema`'s, read
+      // by the schema and not by name here.
+      'shape',
       // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
       // import specifier, which this scan cannot tell from `scope.j…`. The two
       // entries above it in this set (`fields`, `guards`) are the same artefact
@@ -3619,5 +3627,101 @@ describe('cross-site unprovisioned-anchor convergence (#8405)', () => {
       expect(text).toContain('ADR-0015');
       expect(text.toLowerCase()).toContain('storage');
     }
+  });
+});
+
+
+/**
+ * ── `assignment` value envelopes (#15137) ───────────────────────────────────
+ *
+ * The `objectstack validate` half of the executor card: the ledger's `value`
+ * role (`assignment.assignments.*`, #14149) reaches this pass as a LOCATED
+ * finding at `error` severity, matching what `registerFlow` throws on. Build
+ * and run time must agree about which flows are acceptable — a build that
+ * passes what registration refuses is the worst of both.
+ *
+ * The refusal notion is not re-derived here: `checkDeclaredValue` composes the
+ * same two published primitives the engine does, in the same order.
+ */
+describe('assignment value envelope — located findings (#15137)', () => {
+  const assignmentFlow = (assignments: unknown) => ({
+    flows: [{
+      name: 'nightly_digest',
+      nodes: [
+        { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+        { id: 'set_1', type: 'assignment', config: { assignments } },
+      ],
+      edges: [],
+    }],
+  });
+  const valueIssues = (assignments: unknown) =>
+    validateStackExpressions(assignmentFlow(assignments)).filter((i) => i.where.includes('assignment value'));
+
+  it.each([
+    ['no `source` — the shape only the spec schema catches', { dialect: 'cel' }],
+    ['an empty `source`', { dialect: 'cel', source: '' }],
+    ['a non-`cel` dialect', { dialect: 'template', source: 'Hello {name}' }],
+    ['CEL that does not parse', { dialect: 'cel', source: 'rows.map(r,' }],
+    ['an unknown function', { dialect: 'cel', source: 'nosuchfn(rows)' }],
+  ] as const)('reports %s, located at the author\'s own variable name', (_label, envelope) => {
+    const issues = valueIssues({ digest: envelope });
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.severity).toBe('error');
+    expect(issues[0]!.where).toContain("flow 'nightly_digest'");
+    expect(issues[0]!.where).toContain("node 'set_1'");
+    // The `*` wildcard resolves to the variable the author named, so the
+    // finding points at the assignment, not at "somewhere in this node".
+    expect(issues[0]!.where).toContain('config.assignments.digest');
+    expect(issues[0]!.message).toContain(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL);
+  });
+
+  it('passes a well-formed envelope, and every shape that is not an envelope', () => {
+    expect(valueIssues({
+      digest: { dialect: 'cel', source: 'joinNonEmpty(rows.map(r, r.subject), "\\n")' },
+      greeting: 'Hello {name}',
+      count: 3,
+      flags: { enabled: true },
+      // Envelope-SHAPED only by a non-string dialect — data, not an expression.
+      decoy: { dialect: 7, source: 'x' },
+    })).toHaveLength(0);
+  });
+
+  it('is silent on a whitespace-only `source` — the seam this pass cannot see (#15430)', () => {
+    // `ExpressionSchema.source` is `z.string().min(1)`, so `'   '` passes the
+    // shape rule, and `validateExpression` trims it to empty and answers
+    // `ok: true` ("not authored"). Build says nothing; the CEL engine parses it
+    // untrimmed and the run faults loudly (pinned in `service-automation`'s
+    // `assignment-value-envelope.test.ts`). Pinned as the BOUND of the
+    // build/run agreement, not as desired behaviour — ⛔ do not close it with a
+    // trim rule invented here: that is a third notion of "malformed", which is
+    // the defect this arm exists to avoid. The fix belongs in the shape rule.
+    expect(valueIssues({ digest: { dialect: 'cel', source: '   ' } })).toHaveLength(0);
+  });
+
+  it('says nothing about the legacy array form — it is not a declared slot', () => {
+    // The seat's ask-3 disposition, from the lint side: refusing the array form
+    // would fail builds that pass today, and that refusal is a ruling rather
+    // than a lane's call. The ledger's `*` walk returns early on an array, so
+    // there is no wiring to leave out.
+    expect(valueIssues([{ variable: 'digest', value: { dialect: 'cel' } }])).toHaveLength(0);
+  });
+
+  it('a value envelope is not shadow-checked — that diagnostic is about field reads', () => {
+    // `warnShadowedFieldReads` stays on `predicate` slots: a value envelope is
+    // evaluated in the flow-variable scope by design, so there is no field
+    // reading for a variable to displace.
+    const issues = validateStackExpressions({
+      objects: [{ name: 'crm_lead', fields: { status: { type: 'text' } } }],
+      flows: [{
+        name: 'nightly_digest',
+        variables: [{ name: 'status', type: 'text' }],
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'crm_lead' } },
+          { id: 'set_1', type: 'assignment', config: { assignments: { digest: { dialect: 'cel', source: 'status' } } } },
+        ],
+        edges: [],
+      }],
+    });
+    expect(issues.filter((i) => i.where.includes('assignment value'))).toHaveLength(0);
   });
 });

@@ -455,60 +455,57 @@ describe('the mirror direction: a reader that is never coming back', () => {
     expect(Number(String(declared).replaceAll('_', ''))).toBe(SHIM_DRAIN_STALL_MS);
   });
 
-  it('a CLOSED read end ends the child on its own — by an uncaught EPIPE, never by the bound', () => {
-    // ⚠️ This case used to read `elapsedMs < STALL_MS`, and its name used to
-    // say "released at once … EPIPE reaches the callback". BOTH were wrong
-    // about this shape, and the trace that settles it is worth more than the
-    // assertion it replaces.
+  it('a CLOSED read end ends the child on its own, with the status every other reader gets', () => {
+    // ⚠️ THE NUMBER BELOW MOVED FROM 1 TO 2, and this case is why it could not
+    // move quietly. It pinned 1 on purpose — 1 was what the CLI DID, never what
+    // anyone contracted — and #14858 is the card that changed the CLI. ⛔ This
+    // was not a broken test and the flip is not a regression.
     //
-    // What the child ACTUALLY does with its read end destroyed: oclif's
+    // What the child USED TO DO with its read end destroyed: oclif's
     // `displayWarnings()` makes the first stderr write, the pipe is already
     // gone, node raises `write EPIPE` as an `error` event on `process.stderr`,
-    // NOTHING IS LISTENING, and the process dies of an uncaught exception —
-    // exit 1, ~1.4 s in. `writeStderr()` is never called, so the bound this
-    // case was named after is never armed, let alone paid. Traced on one box
-    // with a `--import` observer: the shim's own 415-byte write is #175, at
-    // 9250 ms, behind 174 oclif writes that all EPIPE — 7.8 s after the
-    // unobserved child is already dead.
+    // NOTHING WAS LISTENING, and the process died of an uncaught exception —
+    // exit 1, 938-1174 ms in, 12 of 12 runs, traced with a `--import` observer
+    // that installed no listener here and wrapped no write. `writeStderr()` was
+    // never called at all, so the bound this case was once named after was
+    // never armed, let alone paid. (An earlier version of this case read
+    // `elapsedMs < STALL_MS` and was named for that bound; the wall clock went
+    // because its whole measured term is child cold start, which is elastic,
+    // and because it stayed green through the very ablation it named.)
     //
-    // ⛔ So the wall-clock bound was not merely fragile, it was a PHANTOM: it
-    // could not fail for the reason it named. Ablated on `bin/run-dev.js`,
-    // same box, same probe, with the old bound's verdict in brackets:
+    // `bin/run-dev.js` now attaches a no-op `error` listener to
+    // `process.stderr` before `run()`. A failed stderr write stops being fatal,
+    // the run reaches the CLI's own exit path — oclif's `handle()`, status 2 —
+    // and the closed reader answers what the drained and never-read readers
+    // already answered (#14715 pinned 2 for the never-read one). Re-measured
+    // for that change, one contiguous 2x2 ablation of the shim on one box, the
+    // listener present/absent against the `write` callback kept/removed:
     //
-    //   pristine                                  exit 1, 1387-1711 ms   [green]
-    //   write callback REMOVED, so a closed path
-    //     could only finish on the bound — the
-    //     regression this case named               exit 1, 1517-1633 ms   [GREEN]
-    //   EPIPE made non-fatal, callback kept       exit 2, 8787-8979 ms   [green, 1.2 s spare]
-    //   both, so the path really pays the bound   exit 2, 23601-23712 ms [red]
+    //   listener present, callback kept (as shipped)  exit 2,  1237-1312 ms
+    //   listener present, callback removed            exit 2, 16271-16294 ms
+    //   listener absent,  callback kept (the defect)  exit 1,   983-1028 ms
+    //   listener absent,  callback removed            exit 1,   843-1031 ms
     //
-    // The bound moved only on lines 3 and 4, which change the EXIT CODE too;
-    // against its own regression it stayed green. And its whole measured term
-    // is child cold start, which is elastic — 1.4 s here, 8.9 s the moment
-    // anything lets the child run further — judged against 10 s borrowed from
-    // case 4's parent stall, a number with no relationship to this case.
+    // ⭐ The exit status is still the observation, and it still carries no load
+    // term. 1 means the child died on its first write and never reached the
+    // drain; 2 means it got through to `handle()`, which on this run is only
+    // reachable THROUGH `writeStderr()` — bound paid or not. BOTH rows that
+    // remove the listener flip it back to 1, so this line pins the fix and not
+    // the weather.
     //
-    // ⭐ The exit status IS the observation the wall clock was standing in for,
-    // and it carries no load term at all. 1 means the child died on its first
-    // write and never reached the drain; 2 means it got through to `handle()`,
-    // which is only reachable THROUGH `writeStderr()` — bound paid or not. Every
-    // ablation above that reaches the drain flips it, including the one the old
-    // assertion could not see.
-    //
-    // ⚠️ 1 is what the CLI DOES, not what anyone contracted: a caller whose
-    // stderr is closed gets 1 where every other reader gets 2, and cannot tell a
-    // failed command from a crashed CLI. Filed as #14858. If that is fixed to
-    // exit 2 this case reds, which is the point — the fixing PR flips the number
-    // here and says why. ⛔ Do not "repair" a red by loosening this to
-    // `not.toBeNull()`; that is the phantom check all over again.
+    // ⛔ Do not "repair" a red here by loosening to `not.toBeNull()`; that is
+    // the phantom check the wall clock already was. A red means the child is
+    // dying on a stderr write again — the listener is gone, or something now
+    // writes to stderr ahead of where it is attached.
     const evidence =
       `closed-read-end child ran ${closedEnd.elapsedMs} ms (harness cap ${UNREAD_HARD_CAP_MS} ms); ` +
       `case 1 measured the same child at ${unbuilt.elapsedMs} ms on this runner minutes earlier`;
     expect(closedEnd.signal, `the harness SIGKILLed the child — it was still alive at the ceiling. ${evidence}`).toBeNull();
     expect(
       closedEnd.code,
-      `the child did not die on its first stderr write — it reached the shim's drain, so something now ` +
-        `tolerates EPIPE on stderr (see #14858 and the ablation table above this assertion). ${evidence}`,
-    ).toBe(1);
+      `the child did not reach the CLI's own exit path — it died on a stderr write, so nothing is making ` +
+        `EPIPE non-fatal on \`process.stderr\` any more (see #14858 and the ablation table above this ` +
+        `assertion). ${evidence}`,
+    ).toBe(2);
   });
 });

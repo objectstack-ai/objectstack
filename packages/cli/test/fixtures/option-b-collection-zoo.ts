@@ -79,6 +79,28 @@ export const ORDERS_PACKAGE_ID = 'com.example.probe.orders';
 export const PROBE_DATASOURCE = 'probe_primary';
 /** Relative to the project root — `resolve-project-database` anchors it there. */
 export const PROBE_DATASOURCE_FILE = '.objectstack/data/probe-primary.db';
+/**
+ * A FEDERATED datasource (ADR-0015), write gate OPEN.
+ *
+ * It is here for one reader: `deriveCrudCases` builds a datasource-by-name map
+ * and consults it for exactly ONE decision — whether a federated object's probe
+ * insert is allowed through the double write gate — so the only way to watch
+ * that map is to carry an external object whose gate depends on it. Declared in
+ * the App package while the object it gates lives in the module package, so the
+ * row watching it measures a CROSS-PACKAGE resolution and not a within-body
+ * read.
+ *
+ * ⚠️ The lean probe kernel builds no live driver for it, so every boot in this
+ * fixture's probe logs one `federated (external) object(s) are NOT bound to
+ * their remote table` ERROR. That is the truthful verdict for a federated
+ * object with no remote behind it; it touches no row here (nothing in this
+ * probe reads the object's data) and is expected output, not a fixture defect.
+ */
+export const PROBE_FEDERATED_DATASOURCE = 'probe_federated';
+/** Relative to the project root, same anchoring as the primary. */
+export const PROBE_FEDERATED_FILE = '.objectstack/data/probe-federated.db';
+/** The write-opted-in federated object the datasource gate above admits. */
+export const PROBE_FEDERATED_OBJECT = 'probe_federated_order';
 /** The `isDefault` permission set `appSecurityPluginOptions` must resolve. */
 export const PROBE_DEFAULT_PERMISSION_SET = 'probe_default_profile';
 export const PROBE_POSITION = 'probe_position';
@@ -135,6 +157,19 @@ const coreStack = (): ObjectStackDefinition =>
         label: 'Probe Primary',
         driver: 'sqlite',
         config: { filename: PROBE_DATASOURCE_FILE },
+        active: true,
+      },
+      // The federated half — see `PROBE_FEDERATED_DATASOURCE`. `datasourceMapping`
+      // does NOT route to it (the project default stays `probe_primary`), so the
+      // only thing that reaches it is the object in the OTHER package binding to
+      // it by name.
+      {
+        name: PROBE_FEDERATED_DATASOURCE,
+        label: 'Probe Federated',
+        driver: 'sqlite',
+        config: { filename: PROBE_FEDERATED_FILE },
+        schemaMode: 'external',
+        external: { allowWrites: true },
         active: true,
       },
     ],
@@ -195,6 +230,22 @@ const ordersStack = (): ObjectStackDefinition =>
         label: 'Probe Order',
         pluralLabel: 'Probe Orders',
         sharingModel: 'private',
+        fields: {
+          name: { name: 'name', type: 'text', label: 'Number', required: true },
+        },
+      },
+      // The FEDERATED object, bound to the datasource the OTHER package
+      // declares and write-opted-in on its own half of ADR-0015's double gate.
+      // A reader that resolves objects but not datasources still gets this one
+      // wrong — it reports the object `blocked` as read-only — which is what
+      // makes the two collections separately observable through one function.
+      {
+        name: PROBE_FEDERATED_OBJECT,
+        label: 'Probe Federated Order',
+        pluralLabel: 'Probe Federated Orders',
+        sharingModel: 'private',
+        datasource: PROBE_FEDERATED_DATASOURCE,
+        external: { remoteName: 'remote_orders', writable: true },
         fields: {
           name: { name: 'name', type: 'text', label: 'Number', required: true },
         },

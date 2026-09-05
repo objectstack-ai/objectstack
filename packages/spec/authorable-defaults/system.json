@@ -109,13 +109,10 @@
     "system/HttpDestinationConfig:method = \"POST\"",
     "system/HttpDestinationConfig:timeout = 30000",
     "system/IncidentNotificationMatrix:escalationChain = []",
-    "system/IncidentNotificationMatrix:escalationTimeoutMinutes = 30",
     "system/IncidentNotificationRule:notifyRegulators = false",
     "system/IncidentResponsePolicy:enabled = true",
     "system/IncidentResponsePolicy:regulatoryNotificationThreshold = \"high\"",
     "system/IncidentResponsePolicy:requirePostIncidentReview = true",
-    "system/IncidentResponsePolicy:retentionDays = 2555",
-    "system/IncidentResponsePolicy:triageDeadlineHours = 1",
     "system/Job:enabled = true",
     "system/KeyRotationPolicy:autoRotate = true",
     "system/KeyRotationPolicy:enabled = false",
@@ -259,9 +256,6 @@
     "system/TracingConfig:traceIdGenerator = \"random\"",
     "system/TrainingCourse:mandatory = false",
     "system/TrainingPlan:enabled = true",
-    "system/TrainingPlan:gracePeriodDays = 30",
-    "system/TrainingPlan:recertificationIntervalDays = 365",
-    "system/TrainingPlan:reminderDaysBefore = 14",
     "system/TrainingPlan:sendReminders = true",
     "system/TrainingPlan:trackCompletion = true"
   ]

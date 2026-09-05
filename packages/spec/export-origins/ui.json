@@ -143,6 +143,7 @@
     "ElementNumberPropsParsed": "src/ui/component.zod.ts#ElementNumberPropsParsed (type)",
     "ElementNumberPropsSchema": "src/ui/component.zod.ts#ElementNumberPropsSchema (const)",
     "ElementRecordPickerProps": "src/ui/component.zod.ts#ElementRecordPickerProps (type)",
+    "ElementRecordPickerPropsParsed": "src/ui/component.zod.ts#ElementRecordPickerPropsParsed (type)",
     "ElementRecordPickerPropsSchema": "src/ui/component.zod.ts#ElementRecordPickerPropsSchema (const)",
     "ElementTextInputPropsSchema": "src/ui/component.zod.ts#ElementTextInputPropsSchema (const)",
     "ElementTextPropsSchema": "src/ui/component.zod.ts#ElementTextPropsSchema (const)",

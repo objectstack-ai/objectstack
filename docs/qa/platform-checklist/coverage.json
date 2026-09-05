@@ -1,5 +1,5 @@
 {
-  "$comment": "Capability-coverage ratchet for the platform test checklist. The universe of governed metadata kinds is DERIVED at check time from packages/spec/liveness/*.json (the ADR-0049 ledger set) — this file must map EVERY kind to at least one checklist item, or waive it with a reason. scripts/check-platform-checklist.mjs flags both directions: an unmapped kind (the platform grew a capability the checklist doesn't test) and an entry for a kind with no liveness ledger (orphan, mirrors the liveness ORPHAN discipline). NOTE: this check runs on a MANUAL/periodic cadence (`pnpm check:platform-checklist`), not in per-PR CI — see docs/qa/platform-checklist/README.md 'Operating cadence'. Pattern copied from examples/app-showcase/src/coverage.ts (demonstrated-or-waived, ADR-0060 house ledger style).",
+  "$comment": "Capability-coverage ratchet for the platform test checklist. The universe of governed metadata kinds is DERIVED at check time from packages/spec/liveness/*.json (the ADR-0049 ledger set) — this file must map EVERY kind to at least one checklist item, or waive it with a reason. scripts/check-platform-checklist.mjs flags both directions: an unmapped kind (the platform grew a capability the checklist doesn't test) and an entry for a kind with no liveness ledger (orphan, mirrors the liveness ORPHAN discipline). NOTE: this check runs on a MANUAL/periodic cadence (`pnpm check:platform-checklist`), not in per-PR CI — see docs/qa/platform-checklist/README.md 'Operating cadence'. Pattern copied from examples/app-showcase/src/coverage.ts (demonstrated-or-waived, ADR-0060 house ledger style). NOT ALL of the universe is a metadata KIND: check-liveness.mts enrols a few SPEC-ONLY schemas (query, qa, manifest, the four RestServerConfig sub-objects, the realtime SubscriptionSchema) through its SPEC_ONLY_SCHEMAS override, and each gets a liveness ledger like any governed kind — so this map is keyed by LEDGER NAME, and an entry here may describe a deployment construction argument or a transport-protocol schema rather than a stored metadata row.",
   "metadataKinds": {
     "action": {
       "items": [
@@ -37,10 +37,24 @@
         "platform-core.marketplace-console-honesty"
       ]
     },
+    "batch_endpoints": {
+      "items": [
+        "api-backend.rest-batch-config-contract",
+        "api-backend.bulk-write-contract",
+        "api-backend.batch-transactional-discovery"
+      ]
+    },
     "book": {
       "items": [
         "platform-core.docs-audience-gate",
         "platform-core.docs-portal-render"
+      ]
+    },
+    "crud_endpoints": {
+      "items": [
+        "api-backend.rest-crud-config-contract",
+        "api-backend.query-contract-matrix",
+        "records-forms.crud-roundtrip"
       ]
     },
     "dashboard": {
@@ -146,6 +160,12 @@
         "records-forms.import-transform-matrix"
       ]
     },
+    "metadata_endpoints": {
+      "items": [
+        "api-backend.rest-metadata-config-contract",
+        "platform-core.metadata-registry-serving"
+      ]
+    },
     "object": {
       "items": [
         "records-forms.crud-roundtrip",
@@ -211,6 +231,9 @@
         "api-backend.aggregate-contract-matrix"
       ]
     },
+    "realtime_subscription": {
+      "waived": "WAIVED 2026-09-04 — there is no runtime behaviour to drive, measured rather than asserted. SubscriptionSchema (packages/spec/src/api/realtime.zod.ts) is a TRANSPORT-PROTOCOL declaration with zero runtime readers: its liveness ledger records every property dead at a same-day census, nothing outside packages/spec imports SubscriptionSchema / SubscriptionEventSchema / RealtimeConfigSchema, and the shipped in-memory adapter reads a different type entirely (RealtimeSubscriptionOptions, packages/spec/src/contracts/realtime-service.ts). There is also nothing for a client to connect to: measured on a stock showcase boot for #14646, GET /api/v1/discovery reports realtime enabled:true but status degraded, handlerReady:false, and no realtime entry in the routes map — #14646 is the open decision on whether the open framework mounts an HTTP/WS/SSE realtime surface at all. An item authored today could only assert absence, which belongs in FOLLOW-UPS.md (§10) and on #14646, not in a coverage entry. WHAT RETIRES THIS WAIVER — either the #14646 decision mounts a realtime transport that parses this schema, in which case author the subscribe / unsubscribe / event-delivery contract and flip this entry to items; or the ADR-0049 enforce-or-remove call retires the schema and its ledger, and the ratchet flags this entry as an ORPHAN to delete. ⚠️ Re-audit it every sweep: 6 of 6 waivers ever written in this file turned out stale (SWEEP.md), which is why this one is grounded in the census and the discovery reading rather than in the schema's own prose."
+    },
     "report": {
       "items": [
         "dashboards.dataset-report-authoring",
@@ -218,6 +241,12 @@
         "dashboards.saved-report-ownership",
         "dashboards.report-schedule-dispatch-delivery",
         "search.command-palette-navigation"
+      ]
+    },
+    "route_generation": {
+      "items": [
+        "api-backend.rest-route-generation-tombstones",
+        "api-backend.enforce-or-remove-authoring-gates"
       ]
     },
     "seed": {

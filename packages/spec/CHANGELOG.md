@@ -6699,8 +6699,9 @@
   and is refused after it. Metadata that parses today parses identically; the
   only thing that changes is what the Studio object designer teaches an author to
   write. The repeater now offers `label`, `value`, `color` and `description` —
-  exactly `SelectOptionSchema`'s authorable keys minus `visibleWhen`, which is a
-  CEL predicate rather than a repeater text input.
+  four of `SelectOptionSchema`'s six authorable keys. `default` and
+  `visibleWhen` are both unoffered; the latter because it is a CEL predicate
+  rather than a repeater text input, not because it is the only key withheld.
   
   **Why remove rather than declare.** The route rests on a premise measured for
   the FIELD-option surface rather than inherited from #5016, which measured the

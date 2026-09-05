@@ -263,8 +263,44 @@ const READ_INVENTION_BASELINE_PATH = join(
  *
  * Each entry names WHY it is durability-critical — the note is printed in the
  * violation message, so the author reads the consequence rather than a rule id.
+ *
+ * ## The raw ObjectQL verbs are still NOT here — measured, not assumed (#12981)
+ *
+ * `insert` / `update` sit in the same excluded class as the read rule's
+ * `find` / `findOne` / `count`: names too generic to declare repo-wide. #12981
+ * closed by declaring the SEEDER WRAPPERS instead — `tryInsert` / `tryUpdate`
+ * are the `catch { return null; }` helpers that whole family is made of, so
+ * naming them puts the family in the vocabulary without dragging every write in
+ * the monorepo in with it. That order was deliberate: the wrappers could only be
+ * declared once the family had been REPAIRED, which is what the census
+ * (`scripts/measure-durability-swallow-family.mjs`) exists to prove, and it is
+ * what keeps `durability-degradation.baseline.json` at its designed empty
+ * steady state rather than filling it with transitional debt.
+ *
+ * Both halves measured on `origin/main@f01adfa5c` while landing the wrappers,
+ * so the next author reads a number rather than re-deriving one:
+ *
+ *   - the two wrappers   → 0 findings (this file, unchanged verdict)
+ *   - bare `insert`      → 36 quiet degradations in 30 files
+ *
+ * ⇒ The second is a repair programme wearing the costume of a vocabulary edit,
+ * and it is the thing #12981 was filed to NOT do by accident. If a future card
+ * needs one specific `ql.insert(...)` seam visible — `keys.ts::handleKeysRequest`
+ * is the standing example, whose catch answers the caller a 500 envelope on
+ * every path and is waiting to say so in `FAILURE_PROPAGATION_SITES` — the
+ * choice is between paying for those 36 and giving this map a per-site scope
+ * the way `FAILURE_PROPAGATION_SITES` already scopes the other vocabulary. That
+ * is a design call, and it is deliberately not taken here.
  */
 const DURABILITY_CRITICAL_CALLEES = new Map([
+    [
+        'tryInsert',
+        "A seeder's insert was refused and the helper answered `null` — the row is simply absent while the seeding pass moves on and its per-boot summary still reads clean. This is the shape #12981 was filed over: the RBAC catalog seeders swallowed refused writes in `catch { return null; }`, and a boot logged \"RBAC catalog seeded\" at `info` over zero landed rows, on a deployed plane, for weeks (#12923). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
+    ],
+    [
+        'tryUpdate',
+        "A seeder's update was refused and the helper answered `false` — the row keeps its pre-seed contents while the pass counts it as reconciled, so a catalog that never converged reports the same bytes as one that had nothing to do (#12923, #12970). The helper answers its CALLER, which reports the refusal through the #12923 accumulator; what this entry holds is that no caller may re-swallow that answer in a quiet `catch`.",
+    ],
     [
         'syncSchema',
         'DDL for the object never ran — the table/columns do not exist, yet the object stays registered and served.',
@@ -4165,11 +4201,21 @@ function reportDepthCost() {
 // fixtures pin both directions: it must FLAG the #4420 shape and must NOT flag
 // the shapes that are legitimately `warn`.
 
-// Set by `selfTest()` only after its verdict is printed, and read at the
-// dispatch: a `return` that leaves the function above that line prints nothing
-// and still exits 0 — a self-test that never finished, reported as one that
-// passed (#13798). The self-test's own exit code stays load-bearing, so the
-// handshake is a flag rather than a returned sentinel.
+// Set by `selfTest()` at BOTH its verdict sites — the green line and the red
+// one — and read at the dispatch AFTER both batteries have run. What it asserts
+// is "ran to the end", pass or fail: a `return` that leaves the function above
+// both verdict lines prints nothing and still exits 0 — a self-test that never
+// finished, reported as one that passed (#13798). The self-test's own exit code
+// stays load-bearing, so the handshake is a flag rather than a returned sentinel.
+//
+// ⛔ Not the sibling gates' shape, deliberately (#14962). Those set the flag on
+// the success path alone, which is sound THERE because their failure path calls
+// `process.exit(1)` inside the self-test, so the flag is never consulted on a
+// red. Here the failure path `return`s and the dispatch keeps running, so a
+// success-only flag reads a genuine red as "never reached its verdict" — a false
+// diagnostic that sends a maintainer hunting for a truncated run that did not
+// happen, and, when the flag was read between the two calls, stopped the second
+// battery from running at all.
 let selfTestReachedVerdict = false;
 
 // ── The two self-tests' battery roster and floors (#13489, batch 10c) ────────
@@ -5490,6 +5536,12 @@ function selfTest() {
     );
     if (failures > 0) {
         console.error(`\n✗ self-test (log-level rule): ${failures} failure(s) (cases and floor)\n`);
+        // A printed red verdict IS a reached verdict (#14962). The handshake
+        // asserts "ran to the end", pass or FAIL; the returned 1 keeps carrying
+        // the verdict, so the dispatch still exits 1. Set HERE, adjacent to the
+        // line it certifies, rather than once before the branch: the flag can
+        // then only be true if one of the two verdict lines was really printed.
+        selfTestReachedVerdict = true;
         return 1;
     }
     console.log(`\n✓ self-test (log-level rule): ${cases.length} case(s) passed\n`);
@@ -5507,7 +5559,9 @@ function selfTest() {
 // three instances, in both directions, or the fourth recurrence lands green.
 // The dispatch calls TWO self-test entries and combines their statuses, so each
 // one needs its own handshake: a `return` above either verdict prints nothing and
-// leaves `undefined`, which the `||` below reads as a pass (#13798).
+// leaves `undefined`, which the `||` below reads as a pass (#13798). Set at both
+// of this battery's verdict sites, green and red, for the reason spelled out at
+// `selfTestReachedVerdict` (#14962).
 let readSeamsReachedVerdict = false;
 
 function selfTestReadSeams() {
@@ -6757,6 +6811,9 @@ function selfTestReadSeams() {
     );
     if (failures > 0) {
         console.error(`\n✗ self-test (read-seam invention rule): ${failures} failure(s) (cases and floor)\n`);
+        // Its own handshake, same reading as `selfTest`'s red path (#14962): a
+        // printed red verdict is a reached verdict, and the returned 1 carries it.
+        readSeamsReachedVerdict = true;
         return 1;
     }
     console.log(
@@ -6769,26 +6826,35 @@ function selfTestReadSeams() {
 
 const args = process.argv.slice(2);
 if (args.includes('--self-test')) {
-    // Both rules' fixtures always run — a red one must not hide the other.
+    // Both rules' fixtures always run — a red one must not hide the other. That
+    // is why BOTH batteries run BEFORE either handshake is read (#14962): reading
+    // the first handshake between the two calls exited the process on a red
+    // battery 1, so battery 2 never ran — the very thing this comment forbids —
+    // and it did so under a message saying no verdict had been reached, while the
+    // red verdict line sat directly above it in the same output.
     const logLevelStatus = selfTest();
+    const readSeamStatus = selfTestReadSeams();
+    // Read AFTER both have reported. An early `return` from either one still
+    // trips its own named diagnostic here; a genuine red does not, because a
+    // printed verdict sets the flag.
+    let handshakeMissing = false;
     if (!selfTestReachedVerdict) {
         console.error(
             '\n✗ check-durability-degradation-log-level self-test: selfTest() returned without reaching its verdict,\n'
                 + 'so no success line was printed. Exiting 0 here would report a self-test\n'
                 + 'that never finished as a self-test that passed.\n',
         );
-        process.exit(1);
+        handshakeMissing = true;
     }
-    const readSeamStatus = selfTestReadSeams();
     if (!readSeamsReachedVerdict) {
         console.error(
             '\n✗ check-durability-degradation-log-level self-test: selfTestReadSeams() returned without\n'
                 + 'reaching its verdict, so no success line was printed. Exiting 0 here would report a\n'
                 + 'self-test that never finished as a self-test that passed.\n',
         );
-        process.exit(1);
+        handshakeMissing = true;
     }
-    process.exit(logLevelStatus || readSeamStatus ? 1 : 0);
+    process.exit(handshakeMissing || logLevelStatus || readSeamStatus ? 1 : 0);
 } else if (args.includes('--depth-cost')) {
     // A diagnostic, deliberately not part of any verdict — see `reportDepthCost`.
     process.exit(reportDepthCost());

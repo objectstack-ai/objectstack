@@ -202,22 +202,18 @@ describe('validateSemanticRoles (ADR-0085)', () => {
     expect(optedOut).toEqual([]);
   });
 
-  it('flags unknown highlightFields entries, including via the compactLayout alias', () => {
+  // [#15254] `highlightFields` EXISTENCE — and the `compactLayout` alias read
+  // that went with it — moved to `validate-object-field-refs.ts`, where it
+  // gates instead of advising. The assertions that used to live here moved
+  // with it (`validate-object-field-refs.test.ts`); the boundary they now pin
+  // from THIS side is below, under "the existence clause that moved out".
+  it('stays silent on a dangling highlightFields entry — no longer this rule\'s (#15254)', () => {
     const findings = validateSemanticRoles(stack([{
       name: 'account',
       highlightFields: ['name', 'industy'], // typo
       fields: { name: {}, industry: {} },
     }]));
-    expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('industy');
-
-    const aliased = validateSemanticRoles(stack([{
-      name: 'account',
-      compactLayout: ['ghost'],
-      fields: { name: {} },
-    }]));
-    expect(aliased).toHaveLength(1);
-    expect(aliased[0]).toMatchObject({ rule: SEMANTIC_ROLE_FIELD_UNKNOWN });
+    expect(findings, JSON.stringify(findings)).toEqual([]);
   });
 
   it('accepts objects as a name-keyed map and tolerates junk shapes', () => {
@@ -275,41 +271,25 @@ describe('validateSemanticRoles — injected system columns (#5378)', () => {
 
   // ── Counter-examples ──
 
-  it.each(['none', 'org'])(
-    "still warns for highlightFields: [owner_id] on ownership: '%s'",
-    (ownership) => {
-      const findings = validateSemanticRoles(stack([{
-        name: 'crm_tag',
-        ownership,
-        highlightFields: ['name', 'owner_id'],
-        fields: { name: {} },
-      }]));
-      expect(findings).toHaveLength(1);
-      expect(findings[0]).toMatchObject({ rule: SEMANTIC_ROLE_FIELD_UNKNOWN });
-      expect(findings[0].message).toContain('owner_id');
-    },
-  );
-
-  it('still warns for an organization_id highlight when the object opts out of tenancy', () => {
+  // [#15254] The three counter-examples that stood here — `ownership: 'none'`
+  // / `'org'` withholding `owner_id`, tenancy opt-out withholding
+  // `organization_id`, and a typo that merely LOOKS like a system column —
+  // pinned the DERIVATION at the `highlightFields` position, and that position
+  // is `object-field-ref-unknown`'s now. They moved verbatim in substance to
+  // `validate-object-field-refs.test.ts` (at `error`), rather than being
+  // dropped: the #5378 derivation is exactly as load-bearing there, and a
+  // counter-example deleted in a move is a counter-example nobody re-runs.
+  // `stageField` keeps its own copies below — this rule still owns that one.
+  it("still warns for a stageField the derivation withholds — ownership: 'none'", () => {
     const findings = validateSemanticRoles(stack([{
       name: 'crm_tag',
-      tenancy: { enabled: false },
-      highlightFields: ['organization_id'],
+      ownership: 'none',
+      stageField: 'owner_id',
       fields: { name: {} },
     }]));
     expect(findings).toHaveLength(1);
-    expect(findings[0].message).toContain('organization_id');
-  });
-
-  it('still warns for a typo that merely LOOKS like a system column', () => {
-    const findings = validateSemanticRoles(stack([{
-      name: 'crm_contact',
-      highlightFields: ['owner_ids', 'creatd_at'],
-      fields: { name: {} },
-    }]));
-    expect(findings).toHaveLength(2);
-    expect(findings.map((f) => f.message).join(' ')).toMatch(/owner_ids/);
-    expect(findings.map((f) => f.message).join(' ')).toMatch(/creatd_at/);
+    expect(findings[0]).toMatchObject({ rule: SEMANTIC_ROLE_FIELD_UNKNOWN });
+    expect(findings[0].message).toContain('owner_id');
   });
 
   // Widening the EXISTENCE question must not make an injected column a group
@@ -395,11 +375,25 @@ describe('validateSemanticRoles — unprovisioned anchors on external objects (#
     expect(findings).toEqual([]);
   });
 
-  it('a withheld anchor still gets the UNKNOWN finding, never the provenance one', () => {
-    // `ownership: 'none'` ⇒ no owner_id anywhere ⇒ rule (c)'s existence warning
-    // owns the defect. One pointer, one finding, the right one.
+  it('a withheld anchor gets the EXISTENCE finding, never the provenance one', () => {
+    // `ownership: 'none'` ⇒ no owner_id anywhere ⇒ the existence verdict owns
+    // the defect, not this rule's provenance one. One pointer, one finding,
+    // the right one — and since #15254 the existence half is
+    // `object-field-ref-unknown`, so what this rule must do here is stay
+    // SILENT. The positive half is pinned in
+    // `validate-object-field-refs.test.ts`.
     const findings = validateSemanticRoles(stack([
       externalObject({ ownership: 'none', highlightFields: ['owner_id'] }),
+    ]));
+    expect(findings, JSON.stringify(findings)).toEqual([]);
+  });
+
+  it('the same withheld anchor on a stageField DOES still warn here', () => {
+    // The control that keeps the test above from being vacuous: this rule's
+    // silence is about the position that moved, not about the rule going
+    // quiet everywhere.
+    const findings = validateSemanticRoles(stack([
+      externalObject({ ownership: 'none', stageField: 'owner_id' }),
     ]));
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(SEMANTIC_ROLE_FIELD_UNKNOWN);

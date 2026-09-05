@@ -49,6 +49,19 @@ export const fieldForm = defineForm({
         // #11875 added `signature`/`qrcode` to the set (the write seam now
         // enforces their declared bound); this visibleWhen moves with it.
         { field: 'maxLength', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']", helpText: 'Maximum character length' },
+        // #14168 (maintainer ruling 2026-09-02, option A) — `valueDomain` is
+        // shown for exactly the types the schema accepts it on
+        // (VALUE_DOMAIN_FIELD_TYPES in field.zod.ts — `text` alone, the one
+        // type whose stored value is a single plain string naming the member);
+        // this visibleWhen moves with the set, like the two rows above. The
+        // `in [...]` form rather than `== 'text'` for that reason: the row
+        // mirrors a SET, and a widening edits the list in place.
+        //
+        // Shown in the same stroke that the record validator starts refusing a
+        // non-member (`value_domain`) and the liveness row flips `live` —
+        // declared = enforced = shown. A key offered in Studio before any write
+        // path enforces it is the ADR-0078 shape.
+        { field: 'valueDomain', visibleWhen: "data.type in ['text']", helpText: 'Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused' },
         // objectui#6140 (maintainer ruling 2026-08-25, Option A) — `rows` is
         // shown for exactly the multiline editor types the schema accepts it
         // on (MULTILINE_EDITOR_FIELD_TYPES in field.zod.ts); this visibleWhen

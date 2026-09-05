@@ -31,7 +31,7 @@ import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { bootStack } from './harness';
+import { bootStack } from './harness.js';
 
 /**
  * Stand-in for `@objectstack/organizations`. Mirrors the real plugin's

@@ -70,6 +70,7 @@
  */
 
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
+import { recordsOf } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
@@ -118,15 +119,6 @@ const OWD_WIDTH: Record<string, number> = {
   public_read: 1,
   public_read_write: 2,
 };
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 /**
  * The object's org-wide default.
@@ -188,11 +180,11 @@ function refOf(def: AnyRec): string | undefined {
 /**
  * The first `master_detail` field on an object, if any — its presence is what
  * makes the object a DETAIL (the child side of a master-detail; ADR-0055).
- * Works for both the array and name-keyed-map field forms (`asArray` folds the
+ * Works for both the array and name-keyed-map field forms (`recordsOf` folds the
  * map key into `name`).
  */
 function firstMasterDetailField(obj: AnyRec): { name: string; parent?: string } | undefined {
-  for (const f of asArray(obj.fields)) {
+  for (const f of recordsOf(obj.fields)) {
     if (f.type === 'master_detail') {
       return { name: String(f.name ?? '?'), parent: refOf(f) };
     }
@@ -259,7 +251,7 @@ const CBP_TIERS: ReadonlyArray<{ label: string; pred: (f: AnyRec) => boolean }> 
  * nothing, and reporting it would be reporting a non-defect.
  */
 function cbpMasterCandidates(obj: AnyRec): { tier: string; candidates: CbpRelation[] } | undefined {
-  const entries = asArray(obj.fields);
+  const entries = recordsOf(obj.fields);
   for (const { label, pred } of CBP_TIERS) {
     const matched = entries.filter((f) => pred(f) && refOf(f));
     if (matched.length > 0) {
@@ -318,8 +310,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   const findings: SecurityFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const objects = asArray(stack.objects);
-  const permissionSets = asArray(stack.permissions);
+  const objects = recordsOf(stack.objects);
+  const permissionSets = recordsOf(stack.permissions);
 
   // ── D1/D4/D11: per-object OWD posture ────────────────────────────────
   for (let i = 0; i < objects.length; i++) {
@@ -583,7 +575,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       .map((ps) => (typeof ps.name === 'string' ? ps.name : undefined))
       .filter((n): n is string => !!n),
   );
-  for (const [i, book] of asArray(stack.books).entries()) {
+  for (const [i, book] of recordsOf(stack.books).entries()) {
     const audience = (book as AnyRec).audience;
     if (!audience || typeof audience !== 'object') continue;
     const setName = (audience as AnyRec).permissionSet;
@@ -725,7 +717,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   const GRANT_SEED_OBJECTS = new Set(['sys_user_position', 'sys_user_permission_set']);
   const DELEGATION_SEED_OBJECTS = new Set(['sys_user_position']);
   const nowMs = opts?.nowMs ?? Date.now();
-  for (const [i, seed] of asArray(stack.data).entries()) {
+  for (const [i, seed] of recordsOf(stack.data).entries()) {
     const seedObject = typeof seed.object === 'string' ? seed.object : '';
     if (!GRANT_SEED_OBJECTS.has(seedObject)) continue;
     const records = Array.isArray(seed.records) ? (seed.records as AnyRec[]) : [];
@@ -821,8 +813,8 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const objects = asArray(stack.objects);
-  const permissionSets = asArray(stack.permissions);
+  const objects = recordsOf(stack.objects);
+  const permissionSets = recordsOf(stack.permissions);
 
   const flagRole = (kind: string, name: unknown, label: unknown, where: string, path: string) => {
     if (identifierHasRoleToken(name)) {
@@ -853,10 +845,10 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
     if (!obj || typeof obj !== 'object' || isSystemObject(obj)) continue;
     const objName = typeof obj.name === 'string' ? obj.name : `(object ${i})`;
     flagRole('object', obj.name, obj.label, `object "${objName}"`, `objects[${i}].name`);
-    for (const f of asArray(obj.fields)) {
+    for (const f of recordsOf(obj.fields)) {
       flagRole('field', f.name, f.label, `field "${objName}.${String(f.name ?? '?')}"`, `objects[${i}].fields.${String(f.name ?? '?')}.name`);
     }
-    for (const [ai, action] of asArray(obj.actions).entries()) {
+    for (const [ai, action] of recordsOf(obj.actions).entries()) {
       flagRole('action', action.name, action.label, `action "${objName}.${String(action.name ?? '?')}"`, `objects[${i}].actions[${ai}].name`);
     }
   }
@@ -865,13 +857,13 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
     if (!ps || typeof ps !== 'object') continue;
     flagRole('permission set', ps.name, ps.label, `permission set "${String(ps.name ?? i)}"`, `permissions[${i}].name`);
   }
-  for (const [i, pos] of asArray(stack.positions).entries()) {
+  for (const [i, pos] of recordsOf(stack.positions).entries()) {
     flagRole('position', pos.name, pos.label, `position "${String(pos.name ?? i)}"`, `positions[${i}].name`);
   }
-  for (const [i, app] of asArray(stack.apps).entries()) {
+  for (const [i, app] of recordsOf(stack.apps).entries()) {
     flagRole('app', app.name, app.label, `app "${String(app.name ?? i)}"`, `apps[${i}].name`);
   }
-  for (const [i, book] of asArray(stack.books).entries()) {
+  for (const [i, book] of recordsOf(stack.books).entries()) {
     flagRole('book', book.name, book.label, `book "${String(book.name ?? i)}"`, `books[${i}].name`);
   }
 

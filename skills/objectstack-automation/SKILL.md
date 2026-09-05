@@ -348,10 +348,12 @@ them right the first time:
    } });
    ```
 
-4. **Conditions are bare CEL — only the stdlib is callable.** `now()`,
+4. **Conditions are bare CEL — the stdlib is what you may call bare.** `now()`,
    `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
    `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL
-   built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for the full table.
+   built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for that
+   table: it is `CEL_STDLIB_FUNCTIONS`, the bare-callable public subset, so receiver
+   methods (called on a value, never bare) are not in it.
    An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
    both **fail the build**: a brace is a template, not CEL — write `record.x`,
    not `{record.x}`.

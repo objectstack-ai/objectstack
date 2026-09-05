@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { DataClassificationSchema } from './security-context.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Incident Response Protocol — ISO 27001:2022 (A.5.24–A.5.28)
@@ -27,6 +28,75 @@ export const IncidentSeveritySchema = lazySchema(() => z.enum([
   'medium',     // Moderate impact with controlled response timeline
   'low',        // Minor impact with standard response procedures
 ]));
+
+// ─── RETIRED deadline keys (ADR-0049 enforce-or-remove) ─────────────────────
+//
+// Six hour/minute/day-shaped deadline and SLA keys were declared on the
+// incident-response schemas and read by NOTHING: no scheduler, escalation
+// engine, regulator notifier, SLA clock or retention sweeper exists on the
+// platform for this family — the schemas are exported, mounted by no stack
+// key and registered as no metadata type, and the reader census over every
+// package outside `packages/spec` (and over objectui at the pinned sha)
+// returned zero hits for every key. An author could write
+// `triageDeadlineHours: 4` and the platform would never act on it; the
+// generated reference docs advertised a deadline nothing kept. Maintainer
+// ruling 2026-09-02 (recorded on #14477): retire the family under
+// enforce-or-remove.
+//
+// Route: `retiredKey()` tombstones, NOT plain deletion — none of these
+// schemas is `.strict()`, so a bare deletion would make zod strip the key in
+// silence, replacing an inert declaration with an invisible one (ADR-0104).
+// The tombstone is audible in both channels: `tsc` (the input type is
+// `never`) and the parse (the prescription is the message). No D2 conversion
+// and no `os migrate meta` sentence: the conversion chain walks a normalized
+// STACK and none of these schemas is a stack collection member, so a
+// conversion would be a transform with no seam that ever runs (the
+// `kernel/MetadataPluginConfig:additionalTypes` precedent). The retirement is
+// registered as `RETIRED_KEYS_BY_MAJOR[18]` entries plus the D3 semantic entry
+// `incident-response-deadline-keys-retired`.
+
+const TARGET_HOURS_RETIRED =
+  '`IncidentResponsePhase.targetHours` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine tracked a response phase against a '
+  + 'clock, so the target was never checked, never escalated and never reported. Delete the '
+  + 'key. There is no replacement, because no incident-response engine exists to keep a phase '
+  + 'deadline.';
+
+const WITHIN_MINUTES_RETIRED =
+  '`IncidentNotificationRule.withinMinutes` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no dispatcher sent an incident notification, '
+  + 'so no deadline for one was ever measured. Delete the key. There is no replacement, '
+  + 'because no incident-notification engine exists to keep the deadline.';
+
+const REGULATOR_DEADLINE_HOURS_RETIRED =
+  '`IncidentNotificationRule.regulatorDeadlineHours` was removed in @objectstack/spec 17 '
+  + '(ADR-0049 enforce-or-remove) — nothing ever read it: no engine notified a regulator, so a '
+  + 'regulatory deadline declared here (a GDPR 72-hour window, for example) was never tracked, '
+  + 'and a compliance author who wrote it held a promise the platform did not keep. Delete the '
+  + 'key. There is no replacement, because no regulatory-notification engine exists.';
+
+const ESCALATION_TIMEOUT_MINUTES_RETIRED =
+  '`IncidentNotificationMatrix.escalationTimeoutMinutes` was removed in @objectstack/spec 17 '
+  + '(ADR-0049 enforce-or-remove) — nothing ever read it: no engine walked `escalationChain` '
+  + 'on a timer, so the timeout never fired, and its default of 30 minutes was materialized '
+  + 'into every parsed matrix without ever being consulted. Delete the key. There is no '
+  + 'replacement, because no escalation engine exists.';
+
+const TRIAGE_DEADLINE_HOURS_RETIRED =
+  '`IncidentResponsePolicy.triageDeadlineHours` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no engine timed the interval between detection '
+  + 'and triage, so the deadline was never kept, and its default of 1 hour was materialized '
+  + 'into every parsed policy without ever being consulted. Delete the key. There is no '
+  + 'replacement, because no incident-response engine exists to keep a triage window.';
+
+const RETENTION_DAYS_RETIRED =
+  '`IncidentResponsePolicy.retentionDays` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no sweeper deleted incident records on a '
+  + 'schedule, so the retention period was never applied, and its default of 2555 days was '
+  + 'materialized into every parsed policy without ever being consulted. Delete the key. '
+  + 'Retention on this platform is the object-level `lifecycle` block (ADR-0057), enforced by '
+  + 'the LifecycleService over the records of an object — declare it on the object that stores '
+  + 'incident records, not on this policy document.';
 
 /**
  * Incident Category Schema
@@ -92,9 +162,9 @@ export const IncidentResponsePhaseSchema = lazySchema(() => z.object({
   assignedTo: z.string().describe('Responsible team or role'),
 
   /**
-   * Target completion time in hours from incident start
+   * REMOVED (ADR-0049 enforce-or-remove) — see `TARGET_HOURS_RETIRED` above.
    */
-  targetHours: z.number().min(0).describe('Target completion time in hours'),
+  targetHours: retiredKey(TARGET_HOURS_RETIRED),
 
   /**
    * Actual completion timestamp (Unix milliseconds)
@@ -137,9 +207,9 @@ export const IncidentNotificationRuleSchema = lazySchema(() => z.object({
   recipients: z.array(z.string()).describe('Roles or teams to notify'),
 
   /**
-   * Maximum time in minutes to send notification after incident detection
+   * REMOVED (ADR-0049 enforce-or-remove) — see `WITHIN_MINUTES_RETIRED` above.
    */
-  withinMinutes: z.number().min(1).describe('Notification deadline in minutes from detection'),
+  withinMinutes: retiredKey(WITHIN_MINUTES_RETIRED),
 
   /**
    * Whether to notify external regulators (for data breaches)
@@ -148,10 +218,9 @@ export const IncidentNotificationRuleSchema = lazySchema(() => z.object({
     .describe('Whether to notify regulatory authorities'),
 
   /**
-   * Regulatory notification deadline in hours (e.g., GDPR 72h)
+   * REMOVED (ADR-0049 enforce-or-remove) — see `REGULATOR_DEADLINE_HOURS_RETIRED` above.
    */
-  regulatorDeadlineHours: z.number().optional()
-    .describe('Regulatory notification deadline in hours'),
+  regulatorDeadlineHours: retiredKey(REGULATOR_DEADLINE_HOURS_RETIRED),
 }).describe('Incident notification rule per severity level'));
 
 export type IncidentNotificationRule = z.input<typeof IncidentNotificationRuleSchema>;
@@ -171,10 +240,9 @@ export const IncidentNotificationMatrixSchema = lazySchema(() => z.object({
     .describe('Notification rules by severity level'),
 
   /**
-   * Default escalation timeout in minutes before auto-escalation
+   * REMOVED (ADR-0049 enforce-or-remove) — see `ESCALATION_TIMEOUT_MINUTES_RETIRED` above.
    */
-  escalationTimeoutMinutes: z.number().default(30)
-    .describe('Auto-escalation timeout in minutes'),
+  escalationTimeoutMinutes: retiredKey(ESCALATION_TIMEOUT_MINUTES_RETIRED),
 
   /**
    * Escalation chain: ordered list of roles to escalate to
@@ -210,8 +278,7 @@ export type IncidentNotificationMatrixParsed = z.infer<typeof IncidentNotificati
  *     {
  *       "phase": "identification",
  *       "description": "Identify scope of unauthorized access",
- *       "assignedTo": "security_team",
- *       "targetHours": 2
+ *       "assignedTo": "security_team"
  *     }
  *   ]
  * }
@@ -340,10 +407,9 @@ export const IncidentResponsePolicySchema = lazySchema(() => z.object({
     .describe('Default incident response team or role'),
 
   /**
-   * Maximum time in hours to begin initial triage
+   * REMOVED (ADR-0049 enforce-or-remove) — see `TRIAGE_DEADLINE_HOURS_RETIRED` above.
    */
-  triageDeadlineHours: z.number().default(1)
-    .describe('Maximum hours to begin triage after detection'),
+  triageDeadlineHours: retiredKey(TRIAGE_DEADLINE_HOURS_RETIRED),
 
   /**
    * Whether to require post-incident review for all incidents
@@ -358,10 +424,9 @@ export const IncidentResponsePolicySchema = lazySchema(() => z.object({
     .describe('Minimum severity requiring regulatory notification'),
 
   /**
-   * Retention period for incident records in days
+   * REMOVED (ADR-0049 enforce-or-remove) — see `RETENTION_DAYS_RETIRED` above.
    */
-  retentionDays: z.number().default(2555)
-    .describe('Incident record retention period in days (default ~7 years)'),
+  retentionDays: retiredKey(RETENTION_DAYS_RETIRED),
 }).describe('Organization-level incident response policy per ISO 27001:2022'));
 
 // Type exports
