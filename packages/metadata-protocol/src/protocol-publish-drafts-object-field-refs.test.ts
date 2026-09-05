@@ -294,3 +294,125 @@ describe('publishPackageDrafts refuses a dangling object field-name list (#15254
         ).resolves.toBeUndefined();
     });
 });
+
+/**
+ * #15495 — the SAME door, the two field-name surfaces #15254 left one key over.
+ *
+ * That card closed `highlightFields` / `publicSharing.redactFields`, the lists
+ * the OBJECT carries at its top level. It left the two field-existence rules
+ * that read an object's SEARCH set and its BUILT-IN LIST VIEWS still declaring
+ * `runtimeTypes: ['flow', 'view']` — so on the one door a Studio tenant has,
+ * an object could name `searchableFields: ['gone_field']` or a list-view
+ * column that resolves to nothing and publish clean, with the identical
+ * downstream silence: the engine filters a stale search entry out without a
+ * word (ADR-0061 / `resolveSearchFields`), and a dangling column renders one
+ * field short.
+ *
+ * Both members were measured over the shipped object corpus at the door's own
+ * snapshot shape before crossing (116 objects, 0 findings — precision 1.0; the
+ * populations are recorded on the members in `reference-integrity-suite.ts`).
+ * This block is the end-to-end half: through the REAL `publishPackageDrafts`,
+ * not through the gate helper.
+ */
+
+/** Step 1 of the click path, on the SEARCH set instead of the highlight strip. */
+const danglingSearchableObject = (name: string) => ({
+    name,
+    label: 'Task',
+    sharingModel: 'private',
+    fields: {
+        name: { type: 'text', label: 'Name' },
+        health_score: { type: 'number', label: 'Health Score' },
+    },
+    nameField: 'name',
+    searchableFields: ['name', 'field_10'],
+});
+
+/** The same click path landing on a built-in list view's `columns`. */
+const danglingListViewObject = (name: string) => ({
+    name,
+    label: 'Task',
+    sharingModel: 'private',
+    fields: {
+        name: { type: 'text', label: 'Name' },
+        health_score: { type: 'number', label: 'Health Score' },
+    },
+    nameField: 'name',
+    listViews: {
+        all: { label: 'All Tasks', columns: ['name', 'field_10'] },
+    },
+});
+
+/** Every name on both surfaces resolving — the control for each refusal above. */
+const cleanBothSurfaces = (name: string) => ({
+    ...danglingSearchableObject(name),
+    searchableFields: ['name'],
+    listViews: {
+        all: { label: 'All Tasks', columns: ['name', 'health_score'] },
+    },
+});
+
+describe('publishPackageDrafts refuses a dangling searchableFields / list-view column (#15495)', () => {
+    it('REFUSES a stale `searchableFields` entry, naming the rule and the name-keyed path', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'proj_task', danglingSearchableObject('proj_task'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).not.toBe('published');
+        expect(res).toMatchObject({ success: false, publishedCount: 0, failedCount: 1 });
+
+        const causal = res.failed.find((f) => f.name === 'proj_task')!;
+        expect(causal, JSON.stringify(res.failed)).toBeDefined();
+        expect(causal.code).toBe('INVALID_METADATA');
+
+        const wire = JSON.stringify(causal);
+        expect(wire).toContain('searchable-field-unknown');
+        expect(wire).toContain('objects.proj_task.searchableFields[1]');
+        expect(wire).toContain('field_10');
+    });
+
+    it('REFUSES a dangling column on a built-in list view, same rule family, same door', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'proj_task', danglingListViewObject('proj_task'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).not.toBe('published');
+        expect(res).toMatchObject({ success: false, publishedCount: 0, failedCount: 1 });
+
+        const causal = res.failed.find((f) => f.name === 'proj_task')!;
+        expect(causal, JSON.stringify(res.failed)).toBeDefined();
+        expect(causal.code).toBe('INVALID_METADATA');
+
+        const wire = JSON.stringify(causal);
+        expect(wire).toContain('list-view-field-unknown');
+        expect(wire).toContain('objects.proj_task.listViews.all.columns[1]');
+        expect(wire).toContain('field_10');
+    });
+
+    it('the SAME object publishes once both surfaces resolve — the refusal is about the reference', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await stageObjectDraft(protocol, 'proj_task', cleanBothSurfaces('proj_task'));
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).toBe('published');
+        expect(res).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
+        expect(res.published.map((p) => p.name)).toEqual(['proj_task']);
+    });
+
+    it('a draft save is still NEVER gated (#4463 D1) on either surface', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await expect(
+            stageObjectDraft(protocol, 'proj_task', danglingSearchableObject('proj_task')),
+        ).resolves.toBeUndefined();
+        await expect(
+            stageObjectDraft(protocol, 'proj_view_task', danglingListViewObject('proj_view_task')),
+        ).resolves.toBeUndefined();
+    });
+});
