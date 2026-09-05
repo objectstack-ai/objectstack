@@ -37,6 +37,17 @@ export default defineConfig({
         find: /^@objectstack\/service-messaging$/,
         replacement: path.resolve(here, '../../services/service-messaging/src/index.ts'),
       },
+      // [#15136] `session-positions-security-axis.test.ts` takes a VALUE
+      // import on `@objectstack/formula` (`celEngine`) — the real CEL engine
+      // the server evaluates formulas and RLS with. Same reason and the same
+      // anchoring as the two entries above. `check:test-source-alias` reports
+      // a new artifact import here as a finding and dictates this remedy: its
+      // `KNOWN_UNALIASED_TEST_IMPORTS` registry is ⛔ SHRINK-ONLY, so aliasing
+      // the specifier is the fix and a new registry row is not.
+      {
+        find: /^@objectstack\/formula$/,
+        replacement: path.resolve(here, '../../formula/src/index.ts'),
+      },
     ],
   },
 });

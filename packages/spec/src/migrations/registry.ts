@@ -6441,11 +6441,21 @@ const step18: MigrationStep = {
         + 'the filter a list view stores and renders was refused by the KPI element beside it, '
         + 'and the objectui parity gate had to carry a reasoned exemption to look away. The '
         + 'convergence was sequenced consumer-first (ruling recorded 2026-08-25, Option A): '
-        + 'objectui#6828 made `ObjectStackAdapter.aggregate()` lower a rule array through the '
-        + 'same `translateFilterArray` its `find()` path runs before the analytics wire, and the '
-        + 'objectui pin carrying it was re-measured before this entry moved — authored array → '
-        + 'adapter lowering → filter AST → accepted by `lowerAnalyticsWhere`, which still refuses '
-        + 'a RAW rule-object array by design. The ruled migration check ran with the change: the '
+        + 'objectui#6828 made `ObjectStackAdapter.aggregate()` run the same `translateFilterArray` '
+        + 'its `find()` path runs, and the objectui pin carrying it was re-measured before this '
+        + 'entry moved — but that measurement named the wrong hop, and #15828 corrects it here. '
+        + '`translateFilterArray` yields AST tuples, which are still a `FilterArray` — input-only '
+        + 'sugar — so the real path is: authored array → `translateFilterArray` → lowered by '
+        + '`parseFilterAST` (`@objectstack/spec/data`, the single sink the `FilterArray` docblock '
+        + 'names, #5158 ruling C) in the adapter, BEFORE the wire → a `FilterCondition` on the '
+        + 'body. The hop that decides it is the runtime route `POST /analytics/query`, which '
+        + 'parses `where` with `AnalyticsQueryRequestSchema` — a `FilterCondition` and nothing '
+        + 'else — so an un-lowered array is refused there before any service code runs. '
+        + '`lowerAnalyticsWhere` (`service-analytics`), where that earlier measurement stopped, '
+        + 'is the IN-PROCESS door (#5334) for callers reaching `analyticsService.query` '
+        + "directly, not the wire's; it too still refuses a RAW rule-object array by design. "
+        + 'objectui#7752 lands the adapter-side lowering. '
+        + 'The ruled migration check ran with the change: the '
         + 'sweep of first-party corpora (examples/, skills/, create-objectstack, content/docs/, '
         + 'packages/apps/, spec fixtures) found ONE `element:number` author writing a record-form '
         + '`filter` — a spec test fixture, rewritten to the array form in the same change — and '
@@ -7829,6 +7839,69 @@ const step18: MigrationStep = {
         + 'the source manifest and republishing.',
     },
     {
+      id: 'plugin-security-scanner-retired',
+      surface:
+        '`@objectstack/core` runtime exports: `PluginSecurityScanner`, and the two types '
+        + 'declared only to feed it, `ScanTarget` and `SecurityIssue`',
+      replacement:
+        'nothing to re-declare — delete the import and every call. Plugin security scanning is '
+        + 'not a platform capability and there is no replacement export. A caller that branched '
+        + 'on `result.status === "passed"` takes that branch unconditionally, because it is the '
+        + 'only branch the scanner ever produced. What the platform does still enforce, and what '
+        + 'to reach for instead: artifact integrity and signatures '
+        + '(`verifyPluginArtifactIntegrity`, the plugin signature verifier) answer "is this the '
+        + 'artifact the publisher signed?" and never "is this artifact safe?"; plugin permissions '
+        + 'and the sandbox resource limits are unchanged. For dependency vulnerabilities use the '
+        + 'tools built for it against your own project — `npm audit` / `pnpm audit`, Dependabot, '
+        + 'the GitHub Advisory Database, OSV — and treat an unaudited third-party plugin as '
+        + 'untrusted code.',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #14919 (director summon #14, '
+        + 'decision batch #42, ruled A: retire in three surfaces). The class shipped on '
+        + '`@objectstack/core`\'s public barrel as a SECURITY control and could not fail. `scan()` '
+        + 'composed five private scanners: four of them (`scanCode`, `scanMalware`, `scanLicenses`, '
+        + '`scanConfiguration`) allocated an empty issue array, logged and returned it with no code '
+        + 'in between, so none could report a finding for any input; the fifth, `scanDependencies`, '
+        + 'ran a real loop but matched only against an in-memory vulnerability database whose sole '
+        + 'writer, the public `addVulnerability`, had zero callers in objectstack, in objectui at '
+        + 'the pinned sha, or in the one demonstration that constructed the scanner, and '
+        + '`updateVulnerabilityDatabase()` logged twice and fetched nothing. The database was '
+        + 'therefore empty on every code path that has ever executed: no issue was ever produced, '
+        + 'the score stayed 100, and the verdict was `status: "passed"` for every plugin the '
+        + 'scanner was ever handed — a malicious one as readily as a benign one. Repair was refused '
+        + 'by name: a real vulnerability scanner is a feature with a design surface, not a defect '
+        + 'fix. Why this entry exists at all, and why D3 semantic rather than a D2 conversion: '
+        + '`PluginSecurityScanner` has no spec schema and never had one — it is a runtime TS class, '
+        + 'so there is no authorable key to tombstone with `retiredKey()`, no stored `sys_metadata` '
+        + 'row that could carry it (a scanner was constructed per call and every result lived in a '
+        + 'per-instance Map discarded with the object), and hence no seam `applyConversionsToStored'
+        + 'Item` would ever reach. The enforced channel is tsc, at the consumer\'s own import site; '
+        + 'for anyone it does not reach, this ledger entry and the generated upgrade guide are the '
+        + 'only channel there is. That is the `contracts.IDataDriver.findStream` (#4484) and '
+        + '`actor-user-roles-to-positions` (#6011) disposition — a TS/API contract, no stored '
+        + 'source, no tombstone, tsc at the call site — applied to a surface one layer further out '
+        + 'than either: those are declared in `packages/spec`, this one only in `packages/core`. '
+        + '⚠️ The out-of-repo consumer population is NOT MEASURED. Zero constructors were found in '
+        + 'objectstack, in objectui at the pinned sha, and in the deleted example, but no download, '
+        + 'dependent or source telemetry was consulted for consumers of the published package, so '
+        + 'this is breaking for an unmeasured population rather than a removal proven to break '
+        + 'nobody.',
+      acceptanceCriteria:
+        'No source imports `PluginSecurityScanner`, `ScanTarget` or `SecurityIssue` from '
+        + '`@objectstack/core` (or from `@objectstack/core/security`, a subpath the package has '
+        + 'never declared in its `exports` and which therefore resolved for nobody). A TypeScript '
+        + 'consumer gets the refusal at compile time at the import site — the export is absent from '
+        + 'the built `dist/index.d.ts`, not merely undocumented. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: every scan this class ever '
+        + 'performed returned zero issues and `status: "passed"`, so deleting a call removes no '
+        + 'check that was running. A caller that treated a passing scan as evidence of safety was '
+        + 'never getting any, and its remediation is to audit dependencies with a real tool, not to '
+        + 'find a replacement symbol — there is none. Verified in-repo by export-list assertions on '
+        + 'both barrels (`packages/core/src/security/security-scanner-retirement.pin.test.ts`), not '
+        + 'by a grep: the name legitimately survives in the tombstone comments that explain the '
+        + 'retirement.',
+    },
+    {
       id: 'record-chatter-position-vocabulary-converged',
       surface:
         '`record:chatter` / `record:discussion` component props (one shared schema object): '
@@ -8075,6 +8148,71 @@ const step18: MigrationStep = {
         + 'carried inert and ignored). Template resolution still keys on `(name, locale)`, and '
         + '`organizationId` still stamps `sys_email.organization_id` without acquiring any overlay '
         + 'semantics.',
+    },
+    {
+      id: 'session-payload-positions-security-axis',
+      surface: 'GET /api/v1/auth/get-session -> user.positions[] (and the client CEL root `current_user.positions` bound from it)',
+      replacement:
+        'the SAME key, carrying the SECURITY positions — the set `/auth/me/permissions` reports '
+        + 'and `resolveUserAuthzGrants` resolves. A reader that wanted the better-auth role '
+        + 'scalar reads `user.role`, which is unchanged and still published',
+      reason:
+        'A MEANING change, not a rename: no key moved, so nothing in this entry can be found by '
+        + 'grepping for a removed spelling — which is exactly why it needs a ledger row. '
+        + '`customSession` built `user.positions` from the better-auth `sys_user.role` scalar '
+        + 'split on commas, PLUS the active membership mapped to `org_*`, PLUS `platform_admin`, '
+        + 'and read NOTHING from `sys_user_position` (ADR-0057 D4), the source of truth for '
+        + 'custom positions. The Console binds that array straight through as the CEL root '
+        + '`current_user` (objectui `expressionUser.ts`: `positions: user.positions ?? []`), so '
+        + 'an `action.visible` / `visibleWhen` / nav `visible` narrowed by a business position '
+        + 'answered FALSE for EVERYONE, including the user who genuinely held it. '
+        + '⭐ The failure was silent and in the invisible direction: the root was bound and the '
+        + 'key was present, so `has(current_user.positions)` was true and CEL raised nothing — '
+        + 'the predicate simply returned FALSE. A predicate that FAULTS fails OPEN in the shell '
+        + 'and would have shown the button; a successful FALSE shows nothing and reports '
+        + 'nothing. The documented example `\'org_admin\' in current_user.positions` kept working '
+        + 'throughout, because `org_admin` is the one name that sits on BOTH axes — which is why '
+        + 'no example, test or doc could reveal the split. '
+        + 'This was a DECLARED contract being violated rather than an ambiguous name: '
+        + '`EvalUserSchema` already specified `positions` as "built-in identity names + position '
+        + 'names", exposed to "every predicate surface (server formula, server RLS, client UI '
+        + 'gates) ... with an identical shape" so a predicate "evaluates identically wherever it '
+        + 'is written". `/auth/me/permissions` and every server-side evaluator '
+        + '(`ExecutionContext.positions`) already resolved the security axis; the session '
+        + 'payload was the one producer that did not, because it derived the value itself '
+        + 'instead of asking the authority `resolve-authz-context.ts` reserves that job for. '
+        + '⚠️ NO renamed auth-role array accompanies this, and that is a measured disposition '
+        + 'rather than an omission: everything the old union contributed beyond the security '
+        + 'axis was the `sys_user.role` scalar\'s own tokens, and that scalar is ALREADY '
+        + 'published unchanged as `user.role` — the single exception ADR-0090 D3\'s "role" word '
+        + 'ban carves out for third-party schema. Minting a `roles` array would revive the exact '
+        + 'banned identifier `check:role-word` ratchets against, to publish information the '
+        + 'payload already carries. Maintainer ruling 2026-09-05 (#15136, director decision '
+        + 'batch #39 item 2, verbatim 「同意」): option A, one name, one meaning. ADR-0068 D1/D2, '
+        + 'ADR-0090 D3/D5, ADR-0057 D4.',
+      acceptanceCriteria:
+        'No predicate and no client reader treats `current_user.positions` / '
+        + '`session.user.positions` as the better-auth role scalar. Audit every authored '
+        + '`visible` / `visibleWhen` / RLS predicate that names `current_user.positions` and '
+        + 'classify each comparand: a real `sys_position` name, a built-in identity name '
+        + '(`platform_admin` / `org_owner` / `org_admin` / `org_member`), or `everyone` needs NO '
+        + 'change and starts working where it silently answered FALSE before; a comparand that '
+        + 'was only ever a `sys_user.role` token (`user`, and `admin` — note `admin` is NOT a '
+        + 'built-in identity name; a membership `admin` is projected as `org_admin`) either '
+        + 'moves to `user.role`, or — the supported route — becomes a real position assigned '
+        + 'through `sys_user_position`, the governed ADR-0090 D12 channel. '
+        + '⚠️ Verify against a REAL session rather than a fixture, and assert the axis by a name '
+        + 'that exists on ONE side only: `org_admin` sits on both and cannot discriminate, which '
+        + 'is precisely how this defect survived its own documented example. Sign in as a user '
+        + 'holding a custom position, read `GET /api/v1/auth/get-session`, and assert that '
+        + 'position is in `user.positions` and that the payload agrees set-for-set with `GET '
+        + '/api/v1/auth/me/permissions`. '
+        + 'Assert the absence of a role-scalar token by VALUE rather than by the predicate\'s '
+        + 'verdict: a gate that reads `false` cannot tell "the name is gone" from "the name was '
+        + 'never there", and both of those from a faulting predicate, which fails OPEN in the '
+        + 'shell and renders anyway. A deployment that stored business role names in '
+        + '`sys_user.role` instead of assigning positions is the one that must act; a name in '
+        + '`sys_member.role` is still projected, so membership-derived names are unaffected.',
     },
     {
       id: 'session-user-language-retired',

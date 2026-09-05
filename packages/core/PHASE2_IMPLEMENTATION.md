@@ -263,52 +263,41 @@ const { withinLimits, violations } = sandbox.checkResourceLimits('my-plugin');
 const usage = sandbox.getResourceUsage('my-plugin');
 ```
 
-### 6. Security Scanner (`security/security-scanner.ts`)
+### 6. Plugin security scanning — NOT a platform capability
 
-The Security Scanner performs comprehensive security analysis of plugins.
+**ObjectStack does not scan plugins for vulnerabilities, malware or license
+compliance, and it never has.** There is no scanner to import, no security
+score, and no CVE database. Nothing in the runtime, the CLI, the plugin loader
+or the REST layer inspects a plugin's code, its dependencies or its
+configuration for security issues.
 
-**Features:**
-- Code vulnerability scanning
-- Dependency vulnerability detection (CVE database integration)
-- Malware pattern detection
-- License compliance checking
-- Configuration security analysis
-- Security scoring (0-100)
-- Issue categorization (critical, high, medium, low, info)
+This section used to document a `PluginSecurityScanner` class exported from
+`@objectstack/core`. That class was retired in #14919 under ADR-0049
+enforce-or-remove, because it was a shell that reported success rather than a
+scanner that found anything: four of its five scan methods returned an empty
+issue list unconditionally, and the fifth matched dependencies against an
+in-memory vulnerability database whose only writer had zero callers anywhere.
+Every `scan()` it was ever asked to perform therefore answered
+`status: 'passed'` with a perfect score — for a benign plugin and a malicious
+one alike. Advertising it here was the failure Prime Directive #10 names:
+advertising a capability the runtime does not deliver. It has no replacement,
+and none is planned; building a real scanner is a feature with a design surface
+of its own, not a repair.
 
-**Usage:**
+**What the platform does enforce**, and what to use instead of a scan:
 
-```typescript
-import { PluginSecurityScanner } from '@objectstack/core/security';
+- **Artifact integrity and signatures** — `verifyPluginArtifactIntegrity` and
+  the signature verifier (`security/plugin-artifact-integrity.ts`,
+  `security/plugin-artifact-signature.ts`) answer *"is this the artifact the
+  publisher signed?"*. They do not answer *"is this artifact safe?"*.
+- **Permissions** — section 4 above. A plugin gets what it is explicitly
+  granted.
+- **Sandboxing** — section 5 above. Resource and access limits at run time.
 
-const scanner = new PluginSecurityScanner(logger);
-
-// Perform security scan
-const result = await scanner.scan({
-  pluginId: 'my-plugin',
-  version: '1.0.0',
-  files: ['src/**/*.ts'],
-  dependencies: {
-    'express': '4.18.0',
-    'lodash': '4.17.21',
-  },
-});
-
-console.log(`Security Score: ${result.score}/100`);
-console.log(`Passed: ${result.passed}`);
-console.log(`Issues:`, result.summary);
-
-// Add vulnerability to database
-scanner.addVulnerability('lodash', '4.17.20', {
-  cve: 'CVE-2021-23337',
-  severity: 'high',
-  affectedVersions: ['<=4.17.20'],
-  fixedIn: ['4.17.21'],
-});
-
-// Update vulnerability database
-await scanner.updateVulnerabilityDatabase();
-```
+For dependency vulnerabilities, use the tools built for it against your own
+project — `npm audit`, `pnpm audit`, GitHub's Dependabot / Advisory Database,
+or OSV. Treat an unaudited third-party plugin as untrusted code, because
+nothing here has audited it for you.
 
 ## Integration with Kernel
 
@@ -321,8 +310,7 @@ import {
   HotReloadManager,
   DependencyResolver,
   PluginPermissionManager,
-  PluginSandboxRuntime,
-  PluginSecurityScanner
+  PluginSandboxRuntime
 } from '@objectstack/core';
 
 const kernel = new ObjectKernel({ logger: { level: 'info' } });
@@ -333,7 +321,6 @@ const hotReload = new HotReloadManager(kernel.logger);
 const depResolver = new DependencyResolver(kernel.logger);
 const permManager = new PluginPermissionManager(kernel.logger);
 const sandbox = new PluginSandboxRuntime(kernel.logger);
-const scanner = new PluginSecurityScanner(kernel.logger);
 
 // Register plugins with enhanced features
 // ... plugin registration code ...
@@ -362,13 +349,13 @@ npm test
 - State preservation uses checksums for integrity verification
 - Dependency resolution uses efficient topological sorting
 - Resource monitoring is throttled (default 5 seconds)
-- Security scanning can be run asynchronously
 
 ## Security
 
 - All permissions must be explicitly granted
 - Sandbox provides multiple isolation levels
-- Security scanner integrates with CVE databases
+- **No plugin security scanning.** The platform performs no vulnerability,
+  malware or license analysis of a plugin — see section 6
 - Resource limits prevent DoS attacks
 - State preservation uses checksums to detect tampering
 
