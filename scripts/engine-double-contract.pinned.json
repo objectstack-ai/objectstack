@@ -1062,6 +1062,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.readonly-insert.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.record-not-found.test.ts",
       "verb": "delete",
       "pinned": 1
