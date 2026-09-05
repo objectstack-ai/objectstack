@@ -179,26 +179,60 @@ const NOTHING_SUPPLIED: HeadlessScreenVerdict = { satisfied: false, supplied: []
  * run — which supplies nothing — skip a screen whose field happens to share a
  * name with a column of the record it was launched from.
  *
- * Two legs, either of which proves caller provenance:
+ * The record is one seed. **The row ID is the other**, and it is the one a
+ * record leg alone cannot see: both doors put the launched row's id into
+ * `params` under names that are NOT columns — `recordId` and the camelCase
+ * `<object>Id` alias on the trigger door (`buildAutomationContext`, which sets
+ * NO `context.record` at all), plus the action's declared `recordIdParam` on
+ * the actions door (`seedFlowActionParams`). A screen field named like any of
+ * them would otherwise read as caller-supplied on a run that supplied nothing,
+ * and an interactive console launch would skip the screen. So those are
+ * refused up front, by NAME for the two the executor can derive and by VALUE
+ * (identical to the row id) for the third, whose name is action-level metadata
+ * this executor cannot see.
+ *
+ * What remains proves caller provenance:
  *
  *  - the record has no such key at all ⇒ the record leg cannot be the source;
  *  - the record HAS the key but `params` holds a different value ⇒ the
- *    caller's bag overwrote it. `{ ...record }` copies the record's own value
+ *    caller's bag overwrote it. The record spread copies the record's own value
  *    by reference/primitive, so a run that supplied nothing is `Object.is`-equal
- *    here, always. Equality is therefore "indistinguishable", not "caller-set".
+ *    here. Equality is therefore "indistinguishable", not "caller-set".
  *
  * The ambiguous case (same key, same value) resolves to NOT caller-supplied,
  * which costs a headless run a pause it might have been allowed to skip and
  * costs an interactive run nothing. That asymmetry is deliberate: every
  * uncertainty in this module must land on today's behaviour.
+ *
+ * ⚠️ **The identity leg is weaker across a durable resume.** A suspended run
+ * persists its `context` as JSON (`suspended-run-store.ts`), so a run continued
+ * from the store judges against a `JSON.parse`d copy: a NON-primitive column
+ * value (an array, an object) is no longer `Object.is`-equal to the one in
+ * `params`, and a later wizard screen colliding with such a column can read as
+ * caller-supplied. Primitive columns are unaffected. Stated, not fixed here —
+ * the remedy is value comparison rather than identity, which is a different
+ * change and has its own card.
  */
 function callerSupplied(
   name: string,
-  context: { params?: Record<string, unknown>; record?: Record<string, unknown> } | undefined,
+  context: { params?: Record<string, unknown>; record?: Record<string, unknown>; object?: string } | undefined,
 ): boolean {
   const params = context?.params;
   if (!params || params[name] === undefined) return false;
+  // Row-id seeds first: neither leg below can disprove them, because the
+  // trigger door sets no record and none of these names is a column.
+  if (name === 'recordId') return false;
+  const objectName = typeof context?.object === 'string' ? context.object.trim() : '';
+  // The camelCase alias both doors seed, derived the same way they derive it.
+  if (objectName && name === `${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`) {
+    return false;
+  }
   const record = context?.record;
+  // The action's declared `recordIdParam` may seed a THIRD name this executor
+  // cannot know, always with the row id as its value — so the value is what
+  // refuses it. A caller who genuinely sends the row id as a screen value only
+  // loses the skip, which is this module's standing failure direction.
+  if (record?.id !== undefined && Object.is(params[name], record.id)) return false;
   if (!record || !Object.prototype.hasOwnProperty.call(record, name)) return true;
   return !Object.is(params[name], record[name]);
 }
@@ -218,7 +252,9 @@ function callerSupplied(
  * the verdict is `false` the moment any of them is unproven:
  *
  *  1. **The caller supplied at least one of THIS screen's declared fields**
- *     ({@link callerSupplied}). Without this leg a screen whose fields are all
+ *     ({@link callerSupplied}) — which refuses the row-id keys both dispatch
+ *     doors seed, so a launch that carried only a `recordId` has supplied
+ *     nothing. Without this leg a screen whose fields are all
  *     optional would be vacuously "satisfied" and would stop rendering for
  *     everyone — the loudest way to break the interactive path. A run that
  *     named none of this screen's fields is not driving it, so it pauses.
@@ -243,7 +279,7 @@ function callerSupplied(
 export function judgeHeadlessScreen(
   fields: readonly ScreenFieldContract[],
   variables: ReadonlyMap<string, unknown>,
-  context: { params?: Record<string, unknown>; record?: Record<string, unknown> } | undefined,
+  context: { params?: Record<string, unknown>; record?: Record<string, unknown>; object?: string } | undefined,
 ): HeadlessScreenVerdict {
   const declared = fields.filter((f) => typeof f?.name === 'string' && f.name.length > 0);
   if (declared.length === 0) return NOTHING_SUPPLIED;

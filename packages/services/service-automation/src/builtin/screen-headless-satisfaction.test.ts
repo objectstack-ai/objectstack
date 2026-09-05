@@ -108,6 +108,27 @@ function actionContext(
     } as AutomationContext;
 }
 
+/**
+ * The OTHER door, and the one a record-only provenance leg cannot see:
+ * `POST /api/v1/automation/:name/trigger`. `buildAutomationContext`
+ * (`@objectstack/runtime`) turns the console's `{recordId, objectName, params}`
+ * into `params.recordId` PLUS the camelCase `<objectName>Id` alias — and sets
+ * **no `context.record` at all**. So neither of those two keys is a column,
+ * nothing can disprove them from the record, and a screen field named like
+ * either of them would read as "the caller supplied this" on an interactive
+ * console launch that supplied nothing.
+ */
+function triggerDoorContext(
+    recordId: string,
+    params: Record<string, unknown> = {},
+): AutomationContext {
+    return {
+        object: 'crm_lead',
+        event: 'manual',
+        params: { ...params, recordId, crmLeadId: recordId },
+    } as AutomationContext;
+}
+
 const LEAD = { id: 'lead_1', name: 'Acme', company: 'Acme Inc' };
 
 describe('screen headless satisfaction (#15705)', () => {
@@ -207,6 +228,98 @@ describe('screen headless satisfaction (#15705)', () => {
             subject: 'Call Acme back', dueDate: '   ',
         }));
         expect(res.status).toBe('paused');
+    });
+
+    // ── The row-id seeds are not the caller speaking ──────────────────────
+    //
+    // Both dispatch doors put the launched row's id into `params` under names
+    // that are NOT record columns, so the record leg alone cannot disprove
+    // them. A screen field named like one of them must therefore not count as
+    // answered — otherwise an interactive console launch, which supplies
+    // nothing but the record it was launched from, skips the screen.
+
+    it('CONTROL — trigger door: a required `recordId` field does NOT satisfy an interactive launch', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [
+            { name: 'recordId', label: 'Record', type: 'text', required: true },
+            { name: 'notes', label: 'Notes', type: 'text' },
+        ];
+        flow.variables = [
+            { name: 'recordId', type: 'text', isInput: true, isOutput: true },
+            { name: 'notes', type: 'text', isInput: true, isOutput: true },
+        ];
+        register({}, flow);
+        const res = await engine.execute('schedule_followup', triggerDoorContext('lead_1'));
+        expect(res.status).toBe('paused');
+        expect(res.screen?.nodeId).toBe('screen_1');
+    });
+
+    it('CONTROL — trigger door: the camelCase `<object>Id` alias does not satisfy it either', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'crmLeadId', label: 'Lead', type: 'text', required: true }];
+        flow.variables = [{ name: 'crmLeadId', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        const res = await engine.execute('schedule_followup', triggerDoorContext('lead_1'));
+        expect(res.status).toBe('paused');
+    });
+
+    it('CONTROL — actions door: the same two seeded id keys do not satisfy it', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [
+            { name: 'recordId', label: 'Record', type: 'text', required: true },
+            { name: 'crmLeadId', label: 'Lead', type: 'text', required: true },
+        ];
+        flow.variables = [
+            { name: 'recordId', type: 'text', isInput: true, isOutput: true },
+            { name: 'crmLeadId', type: 'text', isInput: true, isOutput: true },
+        ];
+        register({}, flow);
+        const res = await engine.execute('schedule_followup', actionContext(LEAD, {}));
+        expect(res.status).toBe('paused');
+    });
+
+    /**
+     * `recordIdParam` is action-level metadata the executor cannot see, so its
+     * NAME cannot be refused — its VALUE is. The dispatcher seeds it with the
+     * row id, so a field bound to the row id is never the caller speaking.
+     */
+    it("CONTROL — a field carrying the row id under the action's own `recordIdParam` name does not satisfy it", async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'leadRef', label: 'Lead ref', type: 'text', required: true }];
+        flow.variables = [{ name: 'leadRef', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        // What `seedFlowActionParams` produces for `recordIdParam: 'leadRef'`.
+        const res = await engine.execute('schedule_followup', actionContext(LEAD, { leadRef: LEAD.id }));
+        expect(res.status).toBe('paused');
+    });
+
+    it('trigger door: a genuine caller param still satisfies the screen', async () => {
+        register();
+        const res = await engine.execute('schedule_followup', triggerDoorContext('lead_1', {
+            subject: 'Call Acme back', dueDate: '2026-09-09',
+        }));
+        expect(res.status).not.toBe('paused');
+        expect(res.output).toMatchObject({ subject: 'Call Acme back', dueDate: '2026-09-09' });
+    });
+
+    /**
+     * The record-change trigger's shape, pinned for the MECHANISM as well as
+     * the outcome: it sets `params` to the SAME object it sets as `record`
+     * (`record-change-trigger.ts`), so `params` is emphatically NOT empty — it
+     * pauses because every key is identity-equal to the record's own value, not
+     * because there was nothing to read.
+     */
+    it('CONTROL — record-change trigger shape: params IS the record, and it still pauses', async () => {
+        const flow: any = followupFlow();
+        flow.nodes[1].config.fields = [{ name: 'company', label: 'Company', type: 'text', required: true }];
+        flow.variables = [{ name: 'company', type: 'text', isInput: true, isOutput: true }];
+        register({}, flow);
+        const isolated = { ...LEAD };
+        const res = await engine.execute('schedule_followup', {
+            record: isolated, params: isolated, object: 'crm_lead', event: 'on_update',
+        } as AutomationContext);
+        expect(res.status).toBe('paused');
+        expect(Object.keys((isolated as Record<string, unknown>))).toContain('company');
     });
 
     // ── Vacuity guards: a screen with nothing to satisfy must not be skipped ──
