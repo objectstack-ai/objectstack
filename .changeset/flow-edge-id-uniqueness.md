@@ -38,7 +38,8 @@ node vocabulary, the edge `type` enum and every other refusal are untouched;
 a flow with unique edge ids (or no edges) parses exactly as before. Node ids
 are not covered by this change.
 
-## FROM → TO
+The shape that is refused, and what the author does about it — a two-edge
+excerpt, the later edge renumbered:
 
 ```ts
 // before — parsed on green, both edges keyed 'e20'
