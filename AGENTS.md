@@ -650,6 +650,16 @@ Even inside your own worktree, operate defensively:
      (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
      spec PRs textually disjoint; every gate reads the whole directory as one set, so
      ratchet semantics are unchanged (`packages/spec/scripts/lib/sharded-artifacts.ts`).
+   - **Corollary — a local `merge-tree` is NOT GitHub's mergeability**, and it has already
+     cost a seat a round trip: a local `git merge-tree` of any `merge=os-regen` path runs
+     the same merge-ort machinery as `git merge` and therefore honours the custom driver,
+     while GitHub runs none, so the two answer different questions about the same snapshot.
+     Probe from a throwaway bare clone that shares the object store and has no driver
+     registered (`git clone --bare --shared . PROBE.git`, then
+     `git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD`), ⛔ never with
+     `-c merge.os-regen.driver=`, which does not disable the driver but leaves git failing
+     to run it and reporting a conflict for every routed path, including ones that
+     text-merge cleanly.
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.
