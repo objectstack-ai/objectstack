@@ -560,9 +560,18 @@ export class HttpDispatcher {
                 // OAuth 2.1 access tokens are honoured ONLY on the MCP
                 // surface (#2698): their coarse tool-family scopes are
                 // enforced at MCP tool dispatch, which other routes don't do.
-                // Matches the plain and `/projects/:id`-scoped route forms
-                // (the scoped prefix is stripped only by the caller, later).
-                acceptOAuthAccessToken: /^(?:\/projects\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
+                // Matches the plain and `/environments/:environmentId`-scoped
+                // route forms (the scoped prefix is stripped only by the caller,
+                // later, which is why this tests the still-scoped path).
+                //
+                // Third reading of the one scoped-URL convention, and it carried
+                // the same pre-ADR-0006 `/projects/` residue as the strip in
+                // `dispatch()`. On its own that was unobservable — a scoped
+                // `/mcp` URL never reached the MCP domain at all — so repairing
+                // the strip is exactly what makes this line reachable, and the two
+                // have to move together: left behind, scoped MCP callers would
+                // reach the domain with their OAuth 2.1 access tokens refused.
+                acceptOAuthAccessToken: /^(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
             });
         } catch {
             // anonymous request — leave executionContext undefined
@@ -1130,11 +1139,6 @@ export class HttpDispatcher {
         return handleKeysRequest(this.domainDeps, method, body, context);
     }
 
-    /**
-     * Parse a project UUID out of a scoped URL path such as
-     * `/api/v1/environments/abc-123/data/task` or `/projects/abc-123/meta`.
-     * Returns `undefined` when the path does not match the scoped pattern.
-     */
     /**
      * Parse an environment UUID out of a scoped URL path such as
      * `/api/v1/environments/abc-123/data/task` or `/environments/abc-123/meta`.
@@ -2195,7 +2199,35 @@ export class HttpDispatcher {
         // Strip the `/environments/:environmentId` prefix so the protocol dispatchers
         // below (meta, data, ui, automation, …) see the same shape whether
         // the caller used host-based routing, `X-Environment-Id`, or a scoped URL.
-        const scopedMatch = cleanPath.match(/^\/projects\/[^/]+(\/.*)?$/);
+        //
+        // The prefix spelled here MUST stay equal to the one
+        // `extractEnvironmentIdFromPath` parses — they are one convention read
+        // twice per request, and they had drifted apart. This line matched the
+        // pre-ADR-0006 `/projects/` spelling while the hint parser already read
+        // `/environments/`, and the consequence was a live routing defect rather
+        // than stale prose:
+        //
+        //   • An environment-scoped URL reached this line UNSTRIPPED, so
+        //     `DomainHandlerRegistry` (prefix/segment matching from the head of
+        //     the path) matched no domain at all — measured through the real
+        //     `@objectstack/hono` catch-all: `GET /api/v1/environments/<id>/data/task`
+        //     → 404 ROUTE_NOT_FOUND, against the unscoped `GET /api/v1/data/task`
+        //     → the `/data` domain. That catch-all is the ONLY entry that hands
+        //     `dispatch()` a still-scoped path; every scoped mount in
+        //     `dispatcher-plugin.ts` passes a pre-stripped subpath, which is why
+        //     the defect was invisible to the standalone server.
+        //   • The legacy spelling was not "still supported" in exchange. Nothing
+        //     parses `/projects/<id>`, so stripping it discarded the only place
+        //     the environment was named: `/projects/<id>/data/task` was served
+        //     with `urlEnvironmentId` undefined — from the host default, not the
+        //     environment its own URL named.
+        //
+        // One spelling, deliberately, and not a two-prefix alternation: ADR-0006
+        // D2 retired `project` on the API surface with no aliases, and the
+        // published migration checklist (`content/docs/api/environment-routing.mdx`)
+        // tells callers to replace `/api/v1/projects/:projectId/...` with
+        // `/api/v1/environments/:environmentId/...`.
+        const scopedMatch = cleanPath.match(/^\/environments\/[^/]+(\/.*)?$/);
         if (scopedMatch) {
             cleanPath = scopedMatch[1] ?? '';
         }
