@@ -24,25 +24,52 @@ const USER = 'user_1';
 type Row = Record<string, any>;
 
 /**
+ * The WHERE matcher, at MODULE scope and pure, so both conformance gates can
+ * lift it and judge it — a matcher that closes over its fixtures is unjudgeable,
+ * which is a worse answer than a wrong one.
+ *
+ * It honours only equality on a field name, which is every predicate this module
+ * issues, and REFUSES everything else loudly. A double that reads a combinator
+ * as a field name answers a question nobody asked, silently.
+ */
+function matchesWhere(row: Row, where: Record<string, unknown>): boolean {
+  for (const [key, value] of Object.entries(where)) {
+    if (key.startsWith('$') || key === 'and' || key === 'or' || key === 'not') {
+      throw new Error(`engineDouble: unsupported WHERE combinator '${key}' — implement it or stop issuing it`);
+    }
+    if (value !== null && typeof value === 'object') {
+      throw new Error(`engineDouble: unsupported operator object on '${key}' — implement it or stop issuing it`);
+    }
+    if (String(row[key] ?? '') !== String(value ?? '')) return false;
+  }
+  return true;
+}
+
+/**
  * A find/update double over two tables.
  *
- * `find` honours only `where.user_id` and `where.id`, which is every predicate
- * this module issues — a double that answered more would be pretending to be an
- * engine, and one that answered less would let a wrong query pass.
+ * Deliberately no more forgiving than the real engine in the two places a
+ * forgiving fake would hide the very logic under test: it REFUSES a `where`
+ * shape it does not implement, and it APPLIES the caller's `limit` — by
+ * presence, so `limit: 0` returns nothing, and after the filter, so a bound
+ * never returns rows the predicate excluded. The scan-ceiling test below is
+ * measuring exactly that bound.
+ *
+ * Failure injection is done by REPLACING a method on the returned object, never
+ * by a flag inside one: a flag read makes the method unliftable, and an
+ * unjudgeable double is how a fake stops being held to anything.
  */
-function engineDouble(members: Row[], sessions: Row[], opts: { failUpdate?: boolean; failFind?: boolean } = {}) {
+function engineDouble(members: Row[], sessions: Row[]) {
   const updates: Row[] = [];
   const tables: Record<string, Row[]> = { sys_member: members, sys_session: sessions };
   const engine: MembershipEndedSessionEngine & { updates: Row[] } = {
     updates,
     async find(object: string, query: any) {
-      if (opts.failFind) throw new Error('driver unreachable');
       const rows = tables[object] ?? [];
-      const where = query?.where ?? {};
-      return rows.filter((r) => Object.entries(where).every(([k, v]) => String(r[k] ?? '') === String(v ?? '')));
+      const matched = rows.filter((r) => matchesWhere(r, query?.where ?? {}));
+      return typeof query?.limit === 'number' ? matched.slice(0, query.limit) : matched;
     },
     async update(object: string, data: any) {
-      if (opts.failUpdate) throw new Error('write refused');
       updates.push({ object, ...data });
       const rows = tables[object] ?? [];
       const row = rows.find((r) => String(r.id) === String(data.id));
@@ -51,6 +78,18 @@ function engineDouble(members: Row[], sessions: Row[], opts: { failUpdate?: bool
     },
     registerHook() { /* not used by the direct-call tests */ },
   };
+  return engine;
+}
+
+/** The read half refuses — a driver this call cannot reach. */
+function withFailingFind(engine: ReturnType<typeof engineDouble>) {
+  engine.find = async () => { throw new Error('driver unreachable'); };
+  return engine;
+}
+
+/** The write half refuses — the row is readable and not writable. */
+function withFailingUpdate(engine: ReturnType<typeof engineDouble>) {
+  engine.update = async () => { throw new Error('write refused'); };
   return engine;
 }
 
@@ -154,7 +193,7 @@ describe('#15784 the shapes that must be NO-OPS — acting on the claim, never o
 describe('#15784 degradation — best-effort, and never silent', () => {
   it('a refused session WRITE is reported, names the #15409 backstop, and does not throw', async () => {
     const warn = vi.fn();
-    const engine = engineDouble([], [liveSession('s1', ORG_A)], { failUpdate: true });
+    const engine = withFailingUpdate(engineDouble([], [liveSession('s1', ORG_A)]));
     const out = await endSessionClaimsForEndedMembership(engine, { userId: USER, organizationId: ORG_A }, { logger: { warn } });
 
     expect(out).toEqual([{ action: 'failed', sessionId: 's1', intended: 'revoked' }]);
@@ -163,13 +202,13 @@ describe('#15784 degradation — best-effort, and never silent', () => {
     // The operator has to learn BOTH halves: what did not happen, and that it
     // is not an access exposure — otherwise this reads as a security incident.
     expect(message).toContain('NOT revoked');
-    expect(message).toContain('#15409');
+    expect(message).toContain('per-request membership check');
     expect(message).toContain('Remedy');
   });
 
   it('a failed READ is reported once and swallowed — a member removal must not 500 on this', async () => {
     const warn = vi.fn();
-    const engine = engineDouble([], [liveSession('s1', ORG_A)], { failFind: true });
+    const engine = withFailingFind(engineDouble([], [liveSession('s1', ORG_A)]));
     const out = await endSessionClaimsForEndedMembership(engine, { userId: USER, organizationId: ORG_A }, { logger: { warn } });
 
     expect(out).toEqual([]);

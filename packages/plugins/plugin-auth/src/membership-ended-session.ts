@@ -239,7 +239,7 @@ export async function endSessionClaimsForEndedMembership(
         '[MembershipEndedSession] this user has more sessions than the sweep considers, so some '
           + 'sessions keeping a claim on the organization they were just removed from were NOT '
           + 'visited. They are not a security exposure — the per-request membership check '
-          + '(#15409) drops the stale claim on their next request — but the courtesy this trigger '
+          + 'drops the stale claim on their next request — but the courtesy this trigger '
           + 'provides did not reach them. Remedy: raise maxSessionScan.',
         { object: SystemObjectName.SESSION, userId, maxSessionScan: maxScan },
       );
@@ -276,7 +276,8 @@ export async function endSessionClaimsForEndedMembership(
             '[MembershipEndedSession] a session still naming the organization its owner was just '
               + 'removed from was NOT re-pointed — the removal itself succeeded, so nothing looks '
               + 'wrong. The session keeps a stale `active_organization_id`. This is NOT an access '
-              + 'exposure: the per-request membership check (#15409) resolves that claim to no '
+              + 'exposure: the per-request membership check in `resolve-authz-context` resolves '
+            + 'that claim to no '
               + 'active organization on the very next request. What is lost is the courtesy — the '
               + 'user is not switched to an organization they do still belong to. Remedy: make the '
               + 'sys_session update land; check write permission on `active_organization_id`.',
@@ -310,7 +311,7 @@ export async function endSessionClaimsForEndedMembership(
             + 'NOT revoked — the removal itself succeeded, so nothing looks wrong, and the admin '
             + 'who clicked "Remove member" believes that person was signed out. They are still '
             + 'signed in, for up to the session\'s remaining lifetime. This is NOT an access '
-            + 'exposure: with no backing membership the per-request check (#15409) already '
+            + 'exposure: with no backing membership the per-request membership check already '
             + 'resolves them to no active organization. Remedy: make the sys_session update land '
             + '— check write permission on `expires_at` / `revoked_at` / `revoke_reason`.',
           { object: SystemObjectName.SESSION, sessionId, userId, error: (e as Error)?.message },
@@ -324,7 +325,7 @@ export async function endSessionClaimsForEndedMembership(
       '[MembershipEndedSession] the membership-ended session sweep did not run to completion — '
         + 'the member removal succeeded, so nothing looks wrong. Sessions holding a claim on the '
         + 'organization the membership ended in were neither re-pointed nor revoked. This is NOT '
-        + 'an access exposure — #15409\'s per-request check covers every removal path by '
+        + 'an access exposure — the per-request membership check covers every removal path by '
         + 'construction — but the sign-out an admin expects did not happen. Remedy: this is the '
         + 'READ half, so check driver connectivity and read access on sys_member / sys_session.',
       { object: SystemObjectName.MEMBER, userId, error: (e as Error)?.message },
@@ -408,7 +409,7 @@ export function registerMembershipEndedSessionTrigger(
 
   logger?.info?.(
     '[MembershipEndedSession] membership-ended session trigger registered on sys_member '
-      + '(delete + organization re-point) — #15784, the COURTESY half of #15409. '
+      + '(delete + organization re-point) — the COURTESY half of the membership-claim ruling. '
       + 'The per-request membership check remains the enforcement.',
   );
 }
