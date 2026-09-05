@@ -30,13 +30,35 @@
  * own child-write recompute uses, over the identical descriptors the engine
  * maintains (maintainer ruling on #6063, 2026-08-07).
  *
- * ## Scope: `count`/`sum` only
+ * ## Scope: `count`/`sum` by default
  *
  * A `NULL` `min`/`max`/`avg` is the LEGITIMATE reading of "no child rows" —
  * those aggregates are undefined on the empty set, which is exactly why #6013
- * leaves them `null` at insert. They are not a defect and are never written
- * here; {@link summaryNullIsBackfillable} is the single predicate, derived from
- * the same empty-set list.
+ * leaves them `null` at insert. They are not a defect and are not written
+ * here unless the caller says otherwise; {@link summaryNullIsBackfillable} is
+ * the single predicate, derived from the same empty-set list.
+ *
+ * ## …and, on request, a column the caller KNOWS was never computed (#15064)
+ *
+ * That predicate decides on the FUNCTION alone, so it cannot tell apart two
+ * states that are identical in storage: a `null` `max` meaning "no child rows",
+ * and a `null` `max` on a column declared AFTER its parent rows already existed
+ * — which nothing has ever computed (the insert-time seed is create-time, the
+ * recompute visits a parent only on a child write, and this run skipped the
+ * function). The narrowing is right for the hole it was written for; the defect
+ * was that the one caller holding the fact "this column is new" — the publish
+ * path that just declared it — had no way to say so. `recomputeUndefinedOnEmpty`
+ * names such roll-ups (`object.field`): a named `min`/`max`/`avg` is walked like
+ * a `count`, and every `NULL` parent is recomputed through the SAME
+ * {@link aggregateSummaryValue}. A parent whose aggregate comes back as the
+ * empty-set reading (`null` — no child rows) already holds the value the engine
+ * would write, so it is neither counted as a hole nor written; one whose
+ * aggregate is defined is filled. Unnamed, the run is exactly what it was, and
+ * `os migrate summary-nulls` keeps its meaning on every deployment (maintainer
+ * ruling on #15064, 2026-09-05: a caller-supplied scope, not a relaxed
+ * predicate). A name that resolves to no roll-up this run walks is REFUSED
+ * before any row is read: the caller's fact could not be acted on, and a silent
+ * no-op there is exactly the false all-clear #15064 was filed over.
  *
  * ## Driver-agnostic, and no `IS NULL` pushdown
  *
@@ -52,7 +74,10 @@
  *
  * Every write turns a `NULL` into a number, so the second run's walk finds no
  * `NULL` rows and writes nothing. A partially-completed run is safe to repeat,
- * and "re-run until it reports zero" is the operator's own verification.
+ * and "re-run until it reports zero" is the operator's own verification. The
+ * same holds under `recomputeUndefinedOnEmpty`: a childless parent's `null`
+ * `max` is re-examined and re-confirmed on every run, never counted or written,
+ * so a scoped re-run reports zero too.
  */
 
 import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
@@ -68,13 +93,20 @@ import {
 export interface SummaryBackfillFieldOutcome {
   object: string;
   field: string;
-  fn: 'count' | 'sum';
+  /** `min`/`max`/`avg` appear here only when named in
+   *  `recomputeUndefinedOnEmpty` (#15064); an unscoped run lists `count`/`sum`. */
+  fn: SummaryDescriptor['fn'];
   /** The child object aggregated — so a report names the whole relationship. */
   childObject: string;
-  /** Parent rows found holding `NULL` in this column. */
+  /** Parent rows found holding `NULL` in this column that this run fills. For a
+   *  `min`/`max`/`avg` named in `recomputeUndefinedOnEmpty`, a `NULL` whose
+   *  recompute is the empty-set reading (`null`) is not a hole and is not
+   *  counted — the row already holds the engine's own value. */
   nullRows: number;
   /** Of those, the ones whose recomputed value is a real aggregate (> 0 rows
-   *  of children) — the rows a `SET col = 0` shortcut would have corrupted. */
+   *  of children) — the rows a `SET col = 0` shortcut would have corrupted. A
+   *  defined `min`/`max`/`avg` implies a child row, so under the scope every
+   *  counted row is one of these. */
   nonEmpty: number;
   /** Values written (equal to `nullRows` on an apply run with no failures;
    *  always 0 on a dry run — a dry run writes nothing). */
@@ -107,6 +139,13 @@ export interface SummaryBackfillReport {
    * narrowing is a decision an operator should be able to SEE.
    */
   skippedUndefinedOnEmpty: string[];
+  /**
+   * The complement of `skippedUndefinedOnEmpty`, in the same `object.field (fn)`
+   * spelling: the `min`/`max`/`avg` roll-ups the caller named in
+   * `recomputeUndefinedOnEmpty` and this run therefore walked like a `count`
+   * (#15064). Empty on an unscoped run.
+   */
+  recomputedUndefinedOnEmpty: string[];
   /** False on a dry run — no writes were made. */
   applied: boolean;
   /** A per-object cap or an unreadable object cut the walk short. */
@@ -137,6 +176,21 @@ export interface SummaryBackfillOptions {
   apply?: boolean;
   /** Restrict to these objects (default: every object owning a roll-up). */
   objects?: string[];
+  /**
+   * `object.field` roll-ups the caller KNOWS have never been computed — a
+   * column declared after its parent rows already existed — so a stored `null`
+   * there is a hole whatever the function (#15064). A `min`/`max`/`avg` named
+   * here is recomputed for every `NULL` parent through the same aggregate the
+   * engine writes, instead of being reported under `skippedUndefinedOnEmpty`;
+   * a parent with no child rows keeps its `null`, which is already the engine's
+   * value for it. Naming a `count`/`sum` is accepted and changes nothing —
+   * those are in scope by default — so a caller can pass every column it just
+   * declared without knowing the empty-set list. A name that resolves to no
+   * roll-up owned by an object this run walks is refused (`FIELD_NOT_FOUND`,
+   * 404) before any row is read. Omitted, the run is exactly the `count`/`sum`
+   * backfill it always was.
+   */
+  recomputeUndefinedOnEmpty?: string[];
   /** Safety bound on parent rows read per object. */
   maxRecordsPerObject?: number;
   /** Retry policy for one row's aggregate + update; defaults to the transient
@@ -151,33 +205,97 @@ const MAX_SAMPLE_IDS = 5;
  *  tenant-scope this" — the same context the other `os migrate` data runs use. */
 const SYSTEM_CTX = { isSystem: true } as const;
 
-/** The `count`/`sum` roll-ups `object` owns, and the `min`/`max`/`avg` ones it
- *  owns that are deliberately out of scope. */
+/** `object.field` — the spelling `recomputeUndefinedOnEmpty` takes, and the
+ *  key a named roll-up is resolved by. */
+const rollupKey = (desc: SummaryDescriptor): string => `${desc.parentObject}.${desc.summaryField}`;
+/** `object.field (fn)` — the spelling both report lists share. */
+const rollupLabel = (desc: SummaryDescriptor): string => `${rollupKey(desc)} (${desc.fn})`;
+
+/** The engine's OWN roll-up index for `object`; an index that cannot be read
+ *  contributes nothing rather than aborting the run. */
+function ownedDescriptors(engine: SummaryBackfillEngine, object: string): SummaryDescriptor[] {
+  try {
+    return engine.getOwnedSummaryDescriptors(object) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** The roll-ups `object` owns that this run walks — every `count`/`sum`, plus
+ *  the `min`/`max`/`avg` the caller named in `recomputeUndefinedOnEmpty` — and
+ *  the `min`/`max`/`avg` it owns that stay out of scope. */
 function partitionDescriptors(
   engine: SummaryBackfillEngine,
   object: string,
-): { backfillable: SummaryDescriptor[]; skipped: string[] } {
-  let owned: SummaryDescriptor[] = [];
-  try {
-    owned = engine.getOwnedSummaryDescriptors(object) ?? [];
-  } catch {
-    owned = [];
-  }
+  scope: ReadonlySet<string>,
+): { backfillable: SummaryDescriptor[]; skipped: string[]; recomputed: string[] } {
   const backfillable: SummaryDescriptor[] = [];
   const skipped: string[] = [];
-  for (const desc of owned) {
+  const recomputed: string[] = [];
+  for (const desc of ownedDescriptors(engine, object)) {
     if (summaryNullIsBackfillable(desc.fn)) backfillable.push(desc);
-    else skipped.push(`${desc.parentObject}.${desc.summaryField} (${desc.fn})`);
+    else if (scope.has(rollupKey(desc))) {
+      backfillable.push(desc);
+      recomputed.push(rollupLabel(desc));
+    } else skipped.push(rollupLabel(desc));
   }
-  return { backfillable, skipped };
+  return { backfillable, skipped, recomputed };
 }
 
 /**
- * Recompute every `count`/`sum` roll-up column still stored as `NULL`.
+ * Resolve `recomputeUndefinedOnEmpty` against the roll-ups owned by the objects
+ * this run walks, BEFORE any row is read (#15064).
+ *
+ * Every entry must name a summary field the engine's own index owns on one of
+ * `candidates`; an entry naming a `count`/`sum` resolves too (already in scope
+ * — nothing to add). One that resolves to nothing — a typo, a field that is not
+ * a roll-up, or an object `options.objects` left out of this run — is REFUSED
+ * as a whole, with nothing written: the caller asserted a fact about a column
+ * this run cannot see, and quietly walking the rest would hand back the
+ * `filled: 0` false all-clear this option exists to end. `FIELD_NOT_FOUND`
+ * (ADR-0112 standard catalog, 404) is the envelope: the named field is what
+ * could not be found.
+ */
+function resolveRecomputeScope(
+  engine: SummaryBackfillEngine,
+  candidates: string[],
+  named: string[] | undefined,
+): Set<string> {
+  const scope = new Set<string>();
+  if (!named || named.length === 0) return scope;
+  const owned = new Set<string>();
+  for (const object of candidates) {
+    for (const desc of ownedDescriptors(engine, object)) owned.add(rollupKey(desc));
+  }
+  const unresolved: string[] = [];
+  for (const entry of named) {
+    if (owned.has(entry)) scope.add(entry);
+    else if (!unresolved.includes(entry)) unresolved.push(entry);
+  }
+  if (unresolved.length > 0) {
+    const err = new Error(
+      `[summary-backfill] recomputeUndefinedOnEmpty names ${unresolved.length} roll-up(s) this run cannot find: ` +
+        `${unresolved.join(', ')}. Each entry is spelled object.field and must name a summary field owned by one ` +
+        `of the ${candidates.length} object(s) this run walks (an object left out by \`objects\` is not walked). ` +
+        'Refused before any row was read; nothing was written.',
+    ) as Error & { code: string; status: number; fields: string[] };
+    err.code = 'FIELD_NOT_FOUND';
+    err.status = 404;
+    err.fields = unresolved;
+    throw err;
+  }
+  return scope;
+}
+
+/**
+ * Recompute every `count`/`sum` roll-up column still stored as `NULL` — and,
+ * for the `min`/`max`/`avg` roll-ups named in `options.recomputeUndefinedOnEmpty`,
+ * every `NULL` parent whose aggregate is defined (#15064).
  *
  * Dry run unless `options.apply` — and a dry run writes nothing at all, so the
  * report can be reviewed (and diffed against what actually happened) before any
- * row changes.
+ * row changes. An unresolvable `recomputeUndefinedOnEmpty` entry throws before
+ * the walk starts, on a dry run as on an apply run.
  */
 export async function backfillSummaryNulls(
   engine: SummaryBackfillEngine,
@@ -190,17 +308,23 @@ export async function backfillSummaryNulls(
     options.objects ??
     (typeof engine.getConfigs === 'function' ? Object.keys(engine.getConfigs()) : []);
 
+  // Resolved (and refused) BEFORE the walk: an apply run must not write half
+  // the deployment and then discover the caller named a column it cannot see.
+  const scope = resolveRecomputeScope(engine, candidates, options.recomputeUndefinedOnEmpty);
+
   const scannedObjects: string[] = [];
   const outcomes = new Map<string, SummaryBackfillFieldOutcome>();
   const skippedUndefinedOnEmpty: string[] = [];
+  const recomputedUndefinedOnEmpty: string[] = [];
   const unreadableObjects: string[] = [];
   const failures: SummaryBackfillFailure[] = [];
   let scannedRecords = 0;
   let truncated = false;
 
   for (const object of candidates) {
-    const { backfillable, skipped } = partitionDescriptors(engine, object);
+    const { backfillable, skipped, recomputed } = partitionDescriptors(engine, object, scope);
     skippedUndefinedOnEmpty.push(...skipped);
+    recomputedUndefinedOnEmpty.push(...recomputed);
     if (backfillable.length === 0) continue;
     scannedObjects.push(object);
 
@@ -208,7 +332,7 @@ export async function backfillSummaryNulls(
       outcomes.set(`${object}.${desc.summaryField}`, {
         object,
         field: desc.summaryField,
-        fn: desc.fn as 'count' | 'sum',
+        fn: desc.fn,
         childObject: desc.childObject,
         nullRows: 0,
         nonEmpty: 0,
@@ -243,9 +367,14 @@ export async function backfillSummaryNulls(
             if (row[desc.summaryField] != null) continue;
             const outcome = outcomes.get(`${object}.${desc.summaryField}`)!;
             outcome.nullRows++;
-            if (outcome.sampleRecordIds.length < MAX_SAMPLE_IDS) {
-              outcome.sampleRecordIds.push(String(parentId));
-            }
+            const sampled = outcome.sampleRecordIds.length < MAX_SAMPLE_IDS;
+            if (sampled) outcome.sampleRecordIds.push(String(parentId));
+            // True only for a `min`/`max`/`avg` the caller named in
+            // `recomputeUndefinedOnEmpty` (#15064) — nothing else undefined on
+            // the empty set reaches this loop. Its empty-set reading is `null`,
+            // which is what the row already holds, so an aggregate over no
+            // child rows is nothing to write, and not a hole either.
+            const undefinedOnEmpty = !summaryNullIsBackfillable(desc.fn);
             try {
               // Counters are bumped AFTER the retry settles, never inside the
               // retried closure — a retried attempt would otherwise count the
@@ -256,13 +385,24 @@ export async function backfillSummaryNulls(
                   engine, desc, String(parentId), { ...SYSTEM_CTX },
                 );
                 if (!apply) return;
+                if (undefinedOnEmpty && computed == null) return;
                 await engine.update(
                   desc.parentObject,
                   { id: parentId, [desc.summaryField]: computed },
                   { context: { ...SYSTEM_CTX } },
                 );
               }, options.retry ?? {});
-              if (typeof computed === 'number' && computed !== 0) outcome.nonEmpty++;
+              if (undefinedOnEmpty && computed == null) {
+                // Reclassified: the stored `null` IS the engine's value for this
+                // parent. Undo the count and the sample taken above.
+                outcome.nullRows--;
+                if (sampled) outcome.sampleRecordIds.pop();
+                continue;
+              }
+              // A defined `min`/`max`/`avg` implies at least one child row by
+              // construction; `count`/`sum` keep the `!== 0` reading the report
+              // has always used.
+              if (undefinedOnEmpty || (typeof computed === 'number' && computed !== 0)) outcome.nonEmpty++;
               if (apply) outcome.filled++;
             } catch (err) {
               // One row's failure must not abort the rest — the same rule the
@@ -305,6 +445,7 @@ export async function backfillSummaryNulls(
     nullRows: fields.reduce((n, f) => n + f.nullRows, 0),
     filled: fields.reduce((n, f) => n + f.filled, 0),
     skippedUndefinedOnEmpty,
+    recomputedUndefinedOnEmpty,
     applied: apply,
     truncated,
     unreadableObjects,
@@ -315,12 +456,16 @@ export async function backfillSummaryNulls(
 /** Human-readable report body, shared by the CLI's dry-run and apply output. */
 export function formatSummaryBackfillReport(report: SummaryBackfillReport): string[] {
   const lines: string[] = [];
+  // Unscoped wording is byte-identical to what it always was; the scoped run
+  // (#15064) says which extra columns it walked and why a NULL may remain.
+  const named = report.recomputedUndefinedOnEmpty.length;
   lines.push(
     `Scanned ${report.scannedRecords} parent row(s) across ${report.scannedObjects.length} object(s) ` +
-      'for count/sum roll-up columns still stored as NULL.',
+      `for count/sum roll-up columns${named > 0 ? ` (plus ${named} named min/max/avg column(s))` : ''} ` +
+      'still stored as NULL.',
   );
   if (report.fields.length === 0) {
-    lines.push('✓ No NULL count/sum roll-up values found — nothing to backfill.');
+    lines.push(`✓ No NULL ${named > 0 ? '' : 'count/sum '}roll-up values found — nothing to backfill.`);
   } else {
     const verb = report.applied ? 'Backfilled' : 'Would backfill';
     lines.push(`${verb} ${report.applied ? report.filled : report.nullRows} value(s) in ${report.fields.length} column(s):`);
@@ -342,6 +487,13 @@ export function formatSummaryBackfillReport(report: SummaryBackfillReport): stri
     lines.push(
       `· Untouched by design (no empty-set value — a null there means "no child rows"): ` +
         report.skippedUndefinedOnEmpty.join(', '),
+    );
+  }
+  if (report.recomputedUndefinedOnEmpty.length > 0) {
+    lines.push(
+      '· Recomputed on request (named as never computed — a column declared after its parent rows existed): ' +
+        report.recomputedUndefinedOnEmpty.join(', ') +
+        '\n    A parent with no child rows keeps NULL there: that is the aggregate\'s own value, not a hole.',
     );
   }
   if (report.failures.length > 0) {

@@ -136,6 +136,7 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
         // NOT a defect. Deliberately out of this migration's scope.
         avg_estimate: { type: 'summary', summaryOperations: { object: 'task', field: 'estimate', function: 'avg' } },
         max_estimate: { type: 'summary', summaryOperations: { object: 'task', field: 'estimate', function: 'max' } },
+        min_estimate: { type: 'summary', summaryOperations: { object: 'task', field: 'estimate', function: 'min' } },
       },
     } as any);
     engine.registry.registerObject({
@@ -317,5 +318,257 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
     expect(formatSummaryBackfillReport(report)).toEqual(
       expect.arrayContaining([expect.stringContaining('could not be recomputed')]),
     );
+  });
+
+  describe('a roll-up column declared AFTER its parent rows existed (#15064)', () => {
+    // The card's own repro. Every row below is stored WITHOUT the min/max/avg
+    // columns — exactly what the database holds the moment a summary field is
+    // added to an object that already has rows: nothing has ever computed it,
+    // children or not (`initializeSummaryFields` is create-time and seeds
+    // nothing for these functions anyway; the recompute runs on a child
+    // write; the unscoped backfill skips the function).
+    const busyAndQuiet = () => {
+      legacyParent('p_busy');
+      legacyTask('t1', 'p_busy', { estimate: 10, status: 'done' });
+      legacyTask('t2', 'p_busy', { estimate: 32, status: 'todo' });
+      legacyParent('p_quiet');
+    };
+    const maxOutcome = (report: Awaited<ReturnType<typeof backfillSummaryNulls>>) =>
+      report.fields.find((f) => f.field === 'max_estimate');
+
+    // What the UNSCOPED run produced for `busyAndQuiet()` on `origin/main`
+    // 791a0cbe6, captured BEFORE this option existed (one throw-away test that
+    // printed `JSON.stringify` of the report and the formatter lines). The
+    // ruling this option lands under is 「Without the scope the run behaves
+    // exactly as today」, so the unscoped pins below compare against these
+    // literals whole — the one delta a reader should find is the additive
+    // `recomputedUndefinedOnEmpty: []`, appended at the end of each report.
+    const BASE_DRY_LINES = [
+      'Scanned 2 parent row(s) across 1 object(s) for count/sum roll-up columns still stored as NULL.',
+      'Would backfill 6 value(s) in 3 column(s):',
+      '  • project.task_count (count over task) — 2 NULL row(s), 1 with real child data\n      e.g. p_busy, p_quiet',
+      '  • project.total_estimate (sum over task) — 2 NULL row(s), 1 with real child data\n      e.g. p_busy, p_quiet',
+      '  • project.done_count (count over task) — 2 NULL row(s), 1 with real child data\n      e.g. p_busy, p_quiet',
+      'Rows "with real child data" are why this run recomputes instead of writing 0:',
+      'their correct value is the aggregate over their children, not the empty-set value.',
+      '· Untouched by design (no empty-set value — a null there means "no child rows"): project.avg_estimate (avg), project.max_estimate (max), project.min_estimate (min)',
+      'Dry run — nothing was written. Re-run with --apply to backfill.',
+    ];
+    const BASE_APPLY_LINES = [
+      'Scanned 2 parent row(s) across 1 object(s) for count/sum roll-up columns still stored as NULL.',
+      'Backfilled 6 value(s) in 3 column(s):',
+      '  • project.task_count (count over task) — 2 NULL row(s), 1 with real child data\n      e.g. p_busy, p_quiet',
+      '  • project.total_estimate (sum over task) — 2 NULL row(s), 1 with real child data\n      e.g. p_busy, p_quiet',
+      '  • project.done_count (count over task) — 2 NULL row(s), 1 with real child data\n      e.g. p_busy, p_quiet',
+      'Rows "with real child data" are why this run recomputes instead of writing 0:',
+      'their correct value is the aggregate over their children, not the empty-set value.',
+      '· Untouched by design (no empty-set value — a null there means "no child rows"): project.avg_estimate (avg), project.max_estimate (max), project.min_estimate (min)',
+    ];
+    const BASE_APPLY_REPORT = {
+      scannedObjects: ['project'],
+      scannedRecords: 2,
+      fields: [
+        { object: 'project', field: 'task_count', fn: 'count', childObject: 'task', nullRows: 2, nonEmpty: 1, filled: 2, sampleRecordIds: ['p_busy', 'p_quiet'] },
+        { object: 'project', field: 'total_estimate', fn: 'sum', childObject: 'task', nullRows: 2, nonEmpty: 1, filled: 2, sampleRecordIds: ['p_busy', 'p_quiet'] },
+        { object: 'project', field: 'done_count', fn: 'count', childObject: 'task', nullRows: 2, nonEmpty: 1, filled: 2, sampleRecordIds: ['p_busy', 'p_quiet'] },
+      ],
+      nullRows: 6,
+      filled: 6,
+      skippedUndefinedOnEmpty: ['project.avg_estimate (avg)', 'project.max_estimate (max)', 'project.min_estimate (min)'],
+      applied: true,
+      truncated: false,
+      unreadableObjects: [],
+      failures: [],
+      recomputedUndefinedOnEmpty: [], // the one additive key
+    };
+
+    it('UNSCOPED: the run is what it always was — report and wording byte-for-byte, the max still NULL and still listed as skipped', async () => {
+      busyAndQuiet();
+
+      const dry = await backfillSummaryNulls(engine, quietLogger, {});
+      expect(formatSummaryBackfillReport(dry)).toEqual(BASE_DRY_LINES);
+      expect(d.writes).toEqual([]);
+
+      const report = await backfillSummaryNulls(engine, quietLogger, { apply: true });
+
+      expect(report).toEqual(BASE_APPLY_REPORT);
+      expect(formatSummaryBackfillReport(report)).toEqual(BASE_APPLY_LINES);
+      // The card's measured symptom, unchanged by design: the just-declared
+      // max stays NULL on the parent that has children, reported under
+      // `skippedUndefinedOnEmpty` — and NOT under `fields`, so `filled` does
+      // not count it.
+      expect(project('p_busy')).toEqual({ id: 'p_busy', name: 'p_busy', task_count: 2, total_estimate: 42, done_count: 1 });
+      expect(project('p_quiet')).toEqual({ id: 'p_quiet', name: 'p_quiet', task_count: 0, total_estimate: 0, done_count: 0 });
+      expect(maxOutcome(report)).toBeUndefined();
+      expect(d.writes.every((w) => !('max_estimate' in w.data))).toBe(true);
+    });
+
+    it('SCOPED: naming the max fills every parent that has children — through the aggregate the engine itself writes', async () => {
+      busyAndQuiet();
+
+      const report = await backfillSummaryNulls(engine, quietLogger, {
+        apply: true,
+        objects: ['project'],
+        recomputeUndefinedOnEmpty: ['project.max_estimate'],
+      });
+
+      expect(project('p_busy').max_estimate).toBe(32);
+      expect(report.recomputedUndefinedOnEmpty).toEqual(['project.max_estimate (max)']);
+      // The scope is per column: the sibling avg/min stay out, and stay listed.
+      expect(report.skippedUndefinedOnEmpty).toEqual(['project.avg_estimate (avg)', 'project.min_estimate (min)']);
+      expect(maxOutcome(report)).toEqual({
+        object: 'project', field: 'max_estimate', fn: 'max', childObject: 'task',
+        nullRows: 1, nonEmpty: 1, filled: 1, sampleRecordIds: ['p_busy'],
+      });
+      expect(report.filled).toBe(BASE_APPLY_REPORT.filled + 1);
+      expect(d.writes.filter((w) => 'max_estimate' in w.data)).toEqual([
+        { object: 'project', id: 'p_busy', data: expect.objectContaining({ max_estimate: 32 }) },
+      ]);
+      // One definition of "what does this roll-up equal": the next child write
+      // moves the column exactly as the engine's own recompute would, from the
+      // value the backfill left there.
+      await engine.insert('task', { title: 't3', estimate: 40, status: 'todo', project: 'p_busy' });
+      expect(project('p_busy').max_estimate).toBe(40);
+    });
+
+    it('SCOPED: a parent with no child rows keeps NULL — the aggregate\'s own reading, not a hole — neither counted nor written', async () => {
+      busyAndQuiet();
+
+      const report = await backfillSummaryNulls(engine, quietLogger, {
+        apply: true,
+        recomputeUndefinedOnEmpty: ['project.max_estimate'],
+      });
+
+      expect(project('p_quiet')).not.toHaveProperty('max_estimate'); // no write ever named it
+      expect(d.writes.filter((w) => w.id === 'p_quiet' && 'max_estimate' in w.data)).toEqual([]);
+      // Both parents were examined (the recompute ran for p_quiet and came back
+      // as the empty-set reading); only p_busy was a hole.
+      expect(report.scannedRecords).toBe(2);
+      expect(maxOutcome(report)).toMatchObject({ nullRows: 1, nonEmpty: 1, filled: 1, sampleRecordIds: ['p_busy'] });
+    });
+
+    it('SCOPED: count control — a count fills identically with or without the scope, and naming one is accepted as a no-op', async () => {
+      busyAndQuiet();
+
+      const report = await backfillSummaryNulls(engine, quietLogger, {
+        apply: true,
+        // A publish path passes every column it just declared, function unknown.
+        recomputeUndefinedOnEmpty: ['project.task_count', 'project.max_estimate', 'project.max_estimate'],
+      });
+
+      expect(project('p_busy').task_count).toBe(2);
+      expect(project('p_quiet').task_count).toBe(0);
+      // The count column's outcome is byte-identical to the unscoped run's.
+      expect(report.fields.find((f) => f.field === 'task_count')).toEqual(
+        BASE_APPLY_REPORT.fields.find((f) => f.field === 'task_count'),
+      );
+      // A count was never skipped, so it is not "recomputed on request" either;
+      // the duplicate entry resolves once.
+      expect(report.recomputedUndefinedOnEmpty).toEqual(['project.max_estimate (max)']);
+    });
+
+    it('SCOPED: min, max and avg all compute through aggregateSummaryValue', async () => {
+      busyAndQuiet();
+
+      await backfillSummaryNulls(engine, quietLogger, {
+        apply: true,
+        recomputeUndefinedOnEmpty: ['project.min_estimate', 'project.max_estimate', 'project.avg_estimate'],
+      });
+
+      expect(project('p_busy')).toMatchObject({ min_estimate: 10, max_estimate: 32, avg_estimate: 21 });
+      for (const field of ['min_estimate', 'max_estimate', 'avg_estimate']) {
+        expect(project('p_quiet')).not.toHaveProperty(field);
+      }
+    });
+
+    it('SCOPED: dry run reports what apply then writes, and writes nothing', async () => {
+      busyAndQuiet();
+
+      const dry = await backfillSummaryNulls(engine, quietLogger, { recomputeUndefinedOnEmpty: ['project.max_estimate'] });
+
+      expect(dry.applied).toBe(false);
+      expect(d.writes).toEqual([]);
+      expect(maxOutcome(dry)).toMatchObject({ nullRows: 1, nonEmpty: 1, filled: 0 });
+      expect(project('p_busy')).not.toHaveProperty('max_estimate');
+
+      const applied = await backfillSummaryNulls(engine, quietLogger, { apply: true, recomputeUndefinedOnEmpty: ['project.max_estimate'] });
+      expect(applied.nullRows).toBe(dry.nullRows);
+      expect(applied.filled).toBe(dry.nullRows);
+      expect(maxOutcome(applied)!.filled).toBe(maxOutcome(dry)!.nullRows);
+    });
+
+    it('SCOPED: idempotent — the second scoped run finds nothing and writes nothing', async () => {
+      busyAndQuiet();
+      const scope = { apply: true, recomputeUndefinedOnEmpty: ['project.max_estimate'] };
+
+      const first = await backfillSummaryNulls(engine, quietLogger, scope);
+      expect(maxOutcome(first)!.filled).toBe(1);
+      const writesAfterFirst = d.writes.length;
+
+      const second = await backfillSummaryNulls(engine, quietLogger, scope);
+
+      // p_quiet's max is still NULL and is re-confirmed, not re-counted.
+      expect(second.nullRows).toBe(0);
+      expect(second.filled).toBe(0);
+      expect(second.fields).toEqual([]);
+      expect(second.recomputedUndefinedOnEmpty).toEqual(['project.max_estimate (max)']);
+      expect(d.writes.length).toBe(writesAfterFirst);
+      expect(formatSummaryBackfillReport(second)).toEqual(
+        expect.arrayContaining([expect.stringContaining('No NULL roll-up values found')]),
+      );
+    });
+
+    it('SCOPED: never overwrites a max already stored', async () => {
+      legacyParent('p_imported', { max_estimate: 99 });
+      legacyTask('t1', 'p_imported', { estimate: 10 });
+
+      const report = await backfillSummaryNulls(engine, quietLogger, { apply: true, recomputeUndefinedOnEmpty: ['project.max_estimate'] });
+
+      expect(project('p_imported').max_estimate).toBe(99);
+      expect(maxOutcome(report)).toBeUndefined();
+    });
+
+    it('REFUSES a name it cannot resolve — FIELD_NOT_FOUND, 404 — before any row is read, on a dry run as on apply', async () => {
+      busyAndQuiet();
+
+      const refusals: Array<[string[], Record<string, unknown>]> = [
+        [['project.nope'], { apply: true }],              // no such field
+        [['max_estimate'], { apply: true }],              // not spelled object.field
+        [['project.name'], { apply: true }],              // a field, not a roll-up
+        [['task.max_estimate'], { apply: true }],         // the child owns no roll-up
+        [['project.max_estimate'], { apply: true, objects: ['task'] }], // object left out of this run
+        [['project.max_estimate', 'project.nope'], {}],   // one good, one bad, dry run: refused whole
+      ];
+      for (const [named, rest] of refusals) {
+        const err = await backfillSummaryNulls(engine, quietLogger, { ...rest, recomputeUndefinedOnEmpty: named }).catch((e) => e);
+        expect(err, named.join(',')).toBeInstanceOf(Error);
+        expect(err.code, named.join(',')).toBe('FIELD_NOT_FOUND');
+        expect(err.status, named.join(',')).toBe(404);
+        expect(err.message, named.join(',')).toContain(named[named.length - 1]);
+      }
+      // Refused BEFORE the walk: no write at all, and even the count/sum holes
+      // this run would otherwise have filled are still holes.
+      expect(d.writes).toEqual([]);
+      expect(project('p_busy').task_count ?? null).toBeNull();
+      expect(project('p_busy')).not.toHaveProperty('max_estimate');
+    });
+
+    it('the formatter names the scoped columns and explains a NULL that remains', async () => {
+      busyAndQuiet();
+
+      const report = await backfillSummaryNulls(engine, quietLogger, { apply: true, recomputeUndefinedOnEmpty: ['project.max_estimate'] });
+      const lines = formatSummaryBackfillReport(report);
+
+      expect(lines[0]).toBe(
+        'Scanned 2 parent row(s) across 1 object(s) for count/sum roll-up columns (plus 1 named min/max/avg column(s)) still stored as NULL.',
+      );
+      expect(lines).toEqual(expect.arrayContaining([
+        expect.stringContaining('  • project.max_estimate (max over task) — 1 NULL row(s), 1 with real child data'),
+        expect.stringContaining('· Recomputed on request'),
+        expect.stringContaining('A parent with no child rows keeps NULL there'),
+      ]));
+      expect(lines.find((l) => l.startsWith('· Recomputed on request'))).toContain('project.max_estimate (max)');
+      expect(lines.find((l) => l.startsWith('· Untouched by design'))).not.toContain('max_estimate');
+    });
   });
 });
