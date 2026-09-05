@@ -216,6 +216,7 @@ import {
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
+  recordsOf,
   resolveFieldPath,
   type ObjectGraph,
 } from './object-graph.js';
@@ -264,15 +265,6 @@ function isRec(v: unknown): v is AnyRec {
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
-}
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
 }
 
 /**
@@ -677,7 +669,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
   // The same rungs `validate-searchable-fields` and `validate-sortable-fields`
   // walk, so the three field axes on this surface cannot cover different sets
   // of list views.
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let oi = 0; oi < objects.length; oi++) {
     const obj = objects[oi];
     if (!isRec(obj)) continue;
@@ -703,7 +695,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
   // the full notes: the flattened list overlay (#9313, `viewKind: 'list'` with
   // no nested `config`) and the ViewItem record (#10001, one level down
   // inside `config`).
-  const views = asArray(stack.views);
+  const views = recordsOf(stack.views);
   for (let vi = 0; vi < views.length; vi++) {
     const view = views[vi];
     if (!isRec(view)) continue;

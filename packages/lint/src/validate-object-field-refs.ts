@@ -131,6 +131,7 @@ import {
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
+  recordsOf,
   resolveFieldPath,
   type ObjectGraph,
 } from './object-graph.js';
@@ -159,15 +160,6 @@ type AnyRec = Record<string, unknown>;
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
 }
 
 /**
@@ -237,7 +229,7 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
   const graph: ObjectGraph = indexObjectGraph(stack);
   if (graph.size === 0) return findings;
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let oi = 0; oi < objects.length; oi++) {
     const obj = objects[oi];
     if (!isRec(obj)) continue;
