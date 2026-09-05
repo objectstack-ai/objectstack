@@ -4684,6 +4684,39 @@ jobs:
       - name: Build workspace packages
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./examples/*^...'
 
+      # CLI transcripts in content/docs are bound to the registries they quote
+      # (#15373). `content/docs` teaches with pasted CLI output, and some of those
+      # lines quote a number the CLI derives from a live registry at runtime —
+      # `Running author-time rules (42)...` is `authoringRulesFor(<command>).length`.
+      # The page wrote it as a literal; nothing derived it and nothing compared it,
+      # so it drifted on every rule added. Four published pages carried 41 against a
+      # registry holding 42, and what surfaced it was a customer-simulation upgrade
+      # run noticing the CLI printed something else. PR #15369 fixed the four
+      # numbers; this is the mechanism.
+      #
+      # ⚠ ORDER / PLACEMENT — this step is HERE, and not with the other docs gates
+      # in the `Lint & Repo Gates` job, for a measured reason. It derives the number
+      # the way the CLI does, by importing the BUILT @objectstack/lint, so it needs
+      # a dist/:
+      #
+      #   · `Lint & Repo Gates` runs `pnpm install` and NEVER builds. Placed there
+      #     the gate would exit 3 (PREREQUISITE NOT MET) on every CI run forever —
+      #     a gate that never measures, which is the shape #4642 named.
+      #   · ci.yml's `Build Core` builds, and hosts `check:dual-build-cjs-loads` for
+      #     exactly this reason, but it is gated on the `core` paths filter, which
+      #     does not include `content/**` — so it would skip the docs-only PRs that
+      #     ADD a stale transcript, the direction this gate exists for.
+      #   · This lane has NO paths filter, sits behind the required `TypeScript Type
+      #     Check` context, and the step above already built packages/lint.
+      #
+      # So it must stay AFTER `Build workspace packages`. It adds no build and no CI
+      # minutes; the scan is ~405 pages plus one dynamic import, ~0.4s. The gate's
+      # own header is the authority on the declaration syntax (fence meta, measured
+      # against the real fumadocs/MDX pipeline) and on why this is a COMPARE rather
+      # than a stamp. Runs its own --self-test first, through the alias.
+      - name: CLI transcripts in content/docs match the registry they quote
+        run: pnpm check:docs-transcript-drift
+
       # The per-package `typecheck` scripts the coverage gate above requires
       # (#4311). tsc resolves workspace imports through each dependency's built
       # dist/*.d.ts, so the task carries `dependsOn: ^build` in turbo.json —
