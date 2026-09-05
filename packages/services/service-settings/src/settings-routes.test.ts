@@ -243,7 +243,7 @@ describe('settings-routes', () => {
     expect(state.body.data.values.currency.value).toBe('CHF');
   });
 
-  it('PUT /api/settings/localization rejects garbage with 400 + SETTINGS_VALIDATION + invalid_value', async () => {
+  it('PUT /api/settings/localization rejects garbage with 400 + SETTINGS_VALIDATION + value_domain', async () => {
     const http = new MockHttp();
     const svc = new SettingsService({ env: {} });
     svc.registerManifest(localizationSettingsManifest);
@@ -260,11 +260,61 @@ describe('settings-routes', () => {
     expect(state.body.error.details.fields).toEqual([
       expect.objectContaining({
         field: 'timezone',
-        code: 'invalid_value',
+        // The wire-visible half of the re-point onto the shared predicate:
+        // this refusal answered `invalid_value` until the catalog gained a
+        // member named for the constraint itself (ADR-0114, maintainer ruling
+        // 2026-09-02). A client branching on the code sees `value_domain`.
+        code: 'value_domain',
         constraint: { valueDomain: 'iana_time_zone' },
         value: 'Mars/Olympus',
       }),
     ]);
+  });
+
+  /**
+   * The wire-visible change, stated AS a change.
+   *
+   * Measured on this endpoint with `timezone: 'Mars/Olympus'`, base
+   * `a56baa2bd` vs this branch:
+   *
+   * - before — `code: 'invalid_value'`, message `Default timezone must be a
+   *   valid IANA time zone identifier (e.g. 'Europe/Zurich'). Received
+   *   'Mars/Olympus'.`
+   * - after — `code: 'value_domain'`, message `Default timezone must be a
+   *   valid IANA time zone identifier, e.g. Europe/Zurich (got
+   *   "Mars/Olympus")` — the published catalog template
+   *   `value_domain_iana_time_zone`, rendered in `en`.
+   *
+   * UNCHANGED across it, and asserted here so the blast radius is stated and
+   * not merely believed: HTTP 400, the envelope code `SETTINGS_VALIDATION`,
+   * `field`, `label`, `constraint.valueDomain` and the echoed `value`. A
+   * client reading `constraint.valueDomain` is unaffected; one branching on
+   * `code === 'invalid_value'` is, and that is the whole of the break.
+   */
+  it('the domain refusal is `value_domain` with the catalog sentence — not `invalid_value`', async () => {
+    const http = new MockHttp();
+    const svc = new SettingsService({ env: {} });
+    svc.registerManifest(localizationSettingsManifest);
+    registerSettingsRoutes(http, svc, { contextFromRequest: adminProvider });
+
+    const h = http.routes.get('PUT /api/settings/:namespace')!;
+    const { req, res, state } = makeReqRes({
+      params: { namespace: 'localization' },
+      body: { timezone: 'Mars/Olympus' },
+    });
+    await h(req, res);
+
+    expect(state.status).toBe(400);
+    expect(state.body.error.code).toBe('SETTINGS_VALIDATION');
+    const field = state.body.error.details.fields[0];
+    expect(field.code).toBe('value_domain');
+    expect(field.code).not.toBe('invalid_value');
+    expect(field.message).toBe(
+      'Default timezone must be a valid IANA time zone identifier, e.g. Europe/Zurich (got "Mars/Olympus")',
+    );
+    expect(field.label).toBe('Default timezone');
+    expect(field.constraint).toEqual({ valueDomain: 'iana_time_zone' });
+    expect(field.value).toBe('Mars/Olympus');
   });
 
   /**
