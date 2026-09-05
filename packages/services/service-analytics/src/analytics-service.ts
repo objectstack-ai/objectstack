@@ -767,6 +767,12 @@ export class AnalyticsService implements IAnalyticsService {
       coerceTemporalFilterValue: config.coerceTemporalFilterValue,
       coerceTemporalFilterColumn: config.coerceTemporalFilterColumn,
       isExternalObject: config.isExternalObject,
+      // [#14079] The declared field type, read off the same `sourceFieldMeta`
+      // hook the display chains use — so the three SQL compilers can give a
+      // text operator over a numeric or boolean column the contract's answer
+      // at compile time. A host that wired no hook answers `undefined`, and
+      // the compilers keep the behaviour they had.
+      declaredFieldType: (object: string, field: string) => config.sourceFieldMeta?.(object, field)?.type,
     };
 
     // Build strategy chain (built-in + custom, sorted by priority)

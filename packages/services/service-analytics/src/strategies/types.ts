@@ -52,4 +52,22 @@ export interface DatasetScope {
 /** A {@link StrategyContext} that can answer for a compiled dataset (#10298). */
 export interface DatasetScopedStrategyContext extends StrategyContext {
   getDatasetScope?(cubeName: string): DatasetScope | undefined;
+  /**
+   * [#14079] The DECLARED type of `field` on `objectName` — `'number'`,
+   * `'boolean'`, `'text'`, … — or `undefined` when the host cannot answer (no
+   * data engine wired, an object or field it does not know).
+   *
+   * The one question this package's three SQL compilers cannot answer from
+   * the filter alone: a text operator aimed at a column whose STORED value is
+   * never text (`NON_TEXT_STORED_VALUE_TYPES`, `@objectstack/spec`) compiles
+   * to the contract's constant — `1 = 0` for a positive operator, `1 = 1` for
+   * `$notContains` — instead of a `LIKE` that coerces on SQLite and is
+   * refused at query time on Postgres (SQLSTATE 42883, a 500). The service
+   * answers it from `AnalyticsServiceConfig.sourceFieldMeta`, the same hook
+   * the result-column display chains read. Declared HERE rather than on the
+   * spec's {@link StrategyContext} for the reason `getDatasetScope` is: nothing
+   * about it is an authorable surface, and a strategy that does not know the
+   * hook keeps the behaviour it had — "cannot answer, do not block".
+   */
+  declaredFieldType?(objectName: string, field: string): string | undefined;
 }
