@@ -61,6 +61,10 @@ interface MountOptions {
     rules?: Row[] | null;
     /** Tenant-scoped `localization.locale` `sys_setting` row value (rung 3). */
     settingLocale?: string;
+    /** Tenant-scoped `localization.timezone` `sys_setting` row value. */
+    settingTimezone?: string;
+    /** Tenant-scoped `localization.currency` `sys_setting` row value. */
+    settingCurrency?: string;
     /** Whether a session resolves at all. */
     authenticated?: boolean;
     /**
@@ -73,7 +77,7 @@ interface MountOptions {
     failUserRead?: boolean;
 }
 
-function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, authenticated = true, failUserRead = false }: MountOptions = {}) {
+function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, settingTimezone, settingCurrency, authenticated = true, failUserRead = false }: MountOptions = {}) {
     const reads: Array<{ object: string; opts: any }> = [];
     let sysUserReads = 0;
     const ql = {
@@ -83,8 +87,18 @@ function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, authe
                 if (failUserRead && ++sysUserReads > 1) throw new Error('sys_user unavailable');
                 return opts?.where?.id === USER ? [{ id: USER, email: 'lang@example.com', locale: storedLocale }] : [];
             }
-            if (object === 'sys_setting' && settingLocale !== undefined) {
-                return [{ namespace: 'localization', key: 'locale', value: settingLocale, scope: 'tenant' }];
+            if (object === 'sys_setting') {
+                // The endpoint reads all three `localization` keys in ONE `$in`
+                // query, so the double answers whichever of them the fixture
+                // configured — and nothing for the rest.
+                const configured: Array<[string, string | undefined]> = [
+                    ['locale', settingLocale],
+                    ['timezone', settingTimezone],
+                    ['currency', settingCurrency],
+                ];
+                return configured
+                    .filter(([, value]) => value !== undefined)
+                    .map(([key, value]) => ({ namespace: 'localization', key, value, scope: 'tenant' }));
             }
             return [];
         },
@@ -213,5 +227,55 @@ describe('/auth/me/localization — the signed-in user\'s language, three rungs 
         expect(body).toEqual({ authenticated: false });
         // No identity row is read for an anonymous caller.
         expect(reads.filter((r) => r.object === 'sys_user')).toEqual([]);
+    });
+});
+
+describe('/auth/me/localization — the regional defaults are RESOLVED, not always null (#15387)', () => {
+    it('answers the tenant\'s configured currency and time zone', async () => {
+        const { get } = mount({ settingTimezone: 'Asia/Shanghai', settingCurrency: 'CNY', settingLocale: 'zh-CN' });
+        const { status, body } = await get();
+        expect(status).toBe(200);
+        // The WHOLE published shape, so a fourth key cannot appear unnoticed.
+        expect(body).toEqual({ authenticated: true, currency: 'CNY', locale: 'zh-CN', timezone: 'Asia/Shanghai' });
+    });
+
+    it('resolves them independently of which locale rung won — they are not a by-product of the language cascade', async () => {
+        // Rung 1 answers the language, so the deployment cascade does NOT decide
+        // `locale` here. Before this card that short-circuit was the only reason
+        // the cascade was consulted at all, and `currency` / `timezone` came off
+        // an ExecutionContext that never carried them.
+        const { get } = mount({ storedLocale: 'ja-JP', settingLocale: 'zh-CN', settingTimezone: 'Europe/Paris', settingCurrency: 'eur' });
+        const { body } = await get('de-DE');
+        // `eur` lower-case: the cascade's own coercion upper-cases a 3-letter code.
+        expect(body).toEqual({ authenticated: true, currency: 'EUR', locale: 'ja-JP', timezone: 'Europe/Paris' });
+    });
+
+    it('a value the cascade refuses falls to the cascade\'s own answer — this surface adds no second parser', async () => {
+        // `coerceCurrency` takes exactly three letters; `coerceTimeZone` takes an
+        // `iana_time_zone` domain member. Neither refusal is re-implemented here:
+        // the endpoint answers whatever the shared resolver answers.
+        const { get } = mount({ settingTimezone: 'Middle/Earth', settingCurrency: 'euro' });
+        const { body } = await get();
+        expect(body.timezone).toBe('UTC');
+        expect(body.currency).toBeNull();
+    });
+
+    it('with nothing configured: the time-zone floor answers, and currency is the one value that stays null', async () => {
+        // The asymmetry is the cascade's, and it is deliberate to pin: `timezone`
+        // has a floor (`UTC`) so an authenticated caller can never see null for
+        // it again, while `currency` has none — a deployment that configures no
+        // currency has no reference currency, and inventing one would be a wrong
+        // answer rather than a missing one.
+        const { get } = mount({});
+        const { body } = await get();
+        expect(body).toEqual({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' });
+    });
+
+    it('the unauthenticated answer stays localization-free', async () => {
+        const { get, reads } = mount({ authenticated: false, settingTimezone: 'Asia/Shanghai', settingCurrency: 'CNY' });
+        const { body } = await get();
+        expect(body).toEqual({ authenticated: false });
+        // Anti-vacuity: no settings read is issued for a caller with no session.
+        expect(reads.filter((r) => r.object === 'sys_setting')).toEqual([]);
     });
 });
