@@ -42,7 +42,6 @@ import {
 } from '@objectstack/types';
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import {
-  BUILTIN_IDENTITY_PLATFORM_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -3610,11 +3609,21 @@ export class AuthManager {
         // organization does not answer while the caller operates in another —
         // the resolver's own rule, now applied to the payload too.
         //
-        // `isPlatformAdmin` is derived from the resolved array rather than asked
-        // separately: ADR-0068 D2 defines it as an alias of `'platform_admin' in
-        // positions`, and one authority answering both cannot disagree with
-        // itself. `platform-admin-standing.consolidation.test.ts` PIN 6 pins that
-        // equivalence shape by shape against the gates.
+        // `isPlatformAdmin` comes from the posture RUNG on the same envelope,
+        // never from the array. ⛔ `positions.includes('platform_admin')` is the
+        // form `resolve-authz-context.ts` explicitly forbids, because an
+        // ADR-0057 D4 `sys_user_position` row MAY SPELL THAT VERY NAME and a
+        // platform-RBAC assignment is not the ADR-0068 D2 capability grant.
+        // Under ruling A that stopped being theoretical: moving `positions` to
+        // the security axis moved the string `platform_admin` into a space a
+        // tenant admin can WRITE (`sys_user_position` is `apiEnabled`), so an
+        // array read here would have let a tenant mint platform standing and
+        // pass the `/admin/*` mount gate. `grants.posture === 'PLATFORM_ADMIN'`
+        // is byte-for-byte what `hasPlatformAdminStanding` returns, so the
+        // payload, that predicate and `judgePlatformAdmin` cannot disagree.
+        // ADR-0068 D2 defines the alias as `'platform_admin' in roles`; that
+        // wording predates D4 rows being able to spell built-in names, and
+        // core's later ⛔ is the specific rule.
         //
         // Fail CLOSED on an unreadable grant store, matching what both halves of
         // the old derivation already did (`isPlatformAdminUserId` returns false
@@ -3622,11 +3631,13 @@ export class AuthManager {
         // than swallowed — an empty `positions[]` hides UI, and this card is
         // about exactly that going unannounced.
         let positions: string[] = [];
+        let platformAdmin = false;
         try {
           const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
             tenantId: (session as any)?.activeOrganizationId ?? undefined,
           });
           positions = grants.positions;
+          platformAdmin = grants.posture === 'PLATFORM_ADMIN';
         } catch (err: any) {
           console.warn(
             '[auth] could not resolve authorization grants for the session payload; '
@@ -3634,7 +3645,6 @@ export class AuthManager {
             err?.message ?? String(err),
           );
         }
-        const platformAdmin = positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
 
         // ADR-0069 — authentication-policy gate posture (password expiry,
         // enforced MFA). Computed only when a gate feature is enabled (else

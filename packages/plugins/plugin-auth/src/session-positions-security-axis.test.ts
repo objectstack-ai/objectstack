@@ -107,6 +107,14 @@ const payloadFor = async (manager: AuthManager, bearer: string) => {
   return session?.user ?? null;
 };
 
+/** The whole envelope — `session.activeOrganizationId` is the scoping input. */
+const sessionEnvelopeFor = async (manager: AuthManager, bearer: string) => {
+  const auth: any = await manager.getAuthInstance();
+  return auth.api
+    .getSession({ headers: new Headers({ authorization: `Bearer ${bearer}` }) })
+    .catch(() => null);
+};
+
 /**
  * Evaluate a predicate exactly as a shell gate does: bind the session payload
  * as `current_user` and run it through the real CEL engine.
@@ -222,12 +230,21 @@ describe('the predicate root stays bound — the failure mode was a FALSE, never
 // against a literal list, so it keeps holding as that authority grows.
 // ───────────────────────────────────────────────────────────────────────────
 describe('the payload agrees with the ONE authorization authority, set for set', () => {
-  it('matches `resolveUserAuthzGrants` for the position holder', async () => {
+  it('matches `resolveUserAuthzGrants` for the position holder, SCOPED to the session org', async () => {
     const { engine, manager, holderId, holderBearer } = await arrange();
     const { resolveUserAuthzGrants } = await import('@objectstack/core');
 
     const payload = await payloadFor(manager, holderBearer);
-    const grants = await resolveUserAuthzGrants(engine as any, holderId);
+    // [#15136 review] Scoped, not unscoped. The payload is tenant-scoped to the
+    // session's active organization exactly as `/auth/me/permissions` and
+    // `ExecutionContext.positions` are, so an UNSCOPED reference only agrees by
+    // accident on a single-org fixture — and would keep agreeing if the scoping
+    // regressed. Reading the org off the session makes the reference follow the
+    // subject rather than restate the fixture.
+    const session = await sessionEnvelopeFor(manager, holderBearer);
+    const grants = await resolveUserAuthzGrants(engine as any, holderId, {
+      tenantId: (session as any)?.session?.activeOrganizationId ?? undefined,
+    });
 
     expect([...(payload?.positions ?? [])].sort()).toEqual([...grants.positions].sort());
     // Not vacuous: the authority really did resolve the position.
