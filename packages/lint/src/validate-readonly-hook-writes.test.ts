@@ -212,11 +212,22 @@ describe('validateReadonlyHookWrites - GREEN: the elevated channel', () => {
   });
 });
 
-describe('validateReadonlyHookWrites - GREEN: INSERT is engine-exempt', () => {
-  // A create may legitimately seed read-only columns: the engine's static
-  // readonly strip is deliberately absent from the insert path (#3043/#3413),
-  // which is the same reason the flow sibling never reads a create_record node.
-  it('never flags insert()', () => {
+describe('validateReadonlyHookWrites - GREEN today: insert()/create() are a SCAN GAP, not an exemption', () => {
+  // [#14147] This block used to be titled "INSERT is engine-exempt" and rested
+  // on exactly that sentence ("a create may legitimately seed read-only
+  // columns", #3043/#3413). The maintainer ruling of 2026-09-03 (option C)
+  // SUPERSEDED it: `engine.insert` now runs the static-`readonly` strip for a
+  // non-system caller, `isSystem`-gated, exactly as `engine.update` does — and
+  // a hook body's `ctx.api` under a non-system trigger IS such a caller. A green
+  // case whose justification has been overturned is indistinguishable from a
+  // scan gap, so the verdicts below are kept — they are still TRUE of what this
+  // rule scans (`update` / `updateById` only) — and the reason is restated:
+  //   - the CONDITIONAL lock has no prior record to evaluate on a create, so
+  //     `hook-api-update-readonly-when-field` is right to stay silent;
+  //   - the STATIC half IS a silent no-op now and is NOT reported — a scan gap,
+  //     filed as #15394. When that lands, `insert()` of a static-`readonly`
+  //     column flips to RED here, and this block's title goes with it.
+  it('never flags insert() — the conditional lock has no prior record on a create; the static half is the #15394 gap', () => {
     expect(
       validateReadonlyHookWrites(
         crmStack("await ctx.api.object('crm_account').insert({ last_activity_date: now });"),
@@ -224,7 +235,7 @@ describe('validateReadonlyHookWrites - GREEN: INSERT is engine-exempt', () => {
     ).toEqual([]);
   });
 
-  it('never flags create()', () => {
+  it('never flags create() — same two facts, same gap', () => {
     expect(
       validateReadonlyHookWrites(
         crmStack("await ctx.api.object('crm_account').create({ last_activity_date: now });"),
