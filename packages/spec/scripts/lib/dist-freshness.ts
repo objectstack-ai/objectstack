@@ -257,11 +257,20 @@ export function inspectDistFreshness(
           `   build that emitted declarations recorded a build-input digest in\n` +
           `   ${label}/dist/.build-input-hash-dts, and ${label}/src no longer hashes to it — so this\n` +
           `   is a real content change, not a timestamp artefact.${digests}`
-        : `${label}/dist/**/*.d.ts is OLDER than ${label}/src, and ${label}/dist/.build-input-hash-dts\n` +
-          `   is absent or unreadable, so there is nothing to check that timestamp against. Either\n` +
-          `   this dist predates that stamp, or the build that wrote it ran with OS_SKIP_DTS=1 and\n` +
-          `   never emitted declarations. One real build settles it and records the stamp, after\n` +
-          `   which a re-checkout that only bumps mtimes stops being refused.`;
+        : stamp.state === 'unstamped'
+          ? `${label}/dist/**/*.d.ts is OLDER than ${label}/src, and ${label}/dist/.build-input-hash-dts\n` +
+            `   is absent or unreadable, so there is nothing to check that timestamp against. Either\n` +
+            `   this dist predates that stamp, or the build that wrote it ran with OS_SKIP_DTS=1 and\n` +
+            `   never emitted declarations. One real build settles it and records the stamp, after\n` +
+            `   which a re-checkout that only bumps mtimes stops being refused.`
+          : // `match` while still refusing: the freshness rule and this wording
+            // read the tree at two different instants, so a build that landed
+            // between them arrives here. Say only what was measured — claiming
+            // a missing stamp that is right there is the wrong-cause defect
+            // #14985 was filed for, one branch over.
+            `${label}/dist/**/*.d.ts is OLDER than ${label}/src, while\n` +
+            `   ${label}/dist/.build-input-hash-dts matches those sources. The tree moved between the\n` +
+            `   two readings — most likely a build finished alongside this one. Re-run this check.`;
 
   return {
     fresh: false,
