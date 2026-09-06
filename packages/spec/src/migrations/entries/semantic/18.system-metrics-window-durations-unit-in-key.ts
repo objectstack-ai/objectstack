@@ -34,8 +34,12 @@ export const entry: SemanticMigration = {
     + 'unchanged: window.durationSeconds: 300 aggregates over five minutes exactly as '
     + 'size: 300 did, and the positive-integer bounds ride along with the renamed keys. Two '
     + 'keys on this same file deliberately do NOT move, and a sweep that renamed either has '
-    + 'over-applied the rule: the error-budget burn-rate window, whose describe reads only '
-    + '"Window size" and names no unit anywhere, is outside the gate population entirely; '
+    + 'over-applied the rule: the error-budget burn-rate window names its unit only in the '
+    + 'JSDoc above it ("Window size in seconds"), a channel the gate does not read: it reads '
+    + '`.describe()` and `.meta({ description })`, and that key\'s describe ("Window size") '
+    + 'names none. So the gate lists it among the duration-shaped keys without judging it — '
+    + 'neither an offender nor an exemption — and it is outside this rename, not outside the '
+    + 'gate population; that JSDoc-channel gap is #15939; '
     + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
     + 'to carry. Both keep their names.',
 };
