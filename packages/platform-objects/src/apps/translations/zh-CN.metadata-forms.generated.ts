@@ -940,7 +940,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       gap: {
         label: "间距",
-        helpText: "栅格间距（Tailwind 单位）"
+        helpText: "组件之间的间距，每级 0.25rem（4 = 1rem）"
       },
       refreshInterval: {
         label: "刷新间隔",
