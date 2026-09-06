@@ -922,15 +922,44 @@ export const FlowSchema = lazySchema(() => strictObject(
   ...MetadataProtectionFields,
 
 }).superRefine((flow, ctx) => {
-  // Every reader of `edges[].id` assumes the ids are unique — a designer, a
-  // BPMN export, a flow diff, any traversal that dedupes by id — while nothing
-  // enforced it: two edges carrying one id parsed, shipped through green CI
-  // twice, and were inert only because the engine keys out-edges by `source`
-  // (#14964). The id space is hand-authored, so the next author picking a
-  // "free" id from the sequence cannot tell it is taken. Refuse the collision
-  // here, at parse time, naming the id and BOTH positions; the issue is
-  // anchored on the later occurrence so the formatted error points at the
-  // edge to renumber.
+  // Two hand-authored id spaces, one rule each, one shape — a later occurrence
+  // of an already-declared id raises one `custom` issue anchored on the LATER
+  // element and naming BOTH positions, so the formatted error points at the
+  // one to rename.
+  //
+  // Nodes (#15713): every edge's `source` / `target` names a node by id and
+  // the engine picks out-edges by `source`, so two top-level nodes sharing an
+  // id make every edge from that id ambiguous — whichever node wins is decided
+  // by array order, silently. Only region bodies were checked (`analyzeRegion`
+  // in `control-flow.zod.ts`, at `registerFlow()`); the flow's own top-level
+  // `nodes[]` parsed with the collision intact. This pass judges the top-level
+  // array ALONE: a region's nodes are judged by `analyzeRegion`, and whether the
+  // two spaces are one is a separate decision, not taken here.
+  const firstNodeIndexById = new Map<string, number>();
+  flow.nodes.forEach((node, index) => {
+    const first = firstNodeIndexById.get(node.id);
+    if (first === undefined) {
+      firstNodeIndexById.set(node.id, index);
+      return;
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: ['nodes', index, 'id'],
+      message:
+        `Duplicate node id \`${node.id}\` — \`nodes[${index}]\` reuses the id already declared by ` +
+        `\`nodes[${first}]\`; every node id in a flow must be unique. Rename one of them: a ` +
+        "node id is the handle every edge's `source`/`target` resolves and a designer, a BPMN " +
+        'export or a flow diff keys on, so a collision routes edges by array order silently ' +
+        'rather than failing loudly.',
+    });
+  });
+
+  // Edges (#14964): every reader of `edges[].id` assumes the ids are unique —
+  // a designer, a BPMN export, a flow diff, any traversal that dedupes by id —
+  // while nothing enforced it: two edges carrying one id parsed, shipped
+  // through green CI twice, and were inert only because the engine keys
+  // out-edges by `source`. The id space is hand-authored, so the next author
+  // picking a "free" id from the sequence cannot tell it is taken.
   const firstIndexById = new Map<string, number>();
   flow.edges.forEach((edge, index) => {
     const first = firstIndexById.get(edge.id);
