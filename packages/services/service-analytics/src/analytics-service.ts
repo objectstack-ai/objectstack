@@ -33,6 +33,11 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+// [#15768] The measure result-type rule — which aggregates return a value of
+// the aggregated field's own type, and which are numeric whatever they read.
+// Owned in its own module so the enumerated verdict per `AggregationFunction`
+// member has one home rather than being inlined at the enrichment site.
+import { measureResultType } from './measure-result-type.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -1426,6 +1431,23 @@ export class AnalyticsService implements IAnalyticsService {
         if (f.percentScale == null) {
           f.percentScale = m.derived?.op === 'ratio' ? 'fraction' : percentScaleOf(meta);
         }
+        // [#15768] The column's TYPE, which until now every producer of this
+        // shape minted as a flat `'number'` for every measure — so a `min`/`max`
+        // over a `date`/`datetime`/`time` field described an ISO instant as a
+        // number, in the same line that carried the instant. `measureResultType`
+        // owns the enumerated verdict per `AggregationFunction` member and
+        // answers `undefined` for every column it has nothing to say about, so
+        // the producer's own value stands unless the rule actively corrects it.
+        //
+        // Corrected HERE rather than in the four producers for the reason the
+        // display chains above are: this is the one seam every path to
+        // `POST /analytics/dataset/query` passes through — the route relays this
+        // method's return verbatim (`res.json(result)`) — and it is the only one
+        // holding both halves of the question, the AUTHORED measure (`aggregate`
+        // + `field`) and the source field's declared type. A per-producer copy
+        // would be four implementations of one rule, free to drift.
+        const resultType = measureResultType(m.aggregate, meta?.type);
+        if (resultType) f.type = resultType;
       }
     }
 
