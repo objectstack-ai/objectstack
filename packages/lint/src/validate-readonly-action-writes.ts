@@ -109,6 +109,7 @@ import {
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
 import { buildReadonlyIndex } from './validate-readonly-flow-writes.js';
+import { recordsOf } from './object-graph.js';
 
 export type ReadonlyActionWriteSeverity = 'warning';
 
@@ -223,15 +224,6 @@ type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => isRec(x));
-  if (isRec(v)) {
-    return Object.entries(v).map(([name, def]) => ({ name, ...(isRec(def) ? def : {}) }));
-  }
-  return [];
-}
-
 /**
  * Validate L2 action-body `ctx.api` writes against target-object `readonlyWhen`
  * declarations. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
@@ -272,7 +264,7 @@ export function validateReadonlyActionWrites(stack: AnyRec): ReadonlyActionWrite
     );
     if (writes.length === 0) continue;
 
-    roIndex ??= buildReadonlyIndex(asArray(stack.objects));
+    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
 
     const where = `action "${site.name}" > body`;
     const reported = new Set<string>();

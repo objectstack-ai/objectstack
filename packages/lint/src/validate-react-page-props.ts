@@ -70,6 +70,7 @@ import {
   unprovisionedAnchorCause,
   unprovisionedAnchorHint,
 } from './system-fields.js';
+import { collectionEntries } from './collection-entries.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS (~70 ms+ to parse, worse on container cold starts), and
@@ -117,7 +118,6 @@ export interface ReactPropFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-const asArray = (v: unknown): AnyRec[] => (Array.isArray(v) ? (v as AnyRec[]) : []);
 
 interface BlockSpec {
   requiredBindings: string[];
@@ -1084,13 +1084,11 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
   // map (external / datasource-introspected), a distinction `indexObjectFields`
   // flattens — and one this check must honor so both surfaces skip alike.
   const searchTargets = indexObjectSearchTargets(stack);
-  const pages = asArray(stack.pages);
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
+  for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     if (!page || page.kind !== 'react') continue;
     const source = page.source;
     if (typeof source !== 'string' || source.trim() === '') continue;
-    const name = String(page.name ?? `#${p}`);
+    const name = String(page.name ?? pagePath);
 
     // A missing compiler must surface as an error, not as "unparseable source":
     // one is this deployment's problem, the other is the author's.
@@ -1116,7 +1114,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
         severity: 'warning',
         rule: REACT_PAGE_SOURCE_UNPARSEABLE,
         where: `page "${name}"`,
-        path: `pages[${p}].source`,
+        path: `${pagePath}.source`,
         message:
           `kind:'react' source did not parse (${describeParseFailure(failure)}), so the component-contract ` +
           `checks read a partially recovered tree and may have missed real problems.`,
@@ -1130,7 +1128,7 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
       if (tsc.isJsxOpeningElement(node) || tsc.isJsxSelfClosingElement(node)) {
         const tag = node.tagName.getText(sf);
         const where = `page "${name}" › <${tag}>`;
-        const path = `pages[${p}].source`;
+        const path = `${pagePath}.source`;
         // A withdrawn `record:*` block, reached by its injected tag. Reported
         // and then dropped: the prop checks below have nothing useful to add
         // about a block that cannot render here at all.

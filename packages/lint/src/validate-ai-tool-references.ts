@@ -34,7 +34,7 @@
 
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 
-import { suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 
 export const AI_SKILL_TOOL_UNRESOLVED = 'ai-skill-tool-unresolved';
 
@@ -56,14 +56,6 @@ export interface AiToolRefFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => !!x && typeof x === 'object');
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -152,19 +144,19 @@ function materialisesAsTool(action: AnyRec): boolean {
 function collectToolUniverse(stack: AnyRec): Set<string> {
   const universe = new Set<string>(PLATFORM_PROVIDED_TOOL_NAMES);
 
-  for (const tool of asArray(stack.tools)) {
+  for (const tool of recordsOf(stack.tools)) {
     const n = strName(tool.name);
     if (n) universe.add(n);
   }
 
   const addActionFamily = (actions: unknown) => {
-    for (const action of asArray(actions)) {
+    for (const action of recordsOf(actions)) {
       const n = strName(action.name);
       if (n && materialisesAsTool(action)) universe.add(`action_${n}`);
     }
   };
   addActionFamily(stack.actions);
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     addActionFamily(obj.actions);
   }
 
@@ -179,13 +171,13 @@ function collectToolUniverse(stack: AnyRec): Set<string> {
 function collectUnexposedActionNames(stack: AnyRec): Set<string> {
   const names = new Set<string>();
   const scan = (actions: unknown) => {
-    for (const action of asArray(actions)) {
+    for (const action of recordsOf(actions)) {
       const n = strName(action.name);
       if (n && !materialisesAsTool(action)) names.add(n);
     }
   };
   scan(stack.actions);
-  for (const obj of asArray(stack.objects)) scan(obj.actions);
+  for (const obj of recordsOf(stack.objects)) scan(obj.actions);
   return names;
 }
 
@@ -211,7 +203,7 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     return universe.has(ref);
   };
 
-  const skills = asArray(stack.skills);
+  const skills = recordsOf(stack.skills);
   for (let si = 0; si < skills.length; si++) {
     const skill = skills[si];
     const skillName = strName(skill.name) ?? `#${si}`;

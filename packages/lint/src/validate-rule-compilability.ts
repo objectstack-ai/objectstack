@@ -144,6 +144,7 @@ import { createRequire } from 'node:module';
 // a sharper reason: it `require`s `ajv/dist/compile/codegen`, so importing it
 // eagerly would drag ajv onto the boot path through the back door.
 import type { Options as AjvOptions } from 'ajv';
+import { recordsOf } from './object-graph.js';
 
 export type RuleCompilabilitySeverity = 'error';
 
@@ -175,17 +176,6 @@ export const RUNTIME_AJV_OPTIONS: AjvOptions = { allErrors: true, strict: false 
 type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
-
-/** Coerce an array-or-name-keyed-map collection to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter(isRec);
-  if (isRec(v)) {
-    return Object.entries(v)
-      .filter(([, def]) => isRec(def))
-      .map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 /**
  * Minimal structural type for the slice of ajv this gate uses. Declared here
@@ -396,7 +386,7 @@ export function walkObjectValidationRules(stack: unknown): WalkedValidationRule[
   const walked: WalkedValidationRule[] = [];
   if (!isRec(stack)) return walked;
 
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const objectName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
     // `validations` is the key `ObjectSchema` declares; `validationRules` is a
     // rejected alias of it (#5096) — see the `### The keys read` note above.
@@ -404,7 +394,7 @@ export function walkObjectValidationRules(stack: unknown): WalkedValidationRule[
     // list, because `validate-expressions.ts` reads the same single key (#5017).
     const validations = obj.validations;
 
-    for (const authored of asArray(validations)) {
+    for (const authored of recordsOf(validations)) {
       for (const { rule, label, path } of flattenRules(authored, '', '')) {
         walked.push({
           rule,
