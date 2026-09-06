@@ -165,16 +165,23 @@ describe('#15685 the /references door answers its two refusals in ONE envelope',
             expect(refused.thrown, `the door threw: ${refused.thrown?.message}`).toBeUndefined();
             expect(refused.status).toBe(501);
 
+            // `toEqual(stringContaining)` rather than `toContain`, deliberately:
+            // when the prose is missing this reads `undefined`, and `toContain`
+            // fails on an `undefined` subject with a matcher TYPE complaint
+            // rather than with the finding. The diff below names the fact.
             const message = refused.body?.error?.message;
             // The WHOLE point of the message: what to ask INSTEAD. Anchored on
             // the URL it prescribes, derived from the composite key's owner —
             // an operator can act on this sentence and on no other.
-            expect(message).toContain(
-                `Ask the owning object instead: GET /api/v1/meta/object/account/references`,
-            );
+            expect(
+                message,
+                'refusal A carried no nested message — the prescription never reached the caller',
+            ).toEqual(expect.stringContaining(
+                'Ask the owning object instead: GET /api/v1/meta/object/account/references',
+            ));
             // And the fact the empty answer would have misreported, spelled out
             // rather than left to be inferred from a 501.
-            expect(message).toContain('cannot be computed');
+            expect(message).toEqual(expect.stringContaining('cannot be computed'));
 
             // The direct statement of the regression, not merely its absence:
             // the generic fault text is what this used to be, everywhere in the
