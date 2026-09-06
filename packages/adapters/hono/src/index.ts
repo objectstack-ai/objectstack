@@ -97,8 +97,176 @@ interface AuthService {
    * AUTH SERVICE's configured `basePath`, not from this adapter's `prefix`,
    * so a deployment whose two disagree gets `false` for everything — the
    * yielding, pre-#15928 answer, which is the safe direction.
+   *
+   * [#16025] That disagreement is what the mount itself now avoids: it is
+   * derived from the same `basePath` (see `resolveAuthMount`), so on every
+   * service that answers `getBasePath` the request this predicate is asked
+   * about is already under the base it answers on.
    */
   ownsRoute?(request: Request): Promise<boolean>;
+  /**
+   * Where does this service's OWN router serve, i.e. what did it configure as
+   * its `basePath`? (#16025)
+   *
+   * Optional for the same reason `ownsRoute` is: this is a structural
+   * interface over whatever the kernel registered as `auth`, and an
+   * implementation predating the accessor must keep working. `AuthPlugin`'s
+   * `AuthManager` implements it, returning the very string it hands
+   * better-auth. A service that does not answer leaves the mount where it was
+   * before this card — see `resolveAuthMount`.
+   */
+  getBasePath?(): string;
+}
+
+/**
+ * The auth service's configured `basePath`, read at app-construction time, or
+ * `undefined` when there is nothing to read. (#16025)
+ *
+ * ## Why the SYNC accessor
+ *
+ * `createHonoApp` is synchronous and returns a mounted `Hono`, so the mount
+ * path has to be decided before any request exists. `kernel.getService` is the
+ * synchronous registry lookup; measured on a real boot it returns the very
+ * same `AuthManager` instance `getServiceAsync` resolves. It throws for a
+ * FACTORY-registered service that has not been instantiated ("is async - use
+ * await") exactly as it throws for a service nobody registered — both are
+ * "cannot read it here", and both land on the pre-#16025 mount rather than on
+ * a guess.
+ *
+ * ⛔ Every non-string, every throw and every empty answer is `undefined`. This
+ * function can only ever MOVE the mount onto an answer the auth service gave;
+ * it can never invent one.
+ */
+function readAuthBasePath(kernel: ObjectKernel): string | undefined {
+  let service: AuthService | null | undefined;
+  try {
+    const getService = (kernel as any)?.getService;
+    if (typeof getService !== 'function') return undefined;
+    service = getService.call(kernel, 'auth') as AuthService | null | undefined;
+  } catch {
+    return undefined;
+  }
+  if (!service || typeof service.getBasePath !== 'function') return undefined;
+  let raw: unknown;
+  try {
+    raw = service.getBasePath();
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (trimmed === '' || trimmed === '/') return undefined;
+  const withSlash = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  const normalised = withSlash.replace(/\/+$/, '');
+  return normalised === '' ? undefined : normalised;
+}
+
+/** Is `path` the namespace `prefix` names, or something inside it? */
+function isUnderPrefix(path: string, prefix: string): boolean {
+  const base = prefix.replace(/\/+$/, '');
+  if (base === '') return true;
+  return path === base || path.startsWith(`${base}/`);
+}
+
+/**
+ * The fixes the refusal offers, each one CHECKED against the same predicate the
+ * refusal itself uses — because a `Fix:` line that does not fix is a false
+ * sentence in shipped code, and the first spelling of this message carried two.
+ *
+ * Two directions, and the caller picks:
+ *
+ *   A — move the app UP to the namespace the base already sits in. Offered only
+ *       when that parent is a USABLE prefix. The parent of a single-segment base
+ *       such as `/auth` is `''`, which `createHonoApp` coerces straight back to
+ *       `/api` (`options.prefix || '/api'`), and the `'/'` that reads as its
+ *       equivalent mounts every OTHER route of the app under `//` — measured
+ *       404 for everything. Suggesting either is advice that does not work, and
+ *       `'/'` is exactly what the first spelling suggested.
+ *   B — move better-auth DOWN under the prefix the caller asked for. Always
+ *       available, but only with a prefix carrying a LEADING SLASH: a base path
+ *       is normalised to start with one and `isUnderPrefix` compares the two as
+ *       written, so NO base path can sit inside a prefix spelled `api/v1`. The
+ *       first spelling suggested `new AuthPlugin({ basePath: 'api/v1/auth' })`
+ *       for exactly that prefix, and it refuses again.
+ *
+ * ⛔ This changes what the refusal SAYS, never which compositions it refuses.
+ */
+function authMountFixes(basePath: string, prefix: string): string[] {
+  const fixes: string[] = [];
+
+  const parent = basePath.split('/').slice(0, -1).join('/');
+  if (parent !== '' && isUnderPrefix(basePath, parent)) {
+    fixes.push(`pass a prefix the base path sits under (createHonoApp({ kernel, prefix: '${parent}' }))`);
+  }
+
+  const rooted = (prefix.startsWith('/') ? prefix : `/${prefix}`).replace(/\/+$/, '');
+  const candidate = `${rooted}/auth`;
+  if (isUnderPrefix(candidate, rooted)) {
+    fixes.push(
+      prefix.startsWith('/')
+        ? `configure the auth service to serve under this prefix (new AuthPlugin({ basePath: '${candidate}' }))`
+        : `spell the prefix with a leading slash and configure the auth service under it ` +
+          `(createHonoApp({ kernel, prefix: '${rooted}' }) with new AuthPlugin({ basePath: '${candidate}' })) — ` +
+          `a base path always starts with '/', so it can never sit inside a prefix that does not`,
+    );
+  }
+
+  return fixes;
+}
+
+/**
+ * Where the `/auth/*` mount goes, and the boot refusal that guards it (#16025).
+ *
+ * ## B — the mount FOLLOWS THE AUTH SERVICE
+ *
+ * Maintainer ruling of 2026-09-06 (director batch #54), options A + B. The
+ * mount is derived from the auth service's own `basePath`, not from this
+ * adapter's `prefix`, because the two defaults do not compose and the failure
+ * was invisible. Measured on a real boot through this adapter, before the fix,
+ * with the documented embed `createHonoApp({ kernel })`:
+ *
+ *     POST /api/auth/sign-in/email  (valid shape, wrong password)  ->  200 {}
+ *     GET  /api/auth/get-session                                   ->  200 {}
+ *     POST /api/auth/sign-up/email                                 ->  200 {}
+ *
+ * — while the same boot answered the auth service directly at its own base:
+ *
+ *     POST /api/v1/auth/delete-user  ->  401 {"message":"Unauthorized","code":"UNAUTHORIZED"}
+ *
+ * A failed sign-in answering `200 {}` is the silent-success shape: a client
+ * reading `res.ok` sends the user into an authenticated view with no session.
+ * ⛔ Neither default moves — options C and D were rejected in the same ruling.
+ *
+ * ## A — and a MISALIGNED prefix refuses out loud
+ *
+ * Following the auth service makes the two line up by construction whenever
+ * the base sits inside the namespace the host asked for, which is true of both
+ * defaults (`/api/v1/auth` is under `/api`). It does NOT when a caller passes
+ * a `prefix` the base is outside of: the auth surface would then be served
+ * outside the namespace the host mounted, and `${prefix}/auth/*` would be
+ * answered by the terminal dispatcher catch-all — the `200 {}` above. That is
+ * the one combination this function refuses, naming both values, because the
+ * ruling's floor is that no combination may fail silently.
+ *
+ * ⚠️ Residual, recorded rather than implied: an auth service that does not
+ * answer `getBasePath` keeps the pre-#16025 mount and buys no refusal, because
+ * nothing here can tell an aligned custom service from a misaligned one. That
+ * is the behaviour before this change, not a new one.
+ */
+function resolveAuthMount(kernel: ObjectKernel, prefix: string): string {
+  const basePath = readAuthBasePath(kernel);
+  if (basePath === undefined) return `${prefix}/auth`;
+  if (!isUnderPrefix(basePath, prefix)) {
+    throw new Error(
+      `[@objectstack/hono] createHonoApp cannot mount the auth surface: the auth service serves ` +
+        `better-auth under basePath "${basePath}", which is not inside this app's prefix "${prefix}". ` +
+        `Mounting it anyway would put auth outside the namespace this app was given, and every request to ` +
+        `"${prefix}/auth/*" would be answered by the dispatcher catch-all instead — a 200 with an empty body, ` +
+        `which reads as success on a failed sign-in. Fix — ` +
+        `${authMountFixes(basePath, prefix).join('; or ')}.`,
+    );
+  }
+  return basePath;
 }
 
 /**
@@ -133,6 +301,11 @@ export function objectStackMiddleware(kernel: ObjectKernel) {
 export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   const app = new Hono();
   const prefix = options.prefix || '/api';
+  // [#16025] Where `/auth/*` is mounted, and the boot refusal that guards it.
+  // Computed BEFORE any route is registered so a misaligned composition never
+  // gets a half-built app: see `resolveAuthMount` for the ruling and the
+  // measurement.
+  const authMount = resolveAuthMount(options.kernel, prefix);
   // ADR-0006 Phase 5: env resolution + multi-kernel routing belong to the
   // host's KernelResolver (the dispatcher resolves the `kernel-resolver`
   // service itself). The legacy envRegistry/kernelManager options are
@@ -325,7 +498,7 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   /**
    * Hand a path THIS mount does not own to whatever else matched (#4117).
    *
-   * The `${prefix}/auth/*` mount below claims a whole namespace and used to be
+   * The `${authMount}/*` mount below claims a whole namespace and used to be
    * TERMINAL — it answered 404 for a path its auth service does not implement.
    * That is #4088's shape, which cost four fixes before #4116's scan started
    * enumerating it, and it is what #4087/#4112 had already concluded about the
@@ -371,9 +544,9 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
   };
 
   // --- Auth (needs auth service integration) ---
-  app.all(`${prefix}/auth/*`, async (c, next) => {
+  app.all(`${authMount}/*`, async (c, next) => {
     try {
-      const path = c.req.path.substring(`${prefix}/auth/`.length);
+      const path = c.req.path.substring(authMount.length + 1);
       const method = c.req.method;
 
       // Try AuthPlugin service first (prefer async to support factory-based services)
@@ -456,8 +629,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         // `@objectstack/plugin-auth`, and should not), so it asks the auth
         // SERVICE, which is the very `AuthManager` instance that owns the walk.
         //
-        // ⛔ The mount is untouched and still claims `${prefix}/auth/*`; what
-        // narrowed is which 404 may be handed on. `/auth/me/permissions` and
+        // ⛔ #15928 left the mount untouched; what it narrowed is which 404
+        // may be handed on. (#16025 later moved WHERE the mount sits — see
+        // `resolveAuthMount` — without touching this decision.)
+        // `/auth/me/permissions` and
         // `/auth/me/localization` are not better-auth endpoints, so they are
         // disclaimed and still yield — #4088's ordering-independent surface,
         // which objectui's permission layer reads, is unchanged.
