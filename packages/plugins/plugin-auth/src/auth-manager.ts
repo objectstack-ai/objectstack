@@ -3306,11 +3306,46 @@ export class AuthManager {
             );
             return;
           }
+          // #15106 — the recipient's OWN stored language, the last auth mail
+          // to reach the top rung of the #14788 option-D ladder. Same rung and
+          // same helper as the other four sends; only the predicate differs,
+          // because this callback is handed an address rather than a user row
+          // — the #14641 invitation shape, and for the same reason it has two
+          // branches:
+          //
+          //  1. the address HAS a `sys_user` row — the ordinary case, since a
+          //     magic link is how an existing account signs in without a
+          //     password → their own `locale`;
+          //  2. NO row — magic link doubles as sign-up (measured in the
+          //     installed 1.7.x: `/sign-in/magic-link` sends WITHOUT checking
+          //     for an account, and `/magic-link/verify` creates one unless
+          //     `disableSignUp`), so an unknown address is legitimate here and
+          //     its language is genuinely unknown → the rungs below stand.
+          //
+          // ⚠️ Lowercased, unlike the invitation predicate, and the difference
+          // is measured rather than stylistic: better-auth lowercases the
+          // invitee address on the invite route, but `signInMagicLinkBodySchema`
+          // applies no such transform, so what arrives here is whatever the
+          // caller typed. `internalAdapter.findUserByEmail` — the lookup
+          // `/magic-link/verify` resolves this very link with — matches on
+          // `email.toLowerCase()`. Reading the column on the same spelling
+          // keeps the row the mail is ABOUT identical to the row the link will
+          // sign into; an address that resolves nothing lands on the rungs
+          // below, which is the documented floor rather than a failure.
+          //
+          // ⛔ The request rung is NOT removed: ruling D inserts the column
+          // ABOVE `Accept-Language`, it does not replace it. A magic link is
+          // requested by its own recipient, so `ctx` here carries the
+          // recipient's own header and stays a legitimate second rung for an
+          // account that has stated no language.
+          const storedLocale = await this.storedRecipientLocale({
+            email: recipientEmail.toLowerCase(),
+          });
           try {
             await emailService.sendTemplate({
               template: 'auth.magic_link',
               to: recipientEmail,
-              ...this.emailLocaleArg(ctx),
+              ...this.emailLocaleArg(ctx, storedLocale),
               data: {
                 magicLinkUrl: url,
                 token,
@@ -5121,9 +5156,10 @@ export class AuthManager {
    * #14641 added. Three predicates, one per caller shape: `sys_user.id` (the
    * sends that hold a user row), the unique `phone_number` (the SMS sends,
    * which are handed a number and nothing else), and the unique `email` (the
-   * invitation send, which is handed an address for an account that may not
-   * exist yet). All three are `unique: true` in the better-auth `user` table
-   * this object is backed by (`@better-auth/core` `db/get-tables.mjs`).
+   * two sends handed an address for an account that may not exist yet — the
+   * invitation since #14641 and the magic link since #15106). All three are
+   * `unique: true` in the better-auth `user` table this object is backed by
+   * (`@better-auth/core` `db/get-tables.mjs`).
    */
   private async storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
     const engine = this.getDataEngine();

@@ -1805,6 +1805,29 @@ export class AppPlugin implements Plugin {
             ctx.logger.debug('[i18n] Set default locale', { appId, locale: i18nConfig.defaultLocale });
         }
 
+        // [#15694] Thread the declared `i18n.fallbackLocale` the same way, for
+        // the same reason: it is authorable on the stack artifact and this is
+        // the only layer that can see it. A provider CONSTRUCTED with it —
+        // `FileI18nAdapter`, which both boot paths build with
+        // `fallbackLocale || defaultLocale || 'en'` — has no `setFallbackLocale`
+        // (it does have the other two) and is skipped by the probe, keeping the
+        // value it was built with. The
+        // kernel's in-memory fallback (auto-registered above when no i18n
+        // plugin is installed) is constructed with nothing, so without this
+        // line the declaration was INERT there: a stack declaring
+        // `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` answered a
+        // missing `zh-CN` key from `en` under `I18nServicePlugin` and from
+        // `zh-CN` — i.e. not at all — under the fallback.
+        //
+        // Same optional-capability probe as `setDefaultLocale` above, and
+        // guarded on "declared something" for the same reason: several
+        // AppPlugins can share one kernel, and an app that declares no `i18n`
+        // block must not clear a fallback another app declared.
+        if (i18nConfig?.fallbackLocale && typeof i18nService.setFallbackLocale === 'function') {
+            i18nService.setFallbackLocale(i18nConfig.fallbackLocale);
+            ctx.logger.debug('[i18n] Set fallback locale', { appId, locale: i18nConfig.fallbackLocale });
+        }
+
         // [#7679] Narrow what `getLocales()` REPORTS to the locales the app
         // declared. This is the only layer that can: `getLocales()` sees the
         // loaded set, and what is loaded is not the app's decision — every

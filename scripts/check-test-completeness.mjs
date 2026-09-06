@@ -144,6 +144,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
+// The shard-item grammar, from the script that WRITES the scheduled list. A
+// second reader here would be a second grammar, and the two would drift apart
+// silently -- an unparsed `@objectstack/cli 1/2` reaches describe() as a
+// package name the turbo ls document has never heard of, which this guard
+// (correctly, for its own contract) refuses the whole shard over.
+import { parseShardItem } from './partition-test-shards.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -298,14 +304,49 @@ export function parseFailedTestPackages(text) {
   return failed;
 }
 
+/**
+ * The scheduled list, folded to PACKAGE names.
+ *
+ * `shard-packages.txt` holds shard ITEMS, and since #16173 an item can be a
+ * file-level slice of a package (`@objectstack/cli 1/2`). Q2 is asked per
+ * package -- did this package report at all on this shard -- and the reported
+ * set is keyed by the package name turbo prints, which carries no slice, so an
+ * unfolded item would be a name the `turbo ls` document does not list and the
+ * shard would be refused whole. Duplicates collapse for the same reason: a
+ * package is complete when every slice of it scheduled HERE has reported, and
+ * partition-test-shards.mjs refuses any split that puts two slices of one
+ * package on one shard, so "every slice here" is "the one slice here".
+ */
+export function scheduledPackages(lines) {
+  const out = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const { name } = parseShardItem(line);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
 // true = every task turbo scheduled succeeded, so nothing was cancelled.
 // false = it stopped early. null = turbo never printed its roster (it died, or
 // the log was truncated) -- unknown, and treated as "not completed" by Rule B.
+//
+// EVERY roster line is folded, not just the last one. A shard's log holds one
+// roster per `turbo run` invocation, and since #16173 a shard that carries a
+// file-level slice runs TWO (the sliced package needs its own passthrough, which
+// turbo applies run-wide). Reading only the last would let a completed second
+// invocation vouch for a first one that stopped early -- and Rule B turns that
+// into a red on every package the abort left unreached, which is precisely the
+// false-red machine this file's header warns about.
 export function parseRunCompleted(text) {
   let completed = null;
   for (const line of text.split('\n')) {
     const m = line.match(TASKS);
-    if (m) completed = Number(m[1]) === Number(m[2]);
+    if (!m) continue;
+    const thisRun = Number(m[1]) === Number(m[2]);
+    completed = completed === null ? thisRun : completed && thisRun;
   }
   return completed;
 }
@@ -596,7 +637,7 @@ function reportVerdict(verdict) {
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-test-completeness self-test': 67,
+  'check-test-completeness self-test': 79,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -956,6 +997,63 @@ function selfTest({ quiet = false } = {}) {
     'exit codes: the refusal code collides with a verdict code',
   );
 
+  // -- File-level slice items in the scheduled list (#16173) ----------------
+  //
+  // `shard-packages.txt` stopped being a list of package names the day one
+  // package started being sharded below package granularity. Both halves below
+  // fail in the false-RED direction if they regress, which is the direction
+  // this file's header spends its length warning about.
+  eq(scheduledPackages(['@objectstack/spec', '@objectstack/core']), ['@objectstack/spec', '@objectstack/core'],
+    'scheduled: plain package names were disturbed');
+  eq(scheduledPackages(['@objectstack/cli 1/2']), ['@objectstack/cli'],
+    'scheduled: a slice did not fold to its package name');
+  eq(scheduledPackages(['@objectstack/cli 1/2', '@objectstack/cli 2/2']), ['@objectstack/cli'],
+    'scheduled: two slices of one package did not collapse');
+  eq(scheduledPackages(['@objectstack/spec', '@objectstack/cli 2/2', '@objectstack/core']),
+    ['@objectstack/spec', '@objectstack/cli', '@objectstack/core'],
+    'scheduled: folding reordered the list');
+  // END-TO-END: an unfolded item reaches describe() as a name the turbo ls
+  // document cannot resolve, and classifyShard refuses the whole shard over it.
+  // This asserts the fold is what stops that, not that describe() got lenient.
+  eq(
+    classifyShard({
+      scheduled: scheduledPackages(['@objectstack/cli 1/2']),
+      reported: new Set(['@objectstack/cli']),
+      failed: new Set(),
+      runCompleted: true,
+      describe: describe({ '@objectstack/cli': { hasTestScript: true, testFileCount: 268 } }),
+    }).silent,
+    [],
+    'scheduled: a slice that DID report was still graded silent',
+  );
+  eq(
+    threw(() =>
+      classifyShard({
+        scheduled: ['@objectstack/cli 1/2'],
+        reported: new Set(['@objectstack/cli']),
+        failed: new Set(),
+        runCompleted: true,
+        describe: describe({ '@objectstack/cli': { hasTestScript: true, testFileCount: 268 } }),
+      }),
+    ),
+    true,
+    'scheduled: an UNFOLDED item was accepted, so the fold is not what makes this work',
+  );
+
+  // -- One roster per turbo invocation, and a shard can now run two (#16173) --
+  const roster = (ok, total) => `Tasks:    ${ok} successful, ${total} total`;
+  eq(parseRunCompleted(roster(4, 4)), true, 'runCompleted: a complete single roster');
+  eq(parseRunCompleted(roster(3, 5)), false, 'runCompleted: an incomplete single roster');
+  eq(parseRunCompleted('no roster here'), null, 'runCompleted: a log with no roster is unknown, not complete');
+  eq(parseRunCompleted(`${roster(4, 4)}\n${roster(2, 2)}`), true,
+    'runCompleted: two complete rosters');
+  // The load-bearing one: the packages the FIRST invocation never reached would
+  // otherwise be charged as silent under Rule B.
+  eq(parseRunCompleted(`${roster(3, 9)}\n${roster(1, 1)}`), false,
+    'runCompleted: a completed second invocation vouched for a first that stopped early');
+  eq(parseRunCompleted(`${roster(9, 9)}\n${roster(0, 1)}`), false,
+    'runCompleted: a second invocation that stopped early was overlooked');
+
   // ⚠️ The floor is scoped to the LOUD run on purpose. `selfTest({ quiet: true })`
   // also runs on EVERY production invocation of this gate (see `main()`), and
   // there nothing claims a self-test verdict — the floor exists to stop a green
@@ -1059,10 +1157,12 @@ function main() {
   if (scheduledPath) {
     let scheduled;
     try {
-      scheduled = readFileSync(scheduledPath, 'utf8')
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
+      scheduled = scheduledPackages(
+        readFileSync(scheduledPath, 'utf8')
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+      );
     } catch (err) {
       console.error(`check-test-completeness: cannot read ${scheduledPath} -- ${err.message}`);
       process.exit(1);

@@ -29,10 +29,12 @@
  *
  * `expect(Array.isArray(x)).toBe(true)` is the kind of assertion that can pass
  * because nothing could have made it fail. It could have here: `ObjectQL.find`
- * returns `hookContext.result` on its hook path, so an `afterFind` handler CAN
- * replace the result with an envelope — measured, not supposed (see the control
- * case at the bottom, which drives exactly that and asserts every pin above it
- * goes red). That is also the reason removal is right rather than merely safe:
+ * returned `hookContext.result` on its hook path, so an `afterFind` handler
+ * COULD replace the result with an envelope — measured, not supposed. Since
+ * #15823 the engine refuses that replacement (`FIND_HOOK_RESULT_NOT_ARRAY`), so
+ * the control case at the bottom now drives the same handler and asserts the
+ * REFUSAL, and checks `expectBareArray`'s discrimination directly. That is also
+ * the reason removal is right rather than merely safe:
  * a hook that corrupted `find()` into `{ records }` would be a contract
  * violation, and the limb did not repair it — it silently absorbed it at these
  * fourteen sites while this package's remaining `find()` call sites broke anyway
@@ -47,7 +49,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { ObjectQL } from '@objectstack/objectql';
+import { FIND_HOOK_RESULT_NOT_ARRAY_CODE, ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
@@ -289,14 +291,36 @@ describe('#15597 — the control: these pins CAN go red', () => {
    * The discrimination check for all fourteen cases above, and the reason the
    * removal argument is about hooks rather than about drivers.
    *
-   * `ObjectQL.find` ends with `return hookContext.result` on its hook path, so
-   * an `afterFind` handler that assigns a non-array makes `find()` resolve to
-   * one. Nothing in this tree does that — the only registered `afterFind` in
-   * the repo is plugin-audit's read recorder, which never touches `ctx.result`
-   * — but the mechanism EXISTS, which is what makes `expectBareArray` a real
-   * assertion instead of a tautology.
+   * ## What this control asserted before #15823, and why it changed
+   *
+   * `ObjectQL.find` used to end with `return hookContext.result` on its hook
+   * path with nothing re-checking the value, so an `afterFind` handler
+   * assigning a non-array made `find()` resolve to one — and this case drove
+   * exactly that, asserting every pin above it went red. That was a real
+   * measurement, and it is what made `expectBareArray` an assertion rather than
+   * a tautology.
+   *
+   * #15823 ruled that seam shut (maintainer, 2026-09-06, direction 1):
+   * `find()` GUARANTEES the array, and a handler that replaces the container is
+   * refused at the engine with `FIND_HOOK_RESULT_NOT_ARRAY`. So the mutation
+   * below no longer produces an envelope at these fourteen sites — it produces
+   * a refusal, which is a STRONGER statement of the same fact and is asserted
+   * as such here.
+   *
+   * ⛔ #15597's own conclusion is untouched by that. Its argument was that the
+   * fourteen limbs were right to remove *even given* an open seam — fourteen
+   * sites of false immunity being worse than one visible failure — and closing
+   * the seam only removes the "reachable in principle" caveat a reviewer used
+   * to have to pay. The limbs stay removed for the reason they were removed.
+   *
+   * ## The two jobs, kept
+   *
+   * (1) the mechanism is really gone — driven, on every one of the fourteen
+   * real reads, through their real production entry points; and (2)
+   * `expectBareArray` really discriminates — asserted directly, since no engine
+   * can hand it an envelope any more.
    */
-  it('an afterFind hook that returns an envelope turns every shape pin red', async () => {
+  it('an afterFind hook that returns an envelope is now REFUSED at every one of the fourteen reads', async () => {
     const engine = await bootEngine();
     await seedAll(engine);
 
@@ -308,20 +332,49 @@ describe('#15597 — the control: these pins CAN go red', () => {
       { packageId: 'test.15597-control' },
     );
 
-    const survivors: string[] = [];
+    /** Blocks that answered a value instead of refusing — must be empty. */
+    const answered: Array<{ id: string; value: unknown }> = [];
+    /** Blocks that refused with some OTHER error — must be empty. */
+    const otherError: Array<{ id: string; code: unknown; message: string }> = [];
+    const refused: string[] = [];
+
     for (const block of BLOCKS) {
-      const value = await block.populated(engine);
-      // Under the mutation the read really does answer an envelope…
-      expect(Array.isArray(value), `${block.id}: the hook did not take effect`).toBe(false);
-      // …and the pin's own assertion rejects it.
       try {
-        expectBareArray(value, block.id);
-        survivors.push(block.id);
-      } catch {
-        /* expected: the pin discriminates */
+        answered.push({ id: block.id, value: await block.populated(engine) });
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === FIND_HOOK_RESULT_NOT_ARRAY_CODE) {
+          refused.push(block.id);
+          // The refusal names the seam it is about — the ruling's own
+          // requirement, checked here on a real production read rather than
+          // only on the engine's own unit harness.
+          expect((error as Error).message, `${block.id}: message does not name the event`).toContain('afterFind');
+        } else {
+          otherError.push({ id: block.id, code, message: String((error as Error)?.message) });
+        }
       }
     }
-    expect(survivors, 'these pins passed on an envelope — they do not discriminate').toEqual([]);
+
+    expect(answered, 'a read answered under the replaced container instead of refusing').toEqual([]);
+    expect(otherError, 'a read refused for some other reason — this control is measuring the wrong thing').toEqual([]);
+    expect(refused, 'every block must refuse').toEqual(BLOCKS.map((b) => b.id));
+  });
+
+  it('expectBareArray still discriminates — it rejects the envelope the engine can no longer produce', () => {
+    // Job (2), now that no engine can supply the input: the helper the fourteen
+    // pins call is exercised against the exact shape the removed limbs claimed
+    // to defend against, plus the `{ data }` spelling one of them used. Without
+    // this the pins above would once again be assertions nothing was ever seen
+    // to fail.
+    for (const envelope of [{ records: [{ id: 'ENVELOPE' }] }, { data: [{ id: 'ENVELOPE' }] }, null, 'rows']) {
+      expect(
+        () => expectBareArray(envelope, 'control'),
+        `expectBareArray accepted ${JSON.stringify(envelope)} — it does not discriminate`,
+      ).toThrow();
+    }
+    // …and passes the shape it is meant to pass, so the check above is not
+    // simply a helper that throws on everything.
+    expect(() => expectBareArray([{ id: 'r1' }], 'control')).not.toThrow();
   });
 });
 

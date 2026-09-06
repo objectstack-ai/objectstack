@@ -1343,8 +1343,12 @@ function compileOperator(
      * read scope compiled to a statement the engine could not PARSE — an RLS
      * policy that cannot be evaluated at all. It goes through
      * {@link textMatch} now with `fold` set, which keeps `translate()` on
-     * Postgres and the `unknown` residue, emits `lower(col) GLOB lower(?)` on
-     * SQLite and the nested-`REPLACE` binary fold on MySQL. The `ESCAPE`
+     * Postgres, emits `lower(col) GLOB lower(?)` on SQLite, the nested-
+     * `REPLACE` binary fold on MySQL and — [#16028] — the same `REPLACE` chain
+     * without the cast on the `unknown` residue, because a datasource whose
+     * dialect nothing answered can BE SQLite and `translate()` failed to parse
+     * there just as loudly through this compiler as through the other two. The
+     * `ESCAPE`
      * binding is still never folded — the construct table owns that, and the
      * SQLite arm has no `ESCAPE` clause to bind at all.
      */

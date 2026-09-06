@@ -31,8 +31,16 @@
  *     Postgres and MySQL.
  *   - `CAST(… AS BINARY)` is byte-wise on MySQL, is not a type on Postgres, and
  *     takes NUMERIC affinity on SQLite (it would compare a number).
- *   - `CAST(col AS BLOB) LIKE ?` was measured on the driver side to return
- *     NOTHING at all — SQLite's LIKE is false for a BLOB operand.
+ *   - `CAST(col AS BLOB) LIKE ?` means two DIFFERENT things on the two SQLite
+ *     builds this repo ships, which disqualifies it more firmly than any single
+ *     wrong answer would. Whether `LIKE` is false for a BLOB operand is fixed
+ *     when SQLite is COMPILED, by `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, so it is
+ *     not a portable property at all: measured on this same fixture,
+ *     `{ name: { $contains: 'acme' } }` answered `[]` on better-sqlite3 13.0.3
+ *     (SQLite 3.53.4, flag compiled in) and `['1','2']` on sql.js 1.14.1
+ *     (SQLite 3.49.1, flag absent) — the latter being precisely the over-fold
+ *     above. A construct that a read scope's correctness rests on cannot be one
+ *     whose meaning an upstream build flag decides.
  *   - The portable primitives that ARE case-sensitive everywhere (`replace()`)
  *     express "occurs somewhere" but not "occurs at the start / at the end"
  *     without character-length arithmetic that is spelled differently on every
@@ -108,11 +116,45 @@
  *   - **`sqlite` → `lower()` around the GLOB arm.** ASCII-only there —
  *     measured, `lower('CAFÉ')` is `cafÉ` — which is the #4706 Q1 = A boundary
  *     executed rather than argued.
- *   - **`postgres` / `unknown` → `translate()`, unchanged.** These two arms
- *     were never broken; the bytes emitted before #15780 are the bytes emitted
- *     now. ⚠️ This DIVERGES from `driver-sql`, whose `unknown` arm folds with
- *     `LOWER()`: each face keeps the residue it already had, and neither claims
- *     the other's.
+ *   - **`postgres` → `translate()`, unchanged.** Correct there, so the bytes
+ *     emitted before #15780 are the bytes emitted now.
+ *   - **[#16028] `unknown` → the portable nested-`REPLACE` fold**
+ *     ({@link asciiLowerReplaceSql}). #15780 left this arm on `translate()` on
+ *     the reading that it "was never broken" — which was true of the dialects
+ *     that arm was PICTURED as (mssql, oracle, which have `translate()`) and
+ *     false of the ones {@link normalizeSqlDialect} actually routes here.
+ *     `unknown` is not a dialect: it is everything nothing answered for, and
+ *     SQLite reaches it through four embedder compositions (a `SqlDriver` given
+ *     a CLASS client or an unrecognised spelling, a host hook answering knex's
+ *     own `'sqlite3'`, a directly-constructed `AnalyticsService` with the
+ *     OPTIONAL `sqlDialect` omitted, a `data` service with no
+ *     `getDriverForObject`). On every one of them `translate()` reached the
+ *     engine and the statement failed to PARSE — a documented operator
+ *     answering 500 because one optional field was left out.
+ *
+ *     ⛔ The fix is NOT `LOWER()`, even though `driver-sql`'s own `unknown` arm
+ *     folds that way: `LOWER()` follows the collation, so it would trade a loud
+ *     parse failure on SQLite for SILENTLY wrong rows on PostgreSQL — the
+ *     Unicode fold #4706 Q1 = A rules out. The `REPLACE` chain is the third
+ *     answer: ASCII-only BY CONSTRUCTION, and parsed by every SQL dialect,
+ *     because `REPLACE` is the one string function all of them have. So the two
+ *     families `unknown` conflates are both served — PostgreSQL/Oracle-like get
+ *     `translate()`'s exact result set in different bytes, SQLite-like get an
+ *     answer at all.
+ *
+ *     ⚠️ The residue that REMAINS, stated because the arm is a residue and not
+ *     a dialect: the fold is exact everywhere, but the COMPARISON is `LIKE`,
+ *     which on a case-/accent-insensitive collation (MySQL/MariaDB reaching
+ *     here through the `'mariadb'` spelling #11756 deliberately leaves
+ *     unrecognised; SQL Server) over-matches beyond ASCII. That is the SAME
+ *     residue this arm's case-EXACT neighbour above already carries and names,
+ *     not a new one — and on those engines `translate()` did not run at all,
+ *     so nothing that answered correctly before stops.
+ *
+ *     ⚠️ This still DIVERGES from `driver-sql`, whose `unknown` arm folds with
+ *     `LOWER()`. Each face keeps its own answer and neither claims the other's;
+ *     what changed is that this one's is now portable rather than merely
+ *     inherited.
  *   - **`mysql` → the nested-`REPLACE` binary fold**
  *     ({@link mysqlAsciiLowerBinarySql}). NOT MEASURED — no MySQL server is
  *     provisionable in this container, so this cell is a declared skip, exactly
@@ -239,7 +281,40 @@ export type TextMatchBind = (value: unknown) => string;
  * than a fold on top of the collation's own.
  */
 function mysqlAsciiLowerBinarySql(expr: string): string {
-  let out = `CAST(${expr} AS BINARY)`;
+  return asciiLowerReplaceSql(`CAST(${expr} AS BINARY)`);
+}
+
+/**
+ * [#16028] The ASCII-ONLY case fold in the ONE spelling every SQL dialect
+ * parses: one nested `REPLACE` per letter of {@link ASCII_UPPER_LETTERS}.
+ *
+ * This is the {@link mysqlAsciiLowerBinarySql} chain with its `CAST(…
+ * AS BINARY)` removed — one builder, two callers, so the MySQL arm's bytes and
+ * the `unknown` arm's fold cannot drift into two different alphabets. The
+ * `CAST` is the part that is MySQL's (byte-wise comparison whatever the
+ * collation says); the chain itself is nobody's dialect in particular, which is
+ * exactly why the residue arm can use it.
+ *
+ * ## Why the chain equals `translate()` rather than approximating it
+ *
+ * `translate(x, 'ABC…', 'abc…')` maps each `A`-`Z` occurrence SIMULTANEOUSLY;
+ * this applies the 26 maps in sequence. The two agree because no step can feed
+ * a later one: every replacement WRITES a lower-case letter and every later
+ * step MATCHES an upper-case one, so nothing a `REPLACE` produces is a target
+ * further down the chain. Measured rather than left as that argument —
+ * `icontains-dialect-sql.test.ts` runs the emitted chain over every ASCII code
+ * point on the engine and requires the ASCII-only map exactly.
+ *
+ * ⛔ Not `LOWER()`, which is what {@link asciiLowerSqlExpr}'s header refuses for
+ * the same arm and for the same reason: `LOWER()` follows the database's
+ * collation, so on PostgreSQL it folds `É` to `é` and silently restores the
+ * Unicode fold #4706 Q1 = A rules out. SQLite's `lower()` happens to be
+ * ASCII-only, which is why measuring `LOWER()` on THIS container's engine
+ * proves nothing about the arm — the trap is a green SQLite reading standing in
+ * for a PostgreSQL one.
+ */
+function asciiLowerReplaceSql(expr: string): string {
+  let out = expr;
   for (let i = 0; i < ASCII_UPPER_LETTERS.length; i++) {
     out = `REPLACE(${out}, '${ASCII_UPPER_LETTERS[i]}', '${ASCII_LOWER_LETTERS[i]}')`;
   }
@@ -301,9 +376,16 @@ export function textMatchPredicateSql(req: TextMatchRequest): string {
   }
 
   // `postgres` — where LIKE is already case-exact — and `unknown`, the residue.
-  // [#15780] The fold here is the `translate()` this package has always emitted
-  // ({@link asciiLowerSqlExpr}); on these two arms it was never the defect, so
-  // the correct diff is no diff.
-  const folded = (expr: string) => (fold ? asciiLowerSqlExpr(expr) : expr);
+  // The CONSTRUCT is shared: `LIKE` over an escaped pattern with a bound
+  // `ESCAPE`. Only the FOLD's spelling differs, and only when there is a fold at
+  // all — for the case-EXACT four `folded` is the identity on both, so those
+  // arms emit one set of bytes here as they always have.
+  //
+  // [#15780 → #16028] `postgres` keeps `translate()`, which is correct there and
+  // whose bytes must not move. `unknown` cannot: it is every dialect nothing
+  // answered for — SQLite and MySQL/MariaDB included — and `translate()` exists
+  // on neither, so the residue arm's fold has to be the portable one.
+  const asciiLower = dialect === 'postgres' ? asciiLowerSqlExpr : asciiLowerReplaceSql;
+  const folded = (expr: string) => (fold ? asciiLower(expr) : expr);
   return `${folded(column)} ${keyword} ${folded(bind(likePattern(shape, value)))} ESCAPE ${bind(LIKE_ESCAPE_CHAR)}`;
 }
