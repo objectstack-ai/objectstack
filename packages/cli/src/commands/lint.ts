@@ -98,7 +98,31 @@ function checkLabelExists(item: any, path: string, kind: string): LintIssue | nu
   return null;
 }
 
-function checkLabelCase(label: string, path: string): LintIssue | null {
+// A label is not required to be a string. `I18nLabelSchema` (spec
+// `ui/i18n.zod`) is `z.union([z.string(), InlineLocaleMapSchema])`, and it is
+// the label primitive the whole `ui/` tree imports — so of the four carriers
+// this rule is called on, two accept the inline locale map:
+// `views[].list.label` / `views[].listViews.*.label` (`ListViewShapeSchema`)
+// and `apps[].label` (`AppSchema`). The other two are `z.string()` and reject
+// the map at the schema door (`objects[].label`, `objects[].fields.*.label`).
+//
+// Every call site reaches this function through `any`-typed config walking, so
+// the annotation below used to say `string` and be wrong: on a map,
+// `label[0]` is `undefined` and `undefined.toUpperCase()` threw. The throw
+// escaped `lintConfig` into the command's catch-all, so an author who
+// localized an app or list-view label could not lint the project at all —
+// every face exited 1 naming no rule, no path and no remedy, on input
+// `ObjectStackDefinitionSchema` parses clean.
+//
+// ⛔ The guard deliberately says NOTHING about a localized label rather than
+// resolving the map and case-checking an entry. Case is a property of a
+// literal; picking WHICH locale entry a case verdict is taken against is a
+// product decision (`resolveI18nLabel` exists, but which entry is
+// authoritative for a lint verdict is not this rule's to answer). Widening
+// the rule to localized labels is an extension, filed separately; this guard
+// is the floor, and it leaves the string branch below byte-identical.
+function checkLabelCase(label: unknown, path: string): LintIssue | null {
+  if (typeof label !== 'string') return null;
   if (label && label[0] !== label[0].toUpperCase()) {
     return {
       severity: 'warning',
@@ -111,7 +135,11 @@ function checkLabelCase(label: string, path: string): LintIssue | null {
   return null;
 }
 
-function getViewLabel(view: any, viewPath: string): { label?: string; path: string } {
+// ⚠️ `label` is `unknown`, not `string`: it is read straight off `any`-typed
+// config and `ListViewShapeSchema.label` is `I18nLabelSchema`, so the value
+// can legitimately be an inline locale map. Annotating it `string` here is
+// what let the map reach `checkLabelCase`'s indexing unchecked.
+function getViewLabel(view: any, viewPath: string): { label?: unknown; path: string } {
   if (view?.list?.label) {
     return { label: view.list.label, path: `${viewPath}.list.label` };
   }

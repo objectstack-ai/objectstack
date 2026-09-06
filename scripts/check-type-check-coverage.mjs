@@ -1165,50 +1165,97 @@ const TEST_DEBT = {
 // still does not: measured on the way out, its test layer holds ZERO
 // `@ts-expect-error` directives, so that half had no subject here either.
 
-  '@objectstack/mcp': {
-    errors: 53,
-    note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
-      + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
-      + 'mcp-http-tools.scopes.test.ts, 6 in mcp-validate-expression.test.ts); TS6133 x1; TS2352 x1. '
-      + 'RE-TALLIED from tsc at the 53 below (62b2655d8) and unchanged class for class, which is why the '
-      + 'composition above is kept rather than rewritten: the 51 TS18046 sit in exactly those four files '
-      + 'in exactly those counts. The two singletons the old tally named by class without saying where '
-      + 'are src/skill-prompts.test.ts(185,23) for the TS2352 and '
-      + 'src/__tests__/mcp-server-runtime.test.ts(7,1) for the TS6133 (`MCPServerRuntimeConfig` declared, '
-      + 'never read). '
-      + 'Measured 52 at 5ab08428 -> 53 at 34558c2cc. This entry WAS the fifth bootstrap margin and the '
-      + 'one the ratchet found on its OWN introducing PR: #5278 reached the merge queue and was kicked '
-      + 'at 03:25:18Z on this single +1, which is not #6077\'s doing (that PR\'s own queue generation '
-      + 'was green) but a pre-existing drift no gate in this repo could see until the ledger was '
-      + 're-measured against a moving base. The +1 is fully attributed: '
-      + 'src/skill-prompts.test.ts(185,23), a TS2352 casting `SkillPrompt | null` to `Record< string, '
-      + 'unknown >` -- the file #3905 / PR #6077 added when it projected skill `instructions` as MCP '
-      + 'prompt primitives, which is also why this package\'s hidden test-file count moved up by one '
-      + '(the count itself is derived by this gate, not recorded here -- #5826). The old note\'s composition '
-      + 'was misleading in the way the top of this ledger warns about: it read "`error` is of type '
-      + 'unknown, one catch-block idiom", while all 51 are the response-body `json` binding, not a '
-      + 'catch block. packages/mcp took a feature landing the same day, so it is an actively-moving '
-      + 'package and an exact number here would very likely lose the same race that killed option D '
-      + 'five times over. THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 63 -> 53 onto '
-      + 'the exact measurement; RECORDED 63 was that margin (+10 over 53 measured at 34558c2cc) and this '
-      + 'sentence is its history, not this entry\'s present state. RECORDED now equals what tsc reports, '
-      + 're-confirmed at 53 at 62b2655d8, so the next new error in this package goes red on arrival -- '
-      + 're-establishing a margin deliberately remains a maintainer call (#5278 option A).',
-  },
-  '@objectstack/formula': {
-    errors: 17,
-    note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1. Re-measured 17 '
-      + 'at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again '
-      + 'rather than five new defects. The TS2739 was inside that 17 from the start and simply went '
-      + 'UNLISTED, so this tally read 16 over a field of 17 until #13631 re-measured 17 at cc837dbfec '
-      + 'and restored it -- COMPOSITION reads tier itemisations and does not sum per-code tallies, so '
-      + 'nothing mechanical read the gap. It is the only one of the 17 in `src/cel-to-filter.test.ts` '
-      + '(173,52), where the local `ok()` helper pins its second argument to the exact shape of the '
-      + 'module-level `VARS` and a partial context cannot satisfy it; the same file already carries a '
-      + 'hand-widened copy of that helper (`filterOf`) written for exactly that reason.',
-  },
-  '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
-  '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
+// ── #12511: SEVEN packages GRADUATED at once, and not one of them was paid down
+//
+// `mcp` (53), `formula` (17), `platform-objects` (3), `connector-mcp` (5),
+// `connector-openapi` (5), `connector-rest` (1) and `service-sms` (1) left this
+// ledger on 2026-09-06, by the same route as `runtime`, `cli`, `lint`,
+// `driver-mongodb`, `verify` and the three plugins: each now has a
+// `tsconfig.test.json` its own `typecheck` script NAMES, so `hidesTests` is
+// false for it and this gate's per-PACKAGE approximation has nothing left to
+// approximate. ⛔ Read that first — a deleted TEST_DEBT entry normally means the
+// errors are gone, and here it does not. This change repairs no test file and
+// edits none.
+//
+// ⚠️ SEVEN IN ONE CHANGE IS NOT A BLANKET EDIT, and that distinction is the
+// whole reason the card ordering this refused one. Each sibling config was
+// written against its OWN measured hole and states its own reading in its own
+// header; the judgement genuinely diverged on both axes that matter here:
+//
+//   - MODULE SEMANTICS. `mcp` is `"type": "module"`, so NodeNext already reads
+//     its tests as ESM and is the STRICTER of the two readings — its sibling
+//     therefore changes module semantics NOT AT ALL, which is
+//     `packages/metadata-core`'s precedent rather than `packages/rest`'s. The
+//     other six are not `"type": "module"`, so NodeNext compiles as CJS what
+//     vitest executes as ESM, and their siblings carry `module: esnext` /
+//     `moduleResolution: bundler` for fidelity to the runtime.
+//   - THE MEASURED SUBTRACTION, which is ZERO for six of the seven. The
+//     remedy that "obviously" dissolves a config-tier pile dissolved one only
+//     where the pile was actually there, and 8 mechanical copies of any one of
+//     these configs would have been 8 configs nobody measured.
+//
+// The attribution has no remainder in either direction. RAW is re-measured on
+// the way out through this gate's own `remeasureProject` shape (extends the
+// package's `tsconfig.json`, drops ONLY the test glob) at 6a1e38244 with the
+// dependency closure built; LEDGER is what `tsconfig.test.json` reports at
+// 52a5a14e7 on that same closure. An error count taken against an unbuilt
+// closure is not a reading — unresolved-import cascades inflate it.
+//
+//   package             RECORDED  RAW  dissolve  exposed  LEDGER
+//   mcp                       53   53         0        0      53
+//   formula                   17   17        -2        0      15
+//   platform-objects           3    3         0        0       3
+//   connector-mcp              5    5         0        0       5
+//   connector-openapi          5    5         0        0       5
+//   connector-rest             1    1         0        0       1
+//   service-sms                1    1         0        0       1
+//
+// RECORDED equalled RAW for all seven, class for class and file for file, so
+// every number this ledger held was exact and stayed exact to the end. The
+// identical populations are now held one level finer, per FILE and per
+// SIGNATURE, in each package's own `test-typecheck-debt.json`.
+//
+// The single dissolution is `formula`'s TS1470 x2 ("`import.meta` is not
+// allowed in files which will build into CommonJS output",
+// `src/rls-predicate.test.ts` and `src/skill-catalog-sync.test.ts`), which goes
+// away under `module: esnext` because it was the CHECK being misconfigured and
+// never the tests. NOTHING was exposed behind it: there was no unresolved-import
+// cascade to collapse in any of the seven, so there is no `+n` term anywhere in
+// the table.
+//
+// ⚠️ ONE COMPOSITION CORRECTION, recorded because the next reader would
+// otherwise go looking for the wrong thing: `formula`'s deleted note attributed
+// its TS2591 x6 to «`process`». Measured here, all six are the bare module
+// specifiers of node builtins — `node:fs` x2, `node:path` x2, `node:url` x2, in
+// those same two files — and the TS2339 x2 beside them are `Property 'url' does
+// not exist on type 'ImportMeta'`. Both classes SURVIVE the move and are
+// ledgered: this package declares no `@types/node` and its tsconfig names no
+// `types`, so the node typings never reach its program. That is real debt with a
+// real repair, and ⛔ it is deliberately NOT repaired here — seeding the ledger
+// is the deliverable, and turning an onboarding into a cleanup is how it stops
+// landing at all.
+//
+// ⚠️ PINS_CHECKED reported nothing for any of the seven in either direction and
+// still does not: their test layers hold ZERO `@ts-expect-error` directives
+// (grepped with a positive control — the same grep hits `packages/spec/src`), so
+// that half had no subject here. What the gap cost was the other half: 83
+// diagnostics that no gate this repo runs had ever reported.
+//
+// ⛔ WHAT DID NOT GRADUATE, and why it is still below: `@objectstack/http-conformance`.
+// Its 2 recorded errors reproduce exactly (TS2307 x1, TS2304 x1) and its own
+// note already says what they are — both inside `node_modules` `.d.ts` files, so
+// the entry moves with the lockfile rather than with this package's code. The
+// reason it cannot take the sibling route unchanged is one this file did not
+// record before: `packages/qa/http-conformance/tsconfig.json` is one of the six
+// package configs that do NOT extend the repo root config, and it is the only
+// one of those that also declares no `skipLibCheck` — which is the sole reason
+// those two third-party declarations are checked at all. Ledgering them per FILE
+// would key a shrink-only ratchet on `.pnpm` content-hash paths that move on any
+// unrelated dependency bump, and turning `skipLibCheck` on in a test program has
+// no precedent among the 31 sibling configs (none declares it). That is a
+// judgement about this repo's config policy rather than about this package, so
+// it is left to the card.
+
   '@objectstack/http-conformance': {
     errors: 2,
     note: 'TS2307 x1, TS2304 x1, and BOTH are reported inside node_modules `.d.ts` files '
@@ -1228,9 +1275,6 @@ const TEST_DEBT = {
       + 'gate refreshes and refuses on -- the number dropped because the program became well-defined, '
       + 'not because anything was suppressed.',
   },
-  '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
-  '@objectstack/connector-rest': { errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are

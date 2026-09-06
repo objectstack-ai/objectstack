@@ -95,6 +95,7 @@ import {
   unprovisionedAnchorCause,
   unprovisionedAnchorHint,
 } from './system-fields.js';
+import { recordsOf } from './object-graph.js';
 
 // The TypeScript compiler must NOT be imported at module top level: it is
 // ~9 MB of CJS, and @objectstack/lint sits on the kernel boot path — while
@@ -382,18 +383,6 @@ type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => isRec(x));
-  if (isRec(v)) {
-    return Object.entries(v).map(([name, def]) => ({
-      name,
-      ...(isRec(def) ? def : {}),
-    }));
-  }
-  return [];
-}
-
 /**
  * object name → its declared field names (both `fields` authoring shapes).
  *
@@ -402,11 +391,11 @@ function asArray(v: unknown): AnyRec[] {
  */
 export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = typeof obj.name === 'string' ? obj.name : undefined;
     if (!name) continue;
     const names = new Set<string>();
-    for (const f of asArray(obj.fields)) {
+    for (const f of recordsOf(obj.fields)) {
       if (typeof f.name === 'string' && f.name) names.add(f.name);
     }
     out.set(name, names);
@@ -725,7 +714,7 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
  */
 export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
   const findings: HookBodyWriteFinding[] = [];
-  const hooks = asArray(stack.hooks);
+  const hooks = recordsOf(stack.hooks);
   if (hooks.length === 0) return findings;
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.

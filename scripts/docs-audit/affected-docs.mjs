@@ -201,7 +201,15 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 // The one answer to "is this span a comment, or code?" (#9367). Dependency-free and
 // side-effect-free on import, so the no-install contract this script runs under holds.
-import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
+// `codeOnly` IS the tree's one comments+literals projection (#15776), imported
+// under this file's own name rather than re-derived here: `js-comment-mask.mjs`
+// owns the projections and its `--self-test` pins this one. Every scan below and
+// the prose that explains them read `codeOnly`, so the name stays.
+//
+// The quote characters SURVIVE the blanking, which is the property `unreadableIn`
+// rides on: a value that still opens with a quote here is one the recognizer or
+// `declinedIn` already accounts for, and a value that does not is one nothing has read.
+import { maskComments, maskCommentsAndLiterals as codeOnly } from '../js-comment-mask.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -2204,22 +2212,6 @@ function scanRouteSurface() {
   }
 
   return { conventionFiles, routeSources, sourceFiles, ledgers, ledgerRows, routeSourceByTail };
-}
-
-/**
- * The source with comments AND string/template/regex CONTENTS blanked, quotes and all other
- * code bytes kept in place. Both masks come from the one answer to "is this span code?"
- * (`js-comment-mask.mjs`), so this cannot drift from what the rest of the repo means by it.
- *
- * The quote characters SURVIVE the blanking, which is the property `unreadableIn` rides on:
- * a value that still opens with a quote here is one the recognizer or `declinedIn` already
- * accounts for, and a value that does not is one nothing has read.
- */
-function codeOnly(source) {
-  const { comment, literal } = scanSource(source);
-  const both = new Uint8Array(comment.length);
-  for (let i = 0; i < both.length; i++) both[i] = comment[i] || literal[i];
-  return blank(source, both);
 }
 
 /**

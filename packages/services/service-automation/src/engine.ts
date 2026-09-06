@@ -7877,6 +7877,40 @@ export class AutomationEngine implements IAutomationService {
                     steps.push(...carriedSteps);
                 }
 
+                // #14955 — publish the failure BEFORE deciding whether it
+                // routes, exactly as the returned-failure arm below does.
+                //
+                // This write used to sit inside `if (faultEdge)`, and no reason
+                // for that was ever recorded: both arms were written in one
+                // commit, and only this one conflated "publish the failure" with
+                // "route the failure" — the arm below already separated them.
+                // The consequence was invisible rather than loud. A node inside a
+                // region never has a `fault` edge of its own (the region's
+                // synthetic sub-flow carries only the region's own edges — see
+                // {@link AutomationEngine.runRegion}), so EVERY thrown failure
+                // inside a region left `$error` naming an earlier, unrelated
+                // failure. The first reader that cared about `$error`'s freshness
+                // — `try_catch`'s `code` binding (#14419) — met it immediately
+                // and bound a message and a code that came from two different
+                // failures: `{ code: 'DUPLICATE_RECORD', message: "Node 'mk'
+                // timed out after 20ms" }`, swallowed by a catch region reading
+                // it as "the row is already there", the run reporting success.
+                //
+                // `{ nodeId, message }` and nothing more: there is no
+                // `NodeExecutionResult` on this path, so no `output` and no
+                // classified `code` exist to carry — and that absence is the
+                // correct answer for a throw, not a reason to leave a stale
+                // `code` standing. This is what the documented contract already
+                // promised — `{$error}` names the most recent failure
+                // (`content/docs/automation/flows.mdx`) — and now holds.
+                //
+                // Publishing is not routing: the guard-refusal rule below is
+                // untouched and still decides, alone, which failures a `fault`
+                // edge may carry. Nor is the thrown value touched — `execErr` is
+                // rethrown below exactly as caught.
+                variables.set('$error', { nodeId: node.id, message: errMsg });
+                this.setNodeError(variables, node.id, errMsg);
+
                 // #3863 — a guard that THROWS is as un-routable as one that
                 // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
                 // that the metadata would run unscoped, and rerouting it would
@@ -7885,8 +7919,6 @@ export class AutomationEngine implements IAutomationService {
                     ? undefined
                     : flow.edges.find(e => e.source === node.id && e.type === 'fault');
                 if (faultEdge) {
-                    variables.set('$error', { nodeId: node.id, message: errMsg });
-                    this.setNodeError(variables, node.id, errMsg);
                     const faultTarget = flow.nodes.find(n => n.id === faultEdge.target);
                     if (faultTarget) {
                         await this.executeNode(faultTarget, flow, variables, context, steps);
