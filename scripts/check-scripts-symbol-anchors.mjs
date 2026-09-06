@@ -71,8 +71,9 @@
  * source no in-repo resolver could ever check. ⛔ Not one digit was repaired or
  * repointed; every number that was in an anchor is still on its page, as data.
  *
- * The residual after that migration is 15, and every one of them is a file
- * another lane holds OPEN right now -- not an ambiguity. ⚠️ That is why the
+ * The residual when that landed was 15, and every one of them was a file
+ * another lane held OPEN at that moment -- ⛔ not one was an ambiguity. That
+ * count is a DATED reading; `--list-unresolvable` is the live one. ⚠️ It is why the
  * flag is still `false`: the fence #15809 was dispatched under is that it flips
  * only when the residual is ZERO and a self-test pins the flip, and a residual
  * of 15 would make this gate permanently red for the length of somebody else's
