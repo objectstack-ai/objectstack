@@ -541,7 +541,7 @@ export class ObjectKernel {
     /**
      * Per-plugin startup durations: plugin name -> elapsed milliseconds that
      * plugin's `start()` took. Not start instants -- see
-     * {@link PluginStartupResult.duration}.
+     * {@link PluginStartupResult.durationMs}.
      */
     getPluginStartupDurations(): Map<string, number> {
         return new Map(this.pluginStartupDurations);
@@ -709,7 +709,7 @@ export class ObjectKernel {
             return {
                 success: true,
                 pluginName: plugin.name,
-                duration,
+                durationMs: duration,
                 // Deprecated alias carrying the same elapsed value; see
                 // PluginStartupResult.startTime.
                 startTime: duration,
@@ -722,7 +722,7 @@ export class ObjectKernel {
                 success: false,
                 pluginName: plugin.name,
                 error: error as Error,
-                duration,
+                durationMs: duration,
                 // Deprecated alias carrying the same elapsed value; see
                 // PluginStartupResult.startTime.
                 startTime: duration,

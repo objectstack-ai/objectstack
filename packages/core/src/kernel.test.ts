@@ -617,7 +617,7 @@ describe('ObjectKernel', () => {
             await kernel.shutdown();
         });
 
-        it('PluginStartupResult.duration is an elapsed duration on both the success and the failure path', async () => {
+        it('PluginStartupResult.durationMs is an elapsed duration on both the success and the failure path', async () => {
             const callStart = (meta: PluginMetadata): Promise<PluginStartupResult> =>
                 (kernel as unknown as {
                     startPluginWithTimeout(p: PluginMetadata): Promise<PluginStartupResult>;
@@ -634,10 +634,10 @@ describe('ObjectKernel', () => {
             const ok = await callStart(okMeta);
 
             expect(ok.success).toBe(true);
-            expect(ok.duration).toBeGreaterThan(0);
-            expect(ok.duration).toBeLessThan(INSTANT_FLOOR_MS);
+            expect(ok.durationMs).toBeGreaterThan(0);
+            expect(ok.durationMs).toBeLessThan(INSTANT_FLOOR_MS);
             // The deprecated alias carries the same elapsed value, not an instant.
-            expect(ok.startTime).toBe(ok.duration);
+            expect(ok.startTime).toBe(ok.durationMs);
 
             const failingMeta: PluginMetadata = {
                 name: 'failing-plugin',
@@ -650,9 +650,9 @@ describe('ObjectKernel', () => {
             const failed = await callStart(failingMeta);
 
             expect(failed.success).toBe(false);
-            expect(failed.duration).toBeGreaterThanOrEqual(0);
-            expect(failed.duration).toBeLessThan(INSTANT_FLOOR_MS);
-            expect(failed.startTime).toBe(failed.duration);
+            expect(failed.durationMs).toBeGreaterThanOrEqual(0);
+            expect(failed.durationMs).toBeLessThan(INSTANT_FLOOR_MS);
+            expect(failed.startTime).toBe(failed.durationMs);
         });
     });
 
