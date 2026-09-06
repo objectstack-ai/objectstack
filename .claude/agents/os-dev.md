@@ -35,7 +35,7 @@ model: opus
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
    - 你恒不写 assignee;到手时它为空照常开工,报进 `summary`。
    - 发现与他人在途工作重复,停下报 `blocked`。
-   - PR 上不是你设置的状态属于另一个 actor:去问,⛔ 永不去纠正。
+   - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
 3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的无 assignee issue。
@@ -276,19 +276,19 @@ model: opus
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。
-- squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
 - 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
+- 认领写 `Clause-②: yes` ⇒ 开 PR 同笔挂 `needs:contract-review`,报告附 `--pair N` 退出码。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
 - 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
-- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行。
-- 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化只随净减内容的 PR。
-- 分界只问折行有没有为新增内容买行,门禁分不出两种 net-0。
+- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
+- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
+- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
 - `skip-changeset` 标签按仓库分流,先认清目标仓有没有这个机制;判据:不从任何包发布东西。
 - 例:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根工具配置 · 私有 workspace · 注释。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
