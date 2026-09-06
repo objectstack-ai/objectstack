@@ -104,6 +104,7 @@ import {
   SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
 } from '../src/commands/init.js';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -120,13 +121,22 @@ afterAll(() => {
 const PROJECT_NAME = 'my-app';
 const STEM = 'probe_thing';
 
-/** Run the emitted project's own `typecheck` script: `tsc --noEmit`. */
+/**
+ * Run the emitted project's own `typecheck` script: `tsc --noEmit`.
+ *
+ * The child's environment is DECLARED (`check:cli-test-child-env`, #11595):
+ * every spawn under `packages/cli/test/**` owes one, so that what a child
+ * inherits is legible at the call site rather than being the vitest worker's
+ * environment by default. `childEnv()` is this directory's choke point — the
+ * environment minus the `VITEST_*` family — and `NO_COLOR` pairs with
+ * `--pretty false` to keep tsc's diagnostics greppable in the failure message.
+ */
 function typecheckProject(root: string): { code: number; output: string } {
   const tscBin = createRequire(import.meta.url).resolve('typescript/bin/tsc');
   const res = spawnSync(
     process.execPath,
     [tscBin, '--pretty', 'false', '--noEmit', '-p', root],
-    { cwd: root, encoding: 'utf-8' },
+    { cwd: root, encoding: 'utf-8', env: childEnv({ NO_COLOR: '1' }) },
   );
   return { code: res.status ?? 1, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
 }
