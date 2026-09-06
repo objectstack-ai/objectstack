@@ -71,6 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
+import { declarationStampState as declarationStampStateFor } from './check-dev-prereqs.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
@@ -134,14 +135,77 @@ function newestMtime(dir, pred, depth = 0) {
 }
 
 /**
+ * Did a declaration-emitting build produce `specDir/dist` from the sources on
+ * disk right now? `match` / `mismatch` / `unstamped` — the reader's docblock in
+ * `check-dev-prereqs.mjs` is the authority on what each verdict means and why
+ * every way of not knowing collapses into `unstamped`.
+ *
+ * Re-exported through this module because `dist-freshness.ts` needs it to NAME
+ * the cause in a refusal, and this file is already the one place `packages/spec`
+ * gates import freshness from. Wrapped rather than re-exported raw so the repo
+ * root is supplied here — a caller that had to pass it could pass the wrong one,
+ * and hashing against the wrong root reads as `mismatch`, which is a refusal
+ * nobody can act on.
+ */
+export function declarationStampState(specDir = SPEC_DIR) {
+  try {
+    return declarationStampStateFor(REPO_ROOT, specDir);
+  } catch {
+    return 'unstamped';
+  }
+}
+
+/**
  * Is `packages/spec/dist` older than the sources it claims to describe? Missing
  * counts as stale. Deliberately conservative: a false "stale" costs a build, a
  * false "fresh" costs a silently wrong artifact.
+ *
+ * ## The mtime rule accuses; the declaration stamp may acquit
+ *
+ * mtimes are the right primitive here and remain the only one that can convict:
+ * they key on `dist/**` + `.d.ts` against `src/**` + `.ts`, the artifact these
+ * gates actually consume, and they see the hand-edited dist and the toolchain
+ * change that a content digest is blind to.
+ *
+ * What they cannot see is that a rewrite left the BYTES alone. `git merge`,
+ * `git checkout` and `git worktree add` all re-check-out unchanged sources and
+ * bump their mtimes, and the build that follows correctly does not run —
+ * turbo's cache hashes content, so it is a cache hit (measured: `>>> FULL
+ * TURBO`, 56ms) that rewrites nothing, leaving every `dist/` mtime where the
+ * previous build left it. The tree is exactly current and this rule said stale:
+ * a refusal whose only remedy was a full rebuild — minutes — of a dist that was
+ * already correct, under a message naming a cause (`OS_SKIP_DTS=1`) that had
+ * nothing to do with it.
+ *
+ * So the accusation now gets one chance to be answered, by the one piece of
+ * evidence that speaks to exactly this: `dist/.build-input-hash-dts`, written by
+ * a build that DID emit declarations, over the digest of the inputs it emitted
+ * them from. Equal to the inputs on disk ⇒ the declarations describe these
+ * sources ⇒ fresh.
+ *
+ * ## Why this is not #7122's rejected direction
+ *
+ * #7122 proposed replacing this rule with `dist/.build-input-hash`, and that was
+ * measured to be wrong in the dangerous direction: that stamp is written by
+ * EVERY build, `OS_SKIP_DTS=1` included, so it says fresh on the one local flag
+ * that guarantees these declarations are stale. Two things keep this different:
+ *
+ *   - the digest read here is a DIFFERENT file, written only by a build that
+ *     emitted declarations. The `OS_SKIP_DTS=1` build does not refresh it, so
+ *     the shape #7122 named still convicts (pinned in `dist-freshness.test.ts`);
+ *   - it may only ever ACQUIT. `unstamped` — no stamp, unreadable, or a package
+ *     whose build does not stamp at all — leaves the mtime verdict standing, so
+ *     the change can only ever turn a refusal into a pass, never a pass into a
+ *     refusal, and every acquittal carries a digest anyone can recompute.
+ *
+ * The digest costs ~30ms over `packages/spec/src`, and it is spent only on the
+ * branch that was previously about to cost a full rebuild.
  */
 export function distIsStale(specDir = SPEC_DIR) {
   const dist = newestMtime(join(specDir, 'dist'), (n) => n.endsWith('.d.ts'));
   if (!dist) return true;
-  return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts')) > dist;
+  if (newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts')) <= dist) return false;
+  return declarationStampState(specDir) !== 'match';
 }
 
 /**

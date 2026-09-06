@@ -124,6 +124,13 @@
  *       so; the declarations may not be. This gate has never probed `.d.ts`
  *       (dev boot needs JS), and AGENTS.md §9 already names the flag as the one
  *       that cannot serve `gen:api-surface`. Recorded, not silently inherited.
+ *       STILL TRUE OF THIS GATE, and it stays that way: `pnpm dev` boots JS, so
+ *       narrowing THIS verdict on account of the declarations would be a false
+ *       red on the documented fast local build. What changed is that the hole is
+ *       no longer unattended — `--stamp` now writes a SECOND file next door,
+ *       `dist/.build-input-hash-dts`, which it skips under this flag exactly so
+ *       that a `.d.ts` reader can tell the two builds apart. Nothing here reads
+ *       it; see DTS_STAMP_BASENAME and `declarationStampState` below.
  *     - A HAND-EDITED dist. The hash covers inputs, not outputs. Nothing here
  *       can see someone editing `dist/index.mjs` directly, and nothing should
  *       have to.
@@ -237,6 +244,7 @@ import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
+import { isEntrypoint } from './invoked-as.mjs';
 import {
   WorkspaceEnumerationError,
   selfTest as workspaceEnumeratorSelfTest,
@@ -303,6 +311,33 @@ const AMPLIFIERS = ['packages/spec'];
 
 /** Where a build records the hash of the inputs it was built from. */
 const STAMP_BASENAME = '.build-input-hash';
+
+/**
+ * Where a build records that its DECLARATION pass ran, and over which inputs.
+ *
+ * Same digest, same writer, same directory as STAMP_BASENAME. The only
+ * difference is WHEN it is written — and that difference is the whole point:
+ * `--stamp` skips this file under `OS_SKIP_DTS=1`, the build flag that emits JS
+ * and leaves whatever `.d.ts` was there before. So this stamp asserts something
+ * STAMP_BASENAME cannot: *the declarations on disk were emitted from inputs with
+ * this digest*.
+ *
+ * Written because a second consumer needs that fact and only that fact.
+ * `distIsStale` in scripts/check-regen-pending.mjs answers "may a gate read
+ * `<pkg>/dist/**\/*.d.ts` and believe it" from mtimes, which is conservative in
+ * the right direction but fires on any rewrite that leaves the bytes alone — a
+ * `git merge` or `git checkout` that re-checks-out an UNCHANGED source bumps its
+ * mtime, and the build then legitimately does not run (turbo's cache hashes
+ * content, so it is a cache hit that rewrites nothing), leaving the gate
+ * refusing a dist that is in fact exactly current. `declarationStampState`
+ * below is the evidence that clears that one case, and only that one case.
+ *
+ * ⛔ It is NOT a replacement for the mtime rule and must never become one: the
+ * digest cannot see a hand-edited dist, a toolchain change or dependency drift,
+ * which is why it may only ever ACQUIT a tree the mtime rule has already
+ * accused, never accuse one the mtime rule cleared.
+ */
+const DTS_STAMP_BASENAME = '.build-input-hash-dts';
 
 /** What an amplifier's build script must contain for its stamp to be maintained. */
 const STAMP_INVOCATION = 'check-dev-prereqs.mjs --stamp';
@@ -618,7 +653,67 @@ function stamp(root, cwd, amplifiers = AMPLIFIERS) {
   const hash = buildInputHash(root, dir);
   writeFileSync(path.join(dist, STAMP_BASENAME), `${hash}\n`);
   console.log(`✓ ${relDir}/dist/${STAMP_BASENAME} ← ${hash.slice(0, 16)}…`);
+
+  // The declarations half, written ONLY by a build that actually emitted them.
+  // Under OS_SKIP_DTS=1 the previous file is left exactly as it was: whatever
+  // `.d.ts` are on disk still came from the build that wrote it, so the old
+  // digest is the true one and refreshing it here is precisely the false green
+  // this stamp exists to avoid.
+  if (process.env.OS_SKIP_DTS) {
+    console.log(
+      `ℹ ${relDir}/dist/${DTS_STAMP_BASENAME} left as-is — OS_SKIP_DTS=1 skipped the declaration pass,\n` +
+        `  so this build cannot vouch for ${relDir}/dist/**/*.d.ts.`,
+    );
+    return 0;
+  }
+  writeFileSync(path.join(dist, DTS_STAMP_BASENAME), `${hash}\n`);
+  console.log(`✓ ${relDir}/dist/${DTS_STAMP_BASENAME} ← ${hash.slice(0, 16)}…`);
   return 0;
+}
+
+/**
+ * Did a declaration-emitting build produce THIS dist from THESE sources?
+ *
+ * The reader for DTS_STAMP_BASENAME, exported because the caller that needs it
+ * is `distIsStale` in scripts/check-regen-pending.mjs — and it has to be THIS
+ * function over THIS hash, or the comparison means nothing (the same argument
+ * that keeps `--stamp` in this file rather than in a script of its own).
+ *
+ * Three verdicts, and the asymmetry between them is deliberate:
+ *
+ *   - `match`     the recorded digest equals the inputs on disk right now, so
+ *                 the declarations describe exactly these sources. This is the
+ *                 ONLY verdict that may clear an mtime accusation.
+ *   - `mismatch`  a declaration-emitting build ran, and the sources have moved
+ *                 since. Nameable in a refusal message: this is not an mtime
+ *                 artefact, the content really did change.
+ *   - `unstamped` NO EVIDENCE — no stamp, an unreadable one, a digest that
+ *                 cannot be computed, or a package whose build does not stamp
+ *                 at all. Every one of those collapses to the same answer on
+ *                 purpose: "cannot vouch" must never read as "vouched for"
+ *                 (#4690), and absence of the input is not licence to acquit.
+ *
+ * It never throws: it is called from inside a freshness predicate whose failure
+ * direction is a silently wrong artifact, so an unreadable tree has to degrade
+ * to `unstamped` rather than take the caller down.
+ */
+export function declarationStampState(root, pkgDir) {
+  const stampFile = path.join(pkgDir, 'dist', DTS_STAMP_BASENAME);
+  let stamped;
+  try {
+    if (!existsSync(stampFile)) return 'unstamped';
+    stamped = readFileSync(stampFile, 'utf-8').trim();
+  } catch {
+    return 'unstamped';
+  }
+  if (!/^[0-9a-f]{64}$/.test(stamped)) return 'unstamped';
+  let actual;
+  try {
+    actual = buildInputHash(root, pkgDir);
+  } catch {
+    return 'unstamped';
+  }
+  return stamped === actual ? 'match' : 'mismatch';
 }
 
 /**
@@ -958,28 +1053,36 @@ function selfTest() {
   return 0;
 }
 
-if (process.argv.includes('--self-test')) {
-  const selfTestCode = selfTest();
-  if (!selfTestReachedVerdict) {
-      console.error(
-          '\n✗ check-dev-prereqs self-test: selfTest() returned without reaching its verdict,\n'
-              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-              + 'that never finished as a self-test that passed.\n',
-      );
-      process.exit(1);
+// Guarded since `declarationStampState` above gained an importer
+// (scripts/check-regen-pending.mjs). Unguarded, importing this file ran the
+// whole workspace scan and then `process.exit`ed out of its consumer's process
+// — and `distIsStale`'s consumers include the pre-commit hook, so the damage
+// would not have been subtle. `isEntrypoint` is the repo's one spelling of this
+// question (scripts/invoked-as.mjs; `check:entry-guard` refuses a twelfth).
+if (isEntrypoint(import.meta.url)) {
+  if (process.argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+        console.error(
+            '\n✗ check-dev-prereqs self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+    process.exit(selfTestCode);
   }
-  process.exit(selfTestCode);
-}
 
-try {
-  if (process.argv.includes('--stamp')) {
-    process.exit(stamp(ROOT, process.cwd()));
+  try {
+    if (process.argv.includes('--stamp')) {
+      process.exit(stamp(ROOT, process.cwd()));
+    }
+    process.exit(report(inspect(ROOT)));
+  } catch (err) {
+    if (err instanceof CoverageError) {
+      console.error(`\n✗ check:dev-prereqs cannot enumerate the workspace, so it cannot vouch for the build.\n\n  ${err.message}\n`);
+      process.exit(1);
+    }
+    throw err;
   }
-  process.exit(report(inspect(ROOT)));
-} catch (err) {
-  if (err instanceof CoverageError) {
-    console.error(`\n✗ check:dev-prereqs cannot enumerate the workspace, so it cannot vouch for the build.\n\n  ${err.message}\n`);
-    process.exit(1);
-  }
-  throw err;
 }

@@ -11,7 +11,7 @@
 // guard exists to prevent — would type-check clean.
 //
 // Declared rather than inferred (no `allowJs`) because the module sits at the
-// repo root, outside the consuming program's `rootDir`. The surface is three
+// repo root, outside the consuming program's `rootDir`. The surface is four
 // functions with one optional argument; keep this file in step with them by
 // hand, and keep it small enough that doing so stays trivial.
 
@@ -22,6 +22,17 @@
  * @param specDir Absolute path to the spec package; defaults to this repo's.
  */
 export function distIsStale(specDir?: string): boolean;
+
+/**
+ * Did a declaration-emitting build produce `specDir/dist` from the sources on
+ * disk right now? `'match'` is the only verdict that clears an mtime
+ * accusation; `'unstamped'` is "no evidence" and covers every way of not being
+ * able to tell. Read the function's own docblock before reusing it — it may
+ * only ever ACQUIT a tree `distIsStale` has already accused.
+ *
+ * @param specDir Absolute path to the spec package; defaults to this repo's.
+ */
+export function declarationStampState(specDir?: string): 'match' | 'mismatch' | 'unstamped';
 
 /**
  * Is `packages/spec/json-schema` older than the sources it was generated from?
