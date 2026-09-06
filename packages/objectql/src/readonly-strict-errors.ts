@@ -157,8 +157,53 @@ function buildRefusalMessage(
   );
 }
 
+/**
+ * [#16159] The ADR-0112 `code` this file's refusal carries, as a constant a
+ * consumer can import instead of re-spelling.
+ *
+ * The docblock above already tells the reader to identify this refusal by
+ * `code` rather than `instanceof`, and
+ * `content/docs/kernel/contracts/data-engine.mdx` repeats the instruction to
+ * customers in its own words ("Catch it by `code`, not `instanceof`"). Until
+ * now the code was an inline string literal, so the only way to FOLLOW that
+ * published instruction was to RE-SPELL the string in the consumer's own
+ * package — which acquires a `check:error-code-provenance` stamp site there
+ * and can then drift from what this engine throws with no compile error to say
+ * so. The guidance and the surface disagreed; this closes that, and it is why
+ * this row was converted ahead of the others on #16159's table.
+ *
+ * ⛔ The string is byte-identical to the literal it replaces. This moves where
+ * a spelling lives, never what it says; renaming the code is a separate
+ * breaking decision and never a rider on this conversion.
+ *
+ * ⚠️ Unlike the other conversions on #16159, `ERR_READONLY_FIELD_REJECTED` is
+ * REGISTERED in `ERROR_CODE_LEDGER` under `@objectstack/objectql`, so this
+ * declaration is a `constdef` stamp site that `check:error-code-provenance`
+ * DOES see (it skips unregistered codes) — and it is listed under this
+ * package's own owner key, which is what makes that gate accept it. It is also
+ * why no row moves in `packages/runtime/src/dispatcher-error-vocabulary.ts`:
+ * that table records UNREGISTERED code sites, and a registered code is
+ * invisible to it by construction.
+ *
+ * The `_CODE` NAME and the bare `readonly code = READONLY_FIELD_REJECTED_CODE;`
+ * spelling are both load-bearing rather than cosmetic: the first is the shape
+ * `check:error-code-provenance`'s `constdef` pattern can see, the second is the
+ * shape `check:dispatcher-error-vocabulary` classifies as `classconst` (an
+ * `as const` suffix on the field would take it out of that pattern). ⛔ Never
+ * rename out of either shape to quiet a gate: a spelling a gate cannot see is
+ * the failure mode the gate exists to catch, not a clean result.
+ *
+ * Shape and placement follow the `*_CODE` constants already in this package;
+ * dropping the `ERR_` prefix from the CONSTANT's name follows the two
+ * `ERR_`-prefixed precedents here (`HOOK_TARGET_REBIND_ERROR_CODE` =
+ * `'ERR_HOOK_TARGET_REBIND'`, `SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE` =
+ * `'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED'`). Re-exported from the `index.ts`
+ * barrel and, like all of them, deliberately NOT from the lean `core.ts` entry.
+ */
+export const READONLY_FIELD_REJECTED_CODE = 'ERR_READONLY_FIELD_REJECTED' as const;
+
 export class ReadonlyFieldRejectedError extends Error {
-  readonly code = 'ERR_READONLY_FIELD_REJECTED' as const;
+  readonly code = READONLY_FIELD_REJECTED_CODE;
   constructor(
     public readonly object: string,
     public readonly fields: string[],
