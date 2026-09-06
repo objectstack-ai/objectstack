@@ -2165,6 +2165,72 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#15832] Drop a map entry for a run this process has a store-authoritative
+     * per-id "no row" answer for — a run parked HERE and consumed by another
+     * replica.
+     *
+     * ## Why this exists at all, and why not on the `'lost'` branch
+     *
+     * {@link forgetSuspendedRun} is the one eviction site, and it runs in
+     * whichever process CONSUMES the suspension. Put two replicas over one
+     * store and the parking process is routinely not that one: A parks a run
+     * and B resumes it, so A's entry is never removed by anything. The card
+     * that found this located the leak on `resumeInternal`'s `'lost'` branch,
+     * which returns before that choke point — but the NO-RACE shape leaks
+     * identically (A parks, only B ever resumes, A never attempts a claim and
+     * there is no `'lost'` at all), so an eviction hung on `'lost'` alone would
+     * leave the ordinary multi-replica deployment untouched.
+     *
+     * The retained snapshot is not only memory. Two readers hand it back:
+     * {@link listSuspendedRuns} — synchronous, cache-only, and the one listing
+     * on the `AutomationService` spec contract — and
+     * {@link listSuspendedRunsDurable}, which deliberately appends map entries
+     * the durable list lacks. After the other replica COMPLETES the run both
+     * report a phantom: a finished run listed as suspended, whose
+     * {@link getSuspendedScreen} answers `null`, so a consumer that lists and
+     * then opens gets an entry it cannot act on.
+     *
+     * ## What this does NOT do
+     *
+     * ⛔ It does not touch the cache-only listing's contract. The spec says
+     * `listSuspendedRuns()` lists "the currently suspended (paused) runs
+     * awaiting a resume"; this engine's own docblock adds only that it may
+     * OMIT runs (those parked in a previous process lifetime) because it reads
+     * the cache alone. Removing an entry therefore moves nothing: under-
+     * reporting is already inside that declared latitude, and over-reporting
+     * was never inside the promise. Nothing here makes either listing
+     * store-backed.
+     *
+     * ⛔ It does not notify the paused node's executor
+     * ({@link NodeExecutor.onSuspensionReleased}). That notification belongs to
+     * {@link forgetSuspendedRun} because it is the choke point every
+     * CONSUMPTION passes through, and an eviction is not a consumption — this
+     * process consumed nothing, the replica that did fired its own. Firing one
+     * here would tear down a pause twice, once per replica.
+     *
+     * ## The two guards, and why each is load-bearing
+     *
+     *  - **no store** — the map IS the authority (`loadSuspendedRunStrict`
+     *    returns from it directly), so there is no second reader to be wrong
+     *    about and nothing may be dropped.
+     *  - **{@link cacheOnlySuspensions}** — a run whose durable save failed was
+     *    never handed to the store, so the store's "no row" is SILENCE about it
+     *    rather than an answer (#13617). Evicting on that would convert
+     *    {@link persistSuspendedRun}'s documented degradation — a failed save
+     *    costs cross-restart durability, not in-process resumability — into a
+     *    run that vanishes from its own process.
+     *
+     * A store read that THROWS must never reach here: an outage means the
+     * run's existence is UNKNOWN, not "gone". Every caller below is on a path
+     * where the store answered.
+     */
+    private evictConsumedSuspension(runId: string): void {
+        if (!this.store) return;
+        if (this.cacheOnlySuspensions.has(runId)) return;
+        this.suspendedRuns.delete(runId);
+    }
+
+    /**
      * [#14333] Claim the right to advance this run past the node it is parked
      * at — the CROSS-REPLICA half of the resume idempotency guard.
      *
@@ -4996,6 +5062,13 @@ export class AutomationEngine implements IAutomationService {
         // deliberately keeps such a run resumable in-process (it reports the
         // lost durability at `error`).
         if (this.cacheOnlySuspensions.has(runId)) return this.suspendedRuns.get(runId) ?? null;
+        // [#15832] The store ANSWERED, and the answer is "no row". Any entry
+        // this process still holds for that run is a run it parked and another
+        // replica consumed — the phantom the two listings hand back. This is
+        // the definitive per-id evidence the paragraph above already rests on,
+        // so the same reading that refuses to serve it here stops publishing it
+        // there. A store read that threw never reaches this line.
+        this.evictConsumedSuspension(runId);
         return null;
     }
 
@@ -5374,6 +5447,14 @@ export class AutomationEngine implements IAutomationService {
                 // already maps it to 409. A distinct code would be vocabulary
                 // nothing reads — add one the day a caller needs the
                 // difference.
+                // [#15832] The store's compare-and-set ANSWERED: no row is parked
+                // where this replica read it. Whatever snapshot this process
+                // still holds for the run is stale by construction — it names a
+                // node the run has left — so it stops being published by the two
+                // listings. ⛔ NOT `forgetSuspendedRun`: nothing was consumed
+                // here, and firing that choke point would tear the pause down a
+                // second time in this process on top of the winner's own.
+                this.evictConsumedSuspension(runId);
                 return {
                     success: false,
                     code: 'RESUME_IN_PROGRESS',
@@ -6536,11 +6617,16 @@ export class AutomationEngine implements IAutomationService {
      */
     async listSuspendedRunsDurable(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
         const byId = new Map<string, { runId: string; flowName: string; nodeId: string; correlation?: string }>();
+        // [#15832] Did the ENUMERATION answer? The reconcile below is allowed
+        // only when it did — see the merge comment for why a failed listing is
+        // silence rather than evidence.
+        let enumerated = false;
         if (this.store) {
             try {
                 for (const r of await this.store.list()) {
                     byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
                 }
+                enumerated = true;
             } catch (err) {
                 // #6299 — driver text to the structured slot, message one line,
                 // same as the two seams above. The SLOT differs: the `Logger`
@@ -6605,8 +6691,35 @@ export class AutomationEngine implements IAutomationService {
         // only {@link cacheOnlySuspensions} answer out of the map. Applying that
         // qualifier here would let a truncated or failed enumeration silently
         // drop live runs from an operability listing.
-        for (const r of this.suspendedRuns.values()) {
+        //
+        // [#15832] What that reasoning leaves open is a run this process parked
+        // and ANOTHER replica has since consumed: absent from the durable list
+        // because it is finished, appended here, and published as suspended by
+        // a listing that also backs the cache-only one. The paragraph above is
+        // right that list-absence is not evidence — so this asks for the
+        // evidence instead. `store.load` is the same definitive per-id read
+        // {@link loadSuspendedRunStrict} rests on, and it is bought only for the
+        // entries that look suspicious: a healthy process, whose map entries all
+        // appear in the durable list, buys none. A read that THROWS leaves the
+        // entry standing (unknown is not gone), and a store that could not be
+        // enumerated at all is not probed row by row — an outage would answer
+        // for every live run in the process.
+        for (const r of [...this.suspendedRuns.values()]) {
             if (byId.has(r.runId)) continue;
+            if (enumerated && !this.cacheOnlySuspensions.has(r.runId)) {
+                let stored: SuspendedRun | null;
+                try {
+                    stored = await this.store!.load(r.runId);
+                } catch {
+                    // Unknown, not gone — keep the entry and publish it, exactly
+                    // as this method did before the reconcile existed.
+                    stored = r;
+                }
+                if (stored === null) {
+                    this.evictConsumedSuspension(r.runId);
+                    continue;
+                }
+            }
             byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
         }
         return [...byId.values()];

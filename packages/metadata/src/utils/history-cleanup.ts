@@ -93,7 +93,7 @@ export class HistoryCleanupManager {
       // Age-based cleanup
       if (this.policy.maxAgeDays) {
         const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - this.policy.maxAgeDays);
+        cutoffDate.setUTCDate(cutoffDate.getUTCDate() - this.policy.maxAgeDays);
         const cutoffISO = cutoffDate.toISOString();
 
         const filter: Record<string, unknown> = {
@@ -256,7 +256,7 @@ export class HistoryCleanupManager {
       // Count records that would be deleted by age
       if (this.policy.maxAgeDays) {
         const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - this.policy.maxAgeDays);
+        cutoffDate.setUTCDate(cutoffDate.getUTCDate() - this.policy.maxAgeDays);
         const cutoffISO = cutoffDate.toISOString();
 
         const filter: Record<string, unknown> = {
