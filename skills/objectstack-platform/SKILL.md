@@ -359,7 +359,7 @@ new DriverPlugin(new SqlDriver({ client: 'pg', connection: process.env.DATABASE_
 
 ## HTTP Layer (Hono)
 
-The HTTP layer is Hono-based. Two packages exist:
+Two packages exist:
 
 | Package | Export | Use When |
 |:--------|:-------|:---------|
@@ -376,25 +376,20 @@ dispatcher yourself.
 ```typescript
 import { createHonoApp } from '@objectstack/hono';
 
-const app = createHonoApp({
-  kernel,                    // ObjectKernel instance
-  prefix: '/api',            // API route prefix (default: '/api')
-});
-
-export default app;          // Deploy to Cloudflare Workers, Deno, Bun, Node
+// prefix defaults to '/api'.
+export default createHonoApp({ kernel });
 ```
+
+⚠️ **`prefix` does not move auth.** The `/auth/*` mount follows the auth
+service's `basePath` (`AuthPlugin` default `/api/v1/auth`), not `prefix` —
+`createHonoApp({ kernel })` reaches better-auth at `/api/v1/auth/*`. A `prefix`
+that `basePath` is not inside **refuses at boot**, naming both values.
 
 ### Architecture
 
-`createHonoApp` follows this architecture:
-
-1. Accept a `kernel` (ObjectKernel) instance
-2. Create an `HttpDispatcher` internally
-3. Mount explicit routes for auth and discovery
-4. Delegate everything else to the dispatcher
-
-This means **new routes added to HttpDispatcher work automatically**
-without adapter code changes.
+`createHonoApp` creates an `HttpDispatcher`, mounts explicit
+routes for auth and discovery, and delegates everything else to it — so **new
+routes added to HttpDispatcher work automatically**.
 
 ---
 
