@@ -4696,10 +4696,11 @@ function selfTest() {
   // an English comment inside a handler window bridged just the same.
   //
   // MEASURED FAILURE (40d5b2d4c, #9405 — a `metadata-protocol` batch-publish change): BOTH
-  // route anchors that run produced were prose and nothing else.
+  // route anchors that run produced were prose and nothing else, both in
+  // `packages/rest/src/rest-server.ts` (lines as measured then, kept as data):
   //
-  //   promoteDraftForPublish → /:type/:name/publish   rest-server.ts:5324,5376  (comments)
-  //   publishPackageDrafts   → /:name/state/:field    rest-server.ts:5694,5722  (comments)
+  //   promoteDraftForPublish → /:type/:name/publish   lines 5324,5376  (comments)
+  //   publishPackageDrafts   → /:name/state/:field    lines 5694,5722  (comments)
   //
   // The second one carried `content/docs/protocol/objectql/state-machine.mdx` onto the
   // advisory (and `meta.getLegalNextStates` through the ledger) for a diff that went
@@ -4773,7 +4774,8 @@ function selfTest() {
   // The third layer of the same family, and the only one with no measured wrong row on the
   // tree that filed it — read that as the point of the block, not as a reason to skip it.
   //
-  // MECHANISM (verified on e7daea169). `rest-server.ts:5661` registers
+  // MECHANISM (verified on e7daea169). `packages/rest/src/rest-server.ts`
+  // (line 5661 as measured then) registers
   // `/:name/state/:field`; the next LITERAL `path:` is 255 lines later at 5916, so the
   // window runs its full 150 lines to 5810 — straight over `path: publishedPath` at 5747,
   // which registers a different route the scan cannot see. 64 lines of the `published`
