@@ -90,7 +90,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 // through it so it physically cannot accept a call `ObjectQL.delete` refuses
 // (`scripts/check-engine-double-contract.mjs`), and the cases read it directly
 // to say WHICH route a recorded call would have taken.
-import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { AutomationEngine } from './engine.js';
 import { AutomationServicePlugin } from './plugin.js';
@@ -124,6 +124,8 @@ function createProbeAwareEngine(
         },
         async insert(_object, data) { rows.set(String(data.id), { ...data }); return data; },
         async update(_object, data, options) {
+            // Refuses what a real server refuses (`check:engine-double-contract`).
+            assertEngineUpdateDispatch(data, options as any);
             const id = options?.where?.id ?? data.id;
             rows.set(String(id), { ...(rows.get(String(id)) ?? { id }), ...data });
             return rows.get(String(id));
