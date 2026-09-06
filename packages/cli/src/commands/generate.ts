@@ -9,6 +9,15 @@ import path from 'path';
 // `satisfies Record<FieldType, …>`, which is what makes a field type added to
 // the spec a named compile error here instead of a silent fallback (#14657).
 import type { FieldType } from '@objectstack/spec/data';
+// #16091 — IMPORTED, not transcribed. Both are on `@objectstack/spec/data`'s
+// exported surface, and spec is not a driver package: the #5726 constraint the
+// transcriptions below cite forbids a static value import of an
+// `@objectstack/driver-*` package and nothing else, so it never reached these.
+// The two driver-side readers that consume them — `isUniqueScopeDeclared` and
+// `computeTenantField` — are spelled here in the driver's own terms ON TOP of
+// these, so the part that can be shared is shared and only the part that
+// genuinely lives on `driver-sql` is mirrored.
+import { isTenancyDisabled, isUniqueDeclared } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 
@@ -1307,10 +1316,16 @@ function declaredVarchar(maxLength: unknown): VarcharAnswer {
 
 /**
  * `schema-drift.ts`'s `isUniqueScopeDeclared` — the FIELD-level unique
- * vocabulary. Transcribed, for the reasons {@link MAX_VARCHAR_CHARS} gives.
+ * vocabulary.
+ *
+ * Spelled as the driver spells it, over the SAME spec predicate the driver
+ * calls: `unique === 'organization' || isUniqueDeclared(unique)`. The word is
+ * accepted here ahead of the spec helper deliberately (ADR-0120 D1, driver
+ * first), so the disjunct is the driver's, not this file's invention — and the
+ * half that IS spec's is imported rather than retyped.
  */
 function isUniqueScopeDeclared(unique: unknown): boolean {
-  return unique === true || unique === 'global' || unique === 'organization';
+  return unique === 'organization' || isUniqueDeclared(unique);
 }
 
 /**
@@ -1322,6 +1337,17 @@ function isUniqueScopeDeclared(unique: unknown): boolean {
  * as global. That the two paths read the same token differently is a maintainer
  * ruling (2026-08-13), not an oversight, so the two readings stay apart here
  * too.
+ *
+ * ⚠️ Unlike {@link MAX_VARCHAR_CHARS}, this one IS on `driver-sql`'s exported
+ * surface, so "not exported" is not the reason it is spelled here — say the
+ * real one instead of borrowing that block's: these generators are SYNCHRONOUS,
+ * and #5726 leaves a CLI production module only `await import()` for a driver
+ * package, which a synchronous function cannot use. Spec's own
+ * `isOrganizationUnique` is not a substitute either: it detects the WORD and
+ * not the scope, so it omits the bare `true` this predicate exists to include.
+ * What makes the spelling safe is the oracle in
+ * `generate-string-family-width.pin.test.ts`, which recomputes this whole key
+ * set from the driver's own exported builders and fails when the two disagree.
  */
 function isOrganizationScopedUnique(unique: unknown): boolean {
   return unique === true || unique === 'organization';
@@ -1334,10 +1360,15 @@ function isOrganizationScopedUnique(unique: unknown): boolean {
  * Computable from the object alone, which is why it is mirrored rather than
  * skipped: explicit opt-out wins, then a declared `tenancy.tenantField` that
  * names a real field, then a field literally named `organization_id`.
+ *
+ * The opt-out itself is spec's `isTenancyDisabled`, IMPORTED — the driver calls
+ * that same function here (ADR-0066: one judgment for the registry, the engine
+ * and every driver), so re-deriving `tenancy?.enabled === false` locally would
+ * be a fourth copy of the thing that helper exists to stop.
  */
 function tenantFieldOf(obj: Record<string, any>): string | null {
   const tenancy = obj?.tenancy;
-  if (tenancy?.enabled === false) return null;
+  if (isTenancyDisabled(obj)) return null;
   const fields = obj?.fields;
   if (tenancy?.tenantField) {
     const declared = String(tenancy.tenantField);
@@ -1393,13 +1424,23 @@ function indexKeyColumns(obj: Record<string, any>): ReadonlySet<string> {
     // An ALREADY-NORMALIZED entry carries its own resolved key parts and is
     // honoured verbatim, so no tenant column is prepended a second time.
     // Unreachable from an authored config — `IndexSchema` is a `strictObject`
-    // with no `nullSafeColumns` key — but mirrored anyway: dropping it would
-    // make this set a strict SUPERSET of the driver's and bound a column the
-    // driver leaves unbounded, which is this card's defect pointed the other
-    // way.
-    const preNormalized =
-      Array.isArray(idx?.nullSafeColumns) &&
-      idx.nullSafeColumns.some((c: unknown) => listed.includes(c as string));
+    // with no `nullSafeColumns` key — but mirrored anyway, because the driver
+    // answers this shape and a generated column has to be the column the driver
+    // would build for the same object however the object got here.
+    //
+    // ⭐ The condition is the driver's OWN: a non-empty `nullSafeColumns`
+    // ARRAY, nothing more. `normalizeDeclaredIndex` filters that array against
+    // the listed columns, but the filter narrows only `nullSafeColumns` — its
+    // `columns` stay the listed ones in every branch of that arm, so an entry
+    // whose `nullSafeColumns` names no listed column still prepends NOTHING.
+    // Asking `.some(c => listed.includes(c))` here instead read that filter as
+    // if it decided the KEY PARTS: on `{ fields: ['f'], unique: 'organization',
+    // nullSafeColumns: ['zzz'] }` the driver keys `{f}` and this keyed
+    // `{organization_id, f}` — a column bounded here that the platform leaves
+    // unbounded, this card's defect pointed the other way. Found by the
+    // differential in `generate-string-family-width.pin.test.ts`, which now
+    // recomputes this whole set from the driver's own exported builders.
+    const preNormalized = Array.isArray(idx?.nullSafeColumns) && idx.nullSafeColumns.length > 0;
     if (!preNormalized && idx?.unique === 'organization' && tenantField && !listed.includes(tenantField)) {
       out.add(tenantField);
     }
