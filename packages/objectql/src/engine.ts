@@ -999,6 +999,13 @@ function assertOrderByIsMaterializable(
   // surfaces engine errors over HTTP therefore answers the same envelope on
   // both doors instead of turning the direct path into an unhandled 500.
   err.status = 400;
+  // …and `httpStatus`, the SAME number under ADR-0112 D5's spelling. `status` is
+  // what every HTTP door in this repo reads (`resolveThrownHttpError`), so it
+  // stays; `httpStatus` is what a consumer holding the THROWN error reads —
+  // the CLI's `--json` error envelope (`errorCodeFields`) is the measured one,
+  // and it saw `code` with no status at all until both spellings were stamped.
+  // Two keys, one value, written together at every producer in this package.
+  err.httpStatus = 400;
   err.code = 'INVALID_SORT';
   err.field = first;
   err.fields = unmaterialized;
@@ -1100,6 +1107,7 @@ function assertProjectionHasNoDottedPaths(
   // code however the caller reached it, so a host surfacing engine errors over
   // HTTP answers the same envelope on both doors.
   err.status = 400;
+  err.httpStatus = 400;
   err.code = 'INVALID_FIELD';
   err.field = first;
   err.fields = dotted;
@@ -1244,6 +1252,7 @@ function undeclaredWriteFieldErrors(
     if (undeclared.length === 0) continue;
     const err: any = new Error(`Unknown field '${undeclared[0]}' on object '${object}'`);
     err.status = 400;
+    err.httpStatus = 400;
     err.code = 'INVALID_FIELD';
     err.field = undeclared[0];
     err.fields = undeclared;
@@ -5472,7 +5481,7 @@ export class ObjectQL implements IObjectQLEngine {
                   && item.name
                   && item.name !== itemName
               ) {
-                  const err: Error & { code?: string; status?: number } = new Error(
+                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
                       `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `
                       + `\`name\` is '${item.name}', which disagrees with the object key it binds to, `
                       + `'${itemName}' (derived from its own \`object\`, else \`list.data.object\` / `
@@ -5484,6 +5493,7 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   err.code = 'VALIDATION_ERROR';
                   err.status = 400;
+                  err.httpStatus = 400;
                   throw err;
               }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
@@ -5501,7 +5511,7 @@ export class ObjectQL implements IObjectQLEngine {
               // internals are well-formed stays the authoring/publish doors'
               // job (defineStack, `os validate`, the metadata door).
               if (key === 'views' && !isViewContainerShaped(toRegister)) {
-                  const err: Error & { code?: string; status?: number } = new Error(
+                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
                       `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
                       + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
                       + 'config belong to a single VIEW, not to the container — wrap it: '
@@ -5513,6 +5523,7 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   err.code = 'INVALID_METADATA';
                   err.status = 422;
+                  err.httpStatus = 422;
                   throw err;
               }
               this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
@@ -5551,7 +5562,7 @@ export class ObjectQL implements IObjectQLEngine {
               const parsed = AssembledViewArtifactSchema.safeParse(item);
               if (!parsed.success) {
                   const itemName = resolveMetadataItemName('views', item) ?? '(unnamed)';
-                  const err: Error & { code?: string; status?: number } = new Error(
+                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
                       `Invalid \`${ASSEMBLED_VIEW_ITEMS_KEY}:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': `
                       + 'the assembled-manifest channel carries non-container view artifacts only — a ViewItem '
                       + 'record (`viewKind` + `config`) or a flattened list/form overlay '
@@ -5560,6 +5571,7 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   err.code = 'INVALID_METADATA';
                   err.status = 422;
+                  err.httpStatus = 422;
                   throw err;
               }
               const body = parsed.data as Record<string, unknown>;
@@ -7076,7 +7088,7 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<Map<string, unknown>> {
     const schema = this._registry.getObject(object);
     if (!collectInternalReadFields(schema).includes(field)) {
-      const err: Error & { code?: string; status?: number; object?: string; field?: string } =
+      const err: Error & { code?: string; status?: number; httpStatus?: number; object?: string; field?: string } =
         new Error(
           `Cannot resolve internal field "${object}.${field}": it is not declared \`internal: true\`. `
             + 'Only fields the engine omits from the generic read path are dereferenceable here — '
@@ -7086,6 +7098,7 @@ export class ObjectQL implements IObjectQLEngine {
         );
       err.code = 'INVALID_FIELD';
       err.status = 400;
+      err.httpStatus = 400;
       err.object = object;
       err.field = field;
       throw err;
@@ -12920,6 +12933,7 @@ export class ObjectQL implements IObjectQLEngine {
             `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
           err.code = 'DELETE_RESTRICTED';
           err.status = 409;
+          err.httpStatus = 409;
           err.object = object;
           // Constraint 2's REQUIRED half — the referenced object is named
           // unconditionally, because "which table is blocking me" is the one

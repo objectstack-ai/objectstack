@@ -328,6 +328,8 @@ function buildRefusalMessage(
 export class SystemWriteOrganizationRequiredError extends Error {
   readonly code = 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' as const;
   readonly status = 500;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 500;
 
   constructor(
     public readonly object: string,
