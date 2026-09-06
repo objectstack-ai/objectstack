@@ -3036,7 +3036,20 @@ export class RemoteTransport {
    * over-matching rather than a near miss. The fold cannot be switched off per
    * statement (`PRAGMA case_sensitive_like` is connection-global, so one query
    * would silently redefine every other query on the same connection), and
-   * `CAST(col AS BLOB) LIKE ?` was measured to match NOTHING at all. `GLOB` is
+   * `CAST(col AS BLOB) LIKE ?` cannot replace it either: whether `LIKE` is false
+   * for a BLOB operand is fixed when SQLite is COMPILED, by
+   * `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, so the construct means two DIFFERENT
+   * things on the two SQLite builds this repo ships. Measured over the shared
+   * `FILTER_TEXT_ROWS` fixture, `{name: {$contains: 'acme'}}` compiled to it:
+   * better-sqlite3 13.0.3 (SQLite 3.53.4, flag compiled in) answers `[]`, and
+   * sql.js 1.14.1 (SQLite 3.49.1, flag absent) answers `['1','2']` — the very
+   * over-match described above. `typeof CAST(name AS BLOB)` is `'blob'` on BOTH,
+   * so the CAST is not the part that differs; `LIKE`'s blob rule is. That
+   * divergence disqualifies it here without any claim about return values, and
+   * it bites hardest on THIS face: a remote transport cannot pin the build its
+   * libSQL server was compiled from, so the flag is not merely upstream, it is
+   * across the wire. `GLOB` carries no such dependency — measured, it answers
+   * `['2']` on both builds. It is
    * SQLite's case-exact pattern operator and is what both SQLite faces now
    * emit — `SqlDriver.applyLike`'s `textMatchPredicate` reaches the identical
    * decision for the local transport, and `turso-local-remote-*` parity suites

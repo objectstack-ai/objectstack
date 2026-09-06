@@ -11,7 +11,7 @@
  * that:
  *
  * - Inline function handlers and string-named handlers share one resolver.
- * - Declarative fields (`condition`, `async`, `retryPolicy`, `timeout`,
+ * - Declarative fields (`condition`, `async`, `retryPolicy`, `timeoutMs`,
  *   `onError`) are honoured uniformly via `wrapDeclarativeHook`.
  * - Hooks can be unregistered as a unit via `packageId`, enabling clean
  *   hot-reload and app uninstall.

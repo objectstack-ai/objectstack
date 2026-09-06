@@ -392,8 +392,17 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // `enforceAuth` was measured NOT to be the repair). A mention count
         // that tracked the site count exactly would be measuring one thing
         // twice.
+        //
+        // [#15685] 77 → 77 sites / 99 → 100 mentions. The `/references` door's
+        // refusal arm added ONE prose mention and NO call site: its comment
+        // records that the arm's catch is scoped to the protocol call alone, so
+        // the `resolveExecCtx` seam above it cannot reach the arm whatever that
+        // seam declares. That is the safety claim the narrow catch rests on, so
+        // naming the seam is the point of the sentence — and the sentence
+        // moving only the mention count is this control working: a site was not
+        // added, and the number that tracks sites did not move.
         expect(SITES.length).toBe(77);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(99);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(100);
     });
 
     it('the split is 24 locally caught / 53 bare — NOT 16 / 53, which does not add to 77', () => {

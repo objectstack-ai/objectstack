@@ -11,6 +11,13 @@ build/runtime model incl. the vendored-console staleness trap (§2), and the
 anti-false-positive rule (§3). This file assumes it and adds the checklist-specific
 contract.
 
+**Who sees a red gate.** `pnpm check:platform-checklist` is not wired into per-PR CI (a
+standing maintainer decision — see the README's "Operating cadence"), so the channel that
+sees its red is
+[`.github/workflows/platform-checklist-watchdog.yml`](../../../.github/workflows/platform-checklist-watchdog.yml):
+it runs the gate on `main` daily, files or refreshes exactly one issue when the gate is red,
+and does nothing at all when it is green.
+
 ## Verdicts
 
 Per **clause** (each acceptance entry gets exactly one):

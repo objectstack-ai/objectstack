@@ -444,7 +444,10 @@ Pass `?cube=<name>` to filter the listing to a single cube (this is what
 
 **Response**: `{ success: true, data: [...] }` where `data` is an array of cube
 definitions with measures and dimensions (time-based dimensions are `dimensions`
-entries with `type: "time"`).
+entries with `type: "time"`). That envelope is the wire shape only — the SDK
+unwraps it, so `client.analytics.meta(cube)` resolves to the cube array itself
+and a caller reads `cubes[0].name`. The same holds for the other analytics and
+automation calls; see the [Client SDK](/docs/api/client-sdk) page.
 
 ### `POST /analytics/sql`
 

@@ -2325,6 +2325,32 @@ jobs:
       # PR. The checklist is a QA ledger, not a code gate; keeping it out of the
       # per-PR path means an unrelated PR is never blocked by checklist drift.
       # Run it by hand: `pnpm check:platform-checklist`. See that dir's README.
+      # Its red does have a reporting channel now, and it is NOT this file:
+      # `.github/workflows/platform-checklist-watchdog.yml` runs the gate on `main`
+      # daily and files or refreshes one issue when it is red.
+
+      # ⛔ …and the step below is NOT that wiring. What runs here is the STATIC PIN
+      # over the watchdog workflow: it asserts the file exists, fires on
+      # `schedule:` + `workflow_dispatch:`, carries NO `merge_group:` /
+      # `pull_request_target:` trigger, that any `pull_request:` trigger is
+      # `paths`-filtered to the watchdog file ALONE, that no board write is
+      # reachable from a pull_request run, and that the gate is invoked through its
+      # package script rather than an inlined copy. Two file reads, no socket.
+      #
+      # The watchdog's own `pull_request:` trigger names only itself, so it fires on
+      # no unrelated PR — that filter is what keeps the decision above intact, and
+      # pinning it is most of this step's job. It has to live HERE rather than
+      # inside the watchdog for the other half: a PR DELETING the watchdog would
+      # silence any check that lived inside it, and this job is the only place where
+      # the absence of that file is observable before it merges.
+      #
+      # Invoked as `node scripts/…` rather than a `pnpm check:*` alias: see the GATE
+      # INVOCATION IDIOM note at the top of this file. The `--self-test` leg runs
+      # first because a checker whose own cases failed has no verdict worth printing.
+      - name: Platform-checklist watchdog workflow pin
+        run: |
+          node scripts/check-platform-checklist-watchdog.mjs --self-test
+          node scripts/check-platform-checklist-watchdog.mjs
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
@@ -3936,6 +3962,24 @@ jobs:
         run: |
           node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
           node packages/lint/scripts/check-reference-carrier-shape.mjs
+
+      # #14478 (maintainer ruling 2026-09-02, "ruled B"): a duration-shaped
+      # `z.number()` key in packages/spec/src/** whose `.describe()` names a
+      # time unit must carry that unit in its NAME (`Ms` / `Seconds` /
+      # `Minutes` / `Hours` / `Days`), or the schema uses a unit-carrying
+      # VALUE (`'14d'` literals, `{ value, unit }` pairs). The founding
+      # specimen was two keys spelled `ttl` fourteen lines apart, one in
+      # seconds and one in milliseconds, each unit named only in prose — an
+      # author copying the outer number into the inner block got a 3.6-second
+      # cache and no error anywhere. No baseline, by ruling: the gate is green
+      # only at zero offenders, and a red is a rename under an ADR-0087
+      # conversion (or a describe to fix), never a ledger row. Placed LAST in
+      # this job on purpose: it is a new tree-wide ratchet, and the job aborts
+      # at the first non-zero exit — nothing behind it would be masked by its
+      # red. Reads src/ through tsx (no build); self-tests first, wired into
+      # the package script as `check:self-test-wired` requires.
+      - name: Duration-shaped spec keys carry their unit in the key name
+        run: pnpm --filter @objectstack/spec check:duration-unit-keys
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

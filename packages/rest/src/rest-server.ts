@@ -325,6 +325,7 @@ import {
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
     boundedDeclaredUserMessage,
+    declaredHttpStatus,
     declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
@@ -1209,6 +1210,93 @@ async function wiredEngineOrLoud<T>(
         // part an operator actually needs.
         throw new AuthzStoreUnavailableError('objectql', err);
     }
+}
+
+/**
+ * [#15685] The `/meta/:type/:name/references` door's PROTOCOL-RAISED refusal,
+ * re-dressed in the ADR-0112 NESTED envelope that door's other refusal exit
+ * already publishes. Answers `undefined` for everything else, so the caller
+ * keeps `handleRouteError` for the rest.
+ *
+ * ## The defect this closes
+ *
+ * The door can refuse in two ways and, measured on one boot, the two answers
+ * agreed on neither the envelope nor the message:
+ *
+ * ```
+ * A  protocol-raised, unanswerable TARGET type (#9327)
+ *    501 {"error":"Internal server error","code":"NOT_IMPLEMENTED"}
+ * B  the resolved kernel has no `findReferencesToMeta` at all (#9326)
+ *    501 {"error":{"code":"NOT_IMPLEMENTED","message":"protocol.findReferencesToMeta() is not available in this kernel"}}
+ * ```
+ *
+ * Two facts are lost on A, and both of them are the operator's:
+ *
+ *  1. **The PRESCRIPTION.** A's message is not decoration — `findReferencesToMeta`
+ *     says so in as many words ("The message is prescriptive per ADR-0110 D3:
+ *     it names the answerable question"). It tells the operator what to ask
+ *     INSTEAD: `Ask the owning object instead: GET /api/v1/meta/object/<owner>/references`.
+ *     That sentence is what keeps "the question was never asked" from being
+ *     read as "nothing depends on this item" — the whole of ADR-0110 D3
+ *     (#8896), in front of an operator whose next click is a delete, because
+ *     the admin "Used by" panel renders its empty case as "Nothing in the
+ *     metadata graph points at this item. Safe to delete." On the wire the
+ *     sentence was replaced by "Internal server error".
+ *  2. **The `code`'s POSITION.** `body.error.code` reads on B and `undefined`
+ *     on A. This door's own comment on the B branch warns against precisely
+ *     that dialect ("never the bare-string or sibling-`code` dialects, which
+ *     make `body.error.code` read `undefined`") — so the route was violating
+ *     its own written rule at its other exit, reached by a different path.
+ *
+ * ## Why the repair is HERE and not at the relay
+ *
+ * A reaches the wire through `handleRouteError` → {@link declaredServerFaultAnswer},
+ * which keeps `status` and `code` and replaces the prose with
+ * `INTERNAL_ERROR_MESSAGE`. That arm is correct and argued for a server FAULT
+ * (#11718, #5582) — a fault message may carry driver internals, and withholding
+ * it is the point. What it cannot see is that a producer-declared 5xx might be
+ * a deliberate REFUSAL whose message is authored FOR the caller. Teaching it
+ * that distinction would change platform-wide behaviour for every
+ * producer-declared 5xx at every door; that is a maintainer's decision and is
+ * handed back as its own finding, not taken here. This arm is the bounded half:
+ * ONE door, re-dressing ONE refusal in the dialect it already publishes.
+ *
+ * ⛔ It is therefore NOT a general "5xx prose is relayed now" rule, and the
+ * three conditions below are what keep it from becoming one.
+ *
+ * ## The three conditions, and why each is exactly this narrow
+ *
+ *  - **`501`**, read through {@link declaredHttpStatus} so both declaration
+ *    spellings (`status` / `statusCode`, #7525) reach the same verdict rather
+ *    than through a fourth local opinion about which field declares a status.
+ *  - **`code === 'NOT_IMPLEMENTED'`**, the literal this route already publishes
+ *    on its B exit. Matching the LITERAL rather than "any declared code" is
+ *    also how the #9232 vocabulary narrowing is honoured by CONSTRUCTION: an
+ *    unregistered producer spelling can never reach this exit, so no second
+ *    copy of `thrownCodeFields`' demotion rule is needed and no new door ships
+ *    an un-narrowed code. ⚠️ The cost is stated rather than hidden: a future
+ *    SECOND refusal code on this route would fall back to the flat fault answer
+ *    until whoever adds it comes here. That is a visible, one-line extension,
+ *    not a silent gap.
+ *  - **A non-empty message.** This arm exists to relay PROSE; with none
+ *    declared there is nothing to relay, and inventing one is the half
+ *    {@link declaredServerFaultAnswer} refuses to invent too.
+ *
+ * ⛔ And it does not re-derive `REFERENCE_SITES.unanswerableTargetTypes` to
+ * decide whether the target was answerable. That set, its canonical-type fold
+ * and its refusal all belong to `findReferencesToMeta`; a second copy at the
+ * transport is the tolerant-consumer direction, and it would drift the moment
+ * the set changed. The route reads what the protocol DECLARED, which is what a
+ * transport is for.
+ */
+function notImplementedRefusalAnswer(
+    error: any,
+): { status: number; body: { error: { code: string; message: string } } } | undefined {
+    if (declaredHttpStatus(error) !== 501) return undefined;
+    if (error?.code !== 'NOT_IMPLEMENTED') return undefined;
+    const message = typeof error?.message === 'string' ? error.message : '';
+    if (message.length === 0) return undefined;
+    return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 
 export class RestServer {
@@ -5844,16 +5932,37 @@ export class RestServer {
                         // laundering it into an org-unscoped 200.
                         const referencesCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(rethrowAuthzStoreUnavailable);
-                        const result = await (p as any).findReferencesToMeta({
-                            type: req.params.type,
-                            name: req.params.name,
-                            // SPREAD, never `organizationId: x ?? null` — the
-                            // implementation declares `organizationId?: string`
-                            // (optional plain string, not nullable), and it
-                            // forwards on truthiness.
-                            ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                        });
+                        // [#15685] The protocol's OWN refusal is re-answered in
+                        // the nested envelope the branch above already uses —
+                        // see {@link notImplementedRefusalAnswer} for why the
+                        // repair is here and how narrow it is. The catch is
+                        // scoped to the protocol call ALONE, so what this arm
+                        // can re-dress is mechanically the set of things
+                        // `findReferencesToMeta` raised: neither
+                        // `resolveProtocol` nor the `resolveExecCtx` seam above
+                        // can reach it, whatever they declare.
+                        let result: unknown;
+                        try {
+                            result = await (p as any).findReferencesToMeta({
+                                type: req.params.type,
+                                name: req.params.name,
+                                // SPREAD, never `organizationId: x ?? null` — the
+                                // implementation declares `organizationId?: string`
+                                // (optional plain string, not nullable), and it
+                                // forwards on truthiness.
+                                ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
+                                ...(environmentId ? { environmentId } : {}),
+                            });
+                        } catch (raised: any) {
+                            const refusal = notImplementedRefusalAnswer(raised);
+                            // Anything else is the outage it always was — the
+                            // 503 `getMetaItems` raises for a `sys_metadata`
+                            // failure (#8896) still propagates to the terminal
+                            // below, message-withheld and logged, unchanged.
+                            if (refusal === undefined) throw raised;
+                            res.status(refusal.status).json(refusal.body);
+                            return;
+                        }
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error);

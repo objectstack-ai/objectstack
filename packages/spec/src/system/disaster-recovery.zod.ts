@@ -23,6 +23,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * ```
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const BackupStrategySchema = lazySchema(() => z.enum([
   'full',
   'incremental',
@@ -112,7 +113,19 @@ export const FailoverConfigSchema = lazySchema(() => z.object({
   /** Automatic failover enabled */
   autoFailover: z.boolean().default(true).describe('Enable automatic failover'),
   /** Health check interval in seconds */
-  healthCheckInterval: z.number().default(30).describe('Health check interval in seconds'),
+  // Renamed from `healthCheckInterval` (#15679, #14478 ruling B): the unit lived
+  // only in the describe prose. Its neighbour `dns.ttl` on this same schema keeps
+  // its bare name under the externalVocabulary exemption — that key mirrors the
+  // DNS resource-record field, this one mirrors nothing outside the repo.
+  healthCheckIntervalSeconds: z.number().default(30).describe('Health check interval in seconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  healthCheckInterval: retiredKey(
+    '`FailoverConfig.healthCheckInterval` was renamed to `healthCheckIntervalSeconds` in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, '
+    + 'not only in the describe prose. Rename the key to `healthCheckIntervalSeconds`; the '
+    + 'value (seconds) and the 30 default are unchanged.',
+  ),
   /** Number of consecutive failures before triggering failover */
   failureThreshold: z.number().default(3).describe('Consecutive failures before failover'),
   /** Regions/zones for disaster recovery */
@@ -124,7 +137,11 @@ export const FailoverConfigSchema = lazySchema(() => z.object({
   })).min(2).describe('Multi-region configuration (minimum 2 regions)'),
   /** DNS failover configuration */
   dns: z.object({
-    ttl: z.number().default(60).describe('DNS TTL in seconds for failover'),
+    // `externalVocabulary` mirror (#14478 ruling B): the DNS resource-record TTL
+    // field, whose unit is fixed at seconds by the standard and spelled `ttl`
+    // by every provider API this key is forwarded to (Route 53, Cloudflare).
+    ttl: z.number().default(60).describe('DNS TTL in seconds for failover')
+      .meta({ externalVocabulary: 'DNS resource-record TTL (RFC 1035 §4.1.3)' }),
     provider: z.enum(['route53', 'cloudflare', 'azure_dns', 'custom']).optional()
       .describe('DNS provider for automatic failover'),
   }).optional().describe('DNS failover settings'),
@@ -191,7 +208,7 @@ export type RTOParsed = z.infer<typeof RTOSchema>;
  *   failover: {
  *     mode: 'active_passive',
  *     autoFailover: true,
- *     healthCheckInterval: 30,
+ *     healthCheckIntervalSeconds: 30,
  *     failureThreshold: 3,
  *     regions: [
  *       { name: 'us-east-1', role: 'primary' },

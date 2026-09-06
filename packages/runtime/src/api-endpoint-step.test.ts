@@ -232,13 +232,13 @@ describe('the policy chain runs between the match and the answer', () => {
         expect(hint).toContain('#5040');
     });
 
-    it('never puts the cacheTtl header on the 501 — but the verdict still carries it', async () => {
+    it('never puts the cacheTtlSeconds header on the 501 — but the verdict still carries it', async () => {
         // Exposure, not application: `Cache-Control` describes a successful body
         // that does not exist yet (execution is E5), and telling a client to
         // cache a 501 for 30s would be worse than saying nothing. The header
         // lives on the policy verdict, which is what the executor will read —
         // asserted directly in `endpoint-policy.test.ts`.
-        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtl: 30 });
+        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtlSeconds: 30 });
         const answer = await policedStep([cached], policyContext());
         expect(answer?.status).toBe(501);
         expect(answer?.headers).toBeUndefined();
@@ -276,7 +276,7 @@ describe('the policy chain runs between the match and the answer', () => {
  * The delegation itself is `endpoint-executor.test.ts`'s subject; what is
  * asserted here is the JOIN — that a passing request reaches the executor with
  * the request's own coordinates and identity, that a denial never does, and
- * that `cacheTtl`'s header lands on a success and on nothing else.
+ * that `cacheTtlSeconds`'s header lands on a success and on nothing else.
  */
 describe('execution runs on the far side of the policy chain', () => {
     const OPEN: ApiEndpoint = ApiEndpointSchema.parse({ ...TASKS, name: 'showcase_open', authRequired: false });
@@ -343,8 +343,8 @@ describe('execution runs on the far side of the policy chain', () => {
         ]]);
     });
 
-    it('puts the cacheTtl Cache-Control on a SUCCESS answer', async () => {
-        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtl: 30 });
+    it('puts the cacheTtlSeconds Cache-Control on a SUCCESS answer', async () => {
+        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtlSeconds: 30 });
         const answer = await wiredStep([cached], { deps: { callData: callDataSpy().fn as never } });
 
         expect(answer?.status).toBe(200);
@@ -352,7 +352,7 @@ describe('execution runs on the far side of the policy chain', () => {
     });
 
     it('never puts it on an ERROR answer, however the failure arose', async () => {
-        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtl: 30 });
+        const cached = ApiEndpointSchema.parse({ ...OPEN, name: 'showcase_cached', cacheTtlSeconds: 30 });
         // A delegated pipeline that throws — the executor maps it to a 4xx/5xx
         // answer, and a client must not be told to reuse a failure for 30s.
         const answer = await wiredStep([cached], {
@@ -365,7 +365,7 @@ describe('execution runs on the far side of the policy chain', () => {
         // Same for a declaration this runtime does not execute (501 from the
         // executor's own `unsupported` arm, not from the no-wiring branch).
         const proxied = ApiEndpointSchema.parse({
-            ...OPEN, name: 'showcase_proxy', type: 'proxy', target: 'https://example.invalid', cacheTtl: 30,
+            ...OPEN, name: 'showcase_proxy', type: 'proxy', target: 'https://example.invalid', cacheTtlSeconds: 30,
         });
         const unsupported = await wiredStep([proxied], { deps: { callData: async () => ({}) } });
         expect(unsupported?.status).toBe(501);
@@ -505,8 +505,8 @@ describe('the mapping keys apply on the two sides of the delegation', () => {
         expect(JSON.stringify(answer?.body)).not.toContain('internal_note');
     });
 
-    it('keeps the cacheTtl header on a mapped success', async () => {
-        // `cacheTtl` is GET-only (#5040 §3.3), so this is a read endpoint: the
+    it('keeps the cacheTtlSeconds header on a mapped success', async () => {
+        // `cacheTtlSeconds` is GET-only (#5040 §3.3), so this is a read endpoint: the
         // point is that the two keys compose — the projection replaces the body
         // and the policy verdict's header still rides with it.
         const mapped = ApiEndpointSchema.parse({
@@ -514,7 +514,7 @@ describe('the mapping keys apply on the two sides of the delegation', () => {
             name: 'showcase_cached_map',
             method: 'GET',
             objectParams: { object: 'showcase_inquiry', operation: 'find' },
-            cacheTtl: 30,
+            cacheTtlSeconds: 30,
             outputMapping: [{ source: 'total', target: 'count' }],
         });
 

@@ -269,12 +269,15 @@ await client.i18n.getLocales();
 await client.i18n.getTranslations('zh-CN');
 await client.i18n.getFieldLabels('contact', 'zh-CN');
 
-// Analytics
-await client.analytics.query({ object: 'sales', aggregations: ['sum:amount'] });
-await client.analytics.meta('sales');
+// Analytics — every method resolves to the payload itself
+const report = await client.analytics.query({ object: 'sales', aggregations: ['sum:amount'] });
+console.log(report.rows.length, report.fields[0].name);
+const cubes = await client.analytics.meta('sales');
+console.log(cubes[0].name);
 
 // Automation
-await client.automation.trigger('send_welcome_email', { userId });
+const run = await client.automation.trigger('send_welcome_email', { userId });
+console.log(run.status);
 
 // File Storage
 await client.storage.upload(fileData, 'user');

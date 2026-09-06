@@ -1082,11 +1082,28 @@ export function matchesLikePattern(value: string, pattern: string, foldAscii = f
  * #6518 measured every way out of that and landed on `GLOB`, which is
  * case-exact by definition: `PRAGMA case_sensitive_like` is CONNECTION-global,
  * so one query would redefine every other query on the connection, and
- * `CAST(col AS BLOB) LIKE ?` was measured to match NOTHING. Three of the five
- * backends are SQLite underneath (driver-sql on better-sqlite3,
- * driver-sqlite-wasm, driver-turso on both transports), so without this
- * translation `$like` would mean one thing on Postgres and another on SQLite —
- * the divergence #6518 closed for `$contains`, re-opened one operator over.
+ * `CAST(col AS BLOB) LIKE ?` is not portable enough to be the answer — whether
+ * `LIKE` is false for a BLOB operand is fixed when SQLite is COMPILED, by
+ * `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, so that construct means two DIFFERENT
+ * things on the two SQLite builds this repo ships. Measured over the shared
+ * `FILTER_TEXT_ROWS` fixture, `{name: {$contains: 'acme'}}` compiled to it:
+ *
+ * | build | `SQLITE_LIKE_DOESNT_MATCH_BLOBS` | rows |
+ * |---|---|---|
+ * | better-sqlite3 13.0.3 (SQLite 3.53.4) | compiled in | `[]` |
+ * | sql.js 1.14.1 (SQLite 3.49.1) | absent | `['1','2']` — `ACME Corp` AND `acme corp` |
+ *
+ * That divergence is disqualifying on its own, without any claim about what the
+ * construct returns: the flag is upstream of us, so the meaning is a property of
+ * how a backend's SQLite was BUILT. And this file is exactly where that bites —
+ * three of the five backends are SQLite underneath (driver-sql on
+ * better-sqlite3, driver-sqlite-wasm, driver-turso on both transports), and
+ * those are NOT the same build: the two rows above ARE two of the three. `GLOB`
+ * has no such dependency — measured, it answers `['2']` on BOTH builds — and
+ * `typeof CAST(name AS BLOB)` is `'blob'` on both, so the CAST is not the part
+ * that differs; `LIKE`'s blob rule is. Without this translation `$like` would
+ * mean one thing on Postgres and another on SQLite — the divergence #6518
+ * closed for `$contains`, re-opened one operator over.
  *
  * `GLOB` has a DIFFERENT pattern language, which is the whole reason this is a
  * translation and not an escape:
