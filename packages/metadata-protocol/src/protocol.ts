@@ -20021,7 +20021,7 @@ export class ObjectStackProtocolImplementation implements
             // registry to the target version; a derived read-model (e.g.
             // `permission` -> `sys_permission_set`) must be just as current
             // when this call returns, not only after the next unrelated
-            // write or boot reconciliation (ADR-0094 D3) eventually heals it.
+            // write or boot reconciliation (ADR-0094 D4) eventually heals it.
             // `body` is the restored version's own — the same value the
             // write-through above registered.
             await this.runMutationProjector({
