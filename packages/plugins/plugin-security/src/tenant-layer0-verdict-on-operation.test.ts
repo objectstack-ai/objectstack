@@ -184,8 +184,16 @@ async function boot(opts: {
         sys_member: del.memberOf.map((organization_id) => ({ user_id: del.userId, organization_id })),
       }
     : {};
+  // Plain equality is all the delegator resolution ever asks for (`{ id }`,
+  // `{ user_id }`). A combinator read as a FIELD NAME would match nothing and
+  // say nothing, so this double REFUSES what it does not implement rather than
+  // answering quietly — `check:where-matcher` refuses exactly the quiet shape.
   const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined): boolean =>
-    Object.entries(where ?? {}).every(([k, v]) => row[k] === v);
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake engine: unsupported combinator ${k}`);
+      if (v && typeof v === 'object') throw new Error(`fake engine: unsupported operator on '${k}'`);
+      return row[k] === v;
+    });
   const rowsOf = (object: string, where: Record<string, unknown> | undefined) =>
     (tables[object] ?? []).filter((r) => matches(r, where));
   const services: Record<string, unknown> = {
@@ -194,7 +202,18 @@ async function boot(opts: {
       registerMiddleware: (mw: any) => middlewares.push(mw),
       getSchema: (name: string) => SCHEMAS[name],
       findOne: vi.fn(async (object: string, o: any) => rowsOf(object, o?.where)[0] ?? null),
-      ...(del ? { find: async (object: string, o: any) => rowsOf(object, o?.where) } : {}),
+      ...(del
+        ? {
+            // The caller's bound is applied AFTER the filter and BY PRESENCE:
+            // core's grants resolution hands every one of these reads a `limit`,
+            // and a double that silently ignores it cannot report what the real
+            // engine would (`check:objectql-double-limit`).
+            find: async (object: string, o: any) => {
+              const rows = rowsOf(object, o?.where);
+              return typeof o?.limit === 'number' ? rows.slice(0, o.limit) : rows;
+            },
+          }
+        : {}),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
