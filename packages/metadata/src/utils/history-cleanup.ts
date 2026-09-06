@@ -51,12 +51,13 @@ export class HistoryCleanupManager {
 
     const intervalMs = (this.policy.cleanupIntervalHours ?? 24) * 60 * 60 * 1000;
 
-    // Run cleanup immediately on start
-    void this.runCleanup();
+    // Run cleanup immediately on start. Both call sites go through
+    // `runCleanupAndReport()`, never `runCleanup()` — see its docblock.
+    void runCleanupAndReport(this);
 
     // Schedule periodic cleanup
     this.cleanupTimer = setInterval(() => {
-      void this.runCleanup();
+      void runCleanupAndReport(this);
     }, intervalMs);
   }
 
@@ -313,5 +314,67 @@ export class HistoryCleanupManager {
       recordsByCount,
       total: recordsByAge + recordsByCount,
     };
+  }
+}
+
+/**
+ * Run one cleanup pass for {@link HistoryCleanupManager.start} and report a
+ * run that lost deletes.
+ *
+ * `runCleanup()` reports its failures to the CALLER, in the `errors` field of
+ * the `{ deleted, errors }` envelope it returns. That is the third answer
+ * AGENTS.md → "Degradation log levels" allows a durability seam, and it is why
+ * that method's inner `catch` clauses are deliberately silent: the same
+ * section names a log per failed write as the mirror-image failure, and asks
+ * for one report, at the first degradation, naming the consequence and the
+ * fix.
+ *
+ * A failure handed to the caller is only reported while somebody READS it, and
+ * `start()` is where that chain ends — it returns `void`, and the interval tick
+ * has no caller at all. Both call sites used to spell the run
+ * `void this.runCleanup()`, so a driver whose deletes failed produced no output
+ * and no reachable count: the history table grew past its retention policy and
+ * nothing said so.
+ *
+ * So the envelope is read HERE, once per run. Restoring
+ * `void this.runCleanup()` at EITHER call site re-opens the defect for that
+ * trigger alone — a startup-only report leaves every scheduled run silent —
+ * which is why the pin asserts the immediate run and an interval tick
+ * separately.
+ *
+ * Module-level, and NOT a private method, on purpose: TypeScript emits
+ * `private` members into the published `dist/*.d.ts` and they join the class's
+ * nominal identity, so a private method would have made an observability
+ * repair move the published declaration. As a free function it changes none of
+ * it — measured, all 10 published declaration files byte-identical.
+ *
+ * Resolves rather than rejects on every path, so `void` at the call sites
+ * cannot turn a cleanup failure into an unhandled rejection.
+ */
+async function runCleanupAndReport(manager: HistoryCleanupManager): Promise<void> {
+  let outcome: { deleted: number; errors: number };
+
+  try {
+    outcome = await manager.runCleanup();
+  } catch (error) {
+    console.error(
+      'History cleanup: the run did not complete, so no history row past the retention '
+      + 'policy was deleted and the table keeps growing while the system reports healthy. '
+      + 'Fix: the cause below comes from the configured data driver, not from the retention '
+      + 'policy; call `runCleanup()` directly to reproduce it. Cause:',
+      error,
+    );
+    return;
+  }
+
+  if (outcome.errors > 0) {
+    console.error(
+      `History cleanup: ${outcome.errors} delete operation(s) failed and `
+      + `${outcome.deleted} row(s) were deleted. The history rows those deletes were meant `
+      + 'to remove are still in the table, nothing retries them, and the table grows past '
+      + 'the retention policy while the system keeps reporting healthy. Fix: check the data '
+      + 'driver delete path for the metadata history table. The per-failure causes are not '
+      + 'carried out of `runCleanup()`, so reproduce them against the driver directly.',
+    );
   }
 }
