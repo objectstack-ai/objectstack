@@ -556,6 +556,23 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
+    // is not an array, breaking the one `return hookContext.result` site in
+    // `engine.ts` that has a concrete declared shape to violate
+    // (`find(): Promise<any[]>`; `findOne`/`update`/`delete` all declare
+    // `Promise<any>`). Refused at the seam — immediately after the dispatch and
+    // ahead of `maskSecretFields` / `stripSearchCompanionFromRead`, which both
+    // already assume the array — rather than surfacing as a `TypeError` at one
+    // of ~140 call sites. SHAPING stays legal: mutating rows, dropping keys,
+    // filtering rows out and assigning a different ARRAY are all untouched;
+    // only the container is protected. Registered rather than left as an `ERR_`
+    // operational code for the same reason as `MULTI_UPDATE_HOOK_KEY_DIVERGENCE`
+    // below — a host has to RECOGNISE this to find its own misbehaving handler,
+    // and an unregistered spelling demotes off `error.code` at every door. Not
+    // a synonym of any standard member: the request is valid and authorized,
+    // and the fault is a server-side extension's, not the caller's.
+    // `FindHookResultNotArrayError`, `find-hook-result-shape.ts`.
+    'FIND_HOOK_RESULT_NOT_ARRAY',
     // [#14010] a hook declared `runAs: 'user'` and its trigger resolved NO user
     // (an `isSystem` plugin/service write, a system-elevated flow node), so its
     // `ctx.api` data operation has no identity to scope to and is REFUSED

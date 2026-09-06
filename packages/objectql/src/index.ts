@@ -144,6 +144,20 @@ export {
   MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS,
   divergingHookPayloadKeys,
 } from './multi-update-hook-key-divergence.js';
+// [#15823] Thrown by `engine.find` when its `afterFind` dispatch returned with
+// `ctx.result` no longer an array — the refusal that makes `find()`'s declared
+// `Promise<any[]>` enforceable at the one seam that could break it. Exported
+// for the same reason as its neighbour above: the remedy belongs to the HOOK'S
+// AUTHOR, who needs to NAME the condition, and `code ===
+// 'FIND_HOOK_RESULT_NOT_ARRAY'` is the boundary-crossing identity.
+// `describeFindHookResult` rides along because it is the whole vocabulary of
+// the `observed` field a consumer would otherwise re-derive.
+export {
+  FindHookResultNotArrayError,
+  FIND_HOOK_RESULT_NOT_ARRAY_CODE,
+  FIND_HOOK_RESULT_NOT_ARRAY_STATUS,
+  describeFindHookResult,
+} from './find-hook-result-shape.js';
 // [#14010] `Hook.runAs` — the declared execution identity of a hook's `ctx.api`
 // data operations. The refusal a `runAs: 'user'` hook raises when its trigger
 // resolved no user (ADR-0112 code + status), the api that raises it, and the

@@ -92,6 +92,7 @@ import {
 } from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
+import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
 import {
   DriverConnectError,
   DatasourceUnavailableError,
@@ -9550,6 +9551,26 @@ export class ObjectQL implements IObjectQLEngine {
           hookContext.event = 'afterFind';
           hookContext.result = result;
           await this.triggerHooks('afterFind', hookContext);
+
+          // [#15823] `find()` GUARANTEES the array, so the one seam that can
+          // break the declaration is closed here. An `afterFind` handler may
+          // SHAPE a read — mutate rows, drop keys, filter rows out, assign a
+          // different ARRAY — but replacing the container is a hook-contract
+          // violation, refused loudly rather than returned as an envelope a
+          // caller's `Promise<any[]>` says cannot occur (ruled 2026-09-06).
+          //
+          // ⛔ Placement is load-bearing and not the `return`: `maskSecretFields`
+          // and `stripSearchCompanionFromRead` below BOTH assume the array and
+          // both run on `hookContext.result`, so the check has to precede them —
+          // otherwise the first consumer to walk a replaced container is the
+          // one that reports the problem, from the wrong place.
+          if (!Array.isArray(hookContext.result)) {
+            throw new FindHookResultNotArrayError({
+              object,
+              event: 'afterFind',
+              result: hookContext.result,
+            });
+          }
 
           // Never let secret-field plaintext (or its ref) leave through the
           // generic read path — mask after hooks run. Privileged consumers use
