@@ -208,13 +208,13 @@ describe('the localized fixtures are schema-VALID — this is not bad input', ()
 
   for (const [carrier, stack] of stacks) {
     it(`${carrier} parses clean`, () => {
-      const parsed = ObjectStackDefinitionSchema.safeParse(normalizeStackInput(stack as any).stack);
+      const parsed = ObjectStackDefinitionSchema.safeParse(normalizeStackInput(stack as any));
       expect(parsed.success).toBe(true);
     });
   }
 
   it('CONTROL: a number label does NOT parse, so the parse check discriminates', () => {
-    const parsed = ObjectStackDefinitionSchema.safeParse(normalizeStackInput(stackWithApp(42) as any).stack);
+    const parsed = ObjectStackDefinitionSchema.safeParse(normalizeStackInput(stackWithApp(42) as any));
     expect(parsed.success).toBe(false);
   });
 });
