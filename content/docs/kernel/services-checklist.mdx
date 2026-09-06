@@ -471,15 +471,26 @@ When an app bundle includes an `i18n` config and `translations` array, `AppPlugi
 ```typescript
 export default defineStack({
   manifest: { id: 'com.example.crm', namespace: 'crm' },
-  i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'] },
+  i18n: { defaultLocale: 'en', supportedLocales: ['en', 'zh-CN'], fallbackLocale: 'en' },
   translations: [CrmTranslations],   // TranslationBundle[]
 });
 ```
 
 AppPlugin will:
 1. Set the default locale via `i18nService.setDefaultLocale()`
-2. Call `i18nService.loadTranslations(locale, data)` for each locale in every bundle
-3. Skip gracefully if no i18n service is registered (no errors, just a debug log)
+2. Narrow what `getLocales()` REPORTS to the app's declared `supportedLocales`, via
+   `i18nService.setSupportedLocales()` (#7679)
+3. Set the declared `i18n.fallbackLocale` — the locale `t()` consults after the requested
+   one — via `i18nService.setFallbackLocale()` (#15694)
+4. Call `i18nService.loadTranslations(locale, data)` for each locale in every bundle
+5. Skip gracefully if no i18n service is registered (no errors, just a debug log)
+
+Each of the three setters is optional on `II18nService` and applied through the same
+`typeof ... === 'function'` capability probe, so a provider that has not implemented one
+keeps its own behaviour rather than breaking; `FileI18nAdapter` is constructed with its
+default and fallback locales and implements no setter for either. Each is also guarded on
+the app having DECLARED the value, because several AppPlugins can share one kernel and an
+app that declares no `i18n` block must not clear what another declared.
 
 #### REST API Endpoints
 
