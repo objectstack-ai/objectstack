@@ -21414,10 +21414,21 @@ export class ObjectStackProtocolImplementation implements
         // question, because a field's dependents ARE reachable — through the
         // object that owns it, which is where a field is authored and where the
         // reference graph has real edges.
+        //
+        // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
+        // this file writes elsewhere are lowercase restatements of the throw's OWN
+        // declared `code`, so the wire carries the same token on the `code` axis;
+        // this refusal's code is `NOT_IMPLEMENTED`, so an `[unanswerable_target]`
+        // opener restated nothing the envelope carries and nothing ever read it.
+        // #12975 (2026-08-29) rules that `error` is HUMAN LANGUAGE while `code` is
+        // the MACHINE TOKEN, and since #15685 this prose reaches the operator
+        // VERBATIM — so the tag was the first thing they read. What separates this
+        // refusal from the route's other 501 is the sentence itself, not a tag.
+        // Its absence is pinned by `protocol.reference-target-unanswerable.test.ts`.
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
-                `[unanswerable_target] References to a '${singularTarget}' item cannot be computed. `
+                `References to a '${singularTarget}' item cannot be computed. `
                 + `A '${singularTarget}' is addressed by the composite key '<object>.<field>' `
                 + `(here '${targetName}'), while every metadata property that names a field holds the `
                 + `BARE field name — so no reference site can ever match this key and an empty answer `
