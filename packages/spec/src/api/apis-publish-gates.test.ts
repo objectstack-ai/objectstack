@@ -55,7 +55,7 @@ const validObjectEndpoint = {
   target: 'showcase_task',
   objectParams: { object: 'showcase_task', operation: 'find' as const },
   authRequired: true,
-  cacheTtl: 30,
+  cacheTtlSeconds: 30,
 };
 
 /** A fully valid `flow` endpoint under the same namespace. */
@@ -141,7 +141,7 @@ describe('[#5111] the flip — a well-formed `apis:` publishes', () => {
           path: '/api/v1/apps/showcase/tasks',
           method: 'POST',
           objectParams: { object: 'showcase_task', operation: 'create' },
-          cacheTtl: undefined,
+          cacheTtlSeconds: undefined,
           inputMapping: [{ source: 'title', target: 'name' }, { source: 'meta.owner', target: 'owner_id' }],
           outputMapping: [{ source: 'id', target: 'task_id' }],
         },
@@ -330,7 +330,7 @@ describe('[#5111] gate (b) — mapping declarations (mirrors `mappingDeclaration
     name: 'showcase_task_create',
     method: 'POST' as const,
     objectParams: { object: 'showcase_task', operation: 'create' as const },
-    cacheTtl: undefined,
+    cacheTtlSeconds: undefined,
   };
 
   it('rejects `transform` on either mapping key', () => {
@@ -380,7 +380,7 @@ describe('[#5111] gate (b) — mapping declarations (mirrors `mappingDeclaration
           {
             ...validObjectEndpoint,
             method: operation === 'delete' ? 'DELETE' : 'GET',
-            cacheTtl: undefined,
+            cacheTtlSeconds: undefined,
             objectParams: { object: 'showcase_task', operation },
             inputMapping: [{ source: 'a', target: 'b' }],
           },
@@ -448,19 +448,19 @@ describe('[#5111] gate (e) — policy keys (ADR-0121 D6 + the E4 refusals)', () 
     expect(apis?.[0]?.rateLimit).toEqual({ enabled: true, windowMs: 60_000, maxRequests: 100 });
   });
 
-  it('rejects a negative `cacheTtl`, and accepts 0 (an explicit no-store)', () => {
-    const message = reject({ manifest, apis: [{ ...validObjectEndpoint, cacheTtl: -5 }] });
+  it('rejects a negative `cacheTtlSeconds`, and accepts 0 (an explicit no-store)', () => {
+    const message = reject({ manifest, apis: [{ ...validObjectEndpoint, cacheTtlSeconds: -5 }] });
     expect(message).toMatch(/cannot be negative/);
-    accept({ manifest, apis: [{ ...validObjectEndpoint, cacheTtl: 0 }] });
+    accept({ manifest, apis: [{ ...validObjectEndpoint, cacheTtlSeconds: 0 }] });
   });
 
-  it('rejects `cacheTtl` on a non-GET endpoint', () => {
+  it('rejects `cacheTtlSeconds` on a non-GET endpoint', () => {
     const message = reject({
       manifest,
-      apis: [{ ...validFlowEndpoint, cacheTtl: 30 }],
+      apis: [{ ...validFlowEndpoint, cacheTtlSeconds: 30 }],
     });
     expect(message).toMatch(/GET-only/);
-    expect(message).toMatch(/apis\.0\.cacheTtl/);
+    expect(message).toMatch(/apis\.0\.cacheTtlSeconds/);
   });
 });
 
@@ -500,7 +500,7 @@ describe('[#5111] gate (d) — one claim per METHOD + path inside a stack', () =
           ...validObjectEndpoint,
           name: 'showcase_task_create',
           method: 'POST',
-          cacheTtl: undefined,
+          cacheTtlSeconds: undefined,
           objectParams: { object: 'showcase_task', operation: 'create' },
         },
       ],
@@ -515,12 +515,12 @@ describe('[#5111] every rejection is actionable, and reaches every publish seam'
       apis: [
         { ...validObjectEndpoint, name: 'a_bad', path: '/api/v1/nope' },
         { ...validFlowEndpoint, name: 'b_bad', target: '' },
-        { ...validObjectEndpoint, name: 'c_bad', path: '/api/v1/apps/showcase/other', cacheTtl: -1 },
+        { ...validObjectEndpoint, name: 'c_bad', path: '/api/v1/apps/showcase/other', cacheTtlSeconds: -1 },
       ],
     });
     const custom = result.success ? [] : result.error.issues.filter((i) => i.code === 'custom');
     expect(custom).toHaveLength(3);
-    expect(custom.map((i) => i.path.join('.'))).toEqual(['apis.0.path', 'apis.1.target', 'apis.2.cacheTtl']);
+    expect(custom.map((i) => i.path.join('.'))).toEqual(['apis.0.path', 'apis.1.target', 'apis.2.cacheTtlSeconds']);
   });
 
   it('`defineStack` throws the same prescription an artifact parse reports', () => {
@@ -551,7 +551,7 @@ describe('[#5111] the `ApiEndpoint` vocabulary itself is untouched', () => {
     expect(parsed.type).toBe('object_operation');
     expect(parsed.objectParams).toEqual({ object: 'showcase_task', operation: 'find' });
     expect(parsed.authRequired).toBe(true);
-    expect(parsed.cacheTtl).toBe(30);
+    expect(parsed.cacheTtlSeconds).toBe(30);
   });
 
   it('keeps `authRequired` defaulting to true — omission is the SAFE state', () => {
@@ -596,7 +596,7 @@ describe('identityFreeEndpointGateFailure — the same judge, minus stack identi
 
   it('still refuses D6 — the gate with no runtime counterpart, and the reason #5189 exists', () => {
     const failure = identityFreeEndpointGateFailure(
-      ApiEndpointSchema.parse({ ...validObjectEndpoint, cacheTtl: undefined, authRequired: false }),
+      ApiEndpointSchema.parse({ ...validObjectEndpoint, cacheTtlSeconds: undefined, authRequired: false }),
     );
     expect(failure).toBeDefined();
     expect(failure!.path).toEqual(['rateLimit']);
@@ -609,7 +609,7 @@ describe('identityFreeEndpointGateFailure — the same judge, minus stack identi
       identityFreeEndpointGateFailure(
         ApiEndpointSchema.parse({
           ...validObjectEndpoint,
-          cacheTtl: undefined,
+          cacheTtlSeconds: undefined,
           authRequired: false,
           rateLimit: { enabled: true, windowMs: 60000, maxRequests: 100 },
         }),
@@ -622,7 +622,7 @@ describe('identityFreeEndpointGateFailure — the same judge, minus stack identi
       [{ type: 'proxy', target: 'https://x.test', objectParams: undefined }, ['type']],
       [{ objectParams: { object: 'showcase_task' } }, ['objectParams']],
       [{ outputMapping: [{ source: 'a', target: 'b', transform: 'upper' }] }, ['outputMapping', 0, 'transform']],
-      [{ cacheTtl: -1 }, ['cacheTtl']],
+      [{ cacheTtlSeconds: -1 }, ['cacheTtlSeconds']],
     ];
     for (const [over, path] of cases) {
       const failure = identityFreeEndpointGateFailure(

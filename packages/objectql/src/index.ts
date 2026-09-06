@@ -66,6 +66,24 @@ export {
 } from './registry.js';
 export type { InjectedColumnProvenance } from './registry.js';
 
+// [#16159] The three ADR-0112 `code` strings the registry's install-time and
+// registration refusals carry, as constants a consumer can import instead of
+// re-spelling. Exported for the reason #14936 established and measured: this
+// package declares BOTH realms in its own `exports`, so a consumer holding
+// the other realm's copy of a class gets `instanceof` === false, silently —
+// a `code` compare is the only check that survives the split, and these are
+// how a consumer performs it without authoring the string itself (and so
+// without acquiring a `check:error-code-provenance` stamp site of its own).
+// ⛔ The classes themselves stay unexported deliberately: exporting them
+// would publish the `instanceof` route this convention exists to replace.
+// See the shared docblock over the constants in `registry.ts` for the full
+// reasoning and for why the `*_CODE` spelling is load-bearing.
+export {
+  NAMESPACE_CONFLICT_CODE,
+  DUPLICATE_ARTIFACT_OBJECT_NAME_CODE,
+  OBJECT_OWNERSHIP_CONFLICT_CODE,
+} from './registry.js';
+
 // [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
 // ADR-0112 D6c). Exported because `os build` is the SECOND door that has to
 // answer "does this group id resolve?" — over a composed artifact, at compile
@@ -144,6 +162,20 @@ export {
   MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS,
   divergingHookPayloadKeys,
 } from './multi-update-hook-key-divergence.js';
+// [#15823] Thrown by `engine.find` when its `afterFind` dispatch returned with
+// `ctx.result` no longer an array — the refusal that makes `find()`'s declared
+// `Promise<any[]>` enforceable at the one seam that could break it. Exported
+// for the same reason as its neighbour above: the remedy belongs to the HOOK'S
+// AUTHOR, who needs to NAME the condition, and `code ===
+// 'FIND_HOOK_RESULT_NOT_ARRAY'` is the boundary-crossing identity.
+// `describeFindHookResult` rides along because it is the whole vocabulary of
+// the `observed` field a consumer would otherwise re-derive.
+export {
+  FindHookResultNotArrayError,
+  FIND_HOOK_RESULT_NOT_ARRAY_CODE,
+  FIND_HOOK_RESULT_NOT_ARRAY_STATUS,
+  describeFindHookResult,
+} from './find-hook-result-shape.js';
 // [#14010] `Hook.runAs` — the declared execution identity of a hook's `ctx.api`
 // data operations. The refusal a `runAs: 'user'` hook raises when its trigger
 // resolved no user (ADR-0112 code + status), the api that raises it, and the
@@ -372,12 +404,23 @@ export type {
 // #8686's ruling. The refusal class is exported because a caller that catches
 // it identifies it by `code`, and the decision function because it is the
 // ruling's five binding points as one pure, directly-testable verdict.
+//
+// [#14936] `SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE` and
+// `isSystemWriteOrganizationRequiredError` are the AFFORDANCE that makes "by
+// `code`" followable without re-spelling the literal. Exporting the class was
+// never enough on its own: this package declares both realms in its `exports`,
+// so a consumer holding the other realm's copy gets `instanceof` === false,
+// silently. The code compare is the check that survives; these two are how a
+// consumer performs it without authoring the string itself, and so without
+// acquiring a `check:error-code-provenance` stamp site of its own.
 export {
   resolveSystemWriteOrganization,
   resolveTenantFieldName,
   isPlatformNamespaceObject,
   carriesOrganization,
+  isSystemWriteOrganizationRequiredError,
   SystemWriteOrganizationRequiredError,
+  SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
   ORGANIZATION_OBJECT,
   GLOBAL_TENANT,
   DEFAULT_TENANT_FIELD,

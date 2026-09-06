@@ -316,31 +316,43 @@ describe('posture reading, with a red control for each', () => {
    * differ — a test that only asserted `passthrough` would still pass if the
    * reader started calling everything passthrough.
    */
-  it('does not stop at the strictObject( idiom — .passthrough() on it wins (#5072)', () => {
+  it('does not stop at the strictObject( idiom — .passthrough() on it wins (#5072); both real sites closed at #15469', () => {
     const view = analyzeSites(at('ui/view.zod.ts'));
 
+    // The two sites #5072 was written for are CLOSED as of #15469 (maintainer
+    // ruling A: both `.passthrough()` calls removed, the gantt window's ten
+    // renderer-read keys declared, the tree window's read set measured empty).
+    // Still pinned BY NAME: a reopen has to come through here and say so.
     for (const name of ['GanttConfigSchema', 'TreeConfigSchema']) {
       const site = view.find((s) => s.name === name);
       expect(site, `${name} is not a site any more — re-point this test, do not delete it`).toBeDefined();
-      // The idiom is still the helper; only the READING of the chain changed.
       expect(site?.idiom).toBe('strictObject');
-      expect(site?.posture, `${name} must read as passthrough — it is open at runtime`).toBe('passthrough');
+      expect(site?.posture, `${name} must read as strict — closed at #15469`).toBe('strict');
     }
 
+    // The #5072 reading itself, on a MUTATED copy of the live file: chain
+    // `.passthrough()` back onto the gantt site and its reading flips. Without
+    // this red control the `strict` assertions above are satisfied by a reader
+    // that has gone back to short-circuiting on the idiom — the exact defect.
+    const red = mutate(
+      'ui/view.zod.ts',
+      'configs give, and a renderer knob is declared HERE before it is read.\n}));',
+      'configs give, and a renderer knob is declared HERE before it is read.\n}).passthrough());',
+    ).find((s) => s.name === 'GanttConfigSchema');
+    expect(red?.idiom).toBe('strictObject');
+    expect(red?.posture, 'the walk past the idiom must still run').toBe('passthrough');
+
     // The control, in the same file and the same idiom: a bare `strictObject(`
-    // with nothing chained on is still strict. Without this the assertion above
+    // with nothing chained on is strict. Without this the assertion above
     // is satisfied by a reader that has simply stopped distinguishing.
     const plain = view.find((s) => s.name === 'GanttQuickFilterSchema');
     expect(plain?.idiom).toBe('strictObject');
     expect(plain?.posture).toBe('strict');
 
-    // Exactly two, and exactly these two. Pinned as a SET rather than a count so
-    // a future batch adding a deliberate `.passthrough()` has to come through
-    // here and say so, instead of quietly widening a number.
-    expect(view.filter((s) => s.posture === 'passthrough').map((s) => s.name)).toEqual([
-      'GanttConfigSchema',
-      'TreeConfigSchema',
-    ]);
+    // The file's passthrough set is EMPTY as of #15469. Pinned as a SET rather
+    // than a count so a future batch adding a deliberate `.passthrough()` has
+    // to come through here and say so, instead of quietly widening a number.
+    expect(view.filter((s) => s.posture === 'passthrough').map((s) => s.name)).toEqual([]);
 
     // And the claim the ledger rests on: no STRIP site moved. Both postures
     // involved are non-strip, so the remaining-strip map — the thing every batch

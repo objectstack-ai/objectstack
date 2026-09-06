@@ -2,7 +2,7 @@
 
 import type { FilterCondition } from '@objectstack/spec/data';
 import type { RegisteredErrorCode } from '@objectstack/spec/api';
-import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from './like-pattern.js';
+import { type LikeShape } from './like-pattern.js';
 import { textMatchPredicateSql, normalizeSqlDialect } from './text-match-sql.js';
 import { textOperatorPolarity } from './non-text-column.js';
 import {
@@ -800,6 +800,7 @@ function textMatch(
   negate: boolean,
   params: unknown[],
   opts: ReadScopeCompileOptions,
+  fold = false,
 ): string {
   return textMatchPredicateSql({
     dialect: normalizeSqlDialect(opts.dialect),
@@ -807,6 +808,7 @@ function textMatch(
     shape,
     value: val,
     negate,
+    fold,
     bind: (v) => bind(params, v),
   });
 }
@@ -1331,19 +1333,29 @@ function compileOperator(
      * the rows already lower-case — and on a read scope that is a row set the
      * policy author never wrote, in the narrowing direction here but in the
      * WIDENING direction under a `$not`.
+     *
+     * [#15780] …and WHICH fold is the DIALECT's answer, exactly as the keyword
+     * is for the case-exact arms. This line used to spell its own binds and
+     * emit `translate()` unconditionally, on the reasoning that a
+     * case-INSENSITIVE operator never wants the per-dialect case-EXACT
+     * construct. The first half of that was right and the second half hid the
+     * defect: `translate()` is Postgres/Oracle, so on a SQLite datasource this
+     * read scope compiled to a statement the engine could not PARSE — an RLS
+     * policy that cannot be evaluated at all. It goes through
+     * {@link textMatch} now with `fold` set, which keeps `translate()` on
+     * Postgres, emits `lower(col) GLOB lower(?)` on SQLite, the nested-
+     * `REPLACE` binary fold on MySQL and — [#16028] — the same `REPLACE` chain
+     * without the cast on the `unknown` residue, because a datasource whose
+     * dialect nothing answered can BE SQLite and `translate()` failed to parse
+     * there just as loudly through this compiler as through the other two. The
+     * `ESCAPE`
+     * binding is still never folded — the construct table owns that, and the
+     * SQLite arm has no `ESCAPE` clause to bind at all.
      */
-    case '$icontains': {
+    case '$icontains':
       assertRenderableText(op, field, val);
-      const gated = textOverNonTextColumn(op, field, opts);
-      if (gated) return gated;
-      // The two binds are spelled out rather than taken from {@link textMatch},
-      // because only the PATTERN placeholder is folded, the `ESCAPE` one must
-      // not be, and this operator is case-INSENSITIVE by ruling so it never
-      // wants the per-dialect case-exact construct. Left-to-right, so the
-      // values land in `params` in placeholder order.
-      const patternRef = asciiLowerSqlExpr(bind(params, likePattern('contains', val)));
-      return `${asciiLowerSqlExpr(col)} LIKE ${patternRef} ESCAPE ${bind(params, LIKE_ESCAPE_CHAR)}`;
-    }
+      return textOverNonTextColumn(op, field, opts)
+        ?? textMatch(col, 'contains', val, false, params, opts, true);
     // [#5298] NULL-safe: `NOT LIKE` is UNKNOWN for a NULL column, and "does not
     // contain" is true of a value that is not there.
     case '$notContains':

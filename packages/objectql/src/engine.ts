@@ -55,6 +55,7 @@ import {
   isDataMigrationFlagVerified,
   renderOperationMessage,
   objectLabelKey,
+  resolveBundleLocale,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -91,6 +92,7 @@ import {
 } from './summary-aggregate.js';
 import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
+import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
 import {
   DriverConnectError,
   DatasourceUnavailableError,
@@ -999,6 +1001,13 @@ function assertOrderByIsMaterializable(
   // surfaces engine errors over HTTP therefore answers the same envelope on
   // both doors instead of turning the direct path into an unhandled 500.
   err.status = 400;
+  // …and `httpStatus`, the SAME number under ADR-0112 D5's spelling. `status` is
+  // what every HTTP door in this repo reads (`resolveThrownHttpError`), so it
+  // stays; `httpStatus` is what a consumer holding the THROWN error reads —
+  // the CLI's `--json` error envelope (`errorCodeFields`) is the measured one,
+  // and it saw `code` with no status at all until both spellings were stamped.
+  // Two keys, one value, written together at every producer in this package.
+  err.httpStatus = 400;
   err.code = 'INVALID_SORT';
   err.field = first;
   err.fields = unmaterialized;
@@ -1100,6 +1109,7 @@ function assertProjectionHasNoDottedPaths(
   // code however the caller reached it, so a host surfacing engine errors over
   // HTTP answers the same envelope on both doors.
   err.status = 400;
+  err.httpStatus = 400;
   err.code = 'INVALID_FIELD';
   err.field = first;
   err.fields = dotted;
@@ -1244,6 +1254,7 @@ function undeclaredWriteFieldErrors(
     if (undeclared.length === 0) continue;
     const err: any = new Error(`Unknown field '${undeclared[0]}' on object '${object}'`);
     err.status = 400;
+    err.httpStatus = 400;
     err.code = 'INVALID_FIELD';
     err.field = undeclared[0];
     err.fields = undeclared;
@@ -2572,7 +2583,13 @@ export class ObjectQL implements IObjectQLEngine {
   // i18n service backing validation-message + field-label localization (#3957).
   // Optional: without it, messages render from the built-in catalog against the
   // declared labels.
-  private i18nService?: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string };
+  private i18nService?: {
+    t?: (key: string, locale: string, params?: Record<string, unknown>) => string;
+    // [#15757] `II18nService` requires `getLocales()`; it is optional HERE for
+    // the same reason `t` is — the setter accepts any partial shim, and a shim
+    // that cannot say what it holds is simply not negotiated against.
+    getLocales?: () => string[];
+  };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
   // writing an object that declares a secret field fails closed (never
@@ -5472,7 +5489,7 @@ export class ObjectQL implements IObjectQLEngine {
                   && item.name
                   && item.name !== itemName
               ) {
-                  const err: Error & { code?: string; status?: number } = new Error(
+                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
                       `Invalid \`views:\` container from ${sourceLabel} '${ownerId}': the container's own `
                       + `\`name\` is '${item.name}', which disagrees with the object key it binds to, `
                       + `'${itemName}' (derived from its own \`object\`, else \`list.data.object\` / `
@@ -5484,6 +5501,7 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   err.code = 'VALIDATION_ERROR';
                   err.status = 400;
+                  err.httpStatus = 400;
                   throw err;
               }
               const toRegister = item.name === itemName ? item : { ...item, name: itemName };
@@ -5501,7 +5519,7 @@ export class ObjectQL implements IObjectQLEngine {
               // internals are well-formed stays the authoring/publish doors'
               // job (defineStack, `os validate`, the metadata door).
               if (key === 'views' && !isViewContainerShaped(toRegister)) {
-                  const err: Error & { code?: string; status?: number } = new Error(
+                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
                       `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
                       + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
                       + 'config belong to a single VIEW, not to the container — wrap it: '
@@ -5513,6 +5531,7 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   err.code = 'INVALID_METADATA';
                   err.status = 422;
+                  err.httpStatus = 422;
                   throw err;
               }
               this._registry.registerItem(pluralToSingular(key), toRegister, 'name' as any, ownerId);
@@ -5551,7 +5570,7 @@ export class ObjectQL implements IObjectQLEngine {
               const parsed = AssembledViewArtifactSchema.safeParse(item);
               if (!parsed.success) {
                   const itemName = resolveMetadataItemName('views', item) ?? '(unnamed)';
-                  const err: Error & { code?: string; status?: number } = new Error(
+                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
                       `Invalid \`${ASSEMBLED_VIEW_ITEMS_KEY}:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': `
                       + 'the assembled-manifest channel carries non-container view artifacts only — a ViewItem '
                       + 'record (`viewKind` + `config`) or a flattened list/form overlay '
@@ -5560,6 +5579,7 @@ export class ObjectQL implements IObjectQLEngine {
                   );
                   err.code = 'INVALID_METADATA';
                   err.status = 422;
+                  err.httpStatus = 422;
                   throw err;
               }
               const body = parsed.data as Record<string, unknown>;
@@ -6060,7 +6080,7 @@ export class ObjectQL implements IObjectQLEngine {
    * a deployment's `validation.field.*` message overrides, and the field's
    * TRANSLATED label for apps whose declared labels are in another language.
    */
-  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string }): void {
+  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string; getLocales?: () => string[] }): void {
     this.i18nService = service;
     this.logger.info('I18nService configured for validation messages');
   }
@@ -6084,9 +6104,60 @@ export class ObjectQL implements IObjectQLEngine {
     const t = this.i18nService?.t;
     return {
       objectName,
-      locale: context?.locale,
+      locale: this.negotiatedMessageLocale(context?.locale),
       translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
     };
+  }
+
+  /**
+   * The locale the bridged i18n service can actually ANSWER in, for the locale
+   * the caller asked for (#15757).
+   *
+   * `ExecutionContext.locale` is the `Accept-Language` header's first tag
+   * verbatim — `preferredLocaleFromHeader` reports what was ASKED FOR and
+   * expands nothing, deliberately, because every one of its callers negotiates
+   * differently. Handing that tag straight to `II18nService.t()` made this the
+   * one consumer that never negotiated at all: a served adapter resolves a
+   * locale EXACTLY and then falls to its declared fallback
+   * (`FileI18nAdapter.t()` is `resolveFromLocale(key, locale)` then
+   * `resolveFromLocale(key, fallbackLocale)`), so a bare `zh` missed a `zh-CN`
+   * bundle and the caller read an English refusal — on the same response whose
+   * dataset, view and object labels were Chinese, because those go through
+   * `pickData` and `pickData` negotiates.
+   *
+   * ⛔ The rule is NOT re-implemented here. `resolveBundleLocale`
+   * (`@objectstack/spec/system`) is the single negotiation rule the document
+   * translators already run — exact → case-insensitive → base language →
+   * variant expansion, which is the step that reaches `zh-CN` from `zh` — and
+   * this asks it the same question about a different set of available locales:
+   * the translators' set is the bundle's keys, and the service's set is what
+   * `getLocales()` reports it holds. A second rule living here is the defect,
+   * not the fix.
+   *
+   * Passes the requested tag through untouched whenever there is nothing to
+   * negotiate against — no service, no `getLocales`, an empty or non-array
+   * answer, a throwing one, or no match. Negotiation needs a list of what
+   * EXISTS; inventing one is how a second rule gets born.
+   */
+  private negotiatedMessageLocale(requested: string | undefined): string | undefined {
+    if (!requested) return requested;
+    const getLocales = this.i18nService?.getLocales;
+    if (typeof getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+      available = getLocales.call(this.i18nService);
+    } catch {
+      // A misbehaving i18n service must not turn a write into a 500.
+      return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    // `resolveBundleLocale` matches against a bundle's KEYS; the offered
+    // locales are exactly that key set, with no data behind them.
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+      if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
   }
 
   /**
@@ -7076,7 +7147,7 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<Map<string, unknown>> {
     const schema = this._registry.getObject(object);
     if (!collectInternalReadFields(schema).includes(field)) {
-      const err: Error & { code?: string; status?: number; object?: string; field?: string } =
+      const err: Error & { code?: string; status?: number; httpStatus?: number; object?: string; field?: string } =
         new Error(
           `Cannot resolve internal field "${object}.${field}": it is not declared \`internal: true\`. `
             + 'Only fields the engine omits from the generic read path are dereferenceable here — '
@@ -7086,6 +7157,7 @@ export class ObjectQL implements IObjectQLEngine {
         );
       err.code = 'INVALID_FIELD';
       err.status = 400;
+      err.httpStatus = 400;
       err.object = object;
       err.field = field;
       throw err;
@@ -9492,6 +9564,26 @@ export class ObjectQL implements IObjectQLEngine {
           hookContext.event = 'afterFind';
           hookContext.result = result;
           await this.triggerHooks('afterFind', hookContext);
+
+          // [#15823] `find()` GUARANTEES the array, so the one seam that can
+          // break the declaration is closed here. An `afterFind` handler may
+          // SHAPE a read — mutate rows, drop keys, filter rows out, assign a
+          // different ARRAY — but replacing the container is a hook-contract
+          // violation, refused loudly rather than returned as an envelope a
+          // caller's `Promise<any[]>` says cannot occur (ruled 2026-09-06).
+          //
+          // ⛔ Placement is load-bearing and not the `return`: `maskSecretFields`
+          // and `stripSearchCompanionFromRead` below BOTH assume the array and
+          // both run on `hookContext.result`, so the check has to precede them —
+          // otherwise the first consumer to walk a replaced container is the
+          // one that reports the problem, from the wrong place.
+          if (!Array.isArray(hookContext.result)) {
+            throw new FindHookResultNotArrayError({
+              object,
+              event: 'afterFind',
+              result: hookContext.result,
+            });
+          }
 
           // Never let secret-field plaintext (or its ref) leave through the
           // generic read path — mask after hooks run. Privileged consumers use
@@ -12920,6 +13012,7 @@ export class ObjectQL implements IObjectQLEngine {
             `Delete or reassign them first, or set deleteBehavior:'cascade' on ${childName}.${fieldName}.`;
           err.code = 'DELETE_RESTRICTED';
           err.status = 409;
+          err.httpStatus = 409;
           err.object = object;
           // Constraint 2's REQUIRED half — the referenced object is named
           // unconditionally, because "which table is blocking me" is the one

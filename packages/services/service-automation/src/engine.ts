@@ -2034,6 +2034,29 @@ export class AutomationEngine implements IAutomationService {
      * nobody read, and every in-flight approval zombified by the next restart.
      */
     private async persistSuspendedRun(run: SuspendedRun): Promise<void> {
+        // [#16129] THE MAP WRITE IS FIRST, and `cacheOnlySuspensions` is written
+        // only after the save below settles => for the whole duration of that
+        // await this entry is in the map and is NOT yet qualified. A concurrent
+        // per-id `loadSuspendedRunStrict` therefore reads a store that
+        // truthfully has no row yet, finds no qualifier, and takes
+        // `evictConsumedSuspension` on a run being parked RIGHT NOW. Reachable
+        // without out-of-band knowledge of the id, because the map write is what
+        // publishes it to `listSuspendedRuns`.
+        //
+        // Bounded, measured, and pinned in
+        // `suspended-run-mid-park-eviction-window.test.ts`: the store-first
+        // strict load keeps the run resumable once the save lands, and the cost
+        // falls entirely on `listSuspendedRuns`, which merely OMITS the run --
+        // inside that listing's declared latitude. Do not widen the marking, add
+        // a lock, or move the save above this line without reading that pin's
+        // header.
+        //
+        // [#16151] The ONE compound case that ESCAPED those bounds — an evicting
+        // read inside the window, and then the save FAILING, leaving the run
+        // with neither a durable row nor a map entry — is closed in the catch
+        // below, which re-seats this entry. The base window itself is
+        // deliberately unchanged: while the save is still in flight a per-id
+        // read still evicts, and bound 1 still carries it.
         this.suspendedRuns.set(run.runId, run);
         if (this.store) {
             try {
@@ -2049,6 +2072,34 @@ export class AutomationEngine implements IAutomationService {
                 // what lets `loadSuspendedRunStrict` keep serving it from the
                 // map — the in-process resumability the message below promises.
                 this.cacheOnlySuspensions.add(run.runId);
+                // [#16151] RE-SEAT THE MAP ENTRY — the marking above qualifies
+                // an entry that may no longer be there. The map write at the
+                // top of this method is NOT yet qualified for the whole
+                // duration of the await, so a concurrent per-id
+                // `loadSuspendedRunStrict` reads a store that truthfully has no
+                // row, finds no qualifier, and evicts a run being parked right
+                // now. Compound that with THIS save failing and the run was
+                // left with neither a durable row nor a map entry:
+                // `hasSuspendedRun` answered `false` and `resume` answered
+                // `RUN_NOT_FOUND` — the run lost IN-PROCESS, while the record
+                // below told the operator it was "kept in memory only" and that
+                // they had until the next restart to act.
+                //
+                // Re-seating restores exactly this method's own write, on the
+                // one path where the store refused the row. It cannot resurrect
+                // a CONSUMED suspension: consumption goes through
+                // `forgetSuspendedRun`, which is reachable only once
+                // `loadSuspendedRunStrict` answers for this run, and for the
+                // whole of this await it answers `null` for the reason above.
+                // Nor can it clobber a NEWER entry: `persistSuspendedRun` is the
+                // only writer of this map, and a second park of the same run
+                // needs a resume that the same `null` refuses.
+                //
+                // ⛔ NOT a widening of the cache-only marking, which #16129
+                // forbids taking unilaterally because it would weaken #13617's
+                // store authority: the marking still happens only after the
+                // save has settled, and only when it settled as a FAILURE.
+                this.suspendedRuns.set(run.runId, run);
                 // #6499 — the cause is the datasource DRIVER's own text, so it
                 // goes to the logger's STRUCTURED slot, never spliced into the
                 // message; see `forgetSuspendedRun`'s catch below for the full
@@ -2062,8 +2113,10 @@ export class AutomationEngine implements IAutomationService {
                 // stays empty on purpose (#5575).
                 this.logger.error(
                     `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is ` +
-                        `kept in memory only and will NOT be resumable after a restart. Fix the store failure ` +
-                        `in this record's meta.`,
+                        `kept in memory only: this process keeps it resumable, and hasSuspendedRun() and ` +
+                        `listSuspendedRuns() both still answer for it — if they do not, this run is already ` +
+                        `gone and that is a defect in this engine, not in the store. It will NOT be resumable ` +
+                        `after a restart. Fix the store failure in this record's meta.`,
                     undefined,
                     describeThrownForLog(err),
                 );
@@ -2162,6 +2215,87 @@ export class AutomationEngine implements IAutomationService {
             }
         }
         await this.releaseSuspension(run, reason);
+    }
+
+    /**
+     * [#15832] Drop a map entry for a run this process has a store-authoritative
+     * per-id "no row" answer for — a run parked HERE and consumed by another
+     * replica.
+     *
+     * ## Why this exists at all, and why not on the `'lost'` branch
+     *
+     * {@link forgetSuspendedRun} is the one eviction site, and it runs in
+     * whichever process CONSUMES the suspension. Put two replicas over one
+     * store and the parking process is routinely not that one: A parks a run
+     * and B resumes it, so A's entry is never removed by anything. The card
+     * that found this located the leak on `resumeInternal`'s `'lost'` branch,
+     * which returns before that choke point — but the NO-RACE shape leaks
+     * identically (A parks, only B ever resumes, A never attempts a claim and
+     * there is no `'lost'` at all), so an eviction hung on `'lost'` alone would
+     * leave the ordinary multi-replica deployment untouched.
+     *
+     * The retained snapshot is not only memory. Two readers hand it back:
+     * {@link listSuspendedRuns} — synchronous, cache-only, and the one listing
+     * on the `AutomationService` spec contract — and
+     * {@link listSuspendedRunsDurable}, which deliberately appends map entries
+     * the durable list lacks. After the other replica COMPLETES the run both
+     * report a phantom: a finished run listed as suspended, whose
+     * {@link getSuspendedScreen} answers `null`, so a consumer that lists and
+     * then opens gets an entry it cannot act on.
+     *
+     * ## What this does NOT do
+     *
+     * ⛔ It does not touch the cache-only listing's contract. The spec says
+     * `listSuspendedRuns()` lists "the currently suspended (paused) runs
+     * awaiting a resume"; this engine's own docblock adds only that it may
+     * OMIT runs (those parked in a previous process lifetime) because it reads
+     * the cache alone. Removing an entry therefore moves nothing: under-
+     * reporting is already inside that declared latitude, and over-reporting
+     * was never inside the promise. Nothing here makes either listing
+     * store-backed.
+     *
+     * ⛔ It does not notify the paused node's executor
+     * ({@link NodeExecutor.onSuspensionReleased}). That notification belongs to
+     * {@link forgetSuspendedRun} because it is the choke point every
+     * CONSUMPTION passes through, and an eviction is not a consumption — this
+     * process consumed nothing, the replica that did fired its own. Firing one
+     * here would tear down a pause twice, once per replica.
+     *
+     * ## The two guards, and why each is load-bearing
+     *
+     *  - **no store** — the map IS the authority (`loadSuspendedRunStrict`
+     *    returns from it directly), so there is no second reader to be wrong
+     *    about and nothing may be dropped.
+     *  - **{@link cacheOnlySuspensions}** — a run whose durable save failed was
+     *    never handed to the store, so the store's "no row" is SILENCE about it
+     *    rather than an answer (#13617). Evicting on that would convert
+     *    {@link persistSuspendedRun}'s documented degradation — a failed save
+     *    costs cross-restart durability, not in-process resumability — into a
+     *    run that vanishes from its own process.
+     *
+     * [#16129] Neither guard covers the MID-PARK WINDOW: `persistSuspendedRun`
+     * writes its map entry BEFORE it awaits the durable save, so an entry can be
+     * live here while the store legitimately has no row for it and the
+     * cache-only qualifier is not yet set. Evicting it is bounded -- the run
+     * stays resumable through the store-first strict load and only the
+     * cache-only listing under-reports -- and
+     * `suspended-run-mid-park-eviction-window.test.ts` pins that window.
+     *
+     * [#16151] The one COMPOUND case that escaped those bounds -- an eviction
+     * here, and then that same save FAILING, leaving the run with neither a
+     * durable row nor a map entry -- no longer does: `persistSuspendedRun`'s
+     * catch re-seats the entry alongside the cache-only marking, so guard 2
+     * above has something to guard again. The same pin file carries it, now at
+     * the intended outcome rather than at the measured loss.
+     *
+     * A store read that THROWS must never reach here: an outage means the
+     * run's existence is UNKNOWN, not "gone". Every caller below is on a path
+     * where the store answered.
+     */
+    private evictConsumedSuspension(runId: string): void {
+        if (!this.store) return;
+        if (this.cacheOnlySuspensions.has(runId)) return;
+        this.suspendedRuns.delete(runId);
     }
 
     /**
@@ -4996,6 +5130,13 @@ export class AutomationEngine implements IAutomationService {
         // deliberately keeps such a run resumable in-process (it reports the
         // lost durability at `error`).
         if (this.cacheOnlySuspensions.has(runId)) return this.suspendedRuns.get(runId) ?? null;
+        // [#15832] The store ANSWERED, and the answer is "no row". Any entry
+        // this process still holds for that run is a run it parked and another
+        // replica consumed — the phantom the two listings hand back. This is
+        // the definitive per-id evidence the paragraph above already rests on,
+        // so the same reading that refuses to serve it here stops publishing it
+        // there. A store read that threw never reaches this line.
+        this.evictConsumedSuspension(runId);
         return null;
     }
 
@@ -5374,6 +5515,14 @@ export class AutomationEngine implements IAutomationService {
                 // already maps it to 409. A distinct code would be vocabulary
                 // nothing reads — add one the day a caller needs the
                 // difference.
+                // [#15832] The store's compare-and-set ANSWERED: no row is parked
+                // where this replica read it. Whatever snapshot this process
+                // still holds for the run is stale by construction — it names a
+                // node the run has left — so it stops being published by the two
+                // listings. ⛔ NOT `forgetSuspendedRun`: nothing was consumed
+                // here, and firing that choke point would tear the pause down a
+                // second time in this process on top of the winner's own.
+                this.evictConsumedSuspension(runId);
                 return {
                     success: false,
                     code: 'RESUME_IN_PROGRESS',
@@ -5431,18 +5580,88 @@ export class AutomationEngine implements IAutomationService {
                     }
                 }
                 const durationMs = Date.now() - run.startTime;
-                const logged = this.recordLog({
-                    id: runId,
-                    flowName: run.flowName,
-                    flowVersion: run.flowVersion,
-                    status: 'completed',
-                    startedAt: run.startedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs,
-                    trigger: buildRunTrigger(context),
-                    steps,
-                    output,
-                }, context);
+                // [#15944] THE RUN IS OVER AND IT SUCCEEDED. Everything from
+                // here to the return is BOOKKEEPING ABOUT that fact, and the
+                // `catch` below this `try` exists for NODE failures — so a
+                // throw out of the history write was handled as though a node
+                // had thrown: the arm journalled a repair snapshot, stamped
+                // `status: 'stranded'`, answered `success: false`, and
+                // {@link restoreConsumedSuspension} then honoured that
+                // snapshot and re-armed the pause, so the NEXT resume RE-RAN
+                // every node after it. Measured: `tail` ran twice.
+                //
+                // The guard restores the invariant `recordLog`'s own doc
+                // states two screens down — "a history write must NEVER block
+                // or break the run that produced it" — which that call was
+                // relied upon to keep and did not.
+                //
+                // Two statements inside `recordLog` reach here on the terminal
+                // path, and neither is hypothetical: `store.recordTerminal`,
+                // whose SYNCHRONOUS throw escapes because the
+                // `void write.catch(...)` beneath it only ever sees a returned
+                // promise's rejection (both shipped stores are `async` and
+                // cannot; the interface is exported, optional, and
+                // host-implementable, and a store returning a non-thenable
+                // makes `write.catch` itself a synchronous TypeError), and the
+                // run-summary line `this.logger.info(line, meta)`, on by
+                // default and calling a HOST-INJECTED logger.
+                //
+                // ⛔ NOT a widening of anything: no exit gains a status it
+                // did not have, the node-failure arm below is untouched, and
+                // the failure is REPORTED rather than swallowed — see the
+                // catch. ⛔ And ⛔ deliberately not fixed at
+                // `restoreConsumedSuspension`: that verb judged correctly on
+                // the evidence it was handed; the evidence is what was wrong,
+                // and no journal is written for a completed run at all now.
+                let logged: ExecutionLogEntry | undefined;
+                try {
+                    logged = this.recordLog({
+                        id: runId,
+                        flowName: run.flowName,
+                        flowVersion: run.flowVersion,
+                        status: 'completed',
+                        startedAt: run.startedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs,
+                        trigger: buildRunTrigger(context),
+                        steps,
+                        output,
+                    }, context);
+                } catch (bookkeeping) {
+                    // #4632 verdict: DURABILITY, so `error` — the caller is
+                    // told the truthful thing (the run completed), which is
+                    // exactly what makes the rest invisible from the outside:
+                    // the terminal history row never landed, nothing retries
+                    // it, and no envelope carries a word about it. After the
+                    // next restart the run is invisible to the Runs surfaces
+                    // and the approvals sweeps read the hole —
+                    // `inspectStrandedRequests` reads "no suspension + no
+                    // terminal row" as a STRANDED request, and
+                    // `releasePendingForTerminalRuns` reads "no terminal row"
+                    // as still-alive. Consequence and fix in the first line,
+                    // per AGENTS.md. Said ONCE per run, not once per failed
+                    // write.
+                    //
+                    // THIRD argument per `error(message, error?, meta?)`; the
+                    // `Error` slot stays empty on purpose (#5575), and the
+                    // thrown text goes to the structured slot rather than into
+                    // the message (#6499).
+                    this.logger.error(
+                        `[Automation] run '${runId}' of flow '${run.flowName}' COMPLETED successfully but its ` +
+                            `run-history bookkeeping threw, so its terminal history row never landed — nothing ` +
+                            `retries it, the caller is told the run succeeded, and after the next restart this ` +
+                            `run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
+                            `stranded and never-finished. The run itself is COMPLETE and must NOT be repaired ` +
+                            `or re-run. Fix the history failure in this record's meta.`,
+                        undefined,
+                        describeThrownForLog(bookkeeping),
+                    );
+                }
+                // [#15944] Recomputed when the guard above had to abandon
+                // `recordLog`: the same pure function of the same steps that
+                // `recordLog`'s own first statement runs, so the two spellings
+                // cannot disagree. Same shape as the strand arm's below.
+                const summary = logged?.summary ?? summarizeRun(steps);
 
                 // ── Subflow up-bubble (nested pause): this run was a subflow
                 // child whose parent suspended awaiting it. Auto-resume the
@@ -5451,7 +5670,7 @@ export class AutomationEngine implements IAutomationService {
                 // continues the parent itself). Best-effort: the child's own
                 // completion stands even if the parent continuation fails.
                 if (!skipBubble) {
-                    await this.bubbleToParent(run, output, logged.summary);
+                    await this.bubbleToParent(run, output, summary);
                 }
 
                 // Surface the flow's friendly completion message so a screen-flow
@@ -5463,7 +5682,7 @@ export class AutomationEngine implements IAutomationService {
                     output,
                     durationMs,
                     successMessage: flow.successMessage,
-                    summary: logged.summary,
+                    summary,
                 };
             } catch (err: unknown) {
                 // Re-suspended at a downstream node: persist a fresh continuation.
@@ -5537,6 +5756,16 @@ export class AutomationEngine implements IAutomationService {
                 // that succeeds. A false negative on a repair instruction is
                 // worse than silence, and it is the opposite of the direction
                 // everybody checks for.
+                //
+                // [#15944] THE SAME TWO STATEMENTS HAVE A SECOND CONSEQUENCE,
+                // and it is the direction everybody DOES check for. On the
+                // COMPLETION path above, a throw out of the same `recordLog`
+                // fell into this arm on a run whose nodes ALL succeeded — a
+                // false `true`: a journal and a `stranded` stamp for a run
+                // that finished, whose "repair" re-armed it and re-ran every
+                // node after the pause. That half is guarded at its own site
+                // (see the completion path), NOT here: this arm stays the
+                // node-failure arm, and reaching it at all was the defect.
                 //
                 // ⛔ This is NOT "assume repairable when the failure is
                 // unknown" — that would invert the honest default and promise
@@ -6536,11 +6765,16 @@ export class AutomationEngine implements IAutomationService {
      */
     async listSuspendedRunsDurable(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
         const byId = new Map<string, { runId: string; flowName: string; nodeId: string; correlation?: string }>();
+        // [#15832] Did the ENUMERATION answer? The reconcile below is allowed
+        // only when it did — see the merge comment for why a failed listing is
+        // silence rather than evidence.
+        let enumerated = false;
         if (this.store) {
             try {
                 for (const r of await this.store.list()) {
                     byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
                 }
+                enumerated = true;
             } catch (err) {
                 // #6299 — driver text to the structured slot, message one line,
                 // same as the two seams above. The SLOT differs: the `Logger`
@@ -6605,8 +6839,35 @@ export class AutomationEngine implements IAutomationService {
         // only {@link cacheOnlySuspensions} answer out of the map. Applying that
         // qualifier here would let a truncated or failed enumeration silently
         // drop live runs from an operability listing.
-        for (const r of this.suspendedRuns.values()) {
+        //
+        // [#15832] What that reasoning leaves open is a run this process parked
+        // and ANOTHER replica has since consumed: absent from the durable list
+        // because it is finished, appended here, and published as suspended by
+        // a listing that also backs the cache-only one. The paragraph above is
+        // right that list-absence is not evidence — so this asks for the
+        // evidence instead. `store.load` is the same definitive per-id read
+        // {@link loadSuspendedRunStrict} rests on, and it is bought only for the
+        // entries that look suspicious: a healthy process, whose map entries all
+        // appear in the durable list, buys none. A read that THROWS leaves the
+        // entry standing (unknown is not gone), and a store that could not be
+        // enumerated at all is not probed row by row — an outage would answer
+        // for every live run in the process.
+        for (const r of [...this.suspendedRuns.values()]) {
             if (byId.has(r.runId)) continue;
+            if (enumerated && !this.cacheOnlySuspensions.has(r.runId)) {
+                let stored: SuspendedRun | null;
+                try {
+                    stored = await this.store!.load(r.runId);
+                } catch {
+                    // Unknown, not gone — keep the entry and publish it, exactly
+                    // as this method did before the reconcile existed.
+                    stored = r;
+                }
+                if (stored === null) {
+                    this.evictConsumedSuspension(r.runId);
+                    continue;
+                }
+            }
             byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
         }
         return [...byId.values()];

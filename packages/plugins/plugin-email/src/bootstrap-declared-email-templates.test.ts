@@ -69,7 +69,15 @@ class FakeEngine {
   }
   async update(name: string, data: any, opts?: any): Promise<any> {
     const id = data?.id ?? opts?.where?.id;
-    const ctx = { input: { id, data }, session: opts?.context };
+    // [#15302] `previous` is bound BEFORE the beforeUpdate dispatch, as the
+    // real engine binds it (#5574 / #5846 - by-id reads the prior row ahead of
+    // the dispatch; each per-row context of a predicate write carries its own).
+    // Withholding it here is what let this fake model a pre-#5574 engine, and
+    // a hook reading `ctx.previous` would have gone silently unstamped against
+    // a fake no production caller resembles.
+    const cond0 = opts?.where ?? (id ? { id } : undefined);
+    const previous = (this.rows[name] ?? []).filter((r) => this.matches(r, cond0)).map((r) => ({ ...r }))[0];
+    const ctx = { input: { id, data }, previous, session: opts?.context };
     for (const h of this.hooks) {
       if (h.event === 'beforeUpdate' && (!h.object || h.object === name)) {
         await h.handler(ctx);

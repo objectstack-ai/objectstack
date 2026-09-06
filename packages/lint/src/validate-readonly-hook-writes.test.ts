@@ -17,6 +17,8 @@ import {
   HOOK_API_UPDATE_READONLY_WHEN_FIELD,
   READONLY_HOOK_WRITE_PATTERN_IDS,
   READONLY_HOOK_WRITE_EXCLUSIONS,
+  READONLY_HOOK_STRIP_SUBJECT_METHODS,
+  READONLY_HOOK_METHOD_EXCLUSIONS,
 } from './validate-readonly-hook-writes.js';
 
 /**
@@ -212,35 +214,179 @@ describe('validateReadonlyHookWrites - GREEN: the elevated channel', () => {
   });
 });
 
-describe('validateReadonlyHookWrites - GREEN today: insert()/create() are a SCAN GAP, not an exemption', () => {
-  // [#14147] This block used to be titled "INSERT is engine-exempt" and rested
-  // on exactly that sentence ("a create may legitimately seed read-only
-  // columns", #3043/#3413). The maintainer ruling of 2026-09-03 (option C)
-  // SUPERSEDED it: `engine.insert` now runs the static-`readonly` strip for a
-  // non-system caller, `isSystem`-gated, exactly as `engine.update` does — and
-  // a hook body's `ctx.api` under a non-system trigger IS such a caller. A green
-  // case whose justification has been overturned is indistinguishable from a
-  // scan gap, so the verdicts below are kept — they are still TRUE of what this
-  // rule scans (`update` / `updateById` only) — and the reason is restated:
-  //   - the CONDITIONAL lock has no prior record to evaluate on a create, so
-  //     `hook-api-update-readonly-when-field` is right to stay silent;
-  //   - the STATIC half IS a silent no-op now and is NOT reported — a scan gap,
-  //     filed as #15394. When that lands, `insert()` of a static-`readonly`
-  //     column flips to RED here, and this block's title goes with it.
-  it('never flags insert() — the conditional lock has no prior record on a create; the static half is the #15394 gap', () => {
-    expect(
-      validateReadonlyHookWrites(
-        crmStack("await ctx.api.object('crm_account').insert({ last_activity_date: now });"),
-      ),
-    ).toEqual([]);
+describe('validateReadonlyHookWrites - RED: insert() of a static-readonly field is the same certain no-op (#15394)', () => {
+  // This block used to be titled "INSERT is engine-exempt" and rested on
+  // exactly that sentence ("a create may legitimately seed read-only columns",
+  // #3043/#3413); after #14147 it was a GREEN control that named itself a scan
+  // gap. The maintainer ruling of 2026-09-03 (option C) put the static-
+  // `readonly` strip inside `engine.insert` for a non-system caller,
+  // `isSystem`-gated, exactly as `engine.update` runs it — and a hook body's
+  // `ctx.api` under a non-system trigger IS such a caller. So the `insert()`
+  // case FLIPS to red here, at the severity the static shape carries on
+  // `update()`. Two things stay green, each for its own measured reason:
+  //   - the CONDITIONAL lock has no prior record to evaluate on a create and
+  //     the engine runs no `readonlyWhen` strip on INSERT ("INSERT stays
+  //     exempt"), so `hook-api-update-readonly-when-field` stays silent;
+  //   - `create()` is not a subject: the QuickJS `ctx.api.object()` installs no
+  //     `create` leaf, so a body's `.create()` is a TypeError on its first run
+  //     — loud, not silent — and a "silently dropped" finding would be false.
+  it('flags insert() writing a static-readonly field — flipped from the #15394 GREEN control', () => {
+    const findings = validateReadonlyHookWrites(
+      crmStack("await ctx.api.object('crm_account').insert({ last_activity_date: now });"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].where).toBe('hook "touch_account" > body');
+    expect(findings[0].path).toBe('hooks[0].body.source');
+    expect(findings[0].message).toContain("'last_activity_date'");
+    expect(findings[0].message).toContain("ctx.api.object('crm_account').insert(...)");
+    // The message says what actually happens to a create — the row is made
+    // without the column — and names the verb; it is not the update sentence.
+    expect(findings[0].message).toContain('INSERT payload');
+    expect(findings[0].message).toContain('created WITHOUT this column');
+    // The remedy names the declared elevation knob and the own-object
+    // beforeInsert stamp, and keeps refusing sudo() for the #14010 reason.
+    expect(findings[0].hint).toContain("runAs: 'system'");
+    expect(findings[0].hint).toContain('beforeInsert');
+    expect(findings[0].hint).toContain('ctx.input.last_activity_date');
+    expect(findings[0].hint).toMatch(/sudo\(\) is NOT an option|not marshalled into the sandbox/);
+    expect(findings[0].hint).not.toMatch(/make the elevation explicit|write it through ctx\.api\.sudo/);
   });
 
-  it('never flags create() — same two facts, same gap', () => {
+  it('flags each distinct readonly field once across insert() and update() of the same object', () => {
+    const findings = validateReadonlyHookWrites(
+      crmStack(
+        "await ctx.api.object('crm_account').insert({ last_activity_date: now }); " +
+          "await ctx.api.object('crm_account').update({ id: accountId, last_activity_date: now });",
+      ),
+    );
+    expect(findings).toHaveLength(1);
+  });
+
+  it('reports a field carrying BOTH flags as the certain (static readonly) finding on insert()', () => {
+    const findings = validateReadonlyHookWrites({
+      objects: [
+        { name: 'crm_account', fields: { locked: { type: 'boolean', readonly: true, readonlyWhen: 'status == "closed"' } } },
+      ],
+      hooks: [
+        {
+          name: 'touch',
+          object: 'crm_case',
+          events: ['afterInsert'],
+          body: { language: 'js', source: "await ctx.api.object('crm_account').insert({ locked: true });" },
+        },
+      ],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+    expect(findings[0].severity).toBe('error');
+  });
+
+  // `id` is excluded as the row ADDRESS only on the payload-addressed UPDATE
+  // (#8141). On an insert the payload has no address, so a caller-supplied `id`
+  // is a field write like any other — judged on the object's own declaration,
+  // which the reference stack does not make, so it goes to the unknown-field
+  // rule; this pins that the address exclusion did not widen to insert.
+  it('does not treat `id` in an insert payload as an address — it is judged like any field', () => {
+    const stack = {
+      objects: [{ name: 'crm_account', fields: { id: { type: 'text', readonly: true }, name: { type: 'text' } } }],
+      hooks: [
+        {
+          name: 'touch',
+          object: 'crm_case',
+          events: ['afterInsert'],
+          body: { language: 'js', source: "await ctx.api.object('crm_account').insert({ id: 'x', name: 'n' });" },
+        },
+      ],
+    };
+    const findings = validateReadonlyHookWrites(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("'id'");
+    // The control: the same key on an update() IS the address, and stays silent.
+    const update = { ...stack, hooks: [{ ...stack.hooks[0], body: { language: 'js', source: "await ctx.api.object('crm_account').update({ id: 'x', name: 'n' });" } }] };
+    expect(validateReadonlyHookWrites(update)).toEqual([]);
+  });
+
+  it("skips a hook that declares runAs: 'system' on insert() — seeding a readonly column at create is a SYSTEM act", () => {
+    const stack = crmStack("await ctx.api.object('crm_account').insert({ last_activity_date: now });");
+    const elevated = { ...stack, hooks: (stack.hooks as any[]).map((h) => ({ ...h, runAs: 'system' })) };
+    expect(validateReadonlyHookWrites(elevated)).toEqual([]);
+    // ...and the control, so the skip is attributable to the declaration alone.
+    expect(validateReadonlyHookWrites(stack)).toHaveLength(1);
+  });
+});
+
+describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', () => {
+  // ⛔ No conditional finding on an insert: `stripReadonlyWhenFields` needs the
+  // record being written over, and engine.ts says "INSERT stays exempt" at that
+  // strip. A warning here would state something false about a write that
+  // lands. The control is the same payload through update(), which does warn.
+  it('never warns on insert() of a readonlyWhen field — INSERT stays exempt from the conditional strip', () => {
+    expect(
+      validateReadonlyHookWrites(crmStack("await ctx.api.object('crm_account').insert({ credit_hold: true });")),
+    ).toEqual([]);
+    const control = validateReadonlyHookWrites(
+      crmStack("await ctx.api.object('crm_account').update({ credit_hold: true });"),
+    );
+    expect(control).toHaveLength(1);
+    expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_WHEN_FIELD);
+  });
+
+  // `create()` exists on the HOST ObjectRepository as an alias of insert(), but
+  // this rule reads L2 bodies, which run in QuickJS, and the VM-side
+  // `ctx.api.object()` installs exactly insert / update / delete / updateMany /
+  // deleteMany / upsert (`installCtx`, runtime/src/sandbox/quickjs-runner.ts;
+  // the runner's test pins its ctx.api surface exhaustively). A body calling
+  // `.create()` therefore throws `TypeError: not a function` on its first run —
+  // a loud failure, not the silent no-op this rule reports — so a finding would
+  // be false in exactly the way the sudo() hint used to be (#14010).
+  // The engine's create-side strip does not judge a PLATFORM object at all
+  // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
+  // own 403 write guard governs it); the UPDATE path applies no such
+  // exclusion. Pinned in both directions per object shape.
+  it.each([
+    ['a sys_ object', { name: 'sys_activity', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['a managedBy object', { name: 'activity', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+  ])('never flags insert() into %s — outside the create-side strip; the same update() is still flagged', (_label, platformObject) => {
+    const hook = (source: string) => ({
+      objects: [platformObject],
+      hooks: [{ name: 'log', object: 'crm_case', events: ['afterInsert'], body: { language: 'js', source } }],
+    });
+    expect(validateReadonlyHookWrites(hook(`await ctx.api.object('${platformObject.name}').insert({ verdict: 'ok' });`))).toEqual([]);
+    const control = validateReadonlyHookWrites(hook(`await ctx.api.object('${platformObject.name}').update({ id: x, verdict: 'ok' });`));
+    expect(control).toHaveLength(1);
+    expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+  });
+
+  it('never flags create() — the sandbox has no such leaf, so the call throws rather than silently dropping', () => {
     expect(
       validateReadonlyHookWrites(
         crmStack("await ctx.api.object('crm_account').create({ last_activity_date: now });"),
       ),
     ).toEqual([]);
+  });
+
+  it('records the create() silence as a reasoned method exclusion — never as "INSERT is exempt"', () => {
+    expect(READONLY_HOOK_METHOD_EXCLUSIONS.map((e) => e.method)).toEqual(['create']);
+    const [create] = READONLY_HOOK_METHOD_EXCLUSIONS;
+    expect(create.reason).toMatch(/QuickJS/);
+    expect(create.reason).toMatch(/TypeError: not a function/);
+    expect(create.reason).not.toMatch(/INSERT is exempt|engine exempts INSERT/i);
+  });
+
+  it('partitions the extractor\'s ctx.api write verbs exactly — every verb is a subject or a reasoned exclusion', () => {
+    // The extractor's `API_WRITE_METHODS` is module-local, so its verbs are
+    // read off the shared ledger's declared `syntax` line for the shape
+    // ("ctx.api.object('<object>').insert({…}) | .create({…}) | …") instead
+    // of being restated here — a fifth verb added there fails this case until
+    // it is classified.
+    const apiPattern = HOOK_BODY_WRITE_PATTERNS.find((p) => p.id === 'api-crud-literal')!;
+    const verbs = [...apiPattern.syntax.matchAll(/\.(\w+)\(/g)].map((m) => m[1]).filter((v) => v !== 'object').sort();
+    expect(verbs).toEqual(['create', 'insert', 'update', 'updateById']);
+    const classified = [...READONLY_HOOK_STRIP_SUBJECT_METHODS, ...READONLY_HOOK_METHOD_EXCLUSIONS.map((e) => e.method)].sort();
+    expect(classified).toEqual(verbs);
+    expect(READONLY_HOOK_STRIP_SUBJECT_METHODS.filter((m) => READONLY_HOOK_METHOD_EXCLUSIONS.some((e) => e.method === m))).toEqual([]);
   });
 });
 

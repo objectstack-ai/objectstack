@@ -185,8 +185,11 @@ describe('checkViewCompleteness — the tree parent pointer (the silent-flat hal
   // A `tree: {}` block satisfies the binding-block table (every key is
   // optional) and still renders flat on an object with no self-reference —
   // the shape a block-presence gate would vouch for. This rule is the second
-  // check the triage asked for, and it mirrors objectui's `detectParentField`
-  // exactly: `type: 'tree'`, else a lookup / master_detail back to the object.
+  // check the triage asked for. Its `lookup` / `master_detail` arm mirrors
+  // objectui's `detectParentField` (a reference back to the object); its
+  // `tree` arm reads the #14892 rule the parse door enforces — a `tree` field
+  // with no `reference`, or one naming this object — which is stricter than
+  // the renderer's "any `tree` field" (see the predicate's docblock).
   const flatObject = {
     name: 'business_unit',
     fields: { name: { type: 'text' }, manager: { type: 'lookup', reference: 'sys_user' } },
@@ -230,6 +233,31 @@ describe('checkViewCompleteness — the tree parent pointer (the silent-flat hal
       name: 'category',
       fields: { name: { type: 'text' }, parent: { type: 'tree' } },
     })).toEqual([]);
+  });
+
+  // [#14892] The `tree` arm reads the rule the object schema enforces: a
+  // `tree` field's `reference`, when present, must name the declaring object.
+  it('a `tree` field naming THIS object is a parent pointer — silent', () => {
+    expect(checkViewCompleteness({ type: 'tree', tree: {} }, {
+      name: 'category',
+      fields: { name: { type: 'text' }, parent: { type: 'tree', reference: 'category' } },
+    })).toEqual([]);
+  });
+
+  it('a `tree` field naming ANOTHER object is not a parent pointer — flagged, as the parse door refuses it', () => {
+    expect(rulesOf({ type: 'tree', tree: {} }, {
+      name: 'showcase_field_zoo',
+      fields: { name: { type: 'text' }, f_tree: { type: 'tree', reference: 'showcase_category' } },
+    })).toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
+  });
+
+  it('a `tree` field with no `reference` is a parent pointer even on a nameless object; one WITH a reference cannot be matched there', () => {
+    expect(checkViewCompleteness({ type: 'tree', tree: {} }, {
+      fields: { parent: { type: 'tree' } },
+    })).toEqual([]);
+    expect(rulesOf({ type: 'tree', tree: {} }, {
+      fields: { parent: { type: 'tree', reference: 'category' } },
+    })).toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
   });
 
   it.each(['lookup', 'master_detail'])('is silent when the object carries a %s back to itself', (type) => {

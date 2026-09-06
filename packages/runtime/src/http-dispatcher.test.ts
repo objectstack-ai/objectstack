@@ -2935,7 +2935,14 @@ describe('HttpDispatcher', () => {
             // No HTTP/WS surface exists — a discovery-advertised route would 404.
             expect(info.routes.realtime).toBeUndefined();
             expect(info.capabilities.websockets.enabled).toBe(false);
-            expect(info.services.realtime.enabled).toBe(true);
+            // [#14646] `enabled` is `false`: `realtime` is a CHANNEL SLOT, so
+            // the field is `isSubscribableChannel` (handlerReady AND a route),
+            // not "the slot is filled". It read `true` beside this entry's own
+            // "no HTTP/WS surface is mounted" message — both true, one field,
+            // two meanings — and a client keying on it subscribed to nothing.
+            // `status: 'degraded'` still says the slot IS occupied. Full pins:
+            // `discovery-realtime-channel.pin.test.ts`.
+            expect(info.services.realtime.enabled).toBe(false);
             expect(info.services.realtime.status).toBe('degraded');
             expect(info.services.realtime.handlerReady).toBe(false);
             // …and a /realtime request indeed has no handler

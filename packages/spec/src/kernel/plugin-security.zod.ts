@@ -25,6 +25,7 @@ import { z } from 'zod';
  * Vulnerability Severity
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const VulnerabilitySeverity = z.enum([
   'critical',
   'high',
@@ -512,7 +513,16 @@ export const PackageDependencyResolutionResultSchema = lazySchema(() => z.object
   /**
    * Resolution time (ms)
    */
-  resolvedIn: z.number().int().min(0).optional().describe('Time taken to resolve dependencies in milliseconds'),
+  // Renamed from `resolvedIn` (#15678, #14478 ruling B): the unit lived only in
+  // the describe prose.
+  resolvedInMs: z.number().int().min(0).optional().describe('Time taken to resolve dependencies in milliseconds'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  resolvedIn: retiredKey(
+    '`PackageDependencyResolutionResult.resolvedIn` was renamed to `resolvedInMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `resolvedInMs`; the value (milliseconds) is unchanged.',
+  ),
 }).describe('Result of a dependency resolution process'));
 
 export type PackageDependencyResolutionResult = z.input<typeof PackageDependencyResolutionResultSchema>;

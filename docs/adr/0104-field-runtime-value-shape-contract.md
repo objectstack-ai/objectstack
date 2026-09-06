@@ -9,7 +9,10 @@
   **errata only** — it registers the outside vocabulary (`fieldRuntimeType`,
   `FileRef`, `RecordRef`, "read-time expansion") against this ADR's names so a
   grep for those words lands here, and corrects three membership facts; it
-  changes no decision.
+  changes no decision. The 2026-09-05 addendum rules the media family's
+  physical column — a string column holding the bare `sys_file` id, switched
+  per deployment on the `adr-0104-file-references` flag, never per version;
+  driver card #15989 implements it.
 - **Date**: 2026-07-22
 - **Issue**: design follow-up generalizing #3405 / #3406 (inline lookup param
   silently stripped); relates #3407 (silently dropped writes), #1878 / #1891
@@ -1020,3 +1023,291 @@ carries the aliased vocabulary's *coverage* across with its names.
    `FileRef` scoped to `file`/`image`/`video`/`audio` would leave `avatar` on
    the legacy inline shape, which is precisely the per-type carve-out that
    addendum rejected.
+
+## Addendum (2026-09-05) — the media family's physical column holds the bare `sys_file` id, switched per deployment on the `adr-0104-file-references` flag
+
+**Provenance.** Maintainer ruling, decision batch #49 item 1, recorded on
+#15041 (comment `5551135629`) by the director seat from the maintainer's live
+reply, verbatim: 「15041 应该改为实际 id 保存。选A，其他同意」. The measurement it
+ruled on is #15041's `os-dev-report` (comment `5550175673`) and its H1 table
+(comment `5550175730`), taken on `origin/main` `8e500f23e` on 2026-09-05. This
+addendum is step 1 of the ruling's execution order: it records the decisions
+about the column and the switch; no code moves with it.
+
+### The fork it closes
+
+D1 handed the column to the driver in one clause — "DDL column choice remains
+the driver's decision; the *classification* moves to the spec" — and D3 then
+narrowed the media family's **stored value** to an opaque `sys_file` id. Every
+declared D3 wave has landed (spec `17.0.0`); none narrowed the column, because
+nothing had scheduled that. So two readings of "the value is an id" coexisted
+on `main`, each internally consistent:
+
+- **The driver: a JSON-quoted id in a JSON column.**
+  `packages/drivers/driver-sql/src/sql-driver.ts#JSON_COLUMN_TYPES` seeds the
+  family by spreading `FILE_REFERENCE_TYPES`, so
+  `packages/drivers/driver-sql/src/sql-driver.ts#isJsonField` answers true for
+  all five, `packages/drivers/driver-sql/src/sql-driver.ts#formatInput`
+  JSON-stringifies the id on every dialect (the #12380 canonical encoding), and
+  the column is `packages/drivers/driver-sql/src/sql-driver.ts#jsonColumn` —
+  `json` on Postgres and MySQL, TEXT on SQLite. Measured on SQLite (two
+  in-memory cells, 2026-09-05): an id written through the driver lands on disk
+  as the quoted text `"file_01HXYZ"` and reads back as the bare string; an
+  inline object written through the driver reads back as an object; a raw
+  bare id inserted by hand makes the SQLite read arm's `JSON.parse` throw, the
+  catch keeps the raw string, and it reads back as `file_01HXYZ` — no fault.
+  The same four rows in a hand-created `VARCHAR(2048)` column read back
+  byte-identical, and `initObjects` over that column left it `VARCHAR(2048)`:
+  additive sync never alters a column's type. Postgres and MySQL were **not**
+  measured (no live cell in the container); reasoned from the source: the
+  write quotes identically, the read path has no parse arm because those
+  clients parse a native `json` column, so a varchar there returns the quoted
+  text verbatim, `isFileIdToken` refuses it, nothing expands it and nothing
+  claims ownership. The reachable harm of a hand-run generated migration on
+  those dialects is therefore write-side quoting into a varchar — silent — and
+  `packages/drivers/driver-sql/src/schema-drift.ts#declaresJsonColumn` keys
+  the json-vs-text finding on `multiple` alone, so the drift report never
+  names it (#15771).
+- **The generator: a bare id in a string column.**
+  `packages/cli/src/commands/generate.ts#FIELD_TYPE_SQL_MAP` gives all five
+  members `VARCHAR(2048)`; the TypeScript form emits `table.string(...)` from
+  one switch arm — #14657's reading of the spec contract as DDL. The pin
+  `packages/cli/src/commands/generate-field-type-vocabulary.pin.test.ts`
+  records the disagreement under a block labelled "Recorded divergence, NOT
+  coverage", so it cannot change shape unnoticed and no reader mistakes it
+  for a ruling.
+
+The spec seat recommended that the generator copy the driver (B), on the
+ground that the value contract and the physical column are different things
+and the column the driver creates is the one every SQL deployment has. The
+maintainer overruled that on exactly the point the seat had flagged as the
+maintainer's to decide: **the physical column follows the contract.** The
+ruling as the director seat recorded it: "Option A. The physical column for
+`file` / `image` / `avatar` / `video` / `audio` holds the actual id — a bare
+`sys_file` id string in a string column — not a JSON-quoted id in a JSON
+column. The driver is the side that moves; the generator's `VARCHAR(2048)`
+already states the ruled end-state and stands." B and C (status quo) are
+rejected: the id is the value, and the column should say so.
+
+### The column: a string column holding the bare id
+
+For every member of `FILE_REFERENCE_TYPES` (`image`, `file`, `avatar`,
+`video`, `audio`), the single-value physical column is a **string column
+holding the bare `sys_file` id** — the value `FileReferenceIdValueSchema`
+admits, stored as itself. The generator's `VARCHAR(2048)` / `table.string`
+is the ruled end-state and stands; the driver moves to it: the family leaves
+`JSON_COLUMN_TYPES`, and `isJsonField` / `formatInput` /
+`packages/drivers/driver-sql/src/sql-driver.ts#formatOutput` stop treating it
+as JSON. The driver's width mirror
+(`packages/drivers/driver-sql/src/sql-driver.ts#varcharColumnChars`) answers
+for the family what the generator answers, so the pin that sweeps the other
+string classes can sweep this one — a width the two sides disagree on would be
+this fork again, one level down.
+
+What this does *not* touch: `multiple: true` media fields keep the JSON array
+column every multi-value field has (the `multiple` half of `isJsonField`); the
+family loses only its own membership. `STRUCTURED_JSON_TYPES` and
+`MULTI_OPTION_TYPES` stay JSON columns. The stored **value** contract does not
+move — `valueSchemaFor(def, 'stored')` already returns
+`FileReferenceIdValueSchema` for the family; this addendum aligns the column
+with the contract, not the contract with the column. Everything above the
+driver (the validator, the read resolver, the ownership hooks, `objectui`)
+sees the same bare id it sees today: the wire shape is unchanged.
+
+This narrows D1's "DDL column choice remains the driver's decision" for one
+class: the driver still owns DDL for every other class, and for this one it
+implements a ruled column. It is the last step of D3's "same shape discipline
+as `lookup`" — a reference column holds the target's id as a string, and now
+the media family's column does too.
+
+### The switch: per deployment, on the existing flag, never per version
+
+The key is the deployment-level `sys_migration` row
+`packages/spec/src/system/migration.zod.ts#FILE_REFERENCES_MIGRATION_ID` —
+`adr-0104-file-references` — and nothing else. It is written by
+`os migrate files-to-references --apply`
+(`packages/cli/src/commands/migrate/files-to-references.ts#MigrateFilesToReferences`
+running
+`packages/services/service-storage/src/files-to-references-migration.ts#runFilesToReferencesMigration`)
+only when backfill and reconciliation report zero blocking discrepancies —
+`sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }` —
+or at creation for a datastore born empty
+(`packages/platform-objects/src/system/migration-flag.ts#attestFreshDatastore`).
+The engine already reads it, memoized, to open strict media value-shape
+enforcement and released-file collection
+(`packages/objectql/src/engine.ts#isFileReferencesMigrationVerified`). The
+column encoding now reads the same row. One flag, not a second gate that can
+disagree (the 2026-07-27 principle) — and never a version number: installing a
+release changes no deployment's column, exactly as it starts no deletion.
+
+The same flag is the right key because the fact it attests is precisely the
+precondition under which the column move is lossless. A JSON column whose every
+cell is a JSON *string* rewrites to a string column with nothing lost; a cell
+still holding an inline object cannot be rewritten, and such a cell is exactly
+a finding the reconciliation refuses to record the flag over. So the column
+move is a further step of `--apply`, after the reconciliation and before the
+row is recorded, and it aborts on any blocking finding — the R4 shape:
+
+```
+os migrate files-to-references --apply
+  1. backfill                 (dry run by default; --apply writes)
+  2. verifyFileReferences     (reconcile the ledger against what records hold)
+  3. zero blocking findings → move this datastore's media columns:
+                               unquote every cell, retype the column to the
+                               string column — per dialect, transactional
+                               where the dialect allows it, aborting on the
+                               first cell that is not a JSON string
+  4. record sys_migration { id: 'adr-0104-file-references', verified_at, blocking: 0 }
+  5. the driver's encoding, strict enforcement and collection read THAT ROW
+```
+
+The per-dialect sketch, carried from the measurement and **unrehearsed** (see
+the gaps below): SQLite rewrites each cell in place with `json_extract` where
+`json_type` is `'text'` (the column keeps TEXT affinity; only the encoding
+changes); Postgres retypes the column to a varchar with a `USING` clause that
+unquotes the JSON string; MySQL retypes with `MODIFY COLUMN` and unquotes with
+`JSON_UNQUOTE` — the order of those two is one of the things the rehearsal
+settles. A dry run prints the statements it would execute and writes nothing,
+as #3617 already requires of every mode but `--apply`.
+
+### The window: two encodings, one invariant, one end
+
+Two encodings will exist across deployments at once, and the driver carries
+both arms until the window closes:
+
+- A deployment **without** the flag keeps today's encoding — a JSON column
+  (`json` on Postgres and MySQL, TEXT on SQLite) holding the JSON-quoted id
+  and, on the default warn-first posture, possibly an inline object the
+  backfill has not yet converted. The driver writes and reads it exactly as
+  it does today.
+- A deployment **with** the flag, after step 3 above, holds the bare id in a
+  string column; the driver writes the bare id and reads it with no JSON
+  codec.
+- Throughout the window the driver **reads both encodings on every dialect**:
+  a JSON-quoted string in a media column decodes to the bare id, a bare id is
+  returned as it is, an inline object still decodes to the object (the
+  dual-read of §D3, unchanged). SQLite's parse-and-catch read arm already
+  behaves this way; Postgres and MySQL return a native `json` column parsed
+  and a varchar verbatim, so the decode there keys on what arrives, not on
+  the dialect.
+
+**The invariant the window rests on: on one deployment, the media column's
+type and the driver's write encoding never disagree.** A quoted write into a
+string column is #15771's silent corruption on Postgres and MySQL; a bare
+write into a native `json` column is a loud `22P02` on Postgres. They are one
+mistake — the key and the column drifting apart — and the driver card's pins,
+per dialect and for both encodings, exist to make that mistake unreachable.
+Three populations the invariant must hold over (the implementing card's
+checklist; the mechanism is that card's decision and is stated in its PR):
+
+1. **Un-flagged deployments** upgrading to a driver that carries the change:
+   nothing moves until they run `--apply`. A media column that additive sync
+   creates on such a deployment during the window takes today's JSON form,
+   because that deployment's encoding is still JSON.
+2. **Deployments flagged before step 3 existed** — every datastore
+   creation-attested since 17.0, the dogfood boots among them, and every
+   `--apply` run before the driver card lands. They hold the flag *and*
+   JSON-quoted ids in a JSON column. The flag row alone cannot tell such a
+   deployment from one whose columns have moved, so the driver may not open
+   the bare-id write arm on the flag alone: step 3 must run on them
+   (re-running `--apply` is idempotent and re-records the row), and until it
+   has, the deployment is on the JSON arm whatever the row says. Whether the
+   step's completion is recorded on the same row or observed from the column
+   itself is the driver card's to settle — it must be one answer, pinned, and
+   it must fail toward the JSON arm.
+3. **Datastores born after the driver card lands** are attested at
+   `kernel:ready`, after schema sync has already created their columns. A
+   store the driver is itself creating from empty carries no legacy encoding,
+   so nothing stops its media columns taking the ruled form from birth — but
+   the seam that makes column and encoding agree across the gap between
+   creation and attestation is the driver card's to choose. The born-strict
+   dogfood boots are the standing canary for this population, as they are
+   for R2.
+
+**Where the window ends.** "Every deployment has moved" is not a fact anyone
+can observe — the same reason the evidence gate went per deployment — so the
+end is located where the code is and made safe where the data is. The JSON
+arm leaves in the **first protocol major after the driver card lands**:
+removing a storage encoding the driver reads is a breaking change and rides a
+major under ADR-0087, with its disposition recorded. From that major the
+driver has one encoding, and a deployment that reaches it without its own
+flag-and-column step is **refused loudly at boot for its media fields**,
+naming `os migrate files-to-references --apply` — never read through a codec
+the driver no longer has, never silently corrupted. This is not the
+per-version switch the previous section forbids: the switch of a deployment's
+encoding stays that deployment's own `--apply`; the major only deletes the
+fallback and makes the missing step loud, and installing it converts nothing
+and deletes nothing ("installing a new version is not consent", 2026-07-27).
+One major and no longer: a standing two-arm codec is the staged transition
+the 2026-08-27 ruling refuses.
+
+### What does not change
+
+- **`syncSchema` / `initObjects`** stay additive and never alter an existing
+  column's type — measured above — so the column move is step 3's alone,
+  never an upgrade's side effect. During the window, sync creates a new media
+  column in the form of the arm its deployment is on (the invariant); it
+  does not consult the flag to retype anything.
+- **The generator** changes nothing: `FIELD_TYPE_SQL_MAP`'s `VARCHAR(2048)`
+  and the TypeScript `table.string` for all five members are the end-state.
+  Its pin block labelled "Recorded divergence, NOT coverage" stays as written
+  until the driver card's PR lands and retires it to coverage in the same
+  change — the divergence is true on every deployment until the driver
+  moves, and the triage on #15041 asked for that retirement to be deliberate.
+- **The evidence table** of the 2026-07-27 amendment gains no row: the media
+  line's evidence is still the `adr-0104-file-references` flag; the fact it
+  attests widens to include the column.
+- **Consumers above the driver** and the `objectui` wire shape: unchanged, as
+  the column section says.
+
+### Confidence gaps — stated, not assumed
+
+1. **Postgres and MySQL are reasoned, not measured.** Only SQLite was measured
+   (two in-memory cells, four rows each, the driver's own TEXT column against
+   a hand-created `VARCHAR(2048)` column, byte-identical reads). The
+   Postgres/MySQL statements above — identical write-side quoting, no read
+   parse arm, a varchar returning quoted text verbatim, `22P02` on a bare
+   write into `json` — are read from the driver source. What closes it: the
+   driver card's per-dialect pins for both encodings run against the live
+   services of the `Temporal Conformance (live PG + MySQL)` job
+   (`postgres:16`, `mysql:8.0`), replacing this paragraph's reasoning with a
+   measurement before `--apply` gains step 3.
+2. **The migration sketch is unrehearsed.** No datastore, copy or fixture has
+   had the unquote-and-retype step run against it; the per-dialect statement
+   order is unsettled (MySQL in particular: a `JSON` column refuses a bare
+   `file_x` as invalid JSON, so the retype must precede the unquote or the two
+   must be one statement). What closes it: a rehearsal on a copy of a real
+   datastore per dialect — the showcase dogfood store is the in-repo
+   candidate — with the dry run printing every statement it would execute and
+   the apply run proving every media cell reads back equal before and after.
+
+Until both close, the window section's Postgres/MySQL descriptions are the
+ruling's intent, not a measurement, and the driver card carries that caveat
+into its PR body.
+
+### Sequencing
+
+1. **This addendum** — #15041 is its carrier; governed `docs/adr/**`, draft
+   PR, human merge.
+2. **The driver card, #15989** (`domain:engine`, `pm:blocked` on this
+   addendum) implements the three sections above: the family leaves
+   `JSON_COLUMN_TYPES`; `isJsonField` / `formatInput` / `formatOutput` stop
+   treating it as JSON, keyed on the flag through the window; step 3 in
+   `--apply`; the `varcharColumnChars` mirror; schema-drift's single-value
+   JSON-class finding (#15771 folded in or left adjacent — the driver card
+   decides); pins per dialect for both encodings across the window; a
+   changeset with its ADR-0087 disposition.
+3. **The generator pin block** retires to coverage only in the driver card's
+   PR. Adjacent and unblocked: #15769 (stale class-doc prose over
+   `FILE_REFERENCE_TYPES`) and objectui#7699 (the legacy blob still submitted
+   when no `fileId` surfaced) proceed on their own.
+
+### Why this stays inside ADR-0104
+
+For the reason the 2026-07-27 addenda gave: it settles *how* D3's accepted
+"field values point into `sys_file`" reaches the physical column, and amends
+one D1 clause for one class rather than revisiting a decision. It is recorded
+here so that a grep for `JSON_COLUMN_TYPES`, `VARCHAR(2048)` or "bare id"
+lands on the decision (Prime Directive #13), and so that the driver card
+implements a ruling rather than a changeset that quietly does the opposite of
+D1's clause.

@@ -19,6 +19,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * W3C Trace Context tracestate header
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const TraceStateSchema = lazySchema(() => z.object({
   /**
    * Vendor-specific key-value pairs
@@ -211,7 +212,19 @@ export const SpanSchema = lazySchema(() => z.object({
   /**
    * Duration in milliseconds
    */
-  duration: z.number().nonnegative().optional().describe('Duration in milliseconds'),
+  // Renamed from `duration` (#15679, #14478 ruling B): the unit lived only in the
+  // describe prose. OpenTelemetry, which this shape mirrors, carries the span
+  // length as a start/end nanosecond pair rather than a key named `duration`, so
+  // there is no external spelling to mirror here — this is a rename, not an
+  // `externalVocabulary` marker.
+  durationMs: z.number().nonnegative().optional().describe('Duration in milliseconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  duration: retiredKey(
+    '`Span.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a '
+    + 'duration-shaped number lives in the key name, not only in the describe prose. Rename '
+    + 'the key to `durationMs`; the value (milliseconds) is unchanged.',
+  ),
 
   /**
    * Span status

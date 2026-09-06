@@ -110,9 +110,45 @@ export class RemoteLoader implements MetadataLoader {
     };
   }
 
+  /**
+   * [#15037] Report only the names that ARE names.
+   *
+   * This read used to be `loadMany<{ name: string }>(type)` mapped straight to
+   * `items.map(i => i.name)`. That type argument is an ASSERTION about bodies
+   * that arrived over HTTP, and nothing checked it: a body with no top-level
+   * `name` yielded `undefined`, which went into an array this signature
+   * declares as `string[]` and reached consumers through
+   * `MetadataManager.listNames()` — a runtime violation of a declared type,
+   * not an untidy entry. A consumer that keys by it, lower-cases it, or feeds
+   * it back to a by-name `load()` gets `undefined` where the type says it
+   * cannot be.
+   *
+   * The guard is `DatabaseLoader.list()`'s, one file away: same cast-then-map
+   * spelling, one `typeof` filter behind it. Silently dropping is the landed
+   * direction, not a preference — `DatabaseLoader` drops rather than throws,
+   * and `FilesystemLoader`'s narrowing carries a maintainer ruling (via the
+   * director seat on #14486, 2026-09-02) that chose narrowing (A) over
+   * refusing loudly (B), because a name in the list that the door answers
+   * `null` for is the silent failure an author reads as their own typo. An
+   * `undefined` here is the extreme form of that name.
+   *
+   * ⛔ NOT copied from the siblings: `MemoryLoader` answers with its store
+   * keys, and #14205 ruled that identity is the key the store holds an item
+   * under rather than `body.name`. This loader reads over HTTP and holds no
+   * store key, so `body.name` is the only identity it has — the list is
+   * narrowed to agree with the door instead. `loadMany()` is deliberately
+   * untouched: it keys nothing, so a nameless body is still served there.
+   *
+   * The predicate is spelled as a type guard, and the mapped element type left
+   * `unknown`, so `tsc` PROVES the declared `string[]` instead of a cast
+   * asserting it — otherwise the compiler reads the filter as always-true and
+   * a later reader deletes it as dead.
+   */
   async list(type: string): Promise<string[]> {
-    const items = await this.loadMany<{ name: string }>(type);
-    return items.map(i => i.name);
+    const items = await this.loadMany<{ name?: unknown }>(type);
+    return items
+      .map(item => item.name)
+      .filter((name): name is string => typeof name === 'string');
   }
 
   async save(

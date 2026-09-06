@@ -108,16 +108,18 @@
  *
  *   - {@link likePattern} / {@link escapeLikePattern} build the LIKE PATTERN,
  *     and are used by the `LIKE` arms — Postgres, MySQL, and the `unknown`
- *     residue — plus `$icontains` on every dialect.
+ *     residue — for BOTH text families.
  *   - Which KEYWORD those patterns hang off, and whether a GLOB pattern with a
  *     different escaped character class is built instead, is
  *     `text-match-sql.ts`'s answer. ⛔ Do not re-derive it here.
  *
- * `$icontains` IS implemented here since #6520, and it is a separate construct
- * rather than a flag on the family above: it folds ASCII case on BOTH sides via
- * {@link asciiLowerSqlExpr}, while the `$contains` family stays case-EXACT. The
- * two must not be collapsed — a shared "case-insensitive" path would give the
- * `$contains` family the fold the ruling took away from it.
+ * [#15780] `$icontains` (#6520) goes through that same table, and its fold is a
+ * per-dialect construct too — {@link asciiLowerSqlExpr} is only the Postgres /
+ * `unknown` arm of it. What the two families share is the TABLE and the
+ * escaping; what separates them is one `fold` flag set on the `$icontains` row
+ * alone. ⛔ The two must never be collapsed into one case-insensitive path —
+ * that would give the `$contains` family back the fold #4706 Q2 = A took away
+ * from it, which is the failure `text-operator-case-exactness.test.ts` guards.
  *
  * ## `String(value)` is safe here because nothing unrenderable reaches it (#5234)
  *
@@ -177,9 +179,18 @@ export function likePattern(shape: LikeShape, value: unknown): string {
   return shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
 }
 
-/** `A`..`Z` and the `a`..`z` they fold onto — the #4706 Q1 = A domain, as data. */
-const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+/**
+ * `A`..`Z` and the `a`..`z` they fold onto — the #4706 Q1 = A domain, as data.
+ *
+ * [#15780] EXPORTED, because the fold is now chosen per dialect and two of the
+ * three arms are built from this domain rather than from `translate()`:
+ * `text-match-sql.ts`'s MySQL arm nests one `REPLACE` per letter, and [#16028]
+ * its `unknown` arm nests the same chain without the binary cast. The domain
+ * itself stays here, in one copy — a second 26-character literal anywhere is
+ * how the Postgres arm and the MySQL arm start folding different alphabets.
+ */
+export const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+export const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 /**
  * [#6520] Wrap a SQL expression in `$icontains`' ASCII-ONLY case fold.
@@ -199,24 +210,32 @@ const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
  * alone, so it is the fold the ruling names rather than the one the database
  * happens to offer.
  *
- * ## The dialect this assumes, stated so it can go red rather than stale
+ * ## The dialect this arm is FOR — no longer the dialect it assumes
  *
- * Postgres. `translate()` is Postgres/Oracle; SQLite has no such function — and
- * [#15684] MEASURED that these compilers' statements do reach SQLite, so the
- * warning this paragraph used to write in the conditional is now a live defect,
- * filed as #15780: on sql.js 1.14.1, `SELECT translate('ABC','ABC','abc')`
- * answers `no such function: translate`, so an `$icontains` in an analytics
- * `where` or in an RLS read scope over a SQLite datasource does not merely
- * over-match — it fails to parse.
+ * Postgres, and the `unknown` residue. `translate()` is Postgres/Oracle and
+ * SQLite has no such function, so while this expression was emitted on EVERY
+ * dialect it did not merely over-match on SQLite — it failed to PARSE
+ * (`no such function: translate` on sql.js 1.14.1). That was #15780, and it is
+ * closed: this function is now ONE arm of `text-match-sql.ts`'s per-dialect
+ * table ({@link textMatchPredicateSql}, `fold: true`), reached on `postgres`
+ * ALONE, while SQLite gets `lower(col) GLOB lower(?)`, MySQL the nested-
+ * `REPLACE` binary fold and — since #16028 — `unknown` the same `REPLACE` chain
+ * without the binary cast.
  *
- * ⛔ Do NOT close that by falling back to `LOWER()`, which would silently
- * restore the Unicode fold this function exists to avoid. The remedy is one
- * more arm on `text-match-sql.ts`'s per-dialect table, whose shapes
- * `driver-sql`'s `textMatchPredicate` already carries: `lower(col) GLOB
- * lower(?)` on SQLite (measured ASCII-only there — `lower('CAFÉ')` is
- * `cafÉ`), nested `REPLACE` over `CAST(… AS BINARY)` on MySQL. #15684
- * deliberately did not build it: its scope was the case-EXACT four, and its
- * suite pins THIS expression as the control that must stay unchanged.
+ * ⛔ Do NOT "simplify" this to `LOWER()`, on any arm. Postgres' `LOWER()` is
+ * locale-aware and would silently restore the Unicode fold #4706 Q1 = A rules
+ * out; SQLite's `lower()` is ASCII-only, which is why the SQLite arm may use it
+ * and this one may not. That asymmetry is the whole reason the fold is chosen
+ * per dialect rather than written once.
+ *
+ * ⛔ [#16028] Nor is this function the `unknown` arm's fold any more, and it may
+ * not be given back. `unknown` is not a dialect — it is everything
+ * `normalizeSqlDialect` could not name, SQLite and MariaDB included — so a
+ * PostgreSQL/Oracle function there is a statement those engines cannot PARSE.
+ * That arm folds with the portable `REPLACE` chain, which is ASCII-only by
+ * construction and therefore does not re-open the `LOWER()` question either.
+ * `driver-sql`'s `unknown` arm still folds with `LOWER()`, its own pre-#6518
+ * shape; each face keeps its own answer and neither claims the other's.
  *
  * The caller must apply it to BOTH sides of the comparison. Folding only the
  * comparand compares a folded needle against a raw column and matches just the

@@ -538,7 +538,20 @@ export const CircuitBreakerConfigSchema = lazySchema(() => z.object({
   failureThreshold: z.number().optional().default(5).describe('Failures before opening circuit'),
   resetTimeoutMs: z.number().optional().default(30000).describe('Time in open state before half-open'),
   halfOpenMaxRequests: z.number().optional().default(1).describe('Requests allowed in half-open state'),
-  monitoringWindow: z.number().optional().default(60000).describe('Rolling window for failure count in ms'),
+  // Renamed from `monitoringWindow` (#15680, ruling B on #14478): the unit lived
+  // only in the describe prose, one key below `resetTimeoutMs`, which already
+  // spelled ITS unit. One shape carrying both conventions — the suffixed one was
+  // the honest half.
+  monitoringWindowMs: z.number().optional().default(60000).describe('Rolling window for failure count in ms'),
+
+  /** Tombstone for the rename above (#15680, ruling B on #14478). */
+  monitoringWindow: retiredKey(
+    '`CircuitBreakerConfig.monitoringWindow` was renamed to `monitoringWindowMs` in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+    + 'only in the describe prose. Rename the key to `monitoringWindowMs`; the value '
+    + '(milliseconds) and the 60000 default are unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
   fallbackStrategy: z.enum(['cache', 'default_value', 'error', 'queue']).optional().describe('Fallback strategy when circuit is open'),
 }).describe('Circuit breaker configuration'));
 
@@ -672,7 +685,19 @@ export const ConnectorTriggerSchema = lazySchema(() => z.object({
   label: z.string().describe('Trigger label'),
   description: z.string().optional(),
   type: z.enum(['polling', 'webhook']).describe('Trigger type'),
-  interval: z.number().optional().describe('Polling interval in seconds'),
+  // Renamed from `interval` (#15680, ruling B on #14478): the unit lived only in
+  // the describe prose, and a polling cadence is exactly the number a reader
+  // guesses at — the same bare `interval` means MILLISECONDS elsewhere in this
+  // spec, so the identical name carried two units a thousandfold apart.
+  intervalSeconds: z.number().optional().describe('Polling interval in seconds'),
+
+  /** Tombstone for the rename above (#15680, ruling B on #14478). */
+  interval: retiredKey(
+    '`ConnectorTrigger.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+    + 'prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 }));
 export type ConnectorTrigger = z.input<typeof ConnectorTriggerSchema>;
 

@@ -52,7 +52,7 @@ type TerminalStatus = 'success' | 'failed' | 'degraded' | 'timeout';
 /**
  * The options handed DOWN to the timer adapter.
  *
- * `retryPolicy` and `timeout` are deliberately NOT forwarded (#7734): this
+ * `retryPolicy` and `timeoutMs` are deliberately NOT forwarded (#7734): this
  * adapter now runs the policy itself, inside {@link DbJobAdapter.wrap}, which
  * is what lets the recorder observe a timeout at the instant it happens. A
  * second `runWithPolicy` downstream would race that whole retry sequence
@@ -61,7 +61,7 @@ type TerminalStatus = 'success' | 'failed' | 'degraded' | 'timeout';
  */
 function withoutPolicy(options?: JobScheduleOptions): JobScheduleOptions | undefined {
   if (!options) return options;
-  const { retryPolicy: _retryPolicy, timeout: _timeout, ...rest } = options;
+  const { retryPolicy: _retryPolicy, timeoutMs: _timeoutMs, ...rest } = options;
   return Object.keys(rest).length > 0 ? (rest as JobScheduleOptions) : undefined;
 }
 
@@ -179,7 +179,7 @@ export class DbJobAdapter implements IJobService {
    */
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
     const wrapped = this.wrap(name, handler, 'schedule', options);
-    // The wrapper OWNS `retryPolicy`/`timeout` from here down — see withoutPolicy.
+    // The wrapper OWNS `retryPolicy`/`timeoutMs` from here down — see withoutPolicy.
     const downstream = withoutPolicy(options);
 
     if (schedule.type === 'cron') {
@@ -554,7 +554,7 @@ export class DbJobAdapter implements IJobService {
    * `timeout` (#7734) is the mirror image of `degraded` here: it IS a failure —
    * the run did not finish, the policy retries it — so it bumps `failure_count`
    * alongside `failed`. Alerting that keys on that count is the reason a job
-   * stuck at five times its declared `timeout` must not read as a quiet success.
+   * stuck at five times its declared `timeoutMs` must not read as a quiet success.
    */
   private async bumpJob(name: string, last_status: TerminalStatus, last_error?: string): Promise<void> {
     try {
