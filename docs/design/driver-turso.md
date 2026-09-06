@@ -510,20 +510,23 @@ packages/plugins/driver-turso/
 
 ## 10. Configuration Schema
 
-The `TursoConfigSchema` is defined in `packages/spec/src/data/driver/turso.zod.ts` and supports:
+`TursoConfigSchema` exists twice on purpose: the authoring contract in
+`packages/spec/src/data/driver/turso.zod.ts` (strict — what a `datasource` may declare), and the
+package-published Spec / Studio mirror in `packages/drivers/driver-turso/src/spec/turso.zod.ts`.
+Both declare exactly the keys the driver reads (ADR-0049 enforce-or-remove); the mirror keeps its
+retired keys (`timeout` → `timeoutMs`; `localPath` and `wasm`, removed) as `z.never()` tombstones
+whose refusal carries the prescription. The live keys:
 
 | Property | Type | Default | Description |
 |:---|:---|:---:|:---|
-| `url` | `string` | (required) | Database URL (`libsql://`, `https://`, `file:`, `:memory:`) |
+| `url` | `string` | (required) | Database URL (`libsql://`, `https://`, `file:`, `:memory:`) — in replica mode, also the local file |
 | `authToken` | `string?` | — | JWT auth token for remote databases |
 | `encryptionKey` | `string?` | — | AES-256 encryption key for local files |
 | `concurrency` | `number` | `20` | Maximum concurrent requests |
 | `syncUrl` | `string?` | — | Remote sync URL for embedded replica mode |
-| `localPath` | `string?` | — | Local file path for embedded replica |
 | `sync.intervalSeconds` | `number` | `60` | Periodic sync interval (0 = manual only) |
 | `sync.onConnect` | `boolean` | `true` | Sync immediately on connect |
-| `timeout` | `number?` | — | Operation timeout in milliseconds |
-| `wasm` | `boolean?` | — | Use WASM build for edge/browser environments |
+| `timeoutMs` | `number?` | — | Operation timeout in milliseconds for remote operations (0 = no bound): remote mode over HTTP aborts each request at the window (`TIMEOUT` / 504); replica mode bounds `sync()`; WebSocket URLs are not bounded |
 
 ---
 
