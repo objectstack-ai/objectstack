@@ -293,8 +293,15 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
       // `$contains` carries NO fold, in any of the three spellings a fold has.
       expect(contains.sql, String(dialect)).not.toMatch(/translate\(|lower\(|REPLACE\(/);
       // …and `$icontains` carries exactly one of them, per dialect.
+      // [#16028] `undefined` (the `unknown` arm) parted company with `postgres`
+      // here: it folds with the PORTABLE `REPLACE` chain, because `unknown` is
+      // every dialect nothing answered for and `translate()` does not exist on
+      // two of them. Each pattern below is discriminating against the other
+      // three arms — `REPLACE(name, 'A', 'a')` is the `unknown` chain's
+      // innermost call and cannot match MySQL's, whose innermost operand is
+      // `CAST(name AS BINARY)`.
       const FOLD_PER_DIALECT: Record<string, RegExp> = {
-        undefined: /translate\(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
+        undefined: /REPLACE\(name, 'A', 'a'\)/,
         postgres: /translate\(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
         sqlite: /lower\(name\) GLOB lower\(\$1\)/,
         mysql: /REPLACE\(CAST\(name AS BINARY\), 'A', 'a'\)/,
