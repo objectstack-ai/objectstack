@@ -70,6 +70,7 @@
 import { canServeApiOperation, type EnableLike } from '@objectstack/spec/data';
 
 import type { ReferenceIntegrityFinding } from './reference-integrity-suite.js';
+import { recordsOf } from './object-graph.js';
 
 export type NavObjectServabilityFinding = ReferenceIntegrityFinding;
 
@@ -79,13 +80,6 @@ export const NAV_OBJECT_UNSERVABLE = 'nav-object-unservable';
 type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
-
-/** Both authoring carriers: an array of documents, or a name-keyed map. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter(isRec);
-  if (isRec(v)) return Object.entries(v).map(([name, def]) => (isRec(def) ? { name, ...def } : { name }));
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -102,7 +96,7 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
   const findings: NavObjectServabilityFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
   if (apps.length === 0) return findings;
 
   // Only objects THIS stack declares can be judged — see the header. The map
@@ -110,7 +104,7 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
   // key that is actually editable, not merely at the nav entry that tripped on
   // it.
   const ownEnable = new Map<string, { enable: EnableLike | undefined; path: string }>();
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (const [oi, obj] of objects.entries()) {
     const n = strName(obj.name);
     if (!n) continue;
@@ -192,7 +186,7 @@ export function validateNavObjectServability(stack: unknown): NavObjectServabili
     // `areas[]` is the other nav container, and the server gates it through the
     // very same walk (#4722) — so this rule must see it too, or it would pass a
     // stack whose served payload the runtime prunes.
-    for (const [ari, area] of asArray(app.areas).entries()) {
+    for (const [ari, area] of recordsOf(app.areas).entries()) {
       walk(area.items, `apps[${ai}].areas[${ari}].items`);
       walk(area.navigation, `apps[${ai}].areas[${ari}].navigation`);
     }
