@@ -8,7 +8,7 @@ Guide for modeling relationships between objects using `lookup`, `master_detail`
 |:-----|:----------|:---------|:--------|:---------|:---------|
 | `lookup` | Independent | Optional by default | Independent | Supported via `summary` | "Related to" |
 | `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`; else lint-warned | Inherits parent | Supported via `summary` | "Owned by" |
-| `tree` | Self-reference | Optional | N/A | Not available | Hierarchical |
+| `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
 
 ## When to Use lookup vs master_detail
 
