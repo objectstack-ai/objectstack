@@ -97,8 +97,29 @@ jobs:
         # `os --version` proves the CLI resolved, installed, and runs on the
         # pushed image; a boot test needs an artifact + DB and belongs to the
         # examples/e2e suites, not here.
+        #
+        # The `require()` line proves the SQL drivers are actually IN the built
+        # image. `check:docs-image-tag` cannot see that: it compares the
+        # Dockerfile install line against README.md's published table, and both
+        # would still agree if the drivers vanished from the image. The class
+        # has already cost a boot once -- docker/Dockerfile records that a tree
+        # without `pg` "died at boot on `Cannot find module 'pg'`", which is why
+        # the install line exists. `require()` needs no artifact and no
+        # database, so it stays on the right side of the same line drawn above.
+        #
+        # `-w` is load-bearing, not incidental. `npm install -g` puts the
+        # drivers in /usr/local/lib/node_modules, which is NOT on `require()`'s
+        # search path from this image's WORKDIR (/srv/app): node's global
+        # folders are $PREFIX/lib/node, and the node:22-slim base sets no
+        # NODE_PATH. Run from /srv/app the probe fails on a CORRECT image, so
+        # it would be a constant red rather than a check. Resolving from inside
+        # the global tree is also how the real boot path resolves them --
+        # driver-sql lives there too. Do not "simplify" this to a bare
+        # `docker run`; verified in both directions before it landed.
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           docker pull "$IMAGE:$VERSION"
           docker run --rm "$IMAGE:$VERSION" os --version
+          docker run --rm -w /usr/local/lib/node_modules "$IMAGE:$VERSION" \
+            node -e "require('pg'); require('mysql2')"

@@ -171,6 +171,7 @@ import {
   childEnv,
   E2E_SECRET_KEY,
   portContentionError,
+  probeThroughChild,
   requireBuiltCli,
   reservePort,
 } from './helpers/serve-process.js';
@@ -293,6 +294,59 @@ interface OriginCheckResult {
 }
 
 /**
+ * The banner's LAST line — the marker the rest of this directory already waits
+ * on (every `runServe()` caller here passes `/Press Ctrl\+C to stop/`), adopted
+ * in place of this file's own `/Server is ready/`.
+ *
+ * `printServerReady` writes the head, the `API:` row and this line with
+ * `console.error`, and writes to one stream are ordered, so a buffer holding
+ * this line holds the whole banner. Keying on the HEAD leaves any later read of
+ * the banner dependent on whether the rest of it landed in the same pipe chunk
+ * — the reasoning `helpers/serve-process.ts` records for its own `BANNER_TAIL`,
+ * which this file was the last spawner here not to follow.
+ *
+ * ⚠️ Stated so it is not oversold: this is directory alignment, ⛔ NOT the
+ * repair for the failure described below, and it is not claimed to be. Measured
+ * on this tree, the HTTP listener is up well before either line — `serve.ts`
+ * awaits `runtime.start()` and only then prints the banner through
+ * `publishBoundPort` — and a probe fired at a port nothing is listening on
+ * answers `ECONNREFUSED` with no socket object at all, which is not the
+ * signature that was recorded. Waiting for the whole banner could not have
+ * prevented that failure.
+ */
+const READY_BANNER_TAIL = /Press Ctrl\+C to stop/;
+
+/**
+ * WHY THE PROBE BELOW IS LIFECYCLE-AWARE — this file's half of the reading.
+ *
+ * A merge-group run evicted a queue entry when the third call site below failed
+ * with:
+ *
+ *     TypeError: fetch failed
+ *     Caused by: SocketError: other side closed
+ *     { code: 'UND_ERR_SOCKET', socket: { bytesWritten: 349, bytesRead: +0 } }
+ *
+ * ⛔ That is NOT "the server was not up": `bytesRead: 0` with `bytesWritten` set
+ * says the connection was ESTABLISHED and the whole request delivered before the
+ * peer closed it, whereas nothing listening answers `ECONNREFUSED` with no
+ * socket object at all. So the wait above was already correct — ⛔ the repair is
+ * not a longer wait and ⛔ not a bigger timeout.
+ *
+ * The mechanism, the three socket shapes measured side by side, the bound and
+ * every fence now live ONCE, with `probeThroughChild()` in
+ * `helpers/serve-process.ts` — read that section rather than a copy of it. Three
+ * sibling files here had the same unguarded shape (#15653) and the idiom was
+ * hoisted so the family has one definition and one pin
+ * (`serve-probe-child-attribution.test.ts`) rather than four copies of it.
+ *
+ * ⛔ The line this file may never cross, restated because the test is slow (its
+ * shard ran 783 s) and its subject is unglamorous: no `.skip`, no `.todo`, no
+ * quarantine list, no retry that swallows a failure into silence. A flake in a
+ * required shard is a harness bug to diagnose, never a licence to stop
+ * measuring.
+ */
+
+/**
  * Boot `os serve` for real against the shipped entrypoint, wait for the ready
  * banner, POST a sign-in attempt carrying an untrusted-looking localhost
  * Origin and no cookie, then shut the child down. Never leaves a child
@@ -392,10 +446,13 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
 
   await new Promise<void>((readyResolve, readyReject) => {
     const timer = setTimeout(() => {
-      readyReject(new Error(`serve never reached "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
+      readyReject(new Error(
+        'serve never printed its COMPLETE ready banner (last line: "Press Ctrl+C to stop")'
+        + `\n--- stdout ---\n${out}\n--- stderr ---\n${err}`,
+      ));
     }, 150_000);
     const onData = () => {
-      if (/Server is ready/.test(out + err)) {
+      if (READY_BANNER_TAIL.test(out + err)) {
         clearTimeout(timer);
         readyResolve();
       }
@@ -422,20 +479,39 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     });
   });
 
+  // Everything the child said, for a failure message that can be attributed
+  // without a second run. Read at THROW time, so it carries the crash the child
+  // printed on its way down rather than the buffer as it stood at ready.
+  const transcript = () => `\n--- child stdout ---\n${out}\n--- child stderr ---\n${err}`;
+
   try {
-    const res = await fetch(`http://localhost:${port}/api/v1/auth/sign-in/email`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        // No cookie header — this is the shape `validateFormCsrf` forces an
-        // origin check for when neither Sec-Fetch-* nor a cookie is present.
-        origin: `http://localhost:${untrustedOriginPort}`,
+    return await probeThroughChild(
+      {
+        child,
+        transcript,
+        label: 'serve-node-env-production-default',
+        what: `the origin probe on port ${port}`,
       },
-      body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
-    });
-    let body: any = null;
-    try { body = await res.json(); } catch { /* non-JSON error body, fall through with null */ }
-    return { status: res.status, body };
+      async () => {
+        const res = await fetch(`http://localhost:${port}/api/v1/auth/sign-in/email`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            // No cookie header — this is the shape `validateFormCsrf` forces an
+            // origin check for when neither Sec-Fetch-* nor a cookie is present.
+            origin: `http://localhost:${untrustedOriginPort}`,
+          },
+          body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
+        });
+        // ⛔ The body read stays INSIDE the guard, and cannot throw: a connection
+        // torn down mid-body rejects out of `res.json()` rather than out of
+        // `fetch()`, and an ASSERTION in here would be reported as a dropped
+        // socket rather than as the wrong answer it is.
+        let body: any = null;
+        try { body = await res.json(); } catch { /* non-JSON error body, fall through with null */ }
+        return { status: res.status, body };
+      },
+    );
   } finally {
     await stop(child);
   }

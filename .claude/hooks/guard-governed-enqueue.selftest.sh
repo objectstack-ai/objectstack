@@ -161,6 +161,14 @@ expect_says 'does NOT re-run on a later approval' 'the no-re-run reason is state
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 expect_says 'OS_ALLOW_GOVERNED_ENQUEUE=1' 'the deliberate exception is named' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+# …and it names WHERE that variable has to be set. A VAR=1 prefix sets the variable in the
+# environment of THAT COMMAND; this hook is not that command, and it reads its own
+# environment, so a prefix never reaches it (#15971). The `lacks` row is the shape shared
+# with the other four matrices, where the dead prefix remedy was actually printed.
+expect_lacks 're-run with' 'no prefix remedy is offered for the exception' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
+expect_says 'hook itself runs in' 'the exception names the environment this hook reads' \
+  "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 expect_says "$HEAD_SHA" 'the current head sha is named so the reader knows which PR state this is' \
   "$(mcp $AUTO 13794)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_UNAPPROVED"
 expect_says 'does NOT have to sit on the' 'the remedy states the 2026-09-04 predicate, not the retired sha pin' \

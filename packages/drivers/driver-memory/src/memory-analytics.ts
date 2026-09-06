@@ -7,7 +7,13 @@ import type { Cube, AnalyticsQuery } from '@objectstack/spec/data';
 // the SQL exit's wildcard rendering is not a third hand-copy of that escape.
 import { asciiCaseInsensitiveRegexSource, likePatternToGlobPattern } from '@objectstack/spec/data';
 import type { InMemoryDriver } from './memory-driver.js';
-import { Logger, createLogger, nextUtcCalendarDay } from '@objectstack/core';
+import {
+  Logger,
+  createLogger,
+  nextUtcCalendarDay,
+  calendarPartsInTzOrUtc,
+  zonedDateStartToUtcMs,
+} from '@objectstack/core';
 import {
   assertFilterConditionShape,
   uncompilableCombinatorError,
@@ -739,7 +745,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         if (timeDim.dateRange) {
           const range = Array.isArray(timeDim.dateRange)
             ? timeDim.dateRange
-            : this.parseDateRangeString(timeDim.dateRange);
+            : this.parseDateRangeString(timeDim.dateRange, query.timezone);
 
           if (range.length === 2) {
             // The window matches BOTH stored forms of a datetime value — the
@@ -1412,14 +1418,101 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     return sql.trim();
   }
 
-  private parseDateRangeString(range: string): string[] {
+  private parseDateRangeString(range: string, timezone?: string): string[] {
     // Simple parser for common date range strings
     // In production, this would use a proper date range parser
+    //
+    // [#15825] ONE calendar, and it is UTC -- the same one `toISOString()`
+    // renders every bound below on. Two INDEPENDENT defects lived here:
+    //
+    //   1. The window BOUNDARY was `new Date(y, m, d)` -- LOCAL midnight --
+    //      rendered as UTC. Wrong on every day of the year in every non-UTC
+    //      process, with no DST transition needed: measured 2026-09-05, the
+    //      `'today'` bucket ran from the previous 16:00Z at `Asia/Shanghai`,
+    //      from 07:00Z at `America/Los_Angeles` (08:00Z outside its DST).
+    //   2. The `last N ...` legs did their arithmetic on the LOCAL calendar
+    //      (`setDate` / `setMonth` / `setFullYear`) and rendered on the UTC
+    //      one. `setDate` preserves WALL-CLOCK time, so the instant moves
+    //      n x 24h only while every local day in the window is 24 hours
+    //      long; across a DST transition it moves 23h or 25h and the window
+    //      start slips an hour.
+    //
+    // ⛔ They do not fix each other: `setUTCDate` alone leaves the
+    // local-midnight boundary in place, and `Date.UTC` alone leaves the
+    // arithmetic mixed. Each is pinned by its own file, and each was ablated
+    // separately to prove it -- `memory-analytics-date-range-utc-window.test.ts`
+    // (boundary; red in any non-UTC zone, no transition instant needed) and
+    // `memory-analytics-date-range-dst.test.ts` (arithmetic; CANNOT go red at
+    // TZ=UTC, where the two spellings are indistinguishable -- which is
+    // exactly why nothing in CI ever reddened on this).
+    //
+    // UTC is the target calendar, not merely "a consistent one". The rest of
+    // the platform resolves a bare date to the UTC day: `@objectstack/core`'s
+    // `{today}` filter-token macro builds its reference day as
+    // `new Date(Date.UTC(year, month - 1, day))` and falls back to UTC parts
+    // when the context carries no timezone, and `{TODAY()}` in flow templates
+    // resolves to the UTC day (#14852, same two-calendar shape). So the same
+    // analytics question asked through this path and through a flow token no
+    // longer selects different rows in one deployment -- that agreement, not
+    // the hour count, is what this repair restores. ⚠️ That paragraph scopes
+    // itself to a query carrying NO timezone; a query that carries one is
+    // answered on THAT zone's calendar -- see [#16042] below.
+    //
+    // [#16042] The reference TIMEZONE, which this path used to accept and drop.
+    //
+    // `AnalyticsQuery.timezone` is declared optional with no default precisely
+    // because an ABSENT value is a meaningful state that the engine resolves
+    // (`selection.timezone ?? context.timezone ?? 'UTC'`, ADR-0053 Phase 2 —
+    // `service-analytics`' `buildQuery` resolves that whole chain and writes the
+    // ANSWER into `query.timezone` before a driver ever sees it). So a driver
+    // owes the chain's last two links: the value it was handed, else UTC. The
+    // third state -- accepting the field and ignoring it -- is the one that
+    // misleads, and it is what a caller asking `'today'` with
+    // `timezone: 'Asia/Shanghai'` got: the UTC day, silently, with no warning.
+    //
+    // TWO halves, and each needs its own primitive:
+    //
+    //   1. WHICH calendar day "now" is -- `calendarPartsInTzOrUtc(now, tz)`,
+    //      read from the platform tz database. Arithmetic then runs on a UTC
+    //      "proxy" date built from those parts, the `proxyDay()` pattern in
+    //      `@objectstack/core`'s filter-token macros: working in UTC keeps
+    //      `last N months` free of DST jumps, and the zone only decides which
+    //      calendar day the window is anchored to.
+    //   2. WHERE that day BEGINS as an instant -- `zonedDateStartToUtcMs(ymd,
+    //      tz)`, that zone's local midnight. This half is required because the
+    //      bounds here are rendered with `toISOString()` and compared against
+    //      DATETIME values, which is exactly the case ADR-0053 settles in
+    //      `service-analytics`' drill ranges: "`datetime` -> the reference tz's
+    //      MIDNIGHT INSTANT (ISO), because the bucket is defined on that tz's
+    //      calendar"; only a `date`-typed, tz-naive column takes the bare
+    //      `YYYY-MM-DD` calendar bound.
+    //
+    // ⛔ Half 1 alone is NOT the fix, and the failure is silent: it would
+    // anchor to Shanghai's calendar day but cut it at UTC midnight, a window
+    // that is neither the UTC day nor the Shanghai day but an 8-hour-shifted
+    // hybrid -- worse for that caller than the UTC day they get today.
+    // ⛔ Nor is `+ 86_400_000` a next-day boundary once a zone is in play:
+    // measured on `America/New_York`, 2026-03-08 begins at 05:00Z and 2026-03-09
+    // at 04:00Z, so that spring-forward day is 23 hours long.
+    //
+    // NO-TIMEZONE CASE UNCHANGED, by construction: `zonedDateStartToUtcMs`
+    // returns plain UTC midnight for an unset, `'UTC'`, or unknown zone, so
+    // every bound below is byte-identical to #15825's for a query carrying no
+    // timezone -- the common case, and the one this must not disturb. An
+    // unknown zone degrades to UTC rather than throwing, the same call
+    // `calendarPartsInTzOrUtc` makes one line above.
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    
+    const ref = calendarPartsInTzOrUtc(now, timezone);
+    const today = new Date(Date.UTC(ref.year, ref.month - 1, ref.day));
+    /** That proxy day's `YYYY-MM-DD`, then the instant it BEGINS in `timezone`. */
+    const boundary = (proxy: Date): string =>
+      new Date(zonedDateStartToUtcMs(proxy.toISOString().slice(0, 10), timezone)).toISOString();
+
     if (range === 'today') {
-      return [today.toISOString(), new Date(today.getTime() + 86400000).toISOString()];
+      // The next calendar day, via the proxy calendar -- never `+ 86_400_000`.
+      const tomorrow = new Date(today.getTime());
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      return [boundary(today), boundary(tomorrow)];
     } else if (range.startsWith('last ')) {
       const parts = range.split(' ');
       const num = parseInt(parts[1]);
@@ -1427,18 +1520,19 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       const start = new Date(today);
       
       if (unit.startsWith('day')) {
-        start.setDate(start.getDate() - num);
+        start.setUTCDate(start.getUTCDate() - num);
       } else if (unit.startsWith('week')) {
-        start.setDate(start.getDate() - num * 7);
+        start.setUTCDate(start.getUTCDate() - num * 7);
       } else if (unit.startsWith('month')) {
-        start.setMonth(start.getMonth() - num);
+        start.setUTCMonth(start.getUTCMonth() - num);
       } else if (unit.startsWith('year')) {
-        start.setFullYear(start.getFullYear() - num);
+        start.setUTCFullYear(start.getUTCFullYear() - num);
       }
       
-      return [start.toISOString(), now.toISOString()];
+      // The upper bound is the current INSTANT, which no zone moves.
+      return [boundary(start), now.toISOString()];
     }
-    
+
     return [range, range]; // Fallback
   }
 

@@ -80,7 +80,7 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 // ignored filter is the one wrong answer a caller cannot detect.
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
-import { RestServerConfig, RestApiConfig } from '@objectstack/spec/api';
+import { RestServerConfig, RestApiConfigParsed } from '@objectstack/spec/api';
 // [#11683] The catalog's own floor for "a required `code` and no more specific
 // one" — see its use in `registerSharingEndpoints`, where the nested ADR-0112
 // envelope declares `code` REQUIRED while the flat classification it re-dresses
@@ -88,7 +88,7 @@ import { RestServerConfig, RestApiConfig } from '@objectstack/spec/api';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 // [#11637] The DECLARED contract for `config.api`, imported as a VALUE rather
 // than a type. Both hops into this package were casts, so this schema had
-// never run on any deployment path — see `assertDeclaredApiConfig` below.
+// never run on any deployment path — see `parseDeclaredApiConfig` below.
 import {
     RestApiConfigSchema,
     CrudEndpointsConfigSchema,
@@ -111,6 +111,22 @@ import type {
     HistoryMetaItemRequest,
     SaveMetaItemRequest,
     DeleteMetaItemRequest,
+    GetUiViewRequest,
+} from '@objectstack/spec/api';
+// [#15866] The same discipline for the DATA doors. Every literal these routes
+// assemble is now compiled against the declared request type through
+// `ServerScopedDataRequest` below, so a member the contract does not declare is
+// a compile error at the call site instead of a payload no schema has seen.
+import type {
+    FindDataRequest,
+    GetDataRequest,
+    CreateDataRequest,
+    UpdateDataRequest,
+    DeleteDataRequest,
+    BatchDataRequest,
+    CreateManyDataRequest,
+    UpdateManyDataRequest,
+    DeleteManyDataRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -207,6 +223,76 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  * literals is now a compile error instead of a cast-and-hope.
  */
 type TransportScopedMetaRequest<R> = R & { environmentId?: string };
+
+/**
+ * [#15866] The DATA doors' sibling of {@link TransportScopedMetaRequest}, and
+ * the reason it is a SECOND alias rather than a widening of the first: the data
+ * routes layer on TWO server-side members, and only one of them is the meta
+ * doors' transport key.
+ *
+ *   - `environmentId` — identical to the meta case and covered by the same
+ *     ruling (2026-08-18, #9741): `resolveProtocol(environmentId)` picks the
+ *     target kernel BEFORE the call, `@objectstack/metadata-protocol`'s data
+ *     methods never read it off the request, and `protocol.zod.ts` records the
+ *     exclusion schema-side. The doors still spread it (long-standing wire
+ *     shape), so it is declared here rather than smuggled past the compiler.
+ *   - `context` — the SERVER-DERIVED execution context from
+ *     {@link RestServer.resolveExecCtx}. The implementation genuinely reads it
+ *     (`findData`/`getData`/`createData`/`updateData`/`deleteData` all declare
+ *     `context?: any` and forward it so the RBAC/RLS middleware can enforce),
+ *     so unlike `environmentId` it IS consumed — but it still must not join the
+ *     request schema, because that schema is the catalog's published
+ *     `requestSchema` and a CALLER-supplied `context` is a privilege escalation:
+ *     `metadata-protocol.findData` deletes any inbound `context` unconditionally
+ *     for exactly that reason (`if (opCtx.context?.isSystem) return next()`
+ *     skips the whole RLS/FLS/CRUD chain). Declared-here is what keeps it
+ *     server-only AND compiled.
+ *
+ * ⛔ Never add a third member here to make a literal fit. A key a caller may
+ * send belongs in the spec schema; a key the door invents belongs in neither.
+ * What this buys is the guard #15866 was filed for: a field ADDED to
+ * `DeleteDataRequestSchema` / `UpdateDataRequestSchema` (and their siblings)
+ * as REQUIRED now reddens this file at build, naming the door that would
+ * otherwise have gone on not sending it.
+ *
+ * ⚠️ Scope of the restored check, stated so it is not overread: these handlers
+ * declare `req: any`, so every key sourced from `req` is `any` on the way in.
+ * What the compiler regains here is the KEY SET — an undeclared member (TS2353)
+ * and a missing required member (TS2739/TS2741) — not the value types of keys
+ * read off the request bag.
+ */
+type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
+
+/**
+ * [#15866] The ONE thing restoring the data doors' compile-time check could not
+ * type honestly, isolated behind a name so what stays erased is countable and
+ * greppable instead of diffuse — and so the next person meets the reason rather
+ * than a bare cast.
+ *
+ * `FindDataRequest.query` declares the AST (`QuerySchema`). But
+ * `@objectstack/metadata-protocol`'s `findData` ingress accepts TWO dialects
+ * through that one slot: the AST, and the WIRE dialect its normalizer folds —
+ * the bare transport spellings and the OData `$` forms (`$top`→`top`→`limit`,
+ * `$orderby`→`orderBy`, `filter`/`filters`/`$filter`→`where`, …). That second
+ * set is deliberately undeclared: the normalizer's own table calls them "the
+ * wire-only spellings no schema declares", and its sibling hint table is
+ * documented as never accepting input precisely so a second de-facto contract
+ * does not grow (Prime Directive #12).
+ *
+ * Three server-built literals in this file speak that wire dialect (the
+ * import-job listing, the export chunk loop, the public picker). ⛔ The two
+ * repairs this card forbids are exactly the two that would make them compile:
+ * widening `QuerySchema` to admit `$`-forms, and dropping back to a runtime
+ * `safeParse`. So the honest move is neither — it is to keep the erasure, make
+ * it one slot wide instead of one call wide, and hand the gap back: the
+ * declared-vs-shipped mismatch on this slot is a CONTRACT question, filed
+ * separately, not something this door may settle by itself.
+ *
+ * ⚠️ What is NOT erased at those three sites, and was before: the method name,
+ * the arity, and every other member of the request literal.
+ */
+const wireDialectQuery = (query: Record<string, unknown>): FindDataRequest['query'] =>
+    query as FindDataRequest['query'];
 import {
     buildFieldMetaMap,
     referenceFieldNames,
@@ -239,6 +325,7 @@ import {
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
     boundedDeclaredUserMessage,
+    declaredHttpStatus,
     declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
@@ -743,8 +830,13 @@ type NormalizedRestServerConfig = {
         enableSearch: boolean;
         enableProjectScoping: boolean;
         projectResolution: 'required' | 'optional' | 'auto';
-        documentation: RestApiConfig['documentation'];
-        responseFormat: RestApiConfig['responseFormat'];
+        // [#14366] The PARSED shape, not the authored one: this block is
+        // built from `RestApiConfigSchema`'s output, so a `documentation` or
+        // `responseFormat` the caller wrote arrives with its OWN declared
+        // inner defaults applied (`documentation.enabled`, `.title`;
+        // `responseFormat.envelope`, `.includeMetadata`, `.includePagination`).
+        documentation: RestApiConfigParsed['documentation'];
+        responseFormat: RestApiConfigParsed['responseFormat'];
     };
     crud: {
         operations: {
@@ -799,7 +891,7 @@ type NormalizedRestServerConfig = {
  *
  * `api` is the one entry with a subtraction: its retired `requireAuth`
  * tombstone is `.omit()`ed because this seam does not own that key's posture
- * (see {@link RestServer.assertDeclaredApiConfig}). The four siblings carry no
+ * (see {@link RestServer.parseDeclaredApiConfig}). The four siblings carry no
  * tombstone of their own and are taken whole. ⛔ `RestServerConfigSchema` — the
  * whole-config schema — is deliberately NOT in this table: its `openApi31`
  * tombstone (#4579) is a `retiredKey()` whose parse REFUSES the key, while
@@ -824,6 +916,13 @@ function buildDeclaredSubConfigSchemas() {
 }
 type DeclaredSubConfigSchemas = ReturnType<typeof buildDeclaredSubConfigSchemas>;
 type DeclaredSubConfigName = keyof DeclaredSubConfigSchemas;
+/**
+ * [#14366] The parsed `api` sub-object, which `normalizeConfig` now BUILDS
+ * FROM. Taken off the table's own entry rather than off `RestApiConfigParsed`,
+ * so it is the post-`.omit()` shape: the retired `requireAuth` tombstone is
+ * absent here exactly as it is absent from the schema this seam runs.
+ */
+type DeclaredApiConfigParsed = z.output<DeclaredSubConfigSchemas['api']>;
 let declaredSubConfigSchemasCache: DeclaredSubConfigSchemas | undefined;
 function declaredSubConfigSchemas(): DeclaredSubConfigSchemas {
     return (declaredSubConfigSchemasCache ??= buildDeclaredSubConfigSchemas());
@@ -1111,6 +1210,93 @@ async function wiredEngineOrLoud<T>(
         // part an operator actually needs.
         throw new AuthzStoreUnavailableError('objectql', err);
     }
+}
+
+/**
+ * [#15685] The `/meta/:type/:name/references` door's PROTOCOL-RAISED refusal,
+ * re-dressed in the ADR-0112 NESTED envelope that door's other refusal exit
+ * already publishes. Answers `undefined` for everything else, so the caller
+ * keeps `handleRouteError` for the rest.
+ *
+ * ## The defect this closes
+ *
+ * The door can refuse in two ways and, measured on one boot, the two answers
+ * agreed on neither the envelope nor the message:
+ *
+ * ```
+ * A  protocol-raised, unanswerable TARGET type (#9327)
+ *    501 {"error":"Internal server error","code":"NOT_IMPLEMENTED"}
+ * B  the resolved kernel has no `findReferencesToMeta` at all (#9326)
+ *    501 {"error":{"code":"NOT_IMPLEMENTED","message":"protocol.findReferencesToMeta() is not available in this kernel"}}
+ * ```
+ *
+ * Two facts are lost on A, and both of them are the operator's:
+ *
+ *  1. **The PRESCRIPTION.** A's message is not decoration — `findReferencesToMeta`
+ *     says so in as many words ("The message is prescriptive per ADR-0110 D3:
+ *     it names the answerable question"). It tells the operator what to ask
+ *     INSTEAD: `Ask the owning object instead: GET /api/v1/meta/object/<owner>/references`.
+ *     That sentence is what keeps "the question was never asked" from being
+ *     read as "nothing depends on this item" — the whole of ADR-0110 D3
+ *     (#8896), in front of an operator whose next click is a delete, because
+ *     the admin "Used by" panel renders its empty case as "Nothing in the
+ *     metadata graph points at this item. Safe to delete." On the wire the
+ *     sentence was replaced by "Internal server error".
+ *  2. **The `code`'s POSITION.** `body.error.code` reads on B and `undefined`
+ *     on A. This door's own comment on the B branch warns against precisely
+ *     that dialect ("never the bare-string or sibling-`code` dialects, which
+ *     make `body.error.code` read `undefined`") — so the route was violating
+ *     its own written rule at its other exit, reached by a different path.
+ *
+ * ## Why the repair is HERE and not at the relay
+ *
+ * A reaches the wire through `handleRouteError` → {@link declaredServerFaultAnswer},
+ * which keeps `status` and `code` and replaces the prose with
+ * `INTERNAL_ERROR_MESSAGE`. That arm is correct and argued for a server FAULT
+ * (#11718, #5582) — a fault message may carry driver internals, and withholding
+ * it is the point. What it cannot see is that a producer-declared 5xx might be
+ * a deliberate REFUSAL whose message is authored FOR the caller. Teaching it
+ * that distinction would change platform-wide behaviour for every
+ * producer-declared 5xx at every door; that is a maintainer's decision and is
+ * handed back as its own finding, not taken here. This arm is the bounded half:
+ * ONE door, re-dressing ONE refusal in the dialect it already publishes.
+ *
+ * ⛔ It is therefore NOT a general "5xx prose is relayed now" rule, and the
+ * three conditions below are what keep it from becoming one.
+ *
+ * ## The three conditions, and why each is exactly this narrow
+ *
+ *  - **`501`**, read through {@link declaredHttpStatus} so both declaration
+ *    spellings (`status` / `statusCode`, #7525) reach the same verdict rather
+ *    than through a fourth local opinion about which field declares a status.
+ *  - **`code === 'NOT_IMPLEMENTED'`**, the literal this route already publishes
+ *    on its B exit. Matching the LITERAL rather than "any declared code" is
+ *    also how the #9232 vocabulary narrowing is honoured by CONSTRUCTION: an
+ *    unregistered producer spelling can never reach this exit, so no second
+ *    copy of `thrownCodeFields`' demotion rule is needed and no new door ships
+ *    an un-narrowed code. ⚠️ The cost is stated rather than hidden: a future
+ *    SECOND refusal code on this route would fall back to the flat fault answer
+ *    until whoever adds it comes here. That is a visible, one-line extension,
+ *    not a silent gap.
+ *  - **A non-empty message.** This arm exists to relay PROSE; with none
+ *    declared there is nothing to relay, and inventing one is the half
+ *    {@link declaredServerFaultAnswer} refuses to invent too.
+ *
+ * ⛔ And it does not re-derive `REFERENCE_SITES.unanswerableTargetTypes` to
+ * decide whether the target was answerable. That set, its canonical-type fold
+ * and its refusal all belong to `findReferencesToMeta`; a second copy at the
+ * transport is the tolerant-consumer direction, and it would drift the moment
+ * the set changed. The route reads what the protocol DECLARED, which is what a
+ * transport is for.
+ */
+function notImplementedRefusalAnswer(
+    error: any,
+): { status: number; body: { error: { code: string; message: string } } } | undefined {
+    if (declaredHttpStatus(error) !== 501) return undefined;
+    if (error?.code !== 'NOT_IMPLEMENTED') return undefined;
+    const message = typeof error?.message === 'string' ? error.message : '';
+    if (message.length === 0) return undefined;
+    return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 
 export class RestServer {
@@ -3186,6 +3372,57 @@ export class RestServer {
     }
 
     /**
+     * [#14882] The `ResolveOptions` every metadata-document translation in
+     * this server hands `@objectstack/spec/system`: the request's locale, the
+     * deployment's DECLARED fallback chain, and [#15711] the deployment's
+     * DEFAULT locale. This is the single seam; every resolver call in this
+     * file spreads it, so a rule about which locale answers lives in the
+     * resolvers (`packages/spec`) and this seam only threads declarations.
+     *
+     * The resolvers walk `requested locale → fallbackChain → authored label`
+     * for a NON-default request, and answer `requested locale → authored
+     * label` for a request that names `defaultLocale` (the authored label IS
+     * the default locale's text — ruled on #15711). A caller that declares
+     * no chain gets no chain: the resolver's own default is `[]`, not `en`.
+     *
+     * Every seam here used to pass none, so the stack's `i18n.fallbackLocale`
+     * never reached the chain: a `zh-CN` workspace that shipped a courtesy
+     * `en` bundle served `Entry Sheet` to a `zh-CN` request, ahead of its own
+     * authored `填报单`, because `en` was consulted before the authored label.
+     *
+     * The chain is read from the i18n service — `getFallbackLocale()`, the
+     * locale its own `t()` falls back to, which `I18nServicePlugin` receives
+     * as `fallbackLocale || defaultLocale || 'en'` from the stack config — so
+     * a bundle label and a `t()` message agree on which locale comes second.
+     * The default locale is read from `getDefaultLocale()`, the same accessor
+     * `extractLocale` already answers a header-less request from, so the
+     * request that falls to the default and the rule that recognises the
+     * default read one value. Both are feature-detected like
+     * `getPackagedObjectBase` (both methods are optional on `II18nService`;
+     * the core in-memory fallback declares neither): a service that does not
+     * declare a fallback gets NO chain, and one that does not declare a
+     * default gets NO default — the serving layer threads a declaration, it
+     * never invents one, and it never answers `'en'` on a provider's behalf.
+     *
+     * With `defaultLocale` threaded, a stack declaring `defaultLocale:
+     * 'zh-CN'` with a reflexive `fallbackLocale: 'en'` serves its authored
+     * `填报单` to a `zh-CN` request and its `en` bundle to every other one —
+     * the contract question this docblock once refused to answer on its own
+     * (#14882 left it to #15711, which ruled it).
+     */
+    private static translateOptionsFor(
+        i18n: any,
+        locale: string,
+    ): { locale: string; fallbackChain?: string[]; defaultLocale?: string } {
+        const fallback = i18n && typeof i18n.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+        const def = i18n && typeof i18n.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+        const opts: { locale: string; fallbackChain?: string[]; defaultLocale?: string } = { locale };
+        if (typeof fallback === 'string' && fallback.length > 0) opts.fallbackChain = [fallback];
+        if (typeof def === 'string' && def.length > 0) opts.defaultLocale = def;
+        return opts;
+    }
+
+    /**
      * An `II18nService.t`-compatible lookup for the request's environment, or
      * `undefined` when no i18n service is registered. Handed to the import
      * runner so its own messages resolve a deployment's `validation.field.*`
@@ -3217,9 +3454,8 @@ export class RestServer {
         if (!item || typeof item !== 'object') return item;
         // [#6349] Normalize HERE, not at the call sites. `isTranslatableMetaType`
         // reads `TRANSLATABLE_METADATA_TYPES`, which is DERIVED from
-        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only
-        // (`view`/`action`/`object`/`app`/`dashboard`/`page`), matching
-        // `translateMetadataDocument`'s "Canonical metadata type string". The
+        // `METADATA_DOCUMENT_TRANSLATORS`' keys — and those are singular-only,
+        // matching `translateMetadataDocument`'s "Canonical metadata type string". The
         // `/meta` handlers hand this helper the RAW `:type` path segment, and
         // Prime Directive #3 makes PLURAL the canonical REST spelling, so the
         // documented spelling missed the set and the whole localization was
@@ -3261,7 +3497,10 @@ export class RestServer {
                 (item as any)?.name,
             )
             : undefined;
-        return translateMetadataDocument(metaType, item, bundle, { locale, packagedBase });
+        return translateMetadataDocument(metaType, item, bundle, {
+            ...RestServer.translateOptionsFor(i18n, locale),
+            packagedBase,
+        });
     }
 
     /**
@@ -3503,7 +3742,7 @@ export class RestServer {
         // the OUTER `{ type, items }`), so every element translates directly —
         // #5563 removed the per-element shape sniff that stood here.
         const translated = arr.map((item) => translateMetadataDocument(metaType, item, bundle, {
-            locale,
+            ...RestServer.translateOptionsFor(i18n, locale),
             packagedBase: this.packagedObjectBase(p, metaType, item?.name),
         }));
         return Array.isArray(items) ? translated : { ...items, items: translated };
@@ -3530,7 +3769,7 @@ export class RestServer {
             resolveMetadataTypeDescription,
             resolveMetadataFormLabels,
         } = await import('@objectstack/spec/system');
-        const opts = { locale } as const;
+        const opts = RestServer.translateOptionsFor(i18n, locale);
         const entries = payload.entries.map((entry: any) => {
             if (!entry || typeof entry !== 'object' || typeof entry.type !== 'string') return entry;
             const next: any = { ...entry };
@@ -3616,8 +3855,9 @@ export class RestServer {
      * walked straight past it and mounted the whole API at `/api//`, and
      * `'v1/beta'` spliced an extra path segment into every route.
      *
-     * VALIDATION ONLY — the parsed output is deliberately discarded and the
-     * normalization below keeps reading the raw input. Two measured reasons:
+     * [#14366] The parsed output is CONSUMED — `normalizeConfig` builds the
+     * `api` block from what this returns. It was VALIDATE-ONLY from #11637
+     * until then, for two measured reasons that have both since expired:
      *
      *  - `enableSearch` USED to be the silent-strip trap here: it was read
      *    below through `as any` and declared nowhere in `packages/spec`, so
@@ -3626,9 +3866,27 @@ export class RestServer {
      *    it off (the ADR-0104 class `shared/retired-key.ts` exists to
      *    prevent). #11983 gave it a declared seat
      *    (`RestApiConfigSchema.enableSearch`, default `true`), so the parse
-     *    now preserves it — but the discard stays, for the omitted keys:
+     *    preserves it.
      *
-     *  - the retired `api.requireAuth` key is `.omit()`ed rather than enforced.
+     *  - `api.projectResolution` was `.omit()`ed until #12450 withdrew it.
+     *
+     *    ⇒ Re-measured at #14366 on the landed tree, because the discard is
+     *    only safe to remove if the key diff is EMPTY: the 14 keys
+     *    `normalizeConfig` reads and the 14 `RestApiConfigSchema` declares
+     *    after the `.omit()` are the same 14, in both directions. So the
+     *    non-strict parse cannot strip anything the runtime honours, and the
+     *    schema's `.default()`s ARE the defaults — one source, not the two
+     *    that a `??` chain here duplicated key for key.
+     *
+     *    The one measured behaviour delta is bounded and named: a
+     *    `documentation` or `responseFormat` object the caller WRITES now
+     *    arrives carrying its own declared inner defaults, where the `??`
+     *    chain copied the authored object through untouched. Both keys have
+     *    zero read sites outside this block (the #14369 census), so nothing
+     *    observes it today — but it is a real change to this structure's
+     *    contents and belongs in the record rather than in a reader's surprise.
+     *
+     *  - the retired `api.requireAuth` key is STILL `.omit()`ed rather than enforced.
      *    #3963 retired it with a deliberate warn-and-ignore posture
      *    (`rest-api-plugin.ts`: "is IGNORED"), chosen in a world where nothing
      *    parsed this config; converting that into a boot failure is that
@@ -3671,13 +3929,13 @@ export class RestServer {
      * CONSUMED. The asymmetry with `api` is measured, not stylistic: for each
      * of the four, every key `normalizeConfig` reads is one its schema
      * declares (the key diff is empty), and none carries a tombstone, so a
-     * consumed parse cannot strip anything the runtime honours. `api` keeps
-     * #11637's validate-only shape here; its `??` chain below duplicates the
-     * schema's defaults key for key today, and folding it onto the parse is a
-     * separate, separately-measured change — not a rider on the siblings.
+     * consumed parse cannot strip anything the runtime honours. [#14366] `api`
+     * went through the same door last, separately measured rather than ridden
+     * on the siblings: the asymmetry is gone and all five now build from their
+     * parsed output.
      */
-    private assertDeclaredApiConfig(api: unknown): void {
-        parseDeclaredSubConfig('api', declaredSubConfigSchemas().api, api, (issues) => (
+    private parseDeclaredApiConfig(api: unknown): DeclaredApiConfigParsed {
+        return parseDeclaredSubConfig('api', declaredSubConfigSchemas().api, api, (issues) => (
             // The `version` rationale is appended only when `version` is what
             // failed. Measured during #11637's own ablation: a
             // `projectResolution` refusal printed the whole "an empty version
@@ -3697,12 +3955,20 @@ export class RestServer {
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
-        // [#11637] `api`: parse BEFORE the cast, not instead of it — the cast
-        // is what makes the `api` block below type-check, and it is only sound
-        // once the declared contract has actually been run. Validate-only; see
-        // `assertDeclaredApiConfig` for why its parsed output is discarded.
-        this.assertDeclaredApiConfig(config.api);
-        const api = (config.api ?? {}) as Partial<RestApiConfig>;
+        // [#11637 / #14366] `api`: parsed AND consumed. #11637 ran the declared
+        // contract here but discarded its output, leaving the block below to be
+        // built from a cast over the raw input through a `??` chain that
+        // duplicated `RestApiConfigSchema`'s defaults key for key — ELEVEN
+        // literals in `packages/rest` restating the eleven top-level
+        // `z.default(...)`s in `packages/spec`, with nothing pinning that the
+        // two stayed equal. (Eleven, measured on both sides at #14366; the
+        // filing card said twelve, having counted the `config.api ?? {}` that
+        // guards the whole object rather than a per-key default.)
+        // #14366 folded the chain onto the parse after re-measuring the key
+        // diff empty in both directions (see `parseDeclaredApiConfig`), so the
+        // schema is now the single source of these defaults. The cast is gone
+        // with it: the parsed output is already typed.
+        const api = this.parseDeclaredApiConfig(config.api);
         // [#11984] The four siblings: parsed AND consumed. Each used to be
         // `(config.<sub> ?? {}) as Partial<...>`, so `batch.maxBatchSize: 0`
         // was the live batch cap (`0` is not nullish) and
@@ -3719,19 +3985,24 @@ export class RestServer {
         const routes = parseDeclaredSubConfig('routes', schemas.routes, config.routes);
 
         return {
+            // Keys listed rather than spread: `NormalizedRestServerConfig`
+            // declares `documentation` / `responseFormat` as REQUIRED (possibly
+            // `undefined`) while the schema declares them `.optional()`, so a
+            // spread would not satisfy this type — and listing them is also
+            // what makes the empty key diff readable at the seam it protects.
             api: {
-                version: api.version ?? 'v1',
-                basePath: api.basePath ?? '/api',
+                version: api.version,
+                basePath: api.basePath,
                 apiPath: api.apiPath,
-                enableCrud: api.enableCrud ?? true,
-                enableMetadata: api.enableMetadata ?? true,
-                enableUi: api.enableUi ?? true,
-                enableBatch: api.enableBatch ?? true,
-                enableDiscovery: api.enableDiscovery ?? true,
-                enableOpenApi: api.enableOpenApi ?? true,
-                enableSearch: api.enableSearch ?? true,
-                enableProjectScoping: api.enableProjectScoping ?? false,
-                projectResolution: api.projectResolution ?? 'auto',
+                enableCrud: api.enableCrud,
+                enableMetadata: api.enableMetadata,
+                enableUi: api.enableUi,
+                enableBatch: api.enableBatch,
+                enableDiscovery: api.enableDiscovery,
+                enableOpenApi: api.enableOpenApi,
+                enableSearch: api.enableSearch,
+                enableProjectScoping: api.enableProjectScoping,
+                projectResolution: api.projectResolution,
                 documentation: api.documentation,
                 responseFormat: api.responseFormat,
             },
@@ -4749,8 +5020,9 @@ export class RestServer {
                         const severityParam = (req.query?.severity as string | undefined) ?? 'error';
                         const severity = severityParam === 'warning' ? 'warning' : 'error';
                         const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [#13753] STATE THE ORG PARTITION — but only on the
-                        // arm where ONE organization is the whole truth.
+                        // [#13753, #15622] STATE THE ORG PARTITION — on BOTH
+                        // arms. They differ only in whether the fold happens
+                        // HERE or is left entirely to the callee.
                         //
                         // `getMetaDiagnostics` reads each swept type through
                         // `getMetaItems({ type: t, organizationId })`.
@@ -4774,7 +5046,7 @@ export class RestServer {
                         // over that one type IS the request's whole scope and
                         // the answer is correct by construction. That is the
                         // arm Studio's per-type directory drill-down uses, and
-                        // it is the arm repaired here.
+                        // it is the arm #13753 repaired.
                         //
                         // ── WHY THE FOLD IS DOUBLED, AND STAYS DOUBLED (#15034) ──
                         //
@@ -4785,7 +5057,8 @@ export class RestServer {
                         // `canonicalMetaType` — so `f(t, f(t, o)) === f(t, o)` and the
                         // inner application is the algebraic no-op. MEASURED: replace
                         // this predicate with a raw `diagnosticsCtx?.tenantId` and
-                        // `rest-server-meta-read-org-scope.test.ts` stays 30/30 GREEN;
+                        // `rest-server-meta-read-org-scope.test.ts` stays GREEN IN FULL
+                        // (30/30 at that revision; the file has grown since);
                         // the inner gate re-folds it, phantom control included.
                         //
                         // ⭐ It is KEPT anyway, and the reason is TRUST DOMAIN rather
@@ -4801,55 +5074,84 @@ export class RestServer {
                         // bundled implementation. Defence in depth, on a seam the type
                         // system does not cover.
                         //
-                        // ⛔ The UNTYPED sweep is deliberately left env-wide,
-                        // and this is a recorded gap rather than an oversight
-                        // (#13753 reports the shape). `targetTypes` is then the
-                        // whole registry — five `allowOrgOverride: true` types
-                        // and every other declared type together — while the
-                        // request carries ONE `organizationId`. Naming the
-                        // tenant there does not merely over-reach: `getMetaItems`
-                        // UNIONs the env-wide rows with the named org's rows,
-                        // so a non-overridable type's org-scoped rows — the
-                        // pre-#6190 phantoms `reportUnhydratableOrgScopedRows`
-                        // warns about, which boot hydration walks past — would
-                        // be read back INTO the governance report as `stats`
-                        // counts and diagnostic entries. A dashboard whose job
-                        // is reporting what is wrong would report rows that do
-                        // not survive a restart.
+                        // ── [#15622] THE UNTYPED SWEEP FORWARDS THE
+                        // ORGANIZATION TOO, and passes it RAW ───────────────
                         //
-                        // ⚠️ #14683 MOVED THIS ARGUMENT and the gap outlived it, so
-                        // read the two apart. What used to hold the untyped arm shut
-                        // was that one org id could not express a per-type scope from
-                        // here without a fan-out per overridable type and a REST-side
-                        // re-aggregation of `total`/`stats`/`scannedTypes`. That is no
-                        // longer the obstacle: `getMetaDiagnostics` calls
-                        // `getMetaItems` once per `t` INSIDE its own loop, and the
-                        // inner gate folds each `t` separately, so a single
-                        // `organizationId` handed to the untyped arm would already be
-                        // narrowed per type — phantoms of non-overridable types
-                        // included. ⛔ The gap nevertheless stays OPEN and stays
-                        // PINNED: closing it moves observable behaviour and is a
-                        // decision somebody makes on a card, not a side effect of a
-                        // comment repair (#15034 files it). The pin that guards it is
-                        // `the untyped sweep is still env-wide` in
-                        // `rest-server-meta-read-org-scope.test.ts` — if it reddens,
-                        // read that card before making it green.
+                        // ⛔ This arm used to be a RECORDED GAP, left env-wide
+                        // on this argument: `targetTypes` is then the whole
+                        // registry — five `allowOrgOverride: true` types and
+                        // every other declared type together — while the
+                        // request carries ONE `organizationId`, and one org id
+                        // could not express a per-type scope from here without
+                        // a fan-out per overridable type plus a REST-side
+                        // re-aggregation of `total`/`stats`/`scannedTypes`.
+                        //
+                        // ⚠️ #14683 DISSOLVED THAT OBSTACLE (#15034 recorded
+                        // it, #15622 acted on it). `getMetaDiagnostics` does
+                        // not spend the organization once: it loops `for (const
+                        // t of targetTypes)` calling `getMetaItems({ type: t,
+                        // organizationId, … })`, and the FIRST thing
+                        // `getMetaItems` does with that organization is
+                        // `organizationIdForMetaRead(request.type, …)` on its
+                        // OWN folded type. So one `organizationId` handed to
+                        // this arm is already narrowed PER TYPE by the callee —
+                        // the org for the five overridable types, `undefined`
+                        // for every other, phantoms of non-overridable types
+                        // dropped. That is precisely the scope the paragraph
+                        // above said one id could not say. No fan-out, no
+                        // REST-side re-aggregation, no second owner of the
+                        // sweep's arithmetic: `stats` / `total` /
+                        // `scannedTypes` are untouched by the gate.
+                        //
+                        // ⭐ RULED that the gap CLOSES rather than being
+                        // re-recorded. A governance summary whose whole job is
+                        // surfacing problems, and which structurally cannot see
+                        // a class of them WHILE ITS OWN drill-down can, issues a
+                        // false all-clear — since #13753 repaired the `?type=`
+                        // arm, this summary undercounts relative to the screen
+                        // you reach by clicking into it. An org-scoped caller
+                        // now sees items THEIR OWN organization authored, on the
+                        // five overridable types only, which for a governance
+                        // report is the correct set.
+                        //
+                        // ⛔ RAW, and deliberately NOT pre-folded with
+                        // `organizationIdForMetaRead(...)` the way the `?type=`
+                        // arm folds above. There is no single type to fold on
+                        // here, and folding on any one of them would suppress
+                        // the organization for EVERY type at once. The per-type
+                        // decision belongs to the callee's loop. Identical in
+                        // shape to the `/references` door below, whose
+                        // narrowness control measured the same callee gate; both
+                        // halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, where ONE
+                        // request shows an overridable type's org-authored row
+                        // present and a planted pre-#6190 phantom on a
+                        // NON-overridable type absent.
+                        //
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this
+                        // behaviour has ONE MAJOR to live and reverts to
+                        // environment-wide when the partition goes. An existing
+                        // value handed to an existing parameter: no new
+                        // parameter, response field, status code or contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
                         // ⚠️ NOT a new org-resolution seam: `resolveExecCtx` is
                         // memoised per request (WeakMap keyed by `req`), the
-                        // same result 40+ handlers here already share. It is
-                        // resolved only on the typed arm so the untyped sweep
-                        // keeps its exact behaviour today, authz-store failure
-                        // modes included — which is why this reads as a
+                        // same result 40+ handlers here already share. It is now
+                        // resolved for BOTH arms — which is why this reads as a
                         // statement rather than a ternary: the LOCALLY CAUGHT
                         // continuation-line spelling is the one the sibling
                         // doors use and the one `execctx-consumer-census`
                         // reads, and a third layout would be invisible to it.
-                        let diagnosticsOrganizationId: string | undefined;
-                        if (diagnosticsType) {
-                            const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
-                                .catch(rethrowAuthzStoreUnavailable);
-                            diagnosticsOrganizationId = organizationIdForMetaRead(
+                        // This door does not sit behind the shared anonymous
+                        // floor, so it decides an authz-store outage for itself
+                        // rather than laundering it into an org-unscoped 200 —
+                        // and the untyped arm now shares that, deliberately.
+                        const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        const diagnosticsOrganizationId: string | undefined = diagnosticsType
+                            ? organizationIdForMetaRead(
                                 // [#10340] FOLDED, not raw — see the PUT door's
                                 // org-scope comment for the measurement. The
                                 // protocol keeps receiving the caller's own
@@ -4857,8 +5159,9 @@ export class RestServer {
                                 // unrecognised one with its own 400); only the
                                 // scope decision reads the canonical singular.
                                 canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
-                            );
-                        }
+                            )
+                            // [#15622] The whole-registry arm — raw, per above.
+                            : diagnosticsCtx?.tenantId;
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
@@ -5571,62 +5874,95 @@ export class RestServer {
                             });
                             return;
                         }
-                        // [#13753] ⛔ STILL NO `organizationId`, and that is a
-                        // RECORDED GAP, not an omission nobody looked at. Read
-                        // this before adding the one-line repair that looks
-                        // obviously missing here.
+                        // ── [#13753] STATE THE ORG PARTITION — and pass it
+                        // RAW, which is the whole of the decision ───────────
                         //
-                        // The card prescribed the sibling call-site fix —
-                        // `organizationIdForMetaRead(canonicalMetaUrlType(
-                        // req.params.type), ctx?.tenantId)` — on the premise
-                        // that this door "takes one type". Measured on the
-                        // merged tree, it does not: `req.params.type` is the
-                        // TARGET, and `findReferencesToMeta` spends the
-                        // organization on the SOURCES. It resolves
+                        // The admin "Used by" panel renders its empty case as
+                        // "Nothing in the metadata graph points at this item.
+                        // Safe to delete." (objectui `metadata-admin/i18n.ts`),
+                        // shown to an operator about to delete something. With
+                        // no organization stated, the sweep read the env
+                        // partition only: an org-scoped `view` referencing the
+                        // item was invisible and the panel issued a false
+                        // clearance — the ADR-0110 D3 harm this route's own 501
+                        // refusal (#9326) exists to prevent, delivered by the
+                        // door after the protocol had refused to deliver it.
+                        //
+                        // ⛔ NOT pre-gated with `organizationIdForMetaRead(
+                        // canonicalMetaUrlType(req.params.type), ...)`, the way
+                        // the sibling `/meta` doors gate. Here `req.params.type`
+                        // is the TARGET, and `findReferencesToMeta` spends the
+                        // organization on the SOURCES: it resolves
                         // `REFERENCE_SITES.byTarget.get(target)`, groups the
-                        // sites by `fromType`, and reads each with
-                        // `getMetaItems({ type: matcher.fromType,
-                        // ...(organizationId ? { organizationId } : {}) })`. So
-                        // one request-level organization is applied to a SET of
-                        // types the target's own registry flag says nothing
-                        // about, and `getMetaItems` applies no gate of its own.
+                        // sites by `fromType` and reads each through
+                        // `getMetaItems({ type: matcher.fromType, ... })`. The
+                        // target's own registry flag therefore says nothing
+                        // about the types actually read, and gating on it would
+                        // suppress the organization for exactly the `object` /
+                        // `flow` / `app` deletes this card is about — the card's
+                        // own false clearance, left standing by a change that
+                        // looks like its repair.
                         //
-                        // Gating on the target would therefore answer a
-                        // question about the wrong type, in both directions:
+                        // ⭐ And RAW is not the unconditional tenant that
+                        // predicate exists to prevent, because since #14683
+                        // `getMetaItems` applies it ITSELF, to its OWN
+                        // `request.type`, after the fold. The per-SOURCE-type
+                        // decision is already the callee's: an overridable
+                        // source (`view`, `dashboard`, `report`, `translation`,
+                        // `email_template`) honours the organization, every
+                        // other source drops it and stays env-wide, so no
+                        // pre-#6190 phantom row is resurrected into a
+                        // destructive-action clearance. `request.organizationId`
+                        // has exactly ONE use inside `findReferencesToMeta` —
+                        // that `getMetaItems` spread — so passing it raw carries
+                        // no other consequence. Both halves are pinned in
+                        // `rest-server-meta-read-org-scope.test.ts`, the second
+                        // as the narrowness control.
                         //
-                        //  • target `allowOrgOverride: true` (`view`,
-                        //    `dashboard`, `report`, `translation`,
-                        //    `email_template`) ⇒ the org is named for EVERY
-                        //    source type, `object` / `flow` / `app` included —
-                        //    the unconditional tenant the read predicate exists
-                        //    to prevent, unioning pre-#6190 phantom rows back
-                        //    into a destructive-action clearance;
-                        //  • target `allowOrgOverride: false` (`object`,
-                        //    `flow`, `app`, `page`, …) ⇒ nothing is named, so
-                        //    an org-scoped `view` that references the object
-                        //    being deleted stays invisible and the "Used by"
-                        //    panel still renders "Nothing in the metadata graph
-                        //    points at this item. Safe to delete." That is the
-                        //    card's own false clearance, on the most common
-                        //    delete there is.
+                        // ⚠️ ADR-0131 D6/D7 retires the per-organization
+                        // metadata partition in v18 (#15206, C5), so this is a
+                        // repair inside a mechanism being removed: an existing
+                        // value handed to an existing parameter, no new contract
+                        // surface. ⛔ Nothing is to be built on it.
                         //
-                        // ⇒ The correct scope is per SOURCE type, and no value
-                        // this call site can pass expresses it. The repair
-                        // belongs where the type being read is known — the
-                        // predicate applied per `matcher.fromType` inside
-                        // `findReferencesToMeta`, or once inside `getMetaItems`
-                        // so read scope cannot drift from write scope for ANY
-                        // caller. Both are `metadata-protocol` changes that the
-                        // card fences off (⛔ "Do not change ... in
-                        // `protocol.ts`"), so this door is reported rather than
-                        // half-repaired: an org-awareness this door cannot
-                        // deliver must not be advertised by a gate that happens
-                        // to read `true` (Prime Directive #10).
-                        const result = await (p as any).findReferencesToMeta({
-                            type: req.params.type,
-                            name: req.params.name,
-                            ...(environmentId ? { environmentId } : {}),
-                        });
+                        // The same memoised resolution the sibling read doors
+                        // share, in the same locally-caught spelling: this door
+                        // does not sit behind the shared anonymous floor, so it
+                        // decides an authz-store outage for itself rather than
+                        // laundering it into an org-unscoped 200.
+                        const referencesCtx = await this.resolveExecCtx(environmentId, req)
+                            .catch(rethrowAuthzStoreUnavailable);
+                        // [#15685] The protocol's OWN refusal is re-answered in
+                        // the nested envelope the branch above already uses —
+                        // see {@link notImplementedRefusalAnswer} for why the
+                        // repair is here and how narrow it is. The catch is
+                        // scoped to the protocol call ALONE, so what this arm
+                        // can re-dress is mechanically the set of things
+                        // `findReferencesToMeta` raised: neither
+                        // `resolveProtocol` nor the `resolveExecCtx` seam above
+                        // can reach it, whatever they declare.
+                        let result: unknown;
+                        try {
+                            result = await (p as any).findReferencesToMeta({
+                                type: req.params.type,
+                                name: req.params.name,
+                                // SPREAD, never `organizationId: x ?? null` — the
+                                // implementation declares `organizationId?: string`
+                                // (optional plain string, not nullable), and it
+                                // forwards on truthiness.
+                                ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
+                                ...(environmentId ? { environmentId } : {}),
+                            });
+                        } catch (raised: any) {
+                            const refusal = notImplementedRefusalAnswer(raised);
+                            // Anything else is the outage it always was — the
+                            // 503 `getMetaItems` raises for a `sys_metadata`
+                            // failure (#8896) still propagates to the terminal
+                            // below, message-withheld and logged, unchanged.
+                            if (refusal === undefined) throw raised;
+                            res.status(refusal.status).json(refusal.body);
+                            return;
+                        }
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error);
@@ -7855,9 +8191,9 @@ export class RestServer {
                     if (this.enforceEnvironmentOwnership(req, res, environmentId, context)) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (p.getUiView) {
-                        const view = await p.getUiView({
+                        const viewRequest: TransportScopedMetaRequest<GetUiViewRequest> = {
                             object: req.params.object,
-                            type: req.params.type as any,
+                            type: req.params.type,
                             // [#13214] `routeEnvironmentId`, NOT the resolved id.
                             // The gate above changed WHO may reach the producer;
                             // it deliberately did not change WHAT the producer is
@@ -7867,7 +8203,8 @@ export class RestServer {
                             // the unscoped mount would be an unrelated behaviour
                             // change riding on a security fix.
                             ...(routeEnvironmentId ? { environmentId: routeEnvironmentId } : {}),
-                        } as any);
+                        };
+                        const view = await p.getUiView(viewRequest);
                         res.json(view);
                     } else {
                         res.status(501).json({ error: 'UI View resolution not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
@@ -7938,12 +8275,13 @@ export class RestServer {
                         // the envelope this route's other filter refusals already
                         // use; see the helper for why.
                         assertFilterParamSuppliedOnce(req.query);
-                        const result = await p.findData({
+                        const listRequest: ServerScopedDataRequest<FindDataRequest> = {
                             object: req.params.object,
                             query: req.query,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.findData(listRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -7995,14 +8333,15 @@ export class RestServer {
                         // — the silent-drop defect wearing a different status.
                         if (refuseUnknownQueryParams(req, res, DATA_RECORD_READ_PARAMS)) return;
                         const { select, expand } = req.query || {};
-                        const result = await p.getData({
+                        const getRequest: ServerScopedDataRequest<GetDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
                             ...(select != null ? { select } : {}),
                             ...(expand != null ? { expand } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.getData(getRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8048,15 +8387,17 @@ export class RestServer {
                             });
                             return;
                         }
-                        const result = await p.createData({
+                        const createRequest: ServerScopedDataRequest<CreateDataRequest> = {
                             object: req.params.object,
                             data: req.body ?? {},
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
-                        // [#3431] Advertise fields the #3043 create ingress strip
-                        // dropped via the response header (body also carries
-                        // `droppedFields`). Status stays 201.
+                        };
+                        const result = await p.createData(createRequest);
+                        // [#3431] Advertise fields the engine's create-side static-
+                        // `readonly` strip dropped (`engine.insert`, relayed by
+                        // `createData` as `droppedFields`) via the response header
+                        // (body also carries `droppedFields`). Status stays 201.
                         applyDroppedFieldsHeader(res, result);
                         res.status(201).json(result);
                     } catch (error: any) {
@@ -8114,12 +8455,13 @@ export class RestServer {
                             });
                             return;
                         }
-                        const result = await p.findData({
+                        const queryRequest: ServerScopedDataRequest<FindDataRequest> = {
                             object: req.params.object,
                             query,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.findData(queryRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8186,14 +8528,15 @@ export class RestServer {
                             });
                             return;
                         }
-                        const result = await p.updateData({
+                        const updateRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
                             data: data ?? {},
                             ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.updateData(updateRequest);
                         // [#3431] Advertise any LEGALLY-stripped write fields via
                         // the response header before serialising (the body also
                         // carries `droppedFields`). Status stays 200.
@@ -8238,13 +8581,14 @@ export class RestServer {
                             : undefined;
                         const expectedVersion = queryVersion ?? ifMatchHeader;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
-                        const result = await p.deleteData({
+                        const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
                             ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.deleteData(deleteRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8494,7 +8838,8 @@ export class RestServer {
                         // ['get','list']. Persist system-elevated so the engine-owned
                         // write guard admits it; attribution is preserved because
                         // `created_by` is stamped explicitly on the row above.
-                        await (p as any).createData({ object: IMPORT_JOB_OBJECT, data: jobRow, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) });
+                        const jobCreateRequest: ServerScopedDataRequest<CreateDataRequest> = { object: IMPORT_JOB_OBJECT, data: jobRow, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) };
+                        await p.createData(jobCreateRequest);
                     } catch (err: any) {
                         logError('[REST] Failed to persist import job:', err);
                         res.status(500).json({ code: 'IMPORT_JOB_CREATE_FAILED', error: 'Could not create import job' });
@@ -8508,7 +8853,9 @@ export class RestServer {
                     // handling and persists terminal state to the job row.
                     const patch = async (data: Record<string, any>) => {
                         try {
-                            await (p as any).updateData({ object: IMPORT_JOB_OBJECT, id: jobId, data, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) }); // [ADR-0103] engine-owned
+                            // [ADR-0103] engine-owned
+                            const jobPatchRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: IMPORT_JOB_OBJECT, id: jobId, data, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) };
+                            await p.updateData(jobPatchRequest);
                         } catch (err) {
                             logError('[REST] import job progress write failed:', err);
                         }
@@ -8615,7 +8962,9 @@ export class RestServer {
                         // Signal the in-process worker and mark the durable row.
                         this.cancelledImportJobs.add(jobId);
                         try {
-                            await (p as any).updateData({ object: IMPORT_JOB_OBJECT, id: jobId, data: { status: 'cancelled', completed_at: new Date().toISOString() }, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) }); // [ADR-0103] engine-owned
+                            // [ADR-0103] engine-owned
+                            const jobCancelRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: IMPORT_JOB_OBJECT, id: jobId, data: { status: 'cancelled', completed_at: new Date().toISOString() }, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) };
+                            await p.updateData(jobCancelRequest);
                         } catch { /* worker will still stop via the in-memory flag */ }
                     }
                     res.json({ success: true });
@@ -8678,24 +9027,27 @@ export class RestServer {
                     // Delete created records first (they didn't exist before).
                     for (const id of log.created) {
                         try {
-                            await (p as any).deleteData({ object: objectName, id, context: writeCtx, ...(environmentId ? { environmentId } : {}) });
+                            const undoDeleteRequest: ServerScopedDataRequest<DeleteDataRequest> = { object: objectName, id, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
+                            await p.deleteData(undoDeleteRequest);
                             deleted++;
                         } catch { failed++; }
                     }
                     // Restore the touched fields on updated records.
                     for (const u of log.updated) {
                         try {
-                            await (p as any).updateData({ object: objectName, id: u.id, data: u.before, context: writeCtx, ...(environmentId ? { environmentId } : {}) });
+                            const undoRestoreRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: objectName, id: u.id, data: u.before, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
+                            await p.updateData(undoRestoreRequest);
                             restored++;
                         } catch { failed++; }
                     }
 
-                    await (p as any).updateData({
+                    const undoStampRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                         object: IMPORT_JOB_OBJECT, id: jobId,
                         data: { reverted_at: new Date().toISOString() },
                         context: { ...(context as any), isSystem: true }, // [ADR-0103] engine-owned
                         ...(environmentId ? { environmentId } : {}),
-                    });
+                    };
+                    await p.updateData(undoStampRequest);
                     res.json({ success: true, jobId, object: objectName, deleted, restored, failed });
                 } catch (error: any) {
                     handleRouteError(res, error, '');
@@ -8775,12 +9127,13 @@ export class RestServer {
                     if (typeof q.status === 'string' && q.status) filter.status = q.status;
                     const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
                     const offset = Math.max(0, Number(q.offset) || 0);
-                    const r = await (p as any).findData({
+                    const jobsListRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: IMPORT_JOB_OBJECT,
-                        query: { $filter: filter, $orderby: { created_at: 'desc' }, $top: limit, $skip: offset },
+                        query: wireDialectQuery({ $filter: filter, $orderby: { created_at: 'desc' }, $top: limit, $skip: offset }),
                         ...(environmentId ? { environmentId } : {}),
                         ...(context ? { context } : {}),
-                    });
+                    };
+                    const r: any = await p.findData(jobsListRequest);
                     const rows = Array.isArray(r?.records) ? r.records
                         : Array.isArray(r?.data) ? r.data
                             : Array.isArray(r?.rows) ? r.rows
@@ -9078,9 +9431,9 @@ export class RestServer {
 
                     while (exported < limit) {
                         const take = Math.min(chunkSize, limit - exported);
-                        const findArgs: any = {
+                        const findArgs: ServerScopedDataRequest<FindDataRequest> = {
                             object: objectName,
-                            query: {
+                            query: wireDialectQuery({
                                 ...(filter ? { $filter: filter } : {}),
                                 ...(search ? { $search: search } : {}),
                                 ...(search && searchFields ? { $searchFields: searchFields } : {}),
@@ -9088,11 +9441,11 @@ export class RestServer {
                                 ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
                                 $top: take,
                                 $skip: skip,
-                            },
+                            }),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
-                        const result: any = await (p as any).findData(findArgs);
+                        const result: any = await p.findData(findArgs);
                         // `findData` returns `{ object, records, total, hasMore }`;
                         // accept the legacy `data` / `rows` aliases and a bare array
                         // so test doubles and alternate protocols keep working.
@@ -9584,7 +9937,7 @@ export class RestServer {
                                         // one surface still serving the packaged
                                         // string back at a tenant who renamed it.
                                         objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
-                                            locale,
+                                            ...RestServer.translateOptionsFor(i18n, locale),
                                             packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
                                         });
                                     }
@@ -9765,12 +10118,13 @@ export class RestServer {
                     };
 
                     const p = await this.resolveProtocol(environmentId, req);
-                    const result = await p.createData({
+                    const formCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
                         object: match.object,
                         data: filteredData,
                         ...(environmentId ? { environmentId } : {}),
                         context,
-                    } as any);
+                    };
+                    const result = await p.createData(formCreateRequest);
                     res.status(201).json(result);
                 } catch (error: any) {
                     const mapped = mapDataError(error);
@@ -9945,9 +10299,11 @@ export class RestServer {
                         anonymous: true,
                     };
 
-                    const result: any = await (p as any).findData({
+                    const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: referenceTo,
-                        query: {
+                        // [#15866] `filters` is a WIRE-only spelling the normalizer folds to
+                        // `where`, and no schema declares it — see {@link wireDialectQuery}.
+                        query: wireDialectQuery({
                             limit: maxResults,
                             offset: 0,
                             filters,
@@ -9962,10 +10318,11 @@ export class RestServer {
                             // UNAUTHENTICATED surface. A pre-schema stored row
                             // still carrying `sort` is IGNORED, not an error.
                             sort: [{ field: displayFields[0], order: 'asc' }],
-                        },
+                        }),
                         ...(environmentId ? { environmentId } : {}),
                         context,
-                    } as any);
+                    };
+                    const result: any = await p.findData(pickerRequest);
 
                     // Project the response server-side too — never trust
                     // that the driver respected `select`.
@@ -12431,23 +12788,29 @@ export class RestServer {
                             if (op.action === 'create') {
                                 // [#3835] Go through the protocol's create ingress —
                                 // the SAME one `POST /data/:object` uses — rather than
-                                // calling `ql.insert` directly. The engine's INSERT path
-                                // is static-`readonly`-exempt by design (#3413), so the
-                                // #3043 strip that stops a non-system caller from seeding
-                                // a read-only column lives at that ingress. Bypassing it
-                                // here made `readonly` mean two different things on two
-                                // create paths: rejected on the single route, written
-                                // through the batch. `createData` also owns the platform-
-                                // object carve-out (a `sys_`/`managedBy` object's own
-                                // guard must REJECT a forged value, not silently swallow
-                                // it), which is why this routes to the ingress instead of
-                                // re-implementing the strip here — one create ingress,
-                                // and a future change to its policy covers the batch for
-                                // free. `trxCtx` carries the caller's context (including
-                                // `isSystem`) plus the open transaction, so the strip
-                                // decides exactly as it does on the single route and the
-                                // insert still joins this transaction.
-                                const created: any = await p.createData({ object: op.object, data, context: trxCtx } as any);
+                                // calling `ql.insert` directly. When this was written the
+                                // #3043 static-`readonly` strip lived at that ingress and
+                                // a direct `ql.insert` bypassed it, so `readonly` meant
+                                // two different things on two create paths. Since the
+                                // maintainer ruling of 2026-09-03 (option C, #14147) the
+                                // strip runs inside `engine.insert` for every non-system
+                                // caller, so both routes are stripped identically, and the
+                                // platform-object carve-out (a `sys_`/`managedBy` object's
+                                // own guard must REJECT a forged value, not silently
+                                // swallow it) is the engine's as well. The routing stands
+                                // on what the ingress still owns: the #3770 object-
+                                // existence gate, the #7823 `internal: true` response
+                                // strip and the `droppedFields` relay — one create
+                                // ingress, one response contract, and a future change to
+                                // its policy covers the batch for free. `trxCtx` carries
+                                // the caller's context (including `isSystem`) plus the
+                                // open transaction, so the engine's strip decides exactly
+                                // as it does on the single route and the insert still
+                                // joins this transaction.
+                                const batchCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
+                                    object: op.object, data, context: trxCtx,
+                                };
+                                const created: any = await p.createData(batchCreateRequest);
                                 for (const e of (created?.droppedFields ?? []) as DroppedFieldsEvent[]) {
                                     dropped.push({ ...e, index });
                                 }
@@ -12536,12 +12899,13 @@ export class RestServer {
                         // [#3939] Cap AFTER the shape check, so a caller gets the
                         // more specific answer first.
                         if (this.enforceBatchSize(res, parsedBatch.data.records.length, maxBatch, req.params?.object)) return;
-                        const result = await p.batchData!({
+                        const batchRequest: ServerScopedDataRequest<BatchDataRequest> = {
                             object: req.params.object,
                             request: req.body,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.batchData!(batchRequest);
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
@@ -12588,12 +12952,13 @@ export class RestServer {
                         }
                         // [#3939] Cap AFTER the shape check.
                         if (this.enforceBatchSize(res, parsedCreateMany.data.records.length, maxBatch, req.params?.object)) return;
-                        const result = await p.createManyData!({
+                        const createManyRequest: ServerScopedDataRequest<CreateManyDataRequest> = {
                             object: req.params.object,
                             records: req.body || [],
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.createManyData!(createManyRequest);
                         res.status(201).json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
@@ -12631,7 +12996,7 @@ export class RestServer {
                         // resolves (e.g. an anonymous public-book read, #3963).
                         const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
                         const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
-                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse(updateManyInput);
+                        const parsedUpdate = UpdateManyDataRequestSchema.safeParse(updateManyInput);
                         if (!parsedUpdate.success) {
                             res.status(400).json({
                                 error: 'Invalid updateMany request',
@@ -12644,11 +13009,12 @@ export class RestServer {
                         // [#3939] Cap AFTER the shape check, so a caller gets the
                         // more specific answer first.
                         if (this.enforceBatchSize(res, parsedUpdate.data.records.length, maxBatch, req.params?.object)) return;
-                        const result = await p.updateManyData!({
+                        const updateManyRequest: ServerScopedDataRequest<UpdateManyDataRequest> = {
                             ...parsedUpdate.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.updateManyData!(updateManyRequest);
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
@@ -12692,7 +13058,7 @@ export class RestServer {
                         // whose exposure policy was never checked.
                         const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
                         const deleteManyInput = { ...(req.body ?? {}), object: req.params.object };
-                        const parsed = (DeleteManyDataRequestSchema as any).safeParse(deleteManyInput);
+                        const parsed = DeleteManyDataRequestSchema.safeParse(deleteManyInput);
                         if (!parsed.success) {
                             res.status(400).json({
                                 error: 'Invalid deleteMany request',
@@ -12706,11 +13072,12 @@ export class RestServer {
                         // route deletes per id, so the list length IS the engine
                         // round-trip count.
                         if (this.enforceBatchSize(res, parsed.data.ids.length, maxBatch, req.params?.object)) return;
-                        const result = await p.deleteManyData!({
+                        const deleteManyRequest: ServerScopedDataRequest<DeleteManyDataRequest> = {
                             ...parsed.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.deleteManyData!(deleteManyRequest);
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);

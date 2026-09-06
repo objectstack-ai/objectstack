@@ -231,7 +231,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **try** | `{ nodes: object[]; edges?: object[] }` | ✅ | Protected region |
 | **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
-| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, and `iteration` / `item` when the failure happened inside a loop body |
+| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
 ### Nested Shape: `TryCatchConfig.try`
@@ -270,6 +270,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **nodeId** | `string` | ✅ | Node the failure is attributed to |
 | **message** | `string` | ✅ | Message of the error that ended the try region, after any retries |
+| **code** | `string` | optional | Platform-classified error code (ADR-0112) of the failure that ended the try region, e.g. `create_record`'s `DUPLICATE_RECORD`; present only when the failing node's own result carried one, so a catch region branching on `$error.code` treats "unset" as "no classified code", never as "nothing failed". An open `string`, not a closed enum: the vocabulary is `StandardErrorCode` plus registered ledger codes plus tenant-authored codes, and third-party node executors bind their own |
 | **iteration** | `integer` | optional | Zero-based iteration of the enclosing loop when the failure happened inside a loop body; absent outside a loop |
 | **item** | `any` | optional | The loop item being processed (the enclosing loop's `iteratorVariable` value) when the failure happened inside a loop body; absent outside a loop |
 

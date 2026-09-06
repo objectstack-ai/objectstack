@@ -1357,11 +1357,13 @@ describe('translatePage', () => {
     it('resolves key by key across the locale chain, not entry by entry', () => {
       // `zh-CN` translates only `title` for this id; `description` must still
       // fall back to `en` rather than being dropped because the zh entry won.
+      // [#15711] The chain is DECLARED: a chain-less caller now gets the
+      // authored text for the omitted key, never a literal `en`.
       const partial: TranslationBundle = {
         'zh-CN': { pages: { sales_home_page: { components: { ai_briefing: { title: '询问 AI 助手' } } } } },
         en: { pages: { sales_home_page: { components: { ai_briefing: { description: 'Open the assistant panel.' } } } } },
       };
-      const out = translatePage(homePage(), partial, { locale: 'zh-CN' });
+      const out = translatePage(homePage(), partial, { locale: 'zh-CN', fallbackChain: ['en'] });
       expect(byId(out, 'ai_briefing').properties.title).toBe('询问 AI 助手');
       expect(byId(out, 'ai_briefing').properties.description).toBe('Open the assistant panel.');
     });
@@ -2212,6 +2214,122 @@ describe('translateObject system-field label fallback', () => {
   });
 });
 
+// ────────────────────────────────────────────────────────────────────────────
+// translateObject — EVERY platform-injected column, per shipped locale
+// (objectstack#14972)
+// ────────────────────────────────────────────────────────────────────────────
+
+import { injectedSystemColumnDefs } from '../data/injected-system-column-provenance';
+
+describe('translateObject localises every platform-injected column (objectstack#14972)', () => {
+  // The column definitions come from the provenance module itself — the same
+  // objects `applySystemFields` spreads at registration and the `/meta` read
+  // exits serve — so the English defaults this block starts from cannot drift
+  // from the shipped tables through a retyped label. The document is a custom
+  // object that ships no translation entries of its own, and the bundle is
+  // absent: only the built-in table can answer.
+  const injected = injectedSystemColumnDefs({ name: 'contracts', fields: { title: { type: 'text' } } });
+  const doc = {
+    name: 'contracts',
+    label: 'Contract',
+    fields: {
+      title: { name: 'title', type: 'text', label: '合同名称' },
+      ...(injected as Record<string, any>),
+    },
+  };
+  const SHIPPED_LOCALES = ['en', 'zh-CN', 'ja-JP', 'es-ES'] as const;
+  const labelsFor = (locale: string): Record<string, string> => {
+    const out = translateObject(doc, undefined, { locale, fallbackChain: [locale] });
+    const fields = out.fields as Record<string, any>;
+    return Object.fromEntries(Object.keys(injected).map((name) => [name, fields[name].label]));
+  };
+
+  it('starts from all seven injected columns carrying their shipped English defaults', () => {
+    expect(Object.keys(injected).sort()).toEqual([
+      'created_at',
+      'created_by',
+      'organization_id',
+      'owner_id',
+      'owning_business_unit_id',
+      'updated_at',
+      'updated_by',
+    ]);
+    // An `en` request leaves every label exactly as the definition ships it.
+    expect(labelsFor('en')).toEqual({
+      organization_id: 'Organization',
+      created_at: 'Created At',
+      created_by: 'Created By',
+      updated_at: 'Last Modified At',
+      updated_by: 'Last Modified By',
+      owner_id: 'Owner',
+      owning_business_unit_id: 'Owning Business Unit',
+    });
+  });
+
+  it('zh-CN: every injected column reads Chinese, in the platform bundles\' wording', () => {
+    expect(labelsFor('zh-CN')).toEqual({
+      organization_id: '组织',
+      created_at: '创建时间',
+      created_by: '创建人',
+      updated_at: '更新时间',
+      updated_by: '更新人',
+      owner_id: '所有者',
+      owning_business_unit_id: '所属业务单元',
+    });
+  });
+
+  it('ja-JP: every injected column reads Japanese, in the platform bundles\' wording', () => {
+    expect(labelsFor('ja-JP')).toEqual({
+      organization_id: '組織',
+      created_at: '作成日時',
+      created_by: '作成者',
+      updated_at: '更新日時',
+      updated_by: '更新者',
+      owner_id: '所有者',
+      owning_business_unit_id: '所属ビジネスユニット',
+    });
+  });
+
+  it('es-ES: every injected column reads Spanish, in the platform bundles\' wording', () => {
+    expect(labelsFor('es-ES')).toEqual({
+      organization_id: 'Organización',
+      created_at: 'Creado el',
+      created_by: 'Creado por',
+      updated_at: 'Actualizado el',
+      updated_by: 'Actualizado por',
+      owner_id: 'Propietario',
+      owning_business_unit_id: 'Unidad de negocio propietaria',
+    });
+  });
+
+  it('a tenant that relabelled the organization column keeps its label on every locale', () => {
+    // The guard is comparison-based: the built-in row applies only while the
+    // served label still equals the definition's English default. A label the
+    // tenant (or the author) wrote is authored data and wins on every locale,
+    // the `en` request included.
+    const renamed = {
+      ...doc,
+      fields: {
+        ...doc.fields,
+        organization_id: { ...(injected.organization_id as Record<string, any>), label: '所属公司' },
+      },
+    };
+    for (const locale of SHIPPED_LOCALES) {
+      const out = translateObject(renamed, undefined, { locale, fallbackChain: [locale] });
+      expect((out.fields as any).organization_id.label, locale).toBe('所属公司');
+      // The untouched columns still localise around it.
+      expect((out.fields as any).owner_id.label, locale).toBe(labelsFor(locale).owner_id);
+    }
+  });
+
+  it('never mutates the input document or the shipped definitions', () => {
+    labelsFor('zh-CN');
+    expect((doc.fields as any).organization_id.label).toBe('Organization');
+    expect((doc.fields as any).owning_business_unit_id.label).toBe('Owning Business Unit');
+    expect(injected.organization_id.label).toBe('Organization');
+  });
+});
+
 describe('translateObject inline actions (objectstack#3370)', () => {
   // The `sys_approval_request` shape: decision actions declared inline on the
   // object. The plugin ships `_actions` translations for them, but the object
@@ -2817,13 +2935,15 @@ describe('translateFlow (#11287)', () => {
   });
 
   it('resolves KEY BY KEY across the locale chain — a partial zh entry still falls back to en', () => {
+    // [#15711] `en` is DECLARED on the chain; a chain-less caller now gets the
+    // authored text for the omitted key, never a literal `en`.
     const partialZh: FlowTestBundle = {
       'zh-CN': {
         flows: { lead_conversion: { screens: { screen_1: { title: '转化详情' } } } },
       },
       en: bundle.en,
     };
-    const out = translateFlow(leadConversion(), partialZh, { locale: 'zh-CN' });
+    const out = translateFlow(leadConversion(), partialZh, { locale: 'zh-CN', fallbackChain: ['en'] });
     const screen = screenOf(out);
     expect(screen.config.title).toBe('转化详情');
     expect(screen.config.fields.find((f: any) => f.name === 'createOpportunity').label)
@@ -3379,5 +3499,167 @@ describe('TranslationDataSchema — datasets (#14253)', () => {
     expect(() => TranslationDataSchema.parse(payload)).toThrow(/its author-facing text is `label`/);
     expect(() => TranslationItemSchema.parse({ locale: 'zh-CN', ...payload }))
       .toThrow(/its author-facing text is `label`/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #14882 — the fallback chain is the DECLARED one, not a literal `en`
+// ---------------------------------------------------------------------------
+
+describe('#14882 — a declared fallback chain, at the resolver', () => {
+  /**
+   * The card's workspace, at the resolver: labels authored in the default
+   * locale (`zh-CN`), a courtesy `en` bundle for English users, NO `zh-CN`
+   * bundle entry. `subject_type` has no `en` entry — the control the reporter
+   * measured, the one field that stayed Chinese while its siblings flipped.
+   *
+   * The resolver itself always honoured a chain it was handed; what this
+   * block pins is the SHAPE the serving layer now hands it (`fallbackChain:
+   * [declared fallbackLocale]`) and what that shape answers. The seam that
+   * builds it is pinned in `@objectstack/rest`.
+   */
+  const SHEET: any = {
+    name: 'kpi_entry_sheet',
+    label: '填报单',
+    pluralLabel: '填报单',
+    fields: {
+      name: { name: 'name', type: 'text', label: '填报单名称' },
+      status: { name: 'status', type: 'select', label: '状态' },
+      total_score: { name: 'total_score', type: 'number', label: '最终得分' },
+      subject_type: { name: 'subject_type', type: 'select', label: '主体类型' },
+    },
+  };
+  const KPI_APP: any = { name: 'kpi_app', label: 'KPI 考核管理', navigation: [] };
+  /** Exactly what `buildTranslationBundle` produces for the card: an EMPTY
+   *  `zh-CN` entry (the locale is declared, nothing is loaded for it) beside
+   *  the courtesy `en` bundle. */
+  const EN_ONLY: TranslationBundle = {
+    'zh-CN': {},
+    en: {
+      objects: {
+        kpi_entry_sheet: {
+          label: 'Entry Sheet',
+          pluralLabel: 'Entry Sheets',
+          fields: { name: { label: 'Sheet' }, status: { label: 'Status' }, total_score: { label: 'Final Score' } },
+        },
+      },
+      apps: { kpi_app: { label: 'KPI Assessment' } },
+    },
+  };
+  /** The options the serving layer builds for `i18n.fallbackLocale: 'zh-CN'`. */
+  const ZH_WORKSPACE = { locale: 'zh-CN', fallbackChain: ['zh-CN'] };
+
+  const labelsOf = (doc: any) => ({
+    label: doc.label,
+    pluralLabel: doc.pluralLabel,
+    name: doc.fields.name.label,
+    status: doc.fields.status.label,
+    total_score: doc.fields.total_score.label,
+    subject_type: doc.fields.subject_type.label,
+  });
+  const AUTHORED = {
+    label: '填报单', pluralLabel: '填报单',
+    name: '填报单名称', status: '状态', total_score: '最终得分', subject_type: '主体类型',
+  };
+  const ENGLISH = {
+    label: 'Entry Sheet', pluralLabel: 'Entry Sheets',
+    name: 'Sheet', status: 'Status', total_score: 'Final Score', subject_type: '主体类型',
+  };
+
+  it('a zh-CN request on a zh-CN workspace resolves to the authored labels, en bundle present', () => {
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, ZH_WORKSPACE))).toEqual(AUTHORED);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, ZH_WORKSPACE).label).toBe('KPI 考核管理');
+  });
+
+  it('control — remove the en bundle and the answer does not move', () => {
+    expect(labelsOf(translateMetadataDocument('object', SHEET, { 'zh-CN': {} }, ZH_WORKSPACE))).toEqual(AUTHORED);
+    expect(labelsOf(translateMetadataDocument('object', SHEET, undefined, ZH_WORKSPACE))).toEqual(AUTHORED);
+  });
+
+  it('an en request on the same workspace still gets the en bundle', () => {
+    const en = { locale: 'en', fallbackChain: ['zh-CN'] };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, en))).toEqual(ENGLISH);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, en).label).toBe('KPI Assessment');
+  });
+
+  it('a zh-CN bundle, when the workspace ships one, still wins over the authored label', () => {
+    // The reporter's documented per-locale layout (`os i18n extract
+    // --locales=zh-CN`) keeps working: an entry for the requested locale IS
+    // the translation; the authored label is only the floor under the chain.
+    const withZh: TranslationBundle = {
+      ...EN_ONLY,
+      'zh-CN': { objects: { kpi_entry_sheet: { label: '填报单（bundle）' } } },
+    };
+    expect(translateMetadataDocument('object', SHEET, withZh, ZH_WORKSPACE).label).toBe('填报单（bundle）');
+  });
+
+  // -------------------------------------------------------------------------
+  // #15711 — ruled A: the authored label IS the default-locale text
+  // -------------------------------------------------------------------------
+
+  it('[#15711] a chain that DECLARES en does not outrank the authored label for a default-locale request', () => {
+    // A stack declaring `defaultLocale: 'zh-CN'` with a reflexive
+    // `fallbackLocale: 'en'` and no zh-CN bundle — the trap #14882 pinned as
+    // it answered then (`Entry Sheet`, the declared `en` outranking the
+    // author). Ruled on #15711: the authored label is the default locale's
+    // text, so a `zh-CN` request never reaches the declared `en`. The chain
+    // is untouched; what changed is that the request names the default.
+    const ruled = { locale: 'zh-CN', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, ruled))).toEqual(AUTHORED);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, ruled).label).toBe('KPI 考核管理');
+    // Control — the same options WITHOUT `defaultLocale` still walk the
+    // chain: the rule is keyed on the declaration, not on the tag's spelling.
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN', fallbackChain: ['en'] }).label)
+      .toBe('Entry Sheet');
+  });
+
+  it('[#15711] a NON-default request still walks the declared chain: fr → en bundle → authored', () => {
+    // `fallbackLocale` keeps its full meaning for every non-default request.
+    const fr = { locale: 'fr', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, fr))).toEqual(ENGLISH);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, fr).label).toBe('KPI Assessment');
+    // and an `en` request on the same stack still gets the courtesy `en` bundle.
+    const en = { locale: 'en', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, en))).toEqual(ENGLISH);
+  });
+
+  it('[#15711] a default-locale bundle, when shipped, still wins over the authored label', () => {
+    // Only the CHAIN is skipped: the requested locale's own bundle is
+    // consulted first, so the reporter's `os i18n extract --locales=zh-CN`
+    // layout keeps working — optional now, not dead.
+    const withZh: TranslationBundle = {
+      ...EN_ONLY,
+      'zh-CN': { objects: { kpi_entry_sheet: { label: '填报单（bundle）' } } },
+    };
+    const ruled = { locale: 'zh-CN', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    const out = translateMetadataDocument('object', SHEET, withZh, ruled);
+    expect(out.label).toBe('填报单（bundle）');
+    // A key the zh-CN bundle omits resolves to the AUTHORED text, never to `en`.
+    expect(out.fields.name.label).toBe('填报单名称');
+  });
+
+  it('[#15711] the default-locale match is a BCP-47 comparison: zh-cn names zh-CN', () => {
+    const lower = { locale: 'zh-cn', fallbackChain: ['en'], defaultLocale: 'zh-CN' };
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, lower).label).toBe('填报单');
+  });
+
+  it("[#15711] a caller that declares NO chain gets 'requested locale, then the authored label' — no literal en", () => {
+    // The ruling's second facet: `fallbackChain ?? ['en']` became
+    // `fallbackChain ?? []`. A chain-less caller (a host outside this repo;
+    // the core in-memory i18n fallback, #15694) no longer has `en` consulted
+    // because a literal said so — the `en` bundle answers only when `en` is
+    // requested or DECLARED. Pinned on a NON-default request too, where the
+    // default-locale rule cannot be the reason.
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN' }).label).toBe('填报单');
+    expect(labelsOf(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'fr' }))).toEqual(AUTHORED);
+    expect(translateMetadataDocument('app', KPI_APP, EN_ONLY, { locale: 'fr' }).label).toBe('KPI 考核管理');
+    // An explicit empty chain reads the same.
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'zh-CN', fallbackChain: [] }).label)
+      .toBe('填报单');
+    // Controls — an `en` request still finds its own bundle with no chain at
+    // all, and a DECLARED `en` is still consulted for a non-default request.
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'en' }).label).toBe('Entry Sheet');
+    expect(translateMetadataDocument('object', SHEET, EN_ONLY, { locale: 'fr', fallbackChain: ['en'] }).label)
+      .toBe('Entry Sheet');
   });
 });

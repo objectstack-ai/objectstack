@@ -4,9 +4,10 @@
 /**
  * measure-self-test-floor -- can each `scripts/**` self-test prove it ran? (#13489)
  *
- *   node scripts/measure-self-test-floor.mjs           # static census (fast)
- *   node scripts/measure-self-test-floor.mjs --probe   # + the dynamic probe (minutes)
- *   node scripts/measure-self-test-floor.mjs --json    # machine-readable
+ *   node scripts/measure-self-test-floor.mjs                        # static census (fast)
+ *   node scripts/measure-self-test-floor.mjs --probe                # + the dynamic probe (minutes)
+ *   node scripts/measure-self-test-floor.mjs --probe --only <path>  # probe ONE census row (repeatable)
+ *   node scripts/measure-self-test-floor.mjs --json                 # machine-readable
  *
  * ## The two holes, which are ORTHOGONAL
  *
@@ -99,6 +100,35 @@
  * `classifyFloor` keyed on the NAME `SELF_TEST_BATTERIES` rather than on a
  * comparison that produces a failure, and called a fixture floored after the
  * roster had been removed. The control caught it; nothing else would have.
+ *
+ * ## `--only`: ONE row, taken through the SHIPPED decision (#15759)
+ *
+ * The full probe spawns every census row twice and does not fit a foreground
+ * turn -- `scripts/pm/dispatch-gates.mjs` alone was measured at 434.3 s. So every
+ * single-row reading this instrument has on record was taken by re-driving
+ * `main()`'s loop in a private throwaway, and a throwaway is a COPY of the
+ * decision the shipped sweep makes: which row, which entry, which budget. The
+ * repair's own evidence then comes from the copy while the original ships --
+ * exactly the class of mistake this tool's controls refuse elsewhere, and why
+ * `sitesInSource` was LIFTED rather than copied (#13874).
+ *
+ * `--only <path>` names census rows for the probe. Both paths run the SAME
+ * `population()` -> `probePlan()` -> `probeEarlyReturn()` chain through
+ * `probeRows()`, which IS the sweep's loop body, lifted -- there is no second
+ * copy of it to drift. Three properties, each controlled:
+ *
+ *   REFUSES     a selector naming no census row exits 2 and lists the nearest
+ *               rows by path substring. A silent empty sweep would print
+ *               `0 DEFEATED, 0 HELD, 0 ACCIDENT` -- a flattering reading
+ *               produced by measuring nothing, which is this file's whole
+ *               subject one level up.
+ *   NARROWS THE PROBE, NOT THE CENSUS. The row count, the floor column and the
+ *               handshake column are printed over the WHOLE population; only
+ *               hole 2 is restricted, and it says over how many of how many. A
+ *               selector that shrank the census would print `1 file(s) under
+ *               scripts/ dispatch on --self-test`, which is false.
+ *   INERT       with no `--only`, every byte of the output is what it was, and
+ *               the sweep's row set is the population object itself.
  */
 
 import { readFileSync, writeFileSync, rmSync, readdirSync, existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
@@ -157,6 +187,21 @@ const PROBE_MARKER = 'OS_SELF_TEST_FLOOR_PROBE';
 
 /** "Did this run SAY anything": its first non-blank line, or '' if it said nothing. */
 const firstNonBlankLine = (out) => out.split('\n').find((l) => l.trim()) ?? '';
+
+/**
+ * Was this run killed by THIS TOOL'S OWN BUDGET? Published as `timedOut` so the
+ * shrink the budget causes is a NUMBER the sweep can report rather than a
+ * silence (#15573).
+ *
+ * ⛔ Read from `error.code`, NOT from the signal. `spawnSync` reports its own
+ * timeout as `{ status: null, signal: 'SIGTERM', error: { code: 'ETIMEDOUT' } }`
+ * -- measured -- and the SIGNAL half of that is not exclusive to it: a SIGTERM
+ * can arrive from anywhere, and a foreground wall-clock cap kills children in
+ * exactly this shape. Reading every SIGTERM as this budget would book rows
+ * against a number nobody set, in the direction that OVERSTATES how much of the
+ * survey this tool is responsible for shrinking.
+ */
+const budgetExpired = (run) => (run.error?.code === 'ETIMEDOUT' ? { timedOut: true } : {});
 
 // ---------------------------------------------------------------------------
 // Instrument 1 -- the static assertion-floor criterion
@@ -232,23 +277,16 @@ export function classifyFloor(code) {
 // Instrument 2 -- the dynamic verdict-handshake probe
 // ---------------------------------------------------------------------------
 
-/** Every `/self.?test/i`-named function DEFINED in this source. */
-export function selfTestDefs(src) {
-  const names = new Set();
-  for (const m of src.matchAll(/(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
-    if (/self.?test/i.test(m[1])) names.add(m[1]);
-  }
-  for (const m of src.matchAll(/const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g)) {
-    if (/self.?test/i.test(m[1])) names.add(m[1]);
-  }
-  return [...names];
-}
-
 /**
  * The source a DEFINITION may be anchored in: comments AND the content of every
  * string, template and regex literal blanked, every other byte -- and every
  * offset and line number -- left exactly where it was, so a match found here
  * slices the ORIGINAL text.
+ *
+ * BOTH halves of "where is the definition" read it: `selfTestDefs` below, which
+ * says WHICH definitions a file holds, and `injectEarlyReturn`, which says where
+ * ONE of them begins. They are one question asked twice, and asking them of two
+ * different texts is the drift #14963's repair exists to end (#15574).
  *
  * ⛔ NOT for the population criterion above, which must keep reading
  * `maskComments`. Every `--self-test` dispatch names the flag with a string
@@ -260,6 +298,44 @@ export function maskCommentsAndLiterals(source) {
   const both = new Uint8Array(source.length);
   for (let i = 0; i < both.length; i++) both[i] = comment[i] | literal[i];
   return blank(source, both);
+}
+
+/**
+ * Every `/self.?test/i`-named function DEFINED in this source, read from the
+ * masked text above -- the same text the injection anchor reads.
+ *
+ * Read RAW, a name written inside a fixture STRING counts as a definition of the
+ * file that quotes it: `scripts/pm/dispatch-gates.mjs` reported a
+ * `fixtureSelfTest` that nothing can call, from a name in a fixture array
+ * (#15574). The error direction is a phantom EXTRA name, which is why it never
+ * produced a wrong measurement -- an extra name only pushes a row from a
+ * mechanical entry into `ambiguous entry (...)`, i.e. NOT MEASURED. What it did
+ * do is put a name that CANNOT BE CALLED into a diagnostic whose whole
+ * instruction to the reader is "read the dispatch site".
+ *
+ * ⚠️ `defs` is PUBLISHED in `--json`, so this reading changes that payload, and
+ * that change IS the repair rather than a side effect of it. Measured over the
+ * census on 2026-09-05: exactly ONE row's `defs` differ (the row above, losing
+ * `fixtureSelfTest`) and NO row's ambiguity changes -- so no entry, no verdict
+ * and no row moves. That row was hand-read before and stays hand-read, for the
+ * three real definitions that remain.
+ *
+ * ⛔ NOT line-anchored, unlike the anchor. The anchor needs the ONE definition a
+ * dispatch calls, so a mid-line named function expression is not its answer;
+ * this half answers "how many self-test-shaped definitions does this file hold",
+ * where that expression is a real definition and dropping it would UNDERCOUNT --
+ * the direction that turns an ambiguous file into a confidently wrong entry.
+ */
+export function selfTestDefs(src) {
+  const code = maskCommentsAndLiterals(src);
+  const names = new Set();
+  for (const m of code.matchAll(/(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    if (/self.?test/i.test(m[1])) names.add(m[1]);
+  }
+  for (const m of code.matchAll(/const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/g)) {
+    if (/self.?test/i.test(m[1])) names.add(m[1]);
+  }
+  return [...names];
 }
 
 /**
@@ -452,6 +528,21 @@ export function relocateSource(source, absFile) {
  * doomed mutation would double a whole sweep of spawns to learn nothing. The
  * row still publishes what the baseline said, because `baselineHead` is usually
  * the whole diagnosis (`Cannot find package ...` reads as "run pnpm install").
+ *
+ * THE BUDGET IS THE INSTRUMENT'S, AND IT IS PER MEMBER. `timeout` is what
+ * `spawnSync` is given for EACH run, and a run that outlasts it is killed with
+ * `SIGTERM` and read -- correctly -- as NOT MEASURED. That is the safe
+ * direction, never a false HELD, and the row names its own reason. But the
+ * reason it names is a fact about THIS TOOL'S BUDGET, and it lands on the
+ * SLOWEST self-tests, which are the ones with the most cases to lose: the
+ * default 120 s is ~3.3x under `scripts/pm/dispatch-gates.mjs`'s own
+ * `--self-test`, the richest in the tree at 1,415 cases (#15573).
+ *
+ * ⛔ The repair is NOT a bigger default -- 180 of the 181 rows fit 120 s, and
+ * raising it for all of them makes every sweep slower to serve one member. The
+ * default stays, and a member measured to need more carries its own
+ * `timeoutMs` in `ENTRY_BY_HAND`, with the reading it came from. `main()`
+ * passes that through; nothing else may.
  */
 export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement = 'relocated' } = {}) {
   const src = readFileSync(absFile, 'utf8');
@@ -493,7 +584,7 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement =
 
     const base = spawnSync(cmd, [absFile, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const baseOut = (base.stdout ?? '') + (base.stderr ?? '');
-    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}`, ...beside };
+    if (base.signal) return { verdict: 'NOT MEASURED', why: `killed by ${base.signal}`, ...budgetExpired(base), ...beside };
     // PRECONDITION. A file the tree cannot run offered the mutation nothing to
     // defeat, so no verdict below is available -- however loudly the mutated run
     // would have exited and spoken. Read before the mutated run is spawned.
@@ -514,7 +605,7 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement =
 
     const mut = spawnSync(cmd, [probePath, '--self-test'], { cwd: ROOT, timeout, encoding: 'utf8' });
     const mutOut = (mut.stdout ?? '') + (mut.stderr ?? '');
-    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}`, ...beside };
+    if (mut.signal) return { verdict: 'NOT MEASURED', why: `killed by ${mut.signal}`, ...budgetExpired(mut), ...beside };
     // A mutation that changed nothing observable did not reach the executed
     // path, whatever its exit code says.
     if (baseOut === mutOut && base.status === mut.status) {
@@ -540,6 +631,169 @@ export function probeEarlyReturn(absFile, entry, { timeout = 120000, placement =
     rmSync(probePath, { force: true });
     if (probeDir) rmSync(probeDir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Instrument 3 -- WHICH verdict handshake a self-test carries, read from code
+// ---------------------------------------------------------------------------
+
+/**
+ * The extent of one definition's BODY in masked code: from the `{` the anchor
+ * lands on to the `}` that closes it, by counting braces.
+ *
+ * ⛔ NOT "the first `}` at column 0". That rule is the tree's convention for
+ * where a top-level definition ENDS, and it is wrong often enough to matter:
+ * `scripts/check-error-code-casing.mjs` closes an inline arrow argument with
+ * `});` at column 0 inside `selfTest`, 107 lines before the function really
+ * ends. Read that way, the flag `selfTest` sets as its last act falls OUTSIDE
+ * its own body and the file classifies `none` -- measured, three files (also
+ * `check-optional-error-sink-contract`, `check-org-identifier`), all three
+ * carrying a perfectly ordinary handshake.
+ *
+ * Counting is safe HERE and only here because the text is already masked: every
+ * brace inside a comment, a string, a template or a regex literal has been
+ * blanked, so the ones that remain are the ones the parser sees.
+ */
+export function definitionSpan(code, name) {
+  const pats = [
+    new RegExp(
+      `^[ \\t]*(?:export\\s+(?:default\\s+)?)?(?:async\\s+)?function\\s+${name}\\s*\\([^)]*\\)` +
+        `\\s*(?::\\s*[A-Za-z_$][\\w$<>\\[\\]|. ]*\\s*)?\\{`,
+      'm',
+    ),
+    new RegExp(`^[ \\t]*(?:export\\s+)?const\\s+${name}\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::[^=]*)?=>\\s*\\{`, 'm'),
+  ];
+  for (const re of pats) {
+    const m = code.match(re);
+    if (!m) continue;
+    const at = m.index + m[0].length;
+    let depth = 1;
+    for (let i = at; i < code.length; i++) {
+      if (code[i] === '{') depth++;
+      else if (code[i] === '}' && --depth === 0) return { at, end: i };
+    }
+  }
+  return null;
+}
+
+/**
+ * SENTINEL -- the self-test's RETURN VALUE is compared against a NAMED operand:
+ * `if (selfTest() !== SELF_TEST_VERDICT)`, `if ((await selfTest()) !== ...)`.
+ *
+ * BOUNDARY -- the operand must be an IDENTIFIER. A comparison against a LITERAL
+ * is the ACCIDENT shape this file's header is about: over a self-test that
+ * returned early, `runSelfTest() === 0` is `undefined === 0` -> false -> exit 1,
+ * having printed ZERO BYTES. Nothing noticed anything; the arithmetic of a
+ * comparison against a missing return value did it, and calling that a handshake
+ * is the mistake the DEFEATED/HELD/ACCIDENT verdict exists to refuse. The word
+ * literals are excluded for the same reason they are literals.
+ *
+ * ⚠️ So `selfTest() !== undefined` would read `none` here, and no file in this
+ * tree spells it that way today. Left unadmitted rather than written blind --
+ * the same protocol the DISPATCH criterion publishes for its two unwitnessed
+ * spellings: widen with a control in both directions, and publish the delta.
+ */
+const HANDSHAKE_RETURN_COMPARED =
+  /(?:await\s+)?\(?\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(\s*\)\s*\)?\s*(?:!==|===|!=|==)\s*([A-Za-z_$][\w$]*)\b/g;
+const LITERAL_OPERAND = /^(?:undefined|null|true|false|NaN)$/;
+
+/**
+ * The FLAG and HELPER shapes share one carrier and differ only in WHO reads it.
+ *
+ * The carrier is a variable that CROSSES THE BOUNDARY out of the self-test: a
+ * module-level binding, assigned `true` INSIDE the self-test's body as its last
+ * act, and read OUTSIDE it by the dispatch. Both halves are structural, and
+ * both are load-bearing:
+ *
+ *   MODULE-LEVEL  a `let`/`var` at column 0. A binding declared inside the
+ *                 self-test cannot outlive the call, so it can carry nothing --
+ *                 and the ordinary accumulator `let ok = true` is exactly that.
+ *                 Without this half `scripts/check-regen-pending.mjs` reads
+ *                 `flag`, on an `ok` set inside `decisionTableSelfTest` and an
+ *                 unrelated `(ok) => !ok` arrow PARAMETER 60 lines later. There
+ *                 is no scope analysis here; the column-0 declaration is what
+ *                 stands in for one.
+ *   CROSSES       set inside the body, read outside it. A boolean set and read
+ *                 within one function is a local decision, not a handshake.
+ *
+ * Then the two shapes:
+ *
+ *   FLAG    the DISPATCH reads it itself, negated -- `if (!selfTestReachedVerdict)`.
+ *   HELPER  the dispatch HANDS it to a callee that refuses on its behalf --
+ *           `requireReachedVerdict('selfTest', selfTestReachedVerdict)`. The
+ *           callee must be defined in this file and its body must PRODUCE A
+ *           FAILURE, which is what separates a refusal from any other function
+ *           that happens to take a boolean.
+ *
+ * ⭐ The helper is therefore not a third mechanism -- it is the FLAG with its
+ * refusal factored out of ten inlined copies, which is exactly the merit the
+ * ruling that admitted it turned on. Recognised as its own shape because the
+ * census question is "which spelling is this file written in", and answering it
+ * is this column's whole job.
+ */
+const MODULE_LEVEL_BINDING = /^(?:let|var)\s+([A-Za-z_$][\w$]*)/gm;
+const SET_TRUE = /([A-Za-z_$][\w$]*)\s*=\s*true\b/g;
+const negatedRead = (name) => new RegExp(String.raw`!\s*${name}\b`, 'g');
+const handedToCall = (name) => new RegExp(String.raw`([A-Za-z_$][\w$]*)\s*\(\s*[^()]*?\b${name}\s*\)`, 'g');
+
+/**
+ * ⭐ THE ONE RECOGNISER (#14968). Every caller -- `--json`, the human census
+ * column, the per-shape summary -- reads THIS, so a fifth landed shape is a
+ * change here and nowhere else. That is the whole point: the repair had landed
+ * in three spellings, every handshake question was answered by a hand-written
+ * grep, and three seats in one shift got three different wrong answers from
+ * three different greps whose completeness nobody could check.
+ *
+ * Returns `'sentinel' | 'flag' | 'helper' | 'none'`, read from the MASKED,
+ * line-anchored source -- the same text `selfTestDefs` and the injection anchor
+ * read. Masked, because a spelling quoted inside a fixture string or described
+ * in a docblock is not a handshake the dispatch can perform; this file is full
+ * of both, and so are the gates that reason about self-tests.
+ *
+ * ⛔ NOT keyed on the three landed NAMES. `SELF_TEST_VERDICT`,
+ * `selfTestReachedVerdict` and `requireReachedVerdict` appear nowhere in this
+ * function: what it reads is the value handed back and the comparison that
+ * consumes it. `classifyFloor` keyed on the NAME `SELF_TEST_BATTERIES` once and
+ * called a fixture floored after its roster had been removed; the control below
+ * renames every landed spelling out of a fixture and requires the same verdict.
+ *
+ * ORDER: sentinel, then helper, then flag. Measured on this base: NO file in the
+ * census carries two shapes, so the order decides nothing today -- the live
+ * check below publishes that overlap as a number rather than leaving it assumed.
+ *
+ * ⛔ It recognises the shapes; it does not legislate them. Two of the three are
+ * deliberate -- the flag exists because those self-tests' own exit codes are
+ * load-bearing, so the handshake cannot BE the return value -- and unifying the
+ * tree is explicitly not this instrument's business.
+ */
+export function classifyHandshake(src) {
+  const code = maskCommentsAndLiterals(src);
+
+  for (const m of code.matchAll(HANDSHAKE_RETURN_COMPARED)) {
+    if (/self.?test/i.test(m[1]) && !LITERAL_OPERAND.test(m[2])) return 'sentinel';
+  }
+
+  const spans = selfTestDefs(src)
+    .map((name) => definitionSpan(code, name))
+    .filter((s) => s !== null);
+  const insideSelfTest = (at) => spans.some((s) => at >= s.at && at < s.end);
+
+  const moduleLevel = new Set([...code.matchAll(MODULE_LEVEL_BINDING)].map((m) => m[1]));
+  const carried = new Set();
+  for (const m of code.matchAll(SET_TRUE)) {
+    if (moduleLevel.has(m[1]) && insideSelfTest(m.index)) carried.add(m[1]);
+  }
+
+  let flag = false;
+  for (const name of carried) {
+    for (const m of code.matchAll(handedToCall(name))) {
+      if (insideSelfTest(m.index) || /self.?test/i.test(m[1])) continue;
+      const def = definitionSpan(code, m[1]);
+      if (def && PRODUCES_FAILURE.test(code.slice(def.at, def.end))) return 'helper';
+    }
+    for (const m of code.matchAll(negatedRead(name))) if (!insideSelfTest(m.index)) flag = true;
+  }
+  return flag ? 'flag' : 'none';
 }
 
 // ---------------------------------------------------------------------------
@@ -820,6 +1074,133 @@ const DECOY_ANCHOR_GATE = [
 const DECOY_ANCHOR_TEXT = 'function selfTest() {';
 
 /**
+ * The MASKED-DEFINITIONS fixture: definition-shaped text that is not a
+ * definition, in BOTH shapes `selfTestDefs` collects and BOTH texts the mask
+ * blanks -- a `function` and an arrow inside a fixture STRING, and a `function`
+ * inside a COMMENT -- standing beside one real example of each.
+ *
+ * The decoy names differ from the real ones ON PURPOSE. The anchor fixture above
+ * spells every decoy `selfTest`, which is right for it (an anchor takes ONE
+ * match and the question is WHICH), but it cannot pin a collector: a `Set` of
+ * names collapses the decoys into the real name and the wrong answer and the
+ * right answer are the same list. Only a decoy with its OWN name can be seen to
+ * be absent -- which is the reading the census took on
+ * `scripts/pm/dispatch-gates.mjs`, where `fixtureSelfTest` is a name in a
+ * fixture array and nothing can call it (#15574).
+ *
+ * The fixture is READ, never spawned; `selfTestDefs` is a pure function of text.
+ */
+const MASKED_DEFS_GATE = [
+  '#!/usr/bin/env node',
+  '// The convention this tree writes: function commentSelfTest() { at column 0.',
+  'const FIXTURE = `',
+  'function fixtureSelfTest() {',
+  "  console.log('a fixture this gate scans, not a definition');",
+  '}',
+  'const fixtureSelfTestLater = () => {};',
+  '`;',
+  'function selfTest() {',
+  "  if (FIXTURE.length < 1) { console.error('the fixture text went missing'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  'const runSelfTestTwice = () => { selfTest(); selfTest(); };',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/** What `selfTestDefs` must collect from the fixture above, and in this order. */
+const MASKED_DEFS_EXPECTED = ['selfTest', 'runSelfTestTwice'];
+
+/**
+ * The HANDSHAKE DECOY: both spellings the recogniser reads, standing in the two
+ * texts the mask blanks -- a `selfTest() !== SELF_TEST_VERDICT` comparison in a
+ * COMMENT, and the flag's `= true` assignment inside a fixture TEMPLATE within
+ * the self-test's own body. Neither is a handshake the dispatch can perform, and
+ * the file's real dispatch is the bare `selfTest();` that notices nothing.
+ *
+ * The two decoys are un-hidden INDEPENDENTLY below, which is what makes this a
+ * reading of the MASK rather than of a fixture whose spellings were never
+ * recognisable: strip the comment marker and the same text reads `sentinel`;
+ * strip the template delimiters and it reads `flag`. Masked, both are gone and
+ * the answer is `none`.
+ */
+const HANDSHAKE_DECOY_GATE = [
+  '#!/usr/bin/env node',
+  "const SELF_TEST_VERDICT = 'reached';",
+  'let selfTestReachedVerdict = false;',
+  '// if (selfTest() !== SELF_TEST_VERDICT) process.exit(1);',
+  'function selfTest() {',
+  '  const FIXTURE = `',
+  '  selfTestReachedVerdict = true;',
+  '  `;',
+  "  if (FIXTURE.length < 1) { console.error('the fixture text went missing'); process.exit(1); }",
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  selfTest();',
+  '  if (!selfTestReachedVerdict) { console.error(\'no verdict\'); process.exit(1); }',
+  '}',
+  '',
+].join('\n');
+
+/** The two decoy texts, each looked up where it is hidden. */
+const DECOY_SENTINEL_TEXT = 'selfTest() !== SELF_TEST_VERDICT';
+const DECOY_FLAG_TEXT = 'selfTestReachedVerdict = true;';
+
+/**
+ * The COLUMN-ZERO BRACE gate, reduced: an inline arrow argument whose `});`
+ * closes at column 0 INSIDE the self-test, ahead of the line that sets the
+ * handshake flag. This is the shape `scripts/check-error-code-casing.mjs`
+ * carries -- and `check-optional-error-sink-contract.mjs` and
+ * `check-org-identifier.mjs` with it. Read with a "body ends at the first `}` at
+ * column 0" rule, the flag assignment falls outside its own function's body, the
+ * carrier never crosses anything, and all three ordinary handshakes read `none`.
+ * `definitionSpan` counts braces over masked text instead; this fixture is why.
+ */
+const EARLY_BRACE_GATE = [
+  '#!/usr/bin/env node',
+  'let selfTestReachedVerdict = false;',
+  'const check = (fn) => fn();',
+  'function selfTest() {',
+  '  check(() => {',
+  "    console.log('fixture self-test: 1 case passes');",
+  '});',
+  '  selfTestReachedVerdict = true;',
+  '}',
+  "if (process.argv.includes('--self-test')) {",
+  '  selfTest();',
+  "  if (!selfTestReachedVerdict) { console.error('no verdict'); process.exit(1); }",
+  '}',
+  '',
+].join('\n');
+
+/**
+ * The SLOW gate, reduced: a self-test that outlasts the budget it is probed
+ * under. It sleeps rather than spins -- a control that runs on EVERY invocation
+ * of this tool may not take a core with it on a shared box.
+ *
+ * The pair below probes THIS ONE FIXTURE under two budgets and nothing else
+ * differs: same file, same entry, same mutation. Under the smaller one the
+ * baseline is killed and no verdict is available; under a budget that fits, the
+ * same gate is read DEFEATED. That is the whole of #15573 in two spawns -- the
+ * row that reads `killed by SIGTERM` is reporting the INSTRUMENT'S budget, and
+ * a budget is a thing a ledger row can carry.
+ */
+const SLOW_GATE = [
+  '#!/usr/bin/env node',
+  'function selfTest() {',
+  '  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900);',
+  "  console.log('fixture self-test: 1 case passes');",
+  '}',
+  "if (process.argv.includes('--self-test')) selfTest();",
+  '',
+].join('\n');
+
+/** A budget the fixture above cannot finish inside, and one it can. */
+const SLOW_GATE_BUDGET_TOO_SMALL = 250;
+const SLOW_GATE_BUDGET_THAT_FITS = 20_000;
+
+/**
  * The WALKING gate, reduced: a gate whose own self-test sweeps the directory it
  * lives in and refuses anything it did not expect to find there. That is not a
  * defect -- `check-pnpm-filter-targets` does exactly this over `scripts/` and is
@@ -986,6 +1367,235 @@ export function runControls() {
     && decoyInjected.includes(`function selfTest() {\n  return; /*${PROBE_MARKER}*/\n\n  const failures = [];`),
     'ANCHOR CONTROL FAILED: the early return was not injected at the REAL definition; a text that merely READS like one -- in a comment, in a fixture string, or mid-line in code -- was preferred over the function the dispatch calls');
 
+  // The DEFINITION LIST, over the same masked text the anchor reads. A phantom
+  // name here is not a wrong verdict -- an extra name only makes a row ambiguous,
+  // which is NOT MEASURED -- but it is a name that cannot be called, published in
+  // `--json` and named in a diagnostic that tells the reader to go read it
+  // (#15574).
+  const maskedDefsFlags = scanSource(MASKED_DEFS_GATE);
+  const commentDef = MASKED_DEFS_GATE.indexOf('function commentSelfTest() {');
+  const literalDef = MASKED_DEFS_GATE.indexOf('function fixtureSelfTest() {');
+  const literalArrowDef = MASKED_DEFS_GATE.indexOf('const fixtureSelfTestLater =');
+  const realFunctionDef = MASKED_DEFS_GATE.indexOf('\nfunction selfTest() {') + 1;
+  say(commentDef >= 0 && maskedDefsFlags.comment[commentDef] === 1,
+    'CONTROL FIXTURE INVALID: the comment decoy is not comment content, so the verdict below says nothing about comments being masked away');
+  say(literalDef >= 0 && maskedDefsFlags.literal[literalDef] === 1,
+    'CONTROL FIXTURE INVALID: the `function` decoy is not literal content, so the verdict below says nothing about fixture STRINGS being masked away -- the half the census actually tripped over');
+  say(literalArrowDef >= 0 && maskedDefsFlags.literal[literalArrowDef] === 1,
+    'CONTROL FIXTURE INVALID: the ARROW decoy is not literal content; `selfTestDefs` collects two shapes and only one of them would be under test');
+  say(realFunctionDef > 0 && maskedDefsFlags.comment[realFunctionDef] === 0 && maskedDefsFlags.literal[realFunctionDef] === 0,
+    'CONTROL FIXTURE INVALID: the real definition is itself masked away, so the fixture cannot show a definition SURVIVING beside the decoys');
+  say(JSON.stringify(selfTestDefs(MASKED_DEFS_GATE)) === JSON.stringify(MASKED_DEFS_EXPECTED),
+    `DEFINITION CONTROL FAILED: definition-shaped text inside a fixture string or a comment was collected as a definition of the file quoting it -- got ${JSON.stringify(selfTestDefs(MASKED_DEFS_GATE))}, expected ${JSON.stringify(MASKED_DEFS_EXPECTED)}`);
+  // ... and the other direction, which is what makes the verdict above a reading
+  // of the MASK rather than of a fixture whose decoys were never collectable:
+  // the SAME text with its literal delimiters removed puts both decoys in code,
+  // and the same collector must then collect them.
+  const unquotedDefs = selfTestDefs(MASKED_DEFS_GATE.replaceAll('`', ''));
+  say(unquotedDefs.includes('fixtureSelfTest') && unquotedDefs.includes('fixtureSelfTestLater'),
+    'CONTROL FIXTURE INVALID: with the fixture STRING delimiters removed the two decoys are still not collected, so they were never definition-shaped and the verdict above passes for the wrong reason');
+  say(selfTestDefs(MASKED_DEFS_GATE.replace('// ', '')).includes('commentSelfTest'),
+    'CONTROL FIXTURE INVALID: with the comment marker removed the comment decoy is still not collected, so it was never definition-shaped and the verdict above passes for the wrong reason');
+
+  // The LEDGER's two row spellings, and the reading `main()` takes from them.
+  // What is at stake is a NOT MEASURED whose stated reason is false: a record
+  // passed through as if it were an entry name asks for a definition of
+  // `[object Object]` and reports "no injectable definition of" it.
+  const rowOf = (defs) => ({ file: 'scripts/fixture-gate.mjs', defs });
+  const ledgerOf = (row) => ({ 'scripts/fixture-gate.mjs': row });
+  say(probePlan(rowOf(['selfTest']), {}).entry === 'selfTest' && probePlan(rowOf(['selfTest']), {}).timeoutMs === undefined,
+    'PLAN CONTROL FAILED: a file with exactly ONE self-test definition and no ledger row did not resolve mechanically to that definition at the default budget');
+  say(probePlan(rowOf(['selfTest', 'runSelfTest']), {}).entry === undefined
+    && /^ambiguous entry \(selfTest, runSelfTest\)/.test(probePlan(rowOf(['selfTest', 'runSelfTest']), {}).why ?? ''),
+    'PLAN CONTROL FAILED: two definitions and no ledger row is an ambiguous entry, which is NOT MEASURED with that reason -- never a guess at one of them');
+  say(/inline top-level block/.test(probePlan(rowOf([]), {}).why ?? ''),
+    'PLAN CONTROL FAILED: a file with no self-test definition at all lost its own NOT MEASURED reason');
+  say(probePlan(rowOf(['selfTest', 'runSelfTest']), ledgerOf('runSelfTest')).entry === 'runSelfTest',
+    'PLAN CONTROL FAILED: a hand-read ledger row did not override the mechanical reading; the ledger exists precisely for the files the mechanical path cannot resolve');
+  say(probePlan(rowOf(['selfTest']), ledgerOf(null)).entry === undefined
+    && /not probeable/.test(probePlan(rowOf(['selfTest']), ledgerOf(null)).why ?? ''),
+    'PLAN CONTROL FAILED: a `null` ledger row was probed anyway; a hand-read "there is no single entry" must stay NOT MEASURED');
+  const recordPlan = probePlan(rowOf(['selfTest']), ledgerOf({ entry: 'runSelfTest', timeoutMs: 5000 }));
+  say(recordPlan.entry === 'runSelfTest' && recordPlan.timeoutMs === 5000,
+    `PLAN CONTROL FAILED: the record row spelling did not yield its entry and budget (got ${JSON.stringify(recordPlan)})`);
+  say(typeof recordPlan.entry === 'string',
+    'PLAN CONTROL FAILED: the record row itself was passed through as the ENTRY; the probe would then report `no injectable definition of [object Object]` -- a NOT MEASURED whose stated reason is false');
+  // The SHIPPED ledger, read the way `main()` reads it. A row edited into a
+  // shape this reader does not understand is silently no budget at all.
+  for (const [file, row] of Object.entries(ENTRY_BY_HAND)) {
+    const { entry, timeoutMs } = readLedgerRow(row);
+    const fields = typeof row === 'object' && row !== null ? Object.keys(row) : [];
+    say(entry === null || (typeof entry === 'string' && entry.length > 0),
+      `LEDGER ROW INVALID: ${file} names no entry this reader can use (${JSON.stringify(row)})`);
+    say(timeoutMs === undefined || (Number.isInteger(timeoutMs) && timeoutMs > 0),
+      `LEDGER ROW INVALID: ${file} carries a budget that is not a positive whole number of milliseconds (${JSON.stringify(timeoutMs)})`);
+    say(fields.every((k) => k === 'entry' || k === 'timeoutMs'),
+      `LEDGER ROW INVALID: ${file} carries a field this reader does not read (${fields.join(', ')}); a misspelled \`timeoutMs\` is not a smaller budget, it is NO budget -- the default, and the SIGTERM this field exists to end`);
+  }
+
+  // ⭐ THE ROW SELECTOR (#15759), over a fixture population. What is at stake in
+  // every verdict here is a SWEEP THAT MEASURED NOTHING: an empty selection and a
+  // complete census print the same three numbers, and only one of them is a
+  // survey. So the selector's failure mode must be a REFUSAL, never a smaller run.
+  const selRows = [
+    { file: 'scripts/check-alpha.mjs', abs: join(ROOT, 'scripts/check-alpha.mjs'), defs: ['selfTest'] },
+    { file: 'scripts/check-beta.mjs', abs: join(ROOT, 'scripts/check-beta.mjs'), defs: ['selfTest'] },
+    { file: 'scripts/pm/check-beta.mjs', abs: join(ROOT, 'scripts/pm/check-beta.mjs'), defs: ['selfTest'] },
+  ];
+  say(new Set(selRows.map((r) => r.file)).size === selRows.length
+    && selRows.filter((r) => r.file.endsWith('/check-beta.mjs')).length === 2,
+    'CONTROL FIXTURE INVALID: the fixture population no longer holds three distinct rows, two of which share a basename; the exact-match and nearest-row verdicts below would both be reading a population that cannot tell them apart');
+
+  // (3) NO FLAG = THE WHOLE POPULATION, and the population OBJECT at that: the
+  // unrestricted sweep must not be a filtered copy that could differ from it.
+  say(parseOnly(['--probe', '--json']).selectors.length === 0,
+    'SELECTOR CONTROL FAILED: an argv carrying no `--only` produced selectors; the default sweep would then be restricted by something nobody passed');
+  say(selectRows(selRows, []).selected === selRows,
+    'SELECTOR CONTROL FAILED: with no selector the probe was handed a COPY of the population rather than the population itself');
+
+  // (1) ONE ROW SELECTED IS THAT ROW. Both spellings, repeatable, and the
+  // path forms a reader actually has: repo-relative, `./`-prefixed, absolute.
+  const onlyOne = parseOnly(['--probe', '--only', 'scripts/pm/check-beta.mjs']);
+  say(JSON.stringify(onlyOne.selectors) === JSON.stringify(['scripts/pm/check-beta.mjs']),
+    `SELECTOR CONTROL FAILED: \`--only <path>\` did not read its value (got ${JSON.stringify(onlyOne.selectors ?? onlyOne.refusal)})`);
+  const pickedOne = selectRows(selRows, onlyOne.selectors);
+  say(pickedOne.selected?.length === 1 && pickedOne.selected[0] === selRows[2],
+    'SELECTOR CONTROL FAILED: a selector naming one row exactly did not select exactly that row -- and the two rows sharing a basename are what makes that a reading of the PATH');
+  const twoSpellings = parseOnly(['--only', 'scripts/check-alpha.mjs', '--only=scripts/check-beta.mjs']);
+  say(twoSpellings.selectors?.length === 2 && selectRows(selRows, twoSpellings.selectors).selected?.length === 2,
+    'SELECTOR CONTROL FAILED: `--only` is not repeatable across its two spellings; a reader naming two rows would silently probe one');
+  say(selectRows(selRows, ['./scripts/check-alpha.mjs']).selected?.[0] === selRows[0]
+    && selectRows(selRows, [join(ROOT, 'scripts/check-alpha.mjs')]).selected?.[0] === selRows[0],
+    'SELECTOR CONTROL FAILED: a `./`-prefixed or ABSOLUTE path did not name the row the census prints as `scripts/check-alpha.mjs`');
+  say(selectRows(selRows, ['scripts/check-alpha.mjs', './scripts/check-alpha.mjs']).selected?.length === 1,
+    'SELECTOR CONTROL FAILED: the same row named twice was selected twice; that row would be spawned four times and reported as two');
+
+  // ... and the loop body RAN IT AND NOTHING ELSE. Counting the probe's calls is
+  // the only reading that separates "probed one row" from "swept everything and
+  // reported one row" -- the two are indistinguishable in the printed output.
+  const probeCalls = [];
+  const recorded = selRows.map((r) => ({ ...r }));
+  const pickedRecorded = selectRows(recorded, ['scripts/check-beta.mjs']);
+  probeRows(pickedRecorded.selected ?? [], {
+    plan: () => ({ entry: 'selfTest', timeoutMs: undefined }),
+    probe: (abs) => { probeCalls.push(abs); return { verdict: 'DEFEATED' }; },
+  });
+  say(probeCalls.length === 1 && probeCalls[0] === recorded[1].abs,
+    `SELECTOR CONTROL FAILED: probing ONE selected row called the probe ${probeCalls.length} time(s) (${probeCalls.join(', ') || 'none'}); a selector that still walked the population is a full sweep with a filtered report`);
+  say(recorded[0].probe === undefined && recorded[2].probe === undefined,
+    'SELECTOR CONTROL FAILED: an UNSELECTED row came back carrying a probe verdict');
+
+  // (2) AN UNKNOWN ROW REFUSES, and names candidates. A near-miss must not be
+  // guessed into a row either: running the row it guessed answers a question
+  // nobody asked, under a path the reader never typed.
+  const missed = selectRows(selRows, ['scripts/check-bet.mjs']);
+  say(missed.selected === undefined && typeof missed.refusal === 'string'
+    && missed.refusal.includes('names no census row'),
+    `SELECTOR CONTROL FAILED: a selector naming no row did not refuse (got ${JSON.stringify(missed.selected?.map((r) => r.file) ?? missed.refusal)})`);
+  say(missed.refusal?.includes('scripts/check-beta.mjs') && missed.refusal?.includes('scripts/pm/check-beta.mjs'),
+    `SELECTOR CONTROL FAILED: the refusal named no nearest row, so a typo leaves the reader with nothing to correct it to (${JSON.stringify(missed.refusal ?? '')})`);
+  // ... and one selector missing refuses the WHOLE invocation. A partial run that
+  // dropped the unmatched name would report a sweep the reader did not ask for.
+  say(typeof selectRows(selRows, ['scripts/check-alpha.mjs', 'scripts/check-bet.mjs']).refusal === 'string',
+    'SELECTOR CONTROL FAILED: one unmatched selector beside a matched one was dropped rather than refused; the reader would be shown a sweep missing a row they named');
+  // ... and the FIRST tier: a bare basename is not a match, but it names a real
+  // row and the refusal hands back the path the census prints.
+  const bareBase = selectRows(selRows, ['check-alpha.mjs']);
+  say(typeof bareBase.refusal === 'string' && bareBase.refusal.includes('scripts/check-alpha.mjs'),
+    'SELECTOR CONTROL FAILED: a bare basename neither matched nor was pointed at the full path it names; the reader is left to guess the census spelling');
+  // ... and a selector with nothing near it still refuses -- with a reading, not
+  // a bare list. The cut is the LONGEST shared basename prefix, not a per-part
+  // score: scored, every miss "matches" every row ending in `.mjs`.
+  const nowhere = selectRows(selRows, ['scripts/zzz-nothing-alike.mjs']);
+  say(typeof nowhere.refusal === 'string' && nowhere.refusal.includes('contains any part of it'),
+    `SELECTOR CONTROL FAILED: a selector with no near row did not refuse (${JSON.stringify(nowhere.selected?.length ?? nowhere.refusal)})`);
+  say(!nowhere.refusal?.includes('check-alpha'),
+    'SELECTOR CONTROL FAILED: a selector sharing nothing but its extension with the census still listed rows; a diagnostic that names everything names nothing');
+  say(!missed.refusal?.includes('check-alpha'),
+    'SELECTOR CONTROL FAILED: the nearest-row list reached past the rows sharing the LONGEST basename prefix; a cut that is not the maximum pads the list with the rest of the census');
+
+  // The ARGV shapes that must refuse rather than widen. `--only --probe` read
+  // permissively means "sweep everything": the outcome that takes hours and looks
+  // like success, reached by a typo.
+  say(parseOnly(['--only']).refusal !== undefined,
+    'SELECTOR CONTROL FAILED: a trailing `--only` with no value was read as no selector at all, which is the full sweep');
+  say(parseOnly(['--only', '--probe']).refusal !== undefined,
+    'SELECTOR CONTROL FAILED: `--only --probe` took the FLAG as the selector value; the selector then names no row -- or, unmatched, the run sweeps everything');
+  say(parseOnly(['--only=']).refusal !== undefined,
+    'SELECTOR CONTROL FAILED: `--only=` with an empty value was accepted');
+
+  // Instrument 3 -- WHICH handshake, one fixture per landed shape and both
+  // directions on each. What is at stake is the question the card was filed
+  // about: every handshake census in this family was a hand-written grep for one
+  // of three spellings, and three of them in one shift gave three wrong answers.
+  say(classifyHandshake(SOUND_GATE) === 'sentinel',
+    `HANDSHAKE CONTROL FAILED: a dispatch comparing the self-test's RETURN VALUE against a named verdict read ${classifyHandshake(SOUND_GATE)}, not sentinel`);
+  say(classifyHandshake(WALKING_GATE) === 'flag',
+    `HANDSHAKE CONTROL FAILED: a module-level flag set inside the self-test and read negated at the dispatch read ${classifyHandshake(WALKING_GATE)}, not flag`);
+  say(classifyHandshake(HELPER_HANDSHAKE_GATE) === 'helper',
+    `HANDSHAKE CONTROL FAILED: a flag handed to a refusing helper read ${classifyHandshake(HELPER_HANDSHAKE_GATE)}, not helper`);
+  say(classifyHandshake(HOLED_GATE) === 'none',
+    `HANDSHAKE CONTROL FAILED: a bare \`selfTest();\` dispatch that discards the completion read ${classifyHandshake(HOLED_GATE)}, not none`);
+  // ... and the pair that makes `helper` a reading of the HANDSHAKE rather than
+  // of the file: the SAME fixture with only the `requireReachedVerdict` call
+  // deleted. One line is the whole difference, and it is the handshake.
+  say(classifyHandshake(HELPER_HANDSHAKE_GATE_HOLED) === 'none',
+    `HANDSHAKE CONTROL FAILED: the helper fixture with only its handshake CALL deleted still read ${classifyHandshake(HELPER_HANDSHAKE_GATE_HOLED)}; the flag is still declared and still set, so anything but none is the NAME being read and not the mechanism`);
+  // The ACCIDENT boundary, which is the sharpest thing this recogniser has to
+  // get right: `runSelfTest() === 0` IS a comparison of the return value, and it
+  // is NOT a handshake -- an early return makes it `undefined === 0`, exit 1,
+  // ZERO bytes printed, nothing noticed. Reading it sentinel would publish the
+  // exact accident-versus-handshake confusion this file exists to expose.
+  say(classifyHandshake(ACCIDENT_GATE) === 'none',
+    `HANDSHAKE CONTROL FAILED: a return value compared against a LITERAL read ${classifyHandshake(ACCIDENT_GATE)}; that is the ACCIDENT shape, where a comparison against a missing return value exits non-zero having printed nothing`);
+  say(classifyHandshake(TERNARY_EXIT_GATE) === 'none',
+    `HANDSHAKE CONTROL FAILED: a bare \`process.exit(<expr> ? 0 : 1)\` dispatch read ${classifyHandshake(TERNARY_EXIT_GATE)}; nothing there compares the completion against anything`);
+  // ⭐ NAME-INDEPENDENCE, the direction the card is about. Every landed spelling
+  // is renamed out of all three fixtures -- `SELF_TEST_VERDICT`,
+  // `selfTestReachedVerdict`, `requireReachedVerdict` -- and the verdicts must
+  // not move. A recogniser keyed on those names passes every control above and
+  // fails all three of these; `classifyFloor` keyed on the NAME
+  // `SELF_TEST_BATTERIES` once and called a fixture floored with its roster gone.
+  const renamed = (fixture) => fixture
+    .replaceAll('SELF_TEST_VERDICT', 'FIXTURE_COMPLETION_TOKEN')
+    .replaceAll('VERDICT', 'COMPLETION_TOKEN')
+    .replaceAll('selfTestReachedVerdict', 'batteriesAllRan')
+    .replaceAll('requireReachedVerdict', 'insistTheyRan');
+  say(classifyHandshake(renamed(SOUND_GATE)) === 'sentinel',
+    'NAME-INDEPENDENCE CONTROL FAILED: the sentinel fixture stopped reading sentinel once its verdict constant was renamed; the recogniser is keyed on a NAME, which is the defect one level up');
+  say(classifyHandshake(renamed(WALKING_GATE)) === 'flag',
+    'NAME-INDEPENDENCE CONTROL FAILED: the flag fixture stopped reading flag once `selfTestReachedVerdict` was renamed; the recogniser is keyed on a NAME');
+  say(classifyHandshake(renamed(HELPER_HANDSHAKE_GATE)) === 'helper',
+    'NAME-INDEPENDENCE CONTROL FAILED: the helper fixture stopped reading helper once `requireReachedVerdict` was renamed; the recogniser is keyed on a NAME');
+
+  // The DECOY, and the fixture-validity guards without which it says nothing: a
+  // decoy that is not comment or literal content is testing something else.
+  const hsFlags = scanSource(HANDSHAKE_DECOY_GATE);
+  const sentinelDecoy = HANDSHAKE_DECOY_GATE.indexOf(DECOY_SENTINEL_TEXT);
+  const flagDecoy = HANDSHAKE_DECOY_GATE.indexOf(DECOY_FLAG_TEXT);
+  say(sentinelDecoy >= 0 && hsFlags.comment[sentinelDecoy] === 1,
+    'CONTROL FIXTURE INVALID: the sentinel decoy is not COMMENT content, so the decoy verdict below says nothing about comments being masked away');
+  say(flagDecoy >= 0 && hsFlags.literal[flagDecoy] === 1,
+    'CONTROL FIXTURE INVALID: the flag decoy is not LITERAL content, so the decoy verdict below says nothing about fixture STRINGS being masked away');
+  say(classifyHandshake(HANDSHAKE_DECOY_GATE) === 'none',
+    `HANDSHAKE DECOY CONTROL FAILED: a handshake spelled only inside a comment and a fixture template was recognised as ${classifyHandshake(HANDSHAKE_DECOY_GATE)}; a census reading raw text credits every gate that merely QUOTES the repair with having it`);
+  // ... and both decoys un-hidden INDEPENDENTLY, which is what makes the verdict
+  // above a reading of the mask rather than of two texts that were never
+  // recognisable in the first place.
+  say(classifyHandshake(HANDSHAKE_DECOY_GATE.replace('// ', '')) === 'sentinel',
+    'CONTROL FIXTURE INVALID: with its comment marker removed the sentinel decoy is still not recognised, so it was never a handshake spelling and the decoy verdict passes for the wrong reason');
+  say(classifyHandshake(HANDSHAKE_DECOY_GATE.replaceAll('`', '')) === 'flag',
+    'CONTROL FIXTURE INVALID: with the template delimiters removed the flag decoy is still not recognised, so it was never a handshake spelling and the decoy verdict passes for the wrong reason');
+
+  // The BODY EXTENT, on the shape that made three live files read `none`: an
+  // inline arrow argument closing with `});` at column 0 inside the self-test,
+  // ahead of the flag assignment.
+  const earlyBraceLines = EARLY_BRACE_GATE.split('\n');
+  say(earlyBraceLines.findIndex((l) => l.startsWith('}')) < earlyBraceLines.findIndex((l) => l.includes('selfTestReachedVerdict = true')),
+    'CONTROL FIXTURE INVALID: the fixture no longer closes a brace at column 0 AHEAD of its flag assignment, so a first-column-brace body rule would reach the assignment anyway and the verdict below tests nothing');
+  say(classifyHandshake(EARLY_BRACE_GATE) === 'flag',
+    `BODY EXTENT CONTROL FAILED: a self-test whose body contains a column-0 \`});\` read ${classifyHandshake(EARLY_BRACE_GATE)}; its flag is set INSIDE the function and the body extent is what says so -- three live files carry exactly this and read none without brace counting`);
+
   // Instrument 1, both directions.
   say(classifyFloor(maskComments(HOLED_GATE)) === 'NONE',
     'POSITIVE CONTROL FAILED: a self-test deciding success by failures.length alone was not classified NONE');
@@ -1131,6 +1741,28 @@ export function runControls() {
     say(hhHoled.mutatedBytes === 0,
       'POSITIVE CONTROL FAILED: the helper-handshake gate with its handshake deleted printed something; without the call there is nothing left to notice the early return, so the run says NOTHING and exits 0');
 
+    // The BUDGET, in both directions: ONE fixture, two budgets, nothing else
+    // different -- same file, same entry, same mutation. Under a budget it
+    // cannot finish inside, the baseline is killed and NO verdict is available;
+    // under one that fits, the same gate is read DEFEATED. This is the pair that
+    // pins #15573: a row reading `killed by SIGTERM` reports the INSTRUMENT'S
+    // budget, and a budget is a thing a ledger row can carry.
+    const slow = join(dir, 'slow-gate.mjs');
+    writeFileSync(slow, SLOW_GATE);
+    const slowKilled = probeEarlyReturn(slow, 'selfTest', { timeout: SLOW_GATE_BUDGET_TOO_SMALL });
+    const slowFits = probeEarlyReturn(slow, 'selfTest', { timeout: SLOW_GATE_BUDGET_THAT_FITS });
+    say(slowKilled.verdict === 'NOT MEASURED' && /^killed by /.test(slowKilled.why ?? ''),
+      `BUDGET CONTROL FAILED: a self-test that outlasts its budget read ${slowKilled.verdict} (${slowKilled.why ?? ''}); a run that never produced an exit code measured nothing, and the safe direction is to say so`);
+    // ⛔ ... and it must be readable as THIS TOOL'S doing. Without that field the
+    // shrink is a silence: the sweep can count the NOT MEASURED rows but cannot
+    // say how many of them were killed by a number it chose itself.
+    say(slowKilled.timedOut === true,
+      'BUDGET CONTROL FAILED: a row killed by the probe\'s own timeout does not publish `timedOut`, so the population this instrument silences cannot be counted');
+    say(slowFits.verdict === 'DEFEATED',
+      `BUDGET CONTROL FAILED: the SAME fixture under a budget that fits read ${slowFits.verdict} (${slowFits.why ?? ''}); with both budgets alike the verdict above says nothing about the BUDGET being what ended the other run`);
+    say(slowFits.timedOut === undefined,
+      'BUDGET CONTROL FAILED: a run that finished inside its budget still published `timedOut`; the count of silenced rows would then include rows that were measured');
+
     // The WALKING gate, in both PLACEMENTS. This is the pair that pins the
     // repair: the same fixture, the same mutation, differing only in where the
     // copy was written. Its own directory is separate from the fixtures above,
@@ -1160,6 +1792,30 @@ export function runControls() {
     // is only reachable through a green baseline) and this one exits 1.
     say(wk.baselineExit === 0 && wkBeside.baselineExit === 1,
       `CONTROL FIXTURE INVALID: the two placements did not separate the fixture's own baseline (relocated exit ${wk.baselineExit}, beside exit ${wkBeside.baselineExit}); with both alike, the verdicts above say nothing about WHERE the copy was written`);
+
+    // ⭐ THE SELECTOR THROUGH THE SHIPPED PROBE (#15759). Everything above drives
+    // `probeEarlyReturn` directly; this drives `probeRows`, the loop body `main()`
+    // itself runs, over a two-row fixture population with ONE row selected. That
+    // is the property the card is about: a single-row reading has to come from
+    // the shipped decision rather than from a private re-drive of it.
+    const selHoledRow = { file: 'scripts/holed-gate.mjs', abs: holed, defs: ['selfTest'] };
+    const selSoundRow = { file: 'scripts/sound-gate.mjs', abs: sound, defs: ['selfTest'] };
+    const selPicked = selectRows([selHoledRow, selSoundRow], ['scripts/sound-gate.mjs']);
+    probeRows(selPicked.selected ?? []);
+    say(selPicked.selected?.length === 1 && selPicked.selected[0] === selSoundRow,
+      'SELECTOR CONTROL FAILED: the selector did not pick exactly the named fixture row out of the fixture population');
+    // The ANTI-DRIFT reading, and it is the whole point: the SAME fixture, read
+    // through the sweep's loop body and read through a direct call, must agree.
+    // A private copy of the loop is what this card was filed about; if one ever
+    // grows here, these two verdicts separate.
+    say(selSoundRow.probe?.verdict === s.verdict && selSoundRow.probe?.mutatedHead === s.mutatedHead,
+      `SELECTOR CONTROL FAILED: the selected row read ${selSoundRow.probe?.verdict} (${JSON.stringify(selSoundRow.probe?.mutatedHead ?? selSoundRow.probe?.why ?? '')}) through the sweep's loop body but ${s.verdict} through a direct call to the probe; the two paths have drifted`);
+    // ... and the row was run TWICE: a baseline and a mutation, both reported.
+    // One spawn cannot produce this pair, and one spawn is not a probe.
+    say(selSoundRow.probe?.baselineExit === 0 && typeof selSoundRow.probe?.mutatedExit === 'number',
+      `SELECTOR CONTROL FAILED: the selected row published no baseline/mutated pair (baseline ${selSoundRow.probe?.baselineExit}, mutated ${selSoundRow.probe?.mutatedExit}); the probe is two runs of that file and a row missing either measured nothing`);
+    say(selHoledRow.probe === undefined,
+      'SELECTOR CONTROL FAILED: the UNSELECTED fixture row was probed anyway -- spawned twice, off the record, in a run the reader restricted');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1178,6 +1834,23 @@ export function runControls() {
  *
  * A row whose file no longer holds more than one `/self.?test/i` definition is
  * dead and should be deleted; the mechanical path then covers it.
+ *
+ * ## Two row spellings, and why the second one exists
+ *
+ *   'scripts/x.mjs': 'selfTest'                        the entry NAME alone.
+ *   'scripts/x.mjs': { entry: 'selfTest', timeoutMs }  the name, plus what THIS
+ *                                                      member needs from the
+ *                                                      probe to reach a verdict.
+ *
+ * `timeoutMs` is a per-member BUDGET, measured and recorded with the reading it
+ * came from -- never estimated, and never applied to a member nobody measured.
+ * It is here rather than in `probeEarlyReturn`'s default because a budget that
+ * one member needs is a cost every other member would pay: this ledger is the
+ * one place that already says "this file, for this stated reason" (#15573).
+ *
+ * ⛔ It is a BUDGET, not a deadline the probe aims for: a run that finishes
+ * sooner is not waited on, and a member that outgrows its recorded budget goes
+ * back to NOT MEASURED rather than being quietly given more.
  */
 export const ENTRY_BY_HAND = Object.freeze({
   'scripts/check-comment-mask-corpus.mjs': 'selfTest',
@@ -1196,9 +1869,15 @@ export const ENTRY_BY_HAND = Object.freeze({
   'scripts/check-platform-checklist.mjs': null,
   // The self-test is an inline top-level block calling several helpers.
   'scripts/check-regen-pending.mjs': null,
-  // Four self-test-shaped names in raw source (`selfTest`, `selfTestOnlyCallables`
-  // and two inside fixtures), so the entry is hand-read -- but for THIS FILE's
-  // reason. The row was a `null` until #14963, on the claim that injecting here
+  // Four self-test-shaped definitions in this file -- `selfTest`,
+  // `selfTestOnlyCallables`, `maskSelfTests`, `selfTestCaseLines` -- so the
+  // entry is hand-read, and stays hand-read: they are all real, and reading
+  // which one the DISPATCH calls is not something a count can do. (A fifth,
+  // `fixtureSelfTest`, was collected here until #15574 from a name inside a
+  // fixture array; `selfTestDefs` reads masked source now and it is gone. The
+  // row is unaffected either way -- four names are as ambiguous as five.)
+  //
+  // The row was a `null` until #14963, on the claim that injecting here
   // can only produce a SyntaxError: the anchor read raw source, where a docblock
   // sentence and then a FIXTURE STRING stand ahead of the real definition. That
   // was the INSTRUMENT's limit recorded as this file's property. Anchored on the
@@ -1207,13 +1886,66 @@ export const ENTRY_BY_HAND = Object.freeze({
   // failed (exit 1)` for as long as the copy was written under `scripts/`, where
   // this gate's own single-site sweep found the near-duplicate and refused: the
   // copy now lands outside that tree and this gate's baseline is clean (#15515).
-  // What is left is the BUDGET: at the default 120 s the self-test does not
-  // finish and the row reads `killed by SIGTERM` (#15573, not folded in here).
-  // Measured at 900 s on a shared box: baseline exit 0 after ~7 minutes, mutated
-  // exit 1 in 200 bytes, verdict HELD -- so the row is a budget away, not a
-  // property of the file.
-  'scripts/pm/dispatch-gates.mjs': 'selfTest',
+  // What was left was the BUDGET, and this row now carries it (#15573). At the
+  // default 120 s the self-test does not finish, the baseline is killed and the
+  // row reads `killed by SIGTERM` -- a limit of the INSTRUMENT recorded as a
+  // property of the FILE for the third time on this one row.
+  //
+  // THE READING THE BUDGET COMES FROM, and it is one measurement, not a margin:
+  //   `time node scripts/pm/dispatch-gates.mjs --self-test` -> real 6m39.690s,
+  //   exit 0, `✓ dispatch-gates self-test: 1415 cases pass.` (cf6b67164, an
+  //   installed worktree, one process at a time).
+  //   Probed ONCE at 900 000 ms on a shared box: verdict HELD, baselineExit=0
+  //   mutatedExit=1 mutatedBytes=200, head `✗ dispatch-gates self-test:
+  //   selfTest() returned without reaching its verdict,`; 425 s wall clock.
+  // 900 s is ~2.25x the measured wall clock, which is headroom for a SHARED box
+  // rather than for growth: a self-test that outgrows this budget must come back
+  // here and be measured again, not be topped up.
+  'scripts/pm/dispatch-gates.mjs': { entry: 'selfTest', timeoutMs: 900_000 },
 });
+
+/**
+ * One ledger row, in either spelling, read into the one shape the probe takes.
+ *
+ * A row is `null` (not probeable), an entry NAME, or a record carrying that name
+ * and this member's options -- see the ledger's own docblock. The union is read
+ * HERE and nowhere else: a caller that passed a record straight through as the
+ * entry would ask for a definition named `[object Object]`, get `no injectable
+ * definition of ...` back, and publish a NOT MEASURED whose stated reason is
+ * false. The controls drive both spellings.
+ */
+export function readLedgerRow(row) {
+  if (row === null || typeof row === 'string') return { entry: row, timeoutMs: undefined };
+  return { entry: row.entry, timeoutMs: row.timeoutMs };
+}
+
+/**
+ * What the probe should do with one census row: which definition to enter and
+ * under what budget, or WHY there is nothing to enter.
+ *
+ * `{ why }` is the NOT MEASURED reason, verbatim as the row publishes it;
+ * `{ entry, timeoutMs }` is a probe to run, `timeoutMs` undefined meaning "the
+ * default budget". Lifted out of `main()` so the ledger's two spellings and the
+ * mechanical fallback are decided by something the controls can drive: the
+ * decision is where a wrong entry becomes a wrong REASON, and `main()` cannot be
+ * called with a fixture ledger.
+ */
+export function probePlan(row, ledger = ENTRY_BY_HAND) {
+  const listed = Object.hasOwn(ledger, row.file) ? readLedgerRow(ledger[row.file]) : null;
+  if (listed !== null && listed.entry === null) {
+    return { why: 'entry read by hand as not probeable -- see ENTRY_BY_HAND' };
+  }
+  const entry = listed?.entry ?? (row.defs.length === 1 ? row.defs[0] : undefined);
+  if (entry === undefined) {
+    return {
+      why:
+        row.defs.length === 0
+          ? 'self-test is an inline top-level block; no callee to leave early'
+          : `ambiguous entry (${row.defs.join(', ')}) and no ENTRY_BY_HAND row -- read the dispatch site`,
+    };
+  }
+  return { entry, timeoutMs: listed?.timeoutMs };
+}
 
 /**
  * This file is not itself a member: the `--self-test` literals below live in
@@ -1245,13 +1977,249 @@ export function population() {
     if (!DISPATCH.test(code)) continue;
     const file = abs.slice(ROOT.length + 1).split(sep).join('/');
     if (file === CENSUS_SELF) continue;
-    rows.push({ file, abs, floor: classifyFloor(code), defs: selfTestDefs(src) });
+    rows.push({ file, abs, floor: classifyFloor(code), defs: selfTestDefs(src), handshake: classifyHandshake(src) });
   }
   if (rows.length === 0) throw new Error('the census found no self-test dispatch at all -- refusing rather than reporting zero');
   return rows;
 }
 
+/**
+ * The three LANDED NAMES, kept as the census's SECOND OPINION and never as its
+ * answer. Each is the grep a seat actually wrote when it needed this reading.
+ *
+ * ⛔ This is not a fallback recogniser and nothing reads it for a verdict. It
+ * exists so the live check below can ask the completeness question the card was
+ * filed about -- "does the population carrying a handshake match the population
+ * the recogniser can see?" -- against a reading that shares NO code with the
+ * recogniser. Agreement is the evidence; the moment they disagree, one of the
+ * two is incomplete and a census printed from either is a number nobody can
+ * check. Measured on this base: they agree on all 181 rows, file for file.
+ *
+ * A FIFTH shape therefore lands in TWO places -- here and in the recogniser --
+ * and that is deliberate. A shape only the recogniser knows would silently make
+ * this control weaker than the thing it controls.
+ */
+const LANDED_HANDSHAKE_NAMES = [
+  /!==\s*[A-Za-z_$][\w$]*VERDICT|===\s*[A-Za-z_$][\w$]*VERDICT/,
+  /[A-Za-z_$][\w$]*ReachedVerdict/,
+  /requireReachedVerdict\s*\(/,
+];
+
+/**
+ * THE LIVE COMPLETENESS CHECK, over the real census rather than over fixtures.
+ *
+ * ⛔ Deliberately NOT in `runControls()`, whose whole invariant is that nothing
+ * there reads the repo, so a control failure is always the instrument. This one
+ * reads the tree, and it can fail because of what LANDED in it -- which is
+ * exactly what it is for. It refuses rather than degrading: a census that quietly
+ * reports the smaller of two disagreeing populations commits the defect this
+ * instrument exists to measure, one level up.
+ *
+ * The card's own words for why the assertion is not enough: "a hand-written grep
+ * whose completeness nobody can check". This is the check.
+ */
+export function handshakeCensusFailures(rows) {
+  const failures = [];
+  const seenBy = { recogniser: [], names: [] };
+  for (const r of rows) {
+    const code = maskCommentsAndLiterals(readFileSync(r.abs, 'utf8'));
+    if (r.handshake !== 'none') seenBy.recogniser.push(r.file);
+    if (LANDED_HANDSHAKE_NAMES.some((re) => re.test(code))) seenBy.names.push(r.file);
+  }
+  const byName = new Set(seenBy.names);
+  const byShape = new Set(seenBy.recogniser);
+  const recogniserOnly = seenBy.recogniser.filter((f) => !byName.has(f));
+  const namesOnly = seenBy.names.filter((f) => !byShape.has(f));
+  if (recogniserOnly.length > 0) {
+    failures.push(
+      `${recogniserOnly.length} file(s) carry a shape the recogniser reads but no LANDED SPELLING knows: `
+        + `${recogniserOnly.join(', ')}. A new shape landed and the second opinion was not widened with it, `
+        + 'so this census no longer has one.',
+    );
+  }
+  if (namesOnly.length > 0) {
+    failures.push(
+      `${namesOnly.length} file(s) carry a landed handshake spelling the recogniser reads as \`none\`: `
+        + `${namesOnly.join(', ')}. The column would report those gates as having NO handshake -- the `
+        + 'exact wrong reading, in the flattering direction, that #14968 was filed about.',
+    );
+  }
+  return failures;
+}
+
+// ---------------------------------------------------------------------------
+// The row selector -- WHICH census rows the probe runs (#15759)
+// ---------------------------------------------------------------------------
+
+/** The only help text this file ships; printed by every refusal below. */
+const USAGE = [
+  'usage:',
+  '  node scripts/measure-self-test-floor.mjs                        static census (fast)',
+  '  node scripts/measure-self-test-floor.mjs --probe                + the dynamic probe (minutes)',
+  '  node scripts/measure-self-test-floor.mjs --probe --only <path>  probe ONE census row; repeatable',
+  '  node scripts/measure-self-test-floor.mjs --json                 machine-readable',
+  '',
+  '`--only` takes ONE census row path per occurrence -- the path the census prints',
+  '(`scripts/invoked-as.mjs`), repo-relative or absolute, `--only=<path>` accepted.',
+  'It restricts what the PROBE runs; the census, the floor column and the handshake',
+  'column are always printed over the whole population.',
+].join('\n');
+
+/**
+ * The `--only` selectors, in both spellings -- or WHY this argv cannot be read.
+ *
+ * ⛔ A flag given no value is a REFUSAL, never an empty selector list. Read
+ * permissively, `--only --probe` would mean "sweep everything": the one outcome a
+ * selector must never reach by accident, because it is also the outcome that
+ * takes hours and looks like success.
+ */
+export function parseOnly(argv) {
+  const selectors = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--only') {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith('-')) {
+        return {
+          refusal:
+            '`--only` was given no value (it is followed by '
+            + `${value === undefined ? 'nothing' : JSON.stringify(value)}).`,
+        };
+      }
+      selectors.push(value);
+      i += 1;
+    } else if (arg.startsWith('--only=')) {
+      const value = arg.slice('--only='.length);
+      if (value === '') return { refusal: '`--only=` was given an empty value.' };
+      selectors.push(value);
+    }
+  }
+  return { selectors };
+}
+
+/**
+ * One selector, read into the spelling a census row publishes: repo-relative,
+ * `/`-joined. An absolute path under the repo and a `./`-prefixed one name the
+ * same row as the census's own `scripts/x.mjs`, and a reader who copied the path
+ * out of a shell prompt has all three.
+ */
+export function normalizeSelector(selector, root = ROOT) {
+  let s = selector.split(sep).join('/').replace(/\/+$/, '');
+  const rootSlash = `${root.split(sep).join('/').replace(/\/+$/, '')}/`;
+  if (s.startsWith(rootSlash)) s = s.slice(rootSlash.length);
+  while (s.startsWith('./')) s = s.slice(2);
+  return s;
+}
+
+/**
+ * The rows a failed selector most likely meant, BY PATH -- read in two tiers,
+ * the second reached only when the first is empty.
+ *
+ *   CONTAINS  the whole selector appears in the path. A bare basename, a
+ *             directory (`scripts/pm`), a truncated prefix -- the reader named a
+ *             real part of a real row and needs the rest of the path.
+ *   PREFIX    otherwise, the rows sharing the LONGEST basename prefix with the
+ *             selector's basename, and only those: `invoked-a.mjs` reaches
+ *             `invoked-as.mjs` at 9 characters while every other row shares 0.
+ *
+ * ⛔ The cut is the MAXIMUM, never a threshold, and never a per-part score. A
+ * score summed over path parts ranks the right row first and then pads the list
+ * with every row that happens to end in `.mjs` -- measured, on this census: a
+ * miss "matched" 181 rows, and a diagnostic that names everything names nothing.
+ *
+ * This is a diagnostic and never a match: nothing here can select a row. A
+ * "nearest" rule that RAN the row it guessed would answer a question nobody
+ * asked, under a path the reader never typed.
+ */
+export function nearestRows(rows, want, limit = 8) {
+  const needle = want.toLowerCase();
+  if (needle.length >= 3) {
+    const contains = rows.filter((r) => r.file.toLowerCase().includes(needle)).map((r) => r.file);
+    if (contains.length > 0) return contains.slice(0, limit);
+  }
+  const baseOf = (f) => f.slice(f.lastIndexOf('/') + 1);
+  const base = baseOf(needle);
+  const shared = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i += 1; return i; };
+  const scored = rows.map((r) => ({ file: r.file, n: shared(base, baseOf(r.file.toLowerCase())) }));
+  const best = Math.max(0, ...scored.map((x) => x.n));
+  if (best < 3) return [];
+  return scored.filter((x) => x.n === best).map((x) => x.file).slice(0, limit);
+}
+
+/**
+ * WHICH rows the probe runs. No selectors is the population ITSELF -- the same
+ * array object, so the unrestricted sweep cannot be a filtered copy of anything.
+ *
+ * A selector that names no row REFUSES, listing the nearest rows. The refusal is
+ * the point of this function: the alternative -- an empty selection swept
+ * silently -- prints `0 DEFEATED, 0 HELD, 0 ACCIDENT` and exits 0, which reads
+ * like a clean survey and is a survey that never ran.
+ */
+export function selectRows(rows, selectors) {
+  if (selectors.length === 0) return { selected: rows };
+  const selected = [];
+  const misses = [];
+  for (const selector of selectors) {
+    const want = normalizeSelector(selector);
+    const hit = rows.find((r) => r.file === want);
+    if (hit === undefined) {
+      const nearest = nearestRows(rows, want);
+      misses.push(
+        `\`--only ${selector}\` names no census row (read as \`${want}\`).\n`
+        + (nearest.length > 0
+          ? `  nearest rows by path: ${nearest.join(', ')}`
+          : `  no census row's path contains any part of it -- run without \`--only\` to print all ${rows.length} rows.`),
+      );
+      continue;
+    }
+    if (!selected.includes(hit)) selected.push(hit);
+  }
+  if (misses.length > 0) return { refusal: misses.join('\n') };
+  return { selected };
+}
+
+/**
+ * THE SWEEP'S LOOP BODY, lifted so the `--only` path and the full sweep are the
+ * same code and not two readings of it (#15759). Assigns each row's `probe`.
+ *
+ * `plan` and `probe` are injection points for the controls ONLY -- `main()` passes
+ * neither, so the shipped sweep and the shipped selector both run the real
+ * `probePlan` and the real `probeEarlyReturn`. A control that could not count the
+ * probe's calls could not tell "ran one row" from "ran the row and swept the rest".
+ */
+export function probeRows(rows, { plan = probePlan, probe = probeEarlyReturn } = {}) {
+  for (const r of rows) {
+    const p = plan(r);
+    if (p.entry === undefined) { r.probe = { verdict: 'NOT MEASURED', why: p.why }; continue; }
+    // `timeout: undefined` is the DEFAULT budget, not "no budget" -- the
+    // destructured default in `probeEarlyReturn` is what supplies 120 s.
+    r.probe = probe(r.abs, p.entry, { timeout: p.timeoutMs });
+  }
+  return rows;
+}
+
+/** A mis-invocation: exit 2, loudly, with the help text. Never a smaller sweep. */
+function refuse(message) {
+  console.error(`measure-self-test-floor: ${message}\n`);
+  console.error(USAGE);
+  console.error('');
+  process.exit(2);
+}
+
 function main() {
+  const wantProbe = process.argv.includes('--probe');
+  // Read BEFORE the controls run: an argv this file cannot read is not a
+  // measurement that came out small, it is a run that never started -- and the
+  // controls are a minute of spawning to reach the same refusal.
+  const only = parseOnly(process.argv.slice(2));
+  if (only.refusal !== undefined) refuse(only.refusal);
+  if (only.selectors.length > 0 && !wantProbe) {
+    refuse(
+      '`--only` selects rows for the PROBE, and `--probe` was not passed. There is no\n'
+      + 'sweep to restrict, and the census below it is printed whole either way.',
+    );
+  }
+
   const controlFailures = runControls();
   if (controlFailures.length > 0) {
     console.error('measure-self-test-floor: ITS OWN CONTROLS FAILED -- no census printed.\n');
@@ -1262,20 +2230,31 @@ function main() {
   }
 
   const rows = population();
-  const wantProbe = process.argv.includes('--probe');
+  const censusFailures = handshakeCensusFailures(rows);
+  if (censusFailures.length > 0) {
+    console.error('measure-self-test-floor: THE HANDSHAKE CENSUS IS NOT COMPLETE -- no census printed.\n');
+    for (const f of censusFailures) console.error(`  - ${f}`);
+    console.error('\nThe recogniser and the landed spellings disagree about WHICH files carry a handshake.');
+    console.error('Widen `classifyHandshake` and `LANDED_HANDSHAKE_NAMES` together, with a control on each.\n');
+    process.exit(1);
+  }
+  // WHICH rows the probe runs. With no `--only` this is the population object
+  // itself, so the full sweep is not a filtered copy of anything.
+  let probed = rows;
   if (wantProbe) {
-    for (const r of rows) {
-      const named = Object.hasOwn(ENTRY_BY_HAND, r.file) ? ENTRY_BY_HAND[r.file] : undefined;
-      if (named === null) { r.probe = { verdict: 'NOT MEASURED', why: 'entry read by hand as not probeable -- see ENTRY_BY_HAND' }; continue; }
-      const entry = named ?? (r.defs.length === 1 ? r.defs[0] : undefined);
-      if (entry === undefined) {
-        r.probe = { verdict: 'NOT MEASURED', why: r.defs.length === 0
-          ? 'self-test is an inline top-level block; no callee to leave early'
-          : `ambiguous entry (${r.defs.join(', ')}) and no ENTRY_BY_HAND row -- read the dispatch site` };
-        continue;
+    const picked = selectRows(rows, only.selectors);
+    if (picked.refusal !== undefined) refuse(picked.refusal);
+    probed = picked.selected;
+    // An excluded row must SAY it was excluded. In `--json` a missing `probe`
+    // key is what a run WITHOUT `--probe` publishes, so leaving it off here
+    // would make "you did not ask for a sweep" and "this row was outside the
+    // sweep you asked for" the same payload.
+    if (probed.length !== rows.length) {
+      for (const r of rows) {
+        if (!probed.includes(r)) r.probe = { verdict: 'NOT PROBED', why: 'excluded by --only' };
       }
-      r.probe = probeEarlyReturn(r.abs, entry);
     }
+    probeRows(probed);
   }
 
   if (process.argv.includes('--json')) {
@@ -1291,17 +2270,44 @@ function main() {
   if (byFloor.ROSTER.length) console.log(`    roster: ${byFloor.ROSTER.join(', ')}`);
   if (byFloor.COUNT.length) console.log(`    count candidates: ${byFloor.COUNT.join(', ')}`);
 
+  const byShape = { sentinel: 0, flag: 0, helper: 0, none: 0 };
+  for (const r of rows) byShape[r.handshake]++;
+  console.log('\nHandshake SHAPE -- which verdict handshake each file carries, read from CODE (#14968):');
+  console.log(
+    `  ${byShape.sentinel} sentinel, ${byShape.flag} flag, ${byShape.helper} helper, `
+      + `${byShape.none} none, of ${rows.length}.`,
+  );
+  console.log('  ⛔ The shapes are RECOGNISED, not legislated: the flag form exists because those');
+  console.log('     self-tests\' own exit codes are load-bearing, so the handshake cannot BE the');
+  console.log('     return value. This column answers "which spelling", never "which is right".');
+  for (const r of rows) console.log(`    ${r.handshake.padEnd(8)} ${r.floor.padEnd(6)} ${r.file}`);
+
   if (!wantProbe) {
     console.log('\nHole 2 -- no verdict handshake: NOT MEASURED (pass --probe; it runs every self-test twice).');
     return;
   }
-  const defeated = rows.filter((r) => r.probe.verdict === 'DEFEATED');
-  const held = rows.filter((r) => r.probe.verdict === 'HELD');
-  const accidents = rows.filter((r) => r.probe.verdict === 'ACCIDENT');
-  const unmeasured = rows.filter((r) => r.probe.verdict === 'NOT MEASURED');
+  const defeated = probed.filter((r) => r.probe.verdict === 'DEFEATED');
+  const held = probed.filter((r) => r.probe.verdict === 'HELD');
+  const accidents = probed.filter((r) => r.probe.verdict === 'ACCIDENT');
+  const unmeasured = probed.filter((r) => r.probe.verdict === 'NOT MEASURED');
+  // ⛔ The restriction is announced BEFORE its numbers, never inferred from them:
+  // `0 DEFEATED, 0 HELD` over one selected row and over the whole census are the
+  // same three digits, and only one of them is a survey.
+  if (probed.length !== rows.length) {
+    console.log(`\n⚠ \`--only\` RESTRICTED this probe to ${probed.length} of ${rows.length} census row(s). The other`);
+    console.log(`   ${rows.length - probed.length} were NOT PROBED, and nothing below is a reading of them.`);
+    for (const r of probed) console.log(`    selected: ${r.file}`);
+  }
+  // The shrink this INSTRUMENT is responsible for, reported as a number rather
+  // than left as a silence -- printed even when it is zero, because a zero that
+  // is printed is a reading and a line that appears only when non-zero is not
+  // (#15573).
+  const timedOut = unmeasured.filter((r) => r.probe.timedOut === true);
   console.log('\nHole 2 -- silently defeated by an early `return` in the self-test (MEASURED):');
   console.log(`  ${defeated.length} DEFEATED, ${held.length} HELD, ${accidents.length} ACCIDENT, ${unmeasured.length} NOT MEASURED.`);
   console.log(`  of the defeated, ${defeated.filter((r) => r.probe.mutatedBytes === 0).length} printed NOTHING at all and still exited 0.`);
+  console.log(`  of the NOT MEASURED, ${timedOut.length} outlasted the probe's own budget and was killed --`);
+  console.log('   a shrink of this survey by a number THIS TOOL chose, not a property of those files.');
   for (const r of held) console.log(`    HELD  ${r.file} -- ${r.probe.mutatedHead.slice(0, 96)}`);
   for (const r of accidents) console.log(`    ACC   ${r.file} -- exited ${r.probe.mutatedExit} printing ${r.probe.mutatedBytes} byte(s); no refusal, so NOT a hold`);
   for (const r of unmeasured) console.log(`    n/m   ${r.file} -- ${r.probe.why}`);

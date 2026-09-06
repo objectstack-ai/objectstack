@@ -5,7 +5,7 @@
  *
  * Three keys, and for each of them the three cases that matter: declared and
  * hit, declared and not hit, and the boundary (`authRequired: false`, a budget
- * that is present but disarmed, `cacheTtl: 0`). A policy key that is only ever
+ * that is present but disarmed, `cacheTtlSeconds: 0`). A policy key that is only ever
  * tested in its "allow" direction is indistinguishable from a key nobody read.
  *
  * Everything is driven with stubs — a counter store, a principal resolver, a
@@ -298,7 +298,7 @@ describe('rateLimit — #5006 primitives, an endpoint-scoped keyspace', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe('cacheTtl — response-header semantics only', () => {
+describe('cacheTtlSeconds — response-header semantics only', () => {
     it('says nothing when the key is absent', async () => {
         expect(computeCacheControl(declare(), 'GET')).toBeUndefined();
         const verdict = await run(declare({ authRequired: false }), harness({}));
@@ -306,38 +306,38 @@ describe('cacheTtl — response-header semantics only', () => {
     });
 
     it('sets `private, max-age=<ttl>` for a positive ttl', async () => {
-        const verdict = await run(declare({ authRequired: false, cacheTtl: 30 }), harness({}));
+        const verdict = await run(declare({ authRequired: false, cacheTtlSeconds: 30 }), harness({}));
         expect(verdict.verdict).toBe('pass');
         if (verdict.verdict !== 'pass') return;
         expect(verdict.responseHeaders).toEqual({ 'Cache-Control': 'private, max-age=30' });
     });
 
     it('is `private` even on an anonymous endpoint — a shared cache must never hold a per-caller answer', () => {
-        expect(computeCacheControl({ name: 'e', cacheTtl: 60 }, 'GET')).toBe('private, max-age=60');
+        expect(computeCacheControl({ name: 'e', cacheTtlSeconds: 60 }, 'GET')).toBe('private, max-age=60');
     });
 
     it('reads 0 as "do not cache" rather than as silence', async () => {
-        // The boundary #5091 asks for. `cacheTtl: 0` is a sentence the author
+        // The boundary #5091 asks for. `cacheTtlSeconds: 0` is a sentence the author
         // wrote; answering it identically to an absent key would make writing it
         // a no-op, which is the failure mode this program exists to remove.
-        expect(computeCacheControl({ name: 'e', cacheTtl: 0 }, 'GET')).toBe('no-store');
-        const verdict = await run(declare({ authRequired: false, cacheTtl: 0 }), harness({}));
+        expect(computeCacheControl({ name: 'e', cacheTtlSeconds: 0 }, 'GET')).toBe('no-store');
+        const verdict = await run(declare({ authRequired: false, cacheTtlSeconds: 0 }), harness({}));
         expect(verdict.verdict).toBe('pass');
         if (verdict.verdict !== 'pass') return;
         expect(verdict.responseHeaders).toEqual({ 'Cache-Control': 'no-store' });
     });
 
     it('truncates a fractional ttl rather than emitting a fractional max-age', () => {
-        expect(computeCacheControl({ name: 'e', cacheTtl: 30.7 }, 'GET')).toBe('private, max-age=30');
+        expect(computeCacheControl({ name: 'e', cacheTtlSeconds: 30.7 }, 'GET')).toBe('private, max-age=30');
     });
 
     it('refuses to invent a meaning for a negative ttl', () => {
-        expect(computeCacheControl({ name: 'e', cacheTtl: -5 }, 'GET')).toBe('no-store');
+        expect(computeCacheControl({ name: 'e', cacheTtlSeconds: -5 }, 'GET')).toBe('no-store');
     });
 
     it('sends no header on a non-GET endpoint, and says so out loud', () => {
         const warnings: string[] = [];
-        const header = computeCacheControl({ name: 'purge', cacheTtl: 30 }, 'POST', {
+        const header = computeCacheControl({ name: 'purge', cacheTtlSeconds: 30 }, 'POST', {
             warn: (m: string) => { warnings.push(m); },
         });
         expect(header).toBeUndefined();
@@ -348,7 +348,7 @@ describe('cacheTtl — response-header semantics only', () => {
     it('is not computed for a denied request', async () => {
         // Nothing to cache, nothing to say: the denial carries its own headers
         // (`Retry-After`) and no cache directive at all.
-        const denied = await run(declare({ cacheTtl: 30 }), harness({}));
+        const denied = await run(declare({ cacheTtlSeconds: 30 }), harness({}));
         expect(denied.verdict).toBe('deny');
         if (denied.verdict !== 'deny') return;
         expect(denied.headers).toBeUndefined();

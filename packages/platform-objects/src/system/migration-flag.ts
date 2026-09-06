@@ -6,6 +6,7 @@ import {
   DATA_MIGRATION_FLAG_OBJECT,
   FILE_REFERENCES_MIGRATION_ID,
   isDataMigrationFlagVerified,
+  VALUE_SHAPES_MIGRATION_ID,
   type DataMigrationFlag,
 } from '@objectstack/spec/system';
 
@@ -205,6 +206,42 @@ export async function recordDataMigrationRun(
   return flag;
 }
 
+/**
+ * The `os migrate` sub-command that re-earns each id a boot's own admitted
+ * value can CONTRADICT — and, by having no row for anything else, the register
+ * of which ids that is.
+ *
+ * ## Why a map and not a branch
+ *
+ * The counterexample this reads comes from
+ * {@link MigrationFlagEngine.valueShapeViolationsAdmitted}, whose whole subject
+ * is ADR-0104 value shapes. So membership here is one question — *does this id
+ * stand for a value-shape contract a stored value can disprove?* — and the
+ * answer for every id that has one is a DIFFERENT command. A two-way branch
+ * answered both at once: it read the file id and gave every other id
+ * `value-shapes` by default. That default was silently wrong the moment a third
+ * id joined {@link CREATION_ATTESTED_MIGRATION_IDS} — `adr-0030-notification-event`
+ * would have been told to run `os migrate value-shapes --apply`, a command that
+ * does not attest it, does not clear it, and has nothing to do with it (there is
+ * no `os migrate notification-event` at all; that cut-over is an operator call
+ * with no self-check, ruled on `NOTIFICATION_EVENT_MIGRATION_ID`'s docblock).
+ *
+ * ⛔ So a new member must NOT inherit a remedy. An id absent from this map is
+ * never-contradictable *by this evidence* — a value-shape tally says nothing
+ * about a fact that is not about value shapes — and it is attested on the birth
+ * observation like any other. Adding a third arm that happens to be right today
+ * would only move the same defect onto the fourth member; adding a ROW is a
+ * deliberate act, and its absence prescribes nothing rather than prescribing
+ * the wrong thing.
+ *
+ * A `Map`, not an object literal: `id` reaches this from a caller-supplied
+ * array, and an object would answer `'toString'` with a function.
+ */
+const VALUE_SHAPE_CONTRACT_REMEDY: ReadonlyMap<string, string> = new Map([
+  [FILE_REFERENCES_MIGRATION_ID, 'files-to-references'],
+  [VALUE_SHAPES_MIGRATION_ID, 'value-shapes'],
+]);
+
 /** Marker written into a creation-attested row's `details`, so an operator
  * reading a verified flag can tell evidence-by-scan from evidence-by-birth. */
 export const CREATION_ATTESTATION_DETAIL = { attested: 'datastore-created-empty' } as const;
@@ -291,7 +328,12 @@ export async function attestFreshDatastore(
     try {
       if (await readDataMigrationFlag(engine, id)) continue; // not ours to write
       // #4769 — a boot may not prove a contract it has already broken.
-      const contradiction = admitted[id];
+      // Asked of the register, not of a default: an id with no value-shape
+      // contract cannot be contradicted by a value-shape tally, so it is
+      // attested on the birth observation instead of being handed another
+      // migration's remedy. See VALUE_SHAPE_CONTRACT_REMEDY.
+      const remedy = VALUE_SHAPE_CONTRACT_REMEDY.get(id);
+      const contradiction = remedy === undefined ? undefined : admitted[id];
       if (contradiction && contradiction.count > 0) {
         const at = contradiction.first;
         const where = at?.object && at?.field ? `${at.object}.${at.field}` : 'a record';
@@ -301,7 +343,7 @@ export async function attestFreshDatastore(
             `(${where}${at?.detail ? `: ${at.detail}` : ''}). The store was created empty, but it ` +
             'is no longer empty and what it now holds contradicts the claim — the gate stays ' +
             'open (warn-first). Fix the data, then run `os migrate ' +
-            (id === FILE_REFERENCES_MIGRATION_ID ? 'files-to-references' : 'value-shapes') +
+            remedy +
             ' --apply` to close it on real evidence (ADR-0104).',
         );
         continue;

@@ -58,12 +58,18 @@
  *
  * ## Why the standalone shape reuses `init`'s renderers
  *
- * `renderPnpmWorkspaceYaml()` and `SCAFFOLD_PNPM_RANGE` are `init.ts`'s, and
- * they are CALLED here rather than restated. A restatement is the two-producer
- * defect `test/scaffold-workspace-consistency.test.ts` exists to catch, and it
- * has already been paid for once in this repo: the build-approval block landed
- * in one scaffold path and not the other, and one of them shipped the pre-fix
- * shape for months.
+ * `renderPnpmWorkspaceYaml()`, `SCAFFOLD_PNPM_RANGE`, `renderScaffoldTsconfig()`
+ * and the `SCAFFOLD_*_RANGE` constants are `init.ts`'s, and they are CALLED here
+ * rather than restated. A restatement is the two-producer defect
+ * `test/scaffold-workspace-consistency.test.ts` exists to catch, and it has
+ * already been paid for twice in this repo: the build-approval block landed in
+ * one scaffold path and not the other, and one of them shipped the pre-fix shape
+ * for months; and the TypeScript range a scaffold installs was written in six
+ * places and split into three values — the two CLI values 210 days apart, the
+ * third 53 and recorded nowhere — on the value that decides whether the
+ * scaffold type-checks at all. The emission policy has
+ * one home now — see the block above `renderScaffoldPackageJson` in `init.ts`
+ * for the measurement and for which values survived.
  *
  * ## The pin
  *
@@ -82,9 +88,19 @@ import path from 'path';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import {
   getCliVersion,
+  NPM_PACKAGE_NAME_MAX_LENGTH,
   renderPnpmWorkspaceYaml,
+  renderScaffoldTsconfig,
   sanitizeNamespace,
   SCAFFOLD_PNPM_RANGE,
+  SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
+  SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
+  SCAFFOLD_TSX_RANGE,
+  SCAFFOLD_TYPES_NODE_RANGE,
+  SCAFFOLD_TYPESCRIPT_RANGE,
+  SCAFFOLD_VITEST_RANGE,
+  SCAFFOLD_ZOD_RANGE,
+  validateProjectName,
 } from './init.js';
 
 /**
@@ -119,22 +135,6 @@ export function rootTsconfigExtends(inRepoDir: string, projectDirName: string): 
   return `${'../'.repeat(depth)}tsconfig.json`;
 }
 
-/**
- * The compiler options a standalone scaffold carries in full, because it
- * extends nothing. Deliberately the same set `objectstack init` writes: two
- * scaffolders that disagree about `moduleResolution` is a support question
- * nobody can answer, and `bundler` is what resolves the `exports` subpaths
- * (`@objectstack/spec/contracts`, `/kernel`) the templates import.
- */
-const STANDALONE_COMPILER_OPTIONS = {
-  target: 'ES2022',
-  module: 'ESNext',
-  moduleResolution: 'bundler',
-  strict: true,
-  esModuleInterop: true,
-  skipLibCheck: true,
-} as const;
-
 /** A rendered file: JSON objects are stringified on write, strings land as-is. */
 type FileRenderer = (name: string) => unknown;
 
@@ -163,6 +163,52 @@ function defineTemplate(t: Omit<CreateTemplate, 'files'>): CreateTemplate {
       return t.filesFor(DEFAULT_PLACEMENT);
     },
   };
+}
+
+/**
+ * The scoped package name a scaffold is about to write, READ BACK off the
+ * rendered manifest rather than recomposed here.
+ *
+ * Recomposing it would be a second copy of `@objectstack/plugin-${name}` that
+ * nothing keeps in step with the renderer — the same restatement that let this
+ * command's emitted name drift away from what `os init` enforces. Reading the
+ * rendered object measures the string that actually lands on disk, and a
+ * template added later is covered without being told to declare anything.
+ *
+ * `null` when the template emits no `package.json`, or emits one without a
+ * string `name`: there is then no package name to judge, which is not the same
+ * as judging one and finding it fine.
+ */
+export function emittedPackageName(
+  template: CreateTemplate,
+  placement: ScaffoldPlacement,
+  name: string,
+): string | null {
+  const render = template.filesFor(placement)['package.json'];
+  if (!render) return null;
+  const manifest = render(name) as { name?: unknown } | null | undefined;
+  return typeof manifest?.name === 'string' ? manifest.name : null;
+}
+
+/**
+ * The one rule `os create` needs and `os init` cannot.
+ *
+ * `init`'s argument IS the package name, so measuring the argument is the same
+ * measurement. `create` composes its argument into a SCOPED name, and npm's
+ * 214-character ceiling counts the scope: `@objectstack/plugin-` spends 20 of
+ * them before the user's first character. A 200-character name is therefore
+ * legal for `init` (measured: accepted) and illegal for `create` (measured:
+ * emits a 220-character name npm refuses) — which is why the shared validator
+ * is shared and this check is not.
+ */
+export function validateEmittedPackageName(packageName: string): string | null {
+  const over = packageName.length - NPM_PACKAGE_NAME_MAX_LENGTH;
+  if (over <= 0) return null;
+  return (
+    `The package name this would emit is ${packageName.length} characters; npm's limit is `
+    + `${NPM_PACKAGE_NAME_MAX_LENGTH}. Shorten the project name by at least ${over} character`
+    + `${over === 1 ? '' : 's'}.`
+  );
 }
 
 function toCamelCase(str: string): string {
@@ -205,26 +251,20 @@ export const templates: Record<string, CreateTemplate> = {
           license: 'MIT',
           dependencies: {
             '@objectstack/spec': objectstackDependencySpec(placement),
-            zod: '^4.3.6',
+            zod: SCAFFOLD_ZOD_RANGE,
           },
           devDependencies: {
-            '@types/node': '^22.0.0',
-            typescript: '^5.8.0',
-            vitest: '^4.0.0',
+            '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
+            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
+            vitest: SCAFFOLD_VITEST_RANGE,
           },
         }),
         'tsconfig.json': (name: string) =>
           standalone
-            ? {
-                compilerOptions: {
-                  ...STANDALONE_COMPILER_OPTIONS,
-                  outDir: 'dist',
-                  rootDir: 'src',
-                  declaration: true,
-                },
-                include: ['src/**/*'],
-                exclude: ['dist', 'node_modules'],
-              }
+            ? renderScaffoldTsconfig({
+                rootDir: 'src',
+                include: SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
+              })
             : {
                 extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, `plugin-${name}`),
                 compilerOptions: {
@@ -319,13 +359,13 @@ MIT
           dependencies: {
             '@objectstack/spec': objectstackDependencySpec(placement),
             '@objectstack/cli': objectstackDependencySpec(placement),
-            zod: '^4.3.6',
+            zod: SCAFFOLD_ZOD_RANGE,
           },
           devDependencies: {
-            '@types/node': '^22.0.0',
-            tsx: '^4.21.0',
-            typescript: '^5.8.0',
-            vitest: '^4.0.0',
+            '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
+            tsx: SCAFFOLD_TSX_RANGE,
+            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
+            vitest: SCAFFOLD_VITEST_RANGE,
           },
         }),
         'objectstack.config.ts': (name: string) => {
@@ -397,16 +437,10 @@ ${
 }`,
         'tsconfig.json': (name: string) =>
           standalone
-            ? {
-                compilerOptions: {
-                  ...STANDALONE_COMPILER_OPTIONS,
-                  outDir: 'dist',
-                  rootDir: '.',
-                  declaration: true,
-                },
-                include: ['*.ts', 'src/**/*'],
-                exclude: ['dist', 'node_modules'],
-              }
+            ? renderScaffoldTsconfig({
+                rootDir: '.',
+                include: SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
+              })
             : {
                 extends: rootTsconfigExtends(EXAMPLE_IN_REPO_DIR, name),
                 compilerOptions: {
@@ -464,11 +498,38 @@ export default class Create extends Command {
       console.log(chalk.dim(`Usage: objectstack create ${args.type} <name>`));
       process.exit(1);
     }
-    
+
+    // ⛔ BEFORE the first write, which is the whole property — a refusal that
+    // arrives after `mkdirSync` has fixed the message and not the defect.
+    //
+    // This command used to validate nothing it emitted, so `os create plugin
+    // "My App"` exited 0 having written `./plugin-My App/` with a manifest
+    // reading `name: "@objectstack/plugin-My App"` — a name npm refuses —
+    // while `os init "My App"` refused the same input and wrote nothing. The
+    // rule set is `init`'s, imported rather than restated: the two scaffolders
+    // already share four symbols, and the one they did not share is the one
+    // they disagreed on.
+    const nameError = validateProjectName(args.name);
+    if (nameError) {
+      console.error(chalk.red(`\n❌ ${nameError}`));
+      console.log(chalk.dim(`  Usage: objectstack create ${args.type} <name>`));
+      process.exit(1);
+    }
+
     const template = templates[args.type as keyof typeof templates];
     const cwd = process.cwd();
     const placement: ScaffoldPlacement = flags['in-repo'] ? 'in-repo' : DEFAULT_PLACEMENT;
     const projectDirName = template.dirName(args.name);
+
+    // The check `init` cannot need, on the string `init` never composes. Also
+    // before any write, and read off the rendered manifest so it measures what
+    // would land rather than a second copy of how it is built.
+    const willEmit = emittedPackageName(template, placement, args.name);
+    const packageNameError = willEmit ? validateEmittedPackageName(willEmit) : null;
+    if (packageNameError) {
+      console.error(chalk.red(`\n❌ ${packageNameError}`));
+      process.exit(1);
+    }
 
     // Refuse `--in-repo` outside a workspace rather than emit the one thing
     // this command is no longer allowed to emit: a project that cannot install.

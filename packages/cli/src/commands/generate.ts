@@ -57,7 +57,7 @@ const GENERATORS: Record<string, {
 /**
  * ${toTitleCase(name)} Object
  */
-const ${toCamelCase(name)}: Data.Object = {
+const ${toCamelCase(name)}: Data.ServiceObject = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
@@ -1014,7 +1014,23 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   percent: 'DECIMAL(5,2)',
   boolean: 'BOOLEAN',
   date: 'DATE',
-  datetime: 'TIMESTAMP',
+  // #15521 — TIMESTAMPTZ, not TIMESTAMP, for the same reason and with the same
+  // measured consequence as the audit-stamp columns in `generateMigrationSql`
+  // below: bare `TIMESTAMP` is `timestamp WITHOUT time zone`, while the driver
+  // creates a declared `Field.datetime` as `table.timestamp(name)` = knex's
+  // `timestamptz`. `createColumn`'s `datetime` arm states that as a decision,
+  // not an accident — "Postgres deliberately keeps `table.timestamp` →
+  // `timestamptz`: asking for precision 3 there would REDUCE it from
+  // microseconds" — and this file's OWN typescript generator already emitted
+  // `table.timestamp` for it, so the SQL format was one producer of three
+  // disagreeing with the other two. Measured on live PostgreSQL 16.13, a
+  // `datetime` field: driver `timestamp with time zone`, ts format `timestamp
+  // with time zone`, this map `timestamp without time zone`.
+  //
+  // The whole temporal class was enumerated in that same run, and it is the only
+  // member that diverged: `date` is DATE and `time` is TIME on all three
+  // producers, so neither moves.
+  datetime: 'TIMESTAMPTZ',
   time: 'TIME',
   email: 'VARCHAR(255)',
   phone: 'VARCHAR(50)',
@@ -1200,8 +1216,40 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
       fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}`);
     }
 
-    fieldLines.push('  "created_at" TIMESTAMP NOT NULL DEFAULT now()');
-    fieldLines.push('  "updated_at" TIMESTAMP NOT NULL DEFAULT now()');
+    // #15521 — TIMESTAMPTZ, not TIMESTAMP. Bare `TIMESTAMP` is `timestamp
+    // WITHOUT time zone`; both knex producers of these same two columns —
+    // `driver-sql`'s `createAuditTimestampColumn` and `generateMigrationTs`
+    // below — yield `timestamptz`. Driven rather than compiled: all three were
+    // run against a live PostgreSQL 16.13 and the columns read back out of
+    // `information_schema.columns`, where this literal was the only one that
+    // came back zone-naive.
+    //
+    //   driver   created_at  timestamp with time zone     null=YES  default=CURRENT_TIMESTAMP
+    //   ts gen   created_at  timestamp with time zone     null=NO   default=CURRENT_TIMESTAMP
+    //   sql gen  created_at  timestamp without time zone  null=NO   default=now()    <- this line
+    //
+    // Not a cosmetic type nit. A zone-naive column stores the wall clock of
+    // whatever session wrote the row and keeps nothing to recover the offset
+    // from, and `DEFAULT now()` is folded into that session's `TimeZone` on the
+    // way in. Two defaulted rows inserted SIX MILLISECONDS apart, one under
+    // `TimeZone='UTC'` and one under `Asia/Tokyo`, were recorded NINE HOURS
+    // apart in the generated table and 3 ms apart in the driver's own:
+    //
+    //   sqlgen (timestamp)    a_utc    2026-09-05 22:31:28.309421
+    //   sqlgen (timestamp)    b_tokyo  2026-09-06 07:31:28.315458   <- +9h, same instant
+    //   tsgen  (timestamptz)  a_utc    2026-09-05 22:31:28.31332+00
+    //   tsgen  (timestamptz)  b_tokyo  2026-09-05 22:31:28.316401+00
+    //
+    // ⚠️ The NOT NULL half of #15521 is deliberately NOT touched here. The
+    // driver leaves both columns nullable and both generators say NOT NULL;
+    // which side moves is a ruling that card holds open, and it is a different
+    // shape of question — nothing fails either way. `DEFAULT now()` is likewise
+    // left alone: it is the same instant as the driver's `CURRENT_TIMESTAMP`
+    // (both are `transaction_timestamp()`), it only reads differently in the
+    // catalog. `generate-builtin-id-column.pin.test.ts` records both of those,
+    // still unresolved, beside this half now resolved.
+    fieldLines.push('  "created_at" TIMESTAMPTZ NOT NULL DEFAULT now()');
+    fieldLines.push('  "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()');
     lines.push(fieldLines.join(',\n'));
     lines.push(');');
     lines.push('');

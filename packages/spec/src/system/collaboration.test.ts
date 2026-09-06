@@ -904,12 +904,12 @@ describe('CollaborationSessionConfigSchema', () => {
       enablePresence: true,
       enableAwareness: false,
       maxUsers: 50,
-      idleTimeout: 600000,
+      idleTimeoutMs: 600000,
       conflictResolution: 'crdt',
       persistence: true,
       snapshot: {
         enabled: true,
-        interval: 60000,
+        intervalMs: 60000,
       },
     };
 
@@ -925,7 +925,7 @@ describe('CollaborationSessionConfigSchema', () => {
     expect(parsed.enableCursorSharing).toBe(true);
     expect(parsed.enablePresence).toBe(true);
     expect(parsed.enableAwareness).toBe(true);
-    expect(parsed.idleTimeout).toBe(300000);
+    expect(parsed.idleTimeoutMs).toBe(300000);
     expect(parsed.conflictResolution).toBe('ot');
     expect(parsed.persistence).toBe(true);
   });
@@ -995,5 +995,47 @@ describe('CollaborationSessionSchema', () => {
       const parsed = CollaborationSessionSchema.parse(session);
       expect(parsed.status).toBe(status);
     });
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B. `idleTimeout` was the live 1000x
+// collision that got this population ruled: milliseconds here, seconds on the
+// tenant surface. Both old spellings are `retiredKey()` tombstones; asserted on
+// the issue CODE and the prescription, never on a bare `toThrow()`.
+describe('collaboration session durations carry their unit (#15679)', () => {
+  it('REFUSES the retired `idleTimeout` with the rename in the message', () => {
+    const result = CollaborationSessionConfigSchema.safeParse({ mode: 'ot', idleTimeout: 600000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'idleTimeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`CollaborationSessionConfig.idleTimeout` was renamed to `idleTimeoutMs`',
+    );
+  });
+
+  it('REFUSES the retired `snapshot.interval` with the rename in the message', () => {
+    const result = CollaborationSessionConfigSchema.safeParse({
+      mode: 'ot',
+      snapshot: { enabled: true, interval: 60000 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'snapshot.interval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`CollaborationSessionConfig.snapshot.interval` was renamed to `intervalMs`',
+    );
+  });
+
+  it('accepts the renamed keys at the same magnitude and keeps the 300000 default', () => {
+    const parsed = CollaborationSessionConfigSchema.parse({
+      mode: 'crdt',
+      idleTimeoutMs: 600000,
+      snapshot: { enabled: true, intervalMs: 60000 },
+    });
+    expect(parsed.idleTimeoutMs).toBe(600000);
+    expect(parsed.snapshot?.intervalMs).toBe(60000);
+    expect(CollaborationSessionConfigSchema.parse({ mode: 'ot' }).idleTimeoutMs).toBe(300000);
   });
 });

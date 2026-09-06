@@ -74,9 +74,16 @@ function makeEngine() {
     },
     /** Test helper: simulate an engine update passing through beforeUpdate hooks. */
     async updateThroughHooks(o: string, id: string, data: Row, session: Row) {
+    // [#15302] `previous` is bound BEFORE the beforeUpdate dispatch, as the
+    // real engine binds it (#5574 / #5846 - by-id reads the prior row ahead of
+    // the dispatch; each per-row context of a predicate write carries its own).
+    // Withholding it here is what let this fake model a pre-#5574 engine, and
+    // a hook reading `ctx.previous` would have gone silently unstamped against
+    // a fake no production caller resembles.
+      const previous = ensure(o).filter((r) => r.id === id).map((r) => ({ ...r }))[0];
       for (const h of hooks) {
         if (h.event === 'beforeUpdate' && h.options.object === o) {
-          await h.handler({ session, input: { id, data } });
+          await h.handler({ session, input: { id, data }, previous });
         }
       }
       return this.update(o, id, data);
@@ -191,9 +198,21 @@ describe('provenance stamp hook (#2909 T1)', () => {
     expect(engine._tables.sys_sharing_rule.find((r) => r.name === 'admin_rule')!.customized).toBe(false);
   });
 
-  it('ignores multi-row updates (no id) without crashing', async () => {
+  it('writes nothing when the dispatch carries no pre-image (it never guesses the row)', async () => {
+    // [#15302] This case used to read "ignores multi-row updates (no id)" and
+    // asserted a boundary that does not exist: per-row dispatch binds
+    // `input.id` on EVERY context, so "no id" never identified a bulk write -
+    // and the id is carried here to say so. What IS true, and what this pins:
+    // the stamp is a decision about the row's pre-image, so a dispatch the
+    // engine gave no `previous` writes nothing rather than re-reading the row.
+    // The per-row behaviour itself is pinned against the real engine in
+    // `sharing-rule-provenance.per-row.test.ts`.
     const hook = engine._hooks.find((h) => h.options.packageId === SHARING_RULE_PROVENANCE_PACKAGE)!;
-    await expect(hook.handler({ session: { userId: 'admin1' }, input: { data: { active: false } } })).resolves.toBeUndefined();
+    const data: Row = { active: false };
+    await expect(
+      hook.handler({ session: { userId: 'admin1' }, input: { id: 'srule_absent', data } }),
+    ).resolves.toBeUndefined();
+    expect(data).toEqual({ active: false });
   });
 
   it('end-to-end: admin edit through hooks → next seed does not clobber', async () => {

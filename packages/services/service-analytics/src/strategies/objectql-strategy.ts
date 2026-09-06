@@ -17,8 +17,10 @@ import {
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js';
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
+import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { invalidMemberError } from '../dataset-refusal.js';
-import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
+import { type LikeShape } from '../like-pattern.js';
+import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
   rebucketCrossObject,
@@ -80,16 +82,26 @@ const SCALAR_SQL_OPS: Record<string, string> = {
  * than the query it claims to reproduce whenever the comparand carried a `_` or
  * `%` — the #3601 / #3602 / #3650 failure this render block exists to prevent.
  */
-const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape; fold?: boolean }> = {
-  contains: { sql: 'LIKE', shape: 'contains' },
-  notContains: { sql: 'NOT LIKE', shape: 'contains' },
-  startsWith: { sql: 'LIKE', shape: 'starts' },
-  endsWith: { sql: 'LIKE', shape: 'ends' },
-  // [#6520] `$icontains`: the same escaped pattern and bound `ESCAPE` as its
-  // four case-EXACT neighbours, with `fold` adding the ASCII-only case fold to
-  // both sides of the comparison. The flag is on this row alone — the family
-  // above it is case-sensitive by ruling (#4706 Q2 = A).
-  icontains: { sql: 'LIKE', shape: 'contains', fold: true },
+const LIKE_SQL_OPS: Record<string, { shape: LikeShape; fold?: boolean; negate?: boolean }> = {
+  // [#15684 / #15780] This table carries NO keyword, deliberately. Every row's
+  // construct comes from the DIALECT (`text-match-sql.ts`): `GLOB` on SQLite,
+  // `LIKE` over `CAST(… AS BINARY)` on MySQL, plain `LIKE` on Postgres, since a
+  // plain `LIKE` is case-exact on Postgres alone. #15684 kept a `sql` field
+  // here for the FOLDING row, which was the last row still emitting a keyword
+  // written locally — together with the `translate()` fold that could not parse
+  // on SQLite. #15780 moved that row onto the table too, so the field had no
+  // reader left, and a dead field named `sql` sitting beside a compiler is an
+  // invitation to read it as the emitted keyword.
+  //
+  // What survives here is only what the construct table cannot derive from the
+  // operator name: which POLARITY the row is (`negate`) and whether it FOLDS
+  // (`fold`), each spelled once. `fold` is on `icontains` ALONE — the four
+  // above it are case-SENSITIVE by ruling (#4706 Q2 = A).
+  contains: { shape: 'contains' },
+  notContains: { shape: 'contains', negate: true },
+  startsWith: { shape: 'starts' },
+  endsWith: { shape: 'ends' },
+  icontains: { shape: 'contains', fold: true },
 };
 
 /** One cross-object grouping dimension planned for FK-expand (#3654). */
@@ -459,7 +471,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         const { field, method } = this.resolveMeasureAggregation(cube, m);
         const measureFilter = datasetScope?.measureFilters?.[m];
         const predicate = measureFilter
-          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params)
+          ? this.renderFilterNodeSql(normalizeAnalyticsFilterTree({ where: measureFilter }), cube, params, ctx)
           : null;
         const aggSql = predicate
           ? this.conditionalAggregateSql(method, field, predicate)
@@ -501,6 +513,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       normalizeAnalyticsFilterTree(query),
       cube,
       params,
+      ctx,
     );
     if (filterClause) whereParts.push(filterClause);
     // [#10413] The dataset's own scope renders too, for the reason the read
@@ -513,6 +526,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         normalizeAnalyticsFilterTree({ where: datasetScope.filter }),
         cube,
         params,
+        ctx,
       );
       if (scopeSql) whereParts.push(scopeSql);
     }
@@ -535,7 +549,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // silently omitting the scope is exactly the misleading output being fixed.
     const scope = ctx.getReadScope?.(tableName);
     if (scope != null) {
-      const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName);
+      // [#14079] The same declared-type rule `NativeSQLStrategy.applyReadScope`
+      // hands the compiler, so the echo prints the constant the executed
+      // statement runs for a text operator over a numeric or boolean column.
+      // [#15684] …and the same dialect, so the echoed scope prints the
+      // construct the executed one runs — `GLOB` on SQLite, where a plain
+      // `LIKE` folds ASCII case and admits rows the policy excludes.
+      const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName, {
+        nonTextColumn: nonTextColumnResolver(ctx, tableName),
+        dialect: sqlDialectFor(ctx, tableName),
+      });
       // [#13926] The same door guard `execute()` trusts (`withReadScope`,
       // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
       // on this strategy, whichever face the caller asked for. Without it the
@@ -1181,6 +1204,17 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     operator: string,
     values: unknown[] | undefined,
     params: unknown[],
+    // [#14079] OPTIONAL, both of them, on purpose. `renderFilterNodeSql` always
+    // passes them; the operator-coverage suite reaches this renderer DIRECTLY
+    // with the four-argument shape it has always had (its local mirror of the
+    // private signature), and a caller that hands no target cannot be asked
+    // the declared-type question — it keeps the `LIKE` it always got, the
+    // "cannot answer, do not block" posture `nonTextColumnResolver` takes for
+    // a context with no hook. Making them required turned that direct call
+    // into a `TypeError` on `target.object` (CI `Test Core (4/6)` and the
+    // live-dialect job, both red on one root cause).
+    target?: { object: string; field: string },
+    ctx?: StrategyContext,
   ): string | null {
     if (operator === 'set') return `${col} IS NOT NULL`;
     if (operator === 'notSet') return `${col} IS NULL`;
@@ -1199,19 +1233,46 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // these: a prefix/suffix/substring match reads the column as stored.
     const like = LIKE_SQL_OPS[operator];
     if (like) {
+      // [#14079] A text operator over a column whose stored value is never
+      // text renders the contract's constant — the same test, on the same
+      // declared-type hook, as `NativeSQLStrategy.buildFilterClause`, so the
+      // echoed statement is the executed one. Before anything binds. Only
+      // when the caller handed BOTH a target and a context (see the parameter
+      // note above): without them there is no declared type to consult.
+      const polarity = textOperatorPolarity(operator);
+      if (polarity && target && ctx && nonTextColumnResolver(ctx, target.object)?.(target.field)) {
+        return polarity === 'negative' ? SQL_CONST_TRUE : SQL_CONST_FALSE;
+      }
       // [#5567] Escaped pattern + an explicit `ESCAPE`, matching what
       // `driver-sql`'s `applyLike` binds for the same operator — so an author
       // who copies this statement out runs the predicate that ran.
-      params.push(likePattern(like.shape, values[0]));
-      const patternRef = `$${params.length}`;
-      params.push(LIKE_ESCAPE_CHAR);
       // [#6520] The fold, when the operator carries one, wraps BOTH sides:
       // folding only the comparand compares a folded needle against a raw column
       // and returns just the rows that were already lower-case — a wrong row set
       // that looks like a working predicate.
-      const lhs = like.fold ? asciiLowerSqlExpr(col) : col;
-      const rhs = like.fold ? asciiLowerSqlExpr(patternRef) : patternRef;
-      return `${lhs} ${like.sql} ${rhs} ESCAPE $${params.length}`;
+      // [#15684 / #15780] Both text families print what the DIALECT will run —
+      // the case-EXACT four because `LIKE` is case-exact on Postgres alone, and
+      // `$icontains` because its fold was `translate()`, which SQLite does not
+      // have at all — [#16028] on the `unknown` arm too, which this compiler
+      // reaches by its OWN extra door: a caller that hands no target and no
+      // context gets `'unknown'` written in below, so the echo's residue arm is
+      // not merely inherited from the hook. Asked of the same hook
+      // `NativeSQLStrategy` asks, on the
+      // same target, so the echo and the executed statement stay one
+      // description — the whole reason this render block exists (#5333). An
+      // echo that printed a parseable statement while the engine refused the
+      // real one is that failure in its loudest form. A caller that handed no
+      // target and no context cannot be asked (the four-argument shape the
+      // operator-coverage suite drives), and keeps the `LIKE` it always got.
+      return textMatchPredicateSql({
+        dialect: target && ctx ? sqlDialectFor(ctx, target.object) : 'unknown',
+        column: col,
+        shape: like.shape,
+        value: values[0],
+        negate: like.negate === true,
+        fold: like.fold === true,
+        bind: (v) => { params.push(v); return `$${params.length}`; },
+      });
     }
 
     const op = SCALAR_SQL_OPS[operator];
@@ -1278,6 +1339,30 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       return bag[member];
     }
     return undefined;
+  }
+
+  /**
+   * [#14079] The (object, field) a filter member binds against — the echo's
+   * copy of `NativeSQLStrategy.resolveStorageTarget`, kept beside the
+   * `LIKE_SQL_OPS` table for the same reason that table is a copy: this file
+   * renders a description of the statement THAT compiler produces, and the
+   * declared-type test both apply is keyed by object and field. A dotted
+   * `sql` is a relationship path (ADR-0071): every segment but the last is a
+   * hop whose join alias is the dot-to-`__` spelling the dataset compiler keys
+   * `cube.joins` by, the last is the column.
+   */
+  private resolveStorageTarget(cube: Cube, member: string, baseObject: string): { object: string; field: string } {
+    const dim = this.lookupMember(cube, member, 'dimension');
+    const measure = dim ? undefined : this.lookupMember(cube, member, 'measure');
+    const rawSql = dim?.sql ?? measure?.sql ?? (member.includes('.') ? member.split('.').slice(1).join('.') : member);
+    if (rawSql.includes('.')) {
+      const segments = rawSql.split('.');
+      const field = segments[segments.length - 1];
+      const relPath = segments.slice(0, -1).join('.');
+      const object = cube.joins?.[relPath.replace(/\./g, '__')]?.name ?? relPath;
+      return { object, field };
+    }
+    return { object: baseObject, field: rawSql.replace(/^\$/, '') };
   }
 
   private resolveFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
@@ -1489,6 +1574,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     node: NormalizedFilterNode | null,
     cube: Cube,
     params: unknown[],
+    ctx: StrategyContext,
   ): string | null {
     if (!node) return null;
 
@@ -1502,18 +1588,24 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         node.operator,
         node.values,
         params,
+        // [#14079] The (object, field) this member binds against, resolved the
+        // way `NativeSQLStrategy.resolveStorageTarget` resolves it, so the echo
+        // asks the declared-type hook the same question the executed statement
+        // asked and prints the same constant for a non-text column.
+        this.resolveStorageTarget(cube, node.member, this.extractObjectName(cube)),
+        ctx,
       );
     }
 
     if (node.kind === 'not') {
-      const inner = this.renderFilterNodeSql(node.child, cube, params);
+      const inner = this.renderFilterNodeSql(node.child, cube, params, ctx);
       return inner ? `NOT (${inner})` : SQL_CONST_FALSE;
     }
 
     const paramBase = params.length;
     const parts: string[] = [];
     for (const child of node.children) {
-      const clause = this.renderFilterNodeSql(child, cube, params);
+      const clause = this.renderFilterNodeSql(child, cube, params, ctx);
       if (clause === null) {
         if (node.kind !== 'or') continue;
         params.length = paramBase;

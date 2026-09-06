@@ -120,8 +120,10 @@ orgs + `organization_id` columns + authored RLS, without
   (`sys_user.manager_id`, `sys_user.primary_business_unit_id`,
   `sys_user.ai_access`) and ADR-0092's registry-driven identity write guard
   with a per-object update whitelist is the sanctioned mechanism
-  (`sys_user → {name, image}` is its first entry). Group-mode org/member
-  metadata needs whitelist entries and a collision guard, not a new mechanism.
+  (`sys_user → {name, image, locale}` is its first entry — `locale` admitted
+  2026-09-03 by maintainer ruling on #14787; see the ADR-0092 D1 Amendment).
+  Group-mode org/member metadata needs whitelist entries and a collision guard,
+  not a new mechanism.
 
 ### Industry convergence (why this shape, and not another)
 

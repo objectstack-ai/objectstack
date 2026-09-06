@@ -280,6 +280,21 @@ export const ERROR_CODE_LEDGER = {
     // operator acts on, and none of them is a synonym of `RESOURCE_CONFLICT`
     // in the detector's sense or in meaning.
     'ACTION_DISABLED',
+    // [#14451] `POST /packages/:id/duplicate` was handed a source that is not a
+    // BASE — a code-loaded or platform/marketplace package. 422 from the
+    // `/packages` door (`domains/packages.ts`), refused BEFORE the protocol
+    // call so the target package record is not minted.
+    //
+    // ⛔ NOT a re-spelling of `WRITABLE_PACKAGE_REQUIRED`, and the distinction
+    // is why it is registered: that code says "this package may not be WRITTEN
+    // to", and its remedy is to use a writable package. Duplicate writes
+    // nothing to its source, so a caller reading that code here hunts for a way
+    // to make a code package writable — there is none, and it is not the point.
+    // This code says the GESTURE does not apply to this source: ADR-0070 D4
+    // duplicates a base's stored rows, a code package's metadata is delivered
+    // as code, and the remedy is a base or an ADR-0005 overlay. Same predicate
+    // (`isWritablePackage`), different consequence.
+    'DUPLICATE_SOURCE_NOT_A_BASE',
     'EXPIRED_OR_REVOKED',         // share link
     // [#9415] the trigger door refused to dispatch a flow that is switched off
     // — `respondToFlowTrigger` (`domains/automation.ts`) reads the engine's
@@ -417,6 +432,12 @@ export const ERROR_CODE_LEDGER = {
     'SSO_REGISTER_FAILED',
     'SSO_REGISTER_FORBIDDEN',
     'USER_ALREADY_EXISTS',        // pass-through from better-auth
+    // [#15587] Raised by US on `/sign-up/email` for an address that already
+    // carries a `sys_user` row, using better-auth's own BASE_ERROR_CODES entry
+    // so the refusal is byte-identical whichever lane produces it. Registered
+    // here because the platform now EMITS it rather than only passing it
+    // through: an emitted-but-unregistered code is the silent fourth state.
+    'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL',
     'VALIDATION_FAILED',
   ],
   '@objectstack/plugin-sharing': [
@@ -535,6 +556,23 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
+    // is not an array, breaking the one `return hookContext.result` site in
+    // `engine.ts` that has a concrete declared shape to violate
+    // (`find(): Promise<any[]>`; `findOne`/`update`/`delete` all declare
+    // `Promise<any>`). Refused at the seam — immediately after the dispatch and
+    // ahead of `maskSecretFields` / `stripSearchCompanionFromRead`, which both
+    // already assume the array — rather than surfacing as a `TypeError` at one
+    // of ~140 call sites. SHAPING stays legal: mutating rows, dropping keys,
+    // filtering rows out and assigning a different ARRAY are all untouched;
+    // only the container is protected. Registered rather than left as an `ERR_`
+    // operational code for the same reason as `MULTI_UPDATE_HOOK_KEY_DIVERGENCE`
+    // below — a host has to RECOGNISE this to find its own misbehaving handler,
+    // and an unregistered spelling demotes off `error.code` at every door. Not
+    // a synonym of any standard member: the request is valid and authorized,
+    // and the fault is a server-side extension's, not the caller's.
+    // `FindHookResultNotArrayError`, `find-hook-result-shape.ts`.
+    'FIND_HOOK_RESULT_NOT_ARRAY',
     // [#14010] a hook declared `runAs: 'user'` and its trigger resolved NO user
     // (an `isSystem` plugin/service write, a system-elevated flow node), so its
     // `ctx.api` data operation has no identity to scope to and is REFUSED

@@ -298,9 +298,9 @@ import {
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'the declaration reader: the fixed spelling, and everything that is not': 15,
-  'the card-level declaration: four states, none collapsed into another': 9,
+  'the card-level declaration: every state, none collapsed into another': 13,
   'C1, replaying the 2026-08-31 measured table': 12,
-  'C2, the row this file exists for': 14,
+  'C2, the row this file exists for': 26,
   'C3, the direction a carrier comparison cannot see': 7,
   '#14155: the COMPLETED state, and the three it must stay distinct from': 18,
   'the event reader itself': 9,
@@ -439,9 +439,25 @@ export function readClause2Line(text) {
  * as `absent` would blame the wrong thing, and reporting it as `declared` would
  * bless a carrier the gate cannot use.
  *
+ * ⭐ "Not read" is TWO facts, and they are returned as two states because the
+ * remedies differ and one count over both describes neither. `absent` — no
+ * comment on the thread is a claim comment at all, so the carrier this limb
+ * reads does not exist and no line could have been read from it; what is owed
+ * is the claim comment. `missing` — a claim comment IS there and carries no
+ * declaration line; the carrier exists and the line is what is owed.
+ *
+ * The predicate that separates them is `CLAIM_COMMENT_MARKER`, imported rather
+ * than restated: a claim comment is one whose body carries a LINE BEGINNING
+ * `Claim:` (or `Claimed:`, optionally blockquoted), and that one spelling is
+ * the whole set — so a heading-style claim (`## Claim — …`) is not a claim
+ * comment here, however complete the reasoning under it, and its thread reads
+ * `absent`. ⛔ Widening the predicate is not this file's to do: it is the
+ * sibling's constant precisely so the two readers cannot drift, and the remedy
+ * for a thread that reads `absent` is a comment in the fixed spelling.
+ *
  * @param {{ body?: string, created_at?: string }[]|null} commentRows — the REST
  *   comment rows, or `null` when the thread could NOT be read.
- * @returns {{ state: 'declared'|'malformed'|'misplaced'|'absent'|'unreadable',
+ * @returns {{ state: 'declared'|'malformed'|'misplaced'|'missing'|'absent'|'unreadable',
  *   value?: 'yes'|'no', detail?: string }}
  */
 export function cardDeclaration(commentRows) {
@@ -476,7 +492,11 @@ export function cardDeclaration(commentRows) {
     if (read?.kind === 'near-miss' && nearMiss === null) nearMiss = read;
   }
   if (malformed) return { state: 'malformed', detail: malformed.line };
-  return { state: 'absent', detail: nearMiss?.line };
+  // Which of the two not-read states this is, told apart by whether the carrier
+  // exists at all. `claimRows` is non-empty exactly when some comment matched
+  // the imported claim predicate, and `pool` is derived from it — so this asks
+  // the same question the reading above asked and cannot answer it differently.
+  return { state: claimRows.length > 0 ? 'missing' : 'absent', detail: nearMiss?.line };
 }
 
 // ---------------------------------------------------------------------------
@@ -575,9 +595,19 @@ export function c1CarrierSplit(pair) {
  *
  * ⭐ The row this file exists for. A card that declared `no` made a decision; a
  * card with nothing to read made none, and until now the two looked the same to
- * every consumer. The sentence therefore leads with which of the four states
- * this is, and never prescribes a value: ⛔ nobody may fill the line in on
- * another seat's behalf, because the declaration IS the judgement.
+ * every consumer. The sentence therefore leads with WHICH state this is, and
+ * never prescribes a value: ⛔ nobody may fill the line in on another seat's
+ * behalf, because the declaration IS the judgement.
+ *
+ * ⭐ "Nothing to read" is itself two readings, and each gets its own sentence
+ * because each names a different remedy. A thread with no claim comment — no
+ * comment carrying a line that BEGINS `Claim:`, which is the whole of the
+ * predicate — has no carrier for the limb at all, and what it owes is that
+ * comment; a heading-style claim (`## Claim — …`) is that case, not a claim
+ * comment short of a line. A thread whose claim comment carries no
+ * `Clause-②:` line has the carrier and owes the line. Reporting both as one
+ * "no reading" told a seat neither which of the two it was in nor what to
+ * write, and let a round report state one number about two different owings.
  */
 export function c2DeclarationUnreadable(pair) {
   const d = cardDeclaration(pair?.cardComments ?? null);
@@ -609,12 +639,24 @@ export function c2DeclarationUnreadable(pair) {
         `but not one of the two values, so there is no reading. ${fixed}. ${notADecision} ` +
         `${NEVER_WRITES}`
       );
+    case 'missing':
+      return (
+        `${head} — NO READING on the declaration limb, and the DECLARATION LINE is what is ` +
+        `missing: the card's claim comment is there and carries no \`Clause-②:\` line in the ` +
+        'fixed spelling' +
+        (d.detail ? `, and the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
+        `. Remedy: add the line to that claim comment — ${fixed}. ${notADecision} ${NEVER_WRITES}`
+      );
     default:
       return (
-        `${head} — NO READING on the declaration limb: the card's claim comment carries no ` +
-        `\`Clause-②:\` line in the fixed spelling` +
-        (d.detail ? `, and the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
-        `. ${fixed}. ${notADecision} ${NEVER_WRITES}`
+        `${head} — NO READING on the declaration limb, and the CLAIM COMMENT is what is ` +
+        'missing: no comment on the card\'s thread is a claim comment, so the carrier this limb ' +
+        'reads does not exist and no line could have been read from it' +
+        (d.detail ? `; the nearest thing on the thread is ${JSON.stringify(d.detail)}` : '') +
+        '. Remedy: write the claim comment with a first line beginning `Claim:`, then the ' +
+        `\`Clause-②: yes|no\` line; ${fixed}. A heading-style claim (\`## Claim — …\`) is not a ` +
+        'claim comment to this predicate, however complete the reasoning under it. ' +
+        `${notADecision} ${NEVER_WRITES}`
       );
   }
 }
@@ -1076,6 +1118,35 @@ export function pairRows(pair) {
   const selfReview = c4VerdictSelfReview(pair);
   if (selfReview) rows.push({ code: 'C4', text: selfReview });
   return rows;
+}
+
+/**
+ * The declaration limb's two not-read states, counted separately for one sweep.
+ *
+ * The summary line is where a round report takes its number from, so a single
+ * "no reading" count is one number said about two different owings: a card
+ * whose claim comment carries no declaration line owes that line, while a card
+ * with no claim comment owes the claim comment first, and a reader of the
+ * total can tell neither how many of each nor which remedy to send. Two
+ * numbers, two labels.
+ *
+ * The tally reads the SAME `cardDeclaration` the rows read, so a count can
+ * never disagree with the rows printed under it. `declared`, `misplaced`,
+ * `malformed` and `unreadable` are counted into neither — each is its own
+ * reading with its own row, and an unreadable thread is UNJUDGED rather than
+ * either not-read state.
+ *
+ * @param {{ cardComments?: object[]|null }[]|null} pairs
+ * @returns {{ absent: number, missing: number }}
+ */
+export function declarationLimbTally(pairs) {
+  const tally = { absent: 0, missing: 0 };
+  for (const pair of pairs ?? []) {
+    const { state } = cardDeclaration(pair?.cardComments ?? null);
+    if (state === 'absent') tally.absent += 1;
+    else if (state === 'missing') tally.missing += 1;
+  }
+  return tally;
 }
 
 /**
@@ -1563,12 +1634,16 @@ function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
     const gap = pairUnjudged(pair);
     if (gap) unjudged.push({ pr: pair.pr, card: pair.card, text: gap });
   }
+  const declarationLimb = declarationLimbTally(pairs);
   if (json) {
-    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, rows, unjudged }, null, 2));
+    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, unjudged }, null, 2));
   } else {
     console.log(
       `check-clause2-carriers: ${pairs.length} card/PR pair(s) derived from ${pulls.length} open ` +
         `PR(s) in ${repo} — ${rows.length} clause-② finding(s), ${unjudged.length} pair(s) UNJUDGED. ` +
+        `Declaration limb not read: ${declarationLimb.absent} with NO CLAIM COMMENT (a line ` +
+        `beginning \`Claim:\` is the whole set) and ${declarationLimb.missing} with a claim ` +
+        'comment but NO DECLARATION LINE — two readings, two remedies, ⛔ never one number. ' +
         'Report-only: findings are patrol input, not a gate verdict.',
     );
     for (const row of rows) console.log(`- **${row.code}** #${row.pr} / #${row.card} — ${row.text}`);
@@ -1672,13 +1747,23 @@ export function selfTest() {
   t('a card that never mentions the clause reads null', readClause2Line('Claim: whatever\nBranch: x') === null);
   t('⛔ the reader never invents a value from an adjacent word', readClause2Line('this card is clause 2 yes in substance')?.kind !== 'declared');
 
-  // -- the card-level declaration: four states, none collapsed into another ---
-  battery('the card-level declaration: four states, none collapsed into another');
+  // -- the card-level declaration: every state, none collapsed into another --
+  battery('the card-level declaration: every state, none collapsed into another');
   t('a claim comment carrying the line reads DECLARED', cardDeclaration([CLAIM('Clause-②: no')]).state === 'declared');
   t('…and keeps the value', cardDeclaration([CLAIM('Clause-②: yes')]).value === 'yes');
-  t('a thread with no claim comment at all reads ABSENT', cardDeclaration([{ body: 'just a comment', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
-  t('the #13910 shape — a claim comment with no Clause-② line — reads ABSENT', cardDeclaration([CLAIM('Domain: `domain:engine`')]).state === 'absent');
-  t('⛔ ABSENT is not `no`', cardDeclaration([CLAIM('Domain: x')]).state !== 'declared');
+  t('a thread with no claim comment at all reads ABSENT — no carrier, so no line could be read', cardDeclaration([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
+  // The claim predicate is a LINE BEGINNING `Claim:`, and that one spelling is
+  // the whole set. A heading-style claim carries no such line, so the thread
+  // has no claim carrier at all and what it owes is the comment, not the line.
+  t('a heading-style claim is NOT a claim comment — the thread reads ABSENT, not missing-a-line', cardDeclaration([{ body: '## Claim — PM loop round R1\nBranch: `claude/issue-13476-unresolvable-engine-403`\nDomain: `domain:engine`', created_at: '2026-08-31T10:00:00Z' }]).state === 'absent');
+  t('the #13910 shape — a claim comment with no Clause-② line — reads MISSING: the carrier is there, the line is not', cardDeclaration([CLAIM('Domain: `domain:engine`')]).state === 'missing');
+  t('⛔ ABSENT and MISSING are two readings, never one — one owes a comment, the other a line', cardDeclaration([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]).state !== cardDeclaration([CLAIM('Domain: x')]).state);
+  // The substring trap: a claim comment that DESCRIBES the declaration carries
+  // the key as a fragment inside a sentence, never as a line of its own. The
+  // reader is line-anchored, so a description is MISSING and never readable.
+  t('a claim comment that only DESCRIBES the line reads MISSING, never declared', cardDeclaration([CLAIM('the dev declares `Clause-②: yes|no` from the diff')]).state === 'missing');
+  t('…and it carries no value — a fragment inside prose is not a reading of one', cardDeclaration([CLAIM('the dev declares `Clause-②: yes|no` from the diff')]).value === undefined);
+  t('⛔ neither not-read state is `no`', cardDeclaration([CLAIM('Domain: x')]).state !== 'declared' && cardDeclaration([{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }]).state !== 'declared');
   t('the line in a NON-claim comment reads MISPLACED, not absent and not declared', cardDeclaration([CLAIM('Domain: x'), { body: 'Clause-②: yes', created_at: '2026-08-31T11:00:00Z' }]).state === 'misplaced');
   t('a malformed line in the claim comment reads MALFORMED', cardDeclaration([CLAIM('Clause-②: Yes')]).state === 'malformed');
   t('an UNREADABLE thread reads unreadable — never absent (#4690)', cardDeclaration(null).state === 'unreadable');
@@ -1717,13 +1802,35 @@ export function selfTest() {
 
   // -- C2, the row this file exists for --------------------------------------
   battery('C2, the row this file exists for');
-  const absent = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: x')] }));
-  t('a card with no Clause-② line in its claim comment produces a C2 row', typeof absent === 'string');
-  t('…and says NO READING in as many words', says(absent, 'NO READING'));
-  t('…and states that it is not a declared `no`', says(absent, 'NOT a declared'));
-  t('…and refuses to have the line filled in on the seat\'s behalf', says(absent, 'Do not fill the line in'));
-  t('…and forbids relaxing the spelling to prose', says(absent, 'do not relax the'));
-  t('…and quotes the fixed spelling so the remedy is executable', says(absent, 'Clause-②: yes'));
+  const missingLine = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Domain: x')] }));
+  t('a card with no Clause-② line in its claim comment produces a C2 row', typeof missingLine === 'string');
+  t('…and says NO READING in as many words', says(missingLine, 'NO READING'));
+  t('…and names the DECLARATION LINE as the thing that is missing', says(missingLine, 'DECLARATION LINE is what is missing'));
+  t('…and sends the remedy to the claim comment that is already there', says(missingLine, 'add the line to that claim comment'));
+  const noClaim = c2DeclarationUnreadable(pair({ cardComments: [{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }] }));
+  t('a thread with no claim comment produces a C2 row of its own', typeof noClaim === 'string');
+  t('…and names the CLAIM COMMENT as the thing that is missing, not the line', says(noClaim, 'CLAIM COMMENT is what is missing'));
+  t('…and its remedy names the fixed first-line spelling', says(noClaim, 'first line beginning `Claim:`'));
+  t('…and names the heading-style claim as the shape that does not count', says(noClaim, '## Claim —'));
+  t('the heading-style thread gets that same row — the shape the predicate never matched', c2DeclarationUnreadable(pair({ cardComments: [{ body: '## Claim — PM loop round R1\nBranch: `claude/issue-13476-unresolvable-engine-403`\nDomain: `domain:engine`', created_at: '2026-08-31T10:00:00Z' }] })) === noClaim);
+  t('⛔ the two not-read rows are DIFFERENT sentences — one number over both describes neither', missingLine !== noClaim);
+  t('…and both still say it is not a declared `no`', says(missingLine, 'NOT a declared') && says(noClaim, 'NOT a declared'));
+  t('…and both refuse to have the line filled in on the seat\'s behalf', says(missingLine, 'Do not fill the line in') && says(noClaim, 'Do not fill the line in'));
+  t('…and both forbid relaxing the spelling to prose', says(missingLine, 'do not relax the') && says(noClaim, 'do not relax the'));
+  t('…and both quote the fixed spelling so the remedy is executable', says(missingLine, 'Clause-②: yes') && says(noClaim, 'Clause-②: yes'));
+  // The summary line is what a round report quotes, so the two readings are
+  // counted apart there too — from the same reader the rows use.
+  const TALLY = [
+    pair({ cardComments: [CLAIM('Clause-②: no')] }),
+    pair({ cardComments: [CLAIM('Domain: x')] }),
+    pair({ cardComments: [CLAIM('Domain: y')] }),
+    pair({ cardComments: [{ body: 'a triage note, and nothing that begins a line with the claim key', created_at: '2026-08-31T10:00:00Z' }] }),
+    pair({ cardComments: null }),
+  ];
+  t('the sweep counts the two not-read states separately', declarationLimbTally(TALLY).missing === 2 && declarationLimbTally(TALLY).absent === 1, JSON.stringify(declarationLimbTally(TALLY)));
+  t('…and counts a DECLARED card into neither', declarationLimbTally([pair({ cardComments: [CLAIM('Clause-②: yes')] })]).absent === 0 && declarationLimbTally([pair({ cardComments: [CLAIM('Clause-②: yes')] })]).missing === 0);
+  t('…and an UNREADABLE thread into neither — it is UNJUDGED, never a not-read declaration', declarationLimbTally([pair({ cardComments: null })]).absent === 0 && declarationLimbTally([pair({ cardComments: null })]).missing === 0);
+  t('…and a MISPLACED declaration into neither — it has its own row and its own remedy', declarationLimbTally([pair({ cardComments: [CLAIM('Domain: x'), { body: 'Clause-②: yes', created_at: '2026-08-31T11:00:00Z' }] })]).missing === 0);
   const nearMiss = c2DeclarationUnreadable(pair({ cardComments: [CLAIM('## Clause ②: **yes**')] }));
   t('a prose declaration still produces the C2 row — prose is not a reading', typeof nearMiss === 'string');
   t('…and the row quotes what WAS there, so the residue is actionable', says(nearMiss, 'Clause ②'));
@@ -2102,7 +2209,8 @@ export function selfTest() {
   }
   console.log(
     `✓ check-clause2-carriers self-test: ${cases.length} cases pass (fixed-spelling reader, the ` +
-      'four declaration states, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
+      'declaration states with the two not-read readings kept apart — no claim comment, and a claim '
+      + 'comment with no line — the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'the three read paths with their offline reader, and the exit register).',
   );

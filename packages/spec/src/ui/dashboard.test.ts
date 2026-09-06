@@ -292,7 +292,7 @@ describe('DashboardSchema', () => {
 
   it('supports columns/gap/refresh/dateRange/globalFilters', () => {
     const d = DashboardSchema.parse({
-      name: 'dash_x', label: 'D', columns: 12, gap: 4, refreshInterval: 60,
+      name: 'dash_x', label: 'D', columns: 12, gap: 4, refreshIntervalSeconds: 60,
       dateRange: { field: 'close_date', defaultRange: 'this_quarter' },
       globalFilters: [{ field: 'owner', type: 'lookup' }],
       widgets: [{ id: 'wid_x', type: 'metric', dataset: 'sales', values: ['revenue'], layout: { x: 0, y: 0, w: 3, h: 2 } }],
@@ -693,5 +693,43 @@ describe('[#5010] DashboardWidgetSchema — retired action trio + `aria`', () =>
       type: 'page:sidebar', properties: {}, aria: { ariaLabel: 'Sidebar' },
     });
     expect(c.aria).toEqual({ ariaLabel: 'Sidebar' });
+  });
+});
+
+// #15680 (stack card 5/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()` — `DashboardSchema` IS `strictObject`, so a bare
+// throw assertion passes identically on the unrecognized-key error, which is
+// exactly the error that cannot carry the rename.
+//
+// The alias half is the part with no other guard: `refresh` / `autoRefresh` /
+// `pollInterval` were rename hints pointing at the OLD spelling, and a hint
+// left pointing at a tombstone would prescribe a key the shape refuses.
+describe('dashboard.refreshInterval carries its unit (#15680)', () => {
+  const base = { name: 'dash_x', label: 'D', widgets: [] };
+
+  it('REFUSES the retired `refreshInterval` with the rename in the message', () => {
+    const result = DashboardSchema.safeParse({ ...base, refreshInterval: 60 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'refreshInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`dashboard.refreshInterval` was renamed to `refreshIntervalSeconds`');
+  });
+
+  it('accepts `refreshIntervalSeconds` at the same magnitude', () => {
+    expect(DashboardSchema.parse({ ...base, refreshIntervalSeconds: 60 }).refreshIntervalSeconds).toBe(60);
+  });
+
+  it('prescribes the NEW spelling from all three rename-hint aliases', () => {
+    for (const alias of ['refresh', 'autoRefresh', 'pollInterval']) {
+      const result = DashboardSchema.safeParse({ ...base, [alias]: 60 });
+      expect(result.success).toBe(false);
+      const message = result.error!.issues.map((i) => i.message).join('\n');
+      expect(message).toContain('refreshIntervalSeconds');
+      // A hint still naming the tombstone would send the author to a key the
+      // shape refuses — the one failure this rename could introduce silently.
+      expect(message).not.toMatch(/`refreshInterval`(?!Seconds)/);
+    }
   });
 });

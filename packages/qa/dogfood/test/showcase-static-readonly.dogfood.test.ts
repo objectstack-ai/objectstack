@@ -18,13 +18,15 @@
 // used to be EXEMPT, so the same non-admin could skip the draft entirely and
 // POST a record already `approval_status:'approved'` — a step SHORTER than
 // #3003, and one the UPDATE strip never reached. It is now closed on both
-// paths: UPDATE in the engine (`stripReadonlyFields`, objectql/engine.ts,
-// #2948) and INSERT at the DataProtocol create INGRESS
-// (metadata-protocol/protocol.ts `stripReadonlyForInsert`, #3043 — the single
-// seam every external REST/GraphQL/MCP create funnels through, while trusted
-// internal engine.insert writers are untouched). On a non-system INSERT or
-// UPDATE, caller-supplied writes to statically-readonly fields are silently
-// dropped (HTTP 2xx; a stripped INSERT field falls back to its `defaultValue`).
+// paths, at ONE enforcement point: `stripReadonlyFields` in objectql/engine.ts,
+// on UPDATE since #2948 and on INSERT since the maintainer ruling of 2026-09-03
+// (option C, #14147). #3043 first closed the INSERT face at the DataProtocol
+// create INGRESS (`stripReadonlyForInsert`, metadata-protocol) — the seam every
+// external REST/GraphQL/MCP create funnels through, while a direct
+// engine.insert caller was untouched; that copy is deleted and the engine
+// strips every non-system caller now. On a non-system INSERT or UPDATE,
+// caller-supplied writes to statically-readonly fields are silently dropped
+// (HTTP 2xx; a stripped INSERT field falls back to its `defaultValue`).
 // System-context writes (import, seed replay, migration) stay exempt, as does
 // `readonlyWhen` on INSERT (a conditional lock needs a prior record).
 //

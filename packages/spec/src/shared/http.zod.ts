@@ -136,7 +136,12 @@ export const CorsConfigSchema = lazySchema(() => z.object({
   /**
    * Preflight cache duration in seconds
    */
-  maxAge: z.number().int().optional().describe('Preflight cache duration in seconds'),
+  // `externalVocabulary` mirror (#14478 ruling B): this key IS the CORS
+  // `Access-Control-Max-Age` response header, whose value is defined in seconds
+  // by the standard. Renaming it to `maxAgeSeconds` would break the one-to-one
+  // reading between this config and the header it emits.
+  maxAge: z.number().int().optional().describe('Preflight cache duration in seconds')
+    .meta({ externalVocabulary: 'CORS `Access-Control-Max-Age` (WHATWG Fetch)' }),
 }));
 
 export type CorsConfig = z.input<typeof CorsConfigSchema>;

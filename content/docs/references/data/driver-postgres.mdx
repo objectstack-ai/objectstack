@@ -49,7 +49,7 @@ PostgreSQL connection configuration
 | **ssl** | `boolean` | optional | Enable TLS. Certificates go in the datasource-level `ssl` block. |
 | **schema** | `string` | optional (default: `"public"`) | Default schema (knex searchPath) |
 | **applicationName** | `string` | optional | Postgres application_name |
-| **statementTimeout** | `integer` | optional | Abort statements running longer than this (ms) |
+| **statementTimeout** | `integer` | optional | Abort statements running longer than this (ms) (unit per PostgreSQL `statement_timeout`) |
 | **autoMigrate** | `Enum<'off' \| 'safe'>` | optional | Dev-only non-destructive schema self-heal |
 
 

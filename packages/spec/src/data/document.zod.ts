@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Document Version Schema
@@ -144,6 +145,49 @@ export const DocumentTemplateSchema = lazySchema(() => z.object({
   })).describe('Template placeholders'),
 }));
 
+// ─── RETIRED deadline keys (ADR-0049 enforce-or-remove) ─────────────────────
+//
+// Two day-shaped keys were declared on `ESignatureConfigSchema` and read by
+// NOTHING: no e-signature engine exists on the platform — no layer ever sent,
+// expired or reminded a signature request — and the reader census over every
+// package outside `packages/spec` (tests and changelogs excluded), over
+// `examples/**` and `skills/**`, and over objectui at the pinned sha returned
+// zero hits for `expirationDays`, `reminderDays`, `eSignature` and the
+// `ESignatureConfig` names, with a lit control inside this package. An author
+// could write `expirationDays: 30` and the platform would never act on it; the
+// generated reference docs advertised an expiry nothing kept. The 2026-09-02
+// ruling on #14477 held the pair on one condition (a roadmapped consumer ⇒
+// `[EXPERIMENTAL — not enforced]`); the maintainer answered it on 2026-09-05
+// (no roadmap), so the ruling's own branch resolves to retirement.
+//
+// Route: `retiredKey()` tombstones, NOT plain deletion — the schema is not
+// `.strict()`, so a bare deletion would make zod strip the key in silence,
+// replacing an inert declaration with an invisible one (ADR-0104). The
+// tombstone is audible in both channels: `tsc` (the input type is `never`)
+// and the parse (the prescription is the message). No D2 conversion and no
+// `os migrate meta` sentence: `DocumentSchema` is not a stack collection
+// member and `document` is no metadata type, so a conversion would be a
+// transform with no seam that ever runs (the
+// `kernel/MetadataPluginConfig:additionalTypes` precedent). The retirement is
+// registered as `RETIRED_KEYS_BY_MAJOR[18]` entries plus the D3 semantic entry
+// `esignature-config-deadline-keys-retired`. `provider` / `enabled` / `signers`
+// stay, byte-identical.
+
+const EXPIRATION_DAYS_RETIRED =
+  '`ESignatureConfig.expirationDays` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no e-signature engine exists on the platform, '
+  + 'so no signature request was ever sent, expired or lapsed, and its default of 30 days was '
+  + 'materialized into every parsed configuration without ever being consulted. Delete the '
+  + 'key. There is no replacement, because no e-signature provider integration exists to keep '
+  + 'an expiry window.';
+
+const REMINDER_DAYS_RETIRED =
+  '`ESignatureConfig.reminderDays` was removed in @objectstack/spec 17 (ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no e-signature engine exists on the platform, '
+  + 'so no reminder email was ever sent, and its default of 7 days was materialized into '
+  + 'every parsed configuration without ever being consulted. Delete the key. There is no '
+  + 'replacement, because no e-signature provider integration exists to send reminders.';
+
 /**
  * E-Signature Configuration Schema
  * 
@@ -168,9 +212,7 @@ export const DocumentTemplateSchema = lazySchema(() => z.object({
  *       "role": "Manager",
  *       "order": 2
  *     }
- *   ],
- *   "expirationDays": 30,
- *   "reminderDays": 7
+ *   ]
  * }
  * ```
  */
@@ -212,16 +254,16 @@ export const ESignatureConfigSchema = lazySchema(() => z.object({
   })).describe('Document signers'),
 
   /**
-   * Days until signature request expires
-   * @default 30
+   * REMOVED (ADR-0049): `expirationDays` — see the RETIRED section above.
+   * Authoring it is a `tsc` error and a parse error carrying the prescription.
    */
-  expirationDays: z.number().optional().default(30).describe('Expiration days'),
+  expirationDays: retiredKey(EXPIRATION_DAYS_RETIRED),
 
   /**
-   * Days between reminder emails
-   * @default 7
+   * REMOVED (ADR-0049): `reminderDays` — see the RETIRED section above.
+   * Authoring it is a `tsc` error and a parse error carrying the prescription.
    */
-  reminderDays: z.number().optional().default(7).describe('Reminder interval days'),
+  reminderDays: retiredKey(REMINDER_DAYS_RETIRED),
 }));
 
 /**

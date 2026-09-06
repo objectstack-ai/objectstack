@@ -377,8 +377,7 @@ export async function canonicalizeStoredMemberRoles(
 
   let rows: any[] = [];
   try {
-    const found = await ql.find(MEMBER_OBJECT, { limit }, { context: SYSTEM_CTX });
-    rows = Array.isArray(found) ? found : Array.isArray(found?.records) ? found.records : [];
+    rows = await ql.find(MEMBER_OBJECT, { limit }, { context: SYSTEM_CTX });
   } catch (e: any) {
     // No membership table yet (fresh boot, mock mode) — nothing to converge.
     logger?.debug?.('[MemberRoleCanonical] sys_member not readable — skipping the pass', {

@@ -22,6 +22,17 @@
  * need. Keys with no source string anywhere are not reported here; a missing
  * label is `required/label`'s finding.
  *
+ * An inline LOCALE MAP — `{ en: 'Members', 'zh-CN': '成员' }`, the second form
+ * `I18nLabelSchema` authorizes — is a source string in every locale it
+ * carries, and is read as one here (#14749, maintainer ruling 2026-09-03,
+ * Q2 = B1). It used to be read as nothing at all: the walker narrowed it to
+ * `undefined` on its way here, which is also what an absent prop produces, so
+ * a prop localised into four languages and a prop nobody wrote were the same
+ * input to this file. Locales the map carries now count as covered; locales it
+ * omits are gaps, on the same footing as a bundle that omits them. The map is
+ * still never extracted and never gets a bundle row — that half is the
+ * extractor's header, and ⛔ no key is invented from a node path.
+ *
  * Which locales get checked is the project's call, never an assumption: the
  * `i18n.supportedLocales` block declares them, and absent that block only the
  * locales a bundle already exists for are checked. A project that does not
@@ -181,6 +192,16 @@ interface ExpectedKey {
    * authors one. This *is* the default-locale text — see `computeI18nCoverage`.
    */
   inline?: string;
+  /**
+   * The inline locale map the author wrote at this prop, when they wrote one
+   * (`{ en: 'Members', 'zh-CN': '成员' }`) — the second authorized form of an
+   * `I18nLabel`, carried here verbatim by the walker.
+   *
+   * Present ⇒ this key IS authored, whatever `inline` says. See
+   * {@link inlineLocaleText} for how a locale is read out of it, and
+   * `computeI18nCoverage` for why that read is narrower than the renderer's.
+   */
+  inlineLocales?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -331,11 +352,91 @@ function collectExpectedKeys(config: any): ExpectedKey[] {
       displayKey: entry.path.join('.'),
       context: describeEntry(entry, source),
       inline: entry.inline,
+      inlineLocales: entry.inlineLocales,
     };
   });
 }
 
 // ─── Lookup ────────────────────────────────────────────────────────────
+
+/**
+ * The text an inline locale map holds **for `locale` specifically** — or
+ * `undefined`, which is this detector's word for "not translated here".
+ *
+ * ## Why this is narrower than the renderer's rule, deliberately
+ *
+ * `resolveI18nLabel` (and objectui's `pickLocalized`, which it is pinned to
+ * limb for limb) answers a different question: *what should I put on screen
+ * for this reader?* Its six limbs therefore end in three fallbacks — the
+ * untagged `default` entry, the `en` entry, then any string in the map — so it
+ * essentially never misses. Reading coverage off it would report every locale
+ * as covered the moment a map exists, which is the mirror image of the bug
+ * this function was added to fix: one answer standing for two opposite facts.
+ *
+ * So only the **tag-matching** limbs count as coverage, in the reference's own
+ * order and with its own case rules:
+ *
+ *   1. the exact tag — `zh-CN` reads the key `zh-CN`;
+ *   2. the base language — `zh-CN` reads the key `zh`;
+ *   3. the first region-qualified sibling sharing that base — `zh` reads
+ *      `zh-CN`; `zh-TW` reads `zh-CN` too. Same language, other region: what
+ *      the renderer really shows, and a translation into the language asked
+ *      for.
+ *
+ * The fallback limbs are excluded because falling back **is** what an
+ * untranslated locale looks like: a `ja-JP` reader shown the `en` entry is
+ * precisely the gap this gate exists to report, and `default` is the entry an
+ * author writes for locales they did **not** translate.
+ *
+ * `i18n-label-resolver.ts` is the authority on the limb rule and on the case
+ * asymmetry mirrored here (region case is irrelevant because limb 3 compares
+ * language subtags only; language case is significant, because the reference
+ * folds neither side). `inline-locale-coverage-parity.test.ts` pins this
+ * function against `resolveI18nLabel`: whenever this says "covered", the
+ * renderer really shows that entry.
+ *
+ * Empty values do not count, matching {@link lookupKey}'s rule on the bundle
+ * side — an empty translation is not a translation, whichever side it is
+ * written on.
+ */
+export function inlineLocaleText(
+  map: Readonly<Record<string, string>> | undefined,
+  locale: string,
+): string | undefined {
+  if (!map) return undefined;
+  const read = (tag: string): string | undefined => {
+    if (!Object.prototype.hasOwnProperty.call(map, tag)) return undefined;
+    const value = map[tag];
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  };
+  const tag = (locale || 'en').trim();
+  const exact = read(tag);
+  if (exact !== undefined) return exact;
+  const base = tag.split('-')[0];
+  const baseHit = read(base);
+  if (baseHit !== undefined) return baseHit;
+  for (const key of Object.keys(map)) {
+    if (key.split('-')[0] === base) {
+      const sibling = read(key);
+      if (sibling !== undefined) return sibling;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Any text the inline map holds at all — the test for "did the author write
+ * something here", used only to decide whether the key is worth reporting on.
+ *
+ * ⛔ Not a coverage answer: see {@link inlineLocaleText} for that.
+ */
+function inlineLocaleAny(map: Readonly<Record<string, string>> | undefined): string | undefined {
+  if (!map) return undefined;
+  for (const value of Object.values(map)) {
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
 
 function lookupKey(data: TranslationData | undefined, path: string[]): string | undefined {
   let current: any = data;
@@ -389,10 +490,22 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
   // string it never wrote inline — other locales still owe a translation for
   // it). A key authored in neither place has no text to translate at all; a
   // missing label is `required/label`'s finding, not an i18n gap.
+  //
+  // An inline LOCALE MAP is authored text too (#14749, maintainer ruling
+  // 2026-09-03, Q2 = B1). It used to fail this test — the walker narrowed a
+  // map to `undefined` on its way here, the same value an absent prop
+  // produces — so a prop written out in four languages was dropped from the
+  // expected set exactly as if nobody had written it, and a bundle entry for
+  // one of its locales pulled it back in and then reported every OTHER locale
+  // as missing. Both readings were the same defect: one diagnostic standing
+  // for two opposite facts.
   const authoredInBundle = (path: string[]): boolean =>
     Object.values(merged).some((data) => lookupKey(data, path) !== undefined);
   const expected = collectExpectedKeys(config).filter(
-    (key) => key.inline !== undefined || authoredInBundle(key.path),
+    (key) =>
+      key.inline !== undefined
+      || inlineLocaleAny(key.inlineLocales) !== undefined
+      || authoredInBundle(key.path),
   );
   const issues: CoverageIssue[] = [];
   const stats: CoverageStats[] = [];
@@ -401,11 +514,25 @@ export function computeI18nCoverage(config: any, opts: CoverageOptions = {}): Co
     const data = merged[locale];
     let translated = 0;
     for (const key of expected) {
-      // The inline `label:` IS the default-locale text — the runtime resolver
-      // falls back to it (i18n-resolver `translateObject`), and `os i18n
-      // extract` seeds bundles from it. Demanding a default-locale bundle entry
-      // that merely restates it reports a gap that does not exist.
-      const value = lookupKey(data, key.path) ?? (locale === defaultLocale ? key.inline : undefined);
+      // Three sources, most specific first.
+      //
+      // 1. The bundle entry for this locale.
+      // 2. The inline locale map's entry FOR THIS LOCALE — tag-matched, never
+      //    the renderer's fallback limbs (see `inlineLocaleText`). A locale
+      //    the map carries is translated; one it does not is a gap, which is
+      //    the whole of what the B1 ruling asks this gate to be able to say.
+      // 3. The inline `label:` IS the default-locale text — the runtime
+      //    resolver falls back to it (i18n-resolver `translateObject`), and
+      //    `os i18n extract` seeds bundles from it. Demanding a default-locale
+      //    bundle entry that merely restates it reports a gap that does not
+      //    exist. A map satisfies the default locale on the same grounds and
+      //    by the same reading: whatever it resolves to there IS the source
+      //    text a reader of the default locale sees, so `inlineLocaleAny`
+      //    stands in for `inline` when the author wrote a map instead of a
+      //    string.
+      const value = lookupKey(data, key.path)
+        ?? inlineLocaleText(key.inlineLocales, locale)
+        ?? (locale === defaultLocale ? (key.inline ?? inlineLocaleAny(key.inlineLocales)) : undefined);
       if (value !== undefined) {
         translated += 1;
         continue;

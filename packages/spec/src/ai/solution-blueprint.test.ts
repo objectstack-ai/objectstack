@@ -535,3 +535,132 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
     expect(parsed.objects[0].fields[2].expression).toBe("record.order_no + ' · ' + record.customer");
   });
 });
+
+// ---------------------------------------------------------------------------
+// VALUE parity — the twin of the key-parity gate above (cloud#1967).
+//
+// The key gate pins WHICH keys each side carries. Nothing pinned the
+// CONSTRAINTS on those keys, and they had drifted: every identifier in the
+// lenient schema carried `.regex(SNAKE_CASE)`, the strict mirror carried none.
+// So the model could legally GENERATE `1_49` for a select option value (from a
+// 「1-49人」 label) and `apply_blueprint` — which validates against the LENIENT
+// schema — then rejected the very blueprint the user had approved:
+//   objects.0.fields.2.options.0.value: Invalid string: must match pattern
+//   /^[a-z_][a-z0-9_]*$/
+// Nothing was staged, the approval became a no-op, and the build landed only
+// because the model happened to retry with a repaired blueprint the user never
+// saw. Two declarations of one contract, disagreeing about values.
+// ---------------------------------------------------------------------------
+describe('strict mirror ↔ lenient schema — VALUE parity (cloud#1967)', () => {
+  /** The regex a zod string leaf enforces, or null when it enforces none. */
+  const patternOf = (schema: any): string | null => {
+    const checks = schema?.def?.checks;
+    if (!Array.isArray(checks)) return null;
+    for (const c of checks) {
+      const p = c?._zod?.def?.pattern;
+      if (p) return String(p);
+    }
+    return null;
+  };
+
+  /**
+   * Index every string leaf reachable from `schema` by its authoring path,
+   * mapping it to the pattern it enforces. Wrapper nodes (optional / nullable /
+   * default / lazy) are transparent so the lenient `.optional()` and the strict
+   * `.nullable()` spelling of the same key land on the SAME path.
+   */
+  const indexPatterns = (schema: any): Map<string, string | null> => {
+    const out = new Map<string, string | null>();
+    const seen = new Set<unknown>();
+    const walk = (node: any, path: string, depth: number): void => {
+      if (!node || depth > 12) return;
+      const def = node.def;
+      if (!def) return;
+      switch (def.type) {
+        case 'optional':
+        case 'nullable':
+        case 'default':
+        case 'prefault':
+        case 'nonoptional':
+        case 'readonly':
+          return walk(def.innerType, path, depth + 1);
+        case 'lazy':
+          return walk(def.getter(), path, depth + 1);
+        case 'array':
+          return walk(def.element, `${path}[]`, depth + 1);
+        case 'object': {
+          if (seen.has(def.shape)) return;
+          seen.add(def.shape);
+          for (const [key, child] of Object.entries(def.shape as Record<string, unknown>)) {
+            walk(child, path ? `${path}.${key}` : key, depth + 1);
+          }
+          return;
+        }
+        case 'string':
+          out.set(path, patternOf(node));
+          return;
+        default:
+          return; // unions / enums / records / numbers carry no identifier pattern
+      }
+    };
+    walk(schema, '', 0);
+    return out;
+  };
+
+  it('every identifier the applier constrains is constrained the same way in the model-facing mirror', () => {
+    const lenient = indexPatterns(SolutionBlueprintSchema);
+    const strict = indexPatterns(SolutionBlueprintStrictSchema);
+    // Only paths BOTH sides carry are comparable — the key-parity gate above
+    // owns "which keys exist"; this one owns "what values they accept".
+    const drift = [...lenient.entries()]
+      .filter(([path]) => strict.has(path))
+      .filter(([path, pattern]) => strict.get(path) !== pattern)
+      .map(([path, pattern]) => `${path}: lenient ${pattern ?? 'none'} vs strict ${strict.get(path) ?? 'none'}`);
+    expect(drift).toEqual([]);
+  });
+
+  it('the model cannot emit the leading-digit option value the applier rejects', () => {
+    // The exact value from the live run: a 「1-49人」 company-size band.
+    const optionsWithLeadingDigit = [
+      { label: '1-49人', value: '1_49' },
+      { label: '50-199人', value: '50_199' },
+    ];
+    const lenient = SolutionBlueprintSchema.safeParse({
+      summary: 's',
+      objects: [{
+        name: 'customer',
+        fields: [{ name: 'company_size', type: 'select', options: optionsWithLeadingDigit }],
+      }],
+    });
+    expect(lenient.success).toBe(false);
+
+    const strict = SolutionBlueprintStrictSchema.safeParse({
+      summary: 's',
+      assumptions: [],
+      questions: null,
+      objects: [{
+        name: 'customer',
+        label: null,
+        description: null,
+        sharingModel: null,
+        nameField: null,
+        fields: [{
+          name: 'company_size',
+          label: null,
+          type: 'select',
+          required: null,
+          reference: null,
+          options: optionsWithLeadingDigit,
+          summaryOperations: null,
+          expression: null,
+        }],
+      }],
+      views: null,
+      dashboards: null,
+      app: null,
+    });
+    // Before cloud#1967 this parse SUCCEEDED — the proposal was legal to
+    // generate and illegal to apply.
+    expect(strict.success).toBe(false);
+  });
+});

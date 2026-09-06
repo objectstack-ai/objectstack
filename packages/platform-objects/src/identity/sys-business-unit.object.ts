@@ -132,6 +132,55 @@ export const SysBusinessUnit = ObjectSchema.create({
       group: 'Hierarchy',
     }),
 
+    // #14238 — maintainer ruling 2026-09-02, option A (verbatim 「同意」): the
+    // IANA zone a date boundary ("when does this day / week / period end?") is
+    // computed in for work that belongs to this unit. A boundary decides WHICH
+    // record exists, not how one is shown: a monthly duty "due on the 5th"
+    // expires at midnight, and in UTC+8 that midnight is 08:00 UTC, so work
+    // finished at 09:00 local on the 5th is recorded late unless the zone is
+    // known. Nullable — null means INHERIT: the nearest ancestor up the
+    // `parent_business_unit_id` chain that carries a value, then the
+    // organization's `sys_organization.timezone` (the chain's root default),
+    // then `UTC`.
+    //
+    // ⚠️ The inheritance is a DOCUMENTED CONTRACT, not a mechanism. Measured on
+    // the tree while this column landed: nothing on the platform walks this
+    // chain UPWARD to resolve an attribute. The three existing walkers of
+    // `parent_business_unit_id` — plugin-sharing's `BusinessUnitGraphService`
+    // (`business-unit-graph.ts`, the `unit_and_subordinates` subtree walk),
+    // plugin-approvals' recursive department approver (`approval-service.ts`)
+    // and plugin-security's delegated-admin frontier (`delegated-admin-gate.ts`)
+    // — all descend from a unit to its DESCENDANTS and read no column beyond
+    // the parent link, `active` and `organization_id`. No resolver API ships
+    // with this column (the ruling: option B, "the effective zone for this
+    // record", waits for a second consumer), so a reader that needs the
+    // effective zone walks the chain itself, in exactly the order above, and
+    // nothing on the platform reads this column yet. Do not read inheritance
+    // onto a field that does not inherit: the column stores what was written.
+    //
+    // Validated on write by `valueDomain: 'iana_time_zone'` (#14168 / #15161 —
+    // the ruling's own precondition, 「rather than shipping an unvalidated text
+    // column」): membership is the shared `Intl.DateTimeFormat` probe, never
+    // the `Intl.supportedValuesOf('timeZone')` enumeration, which omits `UTC`
+    // — the very fallback this contract names. `maxLength: 64` follows
+    // `sys_report_schedule.timezone`, the platform's other IANA column that
+    // pairs a bound with the `UTC` default; the enumeration's longest name on
+    // the repo's Node baseline is 30 characters and the tzdb caps each path
+    // component at 14, so 64 is twice the domain's real ceiling and the smaller
+    // of the two precedents (`sys_job.timezone` says 100, neither declares a
+    // domain — the residue card). No `defaultValue`, deliberately: an explicit
+    // default here would mean "stop inheriting", which is the opposite of what
+    // an unset unit means.
+    timezone: Field.text({
+      label: 'Timezone',
+      required: false,
+      maxLength: 64,
+      valueDomain: 'iana_time_zone',
+      description:
+        'IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit\'s zone, then the organization\'s, then UTC.',
+      group: 'Hierarchy',
+    }),
+
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       // Optional: single-tenant deployments have no organization row (org-scoping

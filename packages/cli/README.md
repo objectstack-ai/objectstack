@@ -314,6 +314,52 @@ os environments bind <id> --artifact dist/objectstack.json  # 8. Bind to a Cloud
 └── package.json                # oclif config under "oclif" key
 ```
 
+## Public subpath exports
+
+`@objectstack/cli` is a command-line tool first, and its `exports` map is
+deliberately sealed: a deep `dist/` path is not a supported import and an
+internal refactor may move it without notice. What an out-of-repo consumer may
+resolve is exactly this map — a subpath is added here on purpose, with a
+`minor` changeset, never discovered by reaching into `dist/`:
+
+| Subpath | What it is for |
+|:---|:---|
+| `@objectstack/cli` | The command classes `bin/run.js` loads — the oclif entry. |
+| `@objectstack/cli/console` | Console SPA resolution helpers (`resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` and the drift guards), consumed by cloud's `objectos-runtime` node server to mount the Console. |
+| `@objectstack/cli/hook-body` | The hook-body extractor `os build` and `os lint` apply, for an app harness that must run the **same** body-only lowering the build ships (below). |
+| `@objectstack/cli/package.json` | The manifest itself, for the ordinary tooling idiom of reading a dependency's own version. |
+
+### `@objectstack/cli/hook-body`
+
+```typescript
+import { extractHookBody, HookBodyExtractionError } from '@objectstack/cli/hook-body';
+import type { ExtractedBody, HookBodyRefusalKind } from '@objectstack/cli/hook-body';
+
+// The metadata-only source `os build` ships for this handler — hand it to the
+// runtime's QuickJS runner in a test and you execute what production executes.
+const body: ExtractedBody = extractHookBody(handler, 'hooks.account.beforeInsert');
+body.source;        // the lowered function body
+body.capabilities;  // the capability tokens inferred from it
+
+// A handler that is no longer shippable body-only is refused with the SAME
+// classification `os lint` reports, so a test can assert the kind, not prose.
+try {
+  extractHookBody(leakyHandler, 'hooks.account.afterUpdate');
+} catch (e) {
+  if (e instanceof HookBodyExtractionError) {
+    const kind: HookBodyRefusalKind = e.kind; // 'unparseable' | 'forbidden-token' | 'free-identifiers'
+    e.freeIdentifiers;                        // the module-scope names the handler reached for
+    e.nodeOnlyIdentifiers;                    // the subset only the Node host provides
+  }
+}
+```
+
+An app that wants to assert "my hooks are still metadata-only" needs the
+platform's own extractor: a local reimplementation passes its own tests while
+diverging from the rule the build actually applies. `os lint`'s
+`hook-body/not-lowerable` rule answers the pass/fail question; this entry hands
+a test the lowered `source` to run. The four names above are the whole surface
+— the entry re-exports them and nothing else.
 
 ## Default capability slate (always-on)
 

@@ -31,10 +31,12 @@
  *   globalActions.<action_name>.label / .description / .confirmText /
  *     .successMessage / .params.<param_name>.*
  *
- * Lookup order: requested locale → each entry of `fallbackChain` (defaults to
- * `['en']`) → literal `label` from the metadata. Helpers never throw — they
- * always return at minimum the metadata literal so unconfigured languages
- * gracefully degrade.
+ * Lookup order: requested locale → each entry of `fallbackChain` → literal
+ * `label` from the metadata — except that a request for the deployment's
+ * `defaultLocale` never walks the chain: the authored label IS the default
+ * locale's text (#15711), so it answers right after the requested locale's
+ * own bundle. Helpers never throw — they always return at minimum the
+ * metadata literal so unconfigured languages gracefully degrade.
  *
  * ## The OTHER half of `I18nLabel`, and where it lives
  *
@@ -194,9 +196,46 @@ export interface ResolveOptions {
   locale?: string;
   /**
    * Ordered fallback locales to consult after `locale` and before returning
-   * the literal label. Defaults to `['en']`.
+   * the literal label.
+   *
+   * [#14882] This is the deployment's DECLARED chain, supplied by the caller
+   * that can see the declaration: the serving layer reads
+   * `II18nService.getFallbackLocale()` (`i18n.fallbackLocale`, else
+   * `defaultLocale` — the collapse both boot paths perform) and passes it
+   * here, so a `zh-CN` workspace resolves `zh-CN → zh-CN → authored label`
+   * and a courtesy `en` bundle is consulted only when `en` is requested.
+   * Every entry is consulted BEFORE the authored label, so an entry the
+   * deployment did not declare is a locale that can outrank the author —
+   * for every NON-default request. A request for {@link defaultLocale} never
+   * reaches the chain (#15711).
+   *
+   * [#15711] Defaults to `[]` — "requested locale, then the authored label"
+   * — when the caller declares nothing at all (no `fallbackChain` key), and
+   * an explicit `[]` reads the same. Nothing falls to `en` because a literal
+   * said so: a chain is consulted only when someone declared it. (Before
+   * #15711 a chain-less caller got a literal `['en']`.)
    */
   fallbackChain?: string[];
+  /**
+   * [#15711] The deployment's DEFAULT locale — the language its metadata
+   * labels are authored in (`i18n.defaultLocale`). When `locale` names it
+   * (BCP-47 tags compare case-insensitively, the same rule
+   * {@link resolveBundleLocale} applies), the resolvers consult the requested
+   * locale's own bundle and then answer with the authored label: the chain
+   * is NOT walked, because the authored label IS the default locale's text.
+   * That is what `os i18n check` already claims when it reports the default
+   * locale as fully covered by authored text, and what a stack declaring
+   * `defaultLocale: 'zh-CN'` with a reflexive `fallbackLocale: 'en'` needs so
+   * its courtesy `en` bundle cannot outrank the author for a `zh-CN` request
+   * (ruled on #15711 — the contract question #14882 left open).
+   *
+   * Supplied by the caller that can see the declaration: the serving layer
+   * reads `II18nService.getDefaultLocale()`. Absent, no request is the
+   * default one and every request walks `locale → fallbackChain → authored`.
+   * A bundle entry for the default locale still wins when one is shipped
+   * (`os i18n extract --locales=<default>` keeps working; it is optional).
+   */
+  defaultLocale?: string;
 }
 
 /**
@@ -280,9 +319,30 @@ function pickData(
   return resolved !== undefined ? bundle[resolved] : undefined;
 }
 
+/**
+ * [#15711] Whether `locale` names the deployment's default locale. BCP-47
+ * tags are case-insensitive (`zh-cn` names `zh-CN`), the same rule
+ * {@link resolveBundleLocale} applies; a different tag (`zh` against
+ * `zh-CN`) is a different locale.
+ */
+function isDefaultLocale(locale: string, defaultLocale: string | undefined): boolean {
+  return typeof defaultLocale === 'string'
+    && defaultLocale.length > 0
+    && locale.toLowerCase() === defaultLocale.toLowerCase();
+}
+
+/**
+ * The locales a lookup consults, in order: the requested locale, then the
+ * DECLARED `fallbackChain` — unless the requested locale is the deployment's
+ * `defaultLocale`, in which case the chain is skipped and the authored label
+ * answers right after the requested locale's own bundle (#15711: the
+ * authored label is the default locale's text). A caller that declares no
+ * chain gets the requested locale alone — nothing is invented (#15711's
+ * second facet; the default used to be a literal `['en']`).
+ */
 function localeChain(opts?: ResolveOptions): string[] {
   const locale = opts?.locale ?? 'en';
-  const fallbacks = opts?.fallbackChain ?? ['en'];
+  const fallbacks = isDefaultLocale(locale, opts?.defaultLocale) ? [] : (opts?.fallbackChain ?? []);
   // Preserve order, drop duplicates.
   const seen = new Set<string>();
   const chain: string[] = [];
@@ -1385,9 +1445,9 @@ export type PageComponentCopyKey = typeof PAGE_COMPONENT_COPY_KEYS[number];
  * Per-component copy for one component id, resolved across the locale chain.
  *
  * Resolved KEY BY KEY rather than by taking the first locale that has an entry
- * for the id: a partially-translated `zh` entry must still fall back to `en`
- * for the keys it omits, which is how every other resolver on this surface
- * behaves.
+ * for the id: a partially-translated `zh` entry must still fall back to the
+ * next locale on the DECLARED chain (`en` in the pins) for the keys it omits,
+ * which is how every other resolver on this surface behaves.
  */
 function lookupPageComponentCopy(
   bundle: TranslationBundle | undefined,
@@ -2081,22 +2141,47 @@ function lookupObjectFieldOption(
 }
 
 /**
- * Built-in labels for the platform-injected system fields (the ObjectQL
- * registry stamps `owner_id` / `created_*` / `updated_*` onto every object
- * with English labels). Custom objects carry no per-object translation
- * entries for these, so without a fallback every localized surface — list
- * headers, export files, import templates — leaks the English default (e.g.
- * an otherwise fully-Chinese import template with an `Owner` column).
+ * Built-in labels for the platform-injected system fields — the full set
+ * `injectedSystemColumnDefs` (`../data/injected-system-column-provenance`)
+ * spreads onto every eligible object with English labels: the tenant scope
+ * anchor `organization_id`, the audit family `created_*` / `updated_*`,
+ * `owner_id` and `owning_business_unit_id`. Custom objects carry no
+ * per-object translation entries for these, so without a fallback every
+ * localized surface — list headers, export files, import templates, the
+ * `/meta` read exits — leaks the English default (e.g. an otherwise
+ * fully-Chinese import template with an `Owner` column, or an
+ * `Organization` field on every business object of a zh-CN tenant).
+ *
+ * The identity-stable definitions themselves are never localised in place:
+ * the ObjectQL registry and the served-document strip read them by exact
+ * identity, so display-name resolution is a read-exit concern that lives
+ * HERE, keyed by field name, and applies only while the served label still
+ * equals the definition's English default (see `builtinSystemFieldLabel`).
+ * A row's `en` therefore MUST equal the definition's `label` byte for byte
+ * — one that drifts silently stops matching and the column leaks English
+ * again; `i18n-resolver.test.ts` pins the pairing from the provenance
+ * module's own definitions.
  *
  * Wording matches the generated platform bundles (`*.objects.generated.ts`)
  * so a system field reads the same on custom and platform objects.
+ * `owning_business_unit_id` has no bundle leaf of its own (injected, hidden,
+ * declared by no platform object), so its wording composes the bundles'
+ * `sys_business_unit` label with the ownership qualifier their
+ * `sys_user.primary_business_unit_id` leaves use.
  */
 const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
+  organization_id: { en: 'Organization', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organización' },
   owner_id: { en: 'Owner', 'zh-CN': '所有者', 'ja-JP': '所有者', 'es-ES': 'Propietario' },
   created_at: { en: 'Created At', 'zh-CN': '创建时间', 'ja-JP': '作成日時', 'es-ES': 'Creado el' },
   created_by: { en: 'Created By', 'zh-CN': '创建人', 'ja-JP': '作成者', 'es-ES': 'Creado por' },
   updated_at: { en: 'Last Modified At', 'zh-CN': '更新时间', 'ja-JP': '更新日時', 'es-ES': 'Actualizado el' },
   updated_by: { en: 'Last Modified By', 'zh-CN': '更新人', 'ja-JP': '更新者', 'es-ES': 'Actualizado por' },
+  owning_business_unit_id: {
+    en: 'Owning Business Unit',
+    'zh-CN': '所属业务单元',
+    'ja-JP': '所属ビジネスユニット',
+    'es-ES': 'Unidad de negocio propietaria',
+  },
 };
 
 /**
@@ -2878,7 +2963,7 @@ function lookupFlowLabel(
 /**
  * Per-screen copy for one node id, resolved across the locale chain — KEY BY
  * KEY, like {@link lookupPageComponentCopy}: a partially-translated `zh` entry
- * must still fall back to `en` for the keys it omits.
+ * must still fall back to the next DECLARED locale for the keys it omits.
  */
 function lookupFlowScreenCopy(
   bundle: TranslationBundle | undefined,

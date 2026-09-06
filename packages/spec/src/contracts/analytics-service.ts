@@ -44,6 +44,32 @@ export interface AnalyticsResult {
     /** Column metadata */
     fields: Array<{
         name: string;
+        /**
+         * The column's data type, in the `DimensionType` vocabulary
+         * (`string` / `number` / `boolean` / `time` / `geo`) — one wire
+         * position, one vocabulary.
+         *
+         * A DIMENSION column carries its cube dimension's type, so a date axis
+         * has always said `time`. A MEASURE column says `number`, with ONE
+         * correction: `min`/`max` over a `date` / `datetime` / `time` field
+         * says `time` (#15768). Those two aggregates return a value OF THE
+         * AGGREGATED FIELD'S OWN TYPE, so the value beside the descriptor is an
+         * instant, a calendar day or a clock time — describing it as a number
+         * left a formatter that branches on this key unable to reach its
+         * temporal branch at all.
+         *
+         * Everything else in the closed `AggregationFunction` vocabulary is
+         * numeric whatever it reads and is unchanged: `count` /
+         * `count_distinct` count rows and values, `sum` / `avg` over a temporal
+         * column are refused by no layer and answered by the backend (an epoch
+         * mean on SQLite, an error on Postgres), so there is no one value for a
+         * type to describe. A derived measure is numeric by construction —
+         * `computeDerived` coerces its operands with `Number()`.
+         *
+         * The correction is tiered "cannot answer, do not block": a host with
+         * no source-field metadata, and a measure over a relationship PATH,
+         * both leave the column exactly as the query layer produced it.
+         */
         type: string;
         /** Human display label (e.g. measure `label`) — for legends/KPIs. */
         label?: string;

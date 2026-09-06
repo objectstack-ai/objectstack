@@ -174,7 +174,7 @@ export const SysSession = ObjectSchema.create({
       required: false,
       readonly: true,
       group: 'Session',
-      description: 'When set, this session was revoked (idle / absolute-max / concurrent-cap / admin). System-managed.',
+      description: 'When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed.',
     }),
     revoke_reason: Field.text({
       label: 'Revoke Reason',
@@ -182,7 +182,19 @@ export const SysSession = ObjectSchema.create({
       maxLength: 64,
       readonly: true,
       group: 'Session',
-      description: 'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, …).',
+      // [#15784] The accept set widens here, and this description IS the
+      // published vocabulary — there is no Zod enum behind this column (it is
+      // free `text`), so this line is the only contract a consumer can read.
+      // Every value before `organization_membership_ended` is either a TIMER
+      // (idle_timeout, absolute_max, concurrent_cap) or an interactive revoke
+      // (user_revoked, admin — `plugin-auth/session-tombstone.ts`); that one is
+      // the first AUTHORIZATION-EVENT cause, written when the membership
+      // backing a session's active organization ends and the user holds no
+      // other. ⛔ It is a COURTESY, never the enforcement: the wall is the
+      // per-request membership check in `resolve-authz-context.ts`.
+      description:
+        'Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, '
+        + 'admin, organization_membership_ended, …).',
     }),
 
     // ── Active context (multi-org/team) ──────────────────────────

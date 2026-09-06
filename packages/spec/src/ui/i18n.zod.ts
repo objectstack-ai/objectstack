@@ -161,9 +161,34 @@ export type InlineLocaleMap = Record<string, string> & {
  *
  * `{ en: 'Members', 'zh-CN': '成员', 'ja-JP': 'メンバー' }`: the author writes
  * every language inline, and the renderer picks one at display time
- * (objectui's `pickLocalized`, which the CLI's `i18n-extract` also recognises —
- * a label already in map form is multilingual, so no bundle key is scaffolded
- * for it).
+ * (objectui's `pickLocalized`).
+ *
+ * ## What the tooling does with a map — and the one thing it will not do
+ *
+ * A map is **never extracted**: `os i18n extract` scaffolds no bundle row for
+ * it, and there is no bundle key family for one. The author's file is the
+ * source of truth, and a translator working from the locale bundle will not
+ * find these strings there — which is the cost of the form, stated here
+ * because this is where an author chooses it.
+ *
+ * It is **not invisible to the coverage gate**, though, and the difference
+ * matters (#14749, maintainer ruling 2026-09-03, Q2 = B1). `os lint` /
+ * `check:i18n-coverage` read the map's own locales: the ones it carries count
+ * as covered, the ones it omits are reported as gaps. Before that ruling the
+ * CLI narrowed a map to "nothing authored in plain text" — the same reading an
+ * absent prop gets — so a prop written out in four languages was reported the
+ * way a prop nobody wrote is. Writing the map is authoring; the gate now says
+ * so.
+ *
+ * ⛔ **No key is synthesised from a node's path in the page tree** (#14749,
+ * Q3 = C3, same ruling). Position-addressed keys (`…components.0.title`) would
+ * make a reorder of two sibling components a silent, all-green swap of their
+ * translations — and `page:accordion` already delivers index identity as a
+ * contract, so the collision is not hypothetical. The recorded direction, if
+ * inline maps are ever to be extracted, is **identity first**: make
+ * `component.id` / `section.name` / `tabs item.value` mandatory and
+ * gate-enforced, then reuse the existing `pages.<page>.components.<id>.<key>`
+ * family.
  *
  * The annotation is what carries the {@link InlineLocaleMap} narrowing into
  * every `z.input`/`z.infer` derivation that embeds this schema — without it the

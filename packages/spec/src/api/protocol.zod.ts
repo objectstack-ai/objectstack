@@ -1973,7 +1973,8 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied fields that were LEGALLY stripped ' +
     'before the record was written — a non-system create cannot seed a static `readonly` ' +
-    'column (ingress strip), so those keys are dropped and the field re-derives its ' +
+    'column (the strip runs inside `engine.insert`, after the `beforeInsert` hooks, ' +
+    '`isSystem`-gated), so those keys are dropped and the field re-derives its ' +
     'default. Present ONLY when ≥1 field was dropped; the create still succeeded without ' +
     'them (status/success semantics unchanged). REST additionally surfaces this as the ' +
     '`X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the ' +
@@ -1993,9 +1994,11 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
  * stable and server-produced): `cloneData` builds exactly
  * `{ object, id, sourceId, record }` — the structural sibling of
  * {@link CreateDataResponseSchema} plus `sourceId`. A clone IS a create (the
- * copy runs the insert path: engine-owned columns re-derived, the #3043
- * readonly ingress strip applied, internal fields omitted from the response,
- * #7823) — but unlike `createData` the producer emits no `droppedFields`
+ * copy runs the insert path: engine-owned columns re-derived, the static
+ * `readonly` strip applied inside `engine.insert` for a non-system caller —
+ * the 2026-09-03 ruling, #14147; the #3043 ingress copy is deleted — and
+ * internal fields omitted from the response, #7823) — but unlike `createData`
+ * the producer emits no `droppedFields`
  * member, so none is declared: a key the producer never writes would be a
  * promise conformance cannot measure.
  */
@@ -2311,8 +2314,8 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   records: z.array(z.record(z.string(), z.unknown())).describe('Created records'),
   count: z.number().describe('Number of records created'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability: caller-supplied `readonly` fields the ' +
-    'create-ingress strip removed before the rows were written. AGGREGATED across the batch ' +
+    'Write-observability: caller-supplied `readonly` fields the in-engine create-side ' +
+    'strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch ' +
     '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
     'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +
     'drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +

@@ -1543,3 +1543,243 @@ describe('the in-memory ObjectQL double honours `limit` (#10978)', () => {
     expect(found.every((r: any) => r.organization_id === 'o1')).toBe(true);
   });
 });
+
+
+// ── [#15409] The SESSION arm of the organization claim ─────────────────────
+
+/**
+ * [#15409 — maintainer ruling 2026-09-05, option B] A browser session whose
+ * `activeOrganizationId` names an organization its owner has LEFT.
+ *
+ * ## What was measured, before the guard existed
+ *
+ * On a live `isolated` boot with the real cloud-private `Organizations` plugin
+ * and a file-backed sqlite store, a session whose owner had been removed
+ * through better-auth's OWN `/organization/remove-member` — driven by the org
+ * owner, 200, the `sys_member` row really deleted — went on READING that
+ * organization's rows (`GET 200`, total 4, every row `@org_alpha`) and WRITING
+ * into it (`POST 201`), the written row read back out of the sqlite file with
+ * the server stopped carrying `organization_id: org_alpha` and the removed
+ * user as `created_by`. Nothing revoked, nothing expired: `revoked_at` was
+ * still `null` and the default session lifetime is 7 days.
+ *
+ * The resolver already HELD the fact. `get-session` returned positions
+ * `["user","org_member"]` while the membership was intact and `["user"]` on
+ * the very next request — off the same `sys_member` read that builds
+ * `accessible_org_ids` — while still serving that organization's rows. The
+ * only tenant-claim-vs-membership comparison in the framework was
+ * `keyPrincipal`-gated, so a session never reached it.
+ *
+ * ## What is pinned here, and what is deliberately NOT
+ *
+ * Option B, ruled: the claim is DROPPED, the principal is NOT refused. So the
+ * assertions below are about `ctx.tenantId` going away while `ctx.userId`
+ * STAYS — the one pair that would go red if someone later "simplified" B into
+ * the API-key arm's option A. Refusing the whole credential is right for an API
+ * key, which IS its organization binding; a session is a person who may hold
+ * legitimate memberships elsewhere.
+ *
+ * ⛔ No new refusal mechanism is pinned because none was added: with no active
+ * organization, Layer 0 already fails closed — `!organizationId ⇒
+ * RLS_DENY_FILTER` in `plugin-security/src/tenant-layer.ts` for reads, and
+ * ADR-0123 D2's write refusal for writes. Those two are pinned where they live.
+ * The end-to-end consequence — reads nothing, write does not land, read back
+ * from the STORE — is pinned in
+ * `packages/rest/src/single-kernel-isolated-session-org-claim-matrix.test.ts`.
+ */
+describe('[#15409] a session organization claim that no membership backs', () => {
+  /** The `sys_session` token — the credential. It must never reach a log line. */
+  const SESSION_TOKEN = 'sess_token_never_log_me';
+
+  /**
+   * A session as better-auth returns it: the ROW `id` and the `token` are
+   * separate columns, which is why the log line can name one and never the
+   * other.
+   */
+  const sessionAs = (userId: string, org: string | null, id = 'ses_probe') =>
+    async () => ({
+      user: { id: userId, email: `${userId}@x.com` },
+      session: { id, token: SESSION_TOKEN, userId, activeOrganizationId: org },
+    });
+
+  /**
+   * `u_ex` was removed from `org_alpha` and is still a member of `org_beta` —
+   * the shape that makes "still authenticated elsewhere" measurable rather than
+   * asserted. `u_ex2` is a fellow member of `org_alpha`, seeded so the
+   * fellow-org peer list has something to leak if the drop is incomplete.
+   */
+  const tables = () => ({
+    sys_user: [{ id: 'u_ex', email: 'u_ex@x.com' }, { id: 'u_ex2', email: 'u_ex2@x.com' }],
+    sys_member: [
+      { user_id: 'u_ex', organization_id: 'org_beta', role: 'member' },
+      { user_id: 'u_ex2', organization_id: 'org_alpha', role: 'member' },
+    ],
+    sys_user_position: [],
+    sys_user_permission_set: [],
+  });
+
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { warnSpy.mockRestore(); });
+  const dropLines = () =>
+    warnSpy.mock.calls
+      .map((c: unknown[]) => c.map(String).join(' '))
+      .filter((l: string) => l.includes('Session organization claim dropped'));
+
+  it('CONTROL · a BACKED claim is adopted untouched — the guard is not a blanket', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_beta'), tenancyPosture: 'isolated',
+    });
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.tenantId).toBe('org_beta');
+    expect(dropLines()).toHaveLength(0);
+  });
+
+  it('THE SUBJECT: an UNBACKED claim resolves with NO active organization', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
+    });
+    expect(ctx.tenantId).toBeUndefined();
+    // …and the key is GONE, not present-and-undefined: a downstream
+    // `'tenantId' in ctx` must read the same as a session that never picked one.
+    expect(Object.prototype.hasOwnProperty.call(ctx, 'tenantId')).toBe(false);
+  });
+
+  /**
+   * ⭐ B, NOT A. The assertion that goes red if the session arm is ever
+   * "simplified" into the API-key arm's refusal: the principal is still
+   * authenticated, still carries its own identity and its real membership set.
+   */
+  it('B, not A: the PRINCIPAL survives — still authenticated, still a member where it really is', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
+    });
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.email).toBe('u_ex@x.com');
+    // The organization they ARE in is still reachable — this is what lets them
+    // switch to it instead of being signed out of everything.
+    expect(ctx.accessible_org_ids).toEqual(['org_beta']);
+    // ⛔ And it is NOT the API-key refusal: no principal was refused.
+    expect(ctx.authRefusal).toBeUndefined();
+  });
+
+  /**
+   * The drop is not a field edit — the envelope is RE-RESOLVED with no tenant.
+   * `org_user_ids` is the one that would give it away: computed under the
+   * rejected claim it enumerates the members of the organization the user left,
+   * and Layer 1 scopes identity tables with it.
+   */
+  it('the envelope carries no residue of the rejected claim — the fellow-org peer list is not the left org\'s', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
+    });
+    expect(ctx.org_user_ids).toEqual(['u_ex']);
+    expect(ctx.org_user_ids).not.toContain('u_ex2');
+  });
+
+  it('the same claim under `group` is dropped too — the wall is membership-derived there as well', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'group',
+    });
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.tenantId).toBeUndefined();
+    expect(dropLines()).toHaveLength(1);
+  });
+
+  /**
+   * Under `single` there is no organization boundary to cross, and a deployment
+   * with no membership rows at all would otherwise lose every session's active
+   * organization. Same scoping the API-key arm carries, same reason.
+   */
+  it('does NOT apply under `single` — no wall, nothing to justify a claim against', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'single',
+    });
+    expect(ctx.tenantId).toBe('org_alpha');
+    expect(dropLines()).toHaveLength(0);
+  });
+
+  /**
+   * An unwired caller is never made WORSE, only less strict — the doctrine
+   * `ResolveAuthzInput.tenancyPosture` already states for the two API-key
+   * refusals. A transport that supplies no posture keeps its old behaviour.
+   */
+  it('does NOT apply when the transport supplies no posture', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'),
+    });
+    expect(ctx.tenantId).toBe('org_alpha');
+    expect(dropLines()).toHaveLength(0);
+  });
+
+  it('a session with NO claim at all is not a drop — nothing was claimed', async () => {
+    const ql = makeQl(tables());
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', null), tenancyPosture: 'isolated',
+    });
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.tenantId).toBeUndefined();
+    expect(dropLines()).toHaveLength(0);
+  });
+
+  it('a membership whose ADR-0091 window has lapsed does not back a claim', async () => {
+    const ql = makeQl({
+      ...tables(),
+      sys_member: [{ user_id: 'u_ex', organization_id: 'org_alpha', role: 'member', valid_until: '2000-01-01T00:00:00Z' }],
+    });
+    const ctx = await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha'), tenancyPosture: 'isolated',
+    });
+    expect(ctx.userId).toBe('u_ex');
+    expect(ctx.tenantId).toBeUndefined();
+    expect(dropLines()).toHaveLength(1);
+  });
+
+  /**
+   * [#15256 / 2A, mirrored] The operator's only exit. The wire is unchanged, so
+   * without this line an offboarded member's live session naming the
+   * organization they left is invisible to everyone.
+   */
+  it('says it OUT LOUD, once, naming session / principal / organization / reason — and ⛔ never the token', async () => {
+    const ql = makeQl(tables());
+    await resolveAuthzContext({
+      ql, headers: H(), getSession: sessionAs('u_ex', 'org_alpha', 'ses_victim'), tenancyPosture: 'isolated',
+    });
+    const lines = dropLines();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('organization_membership_ended');
+    expect(lines[0]).toContain('session=ses_victim');
+    expect(lines[0]).toContain('principal=u_ex');
+    expect(lines[0]).toContain('organization=org_alpha');
+    // ⛔ THE CREDENTIAL. `sys_session.token` is replay-proven impersonation —
+    // its own field comment says so. It must never appear in a log line.
+    expect(lines[0]).not.toContain(SESSION_TOKEN);
+  });
+
+  /**
+   * The API-key arm is UNCHANGED (#15256 decision 1A stands): a key IS its
+   * organization binding, so it keeps refusing the principal outright. The
+   * session line must not fire for it — one credential, one decision point.
+   */
+  it('the API-key arm is untouched: an ex-member KEY is still refused, and says so in ITS own words', async () => {
+    const raw = 'osk_15409_exmember';
+    const ql = makeQl({
+      ...tables(),
+      sys_api_key: [{ id: 'key_ex', key: hashApiKey(raw), revoked: false, user_id: 'u_ex', active_organization_id: 'org_alpha' }],
+    });
+    const ctx = await resolveAuthzContext({
+      ql, headers: { 'x-api-key': raw }, tenancyPosture: 'isolated',
+    });
+    expect(ctx.userId).toBeUndefined();
+    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    // ⛔ Not degraded into the session's drop: the key is REFUSED, not trimmed.
+    expect(dropLines()).toHaveLength(0);
+  });
+});

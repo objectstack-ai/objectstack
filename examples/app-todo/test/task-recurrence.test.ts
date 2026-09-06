@@ -45,6 +45,7 @@ import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 import { allFlows, TaskCompletionFlow } from '../src/flows/index.js';
 import { todoFunctions, computeNextTaskDueDate } from '../src/functions/index.js';
 import { Task } from '../src/objects/task.object.js';
+import taskHook from '../src/objects/task.hook.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -57,9 +58,18 @@ afterEach(async () => {
 });
 
 /**
- * A real kernel with the app's real `todo_task` object and real flows — the
+ * A real kernel with the app's real `todo_task` object, hooks and flows — the
  * same harness `test/task-completion-trigger.test.ts` boots, plus the one wire
  * that card did not need: the function resolver.
+ *
+ * [#14147] The hook wire is new here, and its absence is what this sentence used
+ * to overstate: the harness claimed to boot the same stack as its sibling while
+ * binding no hooks at all, so `task.hook.ts`'s `beforeUpdate` completion stamp
+ * — the app's real answer to `completed_date_required` since #7036 — never ran
+ * in this file. That is why it carried a `completed_date` CREATE-seed the
+ * sibling had already deleted. Binding the app's own hook is what lets the
+ * completion below travel the app's real user path; the app ships this hook, so
+ * a harness that omits it was testing a stack the app does not have.
  *
  * `defineStack({ functions })` is bridged to `AutomationEngine.resolveFunction`
  * by the automation plugin when an app bundle is loaded through `AppPlugin`.
@@ -87,6 +97,7 @@ async function bootTodoKernel(): Promise<{
   objectql.registerDriver(driver, true);
   openDrivers.push(driver);
   objectql.registry.registerObject(Task, 'todo', 'todo');
+  objectql.bindHooks([taskHook], { packageId: 'app:com.example.todo' });
   await objectql.syncSchemas();
 
   automation.setFunctionResolver(
@@ -112,12 +123,24 @@ function calendarDate(value: unknown): string {
  * Complete one recurring task through the real write path and return the task
  * the flow spawned, plus the run that spawned it.
  *
- * `completed_date` is seeded on CREATE for the same reason
- * `test/task-completion-trigger.test.ts` seeds it: the object's
- * `completed_date_required` rule refuses a completion write without it, and the
- * ordinary-user completion path is a separate card's subject (#7036). This card
- * is about what the flow does once it fires, so the completion is driven the way
- * the #6882 suite already drives it.
+ * [#14147] NO `completed_date` CREATE-seed. This helper used to carry one,
+ * citing `test/task-completion-trigger.test.ts` — but that file had already
+ * DELETED the same workaround at #7036 ("the CREATE-seed workaround this test
+ * used to carry existed only because the completion UPDATE was impossible"),
+ * and its `GATES:` case drives this identical write shape (a user-context
+ * predicate update to `status: 'completed'` on a task created without the
+ * column) green today — because that harness BINDS the app's hook, which this
+ * one did not. The seed was a stale copy of a workaround whose reason had
+ * already been fixed: `task.hook.ts`'s `beforeUpdate` leg stamps
+ * `completed_date` on the transition into `completed`, which is what satisfies
+ * the object's `completed_date_required` rule. Both halves had to change here:
+ * bind the hook (above) and drop the seed.
+ *
+ * It had to go now because it was also a NON-SYSTEM caller seeding a
+ * `readonly: true`, server-owned column on create — the act the maintainer
+ * ruling of 2026-09-03 makes the engine strip. Dropping it removes a workaround,
+ * not an assertion: the completion below now travels the app's real user path
+ * rather than around it.
  */
 async function completeRecurringTask(opts: {
   subject: string;
@@ -137,7 +160,6 @@ async function completeRecurringTask(opts: {
     is_recurring: true,
     recurrence_type: opts.recurrenceType,
     recurrence_interval: opts.interval ?? 1,
-    completed_date: '2026-08-09T10:00:00.000Z',
   }, ctx);
   const id = Array.isArray(created) ? created[0].id : created.id;
 
@@ -323,10 +345,12 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       const { automation, data } = await bootTodoKernel();
       const ctx = { context: { userId: 'u_todo' } };
 
+      // [#14147] No `completed_date` seed — see `completeRecurringTask` above:
+      // the hook stamps it on the transition, and a non-system create may not
+      // seed a server-owned column.
       const created = await data.insert('todo_task', {
         subject: 'One-off task', status: 'not_started', priority: 'normal', owner: 'u_todo',
         due_date: '2026-08-10', is_recurring: false,
-        completed_date: '2026-08-09T10:00:00.000Z',
       }, ctx);
       const id = Array.isArray(created) ? created[0].id : created.id;
 
@@ -375,11 +399,20 @@ describe('#7037 — the recurrence branch computes a real next due date', () => 
       broken.type = 'autolaunched';
       automation.registerFlow(broken.name, broken);
 
+      // [#14147] Unlike the cases above, this fixture must START from an
+      // already-completed row — there is no transition to stamp on, and the
+      // object's `completed_date_required` rule refuses a completed task with a
+      // blank `completed_date`. Seeding a server-owned column at create time is
+      // a SYSTEM act (maintainer ruling, 2026-09-03: `context.isSystem`,
+      // `runAs: 'system'`, a system hook or a seed), so this one write declares
+      // itself trusted. Nothing else about the case changes: the subject is
+      // still what the BROKEN flow fixture does with an uncomputed date, and
+      // the assertions below are untouched.
       const created = await data.insert('todo_task', {
         subject: 'Reverse fixture task', status: 'completed', priority: 'normal', owner: 'u_todo',
         due_date: '2026-08-10', is_recurring: true, recurrence_type: 'daily', recurrence_interval: 1,
         completed_date: '2026-08-09T10:00:00.000Z',
-      }, ctx);
+      }, { context: { userId: 'u_todo', isSystem: true } });
       const id = Array.isArray(created) ? created[0].id : created.id;
 
       // Driven directly rather than through the record-change hook, so the

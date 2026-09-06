@@ -148,7 +148,7 @@ describe('IntervalJobAdapter retryPolicy / timeout (#3494)', () => {
       'slow',
       { type: 'interval', intervalMs: 100000 },
       async () => { await new Promise((r) => setTimeout(r, 150)); },
-      { timeout: 25 },
+      { timeoutMs: 25 },
     );
     await adapter.trigger('slow');
     const execs = await adapter.getExecutions('slow');

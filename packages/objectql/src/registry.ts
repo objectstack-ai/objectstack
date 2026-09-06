@@ -901,6 +901,16 @@ function provisionTenantScopeIndex(
  * the write path for the mirrored reason: on exactly those rows the plan also
  * strips nothing (`plan.names` is `{ id }`), so the author's declared column is
  * still present when the re-stamp asks.
+ *
+ * [#15225 → #15813] Briefly exported at module level for the engine's
+ * bulk-event producer, which answered "is this object walled?" from it — a
+ * binding of TWO of the wall's three object clauses, structurally blind to
+ * the deployment's #12699 carve-out (the #15706 finding). That producer now
+ * reads the Layer 0 verdict plugin-security RECORDS on the operation
+ * (`OperationContext.tenantLayer0Verdict`) and consults no schema predicate at
+ * all, so this is private again: the registry's own reading, for the two
+ * sites above, and ⛔ not a contract for any other package to answer the
+ * wall from — the wall answers for itself (ADR-0131 D8).
  */
 function carriesTenantScopeColumn(schema: ServiceObject): boolean {
   // Clause 1 — the wall's own two clauses, spelled here because
@@ -1281,6 +1291,8 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
 export class NamespaceConflictError extends Error {
   readonly code = 'NAMESPACE_CONFLICT';
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The namespace both packages claim. */
   readonly namespace: string;
   /** The installed package that already owns the namespace. */
@@ -1393,6 +1405,8 @@ function declaredOwnedObjectNames(manifest: ObjectStackManifest): string[] {
 export class ArtifactObjectNameConflictError extends Error {
   readonly code = 'DUPLICATE_ARTIFACT_OBJECT_NAME';
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The object name both packages claim. */
   readonly objectName: string;
   /** The co-owning package that already owns the name. */
@@ -1452,6 +1466,8 @@ export class ArtifactObjectNameConflictError extends Error {
 export class ObjectOwnershipConflictError extends Error {
   readonly code = 'OBJECT_OWNERSHIP_CONFLICT';
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The fully-qualified object name both packages claim. */
   readonly objectName: string;
   /** The package that already owns the name. */

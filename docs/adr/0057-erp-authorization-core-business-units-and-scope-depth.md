@@ -2,6 +2,12 @@
 
 **Status**: Accepted in part (2026-06-21) — D1–D3/D8 implemented (scope-depth enum + evaluator, `sys_business_unit` tree, hierarchy-resolver seam, conformance rows); **D4–D7 superseded by ADR-0090 D3 / ADR-0095**: the `sys_role`/`sys_user_role`/`role_and_subordinates` vocabulary never shipped — the code realizes them as flat `sys_position`/`sys_user_position` with rollup on the BU tree. This ADR's own implementation-status table predates that supersession; read it with the rename applied.
 **Deciders**: ObjectStack Protocol Architects
+**Path note (2026-09), paths only — no decision changes**: this record cites the **pre-rename**
+vocabulary, and those four paths no longer resolve. `sys-department.object.ts` and `department-graph.ts`
+became `sys-business-unit.object.ts` / `business-unit-graph.ts` in this ADR's own landing (`e16f2a830`);
+`sys-role.object.ts` and `role-graph.ts` became `sys-position.object.ts` / `position-graph.ts` in the
+ADR-0090 P1 position rename (`6d83431cf`, 2026-07-09). The historical spellings are kept below because
+the argument is *about* the pre-rename shape.
 **Builds on**: [ADR-0010](./0010-metadata-protection-model.md) (metadata protection / object ownership),
 [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove),
 [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (runtime proof),

@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { lazySchema } from '../../shared/lazy-schema';
+import { retiredKey } from '../../shared/retired-key';
 import { strictObject } from '../../shared/strict-object';
 import type { DriverDefinition } from '../datasource.zod';
 import {
@@ -211,10 +212,26 @@ export const TursoConfigSchema = lazySchema(() => strictObject(
       onConnect: z.boolean().optional().describe('Sync immediately on connect'),
     }).optional().describe('Embedded-replica sync configuration (requires `syncUrl`)'),
 
-    /** Operation timeout in ms for remote operations (replica/remote modes). */
-    timeout: z.number().int().positive().optional()
+    /**
+     * Operation timeout in ms for remote operations (replica/remote modes).
+     *
+     * Renamed from `timeout` (#15680, ruling B on #14478): the unit lived only
+     * in the describe prose and in a `.meta({ title })` no parse reads. It sat
+     * two keys below `sync.intervalSeconds`, which already spelled ITS unit —
+     * one shape carrying both conventions, and the suffixed one was the honest
+     * half.
+     */
+    timeoutMs: z.number().int().positive().optional()
       .describe('Operation timeout in milliseconds for remote operations')
       .meta({ title: 'Timeout (ms)' }),
+
+    /** Tombstone for the rename above (#15680, ruling B on #14478). */
+    timeout: retiredKey(
+      '`turso config.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a '
+      + 'duration-shaped number lives in the key name, not only in the describe prose. Rename the '
+      + 'key to `timeoutMs`; the value (milliseconds) is unchanged. '
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    ),
 
     /** Pin the transport instead of inferring it from `url`. */
     mode: TursoTransportModeSchema.optional().meta({ title: 'Transport mode' }),

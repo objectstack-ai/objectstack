@@ -50,6 +50,7 @@ import {
 import { BUILTIN_MEMBERSHIP_ROLES } from '@objectstack/spec';
 import { collectCelRootIdentifiers } from '@objectstack/formula';
 import { walkFlowNodes } from './flow-walk.js';
+import { recordsOf } from './object-graph.js';
 
 export const APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER = 'approval-approver-not-membership-tier';
 export const APPROVAL_APPROVER_TYPE_DEPRECATED = 'approval-approver-type-deprecated';
@@ -128,15 +129,6 @@ const TYPE_FIX: Record<string, string> = {
   bu: 'department',
 };
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 /**
  * Validate the approvers of every Approval node in the stack's flows.
  * Returns findings (empty = clean).
@@ -145,7 +137,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
   const findings: ApprovalApproverFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const flows = asArray(stack.flows);
+  const flows = recordsOf(stack.flows);
   const validTypes = new Set<string>(ApproverType.options);
 
   for (let fi = 0; fi < flows.length; fi++) {
