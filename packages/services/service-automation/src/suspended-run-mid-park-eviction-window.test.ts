@@ -59,22 +59,33 @@
  * a future change that alters the trade — in either direction — has to come
  * through here and say so.
  *
- * ## One measured case that does NOT stay inside those bounds
+ * ## The one case that escaped those bounds — FIXED in #16151
  *
- * `FINDING` below. Bound 1 holds only because the save eventually LANDS. Let the
- * save FAIL after an evicting read has already run, and the compound outcome is
- * a run with no durable row and no map entry: unresumable, and the engine's own
- * `error` record for the failed save promises the opposite ("it is kept in
- * memory only"). It is narrower than the base window — it needs a store that
- * rejects the write while still answering reads with "no row" rather than
- * throwing (a healthy read replica behind a broken write path, a missing INSERT
- * grant, a full disk) — but it is not hypothetical, and it escapes the bound.
+ * Bound 1 holds only because the save eventually LANDS. Let the save FAIL after
+ * an evicting read has already run, and the compound outcome was a run with no
+ * durable row and no map entry: unresumable in its own process, while the
+ * engine's `error` record for that failed save promised the operator the
+ * opposite ("it is kept in memory only ... after a restart"), which is the
+ * direction that costs the most — an operator reading it looks for the run only
+ * after the next restart, and blames the restart. It is narrower than the base
+ * window — it needs a store that rejects the write while still answering reads
+ * with "no row" rather than throwing (a healthy read replica behind a broken
+ * write path, a missing INSERT grant, a full disk) — but it is not
+ * hypothetical.
  *
- * ⛔ It is deliberately NOT fixed here. Widening the cache-only marking is
- * exactly the move this card forbids taking unilaterally, and the choice
- * between that, a lock, and reordering the save is a decision above it. The
- * case is pinned at its MEASURED behaviour so the cost is visible and so any
- * future fix has a red test to turn green.
+ * ⭐ #16150 pinned it at its MEASURED behaviour, explicitly not as desired, so a
+ * fix would have a red test to turn green. #16151 turned it green: the catch in
+ * `persistSuspendedRun` now RE-SEATS the map entry alongside the cache-only
+ * marking, so the marking qualifies something again. The two tests below are
+ * that pin, rewritten to the INTENDED behaviour — the run stays resumable
+ * in-process, and the `error` record's promise is asserted against the state it
+ * describes rather than merely read.
+ *
+ * ⛔ The fix is option C of that card, and nothing wider: the cache-only marking
+ * is NOT widened (it still happens only after the save settles, and only on
+ * failure — widening it would weaken #13617's store authority and is reserved
+ * to its own review), no lock is added, and the save is not reordered. The base
+ * window above is untouched and its two tests are unchanged.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -86,6 +97,17 @@ import type { SuspendedRun, SuspendedRunStore } from './engine.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
+}
+
+/** A logger that keeps every `error` message, so a promise the engine MAKES can
+ *  be asserted against the state it describes. */
+function recordingLogger(errors: string[]): any {
+  const log: any = {
+    info() {}, warn() {}, debug() {},
+    error(message: string) { errors.push(message); },
+    child() { return log; },
+  };
+  return log;
 }
 
 /** start -> lv1 -> lv2 -> end. Two levels, so a re-suspend has somewhere to go. */
@@ -106,8 +128,8 @@ const APPROVAL_FLOW = {
   ],
 } as any;
 
-function engineOver(store: SuspendedRunStore | undefined): AutomationEngine {
-  const engine = new AutomationEngine(silentLogger(), store);
+function engineOver(store: SuspendedRunStore | undefined, logger: any = silentLogger()): AutomationEngine {
+  const engine = new AutomationEngine(logger, store);
   engine.registerNodeExecutor({
     type: 'approval_level',
     descriptor: defineActionDescriptor({
@@ -252,12 +274,15 @@ describe('#16129 — the mid-park window between the map write and the durable s
   });
 });
 
-// -- the one case that escapes the bounds, pinned at its measured behaviour ---
+// -- the one case that escaped the bounds, now pinned at the INTENDED outcome -
 
-describe('#16129 — the window compounded with a FAILING save', () => {
-  it('FINDING: an evicting read inside the window of a save that then fails leaves the run unresumable', async () => {
-    // ⛔ Deliberately NOT fixed here — see this file's header. Pinned so the
-    // cost is visible and so a future fix has a red test to turn green.
+describe('#16151 — the window compounded with a FAILING save', () => {
+  it('an evicting read inside the window of a save that then FAILS leaves the run resumable in-process', async () => {
+    // ⭐ This assertion set is #16150's `FINDING` pin, flipped. It recorded the
+    // MEASURED loss (`hasSuspendedRun` false, `resume` → `RUN_NOT_FOUND`) and
+    // said in its own header that it was pinned as measured and NOT as desired.
+    // What follows is the desired behaviour, and it is what the engine's own
+    // `error` record for a failed save has always promised.
     const inner = new InMemorySuspendedRunStore();
     const { store, entered, release } = gatedSaveStore(inner, { failSave: true });
     const engine = engineOver(store);
@@ -265,30 +290,40 @@ describe('#16129 — the window compounded with a FAILING save', () => {
     const parking = engine.execute('expense_approval');
     const runId = (await entered).runId;
 
-    // Same window, same evicting read.
+    // The BASE window is unchanged by the fix — mid-park, the entry is still
+    // unqualified, and the per-id read still evicts it. That half stays as
+    // #16129 pinned it; only the compound outcome below moves.
     expect(listedNodes(engine.listSuspendedRuns(), runId)).toEqual(['lv1']);
     expect(await engine.hasSuspendedRun(runId)).toBe(false);
     expect(listedNodes(engine.listSuspendedRuns(), runId)).toEqual([]);
 
-    // The save now fails. `persistSuspendedRun` marks the run cache-only — but
-    // the map entry it qualifies is already gone, so the qualifier qualifies
-    // nothing and the strict loader has nothing left to serve.
+    // The save now fails. `persistSuspendedRun` marks the run cache-only AND
+    // re-seats the map entry that read evicted, so the marking qualifies
+    // something again instead of qualifying nothing.
     release();
     expect((await parking).runId).toBe(runId);
 
-    // ESCAPES BOUND 1. The store never took the row and the cache no longer
-    // holds it, so the run is unresumable — while the engine's `error` record
-    // for the failed save says it "is kept in memory only".
+    // The fix invents no durability: the store still never took the row, and
+    // the cross-restart loss the record reports is real.
     expect(await inner.load(runId)).toBeNull();
-    expect(await engine.hasSuspendedRun(runId)).toBe(false);
-    expect(listedNodes(engine.listSuspendedRuns(), runId)).toEqual([]);
-    const resumed = await approve(engine, runId);
-    expect(resumed.success).toBe(false);
-    expect(resumed.code).toBe('RUN_NOT_FOUND');
 
-    // The control that isolates the window as the cause: WITHOUT the mid-park
-    // read, the identical failing save is the documented degradation — the run
-    // stays resumable in-process, which is exactly what the promise says.
+    // BOUND 1, RESTORED. The run is resumable in THIS process — the documented
+    // degradation (a failed save costs cross-restart durability, not in-process
+    // resumability) now holds in the compound case too.
+    expect(await engine.hasSuspendedRun(runId)).toBe(true);
+    expect(listedNodes(engine.listSuspendedRuns(), runId)).toEqual(['lv1']);
+    expect(await engine.getSuspendedScreen(runId)).not.toBeUndefined();
+
+    // Resumable END TO END, not merely answering `true`: the run advances to
+    // the next level (whose save fails the same way) and then completes.
+    expect((await approve(engine, runId)).status).toBe('paused');
+    expect(listedNodes(engine.listSuspendedRuns(), runId)).toEqual(['lv2']);
+    expect((await approve(engine, runId)).success).toBe(true);
+
+    // The CONTROL that isolated the mid-park read as the cause, kept as-is:
+    // WITHOUT the read, the identical failing save is the documented
+    // degradation. It was the half that already behaved; the two now agree,
+    // which is the whole content of the fix.
     const solo = engineOver({
       async save() { throw new Error('sqlite: attempt to write a readonly database'); },
       async load() { return null; },
@@ -298,6 +333,39 @@ describe('#16129 — the window compounded with a FAILING save', () => {
     const soloRun = (await solo.execute('expense_approval')).runId!;
     expect(await solo.hasSuspendedRun(soloRun)).toBe(true);
     expect(listedNodes(solo.listSuspendedRuns(), soloRun)).toEqual(['lv1']);
+  });
+
+  it("the failed-save `error` record is TRUE in this interleaving: both reads it names answer for the run", async () => {
+    // ⭐ The half of #16151 that is not about losing the run. The record told
+    // the operator the run was "kept in memory only" and that they had until
+    // the next restart to act; in this interleaving it was already gone, so the
+    // message misdirected exactly the person who could still have acted. The
+    // remedy is not to weaken the promise but to make it hold AND to make it
+    // CHECKABLE: the message now names the two reads that must answer, so an
+    // operator can falsify it instead of trusting it. This test asserts the
+    // message against the state it describes — prose and behaviour cannot drift
+    // apart without turning it red.
+    const errors: string[] = [];
+    const inner = new InMemorySuspendedRunStore();
+    const { store, entered, release } = gatedSaveStore(inner, { failSave: true });
+    const engine = engineOver(store, recordingLogger(errors));
+
+    const parking = engine.execute('expense_approval');
+    const runId = (await entered).runId;
+    expect(await engine.hasSuspendedRun(runId)).toBe(false); // the evicting read
+    release();
+    await parking;
+
+    const record = errors.find(m => m.includes('failed to persist suspended run'));
+    expect(record).toBeDefined();
+    // What it still says: in-memory survival now, no survival across a restart.
+    expect(record).toContain('kept in memory only');
+    expect(record).toContain('NOT be resumable after a restart');
+    // What it now names — and each named read is asserted to actually answer.
+    expect(record).toContain('hasSuspendedRun()');
+    expect(await engine.hasSuspendedRun(runId)).toBe(true);
+    expect(record).toContain('listSuspendedRuns()');
+    expect(listedNodes(engine.listSuspendedRuns(), runId)).toEqual(['lv1']);
   });
 });
 

@@ -2049,7 +2049,14 @@ export class AutomationEngine implements IAutomationService {
         // falls entirely on `listSuspendedRuns`, which merely OMITS the run --
         // inside that listing's declared latitude. Do not widen the marking, add
         // a lock, or move the save above this line without reading that pin's
-        // header: it also records the ONE compound case that escapes the bounds.
+        // header.
+        //
+        // [#16151] The ONE compound case that ESCAPED those bounds — an evicting
+        // read inside the window, and then the save FAILING, leaving the run
+        // with neither a durable row nor a map entry — is closed in the catch
+        // below, which re-seats this entry. The base window itself is
+        // deliberately unchanged: while the save is still in flight a per-id
+        // read still evicts, and bound 1 still carries it.
         this.suspendedRuns.set(run.runId, run);
         if (this.store) {
             try {
@@ -2065,6 +2072,34 @@ export class AutomationEngine implements IAutomationService {
                 // what lets `loadSuspendedRunStrict` keep serving it from the
                 // map — the in-process resumability the message below promises.
                 this.cacheOnlySuspensions.add(run.runId);
+                // [#16151] RE-SEAT THE MAP ENTRY — the marking above qualifies
+                // an entry that may no longer be there. The map write at the
+                // top of this method is NOT yet qualified for the whole
+                // duration of the await, so a concurrent per-id
+                // `loadSuspendedRunStrict` reads a store that truthfully has no
+                // row, finds no qualifier, and evicts a run being parked right
+                // now. Compound that with THIS save failing and the run was
+                // left with neither a durable row nor a map entry:
+                // `hasSuspendedRun` answered `false` and `resume` answered
+                // `RUN_NOT_FOUND` — the run lost IN-PROCESS, while the record
+                // below told the operator it was "kept in memory only" and that
+                // they had until the next restart to act.
+                //
+                // Re-seating restores exactly this method's own write, on the
+                // one path where the store refused the row. It cannot resurrect
+                // a CONSUMED suspension: consumption goes through
+                // `forgetSuspendedRun`, which is reachable only once
+                // `loadSuspendedRunStrict` answers for this run, and for the
+                // whole of this await it answers `null` for the reason above.
+                // Nor can it clobber a NEWER entry: `persistSuspendedRun` is the
+                // only writer of this map, and a second park of the same run
+                // needs a resume that the same `null` refuses.
+                //
+                // ⛔ NOT a widening of the cache-only marking, which #16129
+                // forbids taking unilaterally because it would weaken #13617's
+                // store authority: the marking still happens only after the
+                // save has settled, and only when it settled as a FAILURE.
+                this.suspendedRuns.set(run.runId, run);
                 // #6499 — the cause is the datasource DRIVER's own text, so it
                 // goes to the logger's STRUCTURED slot, never spliced into the
                 // message; see `forgetSuspendedRun`'s catch below for the full
@@ -2078,8 +2113,10 @@ export class AutomationEngine implements IAutomationService {
                 // stays empty on purpose (#5575).
                 this.logger.error(
                     `[automation] failed to persist suspended run '${run.runId}' to the durable store — it is ` +
-                        `kept in memory only and will NOT be resumable after a restart. Fix the store failure ` +
-                        `in this record's meta.`,
+                        `kept in memory only: this process keeps it resumable, and hasSuspendedRun() and ` +
+                        `listSuspendedRuns() both still answer for it — if they do not, this run is already ` +
+                        `gone and that is a defect in this engine, not in the store. It will NOT be resumable ` +
+                        `after a restart. Fix the store failure in this record's meta.`,
                     undefined,
                     describeThrownForLog(err),
                 );
