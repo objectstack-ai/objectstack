@@ -76,7 +76,7 @@
       "title": "Flow Runs render loop/region iterations as a nested execution tree",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -85,7 +85,8 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route"
+          "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route",
+          "a `loop` whose body holds a two-branch `parallel` — the only shape that exercises both index keys on one step, needed by the loop { parallel } clause. ⚠️ NOT PRESENT in examples/app-showcase: it carries `loop` (showcase_batch_reminders) and `parallel` (showcase_fan_out_notify) as SEPARATE flows and nests neither, so that clause scores blocked(fixture) until such a flow lands (filed separately). The clause is written now because what it pins is settled — maintainer ruling 2026-09-03 — and a clause missing from this item is exactly what let the `iteration` overload sit unmeasured through two releases"
         ]
       },
       "steps": [
@@ -95,6 +96,7 @@
         "record every step's nodeId, nodeType, status, parentNodeId, iteration, regionKind (ExecutionStepLogSchema #1505 region tags)",
         "open the flow in the Studio flow-designer (metadata-admin) and its Runs panel (FlowRunsPanel) — NOT the developer Flow Runs page — and expand the newest run",
         "screenshot the expanded step tree showing the per-iteration children under the loop node",
+        "nesting run (needs the loop { parallel } fixture above): trigger that flow over at least two rows, GET its newest run detail, and record every branch step's parentNodeId, iteration, branch and regionKind — both index keys are read off the SAME step, which is the whole point of the clause",
         "contrast run: trigger again with {\"params\": {\"tasks\": []}} and capture the loop step of that run"
       ],
       "acceptance": [
@@ -109,6 +111,12 @@
           "oracle": "api",
           "verify": "assert the three send_reminder steps each carry {parentNodeId:'loop_tasks', iteration: 0|1|2, regionKind:'loop-body'} and no two share an iteration; top-level steps (start/loop_tasks/end) carry NO parentNodeId",
           "evidence": "step-log excerpt with the tags"
+        },
+        {
+          "clause": "loop { parallel }: a branch step carries BOTH indices, one meaning each — the enclosing loop's row on `iteration`, its own branch position on `branch` — and `iteration` never carries a branch index. Maintainer ruling 2026-09-03: \"`iteration` is single-valued: the zero-based iteration of the enclosing loop, carried through any nesting … The branch index lives on a new optional `branch` key, present only on steps inside a `parallel` branch.\" Before it, one field held both meanings and the innermost region won outright, so every branch step of a loop { parallel } recorded its branch and NO step of that branch recorded the row — a per-row failure inside a branch was attributable to a branch and never to the row",
+          "oracle": "api",
+          "verify": "from the nesting run's detail take the steps with regionKind='parallel-branch' and assert THREE things, because any two of them still pass on a broken engine: (a) each carries a `branch` equal to its branch position, `branch: 0` INCLUDED — a falsy check anywhere on the way silently drops the first branch; (b) each carries an `iteration` equal to the ROW it ran for, so across N rows x M branches every (iteration, branch) pair appears exactly once — the pre-fix engine wrote a CONSTANT iteration per branch, which is why counting distinct values is not enough on its own; (c) the enclosing `parallel` container step itself reads regionKind='loop-body' with the row on `iteration` and NO `branch` of its own. Cross-check that every recorded step still parses under ExecutionStepLogSchema",
+          "evidence": "step-log excerpt for one full row showing both branch steps with their (iteration, branch) pairs, plus the enclosing parallel container step"
         },
         {
           "clause": "the designer Runs panel renders the iterations as a nested tree (per-iteration children folded under the loop node, labeled 1-based), not a flat list",
@@ -154,6 +162,12 @@
           "date": "2026-08-07",
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-09-06",
+          "change": "added the loop { parallel } clause. The item pinned parentNodeId/iteration/regionKind on a plain loop body and said nothing about the nested case — the one shape where two enclosing regions each have an index of their own. It was unwritable while `iteration` was overloaded, because there was no correct reading to assert: the branch index displaced the row. The maintainer ruling of 2026-09-03 made `iteration` single-valued and gave the branch index its own `branch` key, and the engine's runRegion tagger now carries an outer region's index through nesting instead of discarding it for a step an inner region already tagged. Also records, rather than hides, the fixture gap the clause exposes: showcase nests neither construct in the other",
+          "ref": "#15230"
         }
       ]
     },
