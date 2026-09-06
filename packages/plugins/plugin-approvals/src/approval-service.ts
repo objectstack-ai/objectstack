@@ -19,10 +19,13 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
 import { keysetWalk, strandedDecisionFailure } from '@objectstack/types';
+// [#15981] `BUILTIN_IDENTITY_PLATFORM_ADMIN` is deliberately absent: the
+// platform arm of `isOverrideActor` reads the ADR-0095 rung, never the name.
+// The two org-level built-ins below are a NARROWER question and are untouched
+// here — see that predicate's doc block.
 import {
   ADMIN_FULL_ACCESS,
   ORGANIZATION_ADMIN_GRANTS,
-  BUILTIN_IDENTITY_PLATFORM_ADMIN,
   BUILTIN_IDENTITY_ORG_OWNER,
   BUILTIN_IDENTITY_ORG_ADMIN,
 } from '@objectstack/spec/identity';
@@ -1100,10 +1103,24 @@ export class ApprovalService implements IApprovalService {
     // unchecked `as any` on an enforcement input: a typo (`postures`,
     // `'PLATFORM-ADMIN'`) would have compiled and silently denied every
     // override, leaving a stuck approval with no in-product recovery.
+    //
+    // ⛔ [#15981] The rung and the capability name are the whole platform test:
+    // there is NO `positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)` arm any
+    // more, and reading the rung FIRST never made one safe — an OR is only as
+    // strong as its weakest arm. `positions[]` is the security axis and carries
+    // ADR-0057 D4 `sys_user_position` names; that table is `apiEnabled` with
+    // unconstrained `position` values, so a tenant could mint a row spelling
+    // that built-in and `resolveUserAuthzGrants` §4 would push it onto the
+    // array. `resolve-authz-context.ts` states the rule at
+    // `hasPlatformAdminStanding`, whose answer IS `posture === 'PLATFORM_ADMIN'`.
+    //
+    // This arm is the one that CROSSES THE TENANT WALL (the tenant-admin arm
+    // below is confined to the actor's own org), so the minted row bought a
+    // member of one tenant the power to decide another tenant's pending
+    // request. Driven in `approval-positions-name-authority.test.ts`.
     const posture = context.posture;
     const isPlatformAdmin = posture === 'PLATFORM_ADMIN'
-      || perms.includes(ADMIN_FULL_ACCESS)
-      || positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+      || perms.includes(ADMIN_FULL_ACCESS);
     if (isPlatformAdmin) return true;
     const isTenantAdmin = posture === 'TENANT_ADMIN'
       || ORGANIZATION_ADMIN_GRANTS.some((n) => perms.includes(n))
