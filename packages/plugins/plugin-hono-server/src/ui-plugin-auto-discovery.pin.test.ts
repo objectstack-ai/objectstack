@@ -31,10 +31,12 @@
  * and it is blind to everything downstream of the route string. E closes that:
  * it leaves `rawApp.get` alone, so the real handlers install on the real Hono
  * app, and drives `rawApp.request(...)` to pin what actually comes BACK. E is
- * what makes `staticPath` load-bearing (the bytes served come from that
- * directory) and `rewrite: true` load-bearing (the prefix really is stripped
- * before the file is looked up) — two properties every registration-only
- * assertion in this file passes through untouched.
+ * what makes the three properties the block hard-codes per mount load-bearing:
+ * `root: plugin.staticPath` (the bytes served come from that directory),
+ * `rewrite: true` (the prefix really is stripped before the file is looked up)
+ * and `spa: true` (a path matching no file still answers with the index). Every
+ * registration-only assertion in this file passes through all three untouched,
+ * and each has its own case and its own named falsifier in E.
  *
  * STILL UNPINNED, deliberately, and named here so the next reader does not
  * over-trust this file: the `default`/`isDefault` redirect that mounts `/` at
@@ -314,27 +316,44 @@ describe('UI plugin auto-discovery (#16050)', () => {
      * E — served, not merely registered.
      *
      * A, B and D replace `rawApp.get`, so they observe route STRINGS and nothing
-     * downstream of them: which directory is mounted, and whether the route prefix
-     * is stripped before the file is looked up, are both invisible to every one of
-     * them. Measured, not assumed — with `root` swapped to `process.cwd()` and with
-     * `rewrite` flipped to `false`, all of A, B and D stay green.
+     * downstream of them. Measured, not assumed: with `root` swapped to
+     * `process.cwd()`, with `rewrite` flipped to `false`, and with the SPA
+     * fallback retargeted at a file that does not exist, all of A, B and D stay
+     * green through every one of those.
      *
      * So this group installs the real handlers and asks the real Hono app for a
-     * response. It is what makes the file's `staticPath` and `rewrite` claims
-     * load-bearing rather than decorative.
+     * response. The auto-discovery block hard-codes three properties per mount —
+     * `root: plugin.staticPath`, `rewrite: true`, `spa: true` — and ⭐ EACH GETS
+     * ITS OWN CASE WITH ITS OWN NAMED FALSIFIER, because a coverage claim per
+     * property is only worth what its falsifier is:
+     *
+     *   root    — the base route, reddened by pointing `root` elsewhere;
+     *   rewrite — the asset request, reddened by `rewrite: false`;
+     *   spa     — the deep client route, reddened by retargeting the fallback.
+     *
+     * ⚠️ The three are NOT interchangeable, and the trap is specific: the base
+     * route is rewritten to `/`, which resolves to the mount directory, so the
+     * STATIC handler serves `index.html` itself and the SPA fallback is never
+     * reached. A base-route case therefore says nothing whatsoever about the SPA
+     * fallback — it passes with the fallback completely broken. Only a path that
+     * matches no file on disk reaches it.
      */
     describe('E — the mounted routes actually serve from staticPath', () => {
-        it('serves the SPA index for the base route', async () => {
+        it('serves the index for the base route, from the mounted directory', async () => {
             const rawApp = await serve(
                 makeFixture({ name: '@os-fixture/console', slug: 'console-fixture' }),
             );
 
             const res = await rawApp.request('/console-fixture/');
+            const body = await res.text();
 
-            // The bytes come out of the fixture's own temp directory, so a mount
-            // pointed anywhere else cannot answer this.
+            // Served by the STATIC handler, not the SPA fallback: `rewrite` turns
+            // the path into `/`, which resolves to the mount root, and serveStatic
+            // appends `index.html` for a directory. The bytes come out of the
+            // fixture's own temp directory, so a mount pointed anywhere else cannot
+            // answer this — that is the property this case owns.
             expect(res.status).toBe(200);
-            expect(await res.text()).toContain(INDEX_HTML);
+            expect(body).toBe(INDEX_HTML);
         });
 
         it('strips the route prefix before looking the asset up', async () => {
@@ -353,6 +372,24 @@ describe('UI plugin auto-discovery (#16050)', () => {
             expect(res.status).toBe(200);
             expect(body.trim()).toBe(ASSET_CSS);
             expect(body).not.toContain(INDEX_HTML);
+        });
+
+        it('falls back to the index for a deep client-side route', async () => {
+            const rawApp = await serve(
+                makeFixture({ name: '@os-fixture/console', slug: 'console-fixture' }),
+            );
+
+            const res = await rawApp.request('/console-fixture/deep/client/route');
+            const body = await res.text();
+
+            // This path matches NO file under the mount root, so the static handler
+            // calls next() and the scoped SPA fallback is the only thing that can
+            // answer. That makes this the one case in the file that actually
+            // exercises `spa: true`: with the fallback retargeted at a file that
+            // does not exist the request 404s here, while every other case in this
+            // file stays green.
+            expect(res.status).toBe(200);
+            expect(body).toBe(INDEX_HTML);
         });
     });
 });
