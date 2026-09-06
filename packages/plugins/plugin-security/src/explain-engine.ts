@@ -27,7 +27,7 @@ import {
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { matchesFilterCondition } from '@objectstack/formula';
-import { BUILTIN_IDENTITY_PLATFORM_ADMIN, ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
+import { ORGANIZATION_ADMIN_GRANTS } from '@objectstack/spec';
 import type { FieldMaskingRule } from '@objectstack/spec/data';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type {
@@ -96,12 +96,27 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *     `resolveAuthzContext` uses — NOT the previous loose permission-set-NAME
  *     match:
  *       - `PLATFORM_ADMIN` ← the **unscoped `admin_full_access` USER grant**
- *         (`hasPlatformAdminGrant`, which `buildContextForUser` now READS OFF the
- *         resolver's own verdict rather than recomputing), OR the
- *         `platform_admin` built-in position (which is itself only ever
- *         PROJECTED from that same grant — ADR-0068 D2). A merely-SCOPED
- *         `admin_full_access` grant (name present in `permissions`, not held
- *         unscoped) no longer over-labels.
+ *         (`hasPlatformAdminGrant`, which `buildContextForUser` READS OFF the
+ *         resolver's own verdict rather than recomputing), and nothing else. A
+ *         merely-SCOPED `admin_full_access` grant (name present in
+ *         `permissions`, not held unscoped) does not over-label.
+ *
+ *         ⛔ [#15981] It is NOT ALSO the `platform_admin` built-in POSITION.
+ *         That arm rested on the position being "only ever PROJECTED from that
+ *         same grant", which stopped being true when `positions[]` became the
+ *         security axis: it now carries ADR-0057 D4 `sys_user_position` names,
+ *         and that table is `apiEnabled` with unconstrained `position` values,
+ *         so a tenant could mint a row spelling the built-in. ⚠️ Reachability
+ *         here was NARROWER than at #15981's three sibling sites, and it is
+ *         worth stating precisely rather than overclaiming: preference (2)
+ *         above returns first for any principal `buildContextForUser` builds,
+ *         so the SHIPPING path never reached this line and a D4 row never moved
+ *         it. What the name-read did reach was a posture-less HAND-BUILT
+ *         context — and there it made the panel REPORT `PLATFORM_ADMIN` for a
+ *         principal enforcement treats as a MEMBER. That is a misreport, not an
+ *         admission — this engine explains, it does not admit — but it is a
+ *         misreport in the tool an administrator opens to check exactly this,
+ *         so it answered reassuringly wrong at the worst moment.
  *       - `TENANT_ADMIN` ← the `organization_admin` **capability** grant, exactly
  *         like enforcement (ADR-0095 D3). The better-auth `org_owner`/`org_admin`
  *         role positions are a provisioning source only and are no longer read
@@ -110,11 +125,9 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
 function derivePosture(context: any): AuthzPosture {
   if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';
   if (isAuthzPosture(context?.posture)) return context.posture;
-  const positions: string[] = Array.isArray(context?.positions) ? context.positions : [];
   const permissions: string[] = Array.isArray(context?.permissions) ? context.permissions : [];
   return deriveAdminPosture({
-    isPlatformAdmin:
-      context?.hasPlatformAdminGrant === true || positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN),
+    isPlatformAdmin: context?.hasPlatformAdminGrant === true,
     isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
   });
 }

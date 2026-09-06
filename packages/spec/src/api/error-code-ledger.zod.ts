@@ -593,6 +593,35 @@ export const ERROR_CODE_LEDGER = {
     // decision. `MultiUpdateHookKeyDivergenceError`,
     // `multi-update-hook-key-divergence.ts`.
     'MULTI_UPDATE_HOOK_KEY_DIVERGENCE',
+    // [#14748] the ADR-0048 Phase 1 install-time namespace gate's refusal: a
+    // package's `manifest.namespace` is already owned by an INSTALLED package
+    // that is not a co-owner of it (ADR-0130 D1), so the install is refused up
+    // front rather than allowed to half-apply and fail later at table
+    // creation. `NamespaceConflictError`, `registry.ts`.
+    //
+    // Registered because the refusal is WIRE-REACHABLE and its condition has a
+    // caller remedy no standard member carries. `POST /api/v1/packages`
+    // (`packages/runtime/src/domains/packages.ts`) calls `installPackage` with
+    // no artifact install SCOPE — which this gate, unlike the ADR-0130 D3
+    // object-name one, does not need — so an ordinary one-package install
+    // reaches it, and the domain's terminal catch answers through
+    // `errorFromThrown`. #14474 gave the throw its ADR-0112 envelope (`code` +
+    // `status: 422`); until this row landed the door's #9106 narrowing demoted
+    // the spelling onto the open `declaredCode` sibling and put the closed
+    // member 422 derives (`VALIDATION_ERROR`) in `error.code`, so a caller
+    // wanting to tell "your namespace is taken, rename it" from every other 422
+    // had to read the channel ADR-0112 declares as NOT guaranteed.
+    //
+    // Not a VALIDATION_ERROR synonym: the manifest parses and every field is
+    // well-formed — what is refused is the INSTALLATION-WIDE uniqueness of the
+    // namespace against packages already present, which the request body cannot
+    // express and the caller fixes by renaming or uninstalling, not by
+    // correcting a field. Nor a duplicate of `@objectstack/metadata-protocol`'s
+    // `NAMESPACE_PREFIX`: that one refuses a metadata NAME that does not carry
+    // its own package's declared prefix (`validateObjectNamespacePrefix`, a
+    // publish pre-flight); this one refuses the PREFIX itself, at install, as
+    // already owned by someone else.
+    'NAMESPACE_CONFLICT',
     // [#11142/#11230] a by-id update carried an `options.where.id` that is not
     // the bound payload `data.id` — a truthy scalar naming a DIFFERENT row
     // (#11142), or a non-scalar predicate over a row SET (#11230, which also

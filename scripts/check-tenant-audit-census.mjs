@@ -75,8 +75,9 @@
  * calls subtracted -- is present, dated, and NOT compared.
  *
  * Adopted by maintainer ruling on 2026-08-31 (option A), following the precedent
- * the sibling `check-system-context-census.mjs` set at `:77-84`. The full ruling,
- * the falsified alternative at `:30`, and the measurement that draws the line
+ * the sibling `scripts/check-system-context-census.mjs#UNENFORCED_TEXT_COUNTS`
+ * set (lines 77-84 there as measured). The full ruling, the falsified
+ * alternative (line 30 there, the ⭐ line quoted below), and the measurement that draws the line
  * where it is drawn are all at `UNENFORCED_SCALE_ROWS` below.
  *
  * Check B is not redundant with A. The generated region cannot lie, because it
@@ -419,7 +420,8 @@ export const PROSE_COUNTS = [
  * ## ⛔ What was NOT adopted, and why it is closed
  *
  * Asserting against a RECORDED BASELINE SHA instead of the live tree was proposed
- * and is falsified. The sibling's `:30` refutes it in one line:
+ * and is falsified. `scripts/check-system-context-census.mjs` refutes it in one
+ * line (line 30 there as measured):
  *
  *   > *"a gate that only checks what the page already says can never find what
  *   > the page failed to say."*

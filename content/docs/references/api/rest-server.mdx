@@ -175,16 +175,17 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
 | **cacheTtl** | `never` | optional | [REMOVED] `metadata.cacheTtl` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` endpoint's `cacheTtl` is the key that does reach the wire. |
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
-| **endpoints** | `{ types: boolean; items: boolean; item: boolean }` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types: boolean; items: boolean; item: boolean; maintenance: boolean }` | optional | Enable/disable specific endpoints |
 
 ### Nested Shape: `MetadataEndpointsConfig.endpoints`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `boolean` | optional (default: `true`) | GET /meta - List all metadata types |
-| **items** | `boolean` | optional (default: `true`) | GET /meta/:type - List items of type |
-| **item** | `boolean` | optional (default: `true`) | GET /meta/:type/:name - Get specific item |
-| **schema** | `never` | optional | [REMOVED] `metadata.endpoints.schema` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it gated a route that does not exist: the REST server mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete the key; `endpoints.types` / `items` / `item` are the switches that gate real mounts. |
+| **types** | `boolean` | optional (default: `true`) | Mount the metadata type list — `GET /meta` and `GET /meta/types` (one handler, two paths) |
+| **items** | `boolean` | optional (default: `true`) | Mount the per-type item list — `GET /meta/:type`, and nothing else |
+| **item** | `boolean` | optional (default: `true`) | Mount the whole per-item face — `GET`, `PUT` and `DELETE /meta/:type/:name`, its `/references` and `/layers` reads, the history family (`/history`, `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and `GET /meta/book/:name/tree` |
+| **maintenance** | `boolean` | optional (default: `true`) | Mount the whole-store maintenance operations — `GET /meta/diagnostics`, `GET /meta/_drafts` and the `POST /meta/_migrate-stored` write door |
+| **schema** | `never` | optional | [REMOVED] `metadata.endpoints.schema` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — it gated a route that does not exist: the REST server mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete the key; `endpoints.types` / `items` / `item` / `maintenance` are the switches that gate real mounts. |
 
 
 ---
@@ -284,7 +285,7 @@ const result = BatchEndpointsConfigSchema.parse(data);
 | **enableCache** | `boolean` | optional (default: `true`) | Enable HTTP cache headers (ETag, Last-Modified) |
 | **cacheTtl** | `never` | optional | [REMOVED] `metadata.cacheTtl` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` endpoint's `cacheTtl` is the key that does reach the wire. |
 | **maskObjectFields** | `boolean` | optional (default: `true`) | [ADR-0106 D8] Mask served object schemas to the caller's readable fields |
-| **endpoints** | `{ types: boolean; items: boolean; item: boolean }` | optional | Enable/disable specific endpoints |
+| **endpoints** | `{ types: boolean; items: boolean; item: boolean; maintenance: boolean }` | optional | Enable/disable specific endpoints |
 
 ### Nested Shape: `RestServerConfig.batch`
 
