@@ -738,12 +738,39 @@ export interface StepLogEntry {
      * #1479: structured-region grouping. When a step ran inside a `loop` /
      * `parallel` / `try_catch` body region, these tag it with its **immediate**
      * container so run observability can distinguish per-iteration / per-branch
-     * body steps from top-level ones. Set by {@link AutomationEngine.runRegion}
-     * (innermost wins — never overwritten as steps bubble through nested regions).
+     * body steps from top-level ones. Set by {@link AutomationEngine.runRegion}.
+     *
+     * #15230: the innermost region wins the IDENTITY fields — `parentNodeId`,
+     * `regionKind`, `retryAttempt` name which region actually ran the step, and
+     * a step a nested region already claimed keeps them. The INDEX fields
+     * (`iteration`, `branch`) are instead carried THROUGH nesting: an enclosing
+     * region fills the one the inner region left undefined rather than having
+     * it discarded.
+     *
+     * ⚠️ This interface is NOT derived from the spec's `ExecutionStepLog`
+     * (`packages/spec/src/automation/execution.zod.ts`). The two are held in
+     * step by the type-level pin in `builtin/region-index-keys.test.ts` — by
+     * that assertion, not by this comment.
      */
     parentNodeId?: string;
-    /** Zero-based loop iteration or parallel branch index of the enclosing region. */
+    /**
+     * Zero-based iteration of the enclosing `loop`, carried through any
+     * nesting. **Single-valued** (#15230, maintainer ruling 2026-09-03): it no
+     * longer doubles as the parallel branch index — that lives on `branch`.
+     * A step inside a `try` / `catch` region nested in a loop body carries the
+     * enclosing loop's iteration here, because such a region has no index of
+     * its own.
+     */
     iteration?: number;
+    /**
+     * #15230: zero-based index of the enclosing `parallel` branch. Present only
+     * on a step inside a parallel branch, absent everywhere else. When the
+     * parallel node is itself inside a loop body the step carries BOTH — the
+     * row through `iteration`, the branch through here — which is what the
+     * overload could not express: the branch index won outright and no step of
+     * that branch recorded which row it ran for.
+     */
+    branch?: number;
     /** Which region kind the step ran in: `loop-body` | `parallel-branch` | `try` | `catch`. */
     regionKind?: string;
     /**
@@ -8276,9 +8303,17 @@ export class AutomationEngine implements IAutomationService {
      *
      * #1479: the executed body steps are **returned** (tagged with `grouping`)
      * so the calling container node can fold them into the parent run log via
-     * `NodeExecutionResult.childSteps`. Tagging only fills fields left undefined,
-     * so when regions nest, each step keeps its **innermost** container's
-     * `parentNodeId` / `iteration` / `regionKind` / `retryAttempt`.
+     * `NodeExecutionResult.childSteps`. Tagging only ever fills fields left
+     * undefined, so when regions nest each step keeps its **innermost**
+     * container's IDENTITY — `parentNodeId` / `regionKind` / `retryAttempt`.
+     *
+     * #15230: the INDEX fields are the exception, and the reason this card
+     * exists. `iteration` and `branch` are carried THROUGH nesting: an
+     * enclosing region fills the index the inner region left undefined instead
+     * of being discarded because the step already had a `parentNodeId`. Before
+     * this, `loop { parallel }` recorded the branch index and nothing else, so
+     * a per-row failure inside a branch was attributable to a branch and never
+     * to the row.
      *
      * #7546: a region that FAILS still throws — the `try_catch` retry/throw
      * semantics are untouched — but its partial steps are no longer discarded.
@@ -8308,7 +8343,7 @@ export class AutomationEngine implements IAutomationService {
         region: FlowRegionParsed,
         variables: Map<string, unknown>,
         context: AutomationContext,
-        grouping?: { parentNodeId: string; iteration?: number; regionKind?: string; retryAttempt?: number },
+        grouping?: { parentNodeId: string; iteration?: number; branch?: number; regionKind?: string; retryAttempt?: number },
         partialSteps?: StepLogEntry[],
     ): Promise<StepLogEntry[]> {
         const entryId = findRegionEntry(region);
@@ -8319,19 +8354,43 @@ export class AutomationEngine implements IAutomationService {
         // A synthetic flow view — executeNode/traverseNext only read `nodes`/`edges`.
         const subFlow = { nodes: region.nodes, edges: region.edges ?? [] } as unknown as FlowParsed;
         const regionSteps: StepLogEntry[] = [];
-        // Tag this region's steps with their immediate container. Innermost wins:
-        // a step that already carries a `parentNodeId` (set by a nested region)
-        // is left untouched. Shared by the success and failure paths (#7546) so
-        // a failed attempt's steps are indistinguishable in SHAPE from a
-        // successful one's — they differ only in their own `status`.
+        // Tag this region's steps with their container. Shared by the success
+        // and failure paths (#7546) so a failed attempt's steps are
+        // indistinguishable in SHAPE from a successful one's — they differ only
+        // in their own `status`.
+        //
+        // #15230 splits what "innermost wins" governs, because the two halves
+        // answer different questions:
+        //
+        //   IDENTITY (`parentNodeId` / `regionKind` / `retryAttempt`) answers
+        //   WHICH REGION RAN THIS STEP. Innermost wins outright: a step a
+        //   nested region already claimed keeps naming that region, and an
+        //   enclosing region must never relabel it.
+        //
+        //   INDEX (`iteration` / `branch`) answers WHICH PASS OF WHICH REGION.
+        //   Nested regions contribute DIFFERENT indices — the loop's row and
+        //   the parallel's branch are both true of the same step — so an
+        //   enclosing region fills the index the inner one left undefined
+        //   instead of being skipped along with the identity fields. That skip
+        //   is the defect: `loop { parallel }` used to record the branch and
+        //   discard the row.
+        //
+        // Still "only fills what is undefined" in both halves, so an index a
+        // nested region DID set wins: for `loop { loop }` the inner loop's
+        // `iteration` stands, exactly as before.
         const tag = (): void => {
             if (!grouping) return;
             for (const step of regionSteps) {
                 if (step.parentNodeId === undefined) {
                     step.parentNodeId = grouping.parentNodeId;
-                    if (grouping.iteration !== undefined) step.iteration = grouping.iteration;
                     if (grouping.regionKind !== undefined) step.regionKind = grouping.regionKind;
                     if (grouping.retryAttempt !== undefined) step.retryAttempt = grouping.retryAttempt;
+                }
+                if (grouping.iteration !== undefined && step.iteration === undefined) {
+                    step.iteration = grouping.iteration;
+                }
+                if (grouping.branch !== undefined && step.branch === undefined) {
+                    step.branch = grouping.branch;
                 }
             }
         };

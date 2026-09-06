@@ -331,9 +331,17 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
         }
     });
 
-    // ── The fence: `parallel` is untouched ─────────────────────────────────
+    // ── `parallel` inside a loop: both indices, one meaning each ───────────
+    //
+    // This case was the #14414 FENCE while the overload stood: it asserted that
+    // #14456 had left `parallel` alone, with the branch index still occupying
+    // `iteration`. #15230 is the card that retired the overload (maintainer
+    // ruling 2026-09-03), so the fence is spent and what it guarded has moved:
+    // the assertion below now reads the two indices apart. It stays in this
+    // suite because #14456's subject — attributing a contained per-row failure
+    // to its ROW — is exactly what a branch step could not do before.
 
-    it('leaves `parallel` branch tagging exactly as it was — the #14414 fence', async () => {
+    it('loop { parallel }: a branch step carries the row on `iteration` and the branch on `branch` (#15230)', async () => {
         setup(CASES);
         engine.registerFlow('par', {
             name: 'par', label: 'par', type: 'autolaunched', runAs: 'system',
@@ -370,13 +378,23 @@ describe('#14456 — a contained per-iteration failure is visible, attributed an
         await engine.execute('par', { event: 'schedule' } as AutomationContext);
         const run = (await engine.listRuns('par'))[0];
 
-        // A branch step still carries its BRANCH index on `iteration` and
-        // `regionKind: 'parallel-branch'`, five times over (once per row) — the
-        // pre-existing overload #14414 owns. Nothing here changed it.
+        // Five rows x two branches, `regionKind: 'parallel-branch'` throughout.
         const branchSteps = run.steps.filter((s) => s.regionKind === 'parallel-branch');
         expect(branchSteps).toHaveLength(10);
-        expect(branchSteps.filter((s) => s.nodeId === 'flag').every((s) => s.iteration === 0)).toBe(true);
-        expect(branchSteps.filter((s) => s.nodeId === 'noop').every((s) => s.iteration === 1)).toBe(true);
+
+        const flagSteps = branchSteps.filter((s) => s.nodeId === 'flag');
+        const noopSteps = branchSteps.filter((s) => s.nodeId === 'noop');
+
+        // The BRANCH index is constant per branch and lives on `branch`.
+        expect(flagSteps.every((s) => s.branch === 0)).toBe(true);
+        expect(noopSteps.every((s) => s.branch === 1)).toBe(true);
+
+        // The ROW comes through `iteration`, carried down from the enclosing
+        // loop — the reading that did not exist while the branch index sat
+        // there. Each branch ran once per row, so each sees every row exactly
+        // once.
+        expect(flagSteps.map((s) => s.iteration)).toEqual([0, 1, 2, 3, 4]);
+        expect(noopSteps.map((s) => s.iteration)).toEqual([0, 1, 2, 3, 4]);
     });
 });
 
