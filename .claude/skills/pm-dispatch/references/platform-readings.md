@@ -71,6 +71,10 @@
 - 同一 PR 第二次被踢 ⇒ 停止重投,按签名四分支重判。
 - 吞吐两则:合并队列落地 ≈ 每 PR 15–30 分钟且串行,⛔ 不据还没落提前判异常。
 - 单容器重验证(build 加 test)并发甜点 ≈3,排批按它定上限。
+- 入队事件与队列 ref 迟 1–3 分钟才出现 ⇒ 轮询预算按 3 分钟,⛔ 不按 1 分钟判没挂上。
+- ready 翻转触发检查重跑 ⇒ 入队落在翻转之后约一分钟,那段空窗不是挂载失败。
+- `behind` 的 PR 照常入队:落后于 main 不是入队否决,⛔ 不为它先跑 update-branch。
+- `check_suite.completed` 会命名过期 head,check-run 也只属最后一次 push ⇒ 用前先重读当前 head。
 
 ## API 配额
 
@@ -211,6 +215,8 @@
 - `list_issue_types` 对本集成 403 而 `issue_write type:` 正常,是读权限缺口。
 - ⇒ 直接写已知好值(`Bug`/`Feature`/`Task`),写侧报错才是真信号;列表 403 不等于类型不可用。
 - 非法值是响错还是静默丢弃未实测,写非已知值前先小样验证。
+- ⛔ 控制词不取卡片逐字标题:逐字标题回 0,同题自然语言回 14 条含该卡,零仍不是读数。
+- MCP `get_comments` 结果超 ~100 KB 溢出成文件:返回体是路径不是评论,读前先判形。
 
 ## 读数陷阱
 
@@ -327,6 +333,21 @@
 - 计数答至今发生过没有,不答机制在不在:零计数只作弱先验。
 - 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
 - ⛔ 别处写下的计数值一律先复测再用。
+- MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
+- 同一路径吃掉标题里的尖括号跨度 ⇒ 标题占位写裸词(NAME / :id),⛔ 不写尖括号形。
+- 建卡改走 REST `POST /issues` 页脚存活;回读后 `PATCH /issues/{n}` 重送正文逐字节存下。
+- CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
+- Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。
+- 无 `packageManager` 的目录里 corepack 运行时解析 registry `latest` ⇒ 同 SHA 前绿后红是 tag 移了。
+- 自测写出的 fixture `package.json` 必带根清单的 `packageManager`,否则 CI 里解析到 latest。
+- `COREPACK_DEFAULT_TO_LATEST=0` 单用修不了已记 12.x 的 store ⇒ 环境变量不是补救。
+- corepack 下载 pnpm 可在检查体开跑前崩 undici(`assert(!this.paused)`)⇒ 是基础设施红。
+- 落地探针除命名代码形外,还必须在落地前的 tip 上读出不同值,否则它分不开两棵树。
+- `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
+- 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
+- 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
+- `merge-tree` 套不套 `.gitattributes` 驱动随本克隆注册与否变,驱动 exit 0 只说驱动收下了。
+- ⇒ 驱动管辖的路径上冲突证明跑两遍,第二遍带 `-c merge.os-regen.driver=false` 关掉驱动。
 
 ## 闭合关键词解析(PR 正文写侧)
 
@@ -339,6 +360,7 @@
 - PR body 与 squash commit message 是两个独立解析源:commit 干净不等于 body 干净,只查 commit 会漏。
 - 误关的卡以 `completed` 状态对一切只看 open 的过滤与巡检隐身,无机械守卫覆盖这条路径。
 - 消费侧检查 = 合并后读 `closed_by_pull_requests`,在复核清单里。
+- 被 `Fixes` PR 自动关闭的卡保留 `pm:*` 标签;`Refs` PR 不关卡 ⇒ 状态转移归席位不归平台。
 
 ## 断粮检测与跨墙恢复(5 小时用量墙)
 
@@ -357,3 +379,7 @@
 - 更新端带 `model`,但只有每次起新会话的 Routine 吃得到。
 - 自绑的保持所绑会话的档位直到绑定解除 ⇒ ⛔ 不据更新端能改档推自绑的档位可改。
 - UI 建的 Routine agent 改不动:更新端只受理自己建的。
+- 用量墙杀死席位与全部在飞子代理而 worktree 存活;`SendMessage` 幂等重启文本可整批复活。
+- 定时器只在轮次之间投递:可迟到数分钟,也可在轮内被吃掉而无通知 ⇒ 醒来先重读状态。
+- 撞墙期间到点的定时器在重置后按序补投 ⇒ ⛔ 不为它们重建 Routine。
+- 墙杀后别席可能在共享分支留下抢救 WIP 提交:未过门禁的分支尖不是复核输入。
