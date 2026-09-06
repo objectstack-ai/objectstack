@@ -60,6 +60,22 @@ type Fixture = Plugin & {
     staticPath?: string;
 };
 
+/**
+ * The refusal `promise` produced, or a loud failure if it produced none.
+ *
+ * ⛔ Not `promise.catch((e) => e as Error)`: that resolves to `Kernel | Error`,
+ * so a case whose input STOPPED being refused would go on asserting against a
+ * kernel and report a confusing property miss instead of "this loaded".
+ */
+async function refusal(promise: Promise<unknown>): Promise<Error> {
+    try {
+        await promise;
+    } catch (e) {
+        return e as Error;
+    }
+    throw new Error('expected the plugin to be refused, but it loaded');
+}
+
 function fixture(overrides: Partial<Fixture> & { name: string }): Fixture {
     return {
         version: '1.0.0',
@@ -84,7 +100,7 @@ describe('A — the legacy `ui-plugin` value is refused at kernel.use() (#15638,
         // The envelope, not merely "it threw": a bare `toThrow()` would stay
         // green if the kernel started refusing this input for an unrelated
         // reason, which is the failure mode this card was filed about.
-        const err = await kernel.use(legacy).catch((e: unknown) => e as Error);
+        const err = await refusal(kernel.use(legacy));
         expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
         expect(err.message).toContain('@os-fixture/legacy-ui');
         expect(err.message).toContain("at 'type'");
@@ -194,7 +210,7 @@ describe('D — the other two refusals the changeset states', () => {
         const kernel = makeKernel();
         const bad = fixture({ name: '@os-fixture/bad-slug', type: 'ui', slug: 'Not A Slug' });
 
-        const err = await kernel.use(bad).catch((e: unknown) => e as Error);
+        const err = await refusal(kernel.use(bad));
         expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
         expect(err.message).toContain("at 'slug'");
     });
@@ -210,7 +226,7 @@ describe('D — the other two refusals the changeset states', () => {
         const kernel = makeKernel();
         const bad = fixture({ name: '@os-fixture/bad-homepage', homepage: 'not-a-url' });
 
-        const err = await kernel.use(bad).catch((e: unknown) => e as Error);
+        const err = await refusal(kernel.use(bad));
         expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
         expect(err.message).toContain("at 'homepage'");
     });
@@ -250,7 +266,7 @@ describe('E — `version` is DELIBERATELY not enforced from the schema', () => {
 
         // Unchanged message and unchanged owner: this refusal is
         // `validatePluginStructure`'s, not the contract check's.
-        const err = await kernel.use(bad).catch((e: unknown) => e as Error);
+        const err = await refusal(kernel.use(bad));
         expect(err.message).toContain('Invalid semantic version');
         expect(err.message).not.toContain('PLUGIN_CONTRACT_VIOLATION');
     });
