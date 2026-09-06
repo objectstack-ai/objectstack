@@ -187,9 +187,9 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
-const SPEC_CHANGELOG = 'packages/spec/CHANGELOG.md';
+export const SPEC_CHANGELOG = 'packages/spec/CHANGELOG.md';
 const RELEASES_DIR = 'content/docs/releases';
-const INDEX_PATH = `${RELEASES_DIR}/index.mdx`;
+export const INDEX_PATH = `${RELEASES_DIR}/index.mdx`;
 
 /**
  * The sibling gate, as the repo-relative name every MESSAGE in this file names
