@@ -11,7 +11,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import {
   CREATION_ATTESTED_MIGRATION_IDS,
+  FILE_REFERENCES_MIGRATION_ID,
   NOTIFICATION_EVENT_MIGRATION_ID,
+  VALUE_SHAPES_MIGRATION_ID,
 } from '@objectstack/spec/system';
 import {
   readDataMigrationFlag,
@@ -300,6 +302,90 @@ describe('fresh-datastore attestation (ADR-0104, 2026-07-30 addendum)', () => {
       };
 
       expect(await attestFreshDatastore(engine)).toEqual([...CREATION_ATTESTED_MIGRATION_IDS]);
+    });
+
+    /**
+     * #16067. The remedy sentence used to be a two-way branch whose `else`
+     * gave `os migrate value-shapes` to every id that was not the file one.
+     * These pins test that DEFAULT, which is where the defect lived — a pin
+     * that only exercised the two ADR-0104 ids passed on the broken code, and
+     * still would.
+     *
+     * ⚠️ Reachability, measured rather than assumed: the SHIPPED engine cannot
+     * key this tally with a third id (`ObjectQL.noteAdmittedValueShapeViolation`
+     * derives the key from a closed `'media' | 'value-shape'` union, and it is
+     * the only writer of the map). But `valueShapeViolationsAdmitted` is an
+     * OPTIONAL, duck-typed member of {@link MigrationFlagEngine} returning an
+     * open `Record<string, …>` — any other engine satisfies it, as the doubles
+     * in this very file do. So the default was one non-ObjectQL producer away
+     * from being read by an operator, and "unreachable" was never a property
+     * of the seam.
+     */
+    describe('the remedy is looked up, never defaulted (#16067)', () => {
+      /** The mapping the operator-facing sentence must obey, restated here so
+       *  a change to the production map has to be made twice, on purpose. */
+      const REMEDY_BY_ID: Record<string, string> = {
+        [FILE_REFERENCES_MIGRATION_ID]: 'files-to-references',
+        [VALUE_SHAPES_MIGRATION_ID]: 'value-shapes',
+      };
+
+      it('an id with NO value-shape contract is never-contradictable, and is told to run nothing', async () => {
+        const engine = fakeEngine();
+        engine.valueShapeViolationsAdmitted = () => ({
+          [NOTIFICATION_EVENT_MIGRATION_ID]: VIOLATED,
+        });
+        const logger = { info: vi.fn(), warn: vi.fn() };
+
+        const attested = await attestFreshDatastore(engine, { logger });
+
+        // A value-shape tally is evidence about value shapes. The ADR-0030
+        // cut-over's fact — no legacy per-user inbox row here — is not one, so
+        // this counterexample disproves nothing about it and the birth
+        // observation still settles it.
+        expect(attested).toContain(NOTIFICATION_EVENT_MIGRATION_ID);
+        expect(await isDataMigrationVerified(engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(true);
+
+        const warnings = logger.warn.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
+        // ⭐ The card's pin: the operator is NOT sent to `os migrate
+        // value-shapes`, which neither attests nor clears this id. There is no
+        // `os migrate notification-event` to send them to either — that
+        // cut-over is an operator call with no self-check — so the correct
+        // sentence here is no sentence.
+        expect(warnings).not.toContain('value-shapes');
+        expect(warnings).toBe('');
+      });
+
+      /**
+       * Total over the array, so a FOURTH member is judged the moment it is
+       * added instead of inheriting whatever the last branch happened to say.
+       */
+      it.each([...CREATION_ATTESTED_MIGRATION_IDS])(
+        'a contradiction for %s is never handed another migration\'s command',
+        async (id) => {
+          const engine = fakeEngine();
+          engine.valueShapeViolationsAdmitted = () => ({ [id]: VIOLATED });
+          const logger = { info: vi.fn(), warn: vi.fn() };
+
+          const attested = await attestFreshDatastore(engine, { logger });
+          const warnings = logger.warn.mock.calls.map((c) => String(c[0] ?? '')).join('\n');
+          const own = REMEDY_BY_ID[id];
+
+          if (own === undefined) {
+            expect(attested).toContain(id);
+            expect(warnings).toBe('');
+          } else {
+            expect(attested).not.toContain(id);
+            expect(warnings).toContain(`os migrate ${own} --apply`);
+          }
+
+          // The half a bigger ternary would still get wrong: no id may ever be
+          // prescribed a command that belongs to a different id.
+          for (const [other, command] of Object.entries(REMEDY_BY_ID)) {
+            if (other === id) continue;
+            expect(warnings).not.toContain(`os migrate ${command}`);
+          }
+        },
+      );
     });
   });
 });
