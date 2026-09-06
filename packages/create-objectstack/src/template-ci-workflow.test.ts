@@ -16,10 +16,13 @@
 //      a broken workflow to the user who just scaffolded — it is reported as no
 //      CI at all, which is indistinguishable from the defect being fixed here.
 //   2. Every `pnpm <script>` step names a script the template's own
-//      package.json declares. The original ask listed `pnpm lint`; the template
-//      declares no `lint` script and neither scaffolder writes one, so that step
-//      would have failed on the first push of every scaffolded project. A step
-//      list and a script list drifting apart is the whole failure shape.
+//      package.json declares. This is not hypothetical: the template shipped no
+//      `lint` script while the card asked for a `pnpm lint` step, and that step
+//      would have failed on the first push of every scaffolded project with
+//      `Command "lint" not found`. The template now declares `lint` — measured
+//      green against a real scaffold before the step was added — and this pin
+//      is what keeps the step list and the script list from drifting apart
+//      again, in either direction.
 //   3. `.github/` survives the copy. It is the first dot-DIRECTORY the template
 //      has ever carried, and dotfiles have been a packaging problem here before
 //      (`_gitignore`; see TEMPLATE_FILE_ALIASES). The tarball half of that
@@ -143,8 +146,15 @@ describe('bundled template CI workflow', () => {
       ).toContain(script);
     }
 
-    // The two gates this workflow exists to run.
+    // The three gates this workflow exists to run. `lint` is here on a
+    // MEASUREMENT, not on the card's wording: scaffolded for real from the
+    // repo-built scaffolder, `npm install` against the registry, then
+    // `npm run lint` -> exit 0, "All checks passed". It is not a second
+    // spelling of `validate` either — `validate.ts` and `lint.ts` share the
+    // authoring-rule engine but only `lint.ts` imports `checkHookBodyLowering`,
+    // so dropping this step drops that rule from every scaffolded project.
     expect(invoked).toContain('validate');
+    expect(invoked).toContain('lint');
     expect(invoked).toContain('typecheck');
   });
 

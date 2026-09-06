@@ -100,6 +100,8 @@ After editing any metadata, run:
 
 ```bash
 pnpm validate     # schema + CEL predicates + widget bindings (no artifact)
+pnpm lint         # authoring rules validate does not run — e.g. a handler that
+                  # stopped lowering to a metadata-only body
 pnpm typecheck    # TypeScript types against @objectstack/spec
 ```
 

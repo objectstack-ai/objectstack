@@ -57,4 +57,11 @@ jobs:
       # artifact.
       - run: pnpm validate
 
+      # Not a second spelling of `validate`. The two share the authoring-rule
+      # engine but not the rule set — the hook-body lowering check, which
+      # catches handlers that silently stop lowering to metadata-only bodies
+      # (a change of deployment shape, from a refactor that looks like
+      # tidying), runs here and nowhere else.
+      - run: pnpm lint
+
       - run: pnpm typecheck
