@@ -10565,20 +10565,6 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `driver-options-timeout-to-timeout-ms` carries the prescription. Registered
     // under 18 for the launch-window reason its neighbours state.
     'data/DriverOptions:timeout',
-    // #15680 (stack card 5/6 of #14478) — ruling B.
-    // `FilePersistenceConfig.autoSaveInterval` said "Auto-save interval in ms" in
-    // prose and nothing else. Its `min(100)` bound is what made the bare name
-    // dangerous rather than merely untidy: 100 reads as a plausible number of
-    // SECONDS, so an author who guessed the unit wrong cleared the bound, was
-    // refused nowhere, and saved a thousand times more often than intended.
-    // Renamed to `autoSaveIntervalMs`; the value and the 2000 default are
-    // unchanged. Tombstoned with `retiredKey()` — this shape IS `strictObject`, so
-    // a bare deletion is not silent, but an unknown-key rejection cannot carry the
-    // FROM → TO mapping, which is the whole payload of a rename. Covered by the D2
-    // conversion `memory-persistence-auto-save-interval-to-ms`: a memory datasource
-    // is a `datasources[]` stack collection member whose `config` is stored whole in
-    // `sys_metadata`, so the chain has a seam that sees it.
-    'data/FilePersistenceConfig:autoSaveInterval',
     // #14477 — ADR-0049 enforce-or-remove. The 2026-09-02 ruling (ruled A: retire
     // per family) held the `ESignatureConfig` pair on one condition — a roadmapped
     // e-signature consumer would have earned an `[EXPERIMENTAL — not enforced]` tag
@@ -10630,6 +10616,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the D3 semantic entry named below.
     // D3 semantic entry: `esignature-config-deadline-keys-retired`.
     'data/ESignatureConfig:reminderDays',
+    // #15680 (stack card 5/6 of #14478) — ruling B.
+    // `FilePersistenceConfig.autoSaveInterval` said "Auto-save interval in ms" in
+    // prose and nothing else. Its `min(100)` bound is what made the bare name
+    // dangerous rather than merely untidy: 100 reads as a plausible number of
+    // SECONDS, so an author who guessed the unit wrong cleared the bound, was
+    // refused nowhere, and saved a thousand times more often than intended.
+    // Renamed to `autoSaveIntervalMs`; the value and the 2000 default are
+    // unchanged. Tombstoned with `retiredKey()` — this shape IS `strictObject`, so
+    // a bare deletion is not silent, but an unknown-key rejection cannot carry the
+    // FROM → TO mapping, which is the whole payload of a rename. Covered by the D2
+    // conversion `memory-persistence-auto-save-interval-to-ms`: a memory datasource
+    // is a `datasources[]` stack collection member whose `config` is stored whole in
+    // `sys_metadata`, so the chain has a seam that sees it.
+    'data/FilePersistenceConfig:autoSaveInterval',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a

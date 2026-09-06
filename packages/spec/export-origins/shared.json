@@ -13,6 +13,7 @@
     "EVALUATED_EXPRESSION_SOURCE_REQUIRED": "src/shared/expression.zod.ts#EVALUATED_EXPRESSION_SOURCE_REQUIRED (const)",
     "EXTERNAL_ERROR_CODES": "src/shared/external-errors.ts#EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS": "src/shared/external-errors.ts#EXTERNAL_ERROR_HTTP_STATUS (const)",
+    "EpochMs": "src/shared/epoch.zod.ts#EpochMs (type)",
     "EvaluatedExpression": "src/shared/expression.zod.ts#EvaluatedExpression (type)",
     "EvaluatedExpressionParsed": "src/shared/expression.zod.ts#EvaluatedExpressionParsed (type)",
     "EvaluatedExpressionSchema": "src/shared/expression.zod.ts#EvaluatedExpressionSchema (const)",
