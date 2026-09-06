@@ -1,6 +1,6 @@
 ---
 "@objectstack/driver-turso": minor
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 ---
 
 feat(driver-turso)!: `timeout` bounds remote operations; `localPath` and `wasm` leave the published config schema (#16024, ADR-0049 enforce-or-remove)
@@ -58,4 +58,6 @@ source or stored datasource row that passed the spec door can carry them; the
 ADR-0087 ledger records the removal as the D3 entry
 `driver-turso-config-local-path-wasm-retired` (no D2 conversion — there is no
 lossless rewrite for a value that never did anything), which is the
-`@objectstack/spec` patch here.
+`@objectstack/spec` `minor` here — the entry is a new member of the published migration
+registry (`packages/spec/src/migrations/registry.ts`), an additive widening of that package's
+surface, and the act sets the floor.
