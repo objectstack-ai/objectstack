@@ -638,9 +638,16 @@ jobs:
               --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
           done
 
-          if [ -n "$LOGS" ]; then
-            cat $LOGS > "$RUNNER_TEMP/test-core.log"
-          fi
+          # `|| true`, and only over logs that exist: a leg whose guard never got
+          # far enough to open its log would otherwise make `cat` non-zero, and
+          # under `set -e` that replaces the SUITE's exit status with cat's — the
+          # step would report the wrong reason for its own red.
+          : > "$RUNNER_TEMP/test-core.log"
+          for LOG in $LOGS; do
+            if [ -f "$LOG" ]; then
+              cat "$LOG" >> "$RUNNER_TEMP/test-core.log"
+            fi
+          done
           exit $STATUS
 
       # --summarize above costs nothing at runtime and writes
