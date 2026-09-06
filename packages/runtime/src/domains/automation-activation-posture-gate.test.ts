@@ -100,7 +100,32 @@ const PLATFORM_OPERATOR = (): HttpProtocolContext => ({
         positions: ['platform_admin'],
         permissions: ['admin_full_access'],
         systemPermissions: ['manage_metadata'],
+        // [#15981] The ADR-0095 rung, which is what the gate now reads. A real
+        // operator's resolved context carries it AND the projected position name;
+        // this fixture used to carry only the NAME, and a name stopped being
+        // platform evidence when `positions[]` became the security axis (it also
+        // carries ADR-0057 D4 `sys_user_position` names, mintable by a tenant).
+        posture: 'PLATFORM_ADMIN',
         organizationId: null,
+    },
+} as HttpProtocolContext);
+
+/**
+ * [#15981] The ESCALATION shape: a tenant org admin who ALSO holds a
+ * `sys_user_position` row spelling the built-in name. `sys_user_position` is
+ * `apiEnabled` with unconstrained `position` values, so a tenant can mint this
+ * for themselves; the rung stays `TENANT_ADMIN`, because it is derived from the
+ * unscoped `admin_full_access` grant they do not hold. Must be REFUSED.
+ */
+const MINTED_NAME_ONLY = (): HttpProtocolContext => ({
+    request: {},
+    executionContext: {
+        userId: 'u_impostor',
+        positions: ['platform_admin', 'org_owner'],
+        permissions: ['organization_admin'],
+        systemPermissions: ['manage_metadata'],
+        posture: 'TENANT_ADMIN',
+        organizationId: 'org_northwind',
     },
 } as HttpProtocolContext);
 
@@ -195,6 +220,18 @@ describe('ADR-0126 §5 — the activation write is operator-gated in walled post
 
                 expect(statusOf(response)).toBe(200);
                 expect(h.toggleFlow).toHaveBeenCalledWith(FLOW, false);
+            });
+
+            it('[#15981] REFUSES a tenant admin holding only a MINTED `platform_admin` name', async () => {
+                const h = boot(posture);
+
+                const { response } = await toggle(h, MINTED_NAME_ONLY());
+
+                expect(statusOf(response)).toBe(403);
+                expect(codeOf(response)).toBe('PERMISSION_DENIED');
+                // Refused BEFORE the install-wide write — the half a status
+                // assertion alone would not establish.
+                expect(h.toggleFlow).not.toHaveBeenCalled();
             });
 
             it('ALLOWS engine self-invocation', async () => {
