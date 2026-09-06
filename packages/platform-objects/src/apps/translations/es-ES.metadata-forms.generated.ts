@@ -940,7 +940,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       gap: {
         label: "Separación",
-        helpText: "Separación de cuadrícula (unidades Tailwind)"
+        helpText: "Espacio entre widgets, en incrementos de 0.25rem (4 = 1rem)"
       },
       refreshIntervalSeconds: {
         label: "Intervalo de actualización",
