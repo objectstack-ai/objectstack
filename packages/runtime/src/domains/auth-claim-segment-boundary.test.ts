@@ -48,6 +48,12 @@
  * `/aut/foo` and `/zzz/foo` are the card's own clean rows, carried so a run
  * where EVERYTHING 404s is distinguishable from the fix.
  *
+ * ⚠️ That spy is not sufficient on its own, and the LAST case in this file is
+ * why: "not called" cannot separate a RELEASED namespace from a still-wide
+ * claim that refuses inside `handleAuthRequest`. That case observes the
+ * registry resolving `/authx` to a domain registered there after construction
+ * — its own docblock carries the argument.
+ *
  * ## ⛔ Not covered here
  *
  * The `200 {}` those rows carried. It is manufactured one layer out, in the
@@ -165,5 +171,58 @@ describe('#16026: the /auth claim stops at a segment boundary', () => {
         expect(handleRequest).toHaveBeenCalledTimes(1);
         expect(result.result).toBeInstanceOf(Response);
         expect(result.response?.body?.error?.code).toBeUndefined();
+    });
+
+    /**
+     * ⭐ The registry-resolution case — what every case above is blind to.
+     *
+     * The nine cases above read the auth service spy: "not called" is how they
+     * conclude "the domain did not claim this path". That observation cannot
+     * tell the delivered fix apart from a repair which KEEPS the wide
+     * `startsWith('/auth')` claim and moves the refusal INSIDE
+     * `handleAuthRequest`. Under that shape the service is still never called
+     * and the `ROUTE_NOT_FOUND` envelope is still what comes back, so all nine
+     * stay green — while `/authx` is still SHADOWED and a domain someone mounts
+     * there never runs. That shadowing is the harm the card names and the
+     * changeset says is gone, so it needs an observation of its own.
+     *
+     * This case observes the REGISTRY instead of the spy.
+     * `registerDomainHandler` appends to a first-match-wins table
+     * (`DomainHandlerRegistry.register` → `resolve` walks in registration
+     * order), so a probe registered AFTER construction sits BEHIND the auth
+     * route — exactly where a package that mounts `/authx` later would sit. It
+     * is reachable only if the auth route declines the path, and the evidence
+     * is the probe's OWN response coming back out of `dispatch()`, not the
+     * absence of a call.
+     *
+     * ⛔ What falsifies it: the registry resolving `/authx` or `/authx/foo` to
+     * anything other than the probe. In this fixture the auth route is the only
+     * other claimant, so red here means the claim did not stop at the segment
+     * boundary — stated about the registry, which is where the shadowing lives.
+     */
+    it('⭐ a domain registered at /authx AFTER construction is REACHED — the claim released the namespace, it did not merely stop answering', async () => {
+        const { dispatcher, handleRequest } = makeFixture();
+        const probe = vi.fn(async (req: any) => ({
+            handled: true as const,
+            response: { status: 200, body: { success: true, data: { probe: '/authx', path: req.path } } },
+        }));
+        dispatcher.registerDomainHandler({ prefix: '/authx', match: 'segment', handler: probe });
+
+        for (const path of ['/authx', '/authx/foo']) {
+            const result = await dispatcher.dispatch('GET', path, undefined, {}, { request: new Request(`http://localhost${path}`) } as any);
+
+            // The registry resolved to the PROBE: its own response is what the
+            // dispatcher handed back, for this exact path.
+            expect(result.handled).toBe(true);
+            expect(result.response?.status).toBe(200);
+            expect(result.response?.body?.data?.probe).toBe('/authx');
+            expect(result.response?.body?.data?.path).toBe(path);
+            // …and specifically NOT the terminal refusal, which is what a claim
+            // that is still wide but refuses in the handler would produce.
+            expect(result.response?.body?.error?.code).toBeUndefined();
+        }
+
+        expect(probe).toHaveBeenCalledTimes(2);
+        expect(handleRequest).not.toHaveBeenCalled();
     });
 });
