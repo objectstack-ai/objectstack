@@ -607,13 +607,17 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // no layer: the engine refuses it on a declared temporal field at query time
   // (INVALID_FILTER / 400, PR #8808), and anywhere else it compares as a
   // literal string. This is the authoring-time refusal the ruling shipped
-  // alongside the engine door, judging the filter literal in isolation —
-  // ordering positions only, all three authored filter shapes. Like
-  // `validateEmptyCombinators` it needs NO resolution context, so
-  // RUNTIME_NEEDS_FULL_SNAPSHOT does not apply and the runtime gate runs it
-  // for every filter-carrying type the gate already maps: the write path is
-  // the one door an AI author uses, and dashboards/views are where the preset
-  // vocabulary is near enough to reach for.
+  // alongside the engine door. Two arms (the rule's header is the authority):
+  // arm 1 judges the filter literal in isolation — ordering positions only,
+  // all three authored filter shapes, no resolution context; arm 2 (#16106,
+  // maintainer-ruled 1′) judges equality / membership positions WITH the field
+  // type in hand, read from the stack's own `objects` (and `datasets`, to bind
+  // a widget or report) — both collections the per-write snapshot carries —
+  // and stays silent wherever they are absent. So RUNTIME_NEEDS_FULL_SNAPSHOT
+  // still does not apply and the runtime gate runs it for every
+  // filter-carrying type the gate already maps: the write path is the one door
+  // an AI author uses, and dashboards/views are where the preset vocabulary is
+  // near enough to reach for.
   {
     name: 'validatePresetComparands',
     tier: 'gating',
