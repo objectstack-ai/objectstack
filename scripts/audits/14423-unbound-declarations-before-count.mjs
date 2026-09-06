@@ -59,7 +59,8 @@ const loadStandaloneActions = async () => [...namelessStandaloneOrphans, namedSt
 
 const { warnings, logger } = silentLogger();
 
-// Exactly as ObjectQLPlugin.runGovernanceInventory calls it (plugin.ts:2516),
+// Exactly as ObjectQLPlugin.runGovernanceInventory calls it
+// (`packages/objectql/src/plugin.ts#runGovernanceInventory`),
 // with an empty registered-handler set and no object-embedded actions/registry
 // rung, so the ENTIRE declaration set comes from `loadStandaloneActions`.
 await runActionGovernanceInventory({

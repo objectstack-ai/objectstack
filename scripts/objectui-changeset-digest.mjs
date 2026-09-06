@@ -2153,7 +2153,8 @@ function selfTest() {
     );
 
     // --- #6494: the ADR-0087 disposition scaffold ---------------------------
-    // The gate's own marker pattern (check-adr-0087-registration.mjs:416),
+    // The gate's own marker pattern (`scripts/check-adr-0087-registration.mjs`,
+    // line 416 as measured),
     // copied rather than imported: that module's CLI dispatch is top-level, so
     // importing it would RUN the gate. The copy is belt-and-braces — the REAL
     // gate binary judges a real artifact in the round trip below, and that, not
