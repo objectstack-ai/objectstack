@@ -148,9 +148,27 @@
  * its exported `uniqueIndexesFromFields` / `normalizeDeclaredIndex`, and its
  * own `protected` judgments through a subclass — and compares, over a swept
  * corpus rather than a hand-listed one. That differential is what found the
- * `nullSafeColumns` branch this round repaired: `{ fields: ['f'], unique:
+ * `nullSafeColumns` branch an earlier round repaired: `{ fields: ['f'], unique:
  * 'organization', nullSafeColumns: ['zzz'] }` keyed `{organization_id, f}` here
  * against the driver's `{f}`, and no enumerated case had reached the shape.
+ *
+ * ## ⭐ ...and asking the driver's LEAVES is still not asking the driver
+ *
+ * Recomposing the leaves' answers HERE leaves every layer between them and the
+ * emitted column a second copy of this file's own belief. Measured, driver-side:
+ * making `indexedKeyColumns` stop recording declared indexes, and making
+ * `initObjects` hand it `tenantField: null`, each left the platform disagreeing
+ * with both generators over hundreds of objects — and left this file green,
+ * every test, both times. Those two are this card's own subject.
+ *
+ * So the authority in this file is neither the source reader nor the leaf
+ * differential: it is `SqlDriver.initObjects` on an in-memory better-sqlite3
+ * database, read back with `PRAGMA table_info`. That runs
+ * `computeAndRecordTenantField` → `indexedKeyColumns` → `createColumn` → knex
+ * and reports the column that actually exists, with nothing re-derived here.
+ * The two cheaper layers are kept underneath it because they localise a failure
+ * to one constant or one builder; where they and the real chain could disagree,
+ * ⛔ the real chain is right.
  *
  * ⚠️ Scope, as `generateMigrationSql`'s docblock and the `--format` help text
  * already say (#15521): this is a POSTGRESQL claim and nothing else. Neither
@@ -260,6 +278,26 @@ function armMembers(type: string): string[] {
   return [...armContaining(type).matchAll(/case '([^']+)':/g)]
     .map((m) => m[1])
     .filter((t) => REAL_FIELD_TYPES.has(t));
+}
+
+/**
+ * The CHARACTER half of `createColumn`'s catch-all, derived rather than listed.
+ *
+ * The catch-all routes on `JSON_COLUMN_TYPES`, which `driver-sql` seeds from
+ * three spec classes — so the character half is every real `FieldType` the
+ * switch does not case, minus those three classes, imported and never listed
+ * here. ⛔ Never derived from what the generator already answers: a filter that
+ * skips a member whose answer has already drifted measures its own claim only
+ * where the claim already holds.
+ */
+function characterCatchAllMembers(): string[] {
+  const cased = new Set([...createColumnSwitch().matchAll(/case '([^']+)':/g)].map((m) => m[1]));
+  const jsonSeeded = new Set<string>([
+    ...MULTI_OPTION_TYPES,
+    ...STRUCTURED_JSON_TYPES,
+    ...FILE_REFERENCE_TYPES,
+  ]);
+  return [...REAL_FIELD_TYPES].filter((t) => !cased.has(t) && !jsonSeeded.has(t));
 }
 
 /** `createColumn`'s catch-all — where an un-cased type lands. */
@@ -689,10 +727,16 @@ describe('#16091 — the character column both generators emit is the driver\'s'
   });
 
   it('the generator\'s varchar ceiling is the driver\'s, not a second number', () => {
-    // `packages/cli` does not depend on the driver at runtime, so the ceiling is
-    // transcribed in generate.ts. This is the assertion that makes the
-    // transcription safe: the two must be the same number, and a driver that
-    // moves fails here rather than leaving the generators quietly wrong.
+    // ⛔ NOT "because `packages/cli` does not depend on the driver at runtime"
+    // — it does, and this file imports it 500 lines up. That sentence was this
+    // pin's own first answer, it is false, and `generate.ts` now carries it
+    // with a ⛔ so nobody restates it. The ceiling is transcribed because
+    // `MAX_VARCHAR_CHARS` is `protected static` on `SqlDriver` and reaches no
+    // exported surface, and because #5726 leaves a CLI production module only
+    // `await import()` for a driver package — which these SYNCHRONOUS
+    // generators cannot use. This is the assertion that makes the transcription
+    // safe: the two must be the same number, and a driver that moves fails here
+    // rather than leaving the generators quietly wrong.
     const m = GENERATE_SOURCE.match(/^const MAX_VARCHAR_CHARS = (\d+);$/m);
     expect(m, 'generate.ts no longer declares MAX_VARCHAR_CHARS at top level').not.toBeNull();
     expect(Number(m![1])).toBe(MAX_CHARS);
@@ -726,7 +770,8 @@ describe('#16091 — the character column both generators emit is the driver\'s'
       ...STRUCTURED_JSON_TYPES,
       ...FILE_REFERENCE_TYPES,
     ]);
-    const characterCatchAll = catchAll.filter((t) => !jsonSeeded.has(t));
+    const characterCatchAll = characterCatchAllMembers();
+    expect(characterCatchAll).toEqual(catchAll.filter((t) => !jsonSeeded.has(t)));
 
     // Controls for the derivation itself. Without these a seed set that failed
     // to import would leave `characterCatchAll` as the whole catch-all (and the
@@ -849,6 +894,28 @@ describe('#16091 — the character column both generators emit is the driver\'s'
 // Mutating those two in the driver left this file GREEN. What follows removes
 // that: both are RECOMPUTED from `driver-sql` itself and compared against what
 // the generators actually emit.
+//
+// ⭐ ASKING THE DRIVER'S LEAVES IS NOT ASKING THE DRIVER, and this file has now
+// made that mistake twice. Round 2 transcribed the driver's answers and
+// mutating the driver left every pin green. Round 3 asked the driver's exported
+// LEAVES — `uniqueIndexesFromFields`, `normalizeDeclaredIndex`,
+// `computeTenantField` — and then RE-COMPOSED them here, which left every layer
+// between those leaves and the emitted column a second copy of this file's own
+// belief. Measured, driver-side, at that head:
+//
+//   driver-side mutation                                      this file
+//   `indexedKeyColumns` stops recording declared indexes       78 passed (78)
+//   `initObjects` passes `tenantField: null` into it           78 passed (78)
+//
+// Both are this card's own subject — the driver changes what it keys, the
+// generated column stays bounded where the platform's is unbounded — and the
+// instrument reported everything fine. So the differential below enters the
+// REAL CHAIN at the top: `SqlDriver.initObjects` on an in-memory better-sqlite3
+// database, read back with `PRAGMA table_info`. That is
+// `computeAndRecordTenantField` → `indexedKeyColumns` → `createColumn` →
+// knex → an actual column, with nothing re-derived here at all. The leaf
+// differential is KEPT below it, because it localises a failure to one builder;
+// it is not the authority, and where the two could disagree the real chain wins.
 
 /**
  * The driver's own `protected` judgments, reached by widening rather than
@@ -860,6 +927,25 @@ describe('#16091 — the character column both generators emit is the driver\'s'
  * with it — which is exactly what the transcriptions in `generate.ts` cannot do.
  */
 class DriverOracle extends SqlDriver {
+  /**
+   * Every warning the driver emitted, captured instead of printed.
+   *
+   * The corpus deliberately contains index shapes whose key parts name no
+   * materialized column (`idx-ghost`, and every `organization`-scoped index on
+   * the `without-organization_id` shape), and the driver correctly says so
+   * once per table — 144 lines of true, irrelevant warning on a green run,
+   * which is how a real one stops being read. ⛔ Captured, never discarded:
+   * `logger` is the driver's own documented injection point ("production
+   * callers wire in their preferred logger"), the messages stay available to a
+   * failure report, and nothing about the driver's behaviour changes.
+   */
+  public readonly warnings: string[] = [];
+
+  protected override logger = {
+    warn: (msg: string) => { this.warnings.push(msg); },
+    error: (msg: string) => { this.warnings.push(msg); },
+  };
+
   /** `SqlDriver.computeTenantField`, unmodified. */
   public tenantFieldFor(object: { fields?: Record<string, unknown>; tenancy?: unknown }): string | null {
     return this.computeTenantField(object);
@@ -873,6 +959,35 @@ class DriverOracle extends SqlDriver {
   /** `SqlDriver.declaredVarcharLength`, unmodified — the string-family width. */
   public declaredCharsFor(field: unknown): number | null {
     return this.declaredVarcharLength(field);
+  }
+
+  /**
+   * ⭐ THE REAL CHAIN. The columns `initObjects` actually creates for one
+   * object, read back out of the database it created them in.
+   *
+   * Nothing here re-derives anything: `initObjects` resolves the tenant field
+   * through `computeAndRecordTenantField`, composes the key set through
+   * `indexedKeyColumns`, dispatches every field through `createColumn` and
+   * hands the result to knex. `PRAGMA table_info` then reports the column type
+   * SQLite recorded — `text` for `table.text(name)`, `varchar(n)` for
+   * `table.string(name, n)`, `varchar(255)` for a bare `table.string(name)`.
+   * A driver-side change anywhere on that path moves this answer, which is the
+   * property the leaf-level differential below does not have.
+   *
+   * ⚠️ Each object must carry a table name no earlier call used: `initObjects`
+   * takes the ALTER path on a table that already exists, and an ALTER cannot
+   * retype a column — a reused name would silently report the first object's
+   * answer for the second one's declaration. {@link keyProbeCorpus} and the
+   * width sweeps mint one name per probe for exactly that reason.
+   */
+  public async createdColumns(object: { name: string; fields?: Record<string, any>; tenancy?: any }):
+    Promise<Map<string, string>> {
+    await this.initObjects([object]);
+    const rows = (await this.knex.raw(`PRAGMA table_info("${object.name}")`)) as Array<{
+      name: string;
+      type: string;
+    }>;
+    return new Map(rows.map((row) => [row.name, row.type]));
   }
 }
 
@@ -894,12 +1009,14 @@ afterAll(async () => {
  * `schema-drift.ts`'s `indexedKeyColumns`, composed HERE from the driver's own
  * two exported builders.
  *
- * That function is not itself exported, but the two normalizers it composes are
- * (`index.ts`), and composing them is the whole of its body: it records every
- * column of every index those two return. So this recomputes the driver's key
- * set without transcribing a single one of its judgments — the scope
- * vocabulary, the tenant prepend, the `nullSafeColumns` arm and the tenant
- * column itself all arrive from `driver-sql`.
+ * ⛔ NOT the authority, and it must never be read as one. The two normalizers
+ * are the driver's, but the COMPOSITION is this file's — so a driver that
+ * changes how `indexedKeyColumns` composes them, or what `initObjects` feeds
+ * it, moves the platform without moving this function at all. Both of those
+ * were mutated in the driver and this differential stayed green through both.
+ * {@link DriverOracle.createdColumns} is the authority; this is kept only
+ * because it localises a failure to ONE builder, which the real chain cannot
+ * do — when the two disagree, the real chain is right and this is stale.
  */
 function driverKeyColumns(object: Record<string, any>): Set<string> {
   const table = String(object.name);
@@ -938,11 +1055,34 @@ function sqlWidth(column: string | null): number | null {
  * producers would look like they disagreed on every undeclared string field,
  * where they in fact emit the same column two ways.
  */
-function tsWidth(call: string | null): number | null {
-  if (call === "table.text('f')") return null;
-  const m = call?.match(/^table\.string\('f'(?:, (\d+))?\)$/);
+function tsWidth(call: string | null, field = 'f'): number | null {
+  if (call === `table.text('${field}')`) return null;
+  const m = call?.match(new RegExp(`^table\\.string\\('${field}'(?:, (\\d+))?\\)$`));
   if (!m) throw new Error(`not a character column: ${String(call)}`);
   return m[1] === undefined ? DEFAULT_CHARS : Number(m[1]);
+}
+
+/**
+ * The width the PLATFORM'S OWN column declares, in the same units.
+ *
+ * `PRAGMA table_info` reports the type knex asked SQLite for, so
+ * `table.text(name)` reads back as `text` (unbounded, `null` here) and
+ * `table.string(name, n)` as `varchar(n)`. A bare `table.string(name)` is
+ * `varchar(255)` — knex's default, which is {@link DEFAULT_CHARS} read off the
+ * driver's own constant, so the two producers normalize to the same number
+ * rather than to "declared" versus "not declared".
+ *
+ * Anything else throws: a non-character column is outside this card, and
+ * counting it as unbounded would make a JSON column look like agreement.
+ */
+function driverWidth(columnType: string | undefined, where: string): number | null {
+  if (columnType === undefined) {
+    throw new Error(`${where}: initObjects created no such column — the probe never reached the driver`);
+  }
+  if (/^text$/i.test(columnType)) return null;
+  const m = columnType.match(/^varchar\((\d+)\)$/i);
+  if (!m) throw new Error(`${where}: not a character column: ${columnType}`);
+  return Number(m[1]);
 }
 
 /**
@@ -960,6 +1100,21 @@ interface KeyProbe {
   id: string;
   object: Record<string, any>;
 }
+
+/**
+ * The corpus's four dimensions, and the number of probes their product is.
+ *
+ * ⭐ Stated as a literal on purpose. Round 3 hand-counted this sweep, wrote
+ * "1,224 objects over 17 index shapes" into the PR body AND into a commit
+ * message the merge queue composes into the squash body, and nothing caught it
+ * — the only size assertion in this file was `> 200`, which every wrong count
+ * satisfies. A number a human derived by reading array literals is a
+ * measurement like any other and needs an instrument. Adding an index shape
+ * moves this literal; a shape added without moving it fails here rather than
+ * landing a false count in `main`.
+ */
+const KEY_PROBE_DIMENSIONS = { uniques: 6, indexSets: 16, tenancies: 6, shapes: 2 } as const;
+const KEY_PROBE_COUNT = 1152;
 
 /**
  * The swept corpus: every combination of a field-level `unique` spelling, an
@@ -1017,6 +1172,16 @@ function keyProbeCorpus(): KeyProbe[] {
     ['without-organization_id', ['f', 'other', 'org']],
   ];
 
+  // The dimensions this corpus actually has, measured here rather than
+  // hand-counted, so {@link KEY_PROBE_DIMENSIONS} is an assertion about the
+  // arrays above and not a second transcription of them.
+  expect({
+    uniques: uniques.length,
+    indexSets: indexSets.length,
+    tenancies: tenancies.length,
+    shapes: shapes.length,
+  }).toEqual(KEY_PROBE_DIMENSIONS);
+
   const probes: KeyProbe[] = [];
   for (const [shapeId, columns] of shapes) {
     for (const [uniqueId, unique] of uniques) {
@@ -1030,7 +1195,11 @@ function keyProbeCorpus(): KeyProbe[] {
           probes.push({
             id: `${shapeId}/${uniqueId}/${indexId}/${tenancyId}`,
             object: {
-              name: 'probe',
+              // One table name per probe. The real-chain oracle CREATES this
+              // table, and `initObjects` takes the ALTER path on a name it has
+              // already seen — an ALTER cannot retype a column, so a shared
+              // name would report the first probe's answer for all 1,152.
+              name: `probe_${probes.length}`,
               fields,
               ...(indexes ? { indexes } : {}),
               ...(tenancy ? { tenancy } : {}),
@@ -1057,27 +1226,41 @@ function keyProbeCorpus(): KeyProbe[] {
  * generator and not the other would otherwise pass here.
  */
 function generatorKeyColumns(object: Record<string, any>, id: string): Set<string> {
-  const config = { objects: { probe: object } } as Record<string, unknown>;
-  const sql = generateMigrationSql(config);
-  const ts = generateMigrationTs(config);
   const keyed = new Set<string>();
-  for (const field of Object.keys(object.fields)) {
-    const sqlCol = sqlColumn(sql, field);
-    const tsCol = tsColumn(ts, field);
-    const sqlChars = sqlWidth(sqlCol);
-    const tsChars = tsCol === `table.text('${field}')`
-      ? null
-      : Number(tsCol?.match(/^table\.string\('[^']+'(?:, (\d+))?\)$/)?.[1] ?? DEFAULT_CHARS);
-    expect(
-      tsChars,
-      `${id}: the two formats disagree about '${field}' — sql ${String(sqlCol)}, ts ${String(tsCol)}`,
-    ).toBe(sqlChars);
-    if (sqlChars === PROBE_CHARS) keyed.add(field);
-    else if (sqlChars !== null) {
-      throw new Error(`${id}: '${field}' is neither the keyed nor the unkeyed answer: ${String(sqlCol)}`);
+  for (const [field, chars] of generatorWidths(object)) {
+    if (chars === PROBE_CHARS) keyed.add(field);
+    else if (chars !== null) {
+      throw new Error(`${id}: '${field}' is neither the keyed nor the unkeyed answer: ${String(chars)}`);
     }
   }
   return keyed;
+}
+
+/**
+ * Both generators' width for every declared field of one object, in the
+ * driver's own units, asserted to agree with each other on the way past.
+ *
+ * A mirror consulted by one generator and not the other would otherwise pass
+ * every differential in this file: the two formats are separate code paths over
+ * the same helpers, and #16091's own table had them disagreeing on five rows.
+ */
+function generatorWidths(object: Record<string, any>): Map<string, number | null> {
+  const config = { objects: { [String(object.name)]: object } } as Record<string, unknown>;
+  const sql = generateMigrationSql(config);
+  const ts = generateMigrationTs(config);
+  const out = new Map<string, number | null>();
+  for (const field of Object.keys(object.fields ?? {})) {
+    const sqlCol = sqlColumn(sql, field);
+    const tsCol = tsColumn(ts, field);
+    const sqlChars = sqlWidth(sqlCol);
+    expect(
+      tsWidth(tsCol, field),
+      `${String(object.name)}: the two formats disagree about '${field}' — ` +
+      `sql ${String(sqlCol)}, ts ${String(tsCol)}`,
+    ).toBe(sqlChars);
+    out.set(field, sqlChars);
+  }
+  return out;
 }
 
 describe('#16091 — the driver is the ORACLE, not just the source text', () => {
@@ -1116,6 +1299,56 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
     expect(tsWidth("table.string('f', 100)")).toBe(100);
     expect(tsWidth("table.string('f')")).toBe(DEFAULT_CHARS);
     expect(() => tsWidth("table.jsonb('f')")).toThrow();
+    expect(driverWidth('text', 'control')).toBeNull();
+    expect(driverWidth('varchar(100)', 'control')).toBe(100);
+    expect(() => driverWidth('json', 'control')).toThrow();
+    expect(() => driverWidth(undefined, 'control')).toThrow();
+  });
+
+  it('control — the REAL CHAIN really runs, and it really discriminates', async () => {
+    // ⭐ Non-vacuity for `initObjects` itself, and it is the load-bearing
+    // control of this file: every differential below reads columns out of a
+    // database, so a chain that silently created nothing would compare an empty
+    // map against an empty map and pass.
+    const created = await ORACLE.createdColumns({
+      name: 'control_real_chain',
+      fields: {
+        keyed: { type: 'text', maxLength: PROBE_CHARS, unique: true },
+        unkeyed: { type: 'text', maxLength: PROBE_CHARS },
+        organization_id: { type: 'text', maxLength: PROBE_CHARS },
+        sized: { type: 'email', maxLength: 400 },
+        plain: { type: 'color' },
+      },
+    });
+
+    // The table exists and carries the driver's own builtins, which no field
+    // here declares — proof the CREATE really ran rather than the map being
+    // assembled from the declaration.
+    expect(created.has('id')).toBe(true);
+    expect(created.has('created_at')).toBe(true);
+
+    // All three arms answer, and they answer three DIFFERENT things. A chain
+    // that returned one column shape for everything dies here.
+    expect(driverWidth(created.get('keyed'), 'keyed')).toBe(PROBE_CHARS);
+    expect(driverWidth(created.get('unkeyed'), 'unkeyed')).toBeNull();
+    expect(driverWidth(created.get('sized'), 'sized')).toBe(400);
+    expect(driverWidth(created.get('plain'), 'plain')).toBe(DEFAULT_CHARS);
+
+    // ...and the TENANT column is keyed by the field-level `unique: true`,
+    // which is `computeAndRecordTenantField` and `indexedKeyColumns` and
+    // `createColumn` all firing on the real path. This is the exact column the
+    // leaf-composed differential could not see move.
+    expect(driverWidth(created.get('organization_id'), 'organization_id')).toBe(PROBE_CHARS);
+
+    // The same object without the organization column leaves the field's own
+    // key alone — so the assertion above measures the tenant PREPEND rather
+    // than "everything is keyed".
+    const noTenant = await ORACLE.createdColumns({
+      name: 'control_real_chain_no_tenant',
+      fields: { keyed: { type: 'text', maxLength: PROBE_CHARS, unique: true } },
+    });
+    expect(driverWidth(noTenant.get('keyed'), 'keyed')).toBe(PROBE_CHARS);
+    expect(noTenant.has('organization_id')).toBe(false);
   });
 
   // ── The unique VOCABULARY, against the driver's own two predicates ────────
@@ -1178,13 +1411,24 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
     expect(UNIQUE_SPELLINGS.some((u) => isUniqueScopeDeclared(u) && !isOrganizationScopedUnique(u))).toBe(true);
   });
 
-  // ── F1: the key set, recomputed from the driver's own builders ────────────
+  // ── F1a: the key set, recomputed from the driver's own exported builders ──
+  //
+  // Kept because it localises a failure to ONE builder. ⛔ Not the authority —
+  // F1b below is. Read the two together: this one says WHICH builder moved,
+  // that one says whether the platform's column moved at all.
 
   it('the corpus is a real sweep, and both sides really vary across it', () => {
     const corpus = keyProbeCorpus();
+    // ⭐ The EXACT size, not `> 200`. `> 200` is what this case used to assert,
+    // and it is why a hand-count of "1,224 over 17 index shapes" reached a
+    // commit message unchallenged. The product of the four dimensions and the
+    // length of what the sweep actually built must both equal the stated
+    // number — a corpus that grows without this literal growing fails here.
+    const { uniques, indexSets, tenancies, shapes } = KEY_PROBE_DIMENSIONS;
+    expect(uniques * indexSets * tenancies * shapes).toBe(KEY_PROBE_COUNT);
+    expect(corpus.length).toBe(KEY_PROBE_COUNT);
     // A differential over a corpus that answers one thing everywhere proves
-    // nothing, so the corpus's own discriminating power is asserted first.
-    expect(corpus.length).toBeGreaterThan(200);
+    // nothing, so the corpus's own discriminating power is asserted next.
     const driverAnswers = new Set(corpus.map((p) => [...driverKeyColumns(p.object)].sort().join(',')));
     expect(driverAnswers.size).toBeGreaterThan(4);
     expect(driverAnswers.has('')).toBe(true);
@@ -1220,8 +1464,50 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
     ).toEqual([]);
   });
 
-  it('the pre-normalized index arm keys exactly what the driver keys, by name', () => {
-    // ⭐ The divergence this round repaired, spelled out so it cannot come back
+  // ── F1b: THE AUTHORITY — the column `initObjects` actually created ────────
+  //
+  // ⭐ Everything above this line asks the driver's exported parts and puts the
+  // answer together HERE. This asks `SqlDriver.initObjects` for a table and
+  // reads the column out of it. The difference is not stylistic: the two
+  // driver-side mutations that ARE this card's subject — `indexedKeyColumns`
+  // dropping declared indexes, and `initObjects` handing it `tenantField: null`
+  // — are invisible to a re-composition and unmissable here.
+
+  it('every character column the generators emit is the column initObjects CREATES', async () => {
+    const divergences: string[] = [];
+    let columnsCompared = 0;
+    for (const { id, object } of keyProbeCorpus()) {
+      // The platform's own answer: one CREATE TABLE through the whole chain,
+      // read back out of the database. Nothing about it is derived here.
+      const created = await ORACLE.createdColumns(object as { name: string; fields: Record<string, any> });
+      const emitted = generatorWidths(object);
+      for (const [field, generated] of emitted) {
+        const platform = driverWidth(created.get(field), `${id}: '${field}'`);
+        columnsCompared += 1;
+        if (platform !== generated) {
+          divergences.push(
+            `${id}: '${field}' driver=${platform === null ? 'text' : `varchar(${platform})`} ` +
+            `generated=${generated === null ? 'text' : `varchar(${generated})`}`,
+          );
+        }
+      }
+    }
+    // Non-vacuity, stated as an exact count: a loop that compared nothing —
+    // or one whose `createdColumns` quietly returned an empty map — reports no
+    // divergences and passes. 4,032 = the `with-organization_id` half's four
+    // declared columns (576 × 4) plus the other half's three (576 × 3).
+    expect(columnsCompared).toBe(4_032);
+    expect(
+      divergences.slice(0, 20),
+      `${divergences.length} of ${columnsCompared} columns disagree with the column driver-sql ` +
+      'actually created for the same object. Every entry is #16091 itself: a value the platform ' +
+      'stores that a generated table refuses, or one it invites that the platform refuses. The ' +
+      'authority is the DRIVER — fix generate.ts, never this expectation.',
+    ).toEqual([]);
+  }, 60_000);
+
+  it('the pre-normalized index arm keys exactly what initObjects keys, by name', async () => {
+    // ⭐ The divergence round 3 repaired, spelled out so it cannot come back
     // unnoticed inside a sweep. `normalizeDeclaredIndex` filters
     // `nullSafeColumns` against the listed columns, but that filter narrows
     // only `nullSafeColumns` — its `columns` are the listed ones in every
@@ -1232,25 +1518,38 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
       organization_id: { type: 'text', maxLength: PROBE_CHARS },
     };
     const stranger = {
-      name: 'probe',
+      name: 'pre_normalized_stranger',
       fields,
       indexes: [{ fields: ['f'], unique: 'organization', nullSafeColumns: ['zzz'] }],
     };
+    // Asserted through the REAL CHAIN first — the platform's own table — and
+    // through the exported builders second, so the two are pinned to agree.
+    const strangerColumns = await ORACLE.createdColumns(stranger);
+    expect(driverWidth(strangerColumns.get('f'), 'stranger.f')).toBe(PROBE_CHARS);
+    expect(driverWidth(strangerColumns.get('organization_id'), 'stranger.org')).toBeNull();
     expect([...driverKeyColumns(stranger)].sort()).toEqual(['f']);
     expect([...generatorKeyColumns(stranger, 'pre-normalized-stranger')].sort()).toEqual(['f']);
 
     // The counter-case, which is what makes the one above a measurement: the
     // SAME index without `nullSafeColumns` does prepend the tenant column.
     const prepending = {
-      name: 'probe',
+      name: 'pre_normalized_prepending',
       fields,
       indexes: [{ fields: ['f'], unique: 'organization' }],
     };
+    const prependingColumns = await ORACLE.createdColumns(prepending);
+    expect(driverWidth(prependingColumns.get('f'), 'prepending.f')).toBe(PROBE_CHARS);
+    expect(driverWidth(prependingColumns.get('organization_id'), 'prepending.org')).toBe(PROBE_CHARS);
     expect([...driverKeyColumns(prepending)].sort()).toEqual(['f', 'organization_id']);
     expect([...generatorKeyColumns(prepending, 'idx-org')].sort()).toEqual(['f', 'organization_id']);
   });
 
   // ── F2: the two width bodies, recomputed from the driver's own methods ────
+  //
+  // Same two layers, same order: the leaf differentials localise a failure to
+  // one method body, and the real-chain sweep at the end of this section is the
+  // authority — it is the one that also covers `createColumn`'s DISPATCH onto
+  // those bodies, which asking `keyableTextLength` directly cannot see move.
 
   /**
    * The declarations both width sweeps run. Deliberately wider than anything an
@@ -1279,8 +1578,14 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
       ).toBe(chars);
       expect(tsWidth(ts), `keyed text @ maxLength ${shown}, typescript format`).toBe(chars);
     }
+    // ⭐ How many declarations this sweep really carries, stated as a literal
+    // for the same reason {@link KEY_PROBE_COUNT} is: round 3 hand-counted this
+    // array as "37 declarations" and wrote that into a commit message the merge
+    // queue composes into the squash body. It is 38. A hand-count is a
+    // measurement and needs an instrument.
+    expect(WIDTH_DECLARATIONS).toHaveLength(38);
     // Non-vacuity: the sweep really produced both dispositions and more than
-    // one width, so it is not one answer asserted 37 times.
+    // one width, so it is not one answer asserted 38 times.
     expect(answers.has(null)).toBe(true);
     expect([...answers].filter((a) => a !== null).length).toBeGreaterThan(3);
   });
@@ -1315,4 +1620,58 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
     expect(sqlWidth(columnsFor({ type: 'text', unique: true, maxLength: 1000 }).sql)).toBeNull();
     expect(sqlWidth(columnsFor({ type: 'email', maxLength: 1000 }).sql)).toBe(1000);
   });
+
+  it('every character TYPE, at every declaration, takes the width initObjects CREATES', async () => {
+    // ⭐ The width half of F1b, and it reaches one layer the two cases above
+    // cannot: `createColumn`'s DISPATCH. `ORACLE.keyableCharsFor(...)` answers
+    // what `keyableTextLength` returns; it says nothing about which arm
+    // `createColumn` hands the field to, or on what it branches when it gets
+    // there. A driver that started sizing only the UNIQUE key parts, say, moves
+    // the platform's column while `keyableTextLength` answers exactly as before.
+    //
+    // MEMBERSHIP is the driver's, read off its own case labels and its own
+    // catch-all derivation, so a type joining or leaving a family moves what is
+    // swept here with nobody editing this file.
+    const types = [...armMembers('text'), ...armMembers('email'), ...characterCatchAllMembers()];
+    expect(new Set(types).size, 'a type is in two families at once').toBe(types.length);
+    expect(types.length).toBeGreaterThanOrEqual(15);
+
+    const divergences: string[] = [];
+    const answers = new Set<string>();
+    let compared = 0;
+    let probe = 0;
+    for (const type of types) {
+      for (const keyed of [false, true]) {
+        for (const maxLength of WIDTH_DECLARATIONS) {
+          const field: Record<string, unknown> = { type };
+          if (maxLength !== undefined) field.maxLength = maxLength;
+          if (keyed) field.unique = true;
+          const object = { name: `width_${probe++}`, fields: { f: field } };
+          const created = await ORACLE.createdColumns(object);
+          const shown = `${type}${keyed ? ' unique:true' : ''} @ ${JSON.stringify(maxLength) ?? 'undefined'}`;
+          const platform = driverWidth(created.get('f'), shown);
+          const generated = generatorWidths(object).get('f') ?? null;
+          answers.add(`${platform}`);
+          compared += 1;
+          if (platform !== generated) {
+            divergences.push(
+              `${shown}: driver=${platform === null ? 'text' : `varchar(${platform})`} ` +
+              `generated=${generated === null ? 'text' : `varchar(${generated})`}`,
+            );
+          }
+        }
+      }
+    }
+    // Non-vacuity: the sweep really ran, and the platform really gave more than
+    // one answer across it — a chain answering `text` everywhere would make
+    // every comparison above agree with a generator that did the same.
+    expect(compared).toBe(types.length * 2 * WIDTH_DECLARATIONS.length);
+    expect(answers.has('null')).toBe(true);
+    expect(answers.size).toBeGreaterThan(3);
+    expect(
+      divergences.slice(0, 20),
+      `${divergences.length} of ${compared} probes take a width the platform's own column does ` +
+      'not have. The authority is driver-sql: fix generate.ts, never this expectation.',
+    ).toEqual([]);
+  }, 60_000);
 });

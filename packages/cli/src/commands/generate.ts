@@ -1319,10 +1319,15 @@ function declaredVarchar(maxLength: unknown): VarcharAnswer {
  * vocabulary.
  *
  * Spelled as the driver spells it, over the SAME spec predicate the driver
- * calls: `unique === 'organization' || isUniqueDeclared(unique)`. The word is
- * accepted here ahead of the spec helper deliberately (ADR-0120 D1, driver
- * first), so the disjunct is the driver's, not this file's invention — and the
- * half that IS spec's is imported rather than retyped.
+ * calls: `unique === 'organization' || isUniqueDeclared(unique)`. The disjunct
+ * is the driver's SPELLING, kept so the mirror matches it character for
+ * character — ⛔ not a scope this predicate adds on top of spec's. Measured
+ * against the built spec, `isUniqueDeclared('organization')` is already `true`
+ * (`packages/spec/src/data/field.zod.ts` lists all three spellings), so the
+ * disjunct is redundant today and BOTH halves are spec's. The driver's own
+ * comment still reads as though the word were accepted ahead of the spec
+ * helper (ADR-0120 D1, driver first); that was true when it was written, it is
+ * not now, and a mirror must not restate it in the present tense.
  */
 function isUniqueScopeDeclared(unique: unknown): boolean {
   return unique === 'organization' || isUniqueDeclared(unique);
