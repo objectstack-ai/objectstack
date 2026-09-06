@@ -47,7 +47,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,54 +58,61 @@ const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
- * Both roots live in the SYSTEM TEMP DIR, and neither is under the repo.
+ * The fixture goes under this package's git-ignored `tmp/`; the `--out` root
+ * stays in the system temp dir. The two are placed differently because only one
+ * of them has to RESOLVE anything.
  *
- * An earlier revision put the fixture at `packages/cli/test/.tmp-i18n-14894`.
- * Nothing tracked ignores `.tmp-*` — the repo's rules cover `tmp/` and `*.tmp`
- * — so `dispatch-gates --self-test` failed its "every in-tree directory this
- * tree's sources create is covered by a tracked ignore rule, or is tracked
- * itself" case, naming this file. ⛔ The repair for that is NOT a bespoke
- * ignore rule for one test: it is not creating the directory in the tree.
+ * The config calls `defineStack`, so it must reach `@objectstack/spec`.
+ * `bundle-require` writes its bundled module NEXT TO the config and Node
+ * resolves the config's bare specifiers from THAT directory, so a project in
+ * the system temp dir cannot see the package — driven: `Cannot find package
+ * '@objectstack/spec' imported from /tmp/…/stack.config.bundled_….mjs`. Under
+ * `packages/cli/tmp/` the lookup walks up into this package's real
+ * `node_modules`, exactly as a user's project does. `serve-no-artifact.e2e`
+ * carries the same constraint and the same answer for the same reason; four
+ * other suites in this directory share the root.
  *
- * ⚠️ Which is why the config below imports NOTHING. `bundle-require` writes its
- * bundled module NEXT TO the config and Node then resolves the config's bare
- * specifiers from THAT directory, so a `defineStack` import out here fails —
- * measured: `Cannot find package '@objectstack/spec' imported from
- * /tmp/…/stack.config.bundled_….mjs`. A plain object default export is what
- * `os i18n extract` actually consumes (it calls `normalizeStackInput` on
- * whatever the config exports), and the readings are identical either way.
+ * ⚠️ It is `tmp/` specifically, and NOT a directory named for this test:
+ * `dispatch-gates --self-test` asserts that every in-tree directory this tree's
+ * sources create is covered by a tracked ignore rule or tracked itself. An
+ * earlier revision used `packages/cli/test/.tmp-i18n-14894`, which nothing
+ * tracked ignores (the rules are `*.tmp` and `tmp/`), and that case failed
+ * naming this file. ⛔ The repair is never a bespoke ignore rule for one test.
+ * `git check-ignore -v packages/cli/tmp/x` answers `.gitignore:55:tmp/`.
  *
- * ⚠️ The cost, stated rather than hidden: `defineStack` used to validate this
- * fixture at load, and a plain object is not validated the same way. Measured
- * on the same tree — dropping `type` from the field is REFUSED under
- * `defineStack` ("Invalid field type ''") and accepted silently without it. The
- * assertions below are the remaining guard, and they are exact leaf counts, so
- * a fixture that stopped describing this stack moves them; but a malformed
- * fixture that happens to keep the counts would now pass. Worth knowing before
- * anyone grows this fixture.
+ * ⚠️ `afterAll` removes THIS suite's `mkdtemp` directory and never the shared
+ * `tmp/` root — the five suites using it run concurrently, and a root-level
+ * `rmSync` here would delete a sibling's fixture mid-run.
  */
+const CLI_PACKAGE_ROOT = resolve(HERE, '..');
+
 let fixtureRoot: string;
 let CONFIG: string;
 
 const CONFIG_SOURCE = [
-  'export default {',
+  "import { defineStack } from '@objectstack/spec';",
+  '',
+  'export default defineStack({',
   "  i18n: { defaultLocale: 'zh-CN', supportedLocales: ['zh-CN'] },",
   "  objects: [{ name: 'kpi_metric', label: 'Metric', fields: { name: { type: 'text', label: 'Name' } } }],",
   "  apps: [{ name: 'kpi', label: 'KPI Console' }],",
-  '};',
+  '});',
   '',
 ].join('\n');
 
 let outRoot: string;
 
 beforeAll(() => {
-  fixtureRoot = mkdtempSync(join(tmpdir(), 'os-i18n-14894-fixture-'));
+  const sharedRoot = join(CLI_PACKAGE_ROOT, 'tmp');
+  mkdirSync(sharedRoot, { recursive: true });
+  fixtureRoot = mkdtempSync(join(sharedRoot, 'os-i18n-14894-fixture-'));
   CONFIG = join(fixtureRoot, 'stack.config.ts');
   writeFileSync(CONFIG, CONFIG_SOURCE, 'utf8');
   outRoot = mkdtempSync(join(tmpdir(), 'os-i18n-14894-'));
 });
 
 afterAll(() => {
+  // This suite's own directory only. ⛔ Never `sharedRoot`.
   rmSync(fixtureRoot, { recursive: true, force: true });
   rmSync(outRoot, { recursive: true, force: true });
 });
