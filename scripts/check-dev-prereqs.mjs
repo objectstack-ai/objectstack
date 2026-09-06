@@ -239,12 +239,19 @@
  *      layout, an amplifier or its build inputs could not be read (a gate that
  *      cannot enumerate members must fail loudly, not pass vacuously — #4690)
  */
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { isEntrypoint } from './invoked-as.mjs';
+import {
+  CoverageError,
+  DTS_STAMP_BASENAME,
+  STAMP_BASENAME,
+  buildInputHash,
+  inspectDeclarationStamp,
+  posixRel,
+  rel,
+} from './build-input-hash.mjs';
 import {
   WorkspaceEnumerationError,
   selfTest as workspaceEnumeratorSelfTest,
@@ -310,44 +317,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  */
 const AMPLIFIERS = ['packages/spec'];
 
-/** Where a build records the hash of the inputs it was built from. */
-const STAMP_BASENAME = '.build-input-hash';
-
-/**
- * Where a build records that its DECLARATION pass ran, and over which inputs.
- *
- * Same digest, same writer, same directory as STAMP_BASENAME. The only
- * difference is WHEN it is written — and that difference is the whole point:
- * `--stamp` skips this file under `OS_SKIP_DTS=1`, the build flag that emits JS
- * and leaves whatever `.d.ts` was there before. So this stamp asserts something
- * STAMP_BASENAME cannot: *the declarations on disk were emitted from inputs with
- * this digest*.
- *
- * Written because a second consumer needs that fact and only that fact.
- * `distIsStale` in scripts/check-regen-pending.mjs answers "may a gate read
- * `<pkg>/dist/**\/*.d.ts` and believe it" from mtimes, which is conservative in
- * the right direction but fires on any rewrite that leaves the bytes alone — a
- * `git merge` or `git checkout` that re-checks-out an UNCHANGED source bumps its
- * mtime, and the build then legitimately does not run (turbo's cache hashes
- * content, so it is a cache hit that rewrites nothing), leaving the gate
- * refusing a dist that is in fact exactly current. `declarationStampState`
- * below is the evidence that clears that one case, and only that one case.
- *
- * ⛔ It is NOT a replacement for the mtime rule and must never become one: the
- * digest cannot see a hand-edited dist, a toolchain change or dependency drift,
- * which is why it may only ever ACQUIT a tree the mtime rule has already
- * accused, never accuse one the mtime rule cleared.
- */
-const DTS_STAMP_BASENAME = '.build-input-hash-dts';
-
 /** What an amplifier's build script must contain for its stamp to be maintained. */
 const STAMP_INVOCATION = 'check-dev-prereqs.mjs --stamp';
-
-/** Per-package build configuration that changes the output without being under src/. */
-const PACKAGE_BUILD_CONFIG = ['package.json', 'tsconfig.json', 'tsconfig.build.json', 'tsup.config.ts', 'tsdown.config.ts'];
-
-/** Thrown for conditions that must fail the gate rather than shrink its coverage. */
-class CoverageError extends Error {}
 
 /**
  * Workspace member directories, from pnpm-workspace.yaml — the workspace's own
@@ -388,95 +359,6 @@ function declaredEntry(pkg) {
 }
 
 const isBuildArtifact = (entry) => /(^|\/)dist\//.test(entry.replace(/^\.\//, ''));
-const rel = (root, p) => path.relative(root, p) || '.';
-const posixRel = (root, p) => rel(root, p).split(path.sep).join('/');
-
-/**
- * Global build inputs, read from turbo.json's own `globalDependencies` rather
- * than restated here: the build's declaration of what invalidates every package
- * is the freshness definition's too, and a new entry there is covered without
- * anyone remembering this file. Only literal paths are understood — a glob would
- * silently hash fewer inputs, so it throws.
- */
-function globalBuildInputs(root) {
-  const file = path.join(root, 'turbo.json');
-  if (!existsSync(file)) throw new CoverageError(`turbo.json is missing — cannot determine the build's global inputs, so freshness cannot be judged.`);
-  let cfg;
-  try {
-    cfg = JSON.parse(readFileSync(file, 'utf-8'));
-  } catch (err) {
-    throw new CoverageError(`turbo.json is not readable as JSON (${err.message}) — cannot determine the build's global inputs.`);
-  }
-  const declared = cfg.globalDependencies ?? [];
-  if (!Array.isArray(declared)) throw new CoverageError(`turbo.json 'globalDependencies' is not an array — cannot determine the build's global inputs.`);
-  return declared.map((entry) => {
-    if (typeof entry !== 'string' || entry.includes('*') || entry.startsWith('$')) {
-      throw new CoverageError(
-        `turbo.json globalDependencies entry ${JSON.stringify(entry)} is not a shape this gate can hash.\n` +
-          `  Teach scripts/check-dev-prereqs.mjs the new shape — hashing fewer inputs than the build\n` +
-          `  reads would make the freshness verdict pass vacuously.`,
-      );
-    }
-    return path.join(root, entry);
-  });
-}
-
-/** Every file under `dir`, sorted, node_modules excluded. */
-function filesUnder(dir, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue;
-    const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) filesUnder(p, out);
-    else if (entry.isFile()) out.push(p);
-  }
-  return out;
-}
-
-/**
- * sha256 over a package's build inputs — the freshness definition, in one place,
- * used by BOTH `--stamp` (at build time) and the gate (at boot time). They must
- * be the same function or the comparison means nothing, which is why the stamper
- * lives in this file rather than in a script of its own.
- *
- * Framing is length-prefixed (`<path>:<bytes>` then the bytes), so no separator
- * can be forged by a file's contents and no control character is needed to
- * delimit records.
- */
-function buildInputHash(root, pkgDir) {
-  const src = path.join(pkgDir, 'src');
-  if (!existsSync(src)) {
-    throw new CoverageError(`${posixRel(root, pkgDir)}/src does not exist, so there is nothing to hash — this gate cannot vouch for its dist.`);
-  }
-  const inputs = [...filesUnder(src)];
-  for (const name of PACKAGE_BUILD_CONFIG) inputs.push(path.join(pkgDir, name));
-  inputs.push(...globalBuildInputs(root));
-
-  const seen = new Set();
-  const records = [];
-  for (const file of inputs) {
-    const key = posixRel(root, file);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    records.push([key, file]);
-  }
-  records.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-
-  const hash = createHash('sha256');
-  for (const [key, file] of records) {
-    // An ABSENT input is hashed as absent rather than skipped: creating a
-    // tsconfig where there was none changes how the package builds, so it has
-    // to change the hash.
-    if (!existsSync(file)) {
-      hash.update(`${key}:absent\n`);
-      continue;
-    }
-    const bytes = readFileSync(file);
-    hash.update(`${key}:${bytes.length}\n`);
-    hash.update(bytes);
-  }
-  return hash.digest('hex');
-}
-
 /**
  * The freshness verdict for the declared amplifiers. Every way of NOT being able
  * to answer throws (#4690): a listed package that is not a workspace member, has
@@ -672,57 +554,6 @@ function stamp(root, cwd, amplifiers = AMPLIFIERS) {
   return 0;
 }
 
-/**
- * Did a declaration-emitting build produce THIS dist from THESE sources?
- *
- * The reader for DTS_STAMP_BASENAME, exported because the caller that needs it
- * is `distIsStale` in scripts/check-regen-pending.mjs — and it has to be THIS
- * function over THIS hash, or the comparison means nothing (the same argument
- * that keeps `--stamp` in this file rather than in a script of its own).
- *
- * Three verdicts, and the asymmetry between them is deliberate:
- *
- *   - `match`     the recorded digest equals the inputs on disk right now, so
- *                 the declarations describe exactly these sources. This is the
- *                 ONLY verdict that may clear an mtime accusation.
- *   - `mismatch`  a declaration-emitting build ran, and the sources have moved
- *                 since. Nameable in a refusal message: this is not an mtime
- *                 artefact, the content really did change.
- *   - `unstamped` NO EVIDENCE — no stamp, an unreadable one, a digest that
- *                 cannot be computed, or a package whose build does not stamp
- *                 at all. Every one of those collapses to the same answer on
- *                 purpose: "cannot vouch" must never read as "vouched for"
- *                 (#4690), and absence of the input is not licence to acquit.
- *
- * It never throws: it is called from inside a freshness predicate whose failure
- * direction is a silently wrong artifact, so an unreadable tree has to degrade
- * to `unstamped` rather than take the caller down.
- *
- * Both digests come back with the verdict so a refusal can SHOW its evidence
- * instead of asserting it — the defect #14985 filed was half a wrong message,
- * and "recorded X, sources now hash to Y" is a claim the reader can recompute.
- * `actual` is computed only when there is a valid digest to compare it against,
- * so the ~30ms hash stays off the path where no amplifier stamp exists at all.
- */
-export function inspectDeclarationStamp(root, pkgDir) {
-  const none = { state: 'unstamped', recorded: null, actual: null };
-  const stampFile = path.join(pkgDir, 'dist', DTS_STAMP_BASENAME);
-  let recorded;
-  try {
-    if (!existsSync(stampFile)) return none;
-    recorded = readFileSync(stampFile, 'utf-8').trim();
-  } catch {
-    return none;
-  }
-  if (!/^[0-9a-f]{64}$/.test(recorded)) return none;
-  let actual;
-  try {
-    actual = buildInputHash(root, pkgDir);
-  } catch {
-    return { ...none, recorded };
-  }
-  return { state: recorded === actual ? 'match' : 'mismatch', recorded, actual };
-}
 
 /**
  * --self-test — a gate only ever observed green is indistinguishable from a gate
@@ -1101,36 +932,28 @@ function selfTest() {
   return 0;
 }
 
-// Guarded since `declarationStampState` above gained an importer
-// (scripts/check-regen-pending.mjs). Unguarded, importing this file ran the
-// whole workspace scan and then `process.exit`ed out of its consumer's process
-// — and `distIsStale`'s consumers include the pre-commit hook, so the damage
-// would not have been subtle. `isEntrypoint` is the repo's one spelling of this
-// question (scripts/invoked-as.mjs; `check:entry-guard` refuses a twelfth).
-if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) {
-    const selfTestCode = selfTest();
-    if (!selfTestReachedVerdict) {
-        console.error(
-            '\n✗ check-dev-prereqs self-test: selfTest() returned without reaching its verdict,\n'
-                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-                + 'that never finished as a self-test that passed.\n',
-        );
-        process.exit(1);
-    }
-    process.exit(selfTestCode);
-  }
-
-  try {
-    if (process.argv.includes('--stamp')) {
-      process.exit(stamp(ROOT, process.cwd()));
-    }
-    process.exit(report(inspect(ROOT)));
-  } catch (err) {
-    if (err instanceof CoverageError) {
-      console.error(`\n✗ check:dev-prereqs cannot enumerate the workspace, so it cannot vouch for the build.\n\n  ${err.message}\n`);
+if (process.argv.includes('--self-test')) {
+  const selfTestCode = selfTest();
+  if (!selfTestReachedVerdict) {
+      console.error(
+          '\n✗ check-dev-prereqs self-test: selfTest() returned without reaching its verdict,\n'
+              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+              + 'that never finished as a self-test that passed.\n',
+      );
       process.exit(1);
-    }
-    throw err;
   }
+  process.exit(selfTestCode);
+}
+
+try {
+  if (process.argv.includes('--stamp')) {
+    process.exit(stamp(ROOT, process.cwd()));
+  }
+  process.exit(report(inspect(ROOT)));
+} catch (err) {
+  if (err instanceof CoverageError) {
+    console.error(`\n✗ check:dev-prereqs cannot enumerate the workspace, so it cannot vouch for the build.\n\n  ${err.message}\n`);
+    process.exit(1);
+  }
+  throw err;
 }

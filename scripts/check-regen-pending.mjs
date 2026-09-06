@@ -71,7 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
-import { inspectDeclarationStamp } from './check-dev-prereqs.mjs';
+import { inspectDeclarationStamp } from './build-input-hash.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
