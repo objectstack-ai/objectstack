@@ -38,7 +38,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
-import { resolveSystemWriteOrganization } from './tenancy/system-write-organization.js';
+import {
+  resolveSystemWriteOrganization,
+  isSystemWriteOrganizationRequiredError,
+  SystemWriteOrganizationRequiredError,
+  SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
+} from './tenancy/system-write-organization.js';
 
 const ORG_ID = 'org_msokm9oaz0cal87q';
 const SECOND_ORG_ID = 'org_second';
@@ -369,5 +374,127 @@ describe('#8844 the exclusions — populations the refusal must not touch', () =
     await engine.insert('billing_license', { subject: 'lic' }, { context: SYSTEM_CTX } as any);
     await engine.insert('dispatch_order', { subject: 'session' }, { context: SESSION_CTX } as any);
     expect(observed.filter((c) => c.object === 'sys_organization')).toEqual([]);
+  });
+});
+
+
+// ── [#14936] The published recognizer ────────────────────────────────────────
+//
+// The card's measurement, taken from a real consumer package loading
+// `@objectstack/objectql` through each of the two realms its own `exports`
+// declares (`import` -> `dist/index.mjs`, `require` -> `dist/index.js`):
+//
+//     SAME CLASS IDENTITY (A === B):      false
+//     instA instanceof A (same realm):    true
+//     instA instanceof B (CROSS-REALM):   false
+//     code compare survives the split:    true
+//
+// So a consumer had exactly two options and both were bad: `instanceof`, which
+// is unsound across that split and fails SILENTLY, or re-spelling
+// `'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED'`, which the provenance gate counts
+// as a stamp site in the consumer's own package and which can drift from what
+// the engine throws. These pins cover the third option this card publishes.
+//
+// Each case below carries its DISCRIMINATING CONTROL, for the reason this
+// file's header already states: a suite that only asserted "the recognizer
+// says true" would stay green if the recognizer were `() => true`, and one
+// that only asserted the same-realm instance would stay green if the
+// recognizer were `instanceof`-based - which is the very defect being fixed.
+
+/**
+ * What a SECOND copy of this module produces: structurally the refusal,
+ * nominally a different class. This is the CJS build's class arriving at a
+ * consumer holding the ESM one (or the reverse) - the exact shape the card's
+ * cross-realm measurement found, reproduced here without needing two builds.
+ */
+class SystemWriteOrganizationRequiredErrorOtherRealmCopy extends Error {
+  readonly code = 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' as const;
+  readonly status = 500;
+  constructor() {
+    super('refused by the other realm\'s copy of this module');
+    this.name = 'SystemWriteOrganizationRequiredError';
+  }
+}
+
+describe('#14936 the published recognizer for the org-less system-write refusal', () => {
+  it('the published constant IS the code the thrown refusal carries, at its 500 status', () => {
+    const err = new SystemWriteOrganizationRequiredError('dispatch_order', 'isolated', 'walled-posture');
+    expect(err.code).toBe(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE);
+    // ADR-0112 envelope: `code` AND `status`. Asserting the throw alone would
+    // stay green against an unrelated failure, and would not notice the status
+    // moving off 500 - which #8844 ruled deliberately.
+    expect(err.status).toBe(500);
+    // The wire string, spelled once here on purpose: this is the TEST layer,
+    // which `check:error-code-provenance` does not scan, so pinning it costs no
+    // stamp site while making a silent rename of the constant impossible to
+    // pass off as "still the same code".
+    expect(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE).toBe('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
+  });
+
+  it('recognises the refusal the engine actually throws', () => {
+    const err = new SystemWriteOrganizationRequiredError(
+      'dispatch_order', 'single', 'ambiguous-organization', 2,
+    );
+    expect(isSystemWriteOrganizationRequiredError(err)).toBe(true);
+  });
+
+  it("recognises the OTHER realm's copy - the exact case `instanceof` gets wrong", () => {
+    const fromOtherRealm = new SystemWriteOrganizationRequiredErrorOtherRealmCopy();
+    // THE CONTROL, and the whole point of the card. Without this line the
+    // assertion below would pass just as happily against an `instanceof`
+    // implementation, i.e. against the defect.
+    expect(fromOtherRealm instanceof SystemWriteOrganizationRequiredError).toBe(false);
+    expect(isSystemWriteOrganizationRequiredError(fromOtherRealm)).toBe(true);
+  });
+
+  it('recognises a transport-rebuilt envelope, which is WHY it does not narrow to the class', () => {
+    // #5437 withholds the prose from the wire and keeps the machine-readable
+    // `code`, so what a consumer catches downstream of a transport can be an
+    // envelope carrying the code and nothing else.
+    const wireEnvelope: Record<string, unknown> = {
+      code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500,
+    };
+    expect(isSystemWriteOrganizationRequiredError(wireEnvelope)).toBe(true);
+    // ...and it carries none of the class's own members. A type guard
+    // (`err is SystemWriteOrganizationRequiredError`) would promise these,
+    // turning a sound check into an unsound assertion one layer down - which
+    // is why the predicate returns `boolean`.
+    expect(wireEnvelope.object).toBeUndefined();
+    expect(wireEnvelope.posture).toBeUndefined();
+    expect(wireEnvelope.reason).toBeUndefined();
+  });
+
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['a bare string carrying the code', 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED'],
+    ['an Error with no code at all', new Error('boom')],
+    ['a DIFFERENT engine refusal', Object.assign(new Error('dup'), { code: 'DUPLICATE_RECORD' })],
+    ['a prefix lookalike', Object.assign(new Error('x'), { code: 'ERR_SYSTEM_WRITE_ORGANIZATION' })],
+    ['a suffix lookalike', Object.assign(new Error('x'), { code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED_V2' })],
+    ['the code in the wrong case', Object.assign(new Error('x'), { code: 'err_system_write_organization_required' })],
+  ])('refuses %s', (_label, value) => {
+    expect(isSystemWriteOrganizationRequiredError(value)).toBe(false);
+  });
+
+  it('keeps `code` a LITERAL type, which is what the cross-package consumer types itself from', () => {
+    // `plugin-sharing/src/sharing-rule-service.ts` declares its own constant as
+    // `SystemWriteOrganizationRequiredError['code']`. Had this refactor widened
+    // the class field to `string`, that consumer would keep COMPILING while
+    // silently losing the drift protection it asked for - so the widening is
+    // pinned as a TYPE error rather than a value assertion. This file carries no
+    // `test-typecheck-debt.json` entry, so a new error here is red on arrival.
+    const pinned: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' =
+      new SystemWriteOrganizationRequiredError('dispatch_order', 'isolated', 'walled-posture').code;
+    expect(pinned).toBe(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE);
+  });
+
+  it('publishes both names from the package BARREL, not only from the module', async () => {
+    // The card's landing surface is "the module plus that package's index.ts
+    // export" - a consumer reaches these by bare specifier, so an export that
+    // exists only on the deep module is not the affordance that was asked for.
+    const barrel = await import('./index.js');
+    expect(barrel.SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE).toBe(SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE);
+    expect(barrel.isSystemWriteOrganizationRequiredError).toBe(isSystemWriteOrganizationRequiredError);
   });
 });
