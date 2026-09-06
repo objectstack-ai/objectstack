@@ -31,8 +31,16 @@
  *     Postgres and MySQL.
  *   - `CAST(… AS BINARY)` is byte-wise on MySQL, is not a type on Postgres, and
  *     takes NUMERIC affinity on SQLite (it would compare a number).
- *   - `CAST(col AS BLOB) LIKE ?` was measured on the driver side to return
- *     NOTHING at all — SQLite's LIKE is false for a BLOB operand.
+ *   - `CAST(col AS BLOB) LIKE ?` means two DIFFERENT things on the two SQLite
+ *     builds this repo ships, which disqualifies it more firmly than any single
+ *     wrong answer would. Whether `LIKE` is false for a BLOB operand is fixed
+ *     when SQLite is COMPILED, by `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, so it is
+ *     not a portable property at all: measured on this same fixture,
+ *     `{ name: { $contains: 'acme' } }` answered `[]` on better-sqlite3 13.0.3
+ *     (SQLite 3.53.4, flag compiled in) and `['1','2']` on sql.js 1.14.1
+ *     (SQLite 3.49.1, flag absent) — the latter being precisely the over-fold
+ *     above. A construct that a read scope's correctness rests on cannot be one
+ *     whose meaning an upstream build flag decides.
  *   - The portable primitives that ARE case-sensitive everywhere (`replace()`)
  *     express "occurs somewhere" but not "occurs at the start / at the end"
  *     without character-length arithmetic that is spelled differently on every
