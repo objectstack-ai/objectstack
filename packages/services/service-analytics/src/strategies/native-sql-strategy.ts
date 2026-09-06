@@ -1154,7 +1154,9 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
       // per-dialect for a DIFFERENT reason than its neighbours: the fold this
       // line used to emit unconditionally was `translate()`, which SQLite does
       // not have, so the statement failed to PARSE there rather than answering
-      // wrong rows. `objectql-strategy.ts`'s echo carries the same flag on the
+      // wrong rows — [#16028] including on the `unknown` arm, which is reached
+      // by an embedder that simply left the optional `sqlDialect` hook unwired.
+      // `objectql-strategy.ts`'s echo carries the same flag on the
       // same single row, so the two keep describing one query.
       //
       // [#5567] Escaped pattern AND an explicit `ESCAPE`, bound together on

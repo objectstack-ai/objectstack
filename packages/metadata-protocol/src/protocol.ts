@@ -4587,7 +4587,7 @@ export class ObjectStackProtocolImplementation implements
      * nothing to report, and "clean" is told apart from "nothing ran" by the
      * gate's own `rulesRun`, not by this.
      */
-    private assertRuntimeAuthoringRules(evt: {
+    private async assertRuntimeAuthoringRules(evt: {
         type: string; name: string; state: 'draft' | 'active'; body: unknown; source?: string;
         /**
          * The organization partition of this write (`saveMetaItem`'s
@@ -4616,7 +4616,7 @@ export class ObjectStackProtocolImplementation implements
          * the only one holding the answer to.
          */
         pending?: RuntimePendingDeclarations;
-    }): RuntimeAuthoringIssue[] {
+    }): Promise<RuntimeAuthoringIssue[]> {
         // [#6710] The ADR-0005 carve-out, now DECLARED instead of inferred.
         //
         // This line used to read `if (this.environmentId === undefined)
@@ -4682,12 +4682,24 @@ export class ObjectStackProtocolImplementation implements
         // collections the three cross-collection security rules compare
         // against (RuntimeStackContext's own docblock carries the 38-vs-4
         // measurement). Gathered PER WRITE like `objects` always was, never
-        // cached: the read is a registry map walk plus one array copy of item
-        // references, it runs only on an `active`-state publish (D1), and a
-        // cache would need invalidation across every org's overlay writes.
+        // cached: it runs only on an `active`-state publish (D1), and a cache
+        // would need invalidation across every org's overlay writes.
         // Each collection is guarded independently so a registry that can
         // answer one question still answers the others.
-        const listCollection = (singularType: string, pluralType: string): unknown[] => {
+        //
+        // [#15950] The cost sentence that stood here — "a registry map walk
+        // plus one array copy of item references" — described only the FIRST
+        // of the two halves below, and it was the reason the second one was
+        // never taken. It now reads: a registry map walk plus one array copy,
+        // PLUS one indexed `sys_metadata` read per collection, all five issued
+        // together. That is a real added cost and it is paid deliberately: the
+        // cheaper gather was answering with a universe the platform's own read
+        // API contradicts, and a per-write snapshot that is cheap and wrong
+        // refuses legitimate writes (the phantom this whole context exists to
+        // prevent). It is still bounded by the number of TENANT-AUTHORED rows
+        // of one type — code-package metadata lives in the registry and never
+        // reaches this read — and it never runs on a draft.
+        const listRegisteredCollection = (singularType: string, pluralType: string): unknown[] => {
             try {
                 if (typeof this.engine.registry?.listItems !== 'function') return [];
                 const items = [...this.engine.registry.listItems(singularType)];
@@ -4696,18 +4708,35 @@ export class ObjectStackProtocolImplementation implements
                 return [];
             }
         };
-        const objects = listCollection('object', 'objects');
-        const permissions = listCollection('permission', 'permissions');
-        const books = listCollection('book', 'books');
-        // [#7529] The resolution universe validateWidgetBindings needs for a
-        // dashboard publish — without it every legitimate board reads as
-        // dangling (see RuntimeStackContext.datasets).
-        const datasets = listCollection('dataset', 'datasets');
-        // [#13216] The resolution universe validateViewPageRefs needs for a
-        // `type: 'page'` view publish — without it every legitimate page mount
-        // reads as dangling (see RuntimeStackContext.pages). Gathered on the
-        // same terms as the four above: per write, on an `active` publish only.
-        const pages = listCollection('page', 'pages');
+        // [#15950] …and the STORED half folded on top of it. The registry is
+        // only ONE of the two homes live metadata has; see
+        // {@link foldStoredCollection} for the measured disagreement and for
+        // why the fold is additive.
+        const listCollection = (singularType: string, pluralType: string): Promise<unknown[]> =>
+            this.foldStoredCollection(
+                listRegisteredCollection(singularType, pluralType),
+                singularType,
+                pluralType,
+                evt.organizationId ?? null,
+            );
+        // Resolved together rather than in sequence: each is one indexed
+        // `sys_metadata` read and they do not depend on one another, so the
+        // store leg costs one round trip of latency for the whole context
+        // instead of five.
+        const [objects, permissions, books, datasets, pages] = await Promise.all([
+            listCollection('object', 'objects'),
+            listCollection('permission', 'permissions'),
+            listCollection('book', 'books'),
+            // [#7529] The resolution universe validateWidgetBindings needs for a
+            // dashboard publish — without it every legitimate board reads as
+            // dangling (see RuntimeStackContext.datasets).
+            listCollection('dataset', 'datasets'),
+            // [#13216] The resolution universe validateViewPageRefs needs for a
+            // `type: 'page'` view publish — without it every legitimate page mount
+            // reads as dangling (see RuntimeStackContext.pages). Gathered on the
+            // same terms as the four above: per write, on an `active` publish only.
+            listCollection('page', 'pages'),
+        ]);
 
         // [#9612] The closure this write is judged against. Resolved from the
         // package registry — the impure read — and handed to the pure gate as
@@ -4733,6 +4762,168 @@ export class ObjectStackProtocolImplementation implements
         });
         if (verdict.error) throw verdict.error;
         return verdict.advisories;
+    }
+
+    /**
+     * [#15950] Fold the STORED half of a resolution universe onto the registry
+     * half {@link assertRuntimeAuthoringRules} gathers.
+     *
+     * ## Why a second half exists at all
+     *
+     * `RuntimeStackContext` declares every one of these collections as the
+     * **live** declarations — `runtime-gate.ts`'s own words for `datasets` are
+     * "The live dataset declarations (stack key `datasets`)" — and live
+     * metadata has TWO homes in this platform, not one: the SchemaRegistry,
+     * which code packages fill at boot, and `sys_metadata`, which every runtime
+     * author writes to. {@link getMetaItems} — the read API behind
+     * `GET /meta/:type` — has always answered from both and merged them. This
+     * gate answered from the registry alone.
+     *
+     * For `object` the two rarely disagree, because
+     * {@link applyRegistryWriteThrough}'s object branch registers
+     * unconditionally. For every OTHER type that branch returns early on an
+     * environment-scoped kernel (and {@link hydrateOverlayIntoRegistry} declines
+     * an org-scoped row on any kernel), so a `PUT /meta/dataset` that answers
+     * `200` leaves the registry untouched until the next boot re-hydrates it.
+     * Measured on the card's shape, in one instant: the row is in the store,
+     * `GET /meta/dataset` returns it with `_diagnostics.valid: true`, and
+     * `registry.listItems('dataset')` returns only the five code-package
+     * datasets — so a dashboard bound to it collected one phantom
+     * `widget-dataset-unknown` per widget, with a hint enumerating everything
+     * except the artifact the author had just saved, until the process
+     * restarted. The 422 and the 200 were two readers disagreeing about the
+     * same word, and the side that was wrong is this one: the lint contract
+     * says "live", and the registry alone is not that.
+     *
+     * ## The fold is ADDITIVE, deliberately
+     *
+     * A stored row contributes a name the registry half does not already carry;
+     * it never displaces a registry entry. That is not caution for its own
+     * sake — the registry's copy of an `object` is the RESOLVED schema
+     * (ADR-0029 D9.2: a base layer with its `extend` contributors folded on),
+     * while a `sys_metadata` row is the base layer alone, which is exactly why
+     * {@link getMetaItems} runs {@link foldObjectExtendersFromRegistry} when its
+     * own merge lets an overlay win. Letting a raw row displace the resolved
+     * body here would trade this card's phantom for a subtler one — a field
+     * reference that resolves today reading as dangling — so the universe grows
+     * and nothing in it is rewritten. The residual is stated rather than
+     * hidden: where an org overlay REDEFINES a code-package item, the gate
+     * still judges that item's CONTENT from the registry's version.
+     *
+     * ## What the read is scoped to
+     *
+     * `state: 'active'` only. A draft must not resolve: #7529's ruling is
+     * refuse-at-publish precisely so an author can write the widget first and
+     * the dataset second, and a draft dataset satisfying a board's binding
+     * would publish a board that cannot render.
+     *
+     * Env-wide rows plus, when the write has one, this write's own
+     * organization — the same two-tier read {@link getMetaItems} performs, and
+     * the same partition the write itself lands in. No other org's overlays are
+     * visible here, on any kernel.
+     *
+     * ⛔ No disabled-package filter, and that is deliberate rather than
+     * forgotten: `getMetaItems` applies one, and the comment on it says in as
+     * many words that the registry primitives keep serving a disabled package's
+     * items so that "migrations, cross-package references and the runtime
+     * authoring gate (`protocol.ts` resolution context) still see a complete
+     * object universe". Filtering here would make the stored half narrower than
+     * the registry half it is folded onto.
+     *
+     * ## Degradation — the invariant, and the half of it that was missing
+     *
+     * "Never let context-gathering fail a write" still holds: nothing here
+     * throws, and a store this host cannot read leaves the caller with the
+     * registry half it would have had anyway. What is NOT kept is the other
+     * behaviour of the `catch {}` above — degrading into something that reads
+     * like a smaller universe with nothing said. A missing table is the one
+     * benign case (`isMissingTableError`, the declared discriminator: an
+     * unprovisioned `sys_metadata` genuinely holds no rows, so the registry
+     * half IS the whole answer); any other failure is reported once, because a
+     * gather that silently shrinks is how a phantom refusal is manufactured,
+     * and this method exists because of one.
+     *
+     * `warn`, not `error`, per this repo's degradation rule: no write claims to
+     * have persisted anything it did not. The consequence is a possible wrong
+     * verdict on the NEXT reference, and the message says so.
+     */
+    private async foldStoredCollection(
+        registered: unknown[],
+        singularType: string,
+        pluralType: string,
+        organizationId: string | null,
+    ): Promise<unknown[]> {
+        if (typeof this.engine?.find !== 'function') return registered;
+        let rows: Record<string, unknown>[];
+        try {
+            const scopes: (string | null)[] = organizationId ? [null, organizationId] : [null];
+            const read = async (type: string, oid: string | null): Promise<Record<string, unknown>[]> => {
+                const rs = await this.engine.find('sys_metadata', {
+                    where: { type, state: 'active', organization_id: oid },
+                });
+                return (rs ?? []) as Record<string, unknown>[];
+            };
+            rows = [];
+            for (const oid of scopes) {
+                // The same singular/plural retry the registry half and
+                // `getMetaItems` both perform: rows written through a plural
+                // URL spelling are stored under it.
+                let rs = await read(singularType, oid);
+                if (rs.length === 0) rs = await read(pluralType, oid);
+                rows.push(...rs);
+            }
+        } catch (error) {
+            if (!isMissingTableError(error, 'sys_metadata')) {
+                console.warn(
+                    `[Protocol] the runtime authoring gate could not read stored '${singularType}' `
+                    + `metadata: ${(error as { message?: string } | null)?.message ?? String(error)}. `
+                    + `This write is NOT blocked, and nothing it saves is at risk — but the gate is `
+                    + `judging references against the SchemaRegistry alone for this write, so a `
+                    + `reference to a runtime-authored ${singularType} may be refused as unknown.`,
+                );
+            }
+            return registered;
+        }
+        if (rows.length === 0) return registered;
+
+        const seen = new Set<string>();
+        for (const item of registered) {
+            const name = (item as { name?: unknown } | null | undefined)?.name;
+            if (typeof name === 'string') seen.add(name);
+        }
+        const merged = [...registered];
+        for (const row of rows) {
+            const name = row.name;
+            if (typeof name !== 'string' || seen.has(name)) continue;
+            let body: unknown;
+            try {
+                const raw = row.metadata;
+                body = this.convertStoredItem(
+                    singularType,
+                    typeof raw === 'string' ? JSON.parse(raw) : raw,
+                );
+            } catch (error) {
+                // One unreadable row must not cost the other rows their place
+                // in the universe — but it is said out loud, because dropping
+                // it silently is the same manufactured phantom as above, one
+                // name narrower.
+                console.warn(
+                    `[Protocol] stored ${singularType}/${name} could not be read into the runtime `
+                    + `authoring gate's resolution context: `
+                    + `${(error as { message?: string } | null)?.message ?? String(error)}. `
+                    + `References to it may be refused as unknown until the row is re-saved.`,
+                );
+                continue;
+            }
+            if (!body || typeof body !== 'object') continue;
+            const packageId = row.package_id;
+            if (typeof packageId === 'string' && (body as { _packageId?: unknown })._packageId === undefined) {
+                (body as { _packageId?: unknown })._packageId = packageId;
+            }
+            seen.add(name);
+            merged.push(body);
+        }
+        return merged;
     }
 
     /**
@@ -15256,7 +15447,7 @@ export class ObjectStackProtocolImplementation implements
         // captured and rides the 2xx this write is about to earn. Held in a
         // local rather than on `this`: the gate is per-write and two concurrent
         // saves must not read each other's findings.
-        const runtimeAdvisories = this.assertRuntimeAuthoringRules({
+        const runtimeAdvisories = await this.assertRuntimeAuthoringRules({
             type: request.type,
             name: request.name,
             state: mode === 'draft' ? 'draft' : 'active',
@@ -16570,7 +16761,7 @@ export class ObjectStackProtocolImplementation implements
         // own. Held in a local, never on `this` — the gate is per-write and
         // two concurrent publishes must not read each other's findings.
         const runtimeAdvisories: RuntimeAuthoringIssue[] = draftForGate
-            ? this.assertRuntimeAuthoringRules({
+            ? await this.assertRuntimeAuthoringRules({
                 type: singularType,
                 name: request.name,
                 state: 'active',
@@ -21414,10 +21605,21 @@ export class ObjectStackProtocolImplementation implements
         // question, because a field's dependents ARE reachable — through the
         // object that owns it, which is where a field is authored and where the
         // reference graph has real edges.
+        //
+        // ⛔ And it opens with NO bracketed tag. The `[item_locked]`-style tags
+        // this file writes elsewhere are lowercase restatements of the throw's OWN
+        // declared `code`, so the wire carries the same token on the `code` axis;
+        // this refusal's code is `NOT_IMPLEMENTED`, so an `[unanswerable_target]`
+        // opener restated nothing the envelope carries and nothing ever read it.
+        // #12975 (2026-08-29) rules that `error` is HUMAN LANGUAGE while `code` is
+        // the MACHINE TOKEN, and since #15685 this prose reaches the operator
+        // VERBATIM — so the tag was the first thing they read. What separates this
+        // refusal from the route's other 501 is the sentence itself, not a tag.
+        // Its absence is pinned by `protocol.reference-target-unanswerable.test.ts`.
         if (REFERENCE_SITES.unanswerableTargetTypes.includes(singularTarget)) {
             const owner = targetName.includes('.') ? targetName.slice(0, targetName.indexOf('.')) : '<object>';
             const err = new Error(
-                `[unanswerable_target] References to a '${singularTarget}' item cannot be computed. `
+                `References to a '${singularTarget}' item cannot be computed. `
                 + `A '${singularTarget}' is addressed by the composite key '<object>.<field>' `
                 + `(here '${targetName}'), while every metadata property that names a field holds the `
                 + `BARE field name — so no reference site can ever match this key and an empty answer `
