@@ -86,7 +86,7 @@
         "app": "showcase",
         "requires": [
           "showcase_batch_reminders (examples/app-showcase/src/automation/flows/index.ts BatchRemindersFlow) — an autolaunched loop flow with a `tasks` list input, runnable on demand via the trigger route",
-          "a `loop` whose body holds a two-branch `parallel` — the only shape that exercises both index keys on one step, needed by the loop { parallel } clause. ⚠️ NOT PRESENT in examples/app-showcase: it carries `loop` (showcase_batch_reminders) and `parallel` (showcase_fan_out_notify) as SEPARATE flows and nests neither, so that clause scores blocked(fixture) until such a flow lands (filed separately). The clause is written now because what it pins is settled — maintainer ruling 2026-09-03 — and a clause missing from this item is exactly what let the `iteration` overload sit unmeasured through two releases"
+          "a `loop` whose body holds a two-branch `parallel` — the only shape that exercises both index keys on one step, needed by the loop { parallel } clause. ⚠️ NOT PRESENT in examples/app-showcase: it carries `loop` (showcase_batch_reminders) and `parallel` (showcase_fan_out_notify) as SEPARATE flows and nests neither, so that clause scores blocked(fixture) until such a flow lands (filed as #16356). The clause is written now because what it pins is settled — maintainer ruling 2026-09-03 — and a clause missing from this item is exactly what let the `iteration` overload sit unmeasured through two releases"
         ]
       },
       "steps": [
