@@ -6,7 +6,7 @@
 
 The kernel's in-memory i18n fallback learns the declared `i18n.fallbackLocale`, so one declaration stops answering two ways (#15694)
 
-`i18n.fallbackLocale` is authorable on the stack artifact (`TranslationConfigSchema`), and `FileI18nAdapter` — the provider `I18nServicePlugin` installs — has always honoured it: `os serve` and the dev plugin construct it with `fallbackLocale || defaultLocale || 'en'`, and its `t()` consults that locale, per key, after the requested one.
+`i18n.fallbackLocale` is authorable on the stack artifact (`TranslationConfigSchema`), and `FileI18nAdapter` — the provider `I18nServicePlugin` installs — has always honoured it: `os serve` constructs it with `fallbackLocale || defaultLocale || 'en'`, and its `t()` consults that locale, per key, after the requested one.
 
 The kernel's in-memory fallback is constructed with nothing. `AppPlugin.loadTranslations` injected the declared `defaultLocale` and `supportedLocales` (#7679) into whichever `i18n` service was registered, but never `fallbackLocale`, and the provider had no setter to receive one. On every stack running that fallback — any stack that declares `translations` without `@objectstack/service-i18n` registered (not installed, or `tierEnabled('i18n')` false) — the declaration was inert. A stack declaring `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` answered a missing `zh-CN` key from `en` under `I18nServicePlugin` and from `zh-CN`, i.e. not at all, under the fallback: one declaration, two providers, two answers. That the fallback self-declares `degraded` licenses fewer capabilities, not a different answer to the same declared key.
 
