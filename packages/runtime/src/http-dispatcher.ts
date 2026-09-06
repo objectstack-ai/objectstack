@@ -399,6 +399,14 @@ export class HttpDispatcher {
         // — there is no such thing here. The request carries its own.
         resolveService: (context: HttpProtocolContext, name: string, environmentId?: string) =>
             this.resolveService(this.requestKernel(context), name, environmentId),
+        // [#15900] The classified lookup, reachable from a DOMAIN gate. The
+        // identity step has read `tenancy` this way since #15366/PR #15909; the
+        // two gates that decide a mint and an install-wide activation write ask
+        // the same question about the same fact, so they read it the same way.
+        // The probe above is untouched — this adds a second, opted-into path,
+        // it does not reroute a name for every domain (#15900 option C).
+        resolveServiceOrLoud: (context: HttpProtocolContext, name: string, environmentId?: string) =>
+            this.resolveServiceOrLoud(this.requestKernel(context), name, environmentId),
         getService: (context: HttpProtocolContext, name: string) =>
             this.getService(this.requestKernel(context), name as Parameters<HttpDispatcher['getService']>[1]),
         getObjectQL: (context, environmentId) =>
@@ -2207,8 +2215,11 @@ export class HttpDispatcher {
 
     /**
      * [#13906 decision 1 A] Resolve a service whose ABSENCE is a supported
-     * composition but whose FAILURE is an outage — today only the `tenancy`
-     * read the identity step feeds `resolveExecutionContext`.
+     * composition but whose FAILURE is an outage — today the `tenancy` read the
+     * identity step feeds `resolveExecutionContext`, and (via
+     * {@link DomainHandlerDeps.resolveServiceOrLoud}, #15900) the same read at
+     * the two domain gates that decide a `/keys` mint and an install-wide
+     * activation write.
      *
      * `resolveService` above is a capability probe: every step of its chain
      * absorbs every rejection and falls through, so a factory that threw and a

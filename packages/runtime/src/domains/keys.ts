@@ -31,7 +31,7 @@
  *    organization is re-checked here, against `sys_member`, at mint time.
  */
 
-import { isGrantActive, effectiveTenancyPosture } from '@objectstack/core';
+import { isGrantActive, effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
 import { generateApiKey } from '../security/api-key.js';
@@ -104,17 +104,38 @@ export async function handleKeysRequest(
 
     // The EFFECTIVE posture, from the kernel's `tenancy` service — what is
     // ENFORCED, not what `OS_TENANCY_POSTURE` requested (ADR-0093 D4/D5: a
-    // requested-but-unenforceable wall resolves to `single`). An absent service
-    // means we cannot tell, and the honest answer to that at MINT time is to
-    // mint: refusing would block key creation on a deployment that may have no
-    // wall at all.
+    // requested-but-unenforceable wall resolves to `single`).
+    //
+    // [#15900, ruled 2026-09-06 — option A] "No service" and "the service could
+    // not be built" are TWO facts, and only one of them licenses a mint:
+    //
+    //  - **never registered** ⇒ no posture, and the honest answer at MINT time
+    //    is to mint. That is the deliberate choice this comment has always
+    //    recorded, and it is unchanged: refusing would block key creation on a
+    //    deployment that may have no wall at all, and a no-tenancy composition
+    //    is supported. ⚠️ It applies to THIS class only — it is not a statement
+    //    about a posture that could not be read.
+    //  - **registered and unable to answer** ⇒ the posture is an authorization
+    //    INPUT that was never READ, so whether this key needs an organization
+    //    was never DECIDED. Minting there hands back a long-lived credential on
+    //    a question nobody answered — the permissive direction #13906 decision 1
+    //    option A ruled against at the identity seam, whose words govern here
+    //    too: 「A posture that could not be READ is not a posture that is
+    //    ABSENT.」 Answered as an outage (503), never as a mint.
+    //
+    // The split is taken from the REGISTRY's own brand (#13905), never from
+    // message text, and the two classes arrive here already told apart —
+    // `resolveServiceOrLoud` absorbs the branded "never registered" and answers
+    // `undefined`, so anything that REJECTS is a `tenancy` that is wired and
+    // broken. ⛔ Hence no `isServiceNotRegisteredError` re-test below: a second
+    // copy of the classification is a second thing to drift.
     let tenancyPosture;
     try {
         tenancyPosture = effectiveTenancyPosture(
-            await deps.resolveService(context, 'tenancy' as any, context.environmentId),
+            await deps.resolveServiceOrLoud(context, 'tenancy', context.environmentId),
         );
-    } catch {
-        tenancyPosture = undefined;
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
     }
     const walled = tenancyPosture ? postureEnforcesWall(tenancyPosture) : false;
 
