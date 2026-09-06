@@ -811,21 +811,64 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
 
 
 /**
- * How {@link composeStacks} treats one top-level key (#5005).
+ * How {@link composeStacks} treats one top-level key of the artifact envelope
+ * (#5005) — the value half of {@link COMPOSE_KEY_DISPOSITIONS}.
  *
- * - `'concat'`    — array collection; concatenated in stack order.
- * - `'single'`    — one scalar/object value; identical declarations pass
- *                   through, differing ones are a composition ERROR.
- * - `'manifest'`  — chosen by the `manifest` option.
- * - `'objects'`   — merged by the `objectConflict` strategy.
- * - `'functions'` — named-handler collection; merged by name.
- * @internal
+ * - `'concat'`    — an array collection; the inputs' arrays are concatenated
+ *                   in stack order. Every metadata collection (`objects` aside)
+ *                   and the envelope's `packages` / `requires` lists compose
+ *                   this way, so a downstream seam that merges N artifacts may
+ *                   concatenate a `'concat'` key without reading its element
+ *                   type.
+ * - `'single'`    — one scalar/object configuration value; identical
+ *                   declarations pass through, differing ones are a
+ *                   composition ERROR naming the key and both stacks (never
+ *                   last-wins, never deep-merge).
+ * - `'manifest'`  — the singular package identity; picked by the `manifest`
+ *                   option (`'first'` / `'last'` / index, or folded into
+ *                   `packages` under `'preserve'`).
+ * - `'objects'`   — merged per object name by the `objectConflict` strategy.
+ * - `'functions'` — a named-handler map; merged by handler name, a duplicate
+ *                   name is an ERROR.
  */
-type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
+export type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
+
+/**
+ * Every top-level key {@link ObjectStackDefinitionSchema} declares — the
+ * artifact envelope's key set: the two envelope-only keys (`manifest`,
+ * `packages`) plus every member of the collections shape. The key half of
+ * {@link COMPOSE_KEY_DISPOSITIONS}; {@link STACK_DEFINITION_KEYS} is its
+ * runtime value.
+ */
+export type StackDefinitionKey = 'manifest' | 'packages' | keyof typeof STACK_DEFINITION_COLLECTIONS_SHAPE;
 
 /**
  * The composition rule for EVERY top-level key of `ObjectStackDefinition`
- * (#5005).
+ * (#5005) — and, since #14877, THE exported source of the artifact envelope's
+ * top-level key set.
+ *
+ * ## Exported, frozen: derive from it, never copy it (#14877)
+ *
+ * A downstream seam that walks an artifact's top level — a hosted publish, an
+ * artifact merge, an assembler — needs two answers: *which keys exist* and
+ * *what composing each one means*. The collection half of the first answer
+ * was already derivable (`PLURAL_TO_SINGULAR`, `METADATA_ALIASES`); the rest
+ * (`manifest`, `requires`, `packages`, …) had to be hand-copied per consumer,
+ * and the copy drifted silently twice (cloud#897: `roles` → `positions` dropped
+ * every hosted `positions[]`; cloud#1888: an artifact merge dropped
+ * `packages[]`). So this table is public: read its keys for the key set
+ * ({@link STACK_DEFINITION_KEYS} is that derivation, done once), and index it
+ * for the rule (`COMPOSE_KEY_DISPOSITIONS[key] === 'concat'` is the question
+ * "may I concatenate this across artifacts?"). A key added to the schema
+ * reaches every deriving consumer the day it lands — a copy would not.
+ *
+ * It is `Object.freeze`d: the contract is read-only, and a consumer cannot
+ * widen or retarget it by assignment. It is literal-typed (`as const`), so
+ * `(typeof COMPOSE_KEY_DISPOSITIONS)[K]` is K's disposition rather than the
+ * union — the derivations below depend on that. The pin
+ * `compose-key-dispositions-export.pin.test.ts` holds this key set equal to
+ * `ObjectStackDefinitionSchema`'s shape in both directions, so the table cannot
+ * drift from the schema without a red test naming the key.
  *
  * ## Why a total table and not a list
  *
@@ -867,12 +910,8 @@ type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functi
  * `translations` bundles each stack ships are written against its own
  * `supportedLocales`, so overriding one stack's declaration leaves the other
  * stack's bundles addressing locales the composed app no longer admits.
- *
- * @internal
  */
-type StackDefinitionKey = 'manifest' | 'packages' | keyof typeof STACK_DEFINITION_COLLECTIONS_SHAPE;
-
-const COMPOSE_KEY_DISPOSITIONS = {
+export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // ── Bespoke strategies (unchanged by #5005) ──
   manifest: 'manifest',
   objects: 'objects',
@@ -952,14 +991,29 @@ const COMPOSE_KEY_DISPOSITIONS = {
   onEnable: 'single',
   // #5051: the last key still on last-wins; aligned here, see the note above.
   i18n: 'single',
-} as const satisfies Record<StackDefinitionKey, ComposeDisposition>;
+} as const satisfies Record<StackDefinitionKey, ComposeDisposition>);
+
+/**
+ * The artifact envelope's top-level key set — every key
+ * {@link ObjectStackDefinitionSchema} declares — as a frozen list (#14877).
+ *
+ * DERIVED from {@link COMPOSE_KEY_DISPOSITIONS} by `Object.keys`, never a
+ * second literal: the table is total over the schema's declared keys, so this
+ * list is too, and a consumer that iterates it sees a new top-level key the
+ * day the schema declares one. Read it where a seam needs "the keys an
+ * artifact may carry" without caring what composing each one means; index the
+ * table where it does.
+ */
+export const STACK_DEFINITION_KEYS: readonly StackDefinitionKey[] = Object.freeze(
+  Object.keys(COMPOSE_KEY_DISPOSITIONS) as StackDefinitionKey[],
+);
 
 /**
  * All array fields on `ObjectStackDefinition` that are simply concatenated.
  * Derived from {@link COMPOSE_KEY_DISPOSITIONS} so the two cannot drift.
  * @internal
  */
-const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof ObjectStackDefinition)[])
+const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
   .filter((key) => COMPOSE_KEY_DISPOSITIONS[key] === 'concat');
 
 

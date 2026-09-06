@@ -1135,10 +1135,19 @@ export const FieldSchema = lazySchema(() => {
    * 
    * For `master_detail` fields, the parent record controls the lifecycle of child records
    * (e.g., cascade delete). For `lookup` fields, the reference is a soft link.
+   *
+   * On a `tree` field the key is OPTIONAL and, when present, must name the
+   * declaring object itself (#14892): a hierarchy is parent/child within one
+   * object, so the value is a redundant self-annotation. This schema cannot
+   * judge it — a field does not know which object declares it — so the
+   * refusal of any other target lives on `ObjectSchema` / `ObjectExtensionSchema`
+   * (`object.zod.ts`, `refuseForeignTreeReference`), where the own name is known.
    */
   reference: z.string().optional().describe(
     'Target object name (snake_case) for lookup/master_detail fields. '
-    + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects.'
+    + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. '
+    + 'On a `tree` field it is optional and, if given, must be the declaring object\'s own name — '
+    + 'the object schema refuses any other target.'
   ),
   /**
    * Polymorphic pointer declaration (ADR-0052 §5 — the ActivityPointer model).

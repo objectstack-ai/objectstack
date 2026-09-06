@@ -807,7 +807,31 @@ export default class Lint extends Command {
         generate = fn;
       } catch (error: any) {
         const msg = `Failed to load generator "${flags.generator}": ${error?.message || error}`;
-        if (flags.json) await emitJson({ error: msg }, 0, { compact: true });
+        // [#15549] The ADR-0112 carriers, spread from the SAME helper the
+        // project-lint catch-all in `run()` uses — not a second shape invented
+        // here. Before this, the `catch` built `msg` and DISCARDED `error`, so
+        // a machine consumer that reads `code` to branch got a real code from
+        // project-lint mode and `undefined` from eval mode, on one command.
+        //
+        // ⛔ Nothing is MINTED. `errorCodeFields` passes a producer's code
+        // through and returns `{}` otherwise — ADR-0112's ledger is the
+        // authority on who may mint one — so this exit stays polymorphic in
+        // exactly the way its sibling is: the hand-thrown "must default-export
+        // a function" above carries neither key and still gets neither.
+        //
+        // The keys are REACHABLE here, which is what makes this a repair and
+        // not a formality. Measured against `bundleRequire` on this entry: a
+        // generator whose TOP-LEVEL EVALUATION throws propagates that error
+        // intact, so `code: "ENOENT"` (a file the module read at import) and a
+        // full `code` + `httpStatus` pair (an SDK refusal at import) both
+        // arrive here — and both were being dropped. esbuild's own
+        // `BuildFailure` — the unresolvable-path and syntax-error cases —
+        // carries neither key, and still correctly emits a bare `{error}`.
+        //
+        // ⛔ `conversions` is NOT added alongside them: that key on the
+        // `--eval` exits is a different card, fenced by #14015 with its own
+        // review gate. This changes the carriers only.
+        if (flags.json) await emitJson({ error: msg, ...errorCodeFields(error) }, 0, { compact: true });
         else printError(msg);
         process.exit(1);
       }
