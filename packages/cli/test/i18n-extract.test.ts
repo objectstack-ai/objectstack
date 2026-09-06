@@ -408,20 +408,24 @@ describe('renderTranslationModule', () => {
 });
 
 /**
- * The three module kinds PARTITION one locale's generated leaves (#14894).
+ * The module a run WRITES and the baseline companion beside it are disjoint,
+ * and under `kind: 'stack'` the two together are everything the extractor built
+ * (#14894).
  *
- * Every leaf has exactly one module it can land in, and the pins below are
- * written as a census — which groups are present, and how many leaves — rather
- * than as a substring search, because the defect this closes was a whole group
- * being present in TWO modules at once and a substring pin cannot see a
- * duplicate.
+ * ⚠️ Not "the three kinds partition the leaves", which is how this block was
+ * first written and is wrong: `'objects'` is a SUB-SELECTION of `'stack'`, not
+ * a sibling cell. The invariant is about the PAIR a run emits.
+ *
+ * The pins are a census — which groups, how many leaves — rather than a
+ * substring search, because the defect this closes was one group present in TWO
+ * modules at once, and a substring pin cannot see a duplicate.
  *
  * Driven before the fix, `kind: 'stack'` (then `'full'`) rendered `data`
  * itself: the stack module carried the `metadataForms` baseline as well, so
  * `--no-metadata-forms` suppressed one copy while the other was written next to
  * it, and with the flag on the baseline was emitted twice.
  */
-describe('renderTranslationModule sub-tree partition (#14894)', () => {
+describe('renderTranslationModule sub-tree selection (#14894)', () => {
   /** A locale's data with all three groups populated, none of them empty. */
   const data = {
     objects: { crm_account: { label: 'Account' } },
@@ -463,7 +467,7 @@ describe('renderTranslationModule sub-tree partition (#14894)', () => {
     );
   });
 
-  it('leaves no leaf without a home and gives no leaf two', () => {
+  it('emits every leaf exactly once across the pair a stack run writes', () => {
     const leaves = (ts: string) => (ts.match(/: "/g) ?? []).length;
     const stack = renderTranslationModule(data, { locale: 'zh-CN', kind: 'stack' });
     const forms = renderTranslationModule(data, { locale: 'zh-CN', kind: 'metadataForms' });

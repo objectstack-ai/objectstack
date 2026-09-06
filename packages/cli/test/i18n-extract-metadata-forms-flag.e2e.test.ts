@@ -113,6 +113,17 @@ function leaves(dir: string, file: string): number {
   return (readFileSync(join(dir, file), 'utf8').match(/: "/g) ?? []).length;
 }
 
+/** Leaf strings in a JSON payload sub-tree — the `--json` counterpart of {@link leaves}. */
+function countLeaves(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0;
+  let n = 0;
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (typeof v === 'string') n += 1;
+    else if (v && typeof v === 'object') n += countLeaves(v);
+  }
+  return n;
+}
+
 describe('os i18n extract — the metadata-form baseline has exactly one home (#14894)', () => {
   it('honours --no-metadata-forms under --no-objects-only (the reported defect)', () => {
     const run = extract('no-mf-no-oo', ['--no-metadata-forms', '--no-objects-only']);
@@ -145,23 +156,68 @@ describe('os i18n extract — the metadata-form baseline has exactly one home (#
     expect(groups(on.dir, 'zh-CN.objects.generated.ts')).toEqual(['kpi_metric']);
   });
 
-  it('--json carries the same payload the files would have carried', () => {
-    // `--json` is documented as "output JSON instead of writing files", so the
-    // sub-tree the emitter refuses to write must not arrive here either.
-    const stdout = execFileSync(
-      TSX,
-      [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', '--json', '--no-objects-only', '--no-metadata-forms'],
-      { encoding: 'utf8', env: childEnv(), timeout: 180_000 },
-    );
-    const payload = JSON.parse(stdout) as {
-      bundles: Record<string, Record<string, unknown>>;
-      metadataFormsCounts: Record<string, number>;
+  /**
+   * ⚠️ Driven in BOTH flag states, and that is the whole point of this case.
+   *
+   * The first version of this pin exercised `--no-metadata-forms` only. A pin
+   * that drives one state of a flag cannot detect that the flag does NOTHING,
+   * and this file's own subject is a flag that did nothing — so the pin had, on
+   * the `--json` face, exactly the blind spot the fix was about. It was not
+   * hypothetical: review measured `--json --no-objects-only` with the flag ON
+   * and with `--no-metadata-forms` returning payloads equal in every field but
+   * `duration`, and this case as first written was green for both.
+   *
+   * So the assertion is on the AXIS: the two states must differ, and each must
+   * be what the file face would have written for the same flags.
+   */
+  it('--json mirrors the file set in BOTH flag states', () => {
+    const runJson = (flags: string[]) => {
+      const stdout = execFileSync(
+        TSX,
+        [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', '--json', '--no-objects-only', ...flags],
+        { encoding: 'utf8', env: childEnv(), timeout: 180_000 },
+      );
+      return JSON.parse(stdout) as {
+        bundles: Record<string, Record<string, unknown>>;
+        metadataForms: Record<string, Record<string, unknown>>;
+        metadataFormsCounts: Record<string, number>;
+        duration: number;
+      };
     };
 
-    expect(Object.keys(payload.bundles['zh-CN']).sort()).toEqual(['apps', 'objects']);
-    // Suppressed from the payload, still reported as a count — the operator can
-    // still see how big the baseline they opted out of is.
-    expect(payload.metadataFormsCounts['zh-CN']).toBeGreaterThan(100);
+    const on = runJson([]);
+    const off = runJson(['--no-metadata-forms']);
+
+    // The stack module's payload is the same either way — this flag does not
+    // touch it. Both carry the app key, which is why `--no-objects-only` exists.
+    for (const payload of [on, off]) {
+      expect(Object.keys(payload.bundles['zh-CN']).sort()).toEqual(['apps', 'objects']);
+      // Suppressed or not, the operator can still see how big the baseline is.
+      expect(payload.metadataFormsCounts['zh-CN']).toBeGreaterThan(100);
+    }
+
+    // Flag ON: the baseline is HERE, under its own key — the JSON counterpart
+    // of the companion file, keyed by the same locales.
+    expect(Object.keys(on.metadataForms)).toEqual(['zh-CN']);
+    expect(countLeaves(on.metadataForms['zh-CN'])).toBeGreaterThan(100);
+    expect(countLeaves(on.metadataForms['zh-CN'])).toBe(on.metadataFormsCounts['zh-CN']);
+
+    // Flag OFF: no baseline anywhere in the payload, which is what the operator
+    // asked for — and the file run for the same flags writes no companion.
+    expect(on.metadataForms['zh-CN']).toBeDefined();
+    expect(off.metadataForms['zh-CN']).toBeUndefined();
+    expect(Object.keys(off.metadataForms)).toEqual([]);
+
+    // The axis itself: the flag must MOVE the payload. `duration` is wall clock
+    // and is dropped, so it cannot manufacture a difference that is not there —
+    // it was the only field separating these two before the fix.
+    const withoutDuration = (p: Record<string, unknown>) => {
+      const { duration: _elapsed, ...rest } = p;
+      return rest;
+    };
+    expect(withoutDuration(on as unknown as Record<string, unknown>)).not.toEqual(
+      withoutDuration(off as unknown as Record<string, unknown>),
+    );
   });
   // Each case spawns the CLI through `tsx`; measured at ~6 s per run on a
   // shared box, well over vitest's 5 s default. Same instrument and same

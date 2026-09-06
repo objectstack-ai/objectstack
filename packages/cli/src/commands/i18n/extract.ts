@@ -263,18 +263,41 @@ export default class I18nExtract extends Command {
           totalExpected: result.totalExpected,
           counts: result.counts,
           metadataFormsCounts,
-          // The same payload the files carry, for the same reason (#14894):
           // `--json` is documented as "output JSON instead of writing files",
-          // so a sub-tree that cannot reach a bundle file must not reach this
-          // either. `metadataForms` never could under `--objects-only`, and
-          // reached this payload under `--no-objects-only` only through the
-          // same `kind: 'full'` fold the emitter has stopped doing — its size
-          // is still reported, in `metadataFormsCounts`.
+          // so this payload mirrors the FILE SET: `bundles` is the stack
+          // module, `metadataForms` below is the companion (#14894).
           bundles: Object.fromEntries(
             localesEmitted.map((l) => [
               l,
               objectsOnly ? (result.bundles[l].objects ?? {}) : stackAuthoredSubtree(result.bundles[l]),
             ]),
+          ),
+          // The baseline's JSON home, gated by {@link emitsMetadataForms} —
+          // the SAME predicate that decides the companion file, deliberately
+          // not a second one.
+          //
+          // ⚠️ Two predicates is what the review of this card's first commit
+          // caught, and the reading is worth keeping: that commit stopped the
+          // `kind: 'full'` fold on this face too, and left the baseline with no
+          // JSON home at all. Driven on a one-object, one-app stack with
+          // `defaultLocale: 'zh-CN'`, `--json --no-objects-only` with the flag
+          // ON and with `--no-metadata-forms` produced payloads that were equal
+          // in every field but `duration` — 3 leaves in `bundles`, no baseline
+          // in either, and `metadataFormsCounts` reporting 773 in both. So on
+          // this face the flag decided NOTHING, in the opposite direction from
+          // the defect the card reported (where it was the fold that ignored
+          // it). A flag that is ignored is a flag that is ignored, whichever
+          // way the output falls.
+          //
+          // Keyed by locale and PRESENT ONLY for the locales whose companion is
+          // written, so the key set here and the `*.metadata-forms.generated.ts`
+          // set are the same set by construction. The map itself is always
+          // emitted — an empty map says "no baseline in this run", which is a
+          // reading; a missing key would be indistinguishable from an older CLI.
+          metadataForms: Object.fromEntries(
+            localesEmitted
+              .filter((l) => emitsMetadataForms(l))
+              .map((l) => [l, result.bundles[l].metadataForms ?? {}]),
           ),
           duration: timer.elapsed(),
         });

@@ -1864,10 +1864,19 @@ export function stackAuthoredSubtree(data: TranslationData): Omit<TranslationDat
  *   kind: 'metadataForms'  → `NonNullable<TranslationData['metadataForms']>`
  *   kind: 'stack'          → `Omit<TranslationData, 'metadataForms'>`
  *
- * The three are a PARTITION of one locale's generated leaves: every leaf has
- * exactly one module it can land in. `'stack'` was called `'full'` and rendered
- * the whole `TranslationData`, which broke the partition — `metadataForms`
- * landed in the stack module AND in its own companion.
+ * ⚠️ The three are NOT three disjoint cells, and calling them a partition was
+ * imprecise enough to correct: `'objects'` is a SUB-SELECTION of `'stack'`, not
+ * a sibling of it. The invariant that actually holds — and the one this
+ * function exists to keep — is about a PAIR: whichever of `'objects'` /
+ * `'stack'` a run picks for the module it writes, that module and the
+ * `'metadataForms'` companion beside it are disjoint, and under `'stack'` the
+ * two together are the whole of what the extractor built. Measured on the
+ * fixture below: 3 + 773 = 776, which is the extractor's own count for that
+ * run — none dropped, none duplicated.
+ *
+ * `'stack'` was called `'full'` and rendered the whole `TranslationData`, which
+ * broke exactly that pairing — `metadataForms` landed in the stack module AND
+ * in its own companion.
  *
  * That is the #14894 defect, and it had two user-visible halves. Both were
  * driven on a `defaultLocale: 'zh-CN'` stack (one object, one app) before this
