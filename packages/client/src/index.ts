@@ -3224,29 +3224,60 @@ export class ObjectStackClient {
        * Tokens and consents referencing the client cascade-delete via the
        * better-auth schema's `onDelete: cascade` foreign keys.
        *
-       * ⚠️ NOT YET BOUND, and deliberately so — this is the one method of the
-       * `oauth.*` family that #14312 left at `Promise<any>`, with its
-       * `exported-any-returns.json` entry still open.
+       * ## Why this method does not call `res.json()` (#15451)
        *
-       * Measured against a real server: the route answers **HTTP 200 with a
-       * ZERO-BYTE body** (its handler returns nothing; the provider declares
-       * it `void`) under a `content-type: application/json` header. So the
-       * `res.json()` below rejects with `SyntaxError: Unexpected end of JSON
-       * input` on every successful delete — the delete itself has already
-       * committed server-side by then.
+       * Measured against a real server — real `betterAuth` + real
+       * `oauthProvider` over the real ObjectQL adapter, driven through this
+       * very client with only the socket stood in for:
        *
-       * No declared return type can be honest while that call stands: any
-       * annotation here would promise a value this method never resolves.
-       * Binding it therefore needs a behaviour change, which is a decision
-       * beyond the type-narrowing this family was scoped to — see #14312.
+       *     POST /oauth2/delete-client -> 200 · 0 bytes
+       *                                   content-type: application/json
+       *                                   content-length: (absent)
+       *
+       * The handler returns nothing and the vendor declares the endpoint
+       * `void` (`StrictEndpoint<'/oauth2/delete-client', …, void>`). A
+       * `res.json()` on that body therefore rejected with `SyntaxError:
+       * Unexpected end of JSON input` on EVERY successful delete, while the
+       * row was already gone server-side — so the method had no success path
+       * a caller could observe, and the obvious recovery (retry) failed
+       * DIFFERENTLY, with the route's 404 `not_found`.
+       *
+       * ⛔ Emptiness is detected by READING the body, not from the status and
+       * not from `content-length`. Both were measured and both are unusable
+       * here: the status is `200`, not the `204` the `{ deleted: true }`
+       * shortcut elsewhere in this file keys off, and the response carries NO
+       * `content-length` header at all. Only the body itself answers.
+       *
+       * ⛔ The parse below is NOT decoration and must not be deleted as dead
+       * code on the grounds that nothing reads its value. It is what keeps
+       * this method LOUD on a malformed non-empty body: a body that is
+       * present but unparseable still rejects exactly as it did before, so
+       * the ONLY behaviour this method changed is the zero-byte case — the
+       * defect itself. Pinned by `oauth-applications-delete.test.ts`.
+       *
+       * ## Why `void`, and not `{ deleted: boolean }`
+       *
+       * "Deleted" and "was already gone" are distinguished by the route, but
+       * on the ERROR channel, not in the success value: a client that is not
+       * there answers 404 `{ error: 'not_found' }`, which `this.fetch` has
+       * already turned into a throw before this line runs. The 200 answer
+       * carries zero bytes and therefore zero information, so a synthesised
+       * `{ deleted: true }` would be a value the wire cannot support and
+       * strictly less informative than the 404 the caller already gets.
        */
-      delete: async (clientId: string) => {
+      delete: async (clientId: string): Promise<void> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/oauth2/delete-client`, {
           method: 'POST',
           body: JSON.stringify({ client_id: clientId }),
         });
-        return res.json();
+        const body = await res.text();
+        if (body === '') return;
+        // Present but unread: validated so a malformed body still speaks, and
+        // discarded because the declared contract is `void`. The day this
+        // route starts answering a payload, widening the return type is a
+        // deliberate, reviewable edit here — never a silent change of shape.
+        JSON.parse(body);
       },
     },
 

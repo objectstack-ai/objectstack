@@ -477,7 +477,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (42)...
+  → Running author-time rules (43)...
   → Checking capability providers (#3366)...
   → Collecting package docs (ADR-0046)...
   → Writing artifact...
@@ -1299,7 +1299,7 @@ third-party extension primitive, authored as `src/skills/<name>.skill.ts` with
 - `--dry-run` — Preview without writing files
 
 **What it does:**
-1. Creates a typed TypeScript file using `Data.Object`, `UI.View`, `Automation.Flow`, etc.
+1. Creates a typed TypeScript file using `Data.ServiceObject`, `UI.View`, `Automation.Flow`, etc.
 2. Creates or updates the barrel `index.ts` in the target directory
 3. Shows a hint to run `objectstack validate`
 
@@ -1351,6 +1351,7 @@ data-model conventions, translation coverage, with a 0-100 quality score.
 os lint                # Author-time rules + style / convention checks
 os lint --score        # Append a 0-100 metadata quality score (letter-graded)
 os lint --fix          # Show what would be fixed (dry-run)
+os lint --strict       # Warnings fail the run too (exit 1); suggestions stay advisory
 os lint --json         # JSON output for CI
 ```
 
@@ -1361,6 +1362,18 @@ artifact. What it does guarantee is the direction that matters for a pre-flight
 before #4409: `os lint` ran one gating rule neither other command ran and missed
 six that both of them ran, so it disagreed with the build in **both**
 directions.
+
+**What fails the run.** By default only an `error`-severity finding fails
+`os lint` (exit 1); warnings and suggestions are printed and the exit code stays
+0. `--strict` makes a run with one or more `warning`-severity findings exit 1
+exactly as an error does, and says why — `N warning(s) fail this run under
+--strict` — so an app can rely on the platform's warning-level rules as its gate
+instead of re-implementing them locally; `suggestion`s stay advisory either way,
+and the default is unchanged by the flag's existence. On the `--json` face the
+verdict is readable without re-deriving it from the counts: `strict` (whether
+the flag was in effect), `failing` (the count the exit code was read from —
+`errors`, or `errors + warnings` under `--strict`) and `passed` (`failing` is
+`0` — the same statement the exit code makes).
 
 #### `os test`
 

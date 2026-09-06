@@ -555,8 +555,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "エラー時"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -940,9 +940,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       gap: {
         label: "間隔",
-        helpText: "グリッド間隔（Tailwind 単位）"
+        helpText: "ウィジェット間の間隔、0.25rem 刻み（4 = 1rem）"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "更新間隔",
         helpText: "自動更新（秒）"
       },

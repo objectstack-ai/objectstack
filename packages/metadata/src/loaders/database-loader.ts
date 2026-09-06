@@ -132,8 +132,14 @@ export interface DatabaseLoaderCacheOptions {
   enabled?: boolean;
   /** Max number of cached `(type, name)` entries. Default: `500`. */
   maxSize?: number;
-  /** TTL in milliseconds. Set to `0` to disable expiry. Default: `60_000`. */
-  ttl?: number;
+  /**
+   * TTL in milliseconds. Set to `0` to disable expiry. Default: `60_000`.
+   *
+   * Renamed from `ttl` (#14478) in lockstep with the spec key it mirrors,
+   * `MetadataManagerConfig.cache.databaseLoader.ttlMs`: the unit now lives in
+   * the name, not only in this comment.
+   */
+  ttlMs?: number;
 }
 
 /**
@@ -249,7 +255,7 @@ export class DatabaseLoader implements MetadataLoader {
     if (cacheEnabled) {
       const lruOpts = {
         maxSize: cacheOpts?.maxSize ?? 500,
-        ttl: cacheOpts?.ttl ?? 60_000,
+        ttl: cacheOpts?.ttlMs ?? 60_000,
       };
       this.loadCache = new LRUCache(lruOpts);
       this.loadManyCache = new LRUCache(lruOpts);

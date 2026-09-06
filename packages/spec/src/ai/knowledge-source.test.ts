@@ -10,10 +10,13 @@
 // schema ENFORCES was measured before these pins were written, and the pins
 // state exactly that — no more:
 //
-// - a bare non-empty string normalizes to `{ dialect: 'cron', source }`;
-// - an expression envelope passes through;
-// - an empty string, a non-string, or an envelope naming an unknown dialect
-//   is refused with `invalid_union` at the slot's own path;
+// - a bare non-blank string normalizes to `{ dialect: 'cron', source }`;
+// - a `{ dialect: 'cron' }` envelope passes through;
+// - a blank string (empty or whitespace-only), a non-string, or an envelope
+//   naming any dialect but `cron` is refused with ONE `invalid_union` at the
+//   slot's own path whose message names the fix — the shared dialect fixed its
+//   envelope arm and learned to trim at #15028 / #15035; the sentences are
+//   `TYPED_EXPRESSION_SOURCE_REQUIRED.cron` / `TYPED_EXPRESSION_DIALECT_ONLY.cron`;
 // - cron SYNTAX is not judged at parse time. `'not a cron'` normalizes like
 //   any other string: the syntax verdict belongs to the `cron` dialect engine
 //   (`@objectstack/formula` cron-engine — 5- or 6-field, or an `@` alias) when
@@ -23,6 +26,7 @@
 //   rewritten in the same commit.
 
 import { describe, expect, it } from 'vitest';
+import { TYPED_EXPRESSION_DIALECT_ONLY, TYPED_EXPRESSION_SOURCE_REQUIRED } from '../shared/expression.zod';
 import {
   KnowledgeRefreshPolicySchema,
   KnowledgeSourceSchema,
@@ -67,15 +71,17 @@ describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot (#14825)', (
     if (withoutRefresh.success) expect(withoutRefresh.data.refresh?.cron).toBeUndefined();
   });
 
-  it('refuses an empty string with `invalid_union` at `refresh.cron`', () => {
-    const r = KnowledgeSourceSchema.safeParse({ ...SOURCE, refresh: { cron: '' } });
-    expect(r.success).toBe(false);
-    if (r.success) return;
-    const issue = r.error.issues.find((i) => i.path.join('.') === 'refresh.cron');
-    expect(issue, JSON.stringify(r.error.issues)).toBeDefined();
-    expect(issue?.code).toBe('invalid_union');
-    expect(issue?.message.split('.')[0]).toBe('Invalid input');
-  });
+  it.each([['the empty string', ''], ['whitespace only', '  \t']])(
+    'refuses a blank string (%s) with ONE `invalid_union` at `refresh.cron` whose message is the cron source-required sentence',
+    (_label, blank) => {
+      const r = KnowledgeSourceSchema.safeParse({ ...SOURCE, refresh: { cron: blank } });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues.map((i) => [i.code, i.path.join('.'), i.message])).toEqual([
+        ['invalid_union', 'refresh.cron', TYPED_EXPRESSION_SOURCE_REQUIRED.cron],
+      ]);
+    },
+  );
 
   it('refuses a non-string value with `invalid_union` at `cron`', () => {
     const r = KnowledgeRefreshPolicySchema.safeParse({ cron: 42 });
@@ -84,12 +90,16 @@ describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot (#14825)', (
     expect(r.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_union', 'cron']]);
   });
 
-  it('refuses an envelope naming a dialect the protocol does not declare', () => {
-    // `js` was retired from `ExpressionDialect` (#3278, ADR-0058 addendum).
-    const r = KnowledgeRefreshPolicySchema.safeParse({ cron: { dialect: 'js', source: 'x' } });
+  it.each([
+    ['a dialect the protocol does not declare (`js`, retired at #3278, ADR-0058 addendum)', 'js'],
+    ['a declared dialect that is not this slot\'s (`cel`, #15028)', 'cel'],
+  ])('refuses an envelope naming %s with ONE `invalid_union` at `cron` whose message is the cron dialect-only sentence', (_label, dialect) => {
+    const r = KnowledgeRefreshPolicySchema.safeParse({ cron: { dialect, source: 'x' } });
     expect(r.success).toBe(false);
     if (r.success) return;
-    expect(r.error.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_union', 'cron']]);
+    expect(r.error.issues.map((i) => [i.code, i.path.join('.'), i.message])).toEqual([
+      ['invalid_union', 'cron', TYPED_EXPRESSION_DIALECT_ONLY.cron],
+    ]);
   });
 
   it('does NOT judge cron syntax at parse time — measured, and the describe promises no more (declared = enforced)', () => {

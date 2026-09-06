@@ -87,9 +87,9 @@
  *
  *   H1  `pm:dispatched` with no assignee — the state model DEFINES the label
  *       rather than describing a habit: 「`pm:dispatched` … 恒带 assignee」
- *       (SKILL.md line 109), and the one lawful way for that field to empty is
+ *       (SKILL.md), and the one lawful way for that field to empty is
  *       the release act, which clears it and posts a `Release:` line in the
- *       SAME write (line 465). So an empty field under this label is the label
+ *       SAME write. So an empty field under this label is the label
  *       contradicting its own definition, not a step somebody forgot — and the
  *       release half of the same rule is H47's row.
  *   H2  assignee set on a pm-tracked card, but no claim comment on the thread
@@ -488,10 +488,17 @@
  *       second half of the contradiction is a FIELD — which is how 17 cards
  *       across three repos (2026-08-23 census: 6 objectstack, 10 objectui, 1
  *       cloud) sat in it with nothing reporting them. The measured origin is a
- *       state ROLLBACK that swaps the label and leaves the field: of the three
- *       rollback paths, only dead-claim reclamation ever named the assignee
- *       drop, so H8's and H19's remedy sentences now name it too (「同笔摘
- *       assignee」). ⚠️ The field carries two meanings — dead agent claims and
+ *       state ROLLBACK that swaps the label and leaves the field. What every
+ *       rollback path owes instead is the release ACT — ONE act with TWO
+ *       halves:
+ *       「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
+ *       — clear the assignee AND post the `Release:` line, in one write. H8's
+ *       full-delivery remedy, H19's release text and H37's dispatched-residue
+ *       remedy all say exactly that, from one constant (`RELEASE_ACT_RULE`),
+ *       because a remedy naming only the FIELD half prescribes the other
+ *       half-state — the field cleared with no record of who let the card go —
+ *       which is the shape H47 reports.
+ *       ⚠️ The field carries two meanings — dead agent claims and
  *       genuine human ownership — and the row deliberately does NOT try to tell
  *       them apart: the ruling of 2026-08-23 puts the rule FIRST and any
  *       true-ownership exemption in an explicit marker LATER, never the other
@@ -1069,8 +1076,8 @@ export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
  *
  *   「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
  *
- * (`.claude/skills/pm-dispatch/SKILL.md` line 465), and the dead-claim route
- * returns a card the same way — 「释放回队(`Release:` 行载因)」 (line 493). So
+ * (`.claude/skills/pm-dispatch/SKILL.md`), and the dead-claim route
+ * returns a card the same way — 「释放回队(`Release:` 行载因)」. So
  * the record lives as a LINE in a comment, exactly as a claim does, and H47 is
  * the row that reads it.
  *
@@ -1090,6 +1097,35 @@ export const CLAIM_COMMENT_MARKER = /^\s*>?\s*Claim(?:ed)?\s*:/mi;
  * `CLAIM_COMMENT_MARKER`, applied to the newer half of the same protocol).
  */
 export const RELEASE_COMMENT_MARKER = /^\s*>?\s*Release\s*:/mi;
+
+/**
+ * The release ACT, quoted from `.claude/skills/pm-dispatch/SKILL.md` VERBATIM
+ * and kept UNBROKEN on one line so it stays greppable against its source:
+ *
+ *   「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
+ *
+ * ONE constant, because every remedy sentence that tells a seat how to let a
+ * card go has to say the SAME thing. Three of them — H8's full-delivery
+ * remedy, H19's release text on both branches, H37's dispatched-residue
+ * remedy — carried a shorthand of this file's own coining instead: a phrase
+ * wearing quotation brackets that appeared in NO SKILL.md, ever (`git log -S`
+ * over that file's whole history came back empty). In this file's register the
+ * brackets promise that these are the protocol's OWN words, so the shorthand
+ * was not a spelling nit — it made a promise the source could not answer.
+ *
+ * ⚠️ It is ONE act with TWO halves — clear the assignee AND post the
+ * `Release:` line (session, cause, destination) — and a remedy naming only the
+ * field half PRESCRIBES a half-state: the field cleared, no record of who let
+ * the card go or why, which is the exact shape H47 exists to report. ⛔ So do
+ * not paraphrase this line, and do not coin a shorthand for it again.
+ *
+ * `selfTest` keeps its OWN transcription of the same line (`RELEASE_RULE_LINE`)
+ * rather than reading this constant: two independent copies compared against
+ * each other is a real check, while a pin that reads the value it pins asserts
+ * nothing at all.
+ */
+const RELEASE_ACT_RULE =
+  '释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。';
 
 export function h2AssigneeNoClaimComment(issue, commentBodies) {
   const labels = labelNames(issue);
@@ -1584,6 +1620,41 @@ export function partOfTargets(body, { markdown = true } = {}) {
   return new Set([...text.matchAll(partOfRe())].map((m) => m[1]));
 }
 
+/**
+ * The third relation a PR body can declare to a card, after `Part of #N` and
+ * a closing keyword: `Refs #N` — the spelling the partial-dispatch rule makes a
+ * PR carry when it lands ONE item of a card (「部分落地(PR 带 `Refs #N (item k)`,⛔
+ * 不 `Fixes`)即释放」). Neither GitHub nor `prDeliversCard` reads it as a
+ * delivery, which is exactly why a merged `Refs` PR can leave its card TAKEN
+ * with nothing on the board contradicting anything — H49's row.
+ *
+ * Same strictness as `partOfRe`, on purpose: the word is bound (`\\b`), the
+ * `#` follows on whitespace with no colon, the read is code-stripped for the
+ * BODY surface (a body QUOTING `Refs #N` in backticks declares nothing), and a
+ * fresh regex per call (the `lastIndex` note at `closingKeywordRe`). `Ref`,
+ * `References` and `See #N` are deliberately NOT this relation: the protocol
+ * has one spelling, and widening the reader is how a dialect gets a home.
+ *
+ * The `(item k)` annotation is captured only when the parenthetical follows the
+ * number DIRECTLY (horizontal whitespace at most), so a sentence that happens
+ * to open a bracket later in the line does not become an item name. The value
+ * is `null` for a bare `Refs #N`, which the row reports as such rather than
+ * inventing an item.
+ */
+function refsRe() {
+  return /\bRefs\s+#(\d+)\b(?:[ \t]*\(([^()\n]{1,40})\))?/gi;
+}
+
+/** `#N` -> the `(item k)` annotation beside it, or `null` when bare (first occurrence wins). */
+export function refsTargets(body, { markdown = true } = {}) {
+  const found = new Map();
+  const text = markdown ? stripMarkdownCode(body) : String(body ?? '');
+  for (const m of text.matchAll(refsRe())) {
+    if (!found.has(m[1])) found.set(m[1], m[2] ?? null);
+  }
+  return found;
+}
+
 /** `#N` -> the closing keyword bound to it (first occurrence wins, for the message). */
 export function closingKeywordTargets(body, { markdown = true } = {}) {
   const found = new Map();
@@ -1673,6 +1744,14 @@ export function branchNameTarget(ref) {
  * exists. So a body that declares ANY delivery is authoritative, and the branch
  * name is consulted only for the bodies that declare none — which is exactly
  * the population the specimen came from, and no other.
+ *
+ * ⚠️ This relation answers "is there a PR on this card", NOT "is the card
+ * finished". H8's MERGED side needs the second question and asks it of
+ * `prFullyDeliversCard` below; every other reader here — H8's open side, H31's
+ * carrier comparison, `claimDelivery`, and the pairing `check-clause2-carriers`
+ * derives — wants this wide one, because a half in flight is live work. ⛔ Do
+ * not narrow it here to serve H8: that would make the live half invisible to
+ * the rows that exist to see it.
  */
 export function prDeliversCard(pr, n) {
   const target = String(n);
@@ -1687,11 +1766,50 @@ export function prDeliversCard(pr, n) {
 }
 
 /**
+ * Does this PR deliver card `n` IN FULL — the narrower reading H8's merged side
+ * takes, and the only reader that takes it.
+ *
+ * ## Why a second reader, and not a narrower first one (#16036)
+ *
+ * The partial-dispatch rule gave `Refs #N (item k)` a meaning: a PR that lands
+ * ONE item of a card, releases the card back to `pm:queue` in the same stroke,
+ * and leaves the remaining items to be re-dispatched from the queue as a FRESH
+ * claim. That body declares no delivery, so `prDeliversCard` falls through to
+ * the branch name — and the branch is named for the card, because that is the
+ * branch the dev cut. H8 therefore read a PARTIAL landing as a full delivery and
+ * prescribed its destructive remedy ("drop `pm:dispatched` and re-grade the
+ * remainder") against a card a second dev is lawfully working. H8 reads no
+ * thread, so the fresh `Claim:` newer than the merge — the record that stands
+ * H49 down — is invisible to it, and the row kept firing from the re-claim until
+ * the remainder's own PR opened and the open side downgraded it.
+ *
+ * So the fallback keeps the recovery it was built for — a body that declares
+ * NOTHING, the #10757 specimen's own population — and declines for a body that
+ * SPOKE about this card in the one spelling the protocol reserves for a
+ * non-delivery. `Fixes`/`Part of` are untouched: those are deliveries whatever
+ * the branch is called, and a `Refs` beside either does not make them partial.
+ *
+ * The `Refs`-only test is `refsOnlyLinksFor` — H49's own predicate, CALLED
+ * rather than restated, so what H49 owns is exactly what H8 excludes and the two
+ * cannot drift into a gap or an overlap. Bound per card number, as H7 binds: a
+ * `Refs #A` on a PR whose branch is named for B narrows nothing about B.
+ */
+export function prFullyDeliversCard(pr, n) {
+  if (!prDeliversCard(pr, n)) return false;
+  return refsOnlyLinksFor([pr], n).length === 0;
+}
+
+/**
  * H8 — null when clean, else the finding sentence.
  *
- * Delivery is `prDeliversCard` (body first, branch name as the fallback its
- * docblock justifies). Only `merged_at`-set PRs count on the merged side —
- * closed-unmerged is an abandoned attempt, not a delivery.
+ * The two sides read delivery through DIFFERENT questions, deliberately since
+ * #16036. The merged side asks whether the card is FINISHED and so reads
+ * `prFullyDeliversCard` — body first, branch name as the fallback its docblock
+ * justifies, minus the `Refs`-only landing H49 owns. The open side asks whether
+ * anything is still in flight and reads `prDeliversCard` unchanged: a `Refs`
+ * half still open is live work this row must not step on, whatever it will later
+ * mean for the card's completeness. Only `merged_at`-set PRs count on the merged
+ * side — closed-unmerged is an abandoned attempt, not a delivery.
  *
  * ## The open side, and why this row DOWNGRADES rather than falls silent
  *
@@ -1724,7 +1842,7 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
   const delivering = [];
   for (const pr of mergedPrs ?? []) {
     if (!pr?.merged_at) continue;
-    if (prDeliversCard(pr, n)) delivering.push(pr);
+    if (prFullyDeliversCard(pr, n)) delivering.push(pr);
   }
   if (delivering.length === 0) return null;
   const list = delivering
@@ -1757,7 +1875,10 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
     `delivering PR ${list} is MERGED but the card still carries \`pm:dispatched\` — ` +
     `the merge's paired write never landed. Drop \`pm:dispatched\` and re-grade the ` +
     `remainder (re-queue, close, or block the un-delivered half) in the same stroke, ` +
-    `and 「同笔摘 assignee」 — the landing re-label owes the ASSIGNEE DROP too. A ` +
+    `and let the card GO in the landed shape — 「${RELEASE_ACT_RULE}」 — ONE act with TWO ` +
+    `halves: clear the assignee AND post the \`Release:\` line (session, cause, destination). ` +
+    `Dropping the field alone leaves no record of who let the card go, which is the half-state ` +
+    `H47 reports. A ` +
     `re-graded card that keeps the finished dev's assignee lands straight in H24's ` +
     `two-views contradiction (\`pm:queue\` + assigned = dispatchable to the queue view, ` +
     `taken to the claim rule), which is how 17 cards across three repos got stuck where ` +
@@ -3468,7 +3589,10 @@ export function h19BlockOutlivedBlocker(issue, resolutions) {
     'to release when the card carries a MERGED PR newer than that conversion comment (the card moved on ' +
     'after the condition was written, so the cited fact can be true and no longer current). This row ' +
     'surfaces the candidate; the unlock sweep releases it — ⛔ never a label written from this script. ' +
-    'When that release does happen, its paired write includes 「同笔摘 assignee」: a card returned to ' +
+    `When that release does happen it is the landed ACT — 「${RELEASE_ACT_RULE}」 — ONE write with ` +
+    'TWO halves: it clears the assignee AND carries the `Release:` line (session, cause, destination). ' +
+    'Dropping the field alone leaves no record of who let the card go, the half-state H47 reports. ' +
+    'A card returned to ' +
     '`pm:queue` still carrying the assignee of the seat that parked it is dispatchable to the queue ' +
     'view and taken to the claim rule at the same time (H24), which is the state the unlock scan was ' +
     'measured leaving behind — ⚠️ agent identity only, a HUMAN assignment is ⛔ never cleared by an agent.';
@@ -3652,11 +3776,37 @@ export const H20_BRANCH_LIST_CAP = 5;
  * fewer place where the code reads as if it honoured a spelling it does not.
  * See `CLAIM_COMMENT_MARKER`'s note for the codepoint reading and the live
  * probe behind it.
+ *
+ * ## The list marker, and the silence it used to buy (#16170)
+ *
+ * A markdown BULLET before the directive — 「- Branch: `claude/issue-…`」, the
+ * natural way to write a claim whose first line is a heading-style `Claim:` and
+ * whose details hang under it in a list — is admitted, because the measured
+ * failure of refusing it was SILENT in the worst possible way. `CLAIM_COMMENT_MARKER`
+ * has no list marker either, so the two anchors failed at DIFFERENT points on the
+ * same comment: the marker matched the undecorated `Claim:` line (the comment IS
+ * a claim), while this reader returned nothing (the claim GOVERNS nothing). Live
+ * on #15511 the result was a claim complete by every other measure that steered
+ * a seat, and then a whole dispatching round, toward a rule about the `Claim:`
+ * line that was not the blocker at all.
+ *
+ * ⛔ The claim MARKER is deliberately NOT widened with it, and the asymmetry is
+ * the point rather than an oversight: when BOTH lines carry a bullet the marker
+ * misses too, the comment is not a claim to any reader here, and the sibling's
+ * "no comment on the card's thread is a claim comment" is then TRUE. The
+ * malignant shape is only the MIXED one, and admitting the marker here is what
+ * removes it. Widening `Claim:` itself is the 2026-08-11 ruling's territory
+ * (⛔ 不放宽谓词), not this reader's.
+ *
+ * ⚠️ The marker is admitted only BEFORE the optional blockquote (`- > Branch:`),
+ * which is the anchor as ruled; a bulleted line INSIDE a blockquote
+ * (`> - Branch:`) is still out, and the self-test pins that as a measured fact
+ * rather than as a contract anybody chose.
  */
 export function claimedBranches(body) {
   const out = [];
   const text = String(body ?? '');
-  for (const line of text.matchAll(/^\s*>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
+  for (const line of text.matchAll(/^\s*(?:[-*+]\s+)?>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
     for (const hit of String(line[1] ?? '').matchAll(CLAIM_BRANCH_SHAPE)) {
       if (!out.includes(hit[0])) out.push(hit[0]);
     }
@@ -4465,8 +4615,7 @@ export function h24QueuedWithAssignee(issue) {
     'protocol reads a non-empty assignee as TAKEN (⛔ never reassign), and both are right about ' +
     'the field they read — so the card is available to everyone and forbidden to everyone at ' +
     'once, not a race but a card nobody can legally move. Remedy: letting a card go is one act ' +
-    'with two halves — 「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);' +
-    '下一任重新认领。」 — so either FINISH the release (post the `Release:` line and clear the ' +
+    `with two halves — 「${RELEASE_ACT_RULE}」 — so either FINISH the release (post the \`Release:\` line and clear the ` +
     'field in the same write) or RE-CLAIM the card (assignee + `Claim:` comment + ' +
     '`pm:dispatched`) if it is really still in flight. ⚠️ Asymmetric: an agent identity in that ' +
     'field is dead-claim residue and may be cleared on its evidence; a HUMAN assignment may be ' +
@@ -6948,8 +7097,11 @@ export function h37FamilyMemberDrift(folds, openByNumber, closedByNumber) {
             'That is the same non-atomic family write failing in the MIRROR direction, and it reads to ' +
             'every per-card predicate as an ordinary in-flight card. Patrol input, NOT a verdict — this ' +
             'member may still have work of its own outstanding. Remedy: clear the residue in the write ' +
-            'that cleared the head (drop `pm:dispatched` and the assignee together — H24\'s ' +
-            '「同笔摘 assignee」), or re-dispatch it on its own card and its own branch if work remains. ' +
+            'that cleared the head, in the landed shape — letting a card go is ONE act with TWO ' +
+            `halves, 「${RELEASE_ACT_RULE}」 — so drop \`pm:dispatched\`, clear the assignee AND ` +
+            'post the `Release:` line (session, cause, destination) together; a kept assignee lands ' +
+            'in H24, a cleared field with no line in H47. Or re-dispatch it on its own card and its ' +
+            'own branch if work remains. ' +
             `Claimants seen on that branch: ${namedMembers(entry?.claimants ?? [])}.`,
         ]);
       }
@@ -8646,8 +8798,8 @@ export function h46ImplementedWithoutClaim(pr, cards) {
 //
 //   「释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」
 //
-// (SKILL.md line 465; the dead-claim route returns a card the same way, 「释放回
-// 队(`Release:` 行载因)」, line 493.) Two halves written in one stroke means
+// (SKILL.md; the dead-claim route returns a card the same way, 「释放回
+// 队(`Release:` 行载因)」.) Two halves written in one stroke means
 // exactly two ways for the stroke to come apart, and this row is both of them:
 //
 //   (a) the record without the field — a `Release:` line NEWER than the last
@@ -8806,8 +8958,7 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
     return (
       `a \`Release:\` line posted AFTER the last \`Claim:\` while the card is STILL ASSIGNED to ` +
       `${logins.map((l) => `\`${l}\``).join(', ')} — a half-done release: the record was written ` +
-      'and the field was not cleared. The protocol makes the two ONE write — 「释放是显式动作:让卡' +
-      '离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。」 — so the board still ' +
+      `and the field was not cleared. The protocol makes the two ONE write — 「${RELEASE_ACT_RULE}」 — so the board still ` +
       'reads TAKEN (⛔ never reassign) on a card whose own thread says its owner has left, and the ' +
       'next seat has no lawful way to pick it up. Remedy: FINISH the release by clearing the ' +
       'assignee, or, if the card was re-taken after that line, post a fresh `Claim:` so the newest ' +
@@ -8825,14 +8976,407 @@ export function h47ReleaseRecordDesync(issue, commentRows) {
     '「`pm:queue` 卡恒无 assignee,有即半态」 makes the empty field the LAWFUL shape, so the board ' +
     "reads clean while the thread's last word on ownership is still a claim — and no reader can " +
     'tell whether the card was released, re-taken by the same seat, or dropped. The protocol asks ' +
-    'for the record in the same stroke as the field — 「释放是显式动作:让卡离手者同笔清 assignee ' +
-    '+ `Release:` 行(会话/因/去向);下一任重新认领。」 — and the dead-claim route says it again on ' +
+    `for the record in the same stroke as the field — 「${RELEASE_ACT_RULE}」 — and the dead-claim route says it again on ` +
     'the way back to the queue: 「释放回队(`Release:` 行载因)」. Remedy: the session that let the ' +
     'card go posts the missing `Release:` line (会话/因/去向). ⚠️ LOWER BOUND, twice over, and ' +
     'neither half is fixable from here: this row fetches NOTHING, so a card whose thread no other ' +
     'row bought is UNJUDGED rather than clean, and a card that was NEVER claimed is clean and ' +
     'looks identical to an exit nobody wrote down. Silence on this leg is an unread surface, not ' +
     'a quiet board. Report-only patrol INPUT: nothing here is blocked and no label is written.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H48 — a GOVERNED open PR carrying a seat's ACCEPT verdict without the two
+// writes that verdict is defined to arrive with (#15895).
+//
+// ## The rule this row patrols
+//
+// A governed surface is landed by the maintainer, by hand (Prime Directive
+// #14), so the seat's review is not a merge — it is a HANDOFF, and the handoff
+// is one act with two writes: the `needs-user-decision` label puts the PR in
+// the maintainer's inbox, and a `## 维护者速读` comment is what makes reading
+// it a two-minute job rather than a diff review. One act, two writes means
+// exactly the shapes this row reads:
+//
+//   verdict ∧ ¬LABEL   accepted and UNFINDABLE — the inbox filter never lists
+//                      it, so the queue it is waiting in has no row for it.
+//   verdict ∧ ¬BRIEF   findable and UNREAD — the maintainer opens a governed
+//                      diff with no summary of what is being asked.
+//   verdict ∧ neither  both at once; ONE finding, naming both halves.
+//
+// ⛔ NO VERDICT is CLEAN here, and that is the boundary of this card: a
+// governed PR nobody has accepted yet is not the maintainer's, and this row
+// never asks a seat to hurry a verdict. Whether a governed PR carrying the
+// LABEL with no verdict behind it (the 代读 shape, live on two PRs the day this
+// landed) deserves a row is a DIFFERENT question and deliberately not answered
+// here.
+//
+// ## The three readings, each from the PR's own state
+//
+//   VERDICT  an issue-comment on the PR whose line begins `**ACCEPT**`.
+//   LABEL    `needs-user-decision` on the PR's labels — read off the LIST row,
+//            no request.
+//   BRIEF    an issue-comment on the PR whose line begins `## 维护者速读`.
+//
+// ⚠️ The BRIEF is a COMMENT and never the body. A dev's PR body may carry a
+// `## 维护者速读(草稿)` section — that is the DRAFT, written before the review
+// happened, and reading it as the brief would let the half this row exists to
+// find satisfy itself. So this row reads comment threads and nothing else, and
+// the sentence says so where a reader would otherwise assume a bug.
+//
+// ## The fetch class this row BUYS — and why it is genuinely new
+//
+// `commentCache` holds CARD threads only: every listing that feeds it filters
+// `!i.pull_request` (H44's clause says the same in the other direction — 「a
+// verdict posted on a PULL REQUEST is NOT in this corpus」). So there is no PR
+// thread already in hand to reuse, and this row declares its own class exactly
+// as H36 and H43 declare theirs:
+//
+//   GET /repos/{owner}/{repo}/issues/{pr}/comments?per_page=100  (paged)
+//
+// bought ONE thread per GOVERNED OPEN PR — never per open PR. On the board this
+// landed against, 31 open PRs, 30 changed-file pages already in hand, 11
+// governed: eleven thread walks, each a single page. `prCommentCache` is where
+// that read lands so a future PR-comment reader costs nothing on a PR this row
+// already bought.
+//
+// ## Two bounds, both stated rather than hidden
+//
+//   • A PR whose changed-file page went UNREAD is not in this population at all
+//     — the governed slice is H36's pages, so an unread page is an unjudged PR
+//     rather than a non-governed one.
+//   • A thread that reached `H48_COMMENT_PAGE_CEILING` is UNREADABLE, not
+//     short. A partial read can only INVENT a missing brief (the verdict is
+//     early, the brief is past the ceiling), and #4690's rule is that an input
+//     which could not be read must never render as one that was clean — so the
+//     truncated thread declines to judge and the coverage pair carries it.
+// ---------------------------------------------------------------------------
+
+/**
+ * The label half of the verdict's second write.
+ *
+ * ⚠️ On a PULL REQUEST this label means「awaiting the maintainer's review」and
+ * it is NOT one of the six card states — ⛔ never add it to a card-state table
+ * here (H24/H25/H29 own that vocabulary) and ⛔ never read a card's copy of it
+ * through this constant.
+ */
+export const GOVERNED_PR_DECISION_LABEL = 'needs-user-decision';
+
+/** One comment page, and the quota backstop on the walk. */
+export const H48_COMMENTS_PAGE_SIZE = 100;
+export const H48_COMMENT_PAGE_CEILING = 5;
+
+/** Governed globs named inline before the sentence degrades to a count — H43's. */
+export const H48_SURFACE_LIST_CAP = 4;
+
+/**
+ * The seat's ACCEPT verdict, as a line.
+ *
+ * Three of `CLAIM_COMMENT_MARKER`'s four properties are mirrored deliberately:
+ * LINE-ANCHORED with the `m` flag (the verdict is a line in a comment, exactly
+ * as a claim is), an OPTIONAL leading blockquote `>` (a seat quoting its own
+ * verdict writes one), and no `g` flag — a shared regex carrying `lastIndex`
+ * between callers is a state bug waiting for its second reader.
+ *
+ * ⚠️ The FOURTH is deliberately NOT carried: no `i` flag. `CLAIM_COMMENT_MARKER`
+ * is case-insensitive as an accommodation for spellings the fleet had already
+ * shipped; the ACCEPT verdict landed on 2026-09-05 with no dialect behind it, so
+ * it starts at the canonical spelling and NOTHING wider — `RELEASE_COMMENT_MARKER`'s
+ * stated reason, applied to the newest half of the same protocol. `**Accept**`
+ * and `ACCEPT` unbolded are MALFORMED verdicts, not unrecognised dialects, and
+ * the repair direction is the WRITE side (the 2026-08-11 ruling quoted at
+ * `CLAIM_COMMENT_MARKER`).
+ *
+ * The closing `**` is load-bearing: without it `**ACCEPTED**` — a word that
+ * says something else about a different act — would read as this verdict.
+ */
+export const ACCEPT_VERDICT_MARKER = /^\s*>?\s*\*\*ACCEPT\*\*/m;
+
+/**
+ * The final maintainer brief, as a heading line.
+ *
+ * Same three mirrored properties, and the same strictness on the spelling: the
+ * literal `## ` prefix, so a `###` sub-heading and a bare mention of 维护者速读
+ * inside a paragraph are both non-matches. A brief that is not a level-2
+ * heading is not the artefact the protocol asks for.
+ */
+export const MAINTAINER_BRIEF_MARKER = /^\s*>?\s*## 维护者速读/m;
+
+/**
+ * Which PRs this row can speak about AT ALL — exported for the reason every
+ * gathering policy here is: the predicate that decides what is even counted is
+ * where a silent hole would live, and the summary's coverage pair is
+ * `judged of these`.
+ *
+ * Governed is the imported matcher's verdict (`governedPathsIn`), never a hand
+ * list of paths. A DRAFT is IN: a governed PR waiting as a draft for the human
+ * merge is the CORRECT terminal state of this regime (H43's header), and it is
+ * still a state in which the maintainer has been handed half a handoff. A
+ * merged or closed PR is OUT — the handoff is over, and nothing here is fixable
+ * after it.
+ */
+export function h48SpeaksAbout(pr, governed) {
+  if ((governed?.length ?? 0) === 0) return false;
+  if (pr?.merged_at) return false;
+  return String(pr?.state ?? 'open') !== 'closed';
+}
+
+/**
+ * H48 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states, never two (#4690), the H4 contract verbatim:
+ *
+ *   undefined  the thread was never consulted. UNJUDGED.
+ *   null       the thread was consulted and could not be read — a failed
+ *              request, or a walk that hit the page ceiling. UNJUDGED.
+ *   rows       judged.
+ *
+ * @param {{ number?: number, state?: string, merged_at?: string|null, labels?: any[] }} pr
+ * @param {{ glob: string, files?: string[] }[]} governed — the matched slice.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   REST rows rather than bodies, so the sentence can date the verdict it found.
+ */
+export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h48SpeaksAbout(pr, governed)) return null;
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  // `latestMarkedComment` rather than a second scan idiom: H47's resolution is
+  // the file's one answer to "which comment carries this marker", and a second
+  // one here is a drift waiting to happen. Existence is all this row needs; the
+  // stamp it also returns is what lets the sentence point at the verdict.
+  const verdict = latestMarkedComment(rows, ACCEPT_VERDICT_MARKER);
+  if (!verdict) return null;
+  const hasBrief = latestMarkedComment(rows, MAINTAINER_BRIEF_MARKER) !== null;
+  const hasLabel = labelNames(pr ?? {}).includes(GOVERNED_PR_DECISION_LABEL);
+  if (hasLabel && hasBrief) return null;
+
+  const surfaces = governed ?? [];
+  const hits = surfaces.reduce((n, s) => n + (s.files?.length ?? 0), 0);
+  const named = surfaces
+    .slice(0, H48_SURFACE_LIST_CAP)
+    .map((s) => `\`${s.glob}\`×${s.files?.length ?? 0}`)
+    .join(', ');
+  const more =
+    surfaces.length > H48_SURFACE_LIST_CAP ? `, +${surfaces.length - H48_SURFACE_LIST_CAP} more` : '';
+  const when = verdict.createdAt ? ` (newest one ${verdict.createdAt})` : '';
+  const missing = [
+    hasLabel ? null : `no \`${GOVERNED_PR_DECISION_LABEL}\` label`,
+    hasBrief ? null : 'no comment whose line begins `## 维护者速读`',
+  ].filter(Boolean);
+  const remedy = [
+    hasLabel ? null : `add \`${GOVERNED_PR_DECISION_LABEL}\``,
+    hasBrief ? null : 'post the final 维护者速读 brief as a COMMENT',
+  ].filter(Boolean);
+  const cost = hasLabel
+    ? 'the maintainer opens a governed diff with nothing saying what is being asked of them'
+    : hasBrief
+      ? 'the inbox filter that lists what is waiting for a ruling does not list this PR'
+      : 'the PR is neither listed in the inbox nor readable in two minutes once it is found';
+  const briefClause = hasBrief
+    ? ''
+    : ' ⚠️ A `## 维护者速读(草稿)` section in the PR BODY does NOT satisfy this half and is not ' +
+      'read here: the draft is written before the review happens, while the brief is the seat\'s own ' +
+      'word after it — so this row reads COMMENT threads and nothing else.';
+  return (
+    `open and GOVERNED (${hits} changed file(s) on the register: ${named}${more}), carrying a seat's ` +
+    `\`**ACCEPT**\` verdict${when}, and ${missing.join(' and ')}. The verdict is a HANDOFF rather than ` +
+    'a merge — a governed surface is landed by the maintainer, by hand — and the handoff is ONE act ' +
+    'with two writes: the label puts the PR in the review inbox and the brief is what makes reading it ' +
+    `a two-minute job. With this half missing, ${cost}.` +
+    briefClause +
+    ` Remedy: ${remedy.join(', and ')}. ⚠️ No verdict at all is CLEAN on this row — a governed PR no ` +
+    'seat has accepted yet is not the maintainer\'s, and nothing here asks anyone to hurry one. ' +
+    'Report-only patrol INPUT, not a verdict and not a gate: nothing is blocked by this row, ⛔ no ' +
+    'label is written from here, and ⛔ no seat may substitute an approving review for the maintainer.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H49 — a PARTIAL dispatch landed and the card still reads TAKEN (#16003).
+//
+// ## The rule this row reads
+//
+// A dispatch may deliberately cover ONE item of a card whose other items belong
+// to another lane or to a governed surface. The PR that lands it carries
+// `Refs #N (item k)` and never `Fixes` — GitHub must not close a card with work
+// left on it — and the protocol makes that landing a RELEASE in the landed
+// form, two lines of the 认领 family, quoted UNBROKEN:
+//
+//   「部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。」
+//   「同笔 `Release:` 行点名已落项与余项去向;余项需换道/拆分加 `pm:retriage`,自队列重新认领。」
+//
+// ONE write: `pm:dispatched` → `pm:queue` (adding `pm:retriage` when a remaining
+// item needs a re-lane or a split — a question for triage, answered each fire),
+// the assignee cleared, a `Release:` line naming the landed item and where the
+// remaining items go; the remaining items are re-dispatched from the queue as a
+// fresh claim. Before the line existed, two seats improvised the transition in
+// one shift with nothing to cite — one of them parking a whole card behind a
+// decision only one of its items depended on.
+//
+// ## The shape, and why nothing else reports it
+//
+// The merged `Refs` PR is invisible to every delivery reader by construction:
+// GitHub closes nothing (no keyword), and `prDeliversCard` reads `Part of` and
+// the keywords, falling back to the BRANCH NAME only. On a head NOT named for
+// the card (a family branch, another card's slug) nothing saw it at all. On a
+// head named FOR the card H8 used to fire through that fallback — a
+// full-delivery verdict on a partial landing, prescribing the destructive
+// de-label against a lawfully re-dispatched remainder — which is why its merged
+// side now excludes the `Refs`-only shape (`prFullyDeliversCard`, #16036). So in
+// BOTH head shapes the card sits `pm:dispatched`, assigned, with a complete
+// `Claim:` and no dev, and H1/H2/H3/H8/H24 are each correctly silent. This row
+// asks the question none of them can: is the NEWEST `Refs`-linked PR on this
+// card MERGED, with no `Release:` or `Claim:` on the thread newer than that
+// merge? H8 could never have asked it — it reads no thread, so a remainder
+// lawfully re-dispatched (a fresh `Claim:` after the merge) is exactly the case
+// this row stands down on. Adjacent rows with no overlap left; the self-test
+// pins both halves of that adjacency.
+//
+// ## Population, and what is OUT by ruling
+//
+//   IN    an OPEN card carrying `pm:dispatched` with a non-empty assignee and
+//         no `pm:queue`.
+//   OUT   `pm:queue` (the release already happened — or H24's shape, if the
+//         field stayed set); `pm:queue` + `pm:dispatched` (H3's contradiction,
+//         not an exit); no assignee (H1's row); a closed card (H22's census).
+//   OUT   a PR that DELIVERS the card — `Part of #N`, or a closing keyword
+//         bound to `#N`, with or without a `Refs` beside it — is H8's business
+//         and is never counted as a `Refs` link here. Bound PER CARD NUMBER as
+//         H7 binds: `Refs #A` beside `Fixes #B` links A and delivers B.
+//   CLEAN an OPEN `Refs` PR on the card: the newest linked PR is still in
+//         flight, so the release is not yet owed.
+//
+// ## Recency
+//
+// The PR side is the newest MERGED `Refs`-only PR by `merged_at`; a stamp that
+// does not parse is not a merge this row can date, and that PR is left out.
+// The thread side is `latestMarkedComment` — H47's resolution, reused — and a
+// marker whose stamp does not parse cannot be placed against a merge, so the
+// row DECLINES rather than accuse: an unreadable stamp is unjudged, never
+// evidence. A `Release:` newer than the merge is the release done (a field that
+// stayed set is then H47 leg (a)'s); a `Claim:` newer than the merge is the
+// remainder re-dispatched. Either stands this row down.
+//
+// ## Cost
+//
+// Nothing. The PR side is H8's merged window plus the open-PR listing already
+// in hand; the thread comes out of `commentCache`, where H2's claim read lands
+// it for exactly this population (an ASSIGNED pm-tracked card) — so unlike
+// H47's `pm:queue` leg the corpus is complete by construction, and a shortfall
+// on the coverage pair is a thread H2 could not read, never one nobody bought.
+// A `Refs` landing older than the merged window is invisible here, as it is to
+// H8; the finding clears when the release lands, not when the PR ages out.
+// ---------------------------------------------------------------------------
+
+/**
+ * The partial-landing rule's defining line, quoted from
+ * `.claude/skills/pm-dispatch/SKILL.md` VERBATIM and kept UNBROKEN so it stays
+ * greppable against its source — `RELEASE_ACT_RULE`'s discipline, applied to the
+ * newer line: the row's sentence quotes the protocol's OWN words or none, and
+ * `selfTest` keeps its own transcription (`PARTIAL_RULE_LINE`) so the pin
+ * compares two copies rather than reading the value it pins.
+ */
+const PARTIAL_LANDING_RULE =
+  '部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。';
+
+/**
+ * Which cards this row can speak about AT ALL — exported for the reason every
+ * counting policy here is: the predicate that decides what is even counted is
+ * where a silent hole would live, and the summary's pair is `judged of these`.
+ */
+export function h49SpeaksAbout(issue) {
+  if (issue?.state === 'closed') return false;
+  const labels = labelNames(issue ?? {});
+  if (!labels.includes('pm:dispatched') || labels.includes('pm:queue')) return false;
+  return (
+    (issue?.assignees ?? []).map((a) => (typeof a === 'string' ? a : a?.login)).filter(Boolean)
+      .length > 0
+  );
+}
+
+/**
+ * The PRs among `prs` linked to card `n` by `Refs #n` ONLY. A body that also
+ * delivers the card — `Part of #n`, or a closing keyword bound to `#n` — is H8's
+ * and is not a link here, however it spells the reference beside it.
+ *
+ * @returns {{ pr: object, item: string|null }[]} — `item` is the `(item k)`
+ *   annotation `refsTargets` captured, or `null` for a bare reference.
+ */
+export function refsOnlyLinksFor(prs, n) {
+  const target = String(n);
+  const out = [];
+  for (const pr of prs ?? []) {
+    const body = pr?.body ?? '';
+    const refs = refsTargets(body);
+    if (!refs.has(target)) continue;
+    if (partOfTargets(body).has(target) || closingKeywordTargets(body).has(target)) continue;
+    out.push({ pr, item: refs.get(target) });
+  }
+  return out;
+}
+
+/**
+ * H49 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states for the thread, never two (#4690), the H4 contract
+ * verbatim: `undefined` never consulted, `null` unreadable — both UNJUDGED and
+ * kept apart from clean by the coverage pair — and rows, judged.
+ *
+ * @param {object} issue — the card.
+ * @param {{ number?: number, body?: string, merged_at?: string|null }[]} mergedPrs —
+ *   H8's merged window.
+ * @param {{ number?: number, body?: string, merged_at?: string|null }[]} openPrs —
+ *   the open-PR listing the sweep already holds.
+ * @param {{ body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   REST rows rather than bodies: this row places two comments against a merge.
+ */
+export function h49PartialLandingUnreleased(issue, mergedPrs, openPrs, commentRows) {
+  if (commentRows === undefined || commentRows === null) return null;
+  if (!h49SpeaksAbout(issue)) return null;
+  const n = String(issue.number);
+  // An OPEN `Refs` PR is the newest word on the card: work is still in flight.
+  if (refsOnlyLinksFor((openPrs ?? []).filter((pr) => !pr?.merged_at), n).length > 0) return null;
+  const landed = refsOnlyLinksFor((mergedPrs ?? []).filter((pr) => pr?.merged_at), n)
+    .map((link) => ({ ...link, at: Date.parse(link.pr.merged_at ?? '') }))
+    .filter((link) => Number.isFinite(link.at));
+  if (landed.length === 0) return null;
+  const newest = landed.reduce((a, b) => (b.at > a.at ? b : a));
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  for (const marker of [CLAIM_COMMENT_MARKER, RELEASE_COMMENT_MARKER]) {
+    const latest = latestMarkedComment(rows, marker);
+    if (!latest) continue;
+    // An unreadable stamp cannot be placed against the merge — decline, never accuse.
+    if (latest.stamp === null || latest.stamp > newest.at) return null;
+  }
+  const logins = (issue?.assignees ?? [])
+    .map((a) => (typeof a === 'string' ? a : a?.login))
+    .filter(Boolean)
+    .map((l) => `\`${l}\``)
+    .join(', ');
+  const when = String(newest.pr.merged_at).slice(0, 10);
+  const itemClause = newest.item ? ` (${newest.item})` : '';
+  const itemNote = newest.item
+    ? `\`${newest.item}\` is landed`
+    : 'no `(item k)` is named beside the reference, so this sentence cannot say WHICH item landed — the ' +
+      '`Release:` line owed below must';
+  const earlier =
+    landed.length > 1 ? `, after ${landed.length - 1} earlier merged \`Refs\` PR(s) on this card` : '';
+  return (
+    `a PARTIAL dispatch landed and the card still reads TAKEN — PR #${newest.pr.number} (merged ${when}) ` +
+    `declares \`Refs #${n}${itemClause}\` and is MERGED${earlier}; ${itemNote}, while the card still ` +
+    `carries \`pm:dispatched\`, is assigned to ${logins}, and no \`Release:\` or \`Claim:\` on its thread ` +
+    'is newer than that merge. The release is OWED: a PR that lands one item of a card carries ' +
+    '`Refs #N (item k)` and never `Fixes`, so GitHub closes nothing and the protocol makes the landing ' +
+    `itself the release, in the landed form — 「${PARTIAL_LANDING_RULE}」 — the act being ` +
+    `「${RELEASE_ACT_RULE}」. Remedy, ONE write: move \`pm:dispatched\` → \`pm:queue\` (adding ` +
+    '`pm:retriage` when a remaining item needs a re-lane or a split — a question for triage, answered ' +
+    'each fire), clear the assignee, and post the `Release:` line naming the landed item and where the ' +
+    'remaining items go; the remaining items are re-dispatched from the queue as a fresh claim. If the ' +
+    'remainder WAS already re-dispatched, a fresh `Claim:` newer than the merge is the record that stands ' +
+    'this row down. ⚠️ Agent identity only, as H24: a HUMAN assignment may be real ownership and ⛔ is ' +
+    'never cleared by an agent — take it to the maintainer. Report-only patrol INPUT: nothing here is ' +
+    'blocked and no label is written.'
   );
 }
 
@@ -8996,6 +9540,21 @@ export const SWEEP_COUNT_KEYS = [
   // from "almost nothing was read".
   'releaseCandidates',
   'releaseJudged',
+  // H48's coverage pair (#15895). `briefCandidates` is how many GOVERNED OPEN
+  // PRs the row could speak about and `briefJudged` how many of those had a
+  // readable comment thread — this row BUYS that thread, so unlike H47's pair
+  // a shortfall here means a failed or ceiling-bound walk rather than an
+  // unbought one, and either way an unjudged PR must not read as a clean one.
+  'briefCandidates',
+  'briefJudged',
+  // H49's coverage pair (#16003). `partialCandidates` is how many OPEN
+  // `pm:dispatched` + assigned cards the row could speak about and
+  // `partialJudged` how many had a comment thread in hand — this row buys none,
+  // and H2 buys one for exactly this population, so a shortfall is a thread H2
+  // could not read rather than one nobody bought; either way an unjudged card
+  // must not read as a clean one.
+  'partialCandidates',
+  'partialJudged',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -9368,6 +9927,33 @@ export function summaryLine(counts, findingCount) {
     'and the no-assignee `pm:queue` leg is the thinnest half of that corpus — H2 buys a thread ' +
     'only for an ASSIGNED card. A card that was never claimed is clean and indistinguishable from ' +
     'an exit nobody recorded, so this count is a LOWER BOUND. ' +
+    // H48's coverage pair (#15895). UNCONDITIONAL like every other window's,
+    // and the register's availability LEADS it for H43's reason: this row can be
+    // quiet because no governed PR carries a verdict, because no thread was
+    // readable, or because the register never loaded — and only the first is a
+    // clean board. The cost is stated per governed open PR because that is the
+    // bound a reader checks: this row is the file's only PR-comment fetch.
+    `Maintainer briefs (H48): ${
+      counts.governedRegisterReason
+        ? `NOT MEASURED — ${counts.governedRegisterReason}`
+        : `${counts.briefJudged ?? 0} of ${counts.briefCandidates ?? 0} governed open PRs judged, one ` +
+          `issue-comment thread bought per governed open PR (at most ${H48_COMMENT_PAGE_CEILING} page(s) ` +
+          `of ${H48_COMMENTS_PAGE_SIZE}). This is a NEW fetch class rather than a second reader of one ` +
+          'already in hand: `commentCache` holds CARD threads only. A thread that failed or reached that ' +
+          'ceiling is UNJUDGED rather than short, a PR whose changed-file page went unread is not in this ' +
+          'population at all, and a governed PR with NO `**ACCEPT**` verdict is CLEAN rather than quiet'
+    }. ` +
+    // H49's coverage pair (#16003). UNCONDITIONAL like every other window's,
+    // and it carries the two disclosures this row owes: it fetches NOTHING (the
+    // thread is H2's read, bought for exactly this population), and its PR side
+    // is H8's bounded merged window, so a landing older than that window is as
+    // invisible here as it is to H8.
+    `Partial landings (H49): ${counts.partialJudged ?? 0} of ${counts.partialCandidates ?? 0} ` +
+    'open `pm:dispatched` + assigned card(s) had a comment thread in hand to judge against the merged ' +
+    'window. It fetches NOTHING of its own — H2 buys that thread for exactly this population, so a ' +
+    'shortfall is a thread H2 could not read, and such a card is UNJUDGED rather than clean. The PR side ' +
+    'is the H8 merged window plus the open listing, so a `Refs` landing older than the window is ' +
+    'invisible here. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -9419,6 +10005,8 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h46Claimless', 'Claim-less implementations (H46): '],
   ['h45EpicParents', 'Epic parent reads (H45): '],
   ['h47Release', 'Release records (H47): '],
+  ['h48Brief', 'Maintainer briefs (H48): '],
+  ['h49Partial', 'Partial landings (H49): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -9785,6 +10373,8 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H45: 'state',
   H46: 'state',
   H47: 'state',
+  H48: 'state',
+  H49: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -12294,6 +12884,46 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     return rows;
   };
   const commentsFor = async (issue) => (await commentRowsFor(issue)).map((c) => c.body ?? '');
+
+  // The PULL-REQUEST comment cache (#15895), and it is a SECOND cache rather
+  // than a widening of the one above on purpose: `commentCache` is keyed by card
+  // number and fed by listings that all filter `!i.pull_request`, so a PR
+  // number colliding with a card number in one map would hand a card's thread to
+  // a PR row. H48 is its only reader today; a future PR-comment reader finds a
+  // thread this row already bought here and pays nothing for it.
+  //
+  // ⛔ Bought ONLY for the PRs H48 speaks about (governed and open), never for
+  // the open-PR listing at large — the caller enforces that, and this helper
+  // never fetches a number it was not handed.
+  //
+  // Returns REST ROWS, or `null` for a thread that could not be read — a failed
+  // request, or a walk still full at the page ceiling. Both are UNJUDGED
+  // (#4690): a partial thread can only INVENT a missing half, never miss one.
+  const prCommentCache = new Map();
+  const prCommentRowsFor = async (number) => {
+    if (prCommentCache.has(number)) return prCommentCache.get(number);
+    const rows = [];
+    let exhausted = false;
+    let value = null;
+    try {
+      for (let page = 1; page <= H48_COMMENT_PAGE_CEILING; page++) {
+        const batch = await rest(
+          `/repos/${OWNER_REPO}/issues/${number}/comments?per_page=${H48_COMMENTS_PAGE_SIZE}&page=${page}`,
+        );
+        const list = Array.isArray(batch) ? batch : [];
+        rows.push(...list);
+        if (list.length < H48_COMMENTS_PAGE_SIZE) {
+          exhausted = true;
+          break;
+        }
+      }
+      if (exhausted) value = rows;
+    } catch {
+      value = null;
+    }
+    prCommentCache.set(number, value);
+    return value;
+  };
   let lastHoldError = null;
 
   // The `Blocked-by:` comment fallback (#8941 / #10061). Same shared cache, so
@@ -12703,6 +13333,27 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       );
       if (gap) findings.push([pr, 'H43', gap]);
     }
+
+    // H48 (#15895) — the ACCEPT verdict whose second write never happened. It
+    // lives INSIDE this block because its population is `governedByPr`, the
+    // slice H43 just computed off H36's file pages: one matcher for the governed
+    // question, never a third. A register that would not load therefore silences
+    // this row exactly as it silences H43, and the summary clause says NOT
+    // MEASURED rather than printing `0 of 0` at a reader (#4690).
+    //
+    // This is the one pass in this file that buys a PULL-REQUEST comment thread,
+    // and it buys one per GOVERNED OPEN PR — 11 of 31 on the board it landed
+    // against. The candidate/judged pair below is what keeps a run whose walks
+    // all failed separable from a board where every handoff was complete.
+    for (const pr of seenPrs.values()) {
+      const governed = governedByPr.get(pr.number);
+      if (!h48SpeaksAbout(pr, governed)) continue;
+      stats.briefCandidates = (stats.briefCandidates ?? 0) + 1;
+      const rows = await prCommentRowsFor(pr.number);
+      if (rows !== null) stats.briefJudged = (stats.briefJudged ?? 0) + 1;
+      const handoff = h48GovernedVerdictWithoutBrief(pr, governed, rows);
+      if (handoff) findings.push([pr, 'H48', handoff]);
+    }
   }
 
   // H8 — one bounded merged-PR listing (window note at the helper), matched
@@ -12718,6 +13369,22 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   for (const issue of seen.values()) {
     const stale = h8MergedPrStillDispatched(issue, mergedWindow, openWindow);
     if (stale) findings.push([issue, 'H8', stale]);
+  }
+
+  // H49 (#16003) — the partial dispatch that landed while the card still reads
+  // TAKEN. Judged over the same cards as H8, against the same two windows, and
+  // placed right after it because it needs both: the merged window built a few
+  // lines above, and the card threads `commentCache` accumulated in the per-card
+  // loop — H2's claim read buys one for every ASSIGNED pm-tracked card, which is
+  // exactly this row's population, so `commentCache.get` (never a fetch) is
+  // complete by construction and a miss is a thread H2 could not read.
+  for (const issue of seen.values()) {
+    if (!h49SpeaksAbout(issue)) continue;
+    stats.partialCandidates = (stats.partialCandidates ?? 0) + 1;
+    const partialRows = commentCache.get(issue.number);
+    if (partialRows !== undefined) stats.partialJudged = (stats.partialJudged ?? 0) + 1;
+    const owed = h49PartialLandingUnreleased(issue, mergedWindow, openWindow, partialRows);
+    if (owed) findings.push([issue, 'H49', owed]);
   }
 
   // H22 — the one closed-issue read in this file (#10688). Kept in its own
@@ -13413,13 +14080,19 @@ function selfTest() {
     body,
     title,
   });
-  // `.claude/skills/pm-dispatch/SKILL.md` line 465, VERBATIM — one constant so
+  // `.claude/skills/pm-dispatch/SKILL.md`, VERBATIM — one constant so
   // the two rows that quote it (H24's remedy, H47's both legs) are pinned
   // against the SAME bytes. Rewriting a maintainer's line is rewriting the
   // ruling, and a quote that drifts from its source in one row while the other
   // holds is exactly the drift a shared constant cannot express.
   const RELEASE_RULE_LINE =
     '释放是显式动作:让卡离手者同笔清 assignee + `Release:` 行(会话/因/去向);下一任重新认领。';
+  // The retired coinage, ASSEMBLED rather than spelled. The measure of this
+  // repair is a `git grep -c` for that phrase over this file reading ZERO, so a
+  // literal needle in the negative cases below would be the single hit that
+  // defeats the check it exists to protect. Joining the halves keeps both the
+  // case and the grep honest.
+  const RETIRED_ASSIGNEE_COINAGE = ['同笔摘', 'assignee'].join(' ');
 
   // -- Row-text wrappers: every message assertion goes through one -----------
   //
@@ -13986,30 +14659,59 @@ function selfTest() {
     head: { ref },
   });
 
-  // Direction 1 — the measured specimen's shape: merged, body carries NEITHER
-  // recognised spelling (`Refs #N` is not one), branch named for the card.
+  // Direction 1 — the DELIVERY relation, unchanged: a body carrying neither
+  // recognised spelling (`Refs #N` is not one) still reaches its card through
+  // the branch name, which is what the live-work readers need.
+  const REFS_ONLY_10757 = onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries');
   t(
     'H8 branch: a `Refs #N`-only body delivers via its branch name',
-    typeof h8MergedPrStillDispatched(
-      dispatched(10757),
-      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
-    ),
+    prDeliversCard(REFS_ONLY_10757, 10757),
+    true,
+  );
+  // …and the FULL-delivery reading H8's merged side takes DECLINES it (#16036).
+  // The body spoke about this card in the one spelling the protocol reserves for
+  // a non-delivery, so the landing is partial and H49 owns it — H8 must not
+  // prescribe dropping `pm:dispatched` off a lawfully re-dispatched remainder.
+  t(
+    'H8 branch: …but a `Refs`-only landing is NOT a full delivery, so H8 is clean (#16036)',
+    h8MergedPrStillDispatched(dispatched(10757), [REFS_ONLY_10757]),
+    null,
+  );
+  t(
+    'H8 branch: …and the narrower reader says so in its own right',
+    prFullyDeliversCard(REFS_ONLY_10757, 10757),
+    false,
+  );
+  // A `Refs` naming ANOTHER card narrows nothing about this one — bound per
+  // card number, as H7 binds.
+  t(
+    'H8 branch: a `Refs` for another card leaves this card\'s fallback intact',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Refs #9999', 'claude/issue-4321-x')]),
+    'string',
+  );
+  // …and a body that DELIVERS is a delivery however it spells the reference
+  // beside it — the same binding H49 makes from the other end.
+  t(
+    'H8 branch: `Refs #N` beside a closing keyword is still a full delivery',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Refs #4321 (item ①)\n\nFixes #4321', 'claude/issue-4321-x')]),
     'string',
   );
   t(
-    'H8 branch: …and the finding names the delivering PR',
-    h8MergedPrStillDispatched(
-      dispatched(10757),
-      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
-    ).includes('#10824'),
-    true,
+    'H8 branch: …and beside `Part of #N` likewise',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Part of #4321\nRefs #4321', 'claude/issue-4321-x')]),
+    'string',
   );
-  // An empty body is the same population — nothing declared, so the branch is
-  // the only evidence there is.
+  // An empty body is the population the fallback WAS built for — nothing
+  // declared, so the branch is the only evidence there is, and H8 still fires.
   t(
     'H8 branch: an empty body delivers via its branch name',
     typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]),
     'string',
+  );
+  t(
+    'H8 branch: …and the finding names the delivering PR',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]).includes('#4400'),
+    true,
   );
 
   // Direction 2 — the RE-SCOPED branch, the false-fire this widening could
@@ -15236,12 +15938,54 @@ function selfTest() {
   t('H20 branch: no directive at all yields nothing', claimedBranches('Claim: seat.\nSession: `session_x`').length, 0);
   t('H20 branch: a missing body does not crash', claimedBranches(undefined).length, 0);
 
+  // -- #16170: the directive written as a markdown BULLET --------------------
+  // Measured live on #15511: a claim whose first line was an undecorated
+  // `Claim:` and whose branch hung under it in a list. The marker matched and
+  // this reader did not, so the comment WAS a claim that GOVERNED nothing —
+  // and nothing in the artefact looked wrong.
+  t('H20 branch: a bulleted directive is read (#16170)', claimedBranches('- Branch: `claude/issue-15511-zh-gap-helptext`').join(','), 'claude/issue-15511-zh-gap-helptext');
+  t('H20 branch: …with `*` as the marker', claimedBranches('* Branch: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …and with `+`, on the plural spelling too', claimedBranches('+ Branches: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …indented under a parent item', claimedBranches('  - Branch: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …and the marker composes with the documented blockquote', claimedBranches('- > Branch: `claude/issue-6752-x`').join(','), 'claude/issue-6752-x');
+  // ⛔ The widening is a LIST MARKER before a `Branch:` DIRECTIVE and nothing
+  // else: a bullet naming any other field, or none, stays out of scope exactly
+  // as an undecorated one does.
+  t('H20 branch: a bullet that is not a `Branch:` line yields nothing', claimedBranches('- Worktree: `claude/issue-1-a`').length, 0);
+  t('H20 branch: …nor does a bulleted prose line that merely names a branch', claimedBranches('- rebased onto claude/issue-9-other yesterday').length, 0);
+  t('H20 branch: a NUMBERED list item is not admitted', claimedBranches('1. Branch: claude/issue-1-a').length, 0);
+  t('H20 branch: a HEADING is not admitted', claimedBranches('## Branch: claude/issue-1-a').length, 0);
+  // ⚠️ A measured RESIDUAL, pinned as a fact rather than as a contract anybody
+  // chose: the ruled anchor admits the marker only BEFORE the optional
+  // blockquote, so the other order — the natural markdown for a bulleted line
+  // INSIDE a blockquote — still yields nothing.
+  t('H20 branch: a blockquoted BULLET (`> - `) is still out — the anchor is marker-then-quote', claimedBranches('> - Branch: `claude/issue-1-a`').length, 0);
+  // ⛔ And the claim MARKER is NOT widened with it (2026-08-11, 不放宽谓词). The
+  // asymmetry is the fix rather than a residue: when BOTH lines carry a bullet
+  // the marker misses too, so the comment is not a claim to any reader here and
+  // the sibling checker's "no claim comment" reading is TRUE. Only the MIXED
+  // shape was malignant, and admitting the marker here is what removes it.
+  t('H20 branch: a bulleted `Claim:` is still not a claim comment', CLAIM_COMMENT_MARKER.test('- Claim: seat.'), false);
+
   // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
   const gov = (rows) => governingClaim(rows);
+  // ⚠️ `?? []` rather than a bare `.branches` on the three-valued return, for
+  // the reason H34's row wrapper carries: a case built to go NULL under a
+  // mutation must report a NAMED failing case, not throw and abort the suite
+  // before the remaining cases run — measured while ablating the #16170 anchor,
+  // where the reverse run died on a TypeError naming neither row nor mutation.
+  const govBranches = (rows) => (gov(rows)?.branches ?? []).join(',');
   t('H20 claim: a claim comment naming a branch is found', gov(claim8878).branches.join(','), 'claude/issue-8878-dispatch-latency');
   t('H20 claim: …and carries its timestamp', gov(claim8878).createdAt, minsAgo20(74));
   t('H20 claim: a `Branch:` line in a comment that is NOT a claim is ignored', gov([claimRow(minsAgo20(90), 'Branch: `claude/issue-1-a`')]), null);
   t('H20 claim: a claim comment naming NO branch yields nothing to check', gov([claimRow(minsAgo20(90), 'Claim: seat.\nSession: `session_x`')]), null);
+  // #16170 — the MIXED shape, which is the only malignant one: an undecorated
+  // `Claim:` (so the marker matches and the comment IS a claim) with the branch
+  // written as a bullet under it. It governs now.
+  t('H20 claim: the MIXED shape governs — undecorated `Claim:`, bulleted `Branch:` (#16170)', govBranches([claimRow(minsAgo20(30), 'Claim: this card is held by session `session_x`.\n\n- Branch: `claude/issue-15511-zh-gap-helptext`\n- Worktree: `/home/user/objectstack-15511`')]), 'claude/issue-15511-zh-gap-helptext');
+  // …while a FULLY bulleted claim governs nothing, the marker having missed it
+  // — and there the sibling's "no claim comment" reading is the true one.
+  t('H20 claim: …and a fully bulleted claim still governs nothing, the marker having missed', gov([claimRow(minsAgo20(30), '- Claim: seat.\n- Branch: `claude/issue-1-a`')]), null);
   const reclaimed = [
     claimRow(minsAgo20(600), 'Claim: first seat.\nBranch: `claude/issue-8878-abandoned`'),
     claimRow(minsAgo20(74), claimBody8878),
@@ -16751,19 +17495,36 @@ function selfTest() {
   t('H24 adjacency: H3 is silent (only ONE label is present)', h3QueueAndDispatched(queued(['pm:queue'], ['os-elon'])), false);
   t('H24 adjacency: H2 is silent when the claim comment is complete', h2AssigneeNoClaimComment(queued(['pm:queue'], ['os-elon']), ['Claim: PM loop round 1\nSession: session_x']), false);
 
-  // -- The paired-write remedy texts (#11196 fix 2) ---------------------------
+  // -- The paired-write remedy texts (#11196 fix 2, re-pointed) ---------------
   // H8's landing re-label and H19's unlock scan are the two rollback paths that
-  // never named the assignee drop; both sentences name it now, and the
-  // half-delivered branch must NOT (there the label and the claim are CORRECT).
+  // never named the release act; both sentences name it now — and they name it
+  // in the spelling that LANDED, quoting the rule line UNBROKEN so the quote
+  // stays checkable against SKILL.md, and naming the SECOND half (the
+  // `Release:` line) that a bare field drop omits. The half-delivered branch
+  // must NOT prescribe it (there the label and the claim are CORRECT).
+  //
+  // Every re-pointed sentence also carries a negative case for the retired
+  // coinage: a re-pointing a later edit can silently undo is not a repair, and
+  // the whole-file grep that measures this one runs nowhere but in a reviewer's
+  // shell.
   const pairedMerged = [{ number: 900, merged_at: '2026-08-22T10:00:00Z', body: 'Fixes #10638', head: { ref: 'x' } }];
   const pairedOpenHalf = [{ number: 901, merged_at: null, draft: true, body: 'Part of #10638', head: { ref: 'y' } }];
-  t('H8: the full-delivery remedy names 同笔摘 assignee', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔摘 assignee'), true);
+  t('H8: the full-delivery remedy names the release act in the spelling that LANDED', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('同笔清 assignee'), true);
+  t('H8: …quoting the rule line unbroken, so the quote stays checkable against SKILL.md', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes(RELEASE_RULE_LINE), true);
+  t('H8: …and names the SECOND half, the `Release:` line a bare field drop omits', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('`Release:` line'), true);
+  t('H8: …and the retired coinage does not come back', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes(RETIRED_ASSIGNEE_COINAGE), false);
   t('H8: …and points at H24 as the state it prevents', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('H24'), true);
   t('H8: …and keeps the human-assignment refusal', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, []).includes('never cleared by an agent'), true);
-  t('H8: the HALF-delivered branch prescribes no assignee drop', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔摘 assignee'), false);
+  t('H8: the HALF-delivered branch prescribes no assignee drop', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('同笔清 assignee'), false);
+  t('H8: …nor the release rule line — nothing is being let go there', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes(RELEASE_RULE_LINE), false);
   t('H8: …and still says the label is correct there', h8row(queued(['pm:dispatched'], ['os-elon']), pairedMerged, pairedOpenHalf).includes('must NOT be dropped'), true);
-  t('H19: the release text names 同笔摘 assignee', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔摘 assignee'), true);
-  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔摘 assignee'), true);
+  t('H19: the release text names the release act in the spelling that LANDED', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('同笔清 assignee'), true);
+  t('H19: …quoting the rule line unbroken', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes(RELEASE_RULE_LINE), true);
+  t('H19: …and names the SECOND half, the `Release:` line', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes('`Release:` line'), true);
+  t('H19: …and the retired coinage does not come back', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/objectstack#2', number: 2, local: true, state: 'closed' }]).includes(RETIRED_ASSIGNEE_COINAGE), false);
+  t('H19: …on the unresolved branch too (one release contract, one sentence)', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes('同笔清 assignee'), true);
+  t('H19: …with the rule line unbroken there too', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RELEASE_RULE_LINE), true);
+  t('H19: …and the retired coinage gone from that branch as well', h19row(queued(['pm:blocked']), [{ key: 'objectstack-ai/cloud#2', number: 2, local: false, state: 'unresolved', detail: 'HTTP 404' }]).includes(RETIRED_ASSIGNEE_COINAGE), false);
 
   // -- H25 + the `pm:awaiting-maintainer` vocabulary (#11196 fix 5) -----------
   t('the ruled spelling is pm:-prefixed', AWAITING_MAINTAINER_LABEL, 'pm:awaiting-maintainer');
@@ -18255,6 +19016,12 @@ function selfTest() {
   t('H37 mirror: …keyed to the member carrying the residue', h37key1(...residue37), 11679);
   t('H37 mirror: …and it says the head CLOSED', h37row1(...residue37).includes('CLOSED'), true);
   t('H37 mirror: …naming it as the same write failing the other way', h37row1(...residue37).includes('MIRROR direction'), true);
+  // The third re-pointed remedy sentence: this row prescribes letting a card
+  // go, so it owes the same landed act, both halves, as H8's and H19's do.
+  t('H37 mirror: …and the remedy names the release act in the spelling that LANDED', h37row1(...residue37).includes('同笔清 assignee'), true);
+  t('H37 mirror: …quoting the rule line unbroken', h37row1(...residue37).includes(RELEASE_RULE_LINE), true);
+  t('H37 mirror: …and names the SECOND half, the `Release:` line', h37row1(...residue37).includes('`Release:` line'), true);
+  t('H37 mirror: …and the retired coinage does not come back', h37row1(...residue37).includes(RETIRED_ASSIGNEE_COINAGE), false);
   const released37 = [
     h37FoldBranches([h37claim(11679, FOLD_37)]),
     h37map(h37card(11679, ['pm:dispatched']), h37card(11678, ['pm:queue'])),
@@ -19032,6 +19799,296 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H47 summary: …and names the thin half of its own corpus', saidBy('h47Release', summaryLine({}, 0)).includes('only for an ASSIGNED card'), true);
   t('H47 summary: …and says the count is a LOWER BOUND', saidBy('h47Release', summaryLine({}, 0)).includes('LOWER BOUND'), true);
   t('H47 summary: a bare line renders numbers, never `undefined`', saidBy('h47Release', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H48 — the ACCEPT verdict whose second write never happened (#15895) ----
+  // The live board carries ZERO of these the day this landed: PR #15908 and
+  // PR #15641 hold all three readings, and the two 代读 PRs (#15382, #15885)
+  // hold label+brief with no verdict, which this row is ruled to read as CLEAN.
+  // So these cases are the only thing pinning the row's behaviour, and they are
+  // written for the shapes a live board will produce rather than today's.
+  const GOV48 = [{ glob: '.claude/**', files: ['.claude/agents/os-dev.md'] }];
+  const VERDICT48 = '**ACCEPT** — lands #15894 as ruled. Governed (`.claude/**`), predicate exit 3.';
+  const BRIEF48 = '## 维护者速读\n\n一句话:巡查行,报告态,不写标签。';
+  const LABEL48 = GOVERNED_PR_DECISION_LABEL;
+  const cm48 = (body, at = '2026-09-05T14:30:00Z') => ({ body, created_at: at });
+  // ⚠️ The fixture BODY always carries the dev's 草稿 section, so every case
+  // below that fires with no brief COMMENT is simultaneously the "a draft in the
+  // body does not satisfy the brief half" case.
+  const pr48 = (labels, extra = {}) => ({
+    number: 15908,
+    state: 'open',
+    draft: true,
+    labels: labels.map((name) => ({ name })),
+    body: '## 维护者速读(草稿)\n\n这是 dev 的草稿,不是评审后的最终速读。',
+    ...extra,
+  });
+  const h48row = (...args) => String(h48GovernedVerdictWithoutBrief(...args) ?? '');
+
+  // The complete handoff, and each way it comes apart.
+  t('H48: verdict + label + brief -> clean', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), null);
+  t('H48: verdict + label, NO brief -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
+  t('H48: …and the row names the brief half that is missing', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and the remedy is posting it as a COMMENT', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: …and never asks for the label, which is already there', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`'), false);
+  t('H48: verdict + brief, NO label -> finding', typeof h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]), 'string');
+  t('H48: …and the row names the label half that is missing', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('no `needs-user-decision` label'), true);
+  t('H48: …and the remedy is the label write', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('Remedy: add `needs-user-decision`.'), true);
+  t('H48: …and never asks for a brief that is already posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('as a COMMENT'), false);
+  t('H48: verdict and NEITHER half -> ONE finding naming both', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no `needs-user-decision` label and no comment whose line begins `## 维护者速读`'), true);
+  t('H48: …and both remedies in one sentence, never two rows', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('add `needs-user-decision`, and post the final 维护者速读 brief as a COMMENT'), true);
+  t('H48: …and it really is ONE row', (h48row(pr48([]), GOV48, [cm48(VERDICT48)]).match(/Report-only patrol INPUT/gu) ?? []).length, 1);
+
+  // The BODY draft is not the brief — the half this row exists to find must not
+  // be allowed to satisfy itself out of the text the dev wrote before review.
+  t('H48: a `## 维护者速读(草稿)` section in the BODY does NOT satisfy the brief half', typeof h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]), 'string');
+  t('H48: …and the row SAYS so, where a reader would otherwise assume a bug', h48row(pr48([LABEL48]), GOV48, [cm48(VERDICT48)]).includes('PR BODY does NOT satisfy this half'), true);
+  t('H48: …and that clause is absent once the brief really is posted', h48row(pr48([]), GOV48, [cm48(VERDICT48), cm48(BRIEF48)]).includes('PR BODY does NOT satisfy'), false);
+  t('H48: a brief comment ANYWHERE on the thread counts, not only the newest', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(BRIEF48, '2026-09-05T10:00:00Z'), cm48(VERDICT48), cm48('lgtm')]), null);
+
+  // ⛔ No verdict is CLEAN — the boundary of this card, pinned so a later reader
+  // does not "fix" it into the 代读 row it was ruled not to be.
+  t('H48: no verdict at all -> CLEAN, not quiet', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, [cm48('rebased onto main')]), null);
+  t('H48: …the live 代读 shape (label + brief, no verdict) is CLEAN and deliberately not this card', h48GovernedVerdictWithoutBrief(pr48([LABEL48]), GOV48, [cm48(BRIEF48)]), null);
+  t('H48: …and an empty thread on a governed PR is clean', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, []), null);
+  t('H48: …and the row states that boundary in its own sentence', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('No verdict at all is CLEAN on this row'), true);
+  t('H48 row: states its report-only posture', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('Report-only patrol INPUT'), true);
+  t('H48 row: …and refuses the one substitution a seat must never make', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('no seat may substitute an approving review'), true);
+  t('H48 row: names the governed surfaces it matched, from the imported matcher', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('`.claude/**`×1'), true);
+  const many48 = Array.from({ length: H48_SURFACE_LIST_CAP + 2 }, (_, i) => ({ glob: `g${i}/**`, files: ['f'] }));
+  t('H48 row: past the surface cap it counts the rest rather than growing', h48row(pr48([]), many48, [cm48(VERDICT48)]).includes('+2 more'), true);
+  t('H48 row: …and dates the verdict it found, so the reader can go to it', h48row(pr48([]), GOV48, [cm48(VERDICT48)]).includes('(newest one 2026-09-05T14:30:00Z)'), true);
+
+  // Population: governed-only, open-only, drafts IN.
+  t('H48: a NON-governed PR with a verdict and nothing else is out of population', h48GovernedVerdictWithoutBrief(pr48([]), [], [cm48(VERDICT48)]), null);
+  t('H48 population: …and the counting policy says so directly', h48SpeaksAbout(pr48([]), []), false);
+  t('H48 population: an undefined governed slice is out too, never a crash', h48SpeaksAbout(pr48([]), undefined), false);
+  t('H48: a CLOSED PR is out — the handoff is over and nothing here is fixable', h48GovernedVerdictWithoutBrief(pr48([], { state: 'closed' }), GOV48, [cm48(VERDICT48)]), null);
+  t('H48: a MERGED PR is out for the same reason', h48GovernedVerdictWithoutBrief(pr48([], { merged_at: '2026-09-05T14:29:00Z' }), GOV48, [cm48(VERDICT48)]), null);
+  t('H48 population: ⛔ a DRAFT is IN — the correct terminal state is still half a handoff', h48SpeaksAbout(pr48([], { draft: true }), GOV48), true);
+  t('H48 population: …and so is a non-draft governed PR', h48SpeaksAbout(pr48([], { draft: false }), GOV48), true);
+  t('H48 population: a closed PR is out', h48SpeaksAbout(pr48([], { state: 'closed' }), GOV48), false);
+  t('H48 population: a merged PR is out', h48SpeaksAbout(pr48([], { merged_at: '2026-09-05T14:29:00Z' }), GOV48), false);
+  t('H48 population: an absent state field is judged, not exempted', h48SpeaksAbout({ ...pr48([]), state: undefined }, GOV48), true);
+
+  // Three input states, never two (#4690) — and here the unreadable one is a
+  // thread this row BOUGHT and did not get, which is why it must not read clean.
+  t('H48: an unconsulted thread is UNJUDGED, never clean', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, undefined), null);
+  t('H48: an UNREADABLE (failed or ceiling-bound) thread is UNJUDGED too', h48GovernedVerdictWithoutBrief(pr48([]), GOV48, null), null);
+  t('H48: a missing PR is judged on the slice it was handed, never a crash', typeof h48GovernedVerdictWithoutBrief(undefined, GOV48, [cm48(VERDICT48)]), 'string');
+
+  // The verdict marker — `CLAIM_COMMENT_MARKER`'s strictness minus the one
+  // property that was an accommodation for a shipped dialect.
+  t('accept marker: the canonical spelling matches', ACCEPT_VERDICT_MARKER.test(VERDICT48), true);
+  t('accept marker: a blockquoted verdict matches, as a claim does', ACCEPT_VERDICT_MARKER.test('> **ACCEPT** — quoted back on the thread'), true);
+  t('accept marker: it reads a line anywhere in the body, as the claim marker does', ACCEPT_VERDICT_MARKER.test('re-read after the merge\n\n**ACCEPT** — still stands'), true);
+  t('accept marker: it must BEGIN the line — prose about accepting is not a verdict', ACCEPT_VERDICT_MARKER.test('I will **ACCEPT** this once CI is green'), false);
+  t('accept marker: ⛔ `ACCEPT` without the bold is not a verdict', ACCEPT_VERDICT_MARKER.test('ACCEPT — lands as ruled'), false);
+  t('accept marker: ⛔ `**ACCEPTED**` says something else and does not match', ACCEPT_VERDICT_MARKER.test('**ACCEPTED** — merged by hand'), false);
+  t('accept marker: ⛔ no `i` flag — a lowercase verdict is MALFORMED, not a dialect', ACCEPT_VERDICT_MARKER.test('**Accept** — lands as ruled'), false);
+  t('accept marker: no `g` flag, so two reads of one body agree', [ACCEPT_VERDICT_MARKER.test(VERDICT48), ACCEPT_VERDICT_MARKER.test(VERDICT48)].join(','), 'true,true');
+
+  // The brief marker — the same three properties, on the literal heading.
+  t('brief marker: the canonical heading matches', MAINTAINER_BRIEF_MARKER.test(BRIEF48), true);
+  t('brief marker: …and the decorated spellings live on the board today', ['## 维护者速读(skills 席,2026-09-05T13:2xZ)', '## 维护者速读 · 待你一个字(代读)'].every((b) => MAINTAINER_BRIEF_MARKER.test(b)), true);
+  t('brief marker: a blockquoted brief matches', MAINTAINER_BRIEF_MARKER.test('> ## 维护者速读'), true);
+  t('brief marker: ⛔ 维护者速读 NOT at line start is a mention, not a brief', MAINTAINER_BRIEF_MARKER.test('见上面的 ## 维护者速读'), false);
+  t('brief marker: ⛔ a `###` sub-heading is not the artefact the protocol names', MAINTAINER_BRIEF_MARKER.test('### 维护者速读'), false);
+  t('brief marker: ⛔ a bare mention with no heading at all', MAINTAINER_BRIEF_MARKER.test('维护者速读:见评论区'), false);
+  t('brief marker: no `g` flag, so two reads of one body agree', [MAINTAINER_BRIEF_MARKER.test(BRIEF48), MAINTAINER_BRIEF_MARKER.test(BRIEF48)].join(','), 'true,true');
+  t('brief marker: a verdict is not a brief', MAINTAINER_BRIEF_MARKER.test(VERDICT48), false);
+  t('brief marker: …and a brief is not a verdict', ACCEPT_VERDICT_MARKER.test(BRIEF48), false);
+
+  // Adjacency: H43 reads WHO WAS ASKED, this row reads whether the handoff was
+  // completed — the same governed PR, two questions neither can answer for the
+  // other. Written with an explicit approver list so the case does not depend on
+  // the live register's contents.
+  const ASKED48 = { ...pr48([LABEL48]), requested_reviewers: [{ login: 'the-maintainer' }] };
+  t('H48 adjacency: H43 is silent once the maintainer is asked', h43GovernedReviewRequestGap(ASKED48, GOV48, ['the-maintainer'], []), null);
+  t('H48 adjacency: …while H48 still fires on that PR, because the brief is missing', typeof h48GovernedVerdictWithoutBrief(ASKED48, GOV48, [cm48(VERDICT48)]), 'string');
+
+  // Registry, counters and the clause.
+  t('H48 band: registered as a state row', familyBand('H48'), 'state');
+  t('H48 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H48'), true);
+  t('H48 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H48 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H48 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H48: both count keys ride the enumerated forwarding contract', ['briefCandidates', 'briefJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H48 summary: the coverage pair is reported', saidBy('h48Brief', summaryLine({ briefJudged: 10, briefCandidates: 11 }, 0)).includes('10 of 11 governed open PRs judged'), true);
+  t('H48 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h48Brief', summaryLine({}, 0)).includes('0 of 0 governed open PRs judged'), true);
+  t('H48 summary: …and states the fetch class it BUYS, per governed open PR', saidBy('h48Brief', summaryLine({}, 0)).includes('one issue-comment thread bought per governed open PR'), true);
+  t('H48 summary: …and names it a NEW class rather than a reuse', saidBy('h48Brief', summaryLine({}, 0)).includes('NEW fetch class'), true);
+  t('H48 summary: …and says a ceiling-bound thread is UNJUDGED, not short', saidBy('h48Brief', summaryLine({}, 0)).includes('UNJUDGED rather than short'), true);
+  t('H48 summary: …and says a verdict-less governed PR is CLEAN, not quiet', saidBy('h48Brief', summaryLine({}, 0)).includes('CLEAN rather than quiet'), true);
+  t('H48 summary: an unloadable register reads NOT MEASURED, as H43 does', saidBy('h48Brief', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('NOT MEASURED'), true);
+  t('H48 summary: …and prints no count at all then, so nothing reads as a clean board', saidBy('h48Brief', summaryLine({ governedRegisterReason: 'the register is not installed beside this file' }, 0)).includes('0 of 0'), false);
+  t('H48 summary: a bare line renders numbers, never `undefined`', saidBy('h48Brief', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H49 — a partial dispatch landed, the card still reads TAKEN (#16003) ---
+  // The rule landed together with this row, so NO card on any board carries a
+  // merged `Refs #N (item k)` PR of the ruled shape yet; these cases are the
+  // only thing pinning the row's behaviour, written for the shapes a live board
+  // will produce rather than the shapes it has today.
+  //
+  // `.claude/skills/pm-dispatch/SKILL.md`, VERBATIM — the self-test's OWN
+  // transcription, for `RELEASE_RULE_LINE`'s reason: two copies compared is a
+  // check, a pin that reads the value it pins is not.
+  const PARTIAL_RULE_LINE =
+    '部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。';
+  const card49 = (labels, assignees = [], extra = {}) => ({
+    number: 16003,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: assignees.map((login) => ({ login })),
+    body: '',
+    title: '',
+    ...extra,
+  });
+  // The head is another card's slug on purpose: a `Refs` PR whose branch is not
+  // named for the card is the shape H8's branch fallback cannot see.
+  const pr49 = (number, body, extra = {}) => ({ number, body, merged_at: null, head: { ref: 'claude/issue-15899-release-quote-both-halves' }, ...extra });
+  const merged49 = (number, body, merged_at = '2026-09-05T20:12:00Z', extra = {}) => pr49(number, body, { merged_at, ...extra });
+  const cm49 = (body, at) => ({ body, created_at: at });
+  const T49_BEFORE = '2026-09-05T18:00:00Z';
+  const T49_AFTER = '2026-09-05T21:00:00Z';
+  const CLAIM49 = 'Claim: PM loop round 7\nSession: `session_x`\nBranch: `claude/issue-16003-partial-dispatch-release`';
+  const RELEASE49 = 'Release: session `session_x` — item ① landed as PR #16010; items ②③ back to `pm:queue`';
+  const TAKEN49 = card49(['pm:dispatched'], ['os-steve']);
+  const LANDED49 = [merged49(16010, 'Refs #16003 (item ①)\n\nLands item ① only; items ② and ③ stay on the card.')];
+  const CLAIMED49 = [cm49(CLAIM49, T49_BEFORE)];
+  const h49row = (...args) => String(h49PartialLandingUnreleased(...args) ?? '');
+
+  // The extractor — H7's strictness, a third relation.
+  t('refs extractor: `Refs #N (item k)` yields the card and its item', refsTargets('Refs #16003 (item ①)').get('16003'), 'item ①');
+  t('refs extractor: a bare `Refs #N` yields null, not an invented item', refsTargets('Refs #16003').get('16003'), null);
+  t('refs extractor: …and the card is still a key', refsTargets('Refs #16003').has('16003'), true);
+  t('refs extractor: no horizontal gap needed before the bracket', refsTargets('Refs #16003(item 2)').get('16003'), 'item 2');
+  t('refs extractor: a bracket NOT adjacent to the number is not an item', refsTargets('Refs #16003 — the kanban half (see the card)').get('16003'), null);
+  t('refs extractor: first occurrence wins, as at the keyword extractor', refsTargets('Refs #1 (item 2)\nRefs #1 (item 3)').get('1'), 'item 2');
+  t('refs extractor: a quoted reference is invisible on the BODY surface', refsTargets('the dispatch asked for `Refs #16003`').size, 0);
+  t('refs extractor: …and visible on the COMMIT surface, as H7\'s are', refsTargets('the dispatch asked for `Refs #16003`', { markdown: false }).size, 1);
+  t('refs extractor: a fenced block is stripped too', refsTargets('```\nRefs #16003\n```').size, 0);
+  t('refs extractor: case-insensitive, exactly as `partOfRe`', refsTargets('refs #16003').has('16003'), true);
+  t('refs extractor: ⛔ `Ref #N` is not the protocol\'s spelling', refsTargets('Ref #16003').size, 0);
+  t('refs extractor: ⛔ nor `References #N`', refsTargets('References #16003').size, 0);
+  t('refs extractor: ⛔ nor a colon, exactly as `Part of` takes none', refsTargets('Refs: #16003').size, 0);
+  t('refs extractor: the word is bound — `Prefs #N` is not a reference', refsTargets('Prefs #16003').size, 0);
+  t('refs extractor: several cards in one body are each read', [...refsTargets('Refs #1 (item ①) and Refs #2').keys()].join(','), '1,2');
+  t('refs extractor: a missing body is empty, never a crash', refsTargets(undefined).size, 0);
+
+  // The link relation — `Refs` ONLY; a body that also delivers the card is H8's.
+  t('H49 links: a `Refs #N (item k)` body links the card with its item', refsOnlyLinksFor(LANDED49, 16003).map((l) => l.item).join(','), 'item ①');
+  t('H49 links: `Refs #N` beside `Fixes #N` is a DELIVERY, not a link', refsOnlyLinksFor([merged49(1, 'Refs #16003 (item ①)\n\nFixes #16003')], 16003).length, 0);
+  t('H49 links: …and beside `Part of #N` likewise', refsOnlyLinksFor([merged49(1, 'Part of #16003\nRefs #16003')], 16003).length, 0);
+  t('H49 links: bound per card — `Refs #A` beside `Fixes #B` still links A', refsOnlyLinksFor([merged49(1, 'Refs #16003 (item ②)\n\nFixes #15999')], 16003).length, 1);
+  t('H49 links: a reference to ANOTHER card is not this card\'s link', refsOnlyLinksFor([merged49(1, 'Refs #15999 (item ①)')], 16003).length, 0);
+  t('H49 links: a missing list is empty, never a crash', refsOnlyLinksFor(undefined, 16003).length, 0);
+
+  // The finding — landed partial, card still TAKEN, nothing newer on the thread.
+  t('H49: merged `Refs` PR + `pm:dispatched` + assigned + claim OLDER than the merge -> finding', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], CLAIMED49), 'string');
+  t('H49: …naming the PR', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('PR #16010 (merged 2026-09-05)'), true);
+  t('H49: …and the item it landed', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('`Refs #16003 (item ①)`'), true);
+  t('H49: …and the login still holding the field', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('`os-steve`'), true);
+  t('H49: …every assignee, not just the first', h49row(card49(['pm:dispatched'], ['os-steve', 'qq9340100']), LANDED49, [], CLAIMED49).includes('`qq9340100`'), true);
+  t('H49: …saying the release is owed', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('The release is OWED'), true);
+  t('H49: …quoting the partial-landing rule line UNBROKEN', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes(PARTIAL_RULE_LINE), true);
+  t('H49: …and the release act UNBROKEN, from the one constant', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes(RELEASE_RULE_LINE), true);
+  t('H49: …never the retired coinage', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes(RETIRED_ASSIGNEE_COINAGE), false);
+  t('H49: …the remedy names the queue destination', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('move `pm:dispatched` → `pm:queue`'), true);
+  t('H49: …and `pm:retriage` as the re-lane/split question for triage', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('adding `pm:retriage` when a remaining item needs a re-lane or a split'), true);
+  t('H49: …and the `Release:` line naming landed item and remainder destination', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('post the `Release:` line naming the landed item and where the remaining items go'), true);
+  t('H49: …and the fresh claim as the re-dispatch record', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('a fresh `Claim:` newer than the merge is the record that stands this row down'), true);
+  t('H49: …refuses the human-clearing write, as H24 does', h49row(card49(['pm:dispatched'], ['yinlianghui']), LANDED49, [], CLAIMED49).includes('never cleared by an agent'), true);
+  t('H49: …and states its report-only posture', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('Report-only patrol INPUT'), true);
+  t('H49: a bare `Refs #N` fires too, and SAYS no item is named', h49row(TAKEN49, [merged49(16010, 'Refs #16003')], [], CLAIMED49).includes('no `(item k)` is named'), true);
+  t('H49: …while the item-bearing case does not carry that clause', h49row(TAKEN49, LANDED49, [], CLAIMED49).includes('no `(item k)` is named'), false);
+  t('H49: an EMPTY thread with a landed partial fires — nothing newer than the merge', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], []), 'string');
+  t('H49: a claim AND a release both older than the merge still fire', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(RELEASE49, '2026-09-05T17:00:00Z'), cm49(CLAIM49, T49_BEFORE)]), 'string');
+  t('H49: assignees given as plain logins are read too', typeof h49PartialLandingUnreleased({ ...card49(['pm:dispatched']), assignees: ['os-steve'] }, LANDED49, [], CLAIMED49), 'string');
+
+  // The clean shapes, each a lawful board state — the ruled list, one case each.
+  t('H49 clean: a `Release:` NEWER than the merge is the release done', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(CLAIM49, T49_BEFORE), cm49(RELEASE49, T49_AFTER)]), null);
+  t('H49 clean: a `Claim:` NEWER than the merge is the remainder re-dispatched', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(CLAIM49, T49_BEFORE), cm49(CLAIM49, T49_AFTER)]), null);
+  t('H49 clean: …the documented blockquote spelling reads the same', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(`> ${RELEASE49}`, T49_AFTER)]), null);
+  t('H49 clean: the `Refs` PR is still OPEN — work in flight, release not yet owed', h49PartialLandingUnreleased(TAKEN49, [], [pr49(16030, 'Refs #16003 (item ②)')], CLAIMED49), null);
+  t('H49 clean: …and an open `Refs` PR beside a merged one is the newer word', h49PartialLandingUnreleased(TAKEN49, LANDED49, [pr49(16030, 'Refs #16003 (item ②)')], CLAIMED49), null);
+  t('H49 clean: …but an open PR delivering ANOTHER card does not stand it down', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [pr49(16030, 'Refs #15999')], CLAIMED49), 'string');
+  t('H49 clean: a merged row appearing in the open list is not an open half', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, LANDED49, CLAIMED49), 'string');
+  t('H49 clean: the card is already `pm:queue` — the release happened', h49PartialLandingUnreleased(card49(['pm:queue'], []), LANDED49, [], CLAIMED49), null);
+  t('H49 clean: …even with the field still set — that is H24\'s row', h49PartialLandingUnreleased(card49(['pm:queue'], ['os-steve']), LANDED49, [], CLAIMED49), null);
+  t('H49 clean: `pm:queue` + `pm:dispatched` is H3\'s contradiction, not an exit', h49PartialLandingUnreleased(card49(['pm:queue', 'pm:dispatched'], ['os-steve']), LANDED49, [], CLAIMED49), null);
+  t('H49 clean: …and H3 does fire on that card, so nothing goes unreported', h3QueueAndDispatched(card49(['pm:queue', 'pm:dispatched'], ['os-steve'])), true);
+  t('H49 clean: a `Fixes` PR is H8\'s business', h49PartialLandingUnreleased(TAKEN49, [merged49(16010, 'Fixes #16003')], [], CLAIMED49), null);
+  t('H49 clean: …and H8 does fire on it', typeof h8MergedPrStillDispatched(TAKEN49, [merged49(16010, 'Fixes #16003')], []), 'string');
+  t('H49 clean: a `Part of` PR is H8\'s business too', h49PartialLandingUnreleased(TAKEN49, [merged49(16010, 'Part of #16003')], [], CLAIMED49), null);
+  t('H49 clean: `Refs #N` beside `Fixes #N` on ONE body is a delivery, judged by H8', h49PartialLandingUnreleased(TAKEN49, [merged49(16010, 'Refs #16003 (item ①)\n\nFixes #16003')], [], CLAIMED49), null);
+  t('H49 clean: a `Refs` PR for another card is not this card\'s landing', h49PartialLandingUnreleased(TAKEN49, [merged49(16010, 'Refs #15999 (item ①)')], [], CLAIMED49), null);
+  t('H49 clean: a quoted `Refs #N` declares nothing', h49PartialLandingUnreleased(TAKEN49, [merged49(16010, 'deliberately not `Refs #16003`')], [], CLAIMED49), null);
+  t('H49 clean: an unassigned `pm:dispatched` card is H1\'s row', h49PartialLandingUnreleased(card49(['pm:dispatched'], []), LANDED49, [], CLAIMED49), null);
+  t('H49 clean: a CLOSED card is beyond this report\'s reach', h49PartialLandingUnreleased(card49(['pm:dispatched'], ['os-steve'], { state: 'closed' }), LANDED49, [], CLAIMED49), null);
+  t('H49 clean: an empty merged window', h49PartialLandingUnreleased(TAKEN49, [], [], CLAIMED49), null);
+  t('H49 clean: a missing merged window', h49PartialLandingUnreleased(TAKEN49, undefined, undefined, CLAIMED49), null);
+  t('H49 clean: an unmerged row in the merged window is not a landing', h49PartialLandingUnreleased(TAKEN49, [pr49(16010, 'Refs #16003 (item ①)')], [], CLAIMED49), null);
+
+  // Recency — the newest MERGED `Refs` PR decides, and unreadable stamps decline.
+  const TWO49 = [merged49(16010, 'Refs #16003 (item ①)', '2026-09-05T12:00:00Z'), merged49(16020, 'Refs #16003 (item ②)', '2026-09-05T20:12:00Z')];
+  t('H49 order: a claim BETWEEN two landings is older than the newest -> finding', typeof h49PartialLandingUnreleased(TAKEN49, TWO49, [], [cm49(CLAIM49, '2026-09-05T15:00:00Z')]), 'string');
+  t('H49 order: …naming the newest landing', h49row(TAKEN49, TWO49, [], [cm49(CLAIM49, '2026-09-05T15:00:00Z')]).includes('PR #16020'), true);
+  t('H49 order: …and counting the earlier one', h49row(TAKEN49, TWO49, [], [cm49(CLAIM49, '2026-09-05T15:00:00Z')]).includes('after 1 earlier merged `Refs` PR(s)'), true);
+  t('H49 order: …window order is irrelevant to which is newest', h49row(TAKEN49, [...TWO49].reverse(), [], [cm49(CLAIM49, '2026-09-05T15:00:00Z')]).includes('PR #16020'), true);
+  t('H49 order: a claim newer than the NEWEST landing stands it down', h49PartialLandingUnreleased(TAKEN49, TWO49, [], [cm49(CLAIM49, T49_AFTER)]), null);
+  t('H49 order: the NEWEST claim governs, not the first', h49PartialLandingUnreleased(TAKEN49, TWO49, [], [cm49(CLAIM49, T49_AFTER), cm49(CLAIM49, T49_BEFORE)]), null);
+  t('H49 order: a claim at the SAME second as the merge is not newer than it', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(CLAIM49, '2026-09-05T20:12:00Z')]), 'string');
+  t('H49 order: an unreadable `merged_at` is not a merge this row can date', h49PartialLandingUnreleased(TAKEN49, [merged49(16010, 'Refs #16003 (item ①)', 'not-a-date')], [], CLAIMED49), null);
+  t('H49 order: …and an unreadable claim stamp DECLINES rather than accuses', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(CLAIM49, 'not-a-date')]), null);
+  t('H49 order: …an unreadable release stamp likewise', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49(RELEASE49, 'not-a-date')]), null);
+  t('H49 order: a comment with no marker at all leaves the merge unanswered', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], [cm49('lgtm', T49_AFTER)]), 'string');
+
+  // Three input states, never two (#4690) — the H4 contract, unchanged here.
+  t('H49: an unconsulted thread is UNJUDGED, never clean', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], undefined), null);
+  t('H49: an UNREADABLE thread is UNJUDGED too', h49PartialLandingUnreleased(TAKEN49, LANDED49, [], null), null);
+  t('H49: a missing issue does not crash', h49PartialLandingUnreleased(undefined, LANDED49, [], CLAIMED49), null);
+  t('H49: an absent state field is judged, not exempted', typeof h49PartialLandingUnreleased({ ...TAKEN49, state: undefined }, LANDED49, [], CLAIMED49), 'string');
+
+  // Adjacency — the gap this row closes, and the overlap it shares with H8.
+  t('H49 adjacency: H8 is SILENT on a `Refs` PR whose head is not named for the card', h8MergedPrStillDispatched(TAKEN49, LANDED49, []), null);
+  t('H49 adjacency: …which is the carrier this row exists for', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], CLAIMED49), 'string');
+  const ON_CARD_BRANCH49 = [merged49(16010, 'Refs #16003 (item ①)', '2026-09-05T20:12:00Z', { head: { ref: 'claude/issue-16003-kanban-keys' } })];
+  // ⚖️ #16036 flipped the first of these. H8's merged side used to fire here
+  // through its branch fallback — a full-delivery verdict on a PARTIAL landing,
+  // prescribing the destructive de-label against a lawfully re-dispatched
+  // remainder — and its `Refs`-only exclusion now leaves this row the sole
+  // reader of BOTH head shapes.
+  t('H49 adjacency: on a head NAMED for the card H8 is silent too, since #16036', h8MergedPrStillDispatched(TAKEN49, ON_CARD_BRANCH49, []), null);
+  t('H49 adjacency: …and this row fires there — one reading now, and no silence', typeof h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], CLAIMED49), 'string');
+  t('H49 adjacency: …and reads the thread H8 cannot — a fresh claim stands THIS row down', h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], [cm49(CLAIM49, T49_AFTER)]), null);
+  t('H49 adjacency: H1 is silent on the carrier (the card HAS an assignee)', h1DispatchedNoAssignee(TAKEN49), false);
+  t('H49 adjacency: H2 is silent (the claim comment is complete)', h2AssigneeNoClaimComment(TAKEN49, [CLAIM49]), false);
+  t('H49 adjacency: H3 is silent (no `pm:queue`)', h3QueueAndDispatched(TAKEN49), false);
+  t('H49 adjacency: H24 is silent (not `pm:queue`)', h24QueuedWithAssignee(TAKEN49), null);
+  t('H49 adjacency: H47 is silent (no `Release:` newer than the claim)', h47ReleaseRecordDesync(TAKEN49, CLAIMED49), null);
+
+  // The counting policy — exported because a population that quietly shrinks
+  // makes a thinning corpus read as a clean board.
+  t('H49 population: an assigned `pm:dispatched` card is in', h49SpeaksAbout(TAKEN49), true);
+  t('H49 population: ⛔ `pm:queue` is out', h49SpeaksAbout(card49(['pm:queue'], ['os-steve'])), false);
+  t('H49 population: ⛔ `pm:queue` + `pm:dispatched` is out (H3)', h49SpeaksAbout(card49(['pm:queue', 'pm:dispatched'], ['os-steve'])), false);
+  t('H49 population: ⛔ no assignee is out (H1)', h49SpeaksAbout(card49(['pm:dispatched'], [])), false);
+  t('H49 population: ⛔ a closed card is out', h49SpeaksAbout(card49(['pm:dispatched'], ['os-steve'], { state: 'closed' })), false);
+  t('H49 population: a missing issue is out, never a crash', h49SpeaksAbout(undefined), false);
+
+  // Registry, counters and the clause.
+  t('H49 band: registered as a state row', familyBand('H49'), 'state');
+  t('H49 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H49'), true);
+  t('H49 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H49 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H49 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H49: both count keys ride the enumerated forwarding contract', ['partialCandidates', 'partialJudged'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H49 summary: the coverage pair is reported', saidBy('h49Partial', summaryLine({ partialJudged: 3, partialCandidates: 4 }, 0)).includes('3 of 4 open `pm:dispatched` + assigned card(s)'), true);
+  t('H49 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h49Partial', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H49 summary: …and says an unread thread is UNJUDGED, not clean', saidBy('h49Partial', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H49 summary: …and names H2 as the read it rides', saidBy('h49Partial', summaryLine({}, 0)).includes('H2 buys that thread'), true);
+  t('H49 summary: …and the merged window as its PR-side horizon', saidBy('h49Partial', summaryLine({}, 0)).includes('older than the window is invisible here'), true);
+  t('H49 summary: a bare line renders numbers, never `undefined`', saidBy('h49Partial', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

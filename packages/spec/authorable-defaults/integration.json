@@ -4,7 +4,7 @@
   "defaults": [
     "integration/CircuitBreakerConfig:failureThreshold = 5",
     "integration/CircuitBreakerConfig:halfOpenMaxRequests = 1",
-    "integration/CircuitBreakerConfig:monitoringWindow = 60000",
+    "integration/CircuitBreakerConfig:monitoringWindowMs = 60000",
     "integration/CircuitBreakerConfig:resetTimeoutMs = 30000",
     "integration/Connector:authentication = {\"type\":\"none\"}",
     "integration/Connector:connectionTimeoutMs = 30000",

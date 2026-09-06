@@ -186,7 +186,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'false positives': 3,
   'fail-closed': 2,
   '#11490: the population is per PROGRAM': 6,
-  'the registry, audited in BOTH directions': 10,
+  'the registry, audited in BOTH directions': 12,
   'census guard: sibling-config discovery going quiet is INVISIBLE': 14,
   'the import clause is bounded to ONE statement (#12555)': 8,
   'the declaration must still BE the workspace (#11510)': 22,
@@ -276,6 +276,38 @@ const REPO_ROOT = resolve(HERE, '..');
  * re-baseline), and `@objectstack/rest` (#12542 / PR #12570 at `3f41a215`, the
  * first package to take the #5286 sibling route for this reason).
  *
+ * ## The #12511 re-baseline — six packages onboarding one program each
+ *
+ * Seven packages took the #5286 sibling route in one change; six of them move
+ * this registry. Every admitted dep is annotated `via tsconfig.test.json` by
+ * this gate's own provenance output, i.e. reached ONLY through the program the
+ * change onboarded — condition 1 above, read off the instrument rather than
+ * asserted. `@objectstack/formula` onboarded a program and admitted NOTHING,
+ * which is the control that says the other six are reporting a real widening
+ * rather than an artifact of the population growing.
+ *
+ *   before   125 programs / 78 packages, 61 entries, 310 package-dep pairs
+ *   after    132 programs / 78 packages, 61 entries, 319 package-dep pairs
+ *
+ * so +7 programs, +0 entries (all six already had one) and +9 pairs: `mcp` +2
+ * (`lint`, `metadata-core`), `platform-objects` +3 (`core`, `formula`, `lint`),
+ * `connector-mcp` / `connector-openapi` / `connector-rest` +1 each
+ * (`service-automation`), `service-sms` +1 (`service-settings`). The ratchet is
+ * shrink-only from the new number.
+ *
+ * ⚠️ TWO OF THE NINE ARE A DISAGREEMENT WORTH NAMING, because a later reader
+ * will otherwise find it and think it was missed. `packages/mcp` and
+ * `packages/platform-objects` both alias `@objectstack/lint` (and mcp also
+ * `@objectstack/metadata-core`) to that package's SOURCE in their vitest
+ * configs, precisely so the suite runs against the checkout rather than a build
+ * artifact — while the test program admitted above still resolves those same
+ * specifiers' TYPES through `dist/`. So for those specifiers the RUN and the
+ * TYPE VERDICT read different artifacts. `paths` is the obvious repair and is
+ * measured to be the wrong one here: the refusal directly above is explicit
+ * that for the ONBOARDING case it billed other packages' source diagnostics
+ * into the onboarding package's ledger (PR #12570, 37 -> 42). Declared here
+ * instead, where the shrink-only ratchet keeps it visible.
+ *
  * ⛔ Still NOT open: `paths` remains the fix for a dep exposed through an
  * EXISTING program, and no widening may silence one. For the onboarding case
  * `paths` is additionally the WRONG tool, measured on PR #12570 rather than
@@ -294,9 +326,9 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/plugin-hono-server', '@objectstack/runtime', '@objectstack/spec',
   ],
   '@objectstack/client-react': ['@objectstack/client', '@objectstack/spec'],
-  '@objectstack/connector-mcp': ['@objectstack/core', '@objectstack/spec'],
-  '@objectstack/connector-openapi': ['@objectstack/core', '@objectstack/spec'],
-  '@objectstack/connector-rest': ['@objectstack/core', '@objectstack/spec'],
+  '@objectstack/connector-mcp': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
+  '@objectstack/connector-openapi': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
+  '@objectstack/connector-rest': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
   '@objectstack/connector-slack': [
     '@objectstack/core', '@objectstack/service-automation', '@objectstack/spec',
   ],
@@ -383,7 +415,8 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/knowledge-ragflow': ['@objectstack/core', '@objectstack/spec'],
   '@objectstack/lint': ['@objectstack/formula', '@objectstack/sdui-parser', '@objectstack/spec'],
   '@objectstack/mcp': [
-    '@objectstack/core', '@objectstack/formula', '@objectstack/spec', '@objectstack/types',
+    '@objectstack/core', '@objectstack/formula', '@objectstack/lint',
+    '@objectstack/metadata-core', '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/metadata': [
     '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/metadata-core',
@@ -399,7 +432,10 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata', '@objectstack/metadata-core',
     '@objectstack/metadata-protocol', '@objectstack/spec', '@objectstack/types',
   ],
-  '@objectstack/platform-objects': ['@objectstack/metadata-core', '@objectstack/spec'],
+  '@objectstack/platform-objects': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/lint',
+    '@objectstack/metadata-core', '@objectstack/spec',
+  ],
   // ── #14062 re-baseline, on the onboarding limb above ─────────────────────
   //
   // The director ruling of 2026-09-01 on #14062 (maintainer verbatim: 「同意」)
@@ -820,7 +856,10 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // #11490 re-baseline: NEW entries — reached only through `tsconfig.scripts.json`.
   '@objectstack/service-messaging': ['@objectstack/spec'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
-  '@objectstack/service-sms': ['@objectstack/core', '@objectstack/plugin-auth', '@objectstack/spec'],
+  '@objectstack/service-sms': [
+    '@objectstack/core', '@objectstack/plugin-auth', '@objectstack/service-settings',
+    '@objectstack/spec',
+  ],
   // #15050 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.test.json` (all 7 deps) and `tsconfig.scripts.json`
   // (`@objectstack/spec` again, no new pairs). Same shape as `service-cluster`
@@ -1650,7 +1689,36 @@ function check(root, registry) {
           '    then the program set itself moved, which since #11490 a package can do, and `paths` is\n' +
           '    measured to be the wrong tool for it: on PR #12570 it billed source diagnostics from\n' +
           '    other packages into this ledger. That case is a re-baseline, and it is\n' +
-          '    settled by the doc-block over the registry, not by this message. Read it first.',
+          '    settled by the doc-block over the registry, not by this message. Read it first.\n' +
+          // #16000: the `paths` limb is the FIRST remedy this message names, and for a consuming
+          // program whose `rootDir` excludes the dependency's source it is closed too — so an author
+          // reading this straight through walks into a SECOND wall nothing here mentioned. The
+          // knowledge was in this file the whole time (the header's with-`paths` red, and the PR
+          // #12570 reading over the registry) and nowhere in the text the author reads; the #15978
+          // round paid a full cycle for that gap, which is what #16000 records.
+          //
+          // Re-measured for this card rather than taken from the filing, on the same pair and
+          // through the same program: `@objectstack/runtime` -> `@objectstack/service-realtime`
+          // via `tsconfig.test.json`, with this message's own remedy applied to
+          // `packages/runtime/tsconfig.json`. That program goes from 191 errors to 204 — +13,
+          // ALL of them TS6059 naming `packages/services/service-realtime/src/**`, and not one
+          // new code error. Every other diagnostic code's count is unchanged.
+          //
+          // ⚠️ Written as a CONDITION and never as a blanket closure. `paths` remains the correct
+          // remedy wherever the consuming program's `rootDir` DOES contain the dependency's source,
+          // and a message overstating the closure would turn an author away from a route that is
+          // open — worse than today's silence. The condition is what was measured, not the verdict.
+          '    ⚠️ And `paths` is not always available — check its precondition before you take that\n' +
+          '    route. It puts the dependency\'s SOURCE into this program, so every file it pulls in has\n' +
+          '    to sit under the consuming program\'s `rootDir`. Where that `rootDir` excludes the\n' +
+          '    dependency (a package-local `./src`, whose `tsconfig*.json` header may say in so many\n' +
+          '    words that it will not widen), tsc admits those files and then reports TS6059 "is not\n' +
+          '    under rootDir" for that package\'s whole file graph — billed to THIS package\'s\n' +
+          '    test-typecheck ledger, which the package that owns the source cannot see. That is the\n' +
+          '    PR #12570 shape again, reached from the `paths` limb instead of the re-baseline one.\n' +
+          '    ⛔ In that case no self-serve remedy is left, and the honest move is to NOT take the\n' +
+          '    dependency: reach the subject through in-package source, or escalate. ⛔ Never widen\n' +
+          '    that ledger and ⛔ never widen a `rootDir` to make room — both are maintainer-only.',
       );
     if (gone.length > 0)
       failures.push(
@@ -2229,6 +2297,28 @@ function selfTest() {
       has(grown.failures, 'ONBOARDED'),
       'the failure text no longer names the one case the refusal does not cover — a package that moved '
         + 'the program set itself, which #11490 made possible and 14 queued onboardings each arrive at',
+    );
+
+    // #16000. `paths` is the FIRST remedy this message names, and it has a
+    // precondition the message did not state: the consuming program's `rootDir`
+    // must contain the dependency's source. Where it does not, that route ends in
+    // TS6059 billed to a ledger the owning package cannot see — measured by the
+    // #15978 round, which spent a full cycle discovering it, and re-measured in the
+    // PR for this card. Two pins, because the halves fail independently: the
+    // DIAGNOSTIC an author meets on that route, and the fact that what would clear
+    // it is not a dev seat's to take — a message naming neither recommends a route
+    // and then names no remaining self-serve option when it closes.
+    expect(
+      has(grown.failures, 'TS6059'),
+      'the failure text no longer names the diagnostic the `paths` remedy produces when the consuming '
+        + "program's `rootDir` excludes the dependency's source — the message then recommends a route "
+        + 'whose second wall is silent from here, which is the cycle #16000 recorded',
+    );
+    expect(
+      has(grown.failures, 'maintainer-only'),
+      'the failure text no longer says that the routes past that wall are closed to a dev seat — '
+        + 'without it this message names `paths` first and names NO remaining self-serve option for '
+        + 'the case where `paths` is unavailable, which is the whole of #16000',
     );
 
     const wide = check(root, { ...measuredNames, '@fx/violator': ['@fx/spec', '@fx/other', '@fx/gone'] });

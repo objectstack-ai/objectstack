@@ -664,6 +664,14 @@ export const CEILINGS = new Map([
   // convention as every entry above); it is a NEW file, so this is an added row
   // and no other row moves.
   ['.claude/skills/pm-dispatch/references/core-rules.md', 150],
+  // The app-vs-platform boundary — the deciding question (could this be written
+  // from the metadata alone, with no knowledge of this company?), the publication
+  // test (one consumer is a use, two is a contract) and the two anti-patterns.
+  // It is on-demand DETAIL by this header's own division of labour: AGENTS.md
+  // carries the one routing row, this file carries the rule and the measurement
+  // behind each clause. A NEW file, so this is not a raise and funds nothing —
+  // set at the landed line count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 66],
   // Lane job descriptions (maintainer ruling 2026-08-19: per-lane PM job
   // descriptions move from seat-post prose into versioned skill references).
   // Set at landed line counts (headroom 0, same convention as above).
@@ -732,6 +740,13 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 72],
+  // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
+  // alternates between the two multi-lane repos, oldest-first inside a repo, with a
+  // 4-hour starvation guard). A seat charter is read per seat session like every
+  // entry above. Set at the landed line count read from this ratchet's own run
+  // (headroom 0, same convention as above); it is a NEW file, so this is an added
+  // row and no other row moves.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 7],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -1029,6 +1044,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/true-green.md', 0],
   ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 352],
   ['.claude/skills/pm-dispatch/references/core-rules.md', 0],
+  ['.claude/skills/pm-dispatch/references/app-platform-boundary.md', 219],
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/services.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/cli.md', 0],
@@ -1037,6 +1053,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],

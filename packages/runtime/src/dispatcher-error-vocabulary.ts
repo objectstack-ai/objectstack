@@ -611,42 +611,41 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
     },
 
-    // ── pending registration [#14474]: an install-time refusal that GAINED an
-    // ── envelope, so the scan can see it for the first time ────────────────
-    // Not a widened scan and not a new producer: `NamespaceConflictError` has
-    // thrown from `SchemaRegistry.installPackage` since ADR-0048 Phase 1, but
-    // it carried no `code` at all, so there was no stamp for any pattern to
-    // match. #14474 gave it the ADR-0112 envelope its three install-time
-    // siblings already carried, which is what put a site here to classify.
-    // The door narrowing its `why` names is #9106's — the file header above
-    // carries it. The anchor lives here rather than in the string, because a
-    // runtime string reaches operators who cannot resolve a tracker id.
+    // ── pending registration [#14921]: a metadata-tree refusal that reaches a
+    // ── dispatcher-door read ───────────────────────────────────────────────
+    // Not a widened scan and not a demotion: this producer is NEW. #14921 made
+    // `FilesystemLoader.list()` (and the shared `loadMany()` walk behind it)
+    // refuse a metadata name derived from more than one file, where before it
+    // reported the name twice and served the first by extension precedence.
+    // The refusal carries the ADR-0112 envelope the ruling ordered, which is
+    // what puts a site here to classify.
     {
-        code: 'NAMESPACE_CONFLICT',
-        file: 'packages/objectql/src/registry.ts',
-        shape: 'classfield',
+        code: 'AMBIGUOUS_METADATA_STEM',
+        file: 'packages/metadata/src/loaders/ambiguous-metadata-stem.ts',
+        shape: 'classconst',
         door: 'dispatcher',
         verdict: 'pending-registration',
         why:
-            'ADR-0048 Phase 1 — the install-time namespace gate\'s refusal, raised by ' +
-            '`SchemaRegistry.installPackage` when a package\'s `manifest.namespace` is already owned by an ' +
-            'installed package that is not a co-owner of it (ADR-0130 D1). ⭐ Its reachability is what ' +
-            'separates it from the three ADR-0130 install-time rows below, whose `door: none` turns on ' +
-            'needing an artifact install SCOPE that no HTTP caller builds: this gate needs no scope, so the ' +
-            'ordinary one-package install reaches it. MEASURED on a booted stack (`@objectstack/verify` ' +
-            '`bootStack`, dev admin, two `POST /api/v1/packages` installs declaring one namespace), not ' +
-            'inferred from the call graph. Before the envelope the door answered `500` with ' +
-            '`code: INTERNAL_ERROR` — `packages/runtime/src/domains/packages.ts` catches and calls ' +
-            '`errorFromThrown(e, 500)`, and `resolveThrownHttpError` found neither `.status` nor `.code` to ' +
-            'read, so the caller\'s fallback stood. With the envelope the SAME request answers `422` and ' +
-            'the body carries `declaredCode: NAMESPACE_CONFLICT` beside `code: VALIDATION_ERROR` (the ' +
-            'member 422 derives through `standardErrorCodeForHttpStatus`, which does not name 422 and ' +
-            'buckets it as a client error). That demote is the door narrowing described in this file\'s ' +
-            'header, and it is exactly what ' +
-            'a `pending-registration` row records: the body PARSES, and what the producer loses instead is ' +
-            'its semantic code, silently absent from `error.code` until a ledger row lands. ⛔ Registering ' +
-            'it is the `packages/spec` lane\'s call and is NOT made here — this row is that batch\'s input, ' +
-            'and registering the code is what ratchets the row out again.',
+            "The ambiguous-metadata-stem refusal: two files under one `ROOT/TYPE/` deriving one metadata name across this "
+            + 'loader\'s REGISTERED extensions is an authoring error, refused with both paths and the type '
+            + 'named rather than resolved by the `.json` → `.yaml` → `.yml` → `.ts` → `.js` precedence '
+            + '(maintainer ruling, director seat, 2026-09-05, option 1 of three). ⭐ Reachability, which is '
+            + 'the only question this table answers, is DERIVED FROM THE CALL GRAPH and is a single '
+            + 'uncaught hop: `MetadataManager.listNames()` and `list()` re-raise this error rather than '
+            + 'absorbing it into their per-loader degradation (that discrimination is the point — a storage '
+            + 'outage still degrades), `listObjects()` is `list(\'object\')`, and '
+            + '`packages/runtime/src/domains/mcp.ts` `listObjectSummaries` awaits `meta.listObjects()` with '
+            + 'NO `try` around it, on the MCP bridge\'s request path. So the throw leaves the domain handler '
+            + 'and reaches `HttpDispatcher.errorFromThrown` — the dispatcher door. ⚠️ The measured in-repo '
+            + 'population of trees that can raise it is ZERO (a walk of 7,770 tracked files over 526 '
+            + 'directories found no stem collision among the registered extensions), so no existing tree '
+            + 'reaches the door today; the row records the PRODUCER, which is what this table is for, and '
+            + 'a producer nobody triggers yet is exactly the one that hides. The door narrows (see this '
+            + "file's header), so the body parses and `AMBIGUOUS_METADATA_STEM` rides `declaredCode` "
+            + 'while `error.code` '
+            + 'takes the member the 500 derives — the demote this verdict names. ⛔ Registering it widens '
+            + '`ApiErrorSchema.code` and is the `packages/spec` lane\'s call, NOT made here: this row is '
+            + 'that batch\'s input, and the registration is what ratchets it out again.',
     },
 
     // ── boot refusals: no HTTP boundary exists yet ─────────────────────────
@@ -847,7 +846,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     {
         code: 'DUPLICATE_ARTIFACT_OBJECT_NAME',
         file: 'packages/objectql/src/registry.ts',
-        shape: 'classfield',
+        // [#16159] `classconst`, not `classfield`, since the literal became the
+        // exported `DUPLICATE_ARTIFACT_OBJECT_NAME_CODE` constant in the producer. The VALUE is
+        // byte-identical and the scanner resolves the constant back to it; only the
+        // spelling the scan matches on moved. The verdict below is untouched.
+        shape: 'classconst',
         door: 'none',
         verdict: 'boot-refusal',
         why:
@@ -875,7 +878,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     {
         code: 'OBJECT_OWNERSHIP_CONFLICT',
         file: 'packages/objectql/src/registry.ts',
-        shape: 'classfield',
+        // [#16159] `classconst`, not `classfield`, since the literal became the
+        // exported `OBJECT_OWNERSHIP_CONFLICT_CODE` constant in the producer. The VALUE is
+        // byte-identical and the scanner resolves the constant back to it; only the
+        // spelling the scan matches on moved. The verdict below is untouched.
+        shape: 'classconst',
         door: 'none',
         verdict: 'boot-refusal',
         why:
@@ -903,6 +910,35 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'shape this repo\'s rejection tests assert on, not evidence of a door. If a door ever answers ' +
             'with this code itself, the verdict becomes pending-registration and it belongs in the ledger ' +
             'batch.'
+    },
+    {
+        code: 'STACK_CROSS_REFERENCE_INVALID',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'ADR-0130 — the AUTHORING gate\'s cross-reference refusal, raised by `defineStack` when a ' +
+            'stack\'s items name objects the stack does not define. One raise site for the whole rule ' +
+            'family: `validateCrossReferences` returns every finding as a `string[]` and `defineStack` ' +
+            'throws the collected set once, so the code names the family and the individual classes ride ' +
+            'the error\'s `issues` field (the five REFUSED ADR-0130 matrix classes — action `objectName`, ' +
+            'view `data.object`, permission-set `objects`, seed dataset `object`, import mapping ' +
+            '`targetObject` — plus the `hooks[].object` rule, and the wider duplicate-action-key, ' +
+            'global-`update`-action and mapping `javascript`-transform findings the same aggregate ' +
+            'carries). Before this envelope it threw a bare `Error`, so those classes were separable only ' +
+            'by message text. ⭐ MEASURED, not inferred from the call graph: `defineStack` is an ' +
+            'authoring/boot-time entry point, and no HTTP domain handler calls it. Every non-test ' +
+            'occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` (25 of them) ' +
+            'is a docstring or comment; the shipped callers are the CLI (`os validate`, `os build`) and ' +
+            'the `os serve` / `os migrate` host configs and `DevPlugin`, which load a stack module at ' +
+            'boot, where a throw aborts before any HTTP boundary exists. The two HTTP install sites — ' +
+            '`POST /packages` in `packages/runtime/src/domains/packages.ts` and `protocol.installPackage` ' +
+            '— call `SchemaRegistry.installPackage`, which never calls `defineStack`. So the code reaches ' +
+            'a reader only inside a message string, never as `error.code`. Its `status: 422` is the ' +
+            'ADR-0112 envelope shape this repo\'s rejection tests assert on, not evidence of a door. If a ' +
+            'door ever answers with this code itself, the verdict becomes pending-registration and it ' +
+            'belongs in the ledger batch.'
     },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //

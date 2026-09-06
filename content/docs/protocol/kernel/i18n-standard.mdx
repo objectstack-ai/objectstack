@@ -150,6 +150,15 @@ Fallback to: pt ✗ (not found)
 Fallback to: en (system default) ✓
 ```
 
+The "system default" step is the stack's **declared** fallback
+(`i18n.fallbackLocale`, else `defaultLocale`), never a literal `en`. For
+metadata labels one more rule applies (#15711): the inline `label:` authored
+on the metadata **is** the default locale's text, so a request for
+`defaultLocale` stops at the authored label without consulting any other
+locale's bundle — a `zh-CN` workspace with a courtesy `en` bundle serves
+Chinese to `zh-CN` and English to `en`. See
+[Translations](/docs/ui/translations#how-a-locale-is-chosen).
+
 ## Translation Bundles
 
 Translations are stored in **JSON files** organized by locale and namespace.

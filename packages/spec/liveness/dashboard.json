@@ -160,9 +160,14 @@
       "status": "live",
       "note": "objectui: DashboardRenderer.tsx:262 — grid gap."
     },
-    "refreshInterval": {
+    "refreshIntervalSeconds": {
       "status": "live",
-      "note": "objectui: DashboardRenderer.tsx:385-386 — sets a setInterval(onRefresh) every N seconds. Caveat: only fires when the host passes an `onRefresh` handler; the renderer is the consumer."
+      "note": "objectui: DashboardRenderer.tsx:385-386 — sets a setInterval(onRefresh) every N seconds. Caveat: only fires when the host passes an `onRefresh` handler; the renderer is the consumer. RENAMED 2026-09-05 (#15680, #14478 ruling B) from `refreshInterval`: the unit lived only in the describe prose. The consumer is in ANOTHER REPOSITORY, so unlike every other rename in this stack its reader could not move in the same PR — objectui at pin a472b07167a3 reads `schema.refreshInterval` at packages/plugin-dashboard/src/DashboardRenderer.tsx:448-453 and DashboardGridLayout.tsx:146-151, multiplies by 1000, and publishes the input name at packages/plugin-dashboard/src/index.tsx:94 (which is what sdui.manifest.json:805 in this repo records). Those sites move in a follow-up objectui card sequenced BEHIND a release that ships this rename; until then the renderer sees an absent key and simply does not start its timer."
+    },
+    "refreshInterval": {
+      "status": "dead",
+      "verifiedAt": "2026-09-05",
+      "note": "REMOVED 2026-09-05 (#15680, #14478 ruling B) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and renamed out of stored sources by the protocol-18 conversion `dashboard-refresh-interval-to-refresh-interval-seconds`. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); use `refreshIntervalSeconds` — rename the key, the value (seconds) is unchanged, and `os migrate meta --from 17` lists the mechanical edits. The tombstone is packages/spec/src/ui/dashboard.zod.ts#refreshInterval. The three rename-hint aliases `refresh` / `autoRefresh` / `pollInterval` were repointed to the new spelling in the same edit."
     },
     "globalFilters": {
       "status": "live",

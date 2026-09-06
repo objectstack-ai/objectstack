@@ -16,14 +16,27 @@
 import { describe, it, expect } from 'vitest';
 import { extractTranslations } from '../src/utils/i18n-extract';
 
-/** Mirror of the emit rule in `src/commands/i18n/extract.ts`. */
+/**
+ * Mirror of the emit rule in `src/commands/i18n/extract.ts`.
+ *
+ * ⚠️ The `--no-objects-only` arm reads the stack module's payload, which is
+ * everything the stack authors MINUS the registry baseline — the command spells
+ * it `stackAuthoredSubtree` / `translationModulePayload(data, 'stack')` since
+ * #14894. This mirror said `data`, baseline included, and the two verdicts
+ * diverge on exactly one input class: a bundle with no authored surface at all,
+ * where the baseline alone made this predicate positive and the command writes
+ * nothing (#16121). The mirror stays a re-implementation rather than an import —
+ * a mirror that calls the thing it mirrors cannot disagree with it — so the
+ * subtraction is spelled out here too.
+ */
 function emittedFiles(
   bundles: Record<string, { objects?: unknown; metadataForms?: unknown }>,
   flags: { objectsOnly: boolean; metadataForms: boolean },
 ): string[] {
   const files: string[] = [];
   for (const [locale, data] of Object.entries(bundles)) {
-    if (countLeaves(flags.objectsOnly ? data.objects : data) > 0) {
+    const { metadataForms: _registryBaseline, ...authored } = data;
+    if (countLeaves(flags.objectsOnly ? data.objects : authored) > 0) {
       files.push(`${locale}.objects.generated.ts`);
     }
     if (flags.metadataForms && countLeaves(data.metadataForms) > 0) {
@@ -78,5 +91,22 @@ describe('os i18n extract emit set', () => {
     expect(emittedFiles(result.bundles, { objectsOnly: false, metadataForms: true })).toContain(
       'en.metadata-forms.generated.ts',
     );
+  });
+
+  /**
+   * The input class the fixture above cannot reach: a bundle whose only content
+   * is the registry baseline. Under `--no-objects-only` the stack module's
+   * payload is then empty, so no stack module is written — and a mirror that
+   * counted the WHOLE bundle said one was. Driven on a synthetic bundle because
+   * the config fixture always authors an object.
+   */
+  it('writes no stack module for a bundle with no authored surface', () => {
+    const baselineOnly = { en: { metadataForms: { form: { field: { label: 'Name' } } } } };
+
+    expect(emittedFiles(baselineOnly, { objectsOnly: false, metadataForms: true })).toEqual([
+      'en.metadata-forms.generated.ts',
+    ]);
+    expect(emittedFiles(baselineOnly, { objectsOnly: false, metadataForms: false })).toEqual([]);
+    expect(emittedFiles(baselineOnly, { objectsOnly: true, metadataForms: false })).toEqual([]);
   });
 });

@@ -59,6 +59,7 @@
  */
 
 import type { ReferenceIntegrityFinding } from './reference-integrity-suite.js';
+import { recordsOf } from './object-graph.js';
 
 export type NavTargetRefSeverity = 'error' | 'warning';
 export type NavTargetRefFinding = ReferenceIntegrityFinding;
@@ -69,12 +70,6 @@ export const NAV_TARGET_UNRESOLVED = 'nav-target-unresolved';
 type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter(isRec);
-  if (isRec(v)) return Object.entries(v).map(([name, def]) => (isRec(def) ? { name, ...def } : { name }));
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -96,7 +91,7 @@ const NAV_TARGETS: ReadonlyArray<readonly [string, string, string, string]> = [
 
 function namesOf(collection: unknown): Set<string> {
   const out = new Set<string>();
-  for (const entry of asArray(collection)) {
+  for (const entry of recordsOf(collection)) {
     const n = strName(entry.name);
     if (n) out.add(n);
   }
@@ -107,7 +102,7 @@ export function validateNavTargetRefs(stack: unknown): NavTargetRefFinding[] {
   const findings: NavTargetRefFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
   if (apps.length === 0) return findings;
 
   const declared = new Map<string, Set<string>>();
@@ -165,7 +160,7 @@ export function validateNavTargetRefs(stack: unknown): NavTargetRefFinding[] {
     walk(app.navigation, `apps[${ai}].navigation`);
     // `areas[]` is the other nav container; it was once skipped wholesale in
     // `stack.zod.ts`, so an areas-based app got no nav validation at all.
-    for (const [ari, area] of asArray(app.areas).entries()) {
+    for (const [ari, area] of recordsOf(app.areas).entries()) {
       walk(area.items, `apps[${ai}].areas[${ari}].items`);
       walk(area.navigation, `apps[${ai}].areas[${ari}].navigation`);
     }

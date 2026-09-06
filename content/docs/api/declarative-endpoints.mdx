@@ -72,7 +72,7 @@ export default defineStack({
       // `type: 'flow'`, as `acme_lead_intake` below shows.
       objectParams: { object: 'acme_lead', operation: 'find' },
       // Omitting `authRequired` is the safe spelling — it defaults to `true`.
-      cacheTtl: 30,
+      cacheTtlSeconds: 30,
     },
     {
       name: 'acme_lead_intake',
@@ -95,7 +95,7 @@ refused is refused before you deploy.
 A declared endpoint is **not a registered route**. It is matched in the dispatcher's
 unmatched-request seam, which is what makes it structurally impossible for your
 declaration to shadow a built-in one. Match → policy chain (`rateLimit` → `authRequired` →
-`cacheTtl`) → delegation to an existing pipeline:
+`cacheTtlSeconds`) → delegation to an existing pipeline:
 
 | `type` | Delegates to | Request shape |
 |:---|:---|:---|
@@ -188,12 +188,13 @@ mapping refusals out of this family rather than nesting them.
 - An **armed** budget must be usable: `maxRequests` above `0` and `windowMs` above `0`. A
   zero-or-negative allowance rejects every request including your own health checks, and
   the runtime fails closed on it rather than serving unmetered.
-- `cacheTtl` is seconds and cannot be negative.
-- `cacheTtl` is **GET-only**. It becomes a `Cache-Control` header on a successful answer,
+- `cacheTtlSeconds` cannot be negative — the key carries its unit, so there is no
+  second place for it to disagree with.
+- `cacheTtlSeconds` is **GET-only**. It becomes a `Cache-Control` header on a successful answer,
   and a non-GET answer is not a cacheable representation, so on any other method the key
   could never take effect and is refused instead of ignored.
 
-`cacheTtl: 0` is not the same as omitting the key: `0` emits `Cache-Control: no-store`
+`cacheTtlSeconds: 0` is not the same as omitting the key: `0` emits `Cache-Control: no-store`
 (saying "never store this"), while omitting it sends no caching header at all. A positive
 ttl emits `private, max-age=<ttl>` — `private` is a security rule and not a tuning choice,
 because any answer can be RLS-trimmed for its caller and a shared cache must never hand
@@ -243,7 +244,7 @@ export const partnerWebhook: ApiEndpoint = {
 
 What that budget buys you, and what it does not:
 
-- **Metering runs before the auth gate** (`rateLimit` → `authRequired` → `cacheTtl`). That
+- **Metering runs before the auth gate** (`rateLimit` → `authRequired` → `cacheTtlSeconds`). That
   order is deliberate: the traffic that most needs a budget — credential stuffing,
   scraping — is exactly the traffic that ends in a `401`, so a denied request still spends
   a token.

@@ -21,6 +21,7 @@ import { z } from 'zod';
  * }
  */
 import { lazySchema } from '../../shared/lazy-schema';
+import { retiredKey } from '../../shared/retired-key';
 export const EventQueueConfigSchema = lazySchema(() => z.object({
   /**
    * Queue name
@@ -125,7 +126,7 @@ export type EventReplayConfigParsed = z.infer<typeof EventReplayConfigSchema>;
  * {
  *   "enabled": true,
  *   "snapshotInterval": 100,
- *   "retention": 365
+ *   "retentionDays": 365
  * }
  */
 export const EventSourcingConfigSchema = lazySchema(() => z.object({
@@ -149,8 +150,18 @@ export const EventSourcingConfigSchema = lazySchema(() => z.object({
   /**
    * Event retention
    */
-  retention: z.number().int().positive().default(365)
+  // Renamed from `retention` (#15678, #14478 ruling B): the unit lived only in
+  // the describe prose, one key below the count-valued `snapshotRetention`.
+  retentionDays: z.number().int().positive().default(365)
     .describe('Days to retain events'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  retention: retiredKey(
+    '`EventSourcingConfig.retention` was renamed to `retentionDays` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged.'
+    + ' The neighbouring `snapshotRetention` is a COUNT of snapshots, not a duration, so it keeps its name.',
+  ),
   
   /**
    * Aggregate types

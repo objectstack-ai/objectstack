@@ -770,7 +770,7 @@ this shape over HTTP — it is an in-process model, not a wire body.
   "status": "healthy",
   "timestamp": "2024-01-15T11:00:00.000Z",
   "metrics": {
-    "uptime": 3600000
+    "uptimeMs": 3600000
   },
   "checks": [
     { "name": "healthCheck", "status": "passed" }
@@ -789,12 +789,13 @@ this shape over HTTP — it is an in-process model, not a wire body.
 | `"plugin-loaded"` | no `checkMethod` is configured, **or** the configured name does not resolve to a function on the plugin |
 | `"health-check"` | the check **threw** — a `timeout` overrun included, since the race surfaces it as a rejection. A fixed name, neither the method's nor the default's, and always `status: "failed"` |
 
-`metrics.uptime` is in **milliseconds** (`Date.now() - startTime`), unlike
-the seconds-valued `uptime` of `GET /health` above, and the report carries no
+`metrics.uptimeMs` is in **milliseconds** (`Date.now() - startTime`), unlike
+the seconds-valued `uptime` of `GET /health` above — which is the very
+collision the unit-in-the-key-name rule exists to remove — and the report carries no
 `version` field — it identifies its plugin by the key it is stored under. The
 optional `message` is set only when a check fails; the schema's remaining
 `metrics` fields (`memoryUsage`, `cpuUsage`, `activeConnections`, `errorRate`,
-`responseTime`) and its `dependencies` array are declared but left unset by the
+`responseTimeMs`) and its `dependencies` array are declared but left unset by the
 monitor today.
 
 ## Shutdown Sequence

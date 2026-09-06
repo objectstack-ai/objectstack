@@ -5,7 +5,7 @@
  * 
  * Runtime Services & Infrastructure Configuration
  * - Infrastructure: Cache, Queue, Storage, Search, HTTP
- * - Observability: Audit, Logging, Metrics, Tracing, Change Management
+ * - Observability: Audit, Logging, Metrics, Tracing
  * - Security: Compliance, Encryption, Masking, Auth Config
  * - Services: Job, Worker, Notification, Translation
  */
@@ -46,7 +46,22 @@ export * from './stack-server.zod';
 export * from './logging.zod';
 export * from './metrics.zod';
 export * from './tracing.zod';
-export * from './change-management.zod';
+// change-management.zod (ChangeTypeSchema / ChangePrioritySchema /
+// ChangeStatusSchema / ChangeImpactSchema / RollbackPlanSchema /
+// ChangeRequestSchema + every type alias) was REMOVED per ADR-0049
+// enforce-or-remove (#15513, maintainer ruling 2026-09-05, ruled A). The module
+// declared an ITIL change-request vocabulary — impact assessment, CAB approval,
+// implementation steps, rollback plans, a `securityImpact.requiresSecurityApproval`
+// gate — and no runtime ever parsed or read any of it: zero consumers outside
+// this package repo-wide (examples, skills and objectui at the pinned sha
+// included), no stack key, no metadata type, absent from the liveness ledgers.
+// `approval.required` and `requiresSecurityApproval` read as gates the platform
+// enforced, and neither ever did. The fourteen #14477 deadline-key tombstones
+// the three compliance families carried leave with their defs' source; their
+// `RETIRED_KEYS_BY_MAJOR[18]` entries stay as history. An approval that must
+// actually gate something is a flow (ADR-0018) with an approval node; metadata
+// change tracking is `sys_metadata` history and the package model (ADR-0126).
+// See the D3 record `change-management-family-retired`.
 export * from './migration.zod';
 
 // Security & Compliance
@@ -65,9 +80,33 @@ export * from './metadata-form-registry';
 // ADR-0066 ⑦/⑧ if needed. encryption.zod stays (EXPERIMENTAL — roadmap).
 export * from './encryption.zod';
 export * from './security-context.zod';
-export * from './incident-response.zod';
+// incident-response.zod (IncidentSeveritySchema / IncidentCategorySchema /
+// IncidentStatusSchema / IncidentResponsePhaseSchema /
+// IncidentNotificationRuleSchema / IncidentNotificationMatrixSchema /
+// IncidentSchema / IncidentResponsePolicySchema + every type alias) was REMOVED
+// per ADR-0049 enforce-or-remove (#15513, maintainer ruling 2026-09-05, ruled
+// A; not roadmapped). The module declared an ISO 27001 A.5.24–A.5.28
+// incident-management vocabulary — severity grading, response phases, a
+// notification matrix with `notifyRegulators`, a policy with
+// `requirePostIncidentReview` — and no runtime ever parsed or read any of it:
+// zero consumers outside this package repo-wide (examples, skills and objectui
+// at the pinned sha included), no stack key, no metadata type, absent from the
+// liveness ledgers. An author writing `notifyRegulators: true` held a
+// compliance promise the platform never kept, with no error and no feedback —
+// the exact declared-≠-enforced shape ADR-0049 exists for, on a compliance
+// surface where "believed it notified the regulator" and "knew it did not" are
+// not the same risk. Incident response as authorable protocol metadata returns
+// via the enforce route of ADR-0049 through a new ADR — the engine first, the
+// vocabulary second. See the D3 record `incident-response-family-retired`.
 export * from './supplier-security.zod';
-export * from './training.zod';
+// training.zod (TrainingCategorySchema / TrainingCompletionStatusSchema /
+// TrainingCourseSchema / TrainingRecordSchema / TrainingPlanSchema + every type
+// alias) was REMOVED per ADR-0049 enforce-or-remove (#15513, same ruling). The
+// module declared an ISO 27001 A.6.3 training-management vocabulary — courses
+// with `mandatory`, plans with `trackCompletion` / `sendReminders`, completion
+// records — and no runtime ever parsed or read any of it (same census, same
+// zero). Nothing assigned a course, tracked a completion, sent a reminder or
+// expired a certification. See the D3 record `training-family-retired`.
 
 // Settings (ADR-0007: Manifest + K/V Store + Resolver)
 export * from './settings-manifest.zod';

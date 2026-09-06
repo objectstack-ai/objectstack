@@ -309,8 +309,24 @@ function checkCondition(value: any, condition: any): boolean {
         // ⚠️ `$eq` ONLY, deliberately. The exemption is written over the
         // OPERATOR and not over "the comparand is null", because the latter
         // spelling would have moved `$in: [null]` / `$nin: [null]` with it —
-        // and those are #13357's cells, `needs-user-decision`, held for the
-        // maintainer. They are measured byte-identical across this change.
+        // and those were #13357's cells, `needs-user-decision`, held for the
+        // maintainer when this landed. They are measured byte-identical
+        // across this change.
+        //
+        // ⛔ They are NOT held any more, and a reader arriving here must not
+        // escalate them a second time: the maintainer ruled them on 2026-08-31
+        // (option C, #13357) and the shapes are REFUSED at the contract's
+        // validation entrance (`assertListComparandShapes`) — the same door the
+        // `$gte: null` note below records for the ordering position — with the
+        // negative pin `memory-null-list-member-unreachable.test.ts`, and the
+        // sibling header in `memory-matcher-null-value-and-comparand.test.ts`
+        // already says so in the past tense.
+        //
+        // ⛔ That ruling is NOT a reason to re-spell this exemption over "the
+        // comparand is null". The reason above is unchanged: a rule written
+        // over the VALUE would still reach arms whose no-value answer is ruled
+        // elsewhere. Only the cells' STATE moved — refused at the door, rather
+        // than held for a ruling.
         if (value === undefined && op !== '$exists' && op !== '$null' && op !== '$eq'
             && !noValueSatisfiesNegation(op)) {
             return false; 

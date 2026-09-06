@@ -198,10 +198,10 @@ describe('RouteDefinitionSchema', () => {
         method: 'POST',
         path: '/api/batch',
         handler: 'batch_process',
-        timeout: 30000,
+        timeoutMs: 30000,
       });
 
-      expect(route.timeout).toBe(30000);
+      expect(route.timeoutMs).toBe(30000);
     });
 
     it('should accept route with rate limit', () => {
@@ -220,11 +220,11 @@ describe('RouteDefinitionSchema', () => {
         method: 'POST',
         path: '/api/heavy-operation',
         handler: 'heavy_handler',
-        timeout: 60000,
+        timeoutMs: 60000,
         rateLimit: 'moderate',
       });
 
-      expect(route.timeout).toBe(60000);
+      expect(route.timeoutMs).toBe(60000);
       expect(route.rateLimit).toBe('moderate');
     });
   });
@@ -253,7 +253,7 @@ describe('RouteDefinitionSchema', () => {
         description: 'Creates a new order in the system',
         public: false,
         permissions: ['orders.create'],
-        timeout: 5000,
+        timeoutMs: 5000,
       };
 
       expect(() => RouteDefinitionSchema.parse(route)).not.toThrow();
@@ -553,5 +553,30 @@ describe('Integration Tests', () => {
     [...systemRoutes, ...apiRoutes].forEach(route => {
       expect(() => RouteDefinitionSchema.parse(route)).not.toThrow();
     });
+  });
+});
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('RouteDefinition.timeout \u2192 timeoutMs (#15677)', () => {
+  const base = { method: 'GET' as const, path: '/api/test', handler: 'test_handler' };
+
+  it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
+    const result = RouteDefinitionSchema.safeParse({ ...base, timeout: 30000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`RouteDefinition\.timeout` was renamed to `timeoutMs`/);
+  });
+
+  it('accepts `timeoutMs` at the same magnitude the retired key carried', () => {
+    const parsed = RouteDefinitionSchema.parse({ ...base, timeoutMs: 30000 });
+    expect(parsed.timeoutMs).toBe(30000);
+    expect(parsed).not.toHaveProperty('timeout');
   });
 });
