@@ -15969,6 +15969,12 @@ function selfTest() {
 
   // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
   const gov = (rows) => governingClaim(rows);
+  // ⚠️ `?? []` rather than a bare `.branches` on the three-valued return, for
+  // the reason H34's row wrapper carries: a case built to go NULL under a
+  // mutation must report a NAMED failing case, not throw and abort the suite
+  // before the remaining cases run — measured while ablating the #16170 anchor,
+  // where the reverse run died on a TypeError naming neither row nor mutation.
+  const govBranches = (rows) => (gov(rows)?.branches ?? []).join(',');
   t('H20 claim: a claim comment naming a branch is found', gov(claim8878).branches.join(','), 'claude/issue-8878-dispatch-latency');
   t('H20 claim: …and carries its timestamp', gov(claim8878).createdAt, minsAgo20(74));
   t('H20 claim: a `Branch:` line in a comment that is NOT a claim is ignored', gov([claimRow(minsAgo20(90), 'Branch: `claude/issue-1-a`')]), null);
@@ -15976,7 +15982,7 @@ function selfTest() {
   // #16170 — the MIXED shape, which is the only malignant one: an undecorated
   // `Claim:` (so the marker matches and the comment IS a claim) with the branch
   // written as a bullet under it. It governs now.
-  t('H20 claim: the MIXED shape governs — undecorated `Claim:`, bulleted `Branch:` (#16170)', gov([claimRow(minsAgo20(30), 'Claim: this card is held by session `session_x`.\n\n- Branch: `claude/issue-15511-zh-gap-helptext`\n- Worktree: `/home/user/objectstack-15511`')]).branches.join(','), 'claude/issue-15511-zh-gap-helptext');
+  t('H20 claim: the MIXED shape governs — undecorated `Claim:`, bulleted `Branch:` (#16170)', govBranches([claimRow(minsAgo20(30), 'Claim: this card is held by session `session_x`.\n\n- Branch: `claude/issue-15511-zh-gap-helptext`\n- Worktree: `/home/user/objectstack-15511`')]), 'claude/issue-15511-zh-gap-helptext');
   // …while a FULLY bulleted claim governs nothing, the marker having missed it
   // — and there the sibling's "no claim comment" reading is the true one.
   t('H20 claim: …and a fully bulleted claim still governs nothing, the marker having missed', gov([claimRow(minsAgo20(30), '- Claim: seat.\n- Branch: `claude/issue-1-a`')]), null);
