@@ -912,7 +912,7 @@ function scanBranchRouting(
             `Declare the branching one way and one way only: a \`condition\` per branch plus ` +
             `\`isDefault: true\` on the fallback, or \`config.conditions[]\` whose \`label\` matches an ` +
             `out-edge's. If the unconditional fan-out is what you meant, drop \`type: 'decision'\` and ` +
-            `use the node it already behaves as. (#4414)`,
+            `use the node it already behaves as.`,
           rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
         });
       }
