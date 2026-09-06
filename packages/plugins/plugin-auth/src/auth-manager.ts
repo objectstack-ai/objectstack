@@ -5449,26 +5449,64 @@ export class AuthManager {
    * [#16025] The path prefix better-auth matches its routes under — the SAME
    * string this manager hands better-auth as its `basePath`, normalised once.
    *
-   * ## Why this is public, and why it is the ONLY definition
+   * ## Why this is public
    *
-   * An HTTP adapter that mounts this service has to know where its routes
-   * live, and until this method existed it could not ask: `config` is private
-   * and nothing else exposed the value. `@objectstack/hono`'s `createHonoApp`
-   * therefore mounted the auth surface under its OWN `prefix` option, whose
-   * default (`/api`) does not compose with this one (`/api/v1/auth`), so on
-   * the documented embed better-auth was never reached at all — measured, on a
-   * real boot:
+   * An HTTP adapter that mounts this service has to know where its routes live,
+   * and it had no member that answers THAT question. `config` is private. The
+   * value was not unreachable, though, and an earlier draft of this docblock
+   * said it was: `getAuthIssuer()` is public and its URL PATH is the configured
+   * base path (`http://localhost:3000/api/v1/auth`) — `auth-plugin.ts:3176`
+   * already reads a path that way, off `getMcpResourceUrl()`. What an adapter
+   * would have been doing is parsing a path back out of an OAuth issuer
+   * identifier, which is a different contract that happens to contain the
+   * answer. A dedicated accessor is the cleaner design; being the ONLY exposure
+   * was never the reason for it.
+   *
+   * `@objectstack/hono`'s `createHonoApp` mounted the auth surface under its OWN
+   * `prefix` option instead, whose default (`/api`) does not compose with this
+   * one (`/api/v1/auth`), so on the documented embed better-auth was never
+   * reached at all — measured, on a real boot:
    *
    *     POST /api/auth/sign-in/email  (valid shape, wrong password)  ->  200 {}
    *     POST /api/v1/auth/delete-user                                ->  401 {"message":"Unauthorized","code":"UNAUTHORIZED"}
    *
-   * ⛔ The value must not be re-derived by any caller, here or in an adapter.
-   * Two readers already existed inside this file — the `basePath` handed to
-   * better-auth and `betterAuthEndpointPath`'s own normalising copy — and they
-   * normalised DIFFERENTLY: a configured `'api/v1/auth'` reached better-auth
-   * without its leading slash while the ownership walk tested against
-   * `'/api/v1/auth'`. Both now read this method, so "where better-auth serves"
-   * has one answer by construction rather than by three sites agreeing.
+   * ## ⛔ What this method is NOT — stated because the first spelling claimed it
+   *
+   * It is NOT the single definition of the base path. FOUR readers of
+   * `this.config.basePath` existed in this file; this method collapses TWO of
+   * them — the string handed to better-auth and `betterAuthEndpointPath`'s
+   * normalising copy. Two remain, each with its own normaliser:
+   *
+   *     getAuthIssuer()      adds a leading slash, KEEPS a trailing one
+   *     getMcpResourceUrl()  adds nothing, strips a trailing `/auth`
+   *
+   * They are deliberately untouched, and collapsing them is not a free move.
+   * `getAuthIssuer()` is the `iss` this AS advertises and `getMcpResourceUrl()`
+   * is the RFC 8707 resource identifier a token's `aud` is matched against —
+   * both compared by exact string by relying parties, so moving either
+   * re-selects tokens. Measured on this manager, at this commit:
+   *
+   *     basePath '/api/v1/auth/'   getAuthIssuer()     -> …/api/v1/auth/   (slash KEPT, while
+   *                                                                        better-auth is now
+   *                                                                        configured without it)
+   *     basePath 'api/v1/auth'     getMcpResourceUrl() -> http://localhost:3000api/v1/mcp
+   *                                                                       (malformed; pre-existing,
+   *                                                                        unchanged by this card)
+   *
+   * ⇒ ⛔ Do not read this method as licence to assume one answer exists. Two
+   * more spellings of "the auth base path" are live in this file, and retiring
+   * them is a decision about published OAuth identifiers, not a tidy-up. It is
+   * reported to the PM rather than taken on a mount card.
+   *
+   * ## What the two collapsed readers actually disagreed about
+   *
+   * As STRINGS, and not as behaviour — measured, not inferred. A configured
+   * `'api/v1/auth'` reached better-auth without its leading slash while the
+   * ownership walk tested `'/api/v1/auth'`; but better-auth/better-call tolerate
+   * the missing slash, so on the merge base `handleRequest` answered `200` and
+   * `ownsRoute` answered `true` on the SAME request. The divergence was LATENT.
+   * Collapsing it closes a trap; it does not repair an observable behaviour, and
+   * ⛔ no input class moved because of it.
    *
    * Normalisation is exactly what `betterAuthEndpointPath` always applied: a
    * leading slash is added when absent, trailing slashes are stripped. A

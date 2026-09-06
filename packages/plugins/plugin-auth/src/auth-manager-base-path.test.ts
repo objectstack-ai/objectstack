@@ -1,16 +1,26 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #16025 — `AuthManager.getBasePath()`, the one definition of "where does
-// better-auth serve".
+// #16025 — `AuthManager.getBasePath()`: the string an HTTP adapter reads to
+// learn where better-auth serves.
+//
+// ⛔ NOT "the one definition" of that value, which an earlier spelling of this
+// header claimed. Two more readers of `this.config.basePath` are live in
+// `auth-manager.ts` — `getAuthIssuer()` and `getMcpResourceUrl()`, each with its
+// own normaliser — and they are deliberately untouched: they are published OAuth
+// identifiers, compared by exact string. The accessor's docblock carries the
+// measurement and the reason.
 //
 // ## Why this member is public, and why a rename is a breaking change
 //
-// An HTTP adapter that mounts this service has to know where its routes live.
-// Until this accessor existed it could not ask — `config` is private and
-// nothing exposed the value — so `@objectstack/hono`'s `createHonoApp` mounted
-// the auth surface under its OWN `prefix` option, whose default (`/api`) does
-// not compose with this one (`/api/v1/auth`). Measured on a real boot with the
-// documented embed `createHonoApp({ kernel })`, before the fix:
+// An HTTP adapter that mounts this service has to know where its routes live,
+// and no member answered THAT question. (The value was not unreachable —
+// `getAuthIssuer()` is public and its URL path is the configured base path — but
+// parsing a path back out of an issuer identifier is reading a different
+// contract that happens to contain the answer.) So `@objectstack/hono`'s
+// `createHonoApp` mounted the auth surface under its OWN `prefix` option, whose
+// default (`/api`) does not compose with this one (`/api/v1/auth`). Measured on
+// a real boot with the documented embed `createHonoApp({ kernel })`, before the
+// fix:
 //
 //     POST /api/auth/sign-in/email  (valid shape, wrong password)  ->  200 {}
 //
@@ -19,10 +29,12 @@
 // rename or removal here silently returns that adapter to the mount above.
 //
 // ⛔ The behaviour that matters most is NOT assertable from this package: that
-// better-auth is really configured with the string this returns. It is one
-// expression — `createAuthInstance` passes `this.getBasePath()` and
-// `betterAuthEndpointPath` reads the same call — so the two cannot disagree by
-// construction rather than by two sites happening to agree. The observable
+// better-auth is really configured with the string this returns. Those two
+// sites are one expression — `createAuthInstance` passes `this.getBasePath()`
+// and `betterAuthEndpointPath` reads the same call — so THEY cannot disagree by
+// construction rather than by happening to agree. (What they disagreed about
+// before was a string, not a behaviour: better-auth tolerates a missing leading
+// slash, so both spellings routed.) The observable
 // proof runs on a real boot in `@objectstack/verify`
 // (`auth-base-path-contract.test.ts`), which is the nearest package that can
 // hold a live better-auth and this manager at once.
@@ -48,9 +60,13 @@ describe('#16025 AuthManager.getBasePath', () => {
   });
 
   it('normalises the spellings that used to reach better-auth and the ownership walk differently', () => {
-    // Before this method there were two normalising sites and they disagreed:
-    // a configured `api/v1/auth` reached better-auth WITHOUT its leading slash
-    // while `betterAuthEndpointPath` tested against `/api/v1/auth`.
+    // Before this method there were two normalising sites and they disagreed as
+    // STRINGS: a configured `api/v1/auth` reached better-auth WITHOUT its
+    // leading slash while `betterAuthEndpointPath` tested against
+    // `/api/v1/auth`. ⛔ They did NOT disagree as behaviour — better-auth and
+    // better-call tolerate the missing slash, so on the merge base
+    // `handleRequest` answered `200` and `ownsRoute` answered `true` on the same
+    // request. What these spellings buy is the trap closed, not a class moved.
     expect(managerWith('api/v1/auth').getBasePath()).toBe('/api/v1/auth');
     expect(managerWith('/api/v1/auth/').getBasePath()).toBe('/api/v1/auth');
     expect(managerWith('/api/v1/auth///').getBasePath()).toBe('/api/v1/auth');
