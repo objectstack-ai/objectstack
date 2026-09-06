@@ -178,6 +178,8 @@ import { fileURLToPath } from 'node:url';
 // `build`), and what a local mutation run has to do by hand.
 import {
   SqlDriver,
+  isOrganizationScopedUnique,
+  isUniqueScopeDeclared,
   normalizeDeclaredIndex,
   uniqueIndexesFromFields,
   type DeclaredIndexInput,
@@ -1114,6 +1116,66 @@ describe('#16091 — the driver is the ORACLE, not just the source text', () => 
     expect(tsWidth("table.string('f', 100)")).toBe(100);
     expect(tsWidth("table.string('f')")).toBe(DEFAULT_CHARS);
     expect(() => tsWidth("table.jsonb('f')")).toThrow();
+  });
+
+  // ── The unique VOCABULARY, against the driver's own two predicates ────────
+
+  /**
+   * Every spelling worth asking about, including the ones the spec rejects by
+   * name — an "anything truthy" reading would silently accept those.
+   */
+  const UNIQUE_SPELLINGS: unknown[] = [
+    true, false, undefined, null, 0, 1, '', 'global', 'organization',
+    'tenant', 'org', 'yes', 'GLOBAL', 'Organization', {}, [],
+  ];
+
+  it('the unique vocabulary is the driver\'s own predicate, spelling for spelling', () => {
+    // ⭐ This is the axis the `@objectstack/spec/data` import buys. `generate.ts`
+    // now reaches the same spec `isUniqueDeclared` the driver's wrapper reaches,
+    // so a change to THAT predicate moves the driver and the generators together
+    // and cannot open a divergence at all. What can still open one is the
+    // driver's own wrapper moving alone — which is what this catches, against
+    // `isUniqueScopeDeclared` itself rather than against its source text.
+    const disagreements: string[] = [];
+    for (const unique of UNIQUE_SPELLINGS) {
+      const driverKeys = isUniqueScopeDeclared(unique);
+      const generatorsKeyed =
+        sqlWidth(columnsFor({ type: 'text', maxLength: PROBE_CHARS, unique }).sql) === PROBE_CHARS;
+      if (driverKeys !== generatorsKeyed) {
+        disagreements.push(`${JSON.stringify(unique)}: driver ${driverKeys}, generators ${generatorsKeyed}`);
+      }
+    }
+    expect(
+      disagreements,
+      'A `unique` spelling the driver keys on is a spelling the generated column must be sized ' +
+      'for, and one it does not key on is one the generated column must leave unbounded.',
+    ).toEqual([]);
+    // Non-vacuity: the sweep really carries both answers, in quantity.
+    expect(UNIQUE_SPELLINGS.filter((u) => isUniqueScopeDeclared(u))).toHaveLength(3);
+    expect(UNIQUE_SPELLINGS.filter((u) => !isUniqueScopeDeclared(u)).length).toBeGreaterThan(8);
+  });
+
+  it('the organization-SCOPE vocabulary is the driver\'s own predicate too', () => {
+    // The second half of the field-level judgment: which of those spellings
+    // ALSO keys the tenant column. Asked of the driver's exported predicate,
+    // not of the word — bare `true` is organization-scoped at field level and
+    // `'global'` is not, a distinction a "detects the word" reading loses.
+    for (const unique of UNIQUE_SPELLINGS) {
+      const scopedByDriver = isUniqueScopeDeclared(unique) && isOrganizationScopedUnique(unique);
+      const out = emit({
+        f: { type: 'text', maxLength: PROBE_CHARS, unique },
+        organization_id: { type: 'text', maxLength: PROBE_CHARS },
+      });
+      const tenantKeyed = sqlWidth(sqlColumn(out.sql, 'organization_id')) === PROBE_CHARS;
+      expect(
+        tenantKeyed,
+        `unique: ${JSON.stringify(unique)} — the driver ${scopedByDriver ? 'keys' : 'does not key'} ` +
+        'the tenant column for this spelling',
+      ).toBe(scopedByDriver);
+    }
+    // Non-vacuity: both dispositions really occur across the sweep.
+    expect(UNIQUE_SPELLINGS.some((u) => isUniqueScopeDeclared(u) && isOrganizationScopedUnique(u))).toBe(true);
+    expect(UNIQUE_SPELLINGS.some((u) => isUniqueScopeDeclared(u) && !isOrganizationScopedUnique(u))).toBe(true);
   });
 
   // ── F1: the key set, recomputed from the driver's own builders ────────────
