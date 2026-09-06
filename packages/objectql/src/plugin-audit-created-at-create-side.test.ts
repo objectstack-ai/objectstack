@@ -170,6 +170,44 @@ describe('audit binder: create-side `created_at` (#15964)', () => {
     expect(Date.parse(row.created_at)).toBeGreaterThan(Date.parse('2020-01-01T00:00:00.000Z'));
   });
 
+  // [#15964] `isSystem` on its own is NOT a back-dating channel, and never was.
+  // It exempts the engine's readonly STRIP; the audit binder's stamp is not
+  // gated on it at all. Before this change a system-context seed kept its
+  // supplied `created_at` because of the `??`, not because of its elevation —
+  // which is how a legitimate back-dating fixture came to depend on the hole
+  // (`packages/qa/dogfood/test/analytics-timezone.dogfood.test.ts` seeds a
+  // timezone-boundary instant exactly this way). Both halves are pinned here so
+  // the next such seed is told which flag it actually needs.
+  it('`isSystem` alone does NOT preserve it, and `isSystem` + `preserveAudit` does', async () => {
+    const { objectql, captured } = await boot('repro_system_seed');
+
+    await objectql.insert('repro_system_seed', forgedPayload(), {
+      context: { isSystem: true },
+    });
+    await objectql.insert('repro_system_seed', forgedPayload(), {
+      context: { isSystem: true, preserveAudit: true },
+    });
+
+    const [elevatedOnly, historical] = captured;
+    printTable('isSystem only', elevatedOnly);
+    printTable('isSystem + preserveAudit', historical);
+
+    // The system context skips the strip, so `id` and `run_at` DO survive here —
+    // that is the control proving the elevation really took effect, and it is
+    // what makes the `created_at` row below a statement about the binder alone.
+    expect(elevatedOnly.id).toBe(FORGED_ID);
+    expect(elevatedOnly.run_at).toBe(FORGED_AT);
+    // …and the binder still stamps, because it is not gated on `isSystem`.
+    expect(elevatedOnly.created_at).not.toBe(FORGED_AT);
+    expect(elevatedOnly.updated_at).not.toBe(FORGED_AT);
+
+    // The explicit channel — `ExecutionContext.preserveAudit`, what REST's
+    // `treatAsHistorical` import sets — reaches the binder through
+    // `buildSession` independently of `isSystem`, so a back-dated seed works.
+    expect(historical.created_at).toBe(FORGED_AT);
+    expect(historical.updated_at).toBe(FORGED_AT);
+  });
+
   // The ruled control: the historical-import channel is EXPLICIT and still
   // works. `runImport({ treatAsHistorical: true })` puts `preserveAudit: true`
   // on the write context (`packages/rest/src/import-runner.ts`), which is
