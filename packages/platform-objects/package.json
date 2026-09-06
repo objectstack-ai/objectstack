@@ -64,8 +64,10 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/platform-objects --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/platform-objects --project tsconfig.test.json",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && pnpm check:test-typecheck"
   },
   "dependencies": {
     "@objectstack/metadata-core": "workspace:*",

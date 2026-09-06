@@ -276,6 +276,38 @@ const REPO_ROOT = resolve(HERE, '..');
  * re-baseline), and `@objectstack/rest` (#12542 / PR #12570 at `3f41a215`, the
  * first package to take the #5286 sibling route for this reason).
  *
+ * ## The #12511 re-baseline — six packages onboarding one program each
+ *
+ * Seven packages took the #5286 sibling route in one change; six of them move
+ * this registry. Every admitted dep is annotated `via tsconfig.test.json` by
+ * this gate's own provenance output, i.e. reached ONLY through the program the
+ * change onboarded — condition 1 above, read off the instrument rather than
+ * asserted. `@objectstack/formula` onboarded a program and admitted NOTHING,
+ * which is the control that says the other six are reporting a real widening
+ * rather than an artifact of the population growing.
+ *
+ *   before   125 programs / 78 packages, 61 entries, 310 package-dep pairs
+ *   after    132 programs / 78 packages, 61 entries, 319 package-dep pairs
+ *
+ * so +7 programs, +0 entries (all six already had one) and +9 pairs: `mcp` +2
+ * (`lint`, `metadata-core`), `platform-objects` +3 (`core`, `formula`, `lint`),
+ * `connector-mcp` / `connector-openapi` / `connector-rest` +1 each
+ * (`service-automation`), `service-sms` +1 (`service-settings`). The ratchet is
+ * shrink-only from the new number.
+ *
+ * ⚠️ TWO OF THE NINE ARE A DISAGREEMENT WORTH NAMING, because a later reader
+ * will otherwise find it and think it was missed. `packages/mcp` and
+ * `packages/platform-objects` both alias `@objectstack/lint` (and mcp also
+ * `@objectstack/metadata-core`) to that package's SOURCE in their vitest
+ * configs, precisely so the suite runs against the checkout rather than a build
+ * artifact — while the test program admitted above still resolves those same
+ * specifiers' TYPES through `dist/`. So for those specifiers the RUN and the
+ * TYPE VERDICT read different artifacts. `paths` is the obvious repair and is
+ * measured to be the wrong one here: the refusal directly above is explicit
+ * that for the ONBOARDING case it billed other packages' source diagnostics
+ * into the onboarding package's ledger (PR #12570, 37 -> 42). Declared here
+ * instead, where the shrink-only ratchet keeps it visible.
+ *
  * ⛔ Still NOT open: `paths` remains the fix for a dep exposed through an
  * EXISTING program, and no widening may silence one. For the onboarding case
  * `paths` is additionally the WRONG tool, measured on PR #12570 rather than
@@ -294,9 +326,9 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/plugin-hono-server', '@objectstack/runtime', '@objectstack/spec',
   ],
   '@objectstack/client-react': ['@objectstack/client', '@objectstack/spec'],
-  '@objectstack/connector-mcp': ['@objectstack/core', '@objectstack/spec'],
-  '@objectstack/connector-openapi': ['@objectstack/core', '@objectstack/spec'],
-  '@objectstack/connector-rest': ['@objectstack/core', '@objectstack/spec'],
+  '@objectstack/connector-mcp': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
+  '@objectstack/connector-openapi': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
+  '@objectstack/connector-rest': ['@objectstack/core', '@objectstack/service-automation', '@objectstack/spec'],
   '@objectstack/connector-slack': [
     '@objectstack/core', '@objectstack/service-automation', '@objectstack/spec',
   ],
@@ -383,7 +415,8 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/knowledge-ragflow': ['@objectstack/core', '@objectstack/spec'],
   '@objectstack/lint': ['@objectstack/formula', '@objectstack/sdui-parser', '@objectstack/spec'],
   '@objectstack/mcp': [
-    '@objectstack/core', '@objectstack/formula', '@objectstack/spec', '@objectstack/types',
+    '@objectstack/core', '@objectstack/formula', '@objectstack/lint',
+    '@objectstack/metadata-core', '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/metadata': [
     '@objectstack/core', '@objectstack/driver-sqlite-wasm', '@objectstack/metadata-core',
@@ -399,7 +432,10 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata', '@objectstack/metadata-core',
     '@objectstack/metadata-protocol', '@objectstack/spec', '@objectstack/types',
   ],
-  '@objectstack/platform-objects': ['@objectstack/metadata-core', '@objectstack/spec'],
+  '@objectstack/platform-objects': [
+    '@objectstack/core', '@objectstack/formula', '@objectstack/lint',
+    '@objectstack/metadata-core', '@objectstack/spec',
+  ],
   // ── #14062 re-baseline, on the onboarding limb above ─────────────────────
   //
   // The director ruling of 2026-09-01 on #14062 (maintainer verbatim: 「同意」)
@@ -820,7 +856,10 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // #11490 re-baseline: NEW entries — reached only through `tsconfig.scripts.json`.
   '@objectstack/service-messaging': ['@objectstack/spec'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
-  '@objectstack/service-sms': ['@objectstack/core', '@objectstack/plugin-auth', '@objectstack/spec'],
+  '@objectstack/service-sms': [
+    '@objectstack/core', '@objectstack/plugin-auth', '@objectstack/service-settings',
+    '@objectstack/spec',
+  ],
   // #15050 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.test.json` (all 7 deps) and `tsconfig.scripts.json`
   // (`@objectstack/spec` again, no new pairs). Same shape as `service-cluster`

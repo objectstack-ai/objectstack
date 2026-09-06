@@ -646,6 +646,110 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'the runtime row above: a recomputed value here reads as a clean, plausible REPAIR rather '
       + 'than as noise, and a dropped entry is indistinguishable from a file somebody fixed.',
   },
+  // ── #12511: the seven ledgered packages that graduated together ───────────
+  //
+  // Seven rows and not one, for the reason the `packages/client` row above
+  // states: `reconcileGenerators` keys on (owner, script), three manifests
+  // defined `gen:test-typecheck-debt` when that row was written and eleven do
+  // now, so one entry standing for the family would be a disposition nobody
+  // actually made for any of these files. Each package's `TEST_DEBT` entry in
+  // `scripts/check-type-check-coverage.mjs` graduated in the same change, so
+  // each file below is now the ONLY record of its population anywhere in the
+  // tree. ⛔ `@objectstack/http-conformance` is deliberately absent: it did not
+  // graduate, keeps its per-package entry, and defines no generator.
+  {
+    path: 'packages/mcp/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/mcp',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'This is the biggest of the seven (53 errors over 6 files) and 51 of them are ONE idiom — `await '
+      + 'res.json()` bound without a narrowing — repeated across four suites. That uniformity is exactly '
+      + 'what makes a mid-merge recompute unreadable here: a number that moved from 53 to 49 because the '
+      + 'half-merged tree resolved one import differently looks like four repairs somebody landed, and '
+      + 'the per-signature keys underneath would be silently rewritten with it.',
+  },
+  {
+    path: 'packages/formula/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/formula',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'The only one of the seven whose ledger is NOT its recorded per-package number (15, from a '
+      + 'recorded 17): the TS1470 x2 dissolved under the sibling config\'s `module: esnext` while '
+      + 'everything else survived. A recomputation mid-merge cannot tell a dissolution from a repair, '
+      + 'and this file is the only record that the -2 was the former.',
+  },
+  {
+    path: 'packages/platform-objects/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/platform-objects',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'Three errors over one file, all in `src/feature-gate-guard.test.ts`. At that size a recomputed '
+      + 'value reads as a clean REPAIR rather than as noise, and a dropped entry is indistinguishable '
+      + 'from a file somebody fixed — the `packages/cli` row above states that direction of the trade at '
+      + 'length.',
+  },
+  {
+    path: 'packages/connectors/connector-mcp/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/connector-mcp',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'Five errors carrying ONE signature in one file, which is the shape this row protects least '
+      + 'visibly: a recompute that keeps the count and swaps the signature is exactly the substitution '
+      + 'the per-signature ledger exists to catch, and doing it as merge noise defeats it silently.',
+  },
+  {
+    path: 'packages/connectors/connector-openapi/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/connector-openapi',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'Five errors carrying one signature in one file — see the `connector-mcp` row directly above; '
+      + 'the two packages measure the identical population against the same connector contract.',
+  },
+  {
+    path: 'packages/connectors/connector-rest/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/connector-rest',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'The smallest ledger in the repo at ONE error, and smallness is the hazard rather than the '
+      + 'reassurance: a mid-merge recompute that writes zero here deletes the whole record, and an empty '
+      + 'ledger reads as a package that graduated.',
+  },
+  {
+    path: 'packages/services/service-sms/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/service-sms',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. '
+      + 'One error, in `src/transports/transports.test.ts` — see the `connector-rest` row directly above '
+      + 'for why a one-entry ledger is the most exposed to a mid-merge recompute, not the least.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',
