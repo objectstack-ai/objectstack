@@ -5495,8 +5495,8 @@ export class AuthManager {
    *
    * ⇒ ⛔ Do not read this method as licence to assume one answer exists. Two
    * more spellings of "the auth base path" are live in this file, and retiring
-   * them is a decision about published OAuth identifiers, not a tidy-up. It is
-   * reported to the PM rather than taken on a mount card.
+   * them is a decision about published OAuth identifiers, not a tidy-up. Filed
+   * as #16399 rather than taken on a mount card.
    *
    * ## What the two collapsed readers actually disagreed about
    *
