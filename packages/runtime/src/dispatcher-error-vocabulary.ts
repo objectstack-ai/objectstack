@@ -940,6 +940,126 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'door ever answers with this code itself, the verdict becomes pending-registration and it ' +
             'belongs in the ledger batch.'
     },
+    // ── [#15963] the six remaining `defineStack` refusals, one code each ──
+    //
+    // Same raiser, same reachability and same verdict as the
+    // STACK_CROSS_REFERENCE_INVALID row above, which was the ONE of seven
+    // `defineStack` refusal sites carrying an envelope. One row per code
+    // rather than one shared `STACK_VALIDATION_FAILED`: this `boot-refusal`
+    // class is already at one-row-per-refusal granularity (14 rows before
+    // these six), and the cross-reference row is an instance of it, not an
+    // exception. The reachability measurement was RE-TAKEN on the tree these
+    // landed against and is recorded once, on the STACK_SCHEMA_INVALID row;
+    // the five rows after it cite that reading by its numbers.
+    {
+        code: 'STACK_SCHEMA_INVALID',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '#15963 — the AUTHORING gate\'s SCHEMA refusal: `ObjectStackDefinitionSchema.safeParse` failed ' +
+            'inside `defineStack`, thrown as `StackSchemaInvalidError` with the zod issues on `issues`. ' +
+            'Its own arm rather than a reuse, on a reading taken before it was written: `packages/spec` ' +
+            'has no zod-failure envelope to reuse (`formatZodError` / `safeParsePretty` return prose; no ' +
+            '`extends Error` there wraps a `ZodError`); the ledger\'s two zod-shaped refusals are both ' +
+            'spelled `*_SCHEMA_INVALID` at 422 (`METADATA_SCHEMA_INVALID`, `FLOW_INPUT_SCHEMA_INVALID`); ' +
+            'and the two other channels a zod failure travels on — `400 VALIDATION_ERROR` (request ' +
+            'syntax) and `VALIDATION_FAILED` + `fields[]` (record validation, which ' +
+            '`validationFailureDetails` duck-types on `name === \'ValidationError\'`) — would each file an ' +
+            'authored stack as something it is not. ⭐ MEASURED on the tree it landed against: every ' +
+            'non-test occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` ' +
+            '(33 of them) is a docstring, a comment or this table\'s own prose — zero call sites. The ' +
+            'shipped callers are the CLI (`os validate`, `os build`) and the `os serve` / `os migrate` ' +
+            'host configs and `DevPlugin`, which load a stack module at boot, where a throw aborts before ' +
+            'any HTTP boundary exists; the two HTTP install sites call `SchemaRegistry.installPackage`, ' +
+            'which never calls `defineStack`. So the code reaches a reader only inside a message string, ' +
+            'never as `error.code`; its `status: 422` is the ADR-0112 envelope shape this repo\'s ' +
+            'rejection tests assert on, not evidence of a door. If a door ever answers with this code ' +
+            'itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
+    },
+    {
+        code: 'STACK_CAPABILITY_UNKNOWN',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '#15963 — `defineStack`\'s capability refusal, raised through `validateKnownCapabilities` when ' +
+            '`requires` names a token no runtime provides (framework#3265/#3308); one `issues` entry per ' +
+            'distinct unknown token, thrown as `StackCapabilityUnknownError`. Reachability is the ' +
+            'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
+            '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
+            'boot-time host configs, where a throw aborts before any HTTP boundary exists. The code ' +
+            'reaches a reader only inside a message string; `status: 422` is envelope shape, not a door. ' +
+            'If a door ever answers with it, the verdict becomes pending-registration.'
+    },
+    {
+        code: 'STACK_NAMESPACE_PREFIX_INVALID',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '#15963 — `defineStack`\'s namespace-prefix refusal, raised through `validateNamespacePrefix` ' +
+            'when an object\'s name lacks the `manifest.namespace` prefix; one `issues` entry per object, ' +
+            'the writing-style hint kept in the message only, thrown as `StackNamespacePrefixInvalidError`. ' +
+            'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
+            'occurrences under `packages/runtime/src` + `packages/rest/src`, zero call sites; callers are ' +
+            'the CLI and the boot-time host configs, where a throw aborts before any HTTP boundary exists. ' +
+            'The code reaches a reader only inside a message string; `status: 422` is envelope shape, not ' +
+            'a door. If a door ever answers with it, the verdict becomes pending-registration.'
+    },
+    {
+        code: 'STACK_SINGLE_APP_VIOLATION',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '#15963 — `defineStack`\'s single-app refusal, raised through `validateSingleApp` when an `app` ' +
+            'package declares more than one app (the banned "suite contains apps" shape, ADR-0019 D3); ' +
+            'thrown as `StackSingleAppViolationError`. Reachability is the STACK_SCHEMA_INVALID reading on ' +
+            'the same tree: 33 non-test `defineStack` occurrences under `packages/runtime/src` + ' +
+            '`packages/rest/src`, zero call sites; callers are the CLI and the boot-time host configs, ' +
+            'where a throw aborts before any HTTP boundary exists. The code reaches a reader only inside ' +
+            'a message string; `status: 422` is envelope shape, not a door. If a door ever answers with ' +
+            'it, the verdict becomes pending-registration.'
+    },
+    {
+        code: 'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '#15963 — `defineStack`\'s hierarchy-scope capability refusal, raised through ' +
+            '`validateHierarchyScopeCapability` when a permission grant uses a HIERARCHY scope while ' +
+            '`requires` omits `hierarchy-security` (ADR-0057 — the declared-capability class that fails ' +
+            'CLOSED); one `issues` entry per grant, thrown as `StackHierarchyScopeCapabilityRequiredError`. ' +
+            'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
+            'occurrences under `packages/runtime/src` + `packages/rest/src`, zero call sites; callers are ' +
+            'the CLI and the boot-time host configs, where a throw aborts before any HTTP boundary exists. ' +
+            'The code reaches a reader only inside a message string; `status: 422` is envelope shape, not ' +
+            'a door. If a door ever answers with it, the verdict becomes pending-registration.'
+    },
+    {
+        code: 'STACK_TRIGGER_CAPABILITY_REQUIRED',
+        file: 'packages/spec/src/stack.zod.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '#15963 — `defineStack`\'s trigger capability refusal, raised through ' +
+            '`validateTriggerCapability` when an auto-launched flow is declared while `requires` omits ' +
+            '`triggers` (#14153 — the declared-capability class that fails SILENT); one `issues` entry per ' +
+            'flow, thrown as `StackTriggerCapabilityRequiredError`. Reachability is the ' +
+            'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
+            '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
+            'boot-time host configs, where a throw aborts before any HTTP boundary exists. The code ' +
+            'reaches a reader only inside a message string; `status: 422` is envelope shape, not a door. ' +
+            'If a door ever answers with it, the verdict becomes pending-registration.'
+    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
