@@ -1167,6 +1167,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts",
       "verb": "delete",
       "pinned": 1
