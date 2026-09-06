@@ -201,7 +201,7 @@ export type RTOParsed = z.infer<typeof RTOSchema>;
  *   rto: { value: 1, unit: 'hours' },
  *   backup: {
  *     strategy: 'incremental',
- *     schedule: '0 0/6 * * *',
+ *     schedule: '0 */6 * * *',
  *     retention: { days: 90, minCopies: 5 },
  *     destination: { type: 's3', bucket: 'backup-bucket', region: 'us-east-1' },
  *   },
