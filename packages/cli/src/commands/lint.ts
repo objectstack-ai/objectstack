@@ -514,6 +514,60 @@ export default class Lint extends Command {
     const configPath = args.config;
     const timer = createTimer();
 
+    // ── `--generator` means nothing without `--eval` — refuse, don't ignore ──
+    //
+    // [#15550] The flag's own description ends "Requires --eval." and nothing
+    // checked it. Driven on this entry before this change, from a lint-clean
+    // project, with a generator that writes a marker file at TOP-LEVEL
+    // evaluation so "was it loaded?" is answered by the filesystem rather than
+    // by reading the control flow:
+    //
+    //     os lint --generator ./gen-marker.mjs            exit 0 · All checks passed · marker ABSENT
+    //     os lint --generator ./does-not-exist.mjs        exit 0 · All checks passed
+    //     os lint --json --generator ./does-not-exist.mjs exit 0 · {"passed":true,…}
+    //
+    // ⇒ accepted by the parser, never loaded, and not named once on either
+    // face — a path that does not exist passes too. `flags.generator` is read
+    // at exactly three sites, all inside `runEval`, which `run()` reaches only
+    // when `flags.eval` is set, so outside eval mode the flag reaches no code
+    // at all.
+    //
+    // That is Prime Directive #10's declared-≠-enforced shape landing on the
+    // person least able to diagnose it: a successful-looking run whose
+    // generator was never called, saying nothing. The direction is #12 — refuse
+    // the off-contract invocation loudly at the boundary. The alternative
+    // repair, deleting "Requires --eval." from the description, was rejected
+    // for the reason that sentence exists: nothing outside eval mode reads this
+    // flag, so dropping the claim documents a no-op flag instead of removing
+    // one, and blesses the silent acceptance rather than ending it.
+    //
+    // ⛔ NOT oclif's `dependsOn: ['eval']`, and that is measured rather than
+    // assumed. It does refuse — but it refuses in the PARSER, before the
+    // command runs, so the refusal is oclif's and not this command's: exit 2, a
+    // stack trace on stderr, and under `--json` an EMPTY STDOUT (measured, both
+    // faces). A machine consumer of `os lint --json` would get no JSON document
+    // at all — the off-envelope class #15549/#16044 had just repaired one exit
+    // over on this very command. Refusing here keeps the envelope this command
+    // already answers with: the human message on `error`, exit 1, both faces.
+    //
+    // ⛔ Nor the raw-argv guard `os migrate meta` uses for its stored-only
+    // flags. That one exists because oclif reads a `default: false` boolean and
+    // an `env`-backed string as "provided"; `--generator` has neither a default
+    // nor an `env`, so `!== undefined` already means the operator typed it.
+    //
+    // ⛔ Nothing is minted: no `code` is attached. This refusal has no producer
+    // error to pass one through, and ADR-0112's ledger is the authority on who
+    // may mint one — the same restraint the generator-load exit below keeps.
+    if (flags.generator !== undefined && !flags.eval) {
+      const message =
+        '--generator only applies to `os lint --eval` (the metadata-generation eval). '
+        + 'Without --eval this command lints the current project and never loads the generator. '
+        + 'Re-run as `os lint --eval --generator <module>`.';
+      if (flags.json) await emitJson({ error: message }, 0, { compact: true });
+      else printError(message);
+      process.exit(1);
+    }
+
     // ── Eval mode — score generated metadata against the convention rubric ──
     // Short-circuits the project lint: this evaluates a generation corpus, not
     // the current config.
