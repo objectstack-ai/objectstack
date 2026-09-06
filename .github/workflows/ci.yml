@@ -693,38 +693,30 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-      # The durable half of #16173. The summary uploaded above is not only the
-      # input to the NEXT refresh of scripts/test-shard-timings.json — it is
-      # this shard measuring itself, right now, against the prediction the
-      # partition step printed minutes ago. Nothing compared those two numbers,
-      # and that is the whole defect: the dataset is generated, it rots in one
-      # direction only (suites get slower, the file stays put), and a shard that
-      # has drifted heavy reads as perfectly balanced until the job timeout
-      # kills it. Measured: @objectstack/cli was predicted 458.15s and ran
-      # 1231.52s — 2.69× — while this job's own max/mean banner read 1.00×.
+      # ⛔ THE DRIFT STEP IS DELIBERATELY NOT WIRED HERE YET (#16173).
       #
-      # ⛔ The failure mode being closed is NOT a slow shard. It is that a
-      # killed shard produces no reading at all while the rollup reads green
-      # (#16157 remains open on that half), so the cost of letting this rot is a
-      # PR that lands with a whole shard unmeasured. A comparison that only
-      # warned would inherit exactly that: something true, printed, and unread.
+      # partition-test-shards.mjs carries a fully-tested `--check-drift` mode —
+      # it reads the summary uploaded above back and reds when a shard's MEASURED
+      # test total outruns its PREDICTED one past MAX_MEASURED_OVER_PREDICTED. The
+      # code, its self-tests and its ablation are all on this branch; only this
+      # invocation waits, and the wait is a SEQUENCING decision, not an oversight.
       #
-      # No `if:` — a suite that already failed must not also be charged with
-      # drift, and the step is skipped for free when the job is already red. No
-      # `continue-on-error` either: the point is the red. It sits ABOVE the
-      # attestation pair for the #6082 reason documented on the upload above —
-      # anything below that pair can fail a job whose credential already counts
-      # as a pass — so a drift red also withholds the attestation, which is the
-      # fail-closed direction.
-      - name: Check this shard's predicted-vs-measured timing drift
-        run: |
-          if ! ls .turbo/runs/*.json > /dev/null 2>&1; then
-            echo "No turbo run summary — nothing was measured, so there is nothing to compare."
-            exit 0
-          fi
-          node scripts/partition-test-shards.mjs --check-drift .turbo/runs/*.json \
-            --label "Test Core (${{ matrix.shard }}/6)"
-
+      # Why: scripts/test-shard-timings.json is still stale for @objectstack/cli
+      # (458.15s recorded, 1231.52s measured), so wiring the step today would red
+      # the shard carrying a CLI slice on every single PR — a true reading, but one
+      # that blocks everything until the dataset is refreshed. The file-level split
+      # above already removes the urgent hazard on its own, taking the worst shard
+      # from ~1445s (80% of this job's 30-minute wall) to ~1059s (59%) with the
+      # dataset untouched, because the CLI is halved across two runners instead of
+      # falling on one.
+      #
+      # ⇒ The refresh and this step land TOGETHER in the follow-up, in that order.
+      # The refresh recipe is in PR #16220's body. When it lands, restore a step
+      # here that runs `--check-drift` over `.turbo/runs/*.json` with
+      # `--label "Test Core (${{ matrix.shard }}/6)"`, with NO `if:` and NO
+      # `continue-on-error` (the point is the red), placed ABOVE the attestation
+      # pair for the #6082 reason documented on the upload above — so a drift red
+      # also withholds the attestation, which is the fail-closed direction.
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
       # say anything at all about a green one.
