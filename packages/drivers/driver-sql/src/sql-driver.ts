@@ -2883,7 +2883,10 @@ function mysqlAsciiLowerBinary(expr: string): string {
  *   the rejection on its own: a construct whose meaning depends on how the
  *   driver's SQLite was BUILT cannot carry a read scope (#3948) whatever value
  *   it happens to return in any one container — the `[]` above is a build's
- *   answer, not SQLite's. So the operator has to change. `GLOB` is case-exact
+ *   answer, not SQLite's. The CAST itself is not the part that differs:
+ *   `typeof CAST(name AS BLOB)` is `'blob'` on BOTH builds, so what diverges is
+ *   purely `LIKE`'s rule for a blob operand, which is the compile-time half. So
+ *   the operator has to change. `GLOB` is case-exact
  *   by definition, answers `['2']` on BOTH builds above, and carries its own
  *   escape mechanism ({@link escapeGlobComparand}). `lower()` in front of it is
  *   still the
