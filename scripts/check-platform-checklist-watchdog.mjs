@@ -121,6 +121,47 @@ const BOARD_WRITE_CALLS = Object.freeze([
   'issues.addLabels(',
 ]);
 
+// ── The self-test's own battery roster and floor ───────────────────────────
+//
+// `failures.length === 0` alone cannot tell "every case held" from "the cases
+// never ran": both print the same green line, and a printed `checked` count
+// that nothing COMPARES is evidence, not proof. So each battery declares a
+// FLOOR and the roster is compared as a SET — a set difference names WHICH
+// battery stopped, where a count says only that something did.
+//
+// The counts are a floor, not an equality: adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running, and the
+// remedy is to find what stopped registering — ⛔ never to lower the number.
+//
+// ⛔ A pinned TOTAL is not the repair either: one battery dropping from 12
+// cases to 2 keeps a total "right" the moment a sibling grows.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the positive control — a compliant workflow yields no finding': 2,
+  'clause 1 — the file exists, is non-empty, and parses as a workflow': 5,
+  'clause 2 — schedule (with a real cron) and workflow_dispatch': 5,
+  'clause 3 — merge_group and pull_request_target refused outright': 6,
+  'clause 4 — a pull_request trigger paths-filtered to this file ALONE': 10,
+  'clause 4b — no board write reachable from a pull_request run': 6,
+  'clauses 5 and 6 — the package script, and no inlined copy of it': 5,
+  'the manifest clause — the package script exists to be invoked': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned beside the floors.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// Set by `selfTest()` only after a verdict is printed — EITHER verdict — and
+// read at the dispatch: a `return` that leaves the function above those lines
+// prints nothing and still exits 0, so a self-test that never finished would
+// report as one that passed. The failure path sets it too, so the refusal fires
+// only when NEITHER verdict was printed, never on a genuine red.
+let selfTestReachedVerdict = false;
+
 /** The tail every trigger refusal carries, so one reason is stated once. */
 const DECISION_TAIL = 'A standing maintainer decision keeps `check:platform-checklist` off the per-PR path, in its own words so that "an unrelated PR is never blocked by checklist drift"; this workflow changes the reporting channel and must never undo that.';
 
@@ -376,9 +417,22 @@ const PR_BLOCK = "  pull_request:\n    paths:\n      - '.github/workflows/platfo
 const withPullRequest = (block) => GOOD.replace(PR_BLOCK, block);
 
 export function selfTest(parse) {
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const t = (what, ok) => {
+    registerCase();
     checked += 1;
     if (!ok) failures.push(what);
   };
@@ -387,12 +441,14 @@ export function selfTest(parse) {
     return f.some((m) => m.includes(needle));
   };
 
+  battery('the positive control — a compliant workflow yields no finding');
   // The positive control. Every clause must be SILENT on a good workflow --
   // without this, a rule that fires on everything would pass every case below.
   const good = judgeWorkflow(GOOD, parse);
   t('the good fixture must produce zero findings (positive control)', good.failures.length === 0);
   t('the good fixture must report its triggers', Array.isArray(good.triggers) && good.triggers.includes('schedule'));
 
+  battery('clause 1 — the file exists, is non-empty, and parses as a workflow');
   // Clause 1 -- absence and unreadability.
   t('a missing workflow ⇒ names the file', fires(null, WORKFLOW_REL));
   t('a missing workflow ⇒ says the gate has no other channel', fires(null, 'is visible to nobody'));
@@ -400,6 +456,7 @@ export function selfTest(parse) {
   t('unparseable YAML ⇒ fires with the parse error', fires('jobs:\n  a:\n  \tbad: [', 'could not be read as YAML'));
   t('a YAML scalar ⇒ fires', fires('just a string', 'does not parse to a workflow mapping'));
 
+  battery('clause 2 — schedule (with a real cron) and workflow_dispatch');
   // Clause 2 -- the positive triggers.
   t('no `on:` block at all ⇒ fires', fires('name: x\njobs: {}\n', 'declares no trigger block'));
   t('no `schedule:` ⇒ fires', fires(GOOD.replace(/  schedule:\n    - cron: '51 2 \* \* \*'\n/, ''), 'declares no `schedule:` trigger'));
@@ -407,6 +464,7 @@ export function selfTest(parse) {
   t('a `schedule:` with no cron ⇒ fires', fires(GOOD.replace("    - cron: '51 2 * * *'\n", '    - {}\n'), 'no usable `cron:`'));
   t('a `schedule:` with an empty cron ⇒ fires', fires(GOOD.replace("'51 2 * * *'", "''"), 'no usable `cron:`'));
 
+  battery('clause 3 — merge_group and pull_request_target refused outright');
   // Clause 3 -- REFUSED OUTRIGHT. Each fires on its own, and the good fixture
   // above proves neither fires without cause.
   for (const trigger of REFUSED_TRIGGERS) {
@@ -415,6 +473,7 @@ export function selfTest(parse) {
     t(`a \`${trigger}:\` trigger ⇒ cites the decision it protects`, fires(withTrigger(trigger), 'never blocked by checklist drift'));
   }
 
+  battery('clause 4 — a pull_request trigger paths-filtered to this file ALONE');
   // Clause 4 -- THE NARROWED CLAUSE. `pull_request:` is permitted, and ONLY
   // while its `paths:` filter names this workflow and nothing else. The good
   // fixture carries exactly that and is silent (asserted above), so each case
@@ -448,6 +507,7 @@ export function selfTest(parse) {
     GOOD.replace('on:\n', '# the pull_request trigger below is paths-filtered; merge_group is refused\non:\n'), parse,
   ).failures.length === 0);
 
+  battery('clause 4b — no board write reachable from a pull_request run');
   // Clause 4's other half -- a board write reachable from a pull_request run.
   const UNGUARDED = GOOD.replace("        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'\n", "        if: steps.gate.outputs.exit_code != '0'\n");
   t('⭐ a board write whose `if:` drops the pull_request guard ⇒ fires', fires(UNGUARDED, 'could write to the board'));
@@ -461,6 +521,7 @@ export function selfTest(parse) {
   t('a step that writes nothing needs no guard (no false positive)', judgeBoardWrites(
     parse('jobs:\n  j:\n    steps:\n      - name: read only\n        run: echo hi\n')).length === 0);
 
+  battery('clauses 5 and 6 — the package script, and no inlined copy of it');
   // Clause 4 / 5 -- the invocation.
   t('no `pnpm check:platform-checklist` ⇒ fires', fires(
     GOOD.replace('pnpm check:platform-checklist', 'pnpm check:something-else'),
@@ -483,27 +544,57 @@ export function selfTest(parse) {
     `never invokes \`pnpm ${PACKAGE_SCRIPT}\``,
   ));
 
+  battery('the manifest clause — the package script exists to be invoked');
   // The manifest clause.
   t('a manifest without the script ⇒ fires', judgeManifest('{"scripts":{"lint":"eslint ."}}').length === 1);
   t('a manifest with the script ⇒ silent', judgeManifest(`{"scripts":{"${PACKAGE_SCRIPT}":"node x.mjs"}}`).length === 0);
   t('an unparseable manifest ⇒ fires', judgeManifest('{').length === 1);
 
-  return { failures, checked };
+  // ── The floor, evaluated BEFORE either verdict is printed ───────────────
+  // A set difference over battery NAMES, so a battery that stopped running
+  // names itself instead of hiding inside a smaller total.
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    failures.push(`SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`);
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    failures.push(`self-test battery "${name}" registered ${count} case(s) but is not declared in SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.`);
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    failures.push(count === 0
+      ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. The verdict would otherwise have claimed those cases hold.`
+      : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do (⛔ MAINTAINER-ONLY: lowering a floor is not the repair).`);
+  }
+
+  if (failures.length > 0) {
+    console.error(`\nx check-platform-checklist-watchdog self-test: ${failures.length} of ${checked} assertions failed\n`);
+    for (const f of failures) console.error(`  - ${f}`);
+    console.error('');
+    selfTestReachedVerdict = true;
+    return 1;
+  }
+  console.log(`OK check-platform-checklist-watchdog self-test: ${checked} assertions across ${declaredBatteries.length} floored batteries, every clause driven by a fixture that makes it fire.`);
+  selfTestReachedVerdict = true;
+  return 0;
 }
 
 async function main(argv) {
   const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
   if (argv.includes('--self-test')) {
-    const { failures, checked } = selfTest(parse);
-    if (failures.length > 0) {
-      console.error(`\nx check-platform-checklist-watchdog self-test: ${failures.length} of ${checked} assertions failed\n`);
-      for (const f of failures) console.error(`  - ${f}`);
-      console.error('');
+    const code = selfTest(parse);
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\nx check-platform-checklist-watchdog self-test: selfTest() returned without reaching its\n'
+          + 'verdict, so neither line was printed and its battery floors never ran. Exiting 0 here\n'
+          + 'would report a self-test that never finished as a self-test that passed.\n',
+      );
       process.exit(1);
     }
-    console.log(`OK check-platform-checklist-watchdog self-test: ${checked} assertions, every clause driven by a fixture that makes it fire.`);
-    return;
+    process.exit(code);
   }
 
   const workflowPath = join(ROOT, WORKFLOW_REL);

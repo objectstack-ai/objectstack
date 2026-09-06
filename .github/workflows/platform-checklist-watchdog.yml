@@ -120,10 +120,12 @@ on:
   pull_request:
     paths:
       - '.github/workflows/platform-checklist-watchdog.yml'
-  # ⛔ NO `pull_request:` and ⛔ NO `merge_group:` here, deliberately — see the
-  # header. `scripts/check-platform-checklist-watchdog.mjs` fails when either
-  # appears, and its self-test proves that refusal fires rather than asserting
-  # it into the void.
+  # ⛔ NO `merge_group:` and ⛔ NO `pull_request_target:` here, ever — those two
+  # are refused OUTRIGHT, because no `paths:` filter makes either safe in this
+  # workflow. `scripts/check-platform-checklist-watchdog.mjs` fails when either
+  # appears, and fails just as loudly when the `pull_request:` trigger above
+  # loses its filter or gains a second path; its self-test drives every one of
+  # those cases rather than asserting them into the void.
 
 # Least privilege. The gate is read-only against the filesystem by construction
 # (no socket, no token), and this job writes issues and nothing else — no label
