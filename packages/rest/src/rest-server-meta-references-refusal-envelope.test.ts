@@ -40,6 +40,7 @@
 // finding.
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from './rest-server.js';
@@ -83,7 +84,14 @@ function mockRes() {
 function emptyEngine(): any {
     return {
         find: async () => [],
-        findOne: async () => null,
+        async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            // The `check:engine-double-contract` pin: a fake looser than
+            // `ObjectQL.findOne` is how a dead REST route once shipped with its
+            // suite green. This double answers "no rows" — but it answers it to
+            // the same dispatch predicate the real engine enforces.
+            assertEngineFindOnePredicate(table, opts);
+            return null;
+        },
         count: async () => 0,
         aggregate: async () => [],
         registry: {
