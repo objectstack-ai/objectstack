@@ -664,7 +664,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'dispatcher',
         verdict: 'pending-registration',
         why:
-            "The #14921 refusal: two files under one `ROOT/TYPE/` deriving one metadata name across this "
+            "The ambiguous-metadata-stem refusal: two files under one `ROOT/TYPE/` deriving one metadata name across this "
             + 'loader\'s REGISTERED extensions is an authoring error, refused with both paths and the type '
             + 'named rather than resolved by the `.json` → `.yaml` → `.yml` → `.ts` → `.js` precedence '
             + '(maintainer ruling, director seat, 2026-09-05, option 1 of three). ⭐ Reachability, which is '
@@ -678,8 +678,9 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + 'population of trees that can raise it is ZERO (a walk of 7,770 tracked files over 526 '
             + 'directories found no stem collision among the registered extensions), so no existing tree '
             + 'reaches the door today; the row records the PRODUCER, which is what this table is for, and '
-            + 'a producer nobody triggers yet is exactly the one that hides. Since #9106 the door narrows, '
-            + 'so the body parses and `AMBIGUOUS_METADATA_STEM` rides `declaredCode` while `error.code` '
+            + 'a producer nobody triggers yet is exactly the one that hides. The door narrows (see this '
+            + "file's header), so the body parses and `AMBIGUOUS_METADATA_STEM` rides `declaredCode` "
+            + 'while `error.code` '
             + 'takes the member the 500 derives — the demote this verdict names. ⛔ Registering it widens '
             + '`ApiErrorSchema.code` and is the `packages/spec` lane\'s call, NOT made here: this row is '
             + 'that batch\'s input, and the registration is what ratchets it out again.',
