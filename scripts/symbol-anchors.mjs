@@ -523,7 +523,26 @@ function trackedFiles(root) {
 }
 
 /**
- * Sweep one corpus. Returns findings and the counts a report needs.
+ * The SHAPE of a declined citation -- why no resolver could bind it. Kept here
+ * rather than in a corpus so every corpus that waives citations reports the
+ * same four words, and a residual list can be grouped without re-deriving the
+ * classification from the raw text.
+ *
+ * Order is load-bearing: a continuation and a tilde form BOTH inherit whatever
+ * path preceded them on the line, so they must be named by how they were
+ * written, never by the path they borrowed.
+ */
+export function declinedShape(la) {
+  if (la.tilde) return 'tilde';
+  if (la.continuation) return 'continuation';
+  if (la.path?.includes('/')) return 'directory-qualified';
+  return 'bare-filename';
+}
+
+/**
+ * Sweep one corpus. Returns findings, the counts a report needs, and the
+ * citations a corpus declined to judge (`declined`, empty unless the corpus
+ * sets `judgeUntrackedLineAnchors: false`).
  *
  * Finding kinds:
  *   line-anchor        a `path:NNN` survived the migration                (RED)
@@ -535,6 +554,7 @@ function trackedFiles(root) {
 export function sweepCorpus(corpus, root = process.cwd()) {
   const tracked = trackedFiles(root);
   const findings = [];
+  const declined = [];
   const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0, unresolvableLineCitation: 0 };
   const sourceCache = new Map();
   const readTarget = (p) => {
@@ -560,19 +580,26 @@ export function sweepCorpus(corpus, root = process.cwd()) {
        * and a gate whose only remedy is "stop writing that" is the
        * permanently-red gate this repo retired.
        *
-       * Measured on `5315098df` over `scripts/**` `.mjs` comment prose: 128
-       * live citations in all, of which 32 name a tracked file and 96 do not --
-       * 66 bare filenames (`engine.ts:9407`, an abbreviation inside a census
-       * table that no resolver can bind to one of this tree's several
-       * `engine.ts`), 22 continuations inheriting no path of their own, 11
-       * directory-qualified paths that are illustrations or sibling-repo files
-       * (`path/to/file.ts:1234`, `src/github.sh:68-91`), and 1 tilde form. The
-       * 96 are a real defect class and are recorded as a follow-up, exactly as
-       * the 1,056 bare paths under `checkBarePaths` were -- but they are not
-       * the cross-file rot #15765 measured, and folding them in would bury this
-       * gate's signal under a cleanup nobody ruled on. */
+       * Measured on `scripts/symbol-anchors.mjs` over `scripts/**` `.mjs`
+       * comment prose, on the date recorded in `check-scripts-symbol-anchors`'s
+       * own census constant: 128 live citations in all, of which 32 named a
+       * tracked file and 96 did not -- bare filenames (an abbreviation inside a
+       * census table that no resolver can bind to one of this tree's several
+       * files of that name), continuations inheriting no path of their own,
+       * directory-qualified paths that are illustrations or sibling-repo files,
+       * and one tilde form. That population is a real defect class and was
+       * recorded as a follow-up (#15809), exactly as the 1,056 bare paths under
+       * `checkBarePaths` were -- but it is not the cross-file rot #15765
+       * measured, and folding it in would bury this gate's signal under a
+       * cleanup nobody ruled on.
+       *
+       * ⭐ Declining to JUDGE is not declining to SEE. Every declined citation
+       * is counted AND recorded in `declined`, so a corpus can enumerate what
+       * it waived (`--list-unresolvable`) and the residual stays a list rather
+       * than a number nobody can act on. */
       if (!corpus.judgeUntrackedLineAnchors && !tracked.has(la.path ?? '')) {
         counts.unresolvableLineCitation += 1;
+        declined.push({ doc: rel, line: la.line, raw: la.raw, path: la.path ?? null, shape: declinedShape(la) });
         continue;
       }
       /* A marker whose CLASS is unrecognised is its own finding, never a
@@ -645,7 +672,7 @@ export function sweepCorpus(corpus, root = process.cwd()) {
       counts[cls] += 1;
     }
   }
-  return { findings, counts };
+  return { findings, counts, declined };
 }
 
 export function formatFindings(findings) {
@@ -678,8 +705,9 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+// 63 → 67 when `declinedShape` gained a case per arm (#15809).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 63,
+  'symbol-anchors self-test': 67,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -884,6 +912,18 @@ export function selfTest() {
   let projThrew = false;
   try { defineCorpus({ id: 'x', label: 'x', docRoots: ['a'], docProjection: 'commentProse' }); } catch { projThrew = true; }
   check(projThrew, 'defineCorpus must refuse a docProjection that is not callable — a skipped projection sweeps raw source while reading as though it did not');
+
+  // 11. ⭐ The declined SHAPE, whose ordering is the whole rule (#15809): a
+  //     continuation and a tilde form inherit whatever path preceded them on
+  //     the line, so classifying by the path first would file them under the
+  //     borrowed path and a residual list would name a file the author never
+  //     wrote. All four arms, in one case each.
+  check(declinedShape({ tilde: true, path: 'a/b.ts' }) === 'tilde',
+    'a tilde form is a TILDE even when a path preceded it on the line — it borrowed that path, it did not cite it');
+  check(declinedShape({ continuation: true, path: 'a/b.ts' }) === 'continuation',
+    'a continuation is a CONTINUATION even when a path preceded it on the line');
+  check(declinedShape({ path: 'a/b.ts' }) === 'directory-qualified', 'a path with a slash is directory-qualified');
+  check(declinedShape({ path: 'b.ts' }) === 'bare-filename', 'a path with no slash is a bare filename — the shape no resolver can bind');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //

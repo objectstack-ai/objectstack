@@ -7,6 +7,7 @@
  *
  *   node scripts/check-scripts-symbol-anchors.mjs
  *   node scripts/check-scripts-symbol-anchors.mjs --list
+ *   node scripts/check-scripts-symbol-anchors.mjs --list-unresolvable
  *   node scripts/check-scripts-symbol-anchors.mjs --self-test
  *
  * ⚠️ THE MECHANISM IS NOT HERE. The grammar, the extractor, the comment-prose
@@ -213,8 +214,32 @@ export function runCheck(root = process.cwd()) {
 }
 
 function list(root = process.cwd()) {
-  const { findings, counts } = sweepCorpus(CORPUS, root);
-  console.log(JSON.stringify({ counts, findings, allowances: HELD_FILE_ALLOWANCES }, null, 2));
+  const { findings, counts, declined } = sweepCorpus(CORPUS, root);
+  console.log(JSON.stringify({ counts, findings, declined, allowances: HELD_FILE_ALLOWANCES }, null, 2));
+}
+
+/**
+ * The citations this corpus DECLINES to judge, enumerated.
+ *
+ * ⚠️ A listing, never a verdict: this exits 0 whatever it prints, exactly as
+ * `--list` does. `runCheck()` is still the only arm that can fail.
+ *
+ * The count alone (`unresolvableLineCitation`, printed by the green line) says
+ * a residual exists without saying where, so nobody can work it down and
+ * nobody can tell a residual that SHRANK from one that moved. This prints
+ * `file:line -- citation` per row and a tally by shape, which is what a
+ * follow-up card needs to be closed rather than re-measured.
+ */
+function listUnresolvable(root = process.cwd()) {
+  const { counts, declined } = sweepCorpus(CORPUS, root);
+  const byShape = {};
+  for (const d of declined) byShape[d.shape] = (byShape[d.shape] ?? 0) + 1;
+  for (const d of declined) console.log(`${d.doc}:${d.line}  ${d.raw}   [${d.shape}]`);
+  console.log(
+    `\n${declined.length} citation(s) name no tracked file and are not judged `
+      + `(counter: ${counts.unresolvableLineCitation}) — `
+      + Object.entries(byShape).sort().map(([k, v]) => `${v} ${k}`).join(', '),
+  );
 }
 
 /* ─────────────────────────────── self-test ─────────────────────────────── */
@@ -242,11 +267,14 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-scripts-symbo
 // row was retired, then 30 → 26 when the `scripts/check-adr-0087-registration.mjs`
 // row was retired and the array went EMPTY (#15765). Any other drop is cases that
 // STOPPED RUNNING; find what stopped registering instead of moving the number.
+// 26 → 29 when the declined citations gained an ENUMERATION beside their count
+// (#15809): three cases hold `declined` equal to `unresolvableLineCitation`, to
+// the file/line/text a residual list needs, and to the shape classification.
 // ⚠️ An empty array does NOT make the allowance battery vacuous: its five
 // fixture cases run off `scripts/bad.mjs`, never off the live rows, so they are
 // not part of this arithmetic and must never fall out of the count.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-scripts-symbol-anchors self-test': 26,
+  'check-scripts-symbol-anchors self-test': 29,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -316,7 +344,7 @@ export function selfTest() {
     execFileSync('git', ['init', '-q'], { cwd: tmp });
     execFileSync('git', ['add', '-A'], { cwd: tmp });
 
-    const { findings, counts } = sweepCorpus(CORPUS, tmp);
+    const { findings, counts, declined } = sweepCorpus(CORPUS, tmp);
     const kinds = findings.map((f) => f.kind);
     const count = (k) => kinds.filter((x) => x === k).length;
 
@@ -338,6 +366,19 @@ export function selfTest() {
       'a citation naming no tracked file must not be a finding under judgeUntrackedLineAnchors: false');
     check(counts.unresolvableLineCitation === 2,
       `both declined citations must be SEEN and counted, got ${counts.unresolvableLineCitation}`);
+    // ...and ENUMERATED, not merely counted (#15809). A count says a residual
+    // exists without saying where, so nobody can work it down and a residual
+    // that MOVED reads identically to one that shrank. `--list-unresolvable`
+    // prints this array; these three cases are what keep it equal to the
+    // counter rather than a second, drifting instrument.
+    check(declined.length === counts.unresolvableLineCitation,
+      `the declined ENUMERATION must equal the declined COUNT, got ${declined.length} vs ${counts.unresolvableLineCitation}`);
+    check(declined.every((d) => d.doc.includes('declined.mjs') && Number.isInteger(d.line) && d.raw),
+      'every declined row must carry the file, the line and the citation text it was declined for');
+    check(
+      declined.map((d) => d.shape).sort().join(',') === 'bare-filename,directory-qualified',
+      `the declined rows must be classified by SHAPE, got ${declined.map((d) => d.shape).sort().join(',')}`,
+    );
 
     // 2. The allowance mechanism, in both directions, against the fixture.
     const fake = [{ file: 'scripts/bad.mjs', dated: '2026-01-01', heldBy: 'PR #1', why: 'fixture' }];
@@ -462,6 +503,7 @@ if (isEntrypoint(import.meta.url)) {
       );
       process.exit(1);
     }
-  } else if (process.argv.includes('--list')) list();
+  } else if (process.argv.includes('--list-unresolvable')) listUnresolvable();
+  else if (process.argv.includes('--list')) list();
   else runCheck();
 }
