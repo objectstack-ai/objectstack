@@ -635,6 +635,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
+      # The durable half of #16173. The summary uploaded above is not only the
+      # input to the NEXT refresh of scripts/test-shard-timings.json — it is
+      # this shard measuring itself, right now, against the prediction the
+      # partition step printed minutes ago. Nothing compared those two numbers,
+      # and that is the whole defect: the dataset is generated, it rots in one
+      # direction only (suites get slower, the file stays put), and a shard that
+      # has drifted heavy reads as perfectly balanced until the job timeout
+      # kills it. Measured: @objectstack/cli was predicted 458.15s and ran
+      # 1231.52s — 2.69× — while this job's own max/mean banner read 1.00×.
+      #
+      # ⛔ The failure mode being closed is NOT a slow shard. It is that a
+      # killed shard produces no reading at all while the rollup reads green
+      # (#16157 remains open on that half), so the cost of letting this rot is a
+      # PR that lands with a whole shard unmeasured. A comparison that only
+      # warned would inherit exactly that: something true, printed, and unread.
+      #
+      # No `if:` — a suite that already failed must not also be charged with
+      # drift, and the step is skipped for free when the job is already red. No
+      # `continue-on-error` either: the point is the red. It sits ABOVE the
+      # attestation pair for the #6082 reason documented on the upload above —
+      # anything below that pair can fail a job whose credential already counts
+      # as a pass — so a drift red also withholds the attestation, which is the
+      # fail-closed direction.
+      - name: Check this shard's predicted-vs-measured timing drift
+        run: |
+          if ! ls .turbo/runs/*.json > /dev/null 2>&1; then
+            echo "No turbo run summary — nothing was measured, so there is nothing to compare."
+            exit 0
+          fi
+          node scripts/partition-test-shards.mjs --check-drift .turbo/runs/*.json \
+            --label "Test Core (${{ matrix.shard }}/6)"
+
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
       # say anything at all about a green one.
