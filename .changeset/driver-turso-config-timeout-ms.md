@@ -4,7 +4,10 @@
 
 feat(driver-turso)!: the published connection config names its timeout's unit (#15682, ruling B on #14478)
 
-<!-- adr-0087: not-required (already-registered turso-config-timeout-to-timeout-ms) that protocol-18 conversion rewrites `datasources[].config.timeout` to `timeoutMs` for turso datasources, which is the same authored key this package's schema mirrors — a second entry would restate the same rewrite without converting anything more -->
+<!-- adr-0087: registered turso-config-timeout-to-timeout-ms -->
+<!-- The protocol-18 conversion above is registered by card 5/6 of the #14478 stack; relative to
+     `main` this combined diff is what adds it, so `registered` is the honest disposition at this
+     level even though `already-registered` was honest per-card. -->
 
 **BREAKING** — `TursoConfigSchema`'s `timeout` is renamed to **`timeoutMs`**. The
 value is unchanged: the same milliseconds, the same `min(0)` bound, the same
