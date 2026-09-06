@@ -387,6 +387,12 @@ jobs:
       #                                 nothing to do cannot be observed working.
       #     check:template-version-sync the template stamper's, for the same
       #                                 reason.
+      #     check:release-index-currency-sync
+      #                                 the release-index stamper's (#15332), for the
+      #                                 same reason again — on a train whose index is
+      #                                 already current it rewrites nothing, and a
+      #                                 rewriter with nothing to do cannot be observed
+      #                                 working.
       #     check:nul-bytes             lint.yml's one UNCONDITIONAL gate whose
       #                                 corpus is every byte in the tree. The 76
       #                                 generated CHANGELOGs are the only prose
@@ -539,13 +545,30 @@ jobs:
             exit 1
           fi
 
-          # Same three filters cut-rc.yml applies to the same surface: the fixed
-          # release paths by pattern, then the two declared lists by WHOLE-LINE
-          # EXACT match, so neither derived filter can accept a path its
-          # declaration does not name and neither needs regex-escaping.
+          # The release-index surface the currency stamper writes, on the same terms
+          # again: resolved from `syncedPaths()` in the rewriter, which derives it
+          # from `INDEX_PATH` in the gate whose finding it clears. Third rewriter,
+          # third resolved list, zero restated literals.
+          INDEX_LIST="${RUNNER_TEMP}/post-version-release-index-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { syncedPaths } from "./scripts/sync-release-index-currency.mjs"; for (const p of syncedPaths()) console.log(p);' \
+                 > "${INDEX_LIST}"; then
+            echo "::error::could not resolve syncedPaths() from scripts/sync-release-index-currency.mjs, so the release-index half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+          if [ ! -s "${INDEX_LIST}" ]; then
+            echo "::error::syncedPaths() in scripts/sync-release-index-currency.mjs resolved EMPTY, so the release index the version pass rewrites would read as an unexpected path. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # Same four filters cut-rc.yml applies to the same surface: the fixed
+          # release paths by pattern, then the three declared lists by WHOLE-LINE
+          # EXACT match, so no derived filter can accept a path its declaration
+          # does not name and none needs regex-escaping.
           UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
             | grep -vxF -f "${TEMPLATE_LIST}" \
-            | grep -vxF -f "${SURFACE_LIST}" || true)"
+            | grep -vxF -f "${SURFACE_LIST}" \
+            | grep -vxF -f "${INDEX_LIST}" || true)"
           if [ -n "${UNEXPECTED}" ]; then
             printf '%s\n' "${UNEXPECTED}" | sed 's/^/::error::  unexpected: /'
             echo "::error::the version pass wrote outside the reviewed post-version surface (paths above). This is the treadmill guard: a new version-time output must arrive together with the gate that judges it. Add the surface to the declaration its rewriter reads, and its gate to the content half below — deliberately, in one reviewed diff."
@@ -591,6 +614,7 @@ jobs:
           run_gate pnpm check:docs-image-tag
           run_gate pnpm check:docs-image-tag-sync
           run_gate pnpm check:template-version-sync
+          run_gate pnpm check:release-index-currency-sync
           run_gate pnpm check:nul-bytes
           run_gate pnpm check:release-notes
           run_gate pnpm check:release-page-status

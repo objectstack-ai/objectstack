@@ -2033,6 +2033,50 @@ jobs:
       - name: Template version-time rewriter self-test
         run: pnpm check:template-version-sync
 
+      # #15332 — the THIRD version-time rewriter, and the third self-test beside
+      # the two above. scripts/sync-release-index-currency.mjs joins the root
+      # `version` chain and stamps the release index's "current series: X.Y.Z,
+      # released YYYY-MM-DD" status field from packages/spec/CHANGELOG.md, so the
+      # sentence cannot go stale the way it did on three consecutive minors
+      # (#10232, #11649, #15332). The gate that names the staleness,
+      # check-release-section-coverage, structurally could not fire on the change
+      # that causes it: the version commit is opened by changesets/action with the
+      # default GITHUB_TOKEN and gets NO CI, and the step further down in this file
+      # runs that gate WITHOUT --strict, where a finding is advisory and the job is
+      # green by design.
+      #
+      # ⚠️ This step is NOT that gate's --strict arm, and must never become it.
+      # Promoting --strict here would also red a release page that has no section
+      # for a just-published train, i.e. every PR between a version commit and its
+      # release-notes PR — a policy question, deliberately not decided by adding a
+      # rewriter. What runs here is ONLY --self-test, whose cases are string
+      # fixtures: it never reads the live index for currency and never reads a
+      # release page at all, so no corpus state can red it. The advisory,
+      # non-strict `Release section-coverage guard` step below is untouched.
+      #
+      # Why it must run at PR time and not only in release.yml's post-version lane,
+      # where the rewriter's own corpus is — two gates in this repo say so, and both
+      # name a PR-TIME caller:
+      #   * check-self-test-wired — a script CI runs that ships a --self-test must
+      #     have that self-test run by CI.
+      #   * scripts/pm/dispatch-gates.mjs --self-test — "a deferred pair defers the
+      #     LEAD, not the load break": a family no every-PR workflow runs leaves its
+      #     import edges unwatched at PR time, so a change breaking the MODULE LOAD
+      #     of check-release-section-coverage.mjs (which this rewriter imports its
+      #     surface, scope and verdict from) would not redden the PR that made it.
+      #     Measured: with release.yml as the only caller, that self-test is
+      #     2-of-1382 RED naming this family; with this step, 1382/1382.
+      #
+      # Only the --self-test runs here, for the same reason the two steps above
+      # give: on a corpus that is already current the rewriter has nothing to do, so
+      # CI can never observe it working. The self-test is where a STALE entry is
+      # observed being stamped through the gate's own verdict, and — the control
+      # that matters just as much — where a CURRENT index is observed left
+      # byte-identical and UNWRITTEN, because this rewriter writes into curated,
+      # reader-facing prose.
+      - name: Release-index currency version-time rewriter self-test
+        run: pnpm check:release-index-currency-sync
+
       # #4851: the docs-accuracy-audit workflow's default scope is a generated list
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself — the caller hands the list in). Hand-kept, that list
