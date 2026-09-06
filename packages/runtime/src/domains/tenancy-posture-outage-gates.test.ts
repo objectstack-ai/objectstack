@@ -56,7 +56,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { ObjectKernel, isAuthzStoreUnavailableError } from '@objectstack/core';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -99,15 +98,21 @@ const bareKernel = (): ObjectKernel =>
 
 /**
  * The engine double the mint path reads: `sys_api_key` inserts and `sys_member`
- * lookups, nothing else.
+ * lookups, and NOTHING else.
  *
- * The write verbs route through ObjectQL's OWN dispatch predicates
- * (`check:engine-double-contract`) rather than a hand-written approximation, so
- * this double cannot be looser than the producer. `find` REFUSES a combinator
- * rather than answering it wrong, for the same reason its sibling in
- * `http-dispatcher.keys.test.ts` does: without the throw, `Object.entries`
- * reads `$or` as an ordinary field name and hands back an empty result set with
- * nothing erroring.
+ * ⛔ Deliberately no `update` / `delete`. The mint path calls neither, and a
+ * double that declares a verb its subject never reaches is coverage nobody is
+ * getting: it would owe `check:engine-double-contract` a ledger row for a pin
+ * that can never fire. A path that grows into one of those verbs fails loudly
+ * here rather than meeting a stub.
+ *
+ * `find` REFUSES a combinator rather than answering it wrong, for the same
+ * reason its sibling in `http-dispatcher.keys.test.ts` does: without the throw,
+ * `Object.entries` reads `$or` as an ordinary field name, compares `row.$or`
+ * against the array, matches nothing, and hands the suite an empty result set
+ * with nothing erroring. It honours the caller's `limit` by PRESENCE and after
+ * the filter (`check:objectql-double-limit`), so it cannot pass a page the
+ * producer would not have returned.
  */
 function keysEngine(members: any[]) {
     const rows: any[] = [];
@@ -120,18 +125,11 @@ function keysEngine(members: any[]) {
         find: async (obj: string, opts: any) => {
             const where = opts?.where ?? {};
             const table = obj === 'sys_api_key' ? rows : obj === 'sys_member' ? members : [];
-            return table.filter((r: any) => Object.entries(where).every(([k, v]) => {
+            const matched = table.filter((r: any) => Object.entries(where).every(([k, v]) => {
                 if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
                 return r[k] === v;
             }));
-        },
-        update: async (_obj: string, data: any, options?: any) => {
-            assertEngineUpdateDispatch(data, options);
-            return {};
-        },
-        delete: async (_obj: string, options?: any) => {
-            assertEngineDeleteDispatch(options);
-            return {};
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
     };
     return { ql, rows };
@@ -253,16 +251,9 @@ function bootActivation(wiring: TenancyWiring) {
         isActionEnabled: () => true,
         describeDisabledAction: (n: string) => `Action '${n}' is disabled`,
         setActionActive,
+        // Same rule as `keysEngine`: only the verbs this door actually reaches.
         find: vi.fn(async () => []),
         insert: vi.fn(),
-        update: async (_obj: string, data: any, options?: any) => {
-            assertEngineUpdateDispatch(data, options);
-            return {};
-        },
-        delete: async (_obj: string, options?: any) => {
-            assertEngineDeleteDispatch(options);
-            return {};
-        },
     };
     const metadata: any = {
         load: vi.fn(async () => null),
