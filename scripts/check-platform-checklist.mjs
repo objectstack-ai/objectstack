@@ -142,7 +142,17 @@ const err = (file, id, msg) => errors.push(`${file}${id ? ` · ${id}` : ''}: ${m
 // The battery runs inline, on every invocation, not only behind `--self-test`,
 // because a `--self-test` here would otherwise execute NOWHERE: this gate is
 // not CI-wired by maintainer decision (README "Operating cadence"), so nothing
-// on a PR would ever reach a `--self-test` leg. NOT because its `pnpm` alias is
+// on a PR would ever reach a `--self-test` leg.
+//
+// ⚠️ CORRECTED (#11730): the second half of that sentence no longer holds, and
+// the first half is unaffected. `.github/workflows/platform-checklist-watchdog.yml`
+// now runs this gate on `main` daily through its package script, so a
+// `--self-test` leg DOES execute somewhere — and the root alias
+// `check:platform-checklist` carries one, which is what `check:self-test-wired`
+// requires of every script CI runs. The gate is still NOT wired into per-PR CI;
+// only the reporting channel changed. The inline battery stays inline: a
+// `--self-test` that runs once a day is not a reason to stop running the cases
+// on the invocation whose verdict is being published. NOT because its `pnpm` alias is
 // unavailable to it: `check:platform-checklist` is already a key in root
 // package.json, and the reading that the #9465 fence covers that file is false
 // -- the GATE INVOCATION IDIOM note at the top of `.github/workflows/lint.yml`
