@@ -70,6 +70,15 @@
  * why the version gap is inert here, and it is not a reason to trust the
  * double: the mock is simply never asked to stand in for the surface on
  * which the two majors differ.
+ *
+ * Two `RedisKV` limbs this file drives but does not assert are pinned in
+ * the sibling `kv.transaction.test.ts`: the WATCH/MULTI abort-retry loop,
+ * and the versioned-delete MULTI/DEL branch. Measured here rather than
+ * assumed: `multi().del` is called zero times by these suites, while
+ * `multi().exec()` DOES return null twice — not because a competing
+ * writer exists, but because of a per-connection stale-watch divergence
+ * in the double. The sibling file carries that measurement and its
+ * controls.
  */
 
 // `ioredis-mock` publishes no type declarations of its own — no `types`

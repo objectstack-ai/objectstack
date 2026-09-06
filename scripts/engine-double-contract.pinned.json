@@ -3217,6 +3217,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/share-links-enforcement-context.test.ts",
       "verb": "delete",
       "pinned": 1

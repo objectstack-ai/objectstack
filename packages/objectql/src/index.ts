@@ -386,12 +386,23 @@ export type {
 // #8686's ruling. The refusal class is exported because a caller that catches
 // it identifies it by `code`, and the decision function because it is the
 // ruling's five binding points as one pure, directly-testable verdict.
+//
+// [#14936] `SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE` and
+// `isSystemWriteOrganizationRequiredError` are the AFFORDANCE that makes "by
+// `code`" followable without re-spelling the literal. Exporting the class was
+// never enough on its own: this package declares both realms in its `exports`,
+// so a consumer holding the other realm's copy gets `instanceof` === false,
+// silently. The code compare is the check that survives; these two are how a
+// consumer performs it without authoring the string itself, and so without
+// acquiring a `check:error-code-provenance` stamp site of its own.
 export {
   resolveSystemWriteOrganization,
   resolveTenantFieldName,
   isPlatformNamespaceObject,
   carriesOrganization,
+  isSystemWriteOrganizationRequiredError,
   SystemWriteOrganizationRequiredError,
+  SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE,
   ORGANIZATION_OBJECT,
   GLOBAL_TENANT,
   DEFAULT_TENANT_FIELD,
