@@ -11,19 +11,26 @@
 //
 // Scope — deliberately narrow to keep it false-positive-free:
 //
-//   • Only `update_record`, and ⚠️ this bullet's REASON is spent. It used to
-//     be that INSERT was engine-exempt from the author-declared static-`readonly`
-//     strip (#3043/#3413: "a `create_record` may legitimately seed readonly
-//     columns", with an ingress copy in metadata-protocol that the flow engine
-//     bypassed by calling the data engine directly). The maintainer ruling of
-//     2026-09-03 (option C, #14147) SUPERSEDED that row: `engine.insert` runs
-//     the static strip for a non-system caller, the ingress copy is deleted,
-//     and a `create_record` node without `runAs:'system'` is exactly such a
-//     caller. So a create writing a readonly field IS a silent no-op now, and
-//     this rule does not yet report it — a scan gap, not a decision, recorded
-//     here and filed rather than widened inside #14147's PR (a new
-//     error-severity finding class is its own change). The hook sibling's
-//     `insert`/`create` gap rests on the same superseded premise.
+//   • `update_record` AND `create_record` — the two nodes whose `fields` map
+//     is a caller-supplied write payload. The create verb used to be excluded
+//     because INSERT was engine-exempt from the author-declared static-
+//     `readonly` strip (#3043/#3413: "a `create_record` may legitimately seed
+//     readonly columns", with an ingress copy in metadata-protocol that the
+//     flow engine bypassed by calling the data engine directly). The maintainer
+//     ruling of 2026-09-03 (option C, #14147) SUPERSEDED that row: `engine.insert`
+//     runs the SAME `stripReadonlyFields` the update path runs, under the same
+//     `isSystem` gate, and a `create_record` node without `runAs:'system'` is
+//     exactly such a caller — the row lands WITHOUT the column and the step
+//     still reports `success` (measured end to end in service-automation's
+//     `create-record-readonly-drop.test.ts`). So the STATIC branch below judges
+//     both verbs alike (#15394 closed the scan gap #14147 left open).
+//
+//     ⚠️ The CONDITIONAL branch stays `update_record`-only, on purpose: a
+//     `readonlyWhen` predicate is evaluated against the record being written
+//     over, which a create does not have, and `engine.ts` says so at the strip
+//     ("INSERT stays exempt" — `stripReadonlyWhenFields` is update-path-only).
+//     A `readonlyWhen` finding on a `create_record` would state something false
+//     about a write that lands, so none is ever produced.
 //
 //   • `runAs:'system'` exempts the STATIC branch ONLY - it is not a flow-level
 //     skip. An elevated run bypasses the static `readonly` strip, so a system
@@ -72,9 +79,26 @@ export interface ReadonlyFlowWriteFinding {
   hint: string;
 }
 
-// Rule ids (registry entries).
+// Rule ids (registry entries). One id per SHAPE, not per verb: since #15394
+// `flow-update-readonly-field` covers the static shape on `create_record` too,
+// because the finding is the same fact (a caller-supplied write to a declared-
+// readonly field the engine strips) and the same strip — the message names the
+// verb it was judged on, and a second id would only split one finding's
+// suppression, docs and counts in two.
 export const FLOW_UPDATE_READONLY_FIELD = 'flow-update-readonly-field';
 export const FLOW_UPDATE_READONLY_WHEN_FIELD = 'flow-update-readonly-when-field';
+
+/** The node type whose payload the STATIC branch alone judges (#15394). */
+const CREATE_NODE_TYPE = 'create_record';
+/** The node type both branches judge. */
+const UPDATE_NODE_TYPE = 'update_record';
+/**
+ * Flow nodes whose `config.fields` is a caller-supplied write payload the engine
+ * runs `stripReadonlyFields` over. Declared as data so a third CRUD verb cannot
+ * land silently in a branch never written for it.
+ */
+export const READONLY_FLOW_WRITE_NODE_TYPES: readonly string[] = [UPDATE_NODE_TYPE, CREATE_NODE_TYPE];
+const WRITE_NODE_TYPES: ReadonlySet<string> = new Set(READONLY_FLOW_WRITE_NODE_TYPES);
 
 type AnyRec = Record<string, unknown>;
 
@@ -126,7 +150,11 @@ export function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, F
 }
 
 /**
- * The target object of an `update_record` node, when statically knowable. Reads
+ * The target object of an `update_record` / `create_record` node, when
+ * statically knowable. Both node configs anchor the object on the same key
+ * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema` in
+ * `@objectstack/spec` automation, `objectName`) and share the same alias
+ * conversion (`flow-node-crud-object-alias` covers the whole CRUD quartet). Reads
  * the canonical `objectName` and its historical `object` alias — a pre-parse
  * source may still carry the alias during the protocol-17 window, until the
  * 'flow-node-crud-object-alias' conversion (#3796) canonicalizes it at load. A
@@ -140,8 +168,9 @@ function readLiteralObjectName(config: AnyRec): string | undefined {
 }
 
 /**
- * Validate flow `update_record` writes against target-object readonly
- * declarations. Pure and dependency-free; safe on pre- or post-parse stacks.
+ * Validate flow `update_record` / `create_record` writes against target-object
+ * readonly declarations. Pure and dependency-free; safe on pre- or post-parse
+ * stacks.
  */
 export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFinding[] {
   const findings: ReadonlyFlowWriteFinding[] = [];
@@ -167,7 +196,11 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
     const walked = walkFlowNodes(flow, `flows[${flowIndex}]`);
 
     walked.forEach(({ node, path: nodePath, regionTrail }, walkIndex) => {
-      if (node?.type !== 'update_record') return;
+      const nodeType = node?.type;
+      if (typeof nodeType !== 'string' || !WRITE_NODE_TYPES.has(nodeType)) return;
+      // A create has no prior record, so only the STATIC branch applies to it
+      // (the header's second bullet); the verb also reaches the message.
+      const isCreate = nodeType === CREATE_NODE_TYPE;
       const config = (node.config ?? {}) as AnyRec;
 
       const objectName = readLiteralObjectName(config);
@@ -205,16 +238,33 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             rule: FLOW_UPDATE_READONLY_FIELD,
             where,
             path: `${nodePath}.config.fields.${fieldName}`,
-            message:
-              `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
-              `runAs:'${runAs}' the engine silently strips readonly fields from the UPDATE payload (#2948), ` +
-              `so this write never lands — while the step still reports success.`,
-            hint:
-              `If automation is meant to maintain this field, declare the flow runAs:'system' (the intended ` +
-              `channel — readonly governs the end-user/API surface, not trusted system writers). Otherwise ` +
-              `remove '${fieldName}' from this update_record node.`,
+            message: isCreate
+              ? // The create-side strip is the 2026-09-03 ruling (#14147): the
+                // same `stripReadonlyFields`, now run by `engine.insert` too.
+                `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
+                `runAs:'${runAs}' the engine silently strips readonly fields from the INSERT payload too ` +
+                `(#14147 — the same strip the UPDATE path runs), so the row is created WITHOUT this column ` +
+                `(it falls back to the field's defaultValue) — while the create_record step still reports ` +
+                `success, with only a run-time warning naming the dropped field.`
+              : `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
+                `runAs:'${runAs}' the engine silently strips readonly fields from the UPDATE payload (#2948), ` +
+                `so this write never lands — while the step still reports success.`,
+            hint: isCreate
+              ? `Seeding a readonly column at create time is a SYSTEM act: declare the flow runAs:'system' ` +
+                `(the intended channel — readonly governs the end-user/API surface, not trusted system ` +
+                `writers). Otherwise remove '${fieldName}' from this create_record node, or stamp it in a ` +
+                `beforeInsert hook on '${objectName}' — a hook-assigned key is the hook's write, not a ` +
+                `caller-supplied one, and survives the strip.`
+              : `If automation is meant to maintain this field, declare the flow runAs:'system' (the intended ` +
+                `channel — readonly governs the end-user/API surface, not trusted system writers). Otherwise ` +
+                `remove '${fieldName}' from this update_record node.`,
           });
-        } else if (meta.readonlyWhen) {
+        } else if (meta.readonlyWhen && !isCreate) {
+          // `!isCreate`: the conditional lock has no prior record to evaluate on
+          // an insert and the engine does not run it there ("INSERT stays
+          // exempt"), so a create is judged on the static branch alone — under
+          // `runAs:'system'` that means a create writing BOTH kinds is clean,
+          // where the same update would still draw the conditional warning.
           findings.push({
             severity: 'warning',
             rule: FLOW_UPDATE_READONLY_WHEN_FIELD,
