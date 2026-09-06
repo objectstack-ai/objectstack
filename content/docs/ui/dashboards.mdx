@@ -360,6 +360,42 @@ under as a dashboard-level variable (readable in widget expressions as
 `page.<name>`) and the key widgets reference in `filterBindings`. It defaults
 to `field`; the name `dateRange` is reserved for the built-in date range.
 
+### Where a Filter's `field` Resolves
+
+A global filter's `field` resolves against the **object behind each bound
+widget's dataset** (`dataset.object`) — never against that dataset's declared
+`dimensions`. Widget `dimensions` are selected from the dataset **by name**.
+They are two different namespaces:
+
+| Key | Resolved against | Rejected by |
+| :--- | :--- | :--- |
+| `globalFilters[].field` (after any `filterBindings` re-target) | The bound widget's `dataset.object` — a bare name against that object's own fields, a dotted `relationship.field` path hop by hop with its prefix declared in the dataset's `include` | `dashboard-filter-field-unknown`, severity **error** |
+| `widgets[].dimensions[]` | The dataset's declared `dimensions`, by name | `widget-dimension-unknown`, severity **error** |
+
+Two consequences follow, and their asymmetry is the part that surprises authors:
+
+- **A filter needs no dataset dimension.** The [Complete Example](#complete-example)
+  below filters on `project` and `assignee`, neither of which the `project_tasks`
+  dataset declares — both are fine, because the `project_task` object has those
+  fields.
+- **Declaring a dimension confers no filterability, and a filterable field is not
+  group-by-able.** The same field can be filterable and un-group-by-able on one
+  dataset: to filter on it the object must have it, and to group by it the dataset
+  must declare it as a dimension. Declaring either buys the other nothing.
+
+A filter naming a field the widget's own object lacks makes that widget's query
+address a column that does not exist. `os validate` and the runtime publish door
+both refuse the board rather than shipping it — see
+[Dangling widget bindings](/docs/deployment/validating-metadata#2-dangling-widget-bindings).
+Opt a single widget out with `filterBindings: { <name>: false }` (see
+[Per-Widget Filter Bindings](#per-widget-filter-bindings) below).
+
+This describes the **authorable surface** — what a dashboard may declare, and what
+author-time validation accepts. It is not a claim about the analytics query API,
+which does accept an object's own field as an ad-hoc dimension without the dataset
+declaring it; `widget-dimension-unknown` is what holds the line for authored
+dashboards.
+
 ### Date Filter Defaults
 
 A `type: 'date'` filter's `defaultValue` must be a value the dashboard can
