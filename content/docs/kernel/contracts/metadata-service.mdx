@@ -31,6 +31,7 @@ export interface IMetadataService {
   registerInMemory?(type: string, name: string, data: unknown): void;
   get(type: string, name: string): Promise<unknown | undefined>;
   list(type: string): Promise<unknown[]>;
+  listDiagnosed?(type: string): Promise<{ items: unknown[]; degraded: boolean; errors: string[] }>;
   unregister(type: string, name: string): Promise<void>;
   exists(type: string, name: string): Promise<boolean>;
   listNames(type: string): Promise<string[]>;
@@ -130,6 +131,51 @@ if (degraded) {
   // The store is unreachable — do NOT conclude the action does not exist.
 }
 ```
+
+### list / listNames
+
+The plural reads' failure posture. Both read a **set** through the same
+registered loaders, and — unlike the singular reads above, which collapse every
+fault into one `null` — they answer two different kinds of fault differently.
+
+| condition | outcome |
+|:---|:---|
+| A loader cannot be read — a storage outage, an unreachable `sys_metadata`, any other throw | **Degrade** — that loader is reported once and skipped; the read resolves with what the reachable loaders hold |
+| One metadata name is derived from more than one file — `twin.json` beside `twin.yaml` in one type directory | **Refuse** — `AmbiguousMetadataStemError` propagates out of both reads |
+
+**Degrade** is the older of the two postures and the one nothing announces to
+the caller: `list` and `listNames` still resolve, the caller still gets an
+array, nothing 500s, and the set is quietly short. `listDiagnosed` is what
+tells a short set apart from a complete one — it returns the same items plus
+`degraded` and `errors`, and `degraded` is true when at least one loader could
+not be read while the set was assembled. It says the set is **known-partial**,
+never that it is empty and never that it is wrong: a reason to withhold a claim
+of *completeness*, never a reason to withhold the items.
+
+`listNames` has **no diagnosed counterpart**. A short name set is not
+distinguishable by its caller at all — the lost loader is reported at `error`
+in the server log and nowhere else.
+
+**Refuse** is an authoring error rather than an outage, so it is deliberately
+not absorbed by the degrade seam above. The filesystem loader derives a
+metadata name by stripping the extension from a flat file's basename, so two
+files under one type directory sharing a stem produce one name that is listed
+twice while only one of them is reachable under that name. Instead of picking a
+winner by extension precedence, the loader throws, and both plural reads
+re-raise it. The error carries the ADR-0112 envelope — code
+`AMBIGUOUS_METADATA_STEM`, status `500` (the request is well formed and no
+caller can fix it by sending something else; only deleting or renaming a file
+does), plus the metadata `type`, the `stem`, and **every** colliding path,
+sorted — never just the precedence winner. Catch it with
+`isAmbiguousMetadataStemError` from `@objectstack/metadata` wherever you need
+to tell it apart from an outage.
+
+<Callout type="info">
+Only stems the loader would actually resolve collide: the comparison is
+case-sensitive, it covers just the extensions whose serializers are registered
+(`.js` is not in the default set), and a nested file sharing a flat file's
+basename is not a collision.
+</Callout>
 
 ### register / unregister
 
