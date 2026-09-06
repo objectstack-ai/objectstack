@@ -36,10 +36,14 @@
  * set is exactly `error`. A later edit that invents a code for it goes red here
  * rather than handing consumers a vocabulary no ledger declares.
  *
- * ⛔ The refusal is deliberately NOT oclif's `dependsOn: ['eval']`. Measured on
- * this entry: `dependsOn` refuses in the parser with exit 2, a stack trace on
- * stderr, and EMPTY STDOUT under `--json`. `the --json face stays a machine
- * face` and the exit-code assertions fail that implementation.
+ * ⛔ The refusal is deliberately NOT oclif's `dependsOn: ['eval']` — and these
+ * pins are NOT the argument for that. Bare `dependsOn` does fail them (exit 2,
+ * empty stdout under `--json`, measured), but a `catch()` override brings it
+ * inside the envelope and PASSES them. So a green here is not a verdict on the
+ * choice, and ⛔ must not be read as one. The reason the guard lives in the
+ * command is BLAST RADIUS — that override re-shapes every parse error on this
+ * command rather than this one precondition — and it is recorded where the
+ * decision is, at the guard in `src/commands/lint.ts`.
  *
  * ## Why no `dist/` sits on the measured path
  *

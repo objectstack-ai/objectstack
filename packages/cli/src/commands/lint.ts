@@ -541,14 +541,29 @@ export default class Lint extends Command {
     // flag, so dropping the claim documents a no-op flag instead of removing
     // one, and blesses the silent acceptance rather than ending it.
     //
-    // ⛔ NOT oclif's `dependsOn: ['eval']`, and that is measured rather than
-    // assumed. It does refuse — but it refuses in the PARSER, before the
-    // command runs, so the refusal is oclif's and not this command's: exit 2, a
-    // stack trace on stderr, and under `--json` an EMPTY STDOUT (measured, both
-    // faces). A machine consumer of `os lint --json` would get no JSON document
-    // at all — the off-envelope class #15549/#16044 had just repaired one exit
-    // over on this very command. Refusing here keeps the envelope this command
-    // already answers with: the human message on `error`, exit 1, both faces.
+    // ⛔ NOT oclif's `dependsOn: ['eval']` — and the reason is BLAST RADIUS,
+    // not an inability to answer inside this command's envelope.
+    //
+    // Bare `dependsOn` refuses in the PARSER, before the command runs, so its
+    // refusal is oclif's: exit 2, and under `--json` an EMPTY STDOUT. (The
+    // stack trace that accompanies it on `bin/run-dev.js` is a DEV-ENTRY
+    // artefact of `settings.debug`; the shipped `bin/run.js` prints oclif's
+    // pretty message with no stack. Don't generalise the dev entry's output.)
+    //
+    // ⚠️ That much CAN be brought inside the envelope: a `catch()` override on
+    // the parse was measured answering exit 1 with `{error}` on the `--json`
+    // face and an empty stderr. So "the framework spelling cannot be
+    // enveloped" is FALSE, and ⛔ nobody should re-derive this choice from it.
+    //
+    // The real objection is scope. That override re-shapes EVERY parse error on
+    // this command, not the one precondition this card is about: every unknown
+    // flag and every bad value would move from exit 2 / stderr to exit 1 /
+    // stdout, and would carry oclif's own prose plus its `--help` hint inside
+    // the JSON `error` string — a wide, uncommissioned change to the very
+    // `--json` envelope #15549/#16044 had just repaired one exit over. A guard
+    // here moves ONE invocation class and leaves every other parse error
+    // exactly as it was, while keeping the envelope this command already
+    // answers with: the human message on `error`, exit 1, both faces.
     //
     // ⛔ Nor the raw-argv guard `os migrate meta` uses for its stored-only
     // flags. That one exists because oclif reads a `default: false` boolean and
