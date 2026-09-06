@@ -151,9 +151,16 @@ export function ownRegionKeys(nodeType: unknown): readonly string[] {
  * is the reverse of the double-count this view exists to prevent and strictly
  * worse: a double-count is visible in the output.
  *
- * The union stays the DEFAULT only so this function's other caller keeps the
- * behaviour it was written against; it is not the correct argument for any new
- * one. `regionKeys: []` is a real answer (strip nothing) and is distinct from
+ * The union stays the DEFAULT to bound this change to the two rules #16111
+ * names — ⛔ NOT because it is the right argument for the caller still taking
+ * it. `lint-flow-patterns.ts` reads the union view for its own recursive
+ * template scan, so it is blind to an `http` node's `body` for exactly the
+ * reason above: the same defect, one call site over, tracked on #16405. Once
+ * that caller passes its own slots this default has no callers left and
+ * `regionKeys` must become REQUIRED, so no later caller inherits the trap by
+ * writing the shorter call.
+ *
+ * `regionKeys: []` is a real answer (strip nothing) and is distinct from
  * omitting the parameter.
  *
  * Exported since #5383 because {@link WalkedFlowNode.localConfig} is not the only
