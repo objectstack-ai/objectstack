@@ -14,9 +14,17 @@
 //   ① the registered `auth` service really carries `getBasePath`, and it is
 //      reachable through the SYNCHRONOUS `kernel.getService`, which is the only
 //      accessor a synchronous `createHonoApp` can use;
-//   ② better-auth really routes under the string it answers — the accessor and
-//      the `basePath` handed to better-auth are one value, not two that happen
-//      to agree today.
+//   ② better-auth really ROUTES under the string it answers.
+//
+// ⛔ Fact ② does not hold because the two are one string, and an earlier
+// spelling of this header said it did. `createAuthInstance` hands better-auth
+// the CONFIGURED `basePath` verbatim while `getBasePath()` answers its
+// normalised form; they differ exactly when a trailing slash is configured, and
+// that gap is deliberate — normalising the handed string moves the OAuth
+// access-token `iss` and this manager's own verifier then rejects the tokens it
+// mints (`auth-manager.ts`, `configuredBasePath()`, carries the measurement).
+// What holds the mount up is narrower and is what the rows below assert: the
+// WIRE PATHS under `getBasePath()`'s answer are the ones better-auth routes.
 //
 // This file is where they are observable: `@objectstack/verify` boots the real
 // kernel with the real `AuthPlugin`. ⛔ Neither fact may be inferred from the

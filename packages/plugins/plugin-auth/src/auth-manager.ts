@@ -1249,7 +1249,7 @@ export class AuthManager {
       // bare host) so the reset-password / verify-email / magic-link URLs
       // better-auth derives from baseURL are always clickable links.
       baseURL: this.getCanonicalOrigin(),
-      basePath: this.getBasePath(),
+      basePath: this.configuredBasePath(),
 
       // Database adapter configuration
       database: this.createDatabaseConfig(),
@@ -5446,8 +5446,43 @@ export class AuthManager {
   }
 
   /**
-   * [#16025] The path prefix better-auth matches its routes under — the SAME
-   * string this manager hands better-auth as its `basePath`, normalised once.
+   * [#16025] The `basePath` string this manager hands better-auth: the
+   * configured value VERBATIM, or the shipped default when nothing is
+   * configured. Unchanged from before this card — only the reading of it moved
+   * here, so `getBasePath()` and this cannot drift apart by accident.
+   *
+   * ## ⛔ Never normalise here
+   *
+   * better-auth stamps the OAuth access-token `iss` from `ctx.context.baseURL`,
+   * which is `baseURL` + THIS string (`@better-auth/oauth-provider` 1.7.2:
+   * `iss: jwtPluginOptions?.jwt?.issuer ?? ctx.context.baseURL`, and this
+   * manager sets no `jwt.issuer`), while `verifyMcpAccessToken` hands
+   * `jose.jwtVerify` `issuer: getAuthIssuer()` — the configured value with a
+   * leading slash ADDED and a trailing one KEPT. `jose` compares `iss` by exact
+   * string, so the two agree only while this string is the configured one.
+   * Measured on bare better-auth 1.7.2 + `@better-auth/oauth-provider` 1.7.2
+   * (memory adapter, this manager's own plugin wiring), a real
+   * `client_credentials` token, configured `basePath: '/api/v1/auth/'`:
+   *
+   *     handed '/api/v1/auth/'   ctx.baseURL …/auth/   iss …/auth/   verifier …/auth/   ->  OK
+   *     handed '/api/v1/auth'    ctx.baseURL …/auth    iss …/auth    verifier …/auth/   ->  REJECTED
+   *                                    ERR_JWT_CLAIM_VALIDATION_FAILED: unexpected "iss" claim value
+   *
+   * ⇒ normalising this string rejects every MCP access token the deployment
+   * mints, for as long as a trailing slash is configured — fail-closed, and
+   * permanent. A draft of this card did exactly that. `getBasePath()` is the
+   * NORMALISED view an HTTP adapter mounts on and is deliberately NOT this;
+   * making the two one value moves a published OAuth identifier, which is
+   * #16399's decision, not this card's.
+   */
+  private configuredBasePath(): string {
+    return this.config.basePath || '/api/v1/auth';
+  }
+
+  /**
+   * [#16025] The path prefix better-auth's routes are reachable under, in the
+   * single NORMALISED spelling an HTTP adapter can mount: a leading slash added
+   * when absent, trailing slashes stripped.
    *
    * ## Why this is public
    *
@@ -5472,10 +5507,22 @@ export class AuthManager {
    *
    * ## ⛔ What this method is NOT — stated because the first spelling claimed it
    *
-   * It is NOT the single definition of the base path. FOUR readers of
-   * `this.config.basePath` existed in this file; this method collapses TWO of
-   * them — the string handed to better-auth and `betterAuthEndpointPath`'s
-   * normalising copy. Two remain, each with its own normaliser:
+   * **It is NOT the string handed to better-auth.** `createAuthInstance` passes
+   * `configuredBasePath()`, the configured value verbatim, and the two differ
+   * exactly when the configured spelling carries a trailing slash or lacks a
+   * leading one. That difference is deliberate and load-bearing — see
+   * `configuredBasePath()` for the token rejection normalising there causes.
+   * What the two DO share is the wire paths they serve: better-call strips a
+   * trailing slash when routing and better-auth adds a missing leading one, so
+   * a mount at `/api/v1/auth/*` reaches a better-auth configured with
+   * `/api/v1/auth/` — measured on the same probe, which drove its whole OAuth
+   * exchange through that mount.
+   *
+   * **It is NOT the single definition of the base path.** FOUR readers of
+   * `this.config.basePath` existed in this file; this card leaves THREE, by
+   * collapsing the string handed to better-auth and `betterAuthEndpointPath`'s
+   * normalising copy onto `configuredBasePath()`. The two that remain keep
+   * their own normalisers:
    *
    *     getAuthIssuer()      adds a leading slash, KEEPS a trailing one
    *     getMcpResourceUrl()  adds nothing, strips a trailing `/auth`
@@ -5486,9 +5533,10 @@ export class AuthManager {
    * both compared by exact string by relying parties, so moving either
    * re-selects tokens. Measured on this manager, at this commit:
    *
-   *     basePath '/api/v1/auth/'   getAuthIssuer()     -> …/api/v1/auth/   (slash KEPT, while
-   *                                                                        better-auth is now
-   *                                                                        configured without it)
+   *     basePath '/api/v1/auth/'   getAuthIssuer()     -> …/api/v1/auth/   (trailing slash KEPT —
+   *                                                                        and better-auth is handed
+   *                                                                        the same spelling, which is
+   *                                                                        why the pair still agrees)
    *     basePath 'api/v1/auth'     getMcpResourceUrl() -> http://localhost:3000api/v1/mcp
    *                                                                       (malformed; pre-existing,
    *                                                                        unchanged by this card)
@@ -5498,22 +5546,29 @@ export class AuthManager {
    * them is a decision about published OAuth identifiers, not a tidy-up. Filed
    * as #16399 rather than taken on a mount card.
    *
-   * ## What the two collapsed readers actually disagreed about
+   * ## ⛔ No value moves — what this card actually changed here
+   *
+   * Every one of the three readers answers exactly what it answered on the
+   * merge base, for every configured spelling. `betterAuthEndpointPath` already
+   * applied this normalisation; better-auth already received the raw configured
+   * string. What is new is that the normalisation has a name and is PUBLIC, so
+   * an adapter can mount on it. A configured `'/'` still normalises to `''`,
+   * unchanged from before.
+   *
+   * ## What the collapsed readers actually disagreed about
    *
    * As STRINGS, and not as behaviour — measured, not inferred. A configured
-   * `'api/v1/auth'` reached better-auth without its leading slash while the
-   * ownership walk tested `'/api/v1/auth'`; but better-auth/better-call tolerate
-   * the missing slash, so on the merge base `handleRequest` answered `200` and
-   * `ownsRoute` answered `true` on the SAME request. The divergence was LATENT.
-   * Collapsing it closes a trap; it does not repair an observable behaviour, and
-   * ⛔ no input class moved because of it.
-   *
-   * Normalisation is exactly what `betterAuthEndpointPath` always applied: a
-   * leading slash is added when absent, trailing slashes are stripped. A
-   * configured `'/'` still normalises to `''`, unchanged from before.
+   * `'api/v1/auth'` reaches better-auth without its leading slash while the
+   * ownership walk tests `'/api/v1/auth'`; but better-auth/better-call tolerate
+   * the missing slash, so `handleRequest` answers `200` and `ownsRoute` answers
+   * `true` on the SAME request. The divergence is LATENT — and ⛔ it is NOT
+   * repaired here, only given one name per side: the mount and the ownership
+   * walk read `getBasePath()`, better-auth still receives the configured
+   * spelling. Repairing it means changing what better-auth is configured with,
+   * which is the very move measured above to reject live tokens.
    */
   getBasePath(): string {
-    const configured = this.config.basePath || '/api/v1/auth';
+    const configured = this.configuredBasePath();
     return (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
   }
 

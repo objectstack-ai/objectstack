@@ -49,10 +49,12 @@
  * ## ⛔ What these cases do NOT cover
  *
  *   - That the kernel's real `auth` service carries `getBasePath` at all, or
- *     that its answer is the string better-auth really matches under. Both are
- *     `@objectstack/plugin-auth`'s to keep (`auth-manager-base-path.test.ts`
- *     pins the accessor there, and `AuthManager` hands better-auth that very
- *     expression), and both were measured on the real boot quoted above. This
+ *     that the wire paths under its answer are the ones better-auth really
+ *     matches. Both are `@objectstack/plugin-auth`'s to keep
+ *     (`auth-manager-base-path.test.ts` pins the accessor there; ⛔ note that
+ *     `AuthManager` hands better-auth the CONFIGURED spelling verbatim, not
+ *     this normalised one — deliberately, because the OAuth `iss` is derived
+ *     from it), and both were measured on the real boot quoted above. This
  *     package does not depend on `@objectstack/plugin-auth` and gains no
  *     dependency here — the same boundary #15928's file records.
  *   - The `200 {}` the BEFORE rows carried. That is manufactured one layer out,
