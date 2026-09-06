@@ -143,7 +143,22 @@ export const MAX_SHARD_OVER_MEAN = 1.3;
 // balanced. Nothing in this repo compared a prediction to an outcome, so the
 // only instrument that ever noticed was a killed job.
 //
-// 1.5 is the smallest round factor satisfying both ends:
+// 1.5 is where the two populations actually separate, measured rather than
+// picked. On run 34013842594 -- a GREEN merge_group build, so the full package
+// list rather than a pull_request's --affected subset -- the six shards ran
+// their `Run this shard's tests` step against the same 672s prediction:
+//
+//   shard 3  462s  0.69x     shard 6  776s  1.15x
+//   shard 5  630s  0.94x     shard 4  793s  1.18x
+//   shard 2  714s  1.06x     shard 1 1168s  1.74x   <- the one carrying the CLI
+//
+// Five healthy shards top out at 1.18x and the drifted one sits at 1.74x, on
+// the same build, so the gap is not runner noise and one factor separates them
+// cleanly. (Those step times include turbo scheduling and any uncached build
+// tasks; this gate compares test-task windows only, which is the tighter and
+// fairer reading of the same shards.)
+//
+// 1.5 also satisfies the two ends the bound is answerable to:
 //
 //   - it must fire well below the 2.69x measured above, or the gate would have
 //     been green straight through the incident it exists to catch;
@@ -151,6 +166,9 @@ export const MAX_SHARD_OVER_MEAN = 1.3;
 //     within the balance bound cannot be the thing that breaks balance. Gating
 //     tighter than the split's own tolerance reds on drift the partitioner is
 //     built to absorb, and a gate that reds on healthy input gets muted.
+//
+// ⛔ Raising this to absorb a red is the one move that cannot be right: the
+// number it would be raised past is a measurement of the dataset being wrong.
 export const MAX_MEASURED_OVER_PREDICTED = 1.5;
 
 // Where a `packages.items[].path` actually points.
