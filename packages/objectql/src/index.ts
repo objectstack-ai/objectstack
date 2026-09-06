@@ -66,6 +66,24 @@ export {
 } from './registry.js';
 export type { InjectedColumnProvenance } from './registry.js';
 
+// [#16159] The three ADR-0112 `code` strings the registry's install-time and
+// registration refusals carry, as constants a consumer can import instead of
+// re-spelling. Exported for the reason #14936 established and measured: this
+// package declares BOTH realms in its own `exports`, so a consumer holding
+// the other realm's copy of a class gets `instanceof` === false, silently —
+// a `code` compare is the only check that survives the split, and these are
+// how a consumer performs it without authoring the string itself (and so
+// without acquiring a `check:error-code-provenance` stamp site of its own).
+// ⛔ The classes themselves stay unexported deliberately: exporting them
+// would publish the `instanceof` route this convention exists to replace.
+// See the shared docblock over the constants in `registry.ts` for the full
+// reasoning and for why the `*_CODE` spelling is load-bearing.
+export {
+  NAMESPACE_CONFLICT_CODE,
+  DUPLICATE_ARTIFACT_OBJECT_NAME_CODE,
+  OBJECT_OWNERSHIP_CONFLICT_CODE,
+} from './registry.js';
+
 // [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
 // ADR-0112 D6c). Exported because `os build` is the SECOND door that has to
 // answer "does this group id resolve?" — over a composed artifact, at compile

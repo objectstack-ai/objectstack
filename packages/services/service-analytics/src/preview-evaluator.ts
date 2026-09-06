@@ -12,7 +12,7 @@
 //     $between/$in/$nin/$contains, $and/$or/$not)
 //   • timeDimensions date-range filtering + granularity bucketing
 //     (day/week/month/quarter/year)
-//   • group-by dimensions; count / countDistinct / sum / avg / min / max
+//   • group-by dimensions; count / count_distinct / sum / avg / min / max
 //   • order + limit/offset
 // Anything beyond (joins via `include`, raw SQL) falls back to the caller's
 // normal execution path — the preview simply doesn't claim it.
@@ -154,20 +154,121 @@ export function bucketDate(value: unknown, granularity: string, timezone?: strin
 
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
-function aggregate(rows: Row[], metricType: string, field: string): number {
-  if (metricType === 'count' || field === '*') {
-    if (metricType === 'countDistinct') {
-      return new Set(rows.map((r) => r[field]).filter((v) => v != null)).size;
-    }
-    return rows.length;
+/**
+ * Read an operand as a number, or `null` for "this is not a number" — the
+ * question `Number()` cannot be asked, because it answers `NaN` for a date and
+ * `0` for `''` and `null` alike.
+ *
+ * Numeric TEXT counts (`'800'`): a seed row carries whatever the draft was
+ * authored with, and a numeric column written as text is still a numeric
+ * column — ordering it lexicographically would put `'1200'` before `'800'`,
+ * which no backend does for that column. A `Date` is deliberately NOT numeric
+ * here: `Number(new Date())` is an epoch integer, and comparing one against a
+ * money amount is a category error rather than an ordering.
+ */
+function numericOperand(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
+  return null;
+}
+
+/**
+ * Order two operands of ONE measure for `min`/`max`.
+ *
+ * Numbers (in either spelling) order numerically; everything else falls to
+ * {@link compare}, this file's shared ordering — so ISO dates order as dates,
+ * a BSON `Date` orders as its instant against wire text, and text orders the
+ * way `MIN(text_col)` orders on a SQL face.
+ *
+ * Deliberately NOT folded into {@link compare} itself: that primitive also
+ * decides `where` filtering and `order`, whose comparand comes from the QUERY
+ * rather than from a sibling row, so widening it would move populations this
+ * card never measured.
+ */
+function compareOperands(a: unknown, b: unknown): number {
+  const an = numericOperand(a);
+  const bn = numericOperand(b);
+  if (an !== null && bn !== null) return an - bn;
+  return compare(a, b);
+}
+
+/**
+ * `min`/`max` over one group: the winning operand **in its own type**.
+ *
+ * NULLs are skipped (every SQL face aggregates over non-null values), and a
+ * group with nothing left answers `null` — `emptyGroupValueFor`
+ * (`@objectstack/spec/data`) rules `min`/`max` over nothing unanswerable, never
+ * the `0` that reads as a measurement somebody made.
+ */
+function extremumOf(rows: Row[], field: string, kind: 'min' | 'max'): unknown {
+  let winner: unknown;
+  let seen = false;
+  for (const r of rows) {
+    const v = r[field];
+    if (v == null) continue;
+    if (!seen) {
+      winner = v;
+      seen = true;
+      continue;
+    }
+    const c = compareOperands(v, winner);
+    if (kind === 'min' ? c < 0 : c > 0) winner = v;
+  }
+  return seen ? winner : null;
+}
+
+/**
+ * One measure over one group.
+ *
+ * `metricType` is the cube metric's `type` — `AggregationMetricType`
+ * (`spec/data/analytics.zod.ts`), which `dataset-compiler` fills with the
+ * dataset measure's own `aggregate` verbatim. That vocabulary is CLOSED, so
+ * every member is answered here rather than left to fall through (#16203):
+ *
+ * | metric type      | answer                                                   |
+ * |:-----------------|:---------------------------------------------------------|
+ * | `count`          | the row count — numeric whatever it counted               |
+ * | `count_distinct` | the cardinality of the non-null values — numeric          |
+ * | `sum` / `avg`    | arithmetic over the operands that read as numbers         |
+ * | `min` / `max`    | the winning operand, IN ITS OWN TYPE ({@link extremumOf}) |
+ * | `number` / `string` / `boolean` | a custom-SQL metric the dataset path never mints — left on the historical numeric `default` |
+ *
+ * ⭐ `min`/`max` are why this function stopped returning `number`. Coercing
+ * every operand with `Number()` and dropping the non-finite ones made a
+ * `max` over a `date` field answer `0` — not a mislabelled column but a
+ * DIFFERENT, WRONG ANSWER to the same query, silently, on the draft-preview
+ * path only. The same value comes back as `'2026-05-12'` from the live path
+ * over the same rows. `cross-object-rebucket.ts` settled the identical
+ * question for the recombination path (#3797): the value `min`/`max` picks is
+ * a value OF the column, so it has to come back in the shape the row carried.
+ *
+ * ⛔ `sum`/`avg` over a TEMPORAL operand is left exactly as it was — the
+ * non-finite operands drop and the answer is the numeric identity. There is no
+ * defined answer to invent (the SQL faces disagree with each other on it), and
+ * #16099 is the open card for REFUSING an incoherent aggregate/field-type pair
+ * — the layer that refuses is that card's ruling, not this file's.
+ *
+ * ⛔ `count`/`count_distinct` stay numeric. Counting `date`s is still counting;
+ * the sibling descriptor rule (`measure-result-type.ts`) answers the same way.
+ */
+function aggregate(rows: Row[], metricType: string, field: string): unknown {
+  // `count`, and any metric aggregating over rows rather than a column.
+  if (metricType === 'count' || field === '*') return rows.length;
   const nums = rows.map((r) => Number(r[field])).filter((n) => Number.isFinite(n));
   switch (metricType) {
-    case 'countDistinct': return new Set(rows.map((r) => r[field]).filter((v) => v != null)).size;
+    // The spec's spelling (`AggregationFunction`), which is what the compiler
+    // copies through. It used to be spelled `countDistinct` here — a word no
+    // producer mints — so the arm was UNREACHABLE and the measure fell to the
+    // numeric `default` below, answering a sum of coerced values (or a row
+    // count) under the author's `count_distinct` name.
+    case 'count_distinct': return new Set(rows.map((r) => r[field]).filter((v) => v != null)).size;
     case 'sum': return nums.reduce((a, b) => a + b, 0);
     case 'avg': return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
-    case 'min': return nums.length ? Math.min(...nums) : 0;
-    case 'max': return nums.length ? Math.max(...nums) : 0;
+    case 'min': return extremumOf(rows, field, 'min');
+    case 'max': return extremumOf(rows, field, 'max');
     default: return nums.length ? nums.reduce((a, b) => a + b, 0) : rows.length;
   }
 }
@@ -250,7 +351,19 @@ export function evaluateAnalyticsQueryOverRows(
   return {
     rows: limited,
     fields: [
-      ...dimensions.map((d) => ({ name: d, type: 'string' })),
+      // A dimension column is described by the CUBE dimension's own type — the
+      // same expression `NativeSQLStrategy.buildFieldMeta` and its ObjectQL
+      // sibling use (`d?.type || 'string'`), so a `date` dataset dimension is
+      // `'time'` here exactly as it is on the live path. Minting `'string'` for
+      // every dimension made the same column two different things depending
+      // only on whether a pending seed draft existed (#16203 (b)).
+      ...dimensions.map((d) => ({ name: d, type: String(cube.dimensions?.[d]?.type || 'string') })),
+      // ⛔ A MEASURE column keeps the `'number'` every producer in the platform
+      // mints for it, live faces included. Correcting it is one rule owned by
+      // `measureResultType` (#15768/#16101) and applied at the ADR-0021
+      // descriptor pass; a second copy of it here would be two implementations
+      // free to drift, over a question this producer cannot answer anyway (it
+      // has the cube, not the source object's declared field types).
       ...query.measures.map((m) => ({ name: m, type: 'number' })),
     ],
   };
