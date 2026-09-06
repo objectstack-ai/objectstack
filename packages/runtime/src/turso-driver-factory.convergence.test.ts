@@ -64,7 +64,9 @@ const FULL_SPEC: DatasourceConnectionSpec = {
     concurrency: 7,
     syncUrl: 'libsql://replica.turso.io',
     sync: { intervalSeconds: 30, onConnect: false },
-    timeout: 9000,
+    // The AUTHORED key (#15680). The driver key it lands on is still `timeout`
+    // — asserted on the constructor argument below.
+    timeoutMs: 9000,
     mode: 'replica',
   },
 };

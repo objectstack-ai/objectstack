@@ -145,7 +145,7 @@ export const SalesDashboard: Dashboard = {
   label: 'Sales Performance',
   columns: 12,
   gap: 4,
-  refreshInterval: 180,                    // seconds; auto-refresh
+  refreshIntervalSeconds: 180,             // auto-refresh cadence
 
   header: {
     showTitle: true,

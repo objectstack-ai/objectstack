@@ -555,8 +555,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       onError: {
         label: "On Error"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -942,8 +942,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Gap",
         helpText: "Space between widgets, in steps of 0.25rem (4 = 1rem)"
       },
-      refreshInterval: {
-        label: "Refresh Interval",
+      refreshIntervalSeconds: {
+        label: "Refresh Interval Seconds",
         helpText: "Auto-refresh (seconds)"
       },
       header: {

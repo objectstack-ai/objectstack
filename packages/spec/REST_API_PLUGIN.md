@@ -315,7 +315,7 @@ const config: RestApiPluginConfig = {
     enableCompression: true,
     enableETag: true,
     enableCaching: true,
-    defaultCacheTtl: 300,
+    defaultCacheTtlSeconds: 300,
   },
 };
 ```
