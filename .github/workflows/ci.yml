@@ -717,6 +717,7 @@ jobs:
       # `continue-on-error` (the point is the red), placed ABOVE the attestation
       # pair for the #6082 reason documented on the upload above — so a drift red
       # also withholds the attestation, which is the fail-closed direction.
+
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
       # say anything at all about a green one.
