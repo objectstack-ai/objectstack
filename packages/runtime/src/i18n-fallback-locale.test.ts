@@ -8,9 +8,10 @@
  *
  * `i18n.fallbackLocale` is authorable on the stack artifact
  * (`TranslationConfigSchema`), and `FileI18nAdapter` — the provider
- * `I18nServicePlugin` installs — has always honoured it: `os serve` constructs
- * it with `fallbackLocale || defaultLocale || 'en'`, and its `t()` consults
- * that locale after the requested one.
+ * `I18nServicePlugin` installs — has always honoured it: both boot paths
+ * construct it with `fallbackLocale || defaultLocale || 'en'`
+ * (`packages/cli/src/commands/serve.ts` and `plugin-dev`'s `dev-i18n.ts`), and
+ * its `t()` consults that locale after the requested one.
  *
  * The kernel's in-memory fallback is constructed with nothing. `AppPlugin`
  * injected `defaultLocale` (#4058-era) and `supportedLocales` (#7679) into

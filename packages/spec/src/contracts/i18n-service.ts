@@ -105,10 +105,11 @@ export interface II18nService {
      * artifact, which only the runtime app-plugin layer can see, so a provider
      * built without it (the kernel's in-memory fallback, auto-registered when
      * no i18n plugin is installed) has no other way to learn it. A provider
-     * constructed WITH it — `FileI18nAdapter`, which `os serve` builds with
-     * `fallbackLocale || defaultLocale || 'en'` — omits this method and keeps
-     * the value it was built with. It does implement `setDefaultLocale` and
-     * `setSupportedLocales`; omitting a setter is per-value, not per-provider.
+     * constructed WITH it — `FileI18nAdapter`, which both boot paths build
+     * with `fallbackLocale || defaultLocale || 'en'` — omits this method and
+     * keeps the value it was built with. It does implement `setDefaultLocale`
+     * and `setSupportedLocales`; omitting a setter is per-value, not
+     * per-provider.
      *
      * Why it exists: `i18n.fallbackLocale` is authorable
      * (`TranslationConfigSchema`), and until this was threaded it was INERT on

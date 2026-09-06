@@ -1808,7 +1808,7 @@ export class AppPlugin implements Plugin {
         // [#15694] Thread the declared `i18n.fallbackLocale` the same way, for
         // the same reason: it is authorable on the stack artifact and this is
         // the only layer that can see it. A provider CONSTRUCTED with it —
-        // `FileI18nAdapter`, which `os serve` builds with
+        // `FileI18nAdapter`, which both boot paths build with
         // `fallbackLocale || defaultLocale || 'en'` — has no `setFallbackLocale`
         // (it does have the other two) and is skipped by the probe, keeping the
         // value it was built with. The

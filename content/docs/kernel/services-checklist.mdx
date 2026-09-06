@@ -488,10 +488,11 @@ AppPlugin will, in this order:
 Each of the three setters is optional on `II18nService` and applied through the same
 `typeof ... === 'function'` capability probe, so a provider that has not implemented one
 keeps its own behaviour rather than breaking. `FileI18nAdapter` implements
-`setDefaultLocale` and `setSupportedLocales` but **not** `setFallbackLocale`: `os serve`
-constructs it with `fallbackLocale || defaultLocale || 'en'` already collapsed from the
-stack config, so the probe skips step 2 and it keeps the value it was built with —
-omitting a setter is per-value, not per-provider. Each setter is also guarded on the app
+`setDefaultLocale` and `setSupportedLocales` but **not** `setFallbackLocale`: both boot
+paths (`os serve` and `DevPlugin`'s auto-wiring) construct it with
+`fallbackLocale || defaultLocale || 'en'` already collapsed from the stack config, so the
+probe skips step 2 and it keeps the value it was built with — omitting a setter is
+per-value, not per-provider. Each setter is also guarded on the app
 having DECLARED the value, because several AppPlugins can share one kernel and an app that
 declares no `i18n` block must not clear what another declared.
 

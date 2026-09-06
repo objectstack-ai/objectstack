@@ -436,8 +436,8 @@ describe('createMemoryI18n declared fallbackLocale (#15694)', () => {
     // WHAT WENT WRONG
     //
     // `i18n.fallbackLocale` is authorable (`TranslationConfigSchema`) and
-    // `FileI18nAdapter` has always honoured it — `os serve` constructs it with
-    // `fallbackLocale || defaultLocale || 'en'`. The kernel's
+    // `FileI18nAdapter` has always honoured it — both boot paths construct it
+    // with `fallbackLocale || defaultLocale || 'en'`. The kernel's
     // in-memory fallback is constructed with nothing and had no setter, so on a
     // stack running it the declaration was INERT: `t()` consulted the requested
     // locale and, only if that locale had NO bundle at all, `defaultLocale`.
