@@ -114,10 +114,41 @@ import { isWritablePackage } from './package-writability.js';
  *
  * Absent column -> `undefined`, so each caller's existing `?? <default>` chain
  * keeps exactly its current meaning.
+ *
+ * ## [#14078] The `Date` arm is TOTAL — an Invalid `Date` yields `undefined`
+ *
+ * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
+ * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
+ * because a guard on some arms and not others re-opens the drift the single
+ * spelling closed.
+ *
+ * Reachability is MEASURED, not assumed (#14409, landed `3ecb7dc1a`): mysql2
+ * 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero
+ * `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in
+ * 275760..294276 — years Postgres itself stores. Unguarded,
+ * `value.toISOString()` raises `RangeError: Invalid time value`, so a read
+ * endpoint answers **500** on a row the operator cannot identify from the
+ * error; the spelling this replaced (`String(value)`) served the visible text
+ * `"Invalid Date"` instead.
+ *
+ * The terminal value is chosen **per call site**, and this one's is
+ * `undefined`: both callers (`getByHash` and `rowToItem`) already end in
+ * `?? new Date(...).toISOString()`, the branch an absent column takes today.
+ * The ruling assigns `undefined` exactly where "the field is optional and the
+ * caller already carries a `?? default` chain". ⛔ NOT the visible text
+ * `"Invalid Date"` — the fields fed from here are read by machines
+ * (`MetadataItem.authoredAt`, whose one in-repo forwarding lands in a
+ * `z.string().datetime()` field), so that text would move the failure to a zod
+ * refusal at the consumer instead of removing it. ⛔ And NOT a blanket `''`: a silent blank is the shape that
+ * hides the producer's bug.
  */
 function canonicalIsoInstant(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
-  if (value instanceof Date) return value.toISOString();
+  // [#14078] Total `Date` arm: an Invalid `Date` is the ONE `Date` shape
+  // `toISOString()` refuses, and it is reachable from two live drivers. It
+  // leaves as `undefined` so the caller's `?? <default>` chain — the same one
+  // an absent column takes — keeps exactly its current meaning.
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
   if (typeof value === 'string') return value;
   return String(value);
 }
