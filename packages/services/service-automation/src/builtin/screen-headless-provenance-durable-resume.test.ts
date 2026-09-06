@@ -164,7 +164,7 @@ describe('caller-provenance survives a durable resume (#15812)', () => {
         expect(resumed.screen?.nodeId).toBe('review');
         // Not merely "it stopped": it stopped WITHOUT having answered itself
         // from the row.
-        expect(resumed.output?.tags).toBeUndefined();
+        expect((resumed.output as Record<string, unknown> | undefined)?.tags).toBeUndefined();
     });
 
     /**
