@@ -1,0 +1,12 @@
+---
+"@objectstack/service-automation": patch
+---
+
+A suspended run whose durable save fails is now kept resumable in this process even when a concurrent read landed mid-park — and the error record that reports the failure says how to check that.
+
+`AutomationEngine.persistSuspendedRun` writes its map entry BEFORE it awaits `store.save()`, and marks the run cache-only only once that save settles. For the whole of that await the entry is live but unqualified, so a concurrent per-id `hasSuspendedRun` / `resume` reads a store that truthfully has no row yet, finds no qualifier, and evicts a run that is being parked right now. That window is bounded and stays as it was: the strict load is store-first, so once the save lands the run is resumable from the store, and only the cache-only listing under-reports.
+
+Compounded with the save then **failing**, it was not bounded. The catch marked the run cache-only, but the map entry that marking qualifies had already been evicted, so the run had neither a durable row nor an in-memory copy: `hasSuspendedRun` answered `false` and `resume` answered `RUN_NOT_FOUND`. The run was lost **in this process**, not merely un-durable — for example a paused approval that no decision can ever advance. Reaching it needs a store that rejects the write while still answering reads with "no row" rather than throwing: a healthy read replica behind a broken write path, a missing `INSERT` grant, a full disk.
+
+- **The failure path now re-seats the map entry** alongside the cache-only marking, so the marking qualifies something again and the documented degradation — a failed save costs cross-restart durability, not in-process resumability — holds in this interleaving too. The cache-only marking is not widened, no lock is added, and the save is not reordered, so a run is still never readable out of the map while the store is authoritative for it.
+- **The error record for a failed save is corrected.** It kept telling the operator the run was "kept in memory only" and that they had until the next restart to act, which in this interleaving pointed away from the loss: the run was already gone, and the restart would take the blame. It now names the two reads that must still answer for the run (`hasSuspendedRun()` and `listSuspendedRuns()`), so the promise can be checked rather than trusted. It still reports the same cause in the same structured slot, at the same `error` level.
