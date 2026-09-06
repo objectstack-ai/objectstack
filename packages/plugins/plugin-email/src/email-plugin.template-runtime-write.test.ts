@@ -263,8 +263,13 @@ describe('#7733 runtime email_template write materializes without a restart', ()
     // `getMetaItem` returns a DECORATED item (`_diagnostics` from
     // `decorateMetadataItem`, `_packageId` / `_provenance` from the registry
     // and the overlay row). `EmailTemplateDefinitionSchema` is a strictObject
-    // that declares no underscore key, so an unstripped body would reject the
-    // very baseline the reset exists to restore.
+    // that declares neither `_diagnostics` nor `_draft`, so an unstripped body
+    // would reject the very baseline the reset exists to restore.
+    //
+    // [#16152] It DOES declare the ADR-0010 envelope (`_packageId` /
+    // `_provenance` and the `_lock*` family, via `MetadataProtectionFields`) —
+    // those parse clean and are not stripped. See the `#16152` describe block
+    // below for the pins that hold that apart.
     const protocol = withEffectiveRead(fakeProtocol(), async () => ({
       type: 'email_template',
       name: 'auth.password_reset',
@@ -376,5 +381,112 @@ describe('#7733 runtime email_template write materializes without a restart', ()
     await protocol.save('auth.password_reset', template());
 
     expect(engine.rows).toHaveLength(0);
+  });
+});
+
+// ── #16152 ─────────────────────────────────────────────────────────────────
+//
+// `readEffectiveTemplate` used to strip read decorations with a MODULE-LOCAL
+// copy of `stripReadDecorations` that dropped every key starting with `_`.
+// The shared list it drifted from (`spec/kernel/metadata-read-decorations.ts`)
+// carries exactly `['_diagnostics', '_draft']` and names the ADR-0010
+// protection envelope as "Deliberately NOT" a member — envelope state the
+// write path legitimately carries, allowlisted by the closed schemas so a
+// served document keeps its provenance on re-parse.
+//
+// The copy's docblock justified the blanket sweep on the claim that
+// `EmailTemplateDefinitionSchema` "declares no underscore key". These pin why
+// that claim is false and what the narrow strip must do instead.
+
+describe('#16152 read-decoration strip uses the shared list, not a blanket `_` sweep', () => {
+  /** The full ADR-0010 envelope, as `MetadataProtectionFields` declares it. */
+  const ENVELOPE = {
+    _lock: 'no-delete',
+    _lockReason: 'Shipped by the auth package.',
+    _lockSource: 'artifact',
+    _provenance: 'package',
+    _packageId: 'com.objectstack.auth',
+    _packageVersion: '1.4.2',
+    _lockDocsUrl: 'https://example.invalid/locks',
+  } as const;
+
+  it('the schema declares the ADR-0010 envelope and rejects the read decorations', async () => {
+    // The premise the deleted docblock got backwards, asserted directly
+    // against the schema rather than inferred from it. `email-template.zod.ts`
+    // spreads `MetadataProtectionFields` into its `strictObject`, so every
+    // envelope key is authorable surface here; `_diagnostics` / `_draft` are
+    // not declared anywhere in that shape, which is why they must be stripped.
+    const { EmailTemplateDefinitionSchema } = await import('@objectstack/spec/system');
+
+    const withEnvelope = EmailTemplateDefinitionSchema.safeParse({ ...template(), ...ENVELOPE });
+    expect(withEnvelope.success).toBe(true);
+    // Guarding a KEY's reachability: no `unrecognized_keys` on any envelope key.
+    expect(
+      (withEnvelope as any).error?.issues?.filter((i: any) => i.code === 'unrecognized_keys') ?? [],
+    ).toEqual([]);
+
+    for (const decoration of ['_diagnostics', '_draft']) {
+      const served = EmailTemplateDefinitionSchema.safeParse({
+        ...template(),
+        [decoration]: decoration === '_draft' ? true : { valid: true },
+      });
+      expect(served.success).toBe(false);
+      const keys = (served as any).error.issues
+        .filter((i: any) => i.code === 'unrecognized_keys')
+        .flatMap((i: any) => i.keys);
+      expect(keys).toContain(decoration);
+    }
+  });
+
+  it('re-materializes a baseline served with the FULL protection envelope on it', async () => {
+    // The envelope rides along on the layered read (`_packageId` /
+    // `_provenance` from the registry, `_lock*` from the artifact layer). It
+    // parses clean, so the reset restores the packaged baseline with no
+    // projector failure — and `mapTemplateToRow`'s closed column list is what
+    // keeps it out of the row, not a strip.
+    const protocol = withEffectiveRead(fakeProtocol(), async () => ({
+      item: {
+        ...template({ subject: 'The packaged subject' }),
+        ...ENVELOPE,
+        _diagnostics: { valid: true },
+        _draft: false,
+      },
+    }));
+    const { engine } = await boot({ protocol });
+
+    await protocol.save('auth.password_reset', template({ subject: 'An operator override' }));
+    await protocol.remove('auth.password_reset');
+
+    expect(protocol.projectorFailures).toEqual([]);
+    const rows = rowsOf(engine, 'auth.password_reset');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].subject).toBe('The packaged subject');
+    // `sys_email_template` declares no underscore column, and
+    // `mapTemplateToRow` projects a closed list — so the envelope cannot reach
+    // the row whatever the strip does. This is the measured reason there is no
+    // second, envelope-stripping pass beside the shared one.
+    for (const k of Object.keys(ENVELOPE)) expect(rows[0]).not.toHaveProperty(k);
+  });
+
+  it('does not silently swallow an underscore key the schema never declared', async () => {
+    // The blanket sweep dropped EVERY `_` key before the parse, so a key that
+    // is neither a decoration nor declared — a producer's typo, a decoration
+    // added upstream and never added to the shared list — vanished and the
+    // reset reported success. That is precisely the silent-strip failure the
+    // closed schemas (#4001) exist to end, and the shared list keeps loud:
+    // the projector surfaces it on the write's own response.
+    const protocol = withEffectiveRead(fakeProtocol(), async () => ({
+      item: { ...template({ subject: 'The packaged subject' }), _notADeclaredKey: 'x' },
+    }));
+    const { engine } = await boot({ protocol });
+
+    await protocol.save('auth.password_reset', template({ subject: 'An operator override' }));
+    await protocol.remove('auth.password_reset');
+
+    expect(protocol.projectorFailures).toHaveLength(1);
+    expect(protocol.projectorFailures[0]).toContain('_notADeclaredKey');
+    // The override row is left exactly as it was — a body the schema refuses
+    // never becomes a write.
+    expect(rowsOf(engine, 'auth.password_reset')[0].subject).toBe('An operator override');
   });
 });
