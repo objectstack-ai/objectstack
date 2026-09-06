@@ -125,6 +125,42 @@ export interface DomainHandlerDeps {
     resolveService<K extends keyof ServiceSlotContracts>(context: HttpProtocolContext, name: K, environmentId?: string): Promise<ServiceSlotContract<K> | undefined>;
     resolveService(context: HttpProtocolContext, name: string, environmentId?: string): any;
     /**
+     * [#15900 · #13906 decision 1 option A] The CLASSIFIED sibling of
+     * `resolveService`, for a domain gate whose input is an authorization FACT
+     * rather than an optional capability.
+     *
+     * Same chain, same registries, same order — only what a REJECTION means
+     * differs:
+     *
+     *  - branded "never registered" (`isServiceNotRegisteredError`, #13905) →
+     *    `undefined`, quiet. The supported composition, whose behaviour is
+     *    exactly what it was;
+     *  - every other rejection (a factory that threw, a scoped registration
+     *    resolved without a scope id, a circular service dependency) →
+     *    re-raised, for the gate to answer as an OUTAGE rather than as an
+     *    absent fact.
+     *
+     * ⚠️ `resolveService` above stays the contract for everything else, and
+     * that is a boundary rather than an oversight: it is a capability PROBE
+     * whose collapsed `undefined` is the right shape for "is this optional
+     * service installed", and rerouting a NAME through this method for every
+     * domain at once would change every gate that reads it in one stroke —
+     * option C on #15900, explicitly NOT ruled, because nobody has enumerated
+     * those gates. A gate opts IN, one call site at a time, and says at the
+     * call site why its input is not a capability question.
+     *
+     * ⛔ Do not reach for this because it reads as the stricter one. The
+     * classification is only meaningful where "the fact could not be read" and
+     * "the fact is absent" license DIFFERENT answers; where they license the
+     * same answer it buys an outage in place of a working deployment.
+     *
+     * Untyped by slot on purpose, exactly like `resolveService`'s second
+     * overload: its callers address `tenancy`, which has no written
+     * `ServiceSlotContracts` entry, and inventing one here would be a shape
+     * nothing verifies.
+     */
+    resolveServiceOrLoud(context: HttpProtocolContext, name: string, environmentId?: string): Promise<any>;
+    /**
      * Unscoped service lookup on the current kernel, typed by the slot.
      *
      * [#4127] Returned `any`, which is why nothing could tell a domain calling
