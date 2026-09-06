@@ -365,6 +365,17 @@ describe('templates survive npm packing', () => {
     expect(rules).toContain('.env');
   });
 
+  // The first dot-DIRECTORY the template has ever carried (#16330). The set
+  // comparison above already covers it, but it names nothing: a strip of
+  // `.github` would read there as "some file went missing". Naming the path
+  // literally, the way the .dockerignore case below does, is what makes the
+  // answer to "do nested dot-directories survive `npm pack`?" readable.
+  it('carries the .github workflow directory through the tarball and the scaffold', () => {
+    expect(packed).toContain('blank/.github/workflows/ci.yml');
+    expect(scaffolded).toContain('.github/workflows/ci.yml');
+    expect(TEMPLATE_FILE_ALIASES.has('.github')).toBe(false);
+  });
+
   it('leaves a literal template dotfile that packs fine alone', () => {
     // .dockerignore is NOT stripped — verified against the published 15.1.1
     // tarball, which ships it while .gitignore is absent. It stays literal, so
