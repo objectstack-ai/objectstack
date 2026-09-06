@@ -11,18 +11,22 @@ name: Platform-Checklist Watchdog
 # by checklist drift. ⛔ This workflow does not touch that. Only the REPORTING
 # CHANNEL changes — which is the whole of what was ruled.
 #
-# That is why this file carries `schedule:` and `workflow_dispatch:` and ⛔ NO
-# `pull_request:` and NO `merge_group:` trigger, unlike every other patrol in
-# this repo (`half-state-patrol.yml`, `release-coverage-patrol.yml` and
-# `required-set-patrol.yml` all carry a paths-filtered `pull_request:` so a
-# change to the patrol is exercised before it merges). Copying that row here
-# would put `check:platform-checklist` on a PR's critical path through the back
-# door and contradict the decision this workflow exists to preserve. The cost is
-# stated rather than hidden: a change to THIS FILE is not proven on a real
-# runner before it merges, so the first scheduled run after such a change is the
-# proof. `scripts/check-platform-checklist-watchdog.mjs` runs on every PR and
-# holds the shape statically — including the absence of those two triggers — so
-# what a PR loses is the live rehearsal, not the shape.
+# So this file carries `schedule:`, `workflow_dispatch:`, and a `pull_request:`
+# trigger `paths`-filtered to THIS FILE AND NOTHING ELSE — the posture
+# `half-state-patrol.yml`, `release-coverage-patrol.yml` and
+# `required-set-patrol.yml` all keep, so a change to the patrol is exercised
+# before it merges. ⛔ NO `merge_group:` and ⛔ NO `pull_request_target:`, ever.
+#
+# The filter is what makes that trigger compatible with the standing decision
+# rather than a back door through it. The decision's own words, in
+# `.github/workflows/lint.yml`: "keeping it out of the per-PR path means an
+# unrelated PR is never blocked by checklist drift." A trigger that fires only
+# on a pull request editing this workflow blocks no unrelated pull request at
+# all — it preserves the decision's purpose while changing its letter, which is
+# exactly what the maintainer ruled on 2026-09-06.
+#
+# ⛔ A `pull_request` run NEVER writes to the board. It runs the gate, publishes
+# the output to the run summary, and stops there.
 #
 # ## Why a workflow, and not "a seat should run it"
 #
@@ -95,6 +99,27 @@ on:
     - cron: '51 2 * * *'
   # The manual fire, and the smoke test this card exits on.
   workflow_dispatch: {}
+  # ⛔ PATHS-FILTERED TO THIS ONE FILE, and that filter is the whole reason this
+  # trigger is allowed to exist. The maintainer's standing decision, in its own
+  # words in `.github/workflows/lint.yml`: "keeping it out of the per-PR path
+  # means an unrelated PR is never blocked by checklist drift." A trigger that
+  # fires ONLY on a pull request editing this workflow blocks no unrelated PR at
+  # all, so it preserves that decision's purpose while changing its letter — the
+  # posture every patrol in this repo already keeps, and the one
+  # `scripts/pm/dispatch-gates.mjs` pins tree-wide.
+  #
+  # ⛔ Do NOT widen this list. A second path here would put the checklist gate on
+  # the critical path of pull requests that have nothing to do with it, which IS
+  # the thing the decision forbids;
+  # `scripts/check-platform-checklist-watchdog.mjs` refuses any widening and its
+  # self-test proves that refusal fires.
+  #
+  # ⛔ And a pull_request run NEVER writes to the board — see the `if:` on the
+  # issue step. It proves the transport, the invocation and the rendering on a
+  # real runner, and nothing else.
+  pull_request:
+    paths:
+      - '.github/workflows/platform-checklist-watchdog.yml'
   # ⛔ NO `pull_request:` and ⛔ NO `merge_group:` here, deliberately — see the
   # header. `scripts/check-platform-checklist-watchdog.mjs` fails when either
   # appears, and its self-test proves that refusal fires rather than asserting
@@ -185,6 +210,10 @@ jobs:
           {
             echo "### Platform-checklist watchdog — gate exit ${{ steps.gate.outputs.exit_code }}"
             echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "_Board write skipped: a pull_request run proves the sweep without filing or refreshing anything._"
+              echo
+            fi
             echo '```'
             cat "$RUNNER_TEMP/gate.out" 2>/dev/null || echo '(no stdout captured)'
             cat "$RUNNER_TEMP/gate.err" 2>/dev/null || true
@@ -194,7 +223,14 @@ jobs:
       - name: File or refresh the watchdog issue
         # RED only. On green this step does not run, and nothing else in this
         # job writes anything — that is the ruled behaviour.
-        if: steps.gate.outputs.exit_code != '0'
+        #
+        # ⛔ And NEVER on a `pull_request` run, whatever the gate said. A pull
+        # request proves the transport, the invocation and the rendering on a
+        # real runner; it must not touch the board. That is the posture every
+        # patrol in this repo keeps, and
+        # `scripts/check-platform-checklist-watchdog.mjs` refuses a board write
+        # whose `if:` lacks this guard.
+        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'
         uses: actions/github-script@v9
         env:
           GATE_EXIT: ${{ steps.gate.outputs.exit_code }}

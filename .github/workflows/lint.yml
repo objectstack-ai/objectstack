@@ -2329,18 +2329,20 @@ jobs:
       # `.github/workflows/platform-checklist-watchdog.yml` runs the gate on `main`
       # daily and files or refreshes one issue when it is red.
 
-      # ⛔ …and the step below is NOT that wiring. `check:platform-checklist` still
-      # never runs on a pull request. What runs here is the STATIC PIN over the
-      # watchdog workflow: it asserts the file exists, fires on `schedule:` +
-      # `workflow_dispatch:`, carries NO `pull_request:` / `pull_request_target:` /
-      # `merge_group:` trigger, and invokes the gate through its package script
-      # rather than an inlined copy of its command. Two file reads, no socket.
+      # ⛔ …and the step below is NOT that wiring. What runs here is the STATIC PIN
+      # over the watchdog workflow: it asserts the file exists, fires on
+      # `schedule:` + `workflow_dispatch:`, carries NO `merge_group:` /
+      # `pull_request_target:` trigger, that any `pull_request:` trigger is
+      # `paths`-filtered to the watchdog file ALONE, that no board write is
+      # reachable from a pull_request run, and that the gate is invoked through its
+      # package script rather than an inlined copy. Two file reads, no socket.
       #
-      # It has to live HERE rather than inside the watchdog. The watchdog runs on no
-      # pull request by construction — that absence is the very thing being pinned —
-      # so it cannot judge the PR that edits it, and a PR DELETING it would silence
-      # any check that lived inside it. This job is the only place where the absence
-      # of that file is observable before it merges.
+      # The watchdog's own `pull_request:` trigger names only itself, so it fires on
+      # no unrelated PR — that filter is what keeps the decision above intact, and
+      # pinning it is most of this step's job. It has to live HERE rather than
+      # inside the watchdog for the other half: a PR DELETING the watchdog would
+      # silence any check that lived inside it, and this job is the only place where
+      # the absence of that file is observable before it merges.
       #
       # Invoked as `node scripts/…` rather than a `pnpm check:*` alias: see the GATE
       # INVOCATION IDIOM note at the top of this file. The `--self-test` leg runs

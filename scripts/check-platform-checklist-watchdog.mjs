@@ -19,26 +19,53 @@
  * an unrelated pull request is never blocked by checklist drift. The watchdog
  * changes the REPORTING CHANNEL and nothing else.
  *
- * So this gate pins five things, and the third is the one worth having:
+ * So this gate pins six things, and the third and fourth are the ones worth
+ * having:
  *
  *   1. the workflow FILE EXISTS and parses as YAML;
  *   2. it carries `schedule:` (with a real `cron:`) and `workflow_dispatch:`;
- *   3. it carries NO `pull_request:`, NO `pull_request_target:` and NO
- *      `merge_group:` trigger;
- *   4. it invokes the gate's PACKAGE SCRIPT, `pnpm check:platform-checklist`;
- *   5. and it does NOT inline a copy of that alias's command.
+ *   3. it carries NO `merge_group:` and NO `pull_request_target:` trigger;
+ *   4. any `pull_request:` trigger it carries is `paths`-filtered to THIS
+ *      WORKFLOW FILE AND NOTHING ELSE;
+ *   5. it invokes the gate's PACKAGE SCRIPT, `pnpm check:platform-checklist`;
+ *   6. and it does NOT inline a copy of that alias's command.
  *
- * Clause 3 is why this file exists rather than a comment asking nicely. A pin
- * that asserted only 1, 2, 4 and 5 would be GREEN on a workflow that had been
- * quietly given a `pull_request:` trigger -- i.e. green on the one edit that
- * contradicts the decision the watchdog was built to preserve. A test that
- * cannot fail on the change it exists to catch is the shape this tree keeps
- * paying for, so every clause below, positive and negative, has a `--self-test`
- * fixture that makes it FIRE, next to one that keeps it silent.
+ * Clauses 3 and 4 are why this file exists rather than a comment asking nicely.
+ * A pin that asserted only the positive ones would be GREEN on a workflow that
+ * had been quietly given an UNFILTERED `pull_request:` trigger -- i.e. green on
+ * the one edit that contradicts the decision the watchdog was built to
+ * preserve. A test that cannot fail on the change it exists to catch is the
+ * shape this tree keeps paying for, so every clause below, positive and
+ * negative, has a `--self-test` fixture that makes it FIRE, next to one that
+ * keeps it silent.
  *
- * `pull_request_target:` is refused beside the two the ruling names. It is a
- * per-PR trigger under another name, and a pin that refuses `pull_request:`
- * while accepting its sibling is a pin with a documented hole in it.
+ * ## Why clause 4 is a FILTER and not a refusal (the 2026-09-06 ruling)
+ *
+ * The card's first ruling refused `pull_request:` outright. Implementing that
+ * literally created this tree's FIRST scheduled-only gate family and reddened
+ * `scripts/pm/dispatch-gates.mjs`, which pins tree-wide that every discovered
+ * family reaches a PR-time trigger -- because every patrol here carries a
+ * paths-filtered `pull_request:`. Put to the maintainer as an A/B/C fork, the
+ * answer was A: filter the trigger rather than forbid it.
+ *
+ * The filter is the whole of what makes that compatible. The decision's own
+ * words, in `.github/workflows/lint.yml`: "keeping it out of the per-PR path
+ * means an unrelated PR is never blocked by checklist drift." A trigger naming
+ * only this workflow fires on no unrelated pull request, so the decision's
+ * PURPOSE is untouched; only its letter changed. Widen the filter by one path
+ * and that stops being true, which is exactly what clause 4 refuses.
+ *
+ * `pull_request_target:` stays refused outright beside `merge_group:`. It is a
+ * per-PR trigger under another name that no `paths:` filter makes safe here,
+ * and a pin refusing one while accepting its sibling is a pin with a documented
+ * hole in it.
+ *
+ * ## Clause 4's other half: a pull request must never write the board
+ *
+ * A trigger that runs the gate on a pull request is only safe while that run
+ * cannot FILE anything. So a step that calls the issues endpoint must carry the
+ * `pull_request` guard in its own `if:`; a board write reachable from a pull
+ * request run is refused, and the self-test drives both directions.
  *
  * ## Why clause 4 is not cosmetic
  *
@@ -74,7 +101,28 @@ const ROOT = resolve(HERE, '..');
 export const WORKFLOW_REL = '.github/workflows/platform-checklist-watchdog.yml';
 export const PACKAGE_SCRIPT = 'check:platform-checklist';
 export const REQUIRED_TRIGGERS = Object.freeze(['schedule', 'workflow_dispatch']);
-export const REFUSED_TRIGGERS = Object.freeze(['pull_request', 'pull_request_target', 'merge_group']);
+export const REFUSED_TRIGGERS = Object.freeze(['pull_request_target', 'merge_group']);
+
+/**
+ * The only path a `pull_request:` trigger on this workflow may name. One entry,
+ * and the gate compares the declared list to it as a SET -- not a prefix, not a
+ * subset -- so neither widening it nor swapping it for some other file passes.
+ */
+export const PR_TRIGGER_ALLOWED_PATHS = Object.freeze([WORKFLOW_REL]);
+
+/** The `if:` condition a board-writing step must carry. */
+export const PR_WRITE_GUARD = "github.event_name != 'pull_request'";
+
+/** Calls that write to the board. Matched in a step's `run:` or `with.script`. */
+const BOARD_WRITE_CALLS = Object.freeze([
+  'issues.create(',
+  'issues.update(',
+  'issues.createComment(',
+  'issues.addLabels(',
+]);
+
+/** The tail every trigger refusal carries, so one reason is stated once. */
+const DECISION_TAIL = 'A standing maintainer decision keeps `check:platform-checklist` off the per-PR path, in its own words so that "an unrelated PR is never blocked by checklist drift"; this workflow changes the reporting channel and must never undo that.';
 
 /**
  * The basenames whose direct invocation clause 5 refuses. Both halves of the
@@ -140,6 +188,77 @@ function invokesInlinedGate(commands) {
   });
 }
 
+/** The trigger block, under either spelling of the `on:` key. */
+function triggerBlock(doc) {
+  const key = Object.prototype.hasOwnProperty.call(doc, 'on') ? 'on'
+    : Object.prototype.hasOwnProperty.call(doc, 'true') ? 'true'
+      : null;
+  return key === null ? undefined : doc[key];
+}
+
+/**
+ * Clause 4. A `pull_request:` trigger is PERMITTED here, and only while it is
+ * `paths`-filtered to this workflow alone. Every way of not being that -- no
+ * configuration at all, a `paths-ignore:` (which is the filter's COMPLEMENT and
+ * fires on everything else), an empty list, an extra entry, a different file --
+ * is a separate refusal, because the remedy differs and a reader should be told
+ * which one they wrote.
+ */
+export function judgePullRequestTrigger(doc) {
+  const block = triggerBlock(doc);
+  const pr = block && typeof block === 'object' && !Array.isArray(block) ? block.pull_request : undefined;
+  const head = `${WORKFLOW_REL} declares a \`pull_request:\` trigger`;
+  const out = [];
+  if (!pr || typeof pr !== 'object' || Array.isArray(pr)) {
+    out.push(`${head} with no configuration, so it fires on EVERY pull request. ${DECISION_TAIL} Filter it to \`paths: ['${WORKFLOW_REL}']\`.`);
+    return out;
+  }
+  if ('paths-ignore' in pr) {
+    out.push(`${head} filtered by \`paths-ignore:\`, which is a filter's COMPLEMENT — it fires on every pull request that does NOT touch the listed paths, i.e. on almost all of them. ${DECISION_TAIL} Use \`paths:\` instead.`);
+  }
+  const paths = pr.paths;
+  if (!Array.isArray(paths) || paths.length === 0) {
+    out.push(`${head} with no usable \`paths:\` filter, so it fires on EVERY pull request. ${DECISION_TAIL} Filter it to \`paths: ['${WORKFLOW_REL}']\`.`);
+    return out;
+  }
+  const declared = paths.map((x) => String(x));
+  const extra = declared.filter((x) => !PR_TRIGGER_ALLOWED_PATHS.includes(x));
+  const missing = PR_TRIGGER_ALLOWED_PATHS.filter((x) => !declared.includes(x));
+  if (extra.length > 0) {
+    out.push(`${head} whose \`paths:\` filter also names ${extra.map((x) => `\`${x}\``).join(', ')}. ${DECISION_TAIL} Widening this filter by one path puts the checklist gate on the critical path of pull requests that have nothing to do with it — the filter may name this workflow and nothing else.`);
+  }
+  if (missing.length > 0) {
+    out.push(`${head} whose \`paths:\` filter does not name ${missing.map((x) => `\`${x}\``).join(', ')}, so a change to the watchdog itself is never exercised before it merges — which is the only thing this trigger is for.`);
+  }
+  return out;
+}
+
+/**
+ * Clause 4's other half. A step that writes to the board must be unreachable
+ * from a `pull_request` run. Judged on the step's own `if:`, because that is
+ * what Actions evaluates — a comment promising the same thing is not a guard.
+ */
+export function judgeBoardWrites(doc) {
+  const out = [];
+  const jobs = doc?.jobs;
+  if (!jobs || typeof jobs !== 'object') return out;
+  for (const [jobId, job] of Object.entries(jobs)) {
+    const steps = Array.isArray(job?.steps) ? job.steps : [];
+    for (const step of steps) {
+      const text = [step?.run, step?.with?.script]
+        .filter((x) => typeof x === 'string').join('\n');
+      const call = BOARD_WRITE_CALLS.find((c) => text.includes(c));
+      if (!call) continue;
+      const cond = typeof step?.if === 'string' ? step.if : '';
+      if (!cond.includes(PR_WRITE_GUARD)) {
+        const where = step?.name ? `step "${step.name}"` : `a step of job \`${jobId}\``;
+        out.push(`${WORKFLOW_REL}: ${where} calls \`${call}\` but its \`if:\` does not carry \`${PR_WRITE_GUARD}\`, so a pull_request run could write to the board. A pull request proves the sweep on a real runner; ⛔ it must never file or refresh anything.`);
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Judge one workflow's TEXT. Pure over its inputs so `--self-test` can drive
  * every clause with a fixture instead of asserting it into the void.
@@ -178,13 +297,18 @@ export function judgeWorkflow(text, parse) {
     }
     for (const t of REFUSED_TRIGGERS) {
       if (names.includes(t)) {
-        failures.push(`${WORKFLOW_REL} declares a \`${t}:\` trigger. ⛔ \`${PACKAGE_SCRIPT}\` is kept OUT of the per-PR path by a standing maintainer decision; this workflow changes the reporting channel and must never put the gate back on a pull request's critical path.`);
+        failures.push(`${WORKFLOW_REL} declares a \`${t}:\` trigger. ⛔ Refused outright — no \`paths:\` filter makes it safe here. ${DECISION_TAIL}`);
       }
+    }
+    if (names.includes('pull_request')) {
+      failures.push(...judgePullRequestTrigger(doc));
     }
     if (names.includes('schedule') && !hasRealCron(doc)) {
       failures.push(`${WORKFLOW_REL} declares \`schedule:\` but no usable \`cron:\` expression under it, so it would never fire.`);
     }
   }
+
+  failures.push(...judgeBoardWrites(doc));
 
   const commands = runBlocks(doc).flatMap((run) => shellCommands(run));
   if (!commands.some((c) => invokes(c, 'pnpm', PACKAGE_SCRIPT))) {
@@ -220,6 +344,9 @@ on:
   schedule:
     - cron: '51 2 * * *'
   workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/platform-checklist-watchdog.yml'
 permissions:
   contents: read
   issues: write
@@ -229,13 +356,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Run the platform checklist gate
+        id: gate
         run: |
           set +e
           pnpm check:platform-checklist > "$RUNNER_TEMP/gate.out" 2>&1
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      - name: File or refresh the watchdog issue
+        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.issues.create({ owner, repo, title, body });
 `;
 
 const withTrigger = (name) => GOOD.replace('  workflow_dispatch: {}\n', `  workflow_dispatch: {}\n  ${name}: {}\n`);
+
+/** Swap the whole `pull_request:` block for another spelling of it. */
+const PR_BLOCK = "  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n";
+const withPullRequest = (block) => GOOD.replace(PR_BLOCK, block);
 
 export function selfTest(parse) {
   const failures = [];
@@ -269,26 +407,59 @@ export function selfTest(parse) {
   t('a `schedule:` with no cron ⇒ fires', fires(GOOD.replace("    - cron: '51 2 * * *'\n", '    - {}\n'), 'no usable `cron:`'));
   t('a `schedule:` with an empty cron ⇒ fires', fires(GOOD.replace("'51 2 * * *'", "''"), 'no usable `cron:`'));
 
-  // Clause 3 -- THE NEGATIVE CLAUSES. Each refused trigger fires on its own,
-  // and the good fixture above proves none of them fires without cause.
+  // Clause 3 -- REFUSED OUTRIGHT. Each fires on its own, and the good fixture
+  // above proves neither fires without cause.
   for (const trigger of REFUSED_TRIGGERS) {
     t(`a \`${trigger}:\` trigger ⇒ fires`, fires(withTrigger(trigger), `declares a \`${trigger}:\` trigger`));
-    t(`a \`${trigger}:\` trigger ⇒ cites the standing decision`, fires(withTrigger(trigger), 'standing maintainer decision'));
+    t(`a \`${trigger}:\` trigger ⇒ says it is refused outright`, fires(withTrigger(trigger), 'Refused outright'));
+    t(`a \`${trigger}:\` trigger ⇒ cites the decision it protects`, fires(withTrigger(trigger), 'never blocked by checklist drift'));
   }
-  // A paths-filtered `pull_request:` is the shape the three sibling patrols
-  // carry, so it is the shape a copy-paste would import. It must fire too.
-  t('a paths-filtered `pull_request:` ⇒ fires', fires(
-    GOOD.replace('  workflow_dispatch: {}\n', "  workflow_dispatch: {}\n  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n"),
-    'declares a `pull_request:` trigger',
-  ));
+
+  // Clause 4 -- THE NARROWED CLAUSE. `pull_request:` is permitted, and ONLY
+  // while its `paths:` filter names this workflow and nothing else. The good
+  // fixture carries exactly that and is silent (asserted above), so each case
+  // here is a single mutation away from a shape that passes.
+  t('an UNFILTERED `pull_request:` ⇒ fires', fires(withPullRequest('  pull_request: {}\n'), 'fires on EVERY pull request'));
+  t('an unfiltered `pull_request:` ⇒ names the remedy', fires(withPullRequest('  pull_request: {}\n'), "Filter it to `paths:"));
+  t('a `pull_request:` with only `types:` and no paths ⇒ fires', fires(
+    withPullRequest('  pull_request:\n    types: [opened, synchronize]\n'), 'no usable `paths:` filter'));
+  t('a `pull_request:` with an EMPTY paths list ⇒ fires', fires(
+    withPullRequest('  pull_request:\n    paths: []\n'), 'no usable `paths:` filter'));
+  t('⭐ a paths filter naming ANOTHER file BESIDE this one ⇒ fires', fires(
+    withPullRequest("  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n      - 'docs/qa/platform-checklist/**'\n"),
+    'also names `docs/qa/platform-checklist/**`'));
+  t('…and it says widening is the defect', fires(
+    withPullRequest("  pull_request:\n    paths:\n      - '.github/workflows/platform-checklist-watchdog.yml'\n      - 'docs/qa/platform-checklist/**'\n"),
+    'may name this workflow and nothing else'));
+  t('⭐ a paths filter naming a DIFFERENT file instead ⇒ fires on both halves', (() => {
+    const text = withPullRequest("  pull_request:\n    paths:\n      - 'scripts/check-platform-checklist.mjs'\n");
+    return fires(text, 'also names `scripts/check-platform-checklist.mjs`')
+      && fires(text, 'does not name `.github/workflows/platform-checklist-watchdog.yml`');
+  })());
+  t('a `paths-ignore:` filter ⇒ fires, and is called the complement', fires(
+    withPullRequest("  pull_request:\n    paths-ignore:\n      - 'README.md'\n"), "filter's COMPLEMENT"));
+  t('the bare flow-sequence spelling `on: [pull_request]` ⇒ fires', fires(
+    'on: [schedule, workflow_dispatch, pull_request]\njobs: {}\n', 'with no configuration'));
   // A trigger named only in a COMMENT is not a trigger. This gate judges the
-  // parsed document, so prose about the refusal cannot be read as the refusal
-  // being violated -- and this file's own workflow header says `pull_request`
-  // out loud several times.
-  t('`pull_request` in a comment ⇒ silent', !fires(
-    GOOD.replace('on:\n', '# deliberately no pull_request: and no merge_group: trigger\non:\n'),
-    'declares a `pull_request:` trigger',
-  ));
+  // parsed document, so prose about the filter cannot be read as the filter
+  // being violated -- and the workflow's own header says `pull_request` out
+  // loud several times.
+  t('`pull_request` in a comment ⇒ silent', judgeWorkflow(
+    GOOD.replace('on:\n', '# the pull_request trigger below is paths-filtered; merge_group is refused\non:\n'), parse,
+  ).failures.length === 0);
+
+  // Clause 4's other half -- a board write reachable from a pull_request run.
+  const UNGUARDED = GOOD.replace("        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'\n", "        if: steps.gate.outputs.exit_code != '0'\n");
+  t('⭐ a board write whose `if:` drops the pull_request guard ⇒ fires', fires(UNGUARDED, 'could write to the board'));
+  t('…and it names the call it found', fires(UNGUARDED, 'issues.create('));
+  t('a board write with NO `if:` at all ⇒ fires', fires(
+    GOOD.replace("        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'\n", ''), 'could write to the board'));
+  t('a comment promising the guard is not a guard', fires(
+    UNGUARDED.replace('          script: |\n', '          # never on a pull_request run\n          script: |\n'), 'could write to the board'));
+  t('`issues.update(` is caught as well as `issues.create(`', fires(
+    UNGUARDED.replace('issues.create(', 'issues.update('), 'issues.update('));
+  t('a step that writes nothing needs no guard (no false positive)', judgeBoardWrites(
+    parse('jobs:\n  j:\n    steps:\n      - name: read only\n        run: echo hi\n')).length === 0);
 
   // Clause 4 / 5 -- the invocation.
   t('no `pnpm check:platform-checklist` ⇒ fires', fires(
@@ -345,6 +516,8 @@ async function main(argv) {
     console.log(`triggers: ${triggers === null ? '(none read)' : triggers.join(', ')}`);
     console.log(`required: ${REQUIRED_TRIGGERS.join(', ')}`);
     console.log(`refused:  ${REFUSED_TRIGGERS.join(', ')}`);
+    console.log(`pull_request: permitted, and only \`paths\`-filtered to exactly ${PR_TRIGGER_ALLOWED_PATHS.join(', ')}`);
+    console.log(`board write:  every step calling the issues endpoint must carry \`${PR_WRITE_GUARD}\` in its own \`if:\``);
   }
 
   if (failures.length > 0) {
@@ -354,7 +527,7 @@ async function main(argv) {
     process.exit(1);
   }
 
-  console.log(`OK ${WORKFLOW_REL}: ${REQUIRED_TRIGGERS.join(' + ')} present, ${REFUSED_TRIGGERS.join(' / ')} absent, invoked through \`pnpm ${PACKAGE_SCRIPT}\`.`);
+  console.log(`OK ${WORKFLOW_REL}: ${REQUIRED_TRIGGERS.join(' + ')} present, ${REFUSED_TRIGGERS.join(' / ')} absent, any pull_request trigger paths-filtered to this file alone, no board write reachable from a pull_request run, invoked through \`pnpm ${PACKAGE_SCRIPT}\`.`);
 }
 
 if (isEntrypoint(import.meta.url)) {
