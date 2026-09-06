@@ -2,8 +2,41 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
-    "types": ["node"]
+    // Widened from `./src` as a CONSEQUENCE of the `paths` rules below — the same
+    // consequence `packages/plugins/plugin-security/tsconfig.json` and
+    // `packages/plugins/plugin-auth/tsconfig.json` each record: redirecting a
+    // workspace specifier to its source puts that package's `src/**` into this
+    // program, and `rootDir` is enforced over every program file even under
+    // `--noEmit`. `../..` (= `packages/`) is the directory that contains every
+    // file in the program. Emit is unaffected: this package builds with tsup, and
+    // `typecheck` passes `--noEmit`.
+    "rootDir": "../..",
+    "types": ["node"],
+    // Without these rules tsc resolves each specifier through the dependency's
+    // `exports` map — `dist/index.d.ts`, a BUILD ARTIFACT — so this package's
+    // typecheck would render a verdict about the last `pnpm build` rather than
+    // about the producer's source in the checkout, which
+    // `check:type-source-resolution` refuses (its header states why the dangerous
+    // case is a typecheck that PASSES).
+    //
+    // `tsconfig.test.json` inherits this map rather than declaring its own — a
+    // child that declared `paths` would REPLACE it, silently sending a
+    // source-resolved specifier back to `dist/`. That is why the test-only
+    // dependency (`@objectstack/metadata-core`, which the moved fakes open their
+    // `update()` with) is listed HERE.
+    //
+    // A subpath rule only where the dependency really publishes one and this
+    // package really imports it: `@objectstack/spec/data` is imported for
+    // `ServiceObject`. A `paths` target matching nothing on disk would fall back
+    // to node resolution silently.
+    "paths": {
+      "@objectstack/core": ["../../core/src/index.ts"],
+      "@objectstack/metadata-core": ["../../metadata-core/src/index.ts"],
+      "@objectstack/plugin-auth": ["../plugin-auth/src/index.ts"],
+      "@objectstack/spec": ["../../spec/src/index.ts"],
+      "@objectstack/spec/*": ["../../spec/src/*/index.ts"],
+      "@objectstack/types": ["../../types/src/index.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["dist", "node_modules", "**/*.test.ts"]

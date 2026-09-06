@@ -720,7 +720,10 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'to let such a host discriminate this refusal from the two neighbouring boot refusals ' +
             '(a licence failure and an absent package) STRUCTURALLY rather than by string match, ' +
             'across module instances — which is a host-boot concern, not wire vocabulary. Same class ' +
-            'and the same #8035 reasoning as the MULTI_TENANT_UNSUPPORTED pair below.',
+            // The precedent is #8035's ruling on the MULTI_TENANT_UNSUPPORTED pair
+            // below — in a comment, not in the string: `pnpm check:doc-authoring`
+            // keeps tracker ids out of prose a reader cannot resolve them from.
+            'and the same reasoning as the MULTI_TENANT_UNSUPPORTED pair below.',
     },
     {
         code: 'MEMORY_MULTI_TENANT_UNSUPPORTED',

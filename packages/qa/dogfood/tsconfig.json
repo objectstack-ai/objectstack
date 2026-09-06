@@ -36,8 +36,20 @@
     // — tsc falls back to node resolution, i.e. to `dist`, silently. `rootDir`
     // already spans the repo root, so pulling the driver's source into this
     // program needs no widening.
+    //
+    // [#16130] `@objectstack/organizations` arrived in this workspace when
+    // ADR-0132 moved the multi-org runtime to open core, and
+    // `test/enterprise-organizations.ts` spells a literal
+    // `import('@objectstack/organizations')` — inside a doc comment, quoting the
+    // constant-false probe it replaced. `check:type-source-resolution` reads
+    // specifiers textually and in the fail-closed direction, so it counts that
+    // one; the rule is what keeps the answer SOURCE either way, and it is the
+    // answer this suite would want the day it really imports the package. Same
+    // ONE bare-name shape as the entry above: that package's `exports` map
+    // carries only `"."`.
     "paths": {
-      "@objectstack/driver-turso": ["../../drivers/driver-turso/src/index.ts"]
+      "@objectstack/driver-turso": ["../../drivers/driver-turso/src/index.ts"],
+      "@objectstack/organizations": ["../../plugins/organizations/src/index.ts"]
     }
   },
   "include": ["test/**/*"],

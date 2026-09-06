@@ -2122,6 +2122,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/organizations/src/claim-org-seed-ownership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/organizations/src/claim-orphan-org-rows.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/plugins/organizations/src/org-creation-no-cross-org-copy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
       "pinned": 1

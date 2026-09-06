@@ -61,6 +61,18 @@ function makeEngine(store: Record<string, Row[]>) {
   const matches = (row: Row, where: Row | undefined): boolean => {
     if (!where) return true;
     return Object.entries(where).every(([key, value]) => {
+      // ⛔ REFUSE a combinator rather than reading it as a field name
+      // (`pnpm check:where-matcher`). A `$and` / `$or` key looked up as a column
+      // is `undefined`, so the row drops and the fake answers "no rows" for a
+      // filter it cannot express — and every negative assertion in this file
+      // would read that empty answer as evidence. Refusing turns the same
+      // situation into a loud failure naming the shape this double lacks.
+      if (key.startsWith('$')) {
+        throw new Error(
+          `fake engine: WHERE combinator \`${key}\` is not implemented — this double ` +
+            'supports exact-match keys only (and `null` for a missing column)',
+        );
+      }
       const actual = row[key];
       if (value === null) return actual == null;
       return actual === value;

@@ -46,6 +46,15 @@ export default defineConfig({
         find: /^@objectstack\/core$/,
         replacement: path.resolve(__dirname, '../../core/src/index.ts'),
       },
+      {
+        // Test-only: the moved fakes open their `update()` with
+        // `assertEngineUpdateDispatch`, which is the PREDICATE those doubles are
+        // pinned to (`pnpm check:engine-double-contract`). Resolved from `dist/`
+        // it would pin them to a stale copy of the producer's rejection rule —
+        // the exact silent-green this gate exists to stop.
+        find: /^@objectstack\/metadata-core$/,
+        replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
+      },
     ],
   },
   test: {

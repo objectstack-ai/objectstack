@@ -211,9 +211,12 @@ describe('OrganizationsPlugin', () => {
 
   it('skips when target object has no organization_id field', async () => {
     const plugin = new OrganizationsPlugin();
-    const { ctx, middlewares } = makeCtx();
-    // Replace schema so the column does not exist.
-    (ctx.getService('objectql') as any).getSchema = () => ({
+    const { ctx, middlewares, ql } = makeCtx();
+    // Replace schema so the column does not exist. `ql` is the same object the
+    // fake ctx hands back from `getService('objectql')` — reached through the
+    // harness rather than through a lookup erased to `any`, which
+    // `pnpm check:slot-lookup` refuses and whose baseline never grows.
+    ql.getSchema = () => ({
       name: 'task',
       fields: { id: { name: 'id' }, name: { name: 'name' } },
     });
