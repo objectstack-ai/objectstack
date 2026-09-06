@@ -52,7 +52,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
-import type { ObjectSchema } from '@objectstack/spec/data';
 
 const FORGED_AT = '1999-01-01T00:00:00.000Z';
 const FORGED_ID = 'conv_REST_FORGED';
@@ -98,7 +97,7 @@ describe('audit binder: create-side `created_at` (#15964)', () => {
     // `created_at` / `updated_at` are NOT declared here: the registry injects
     // them from `AUDIT_FIELD_DEFS`, where both are `readonly: true` datetimes —
     // the same declaration the card's three live objects carry.
-    const schema: ObjectSchema = {
+    const schema = {
       name: objectName,
       label: 'Repro Object',
       datasource: 'audit-capture',
