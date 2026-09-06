@@ -96,6 +96,49 @@ export interface II18nService {
     getFallbackLocale?(): string | undefined;
 
     /**
+     * Set the locale `t()` consults after the requested one — the app's
+     * DECLARED `i18n.fallbackLocale`.
+     *
+     * [#15694] The INJECTION counterpart of {@link getFallbackLocale}, and the
+     * same threading `setDefaultLocale` and `setSupportedLocales` already get
+     * from `AppPlugin.loadTranslations`: the declaration lives on the stack
+     * artifact, which only the runtime app-plugin layer can see, so a provider
+     * built without it (the kernel's in-memory fallback, auto-registered when
+     * no i18n plugin is installed) has no other way to learn it. A provider
+     * constructed WITH it — `FileI18nAdapter`, which both boot paths build
+     * with `fallbackLocale || defaultLocale || 'en'` — omits this method and
+     * keeps the value it was built with. It does implement `setDefaultLocale`
+     * and `setSupportedLocales`; omitting a setter is per-value, not
+     * per-provider.
+     *
+     * Why it exists: `i18n.fallbackLocale` is authorable
+     * (`TranslationConfigSchema`), and until this was threaded it was INERT on
+     * the in-memory provider. A stack declaring `defaultLocale: 'zh-CN'` with
+     * `fallbackLocale: 'en'` answered a missing `zh-CN` key from `en` under
+     * `I18nServicePlugin` and from `zh-CN` — i.e. not at all — under the
+     * fallback. One declaration, two providers, two answers.
+     *
+     * Semantics implementations must honour:
+     * - The value is the SECOND locale `t()` consults, per KEY, after the
+     *   requested one — the same shape `FileI18nAdapter.t()` has. Not a
+     *   whole-bundle swap: a requested locale that HAS a bundle but is missing
+     *   the key must still reach the fallback.
+     * - Never called means no declaration, which must keep the provider's
+     *   existing behaviour exactly. An app that declares no `i18n.fallbackLocale`
+     *   is not opting into a new chain.
+     *
+     * ⛔ Implementing this does NOT oblige implementing {@link getFallbackLocale}.
+     * They answer different questions — what the provider was TOLD versus what
+     * the serving layer may ASK it — and a provider whose accessor would have
+     * to invent a value it was never given must keep omitting the accessor, so
+     * the document translators fall to their own default rather than to a
+     * derived one (#14882).
+     *
+     * @param locale - BCP-47 locale code
+     */
+    setFallbackLocale?(locale: string): void;
+
+    /**
      * Narrow what `getLocales()` reports to the locales the APP declared
      * (`i18n.supportedLocales` on the stack artifact).
      *
