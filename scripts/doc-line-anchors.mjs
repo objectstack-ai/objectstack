@@ -4,7 +4,7 @@
 /**
  * doc-line-anchors -- the ONE reader for `file:line` anchors written in docs prose.
  *
- * A docs page that cites source by `` `security-plugin.ts:1560` `` has created a
+ * A docs page that cites source by `` `<file>.ts:1560` `` has created a
  * two-sided invariant with no owner: the line lives in one tree, the citation in
  * another, and nothing relates them. Measured on
  * `content/docs/permissions/system-context.mdx` over 19 days, **101 of its 111
@@ -20,16 +20,21 @@
  *
  * A naive reader finds only the first and undercounts by a third.
  *
- *   FULL          `` `objectql/src/engine.ts:10501` ``   path + line
- *   CONTINUATION  `` `:1409` ``                          line only; the file is
- *                                                        the nearest FULL anchor
- *                                                        to its left, which is
- *                                                        how a row cites four
- *                                                        sites in one file
- *   RANGE_END     `` `2630` ``                           a bare number whose only
- *                                                        separation from the
- *                                                        anchor on its left is a
- *                                                        dash: `:2483`--`2630`
+ *   FULL          `` `<dir>/<file>.ts:10501` ``        path + line
+ *   CONTINUATION  a backticked `:` and a line number,   line only; the file is
+ *                 `1409`                                the nearest FULL anchor
+ *                                                       to its left, which is
+ *                                                       how a row cites four
+ *                                                       sites in one file
+ *   RANGE_END     `` `2630` ``                          a bare number whose only
+ *                                                       separation from the
+ *                                                       anchor on its left is a
+ *                                                       dash -- a continuation
+ *                                                       for `2483`, then `2630`
+ *
+ * ⚠️ The angle brackets and the spelled-out continuations are deliberate: this
+ * file is itself inside the `scripts/**` symbol-anchor corpus, so an
+ * illustration written anchor-shaped would be a citation of its own.
  *
  * The measurement that makes this list non-negotiable: `grep -c` for anchor-shaped
  * text over the previous edition of that page answered **64**, because it counts
@@ -39,7 +44,7 @@
  * ## Resolution is by unique suffix, and ambiguity is an ERROR
  *
  * An anchor names as little of the path as it can and still be unique --
- * `read-audit.ts:556` where the basename is unique, `objectql/src/engine.ts:10501`
+ * `<file>.ts:556` where the basename is unique, `<dir>/<file>.ts:10501`
  * where it is not. That is a property a gate can hold: resolve the spelling
  * against the tracked file list by path-suffix and REFUSE when two files match.
  * The previous edition had **41 of 111** anchors whose bare basename matched two
@@ -60,11 +65,11 @@ import { extname } from 'node:path';
 /** Extensions an anchor may name. Anything else is prose, not a citation. */
 export const ANCHOR_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.mjs', '.cjs', '.js', '.jsx'];
 
-/** `path/to/file.ts:1234` -- the whole span, nothing else. */
+/** `<dir>/<file>.ts:1234` -- the whole span, nothing else. */
 const FULL_RE = /^([A-Za-z0-9_.\-/]+)\.([a-z]+):(\d+)$/;
-/** `path/to/file.ts` -- a cited file with no line. */
+/** `<dir>/<file>.ts` -- a cited file with no line. */
 const PATH_ONLY_RE = /^([A-Za-z0-9_.\-/]+)\.([a-z]+)$/;
-/** `:1409` -- a continuation of the anchor to its left. */
+/** A backticked `:` and a line number, `1409` -- a continuation of the anchor to its left. */
 const CONTINUATION_RE = /^:(\d+)$/;
 /** `2630` -- a bare number; only an anchor when a dash joins it to one. */
 const BARE_NUMBER_RE = /^(\d+)$/;
@@ -295,8 +300,9 @@ export function blankAnchorLineNumbers(rawText) {
     if (a.start < cursor) continue;
     out += rawText.slice(cursor, a.start);
     // The LAST run of digits in the span is the line number in all three shapes --
-    // `path.ts:1234`, `:1234` and a bare `1234` -- and a path that itself carries
-    // digits (`0112-codes.ts:55`) keeps them, because the lookahead requires that
+    // `<file>.ts:1234`, a backticked `:` and `1234`, and a bare `1234` -- and a
+    // path that itself carries digits (`0112-<name>.ts:55`) keeps them, because
+    // the lookahead requires that
     // nothing but non-digits follows.
     out += rawText.slice(a.start, a.end).replace(/\d+(?=\D*$)/, '#');
     cursor = a.end;

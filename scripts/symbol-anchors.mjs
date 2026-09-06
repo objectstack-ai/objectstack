@@ -32,7 +32,9 @@
  * 16,000-line file has an expected lifetime measured in days.
  *
  * ⭐ And the rot can hide a SEMANTIC INVERSION. ADR-0113 cited
- * `sql-driver.ts:4901` for `if (field.required) col.notNullable()`; the
+ * `packages/drivers/driver-sql/src/sql-driver.ts` (line 4901 as the ADR wrote
+ * it -- a dated reading, ⛔ not a pointer) for `if (field.required)
+ * col.notNullable()`; the
  * mechanism moved and now keys off `storage.notNull` -- the opposite predicate.
  * With the anchor rotted, the ADR's pre-decision Context row reads to a fresh
  * reader as a description of today. That is carded separately as #14193 and is
@@ -96,8 +98,11 @@
  *   (c) READS NATURALLY. `#symbol` is the fragment syntax a reader already
  *       knows from URLs, and it survives copy-paste into a GitHub link.
  *
- * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `file.ts:4901`, `file.ts:341-400`,
- * `file.ts:459–463` (en dash) and a bare continuation `:2933` are all findings.
+ * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `<file>.ts:4901`, `<file>.ts:341-400`,
+ * `<file>.ts:459–463` (en dash) and a bare continuation -- a backticked `:`
+ * followed by a line spec, `2933` -- are all findings. ⚠️ The angle brackets
+ * are deliberate: this file is itself inside the `scripts/**` corpus, so an
+ * illustration written path-shaped would be a citation of its own.
  *
  * ### The one escape hatch, and who may use it
  *
@@ -209,10 +214,10 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
 /* ⛔ The forms the migration deleted. Matched on the SAME text the anchor
  * extractor sees, so a line number cannot hide behind a spelling the extractor
  * normalises away. Both the full form and the bare continuation. */
-/* ⭐ A LINE SPEC is not just `:123`, and assuming it was is how a gate
- * false-greens. The #13556 corpus spells one position NINE ways, and the
- * census's own extractor missed the comma forms exactly as a naive rule here
- * would:
+/* ⭐ A LINE SPEC is not just a colon and one run of digits, and assuming it was
+ * is how a gate false-greens. The #13556 corpus spells one position NINE ways,
+ * and the census's own extractor missed the comma forms exactly as a naive rule
+ * here would:
  *
  *     :4901        :341-400      :459–463 (en dash)     :2214+
  *     :610,1028    :13,346-389   :29-39,147-152         :2956/2991
@@ -224,18 +229,19 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
  * version matched only a span that was EXACTLY an anchor, and it called a
  * corpus still carrying rot clean — three ways at once: a bare anchor in
  * running prose, an anchor sharing a span with other text
- * (`` `Builder.io SDK: packages/sdks/src/types/builder-block.ts:42` ``), and
+ * (`` `Builder.io SDK: <dir>/<file>.ts:42` ``), and
  * that slash list. A line number is rot wherever it is written; the only thing
  * excluded is a FENCED block, which is quoted material, not an anchor. */
 const LINE_SPEC = '\\d+(?:\\s*[-–—]\\s*\\d+)?(?:\\s*[,/]\\s*\\d+(?:\\s*[-–—]\\s*\\d+)?)*\\+?';
 const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + '):(' + LINE_SPEC + ')(?![\\w-])', 'g');
 const LINE_CONTINUATION = new RegExp('`\\s*[:,]\\s*(' + LINE_SPEC + ')`', 'g');
 
-/* `// packages/foo/bar.ts:378` — a comment that is nothing but a path. */
+/* `// <dir>/<file>.ts:378` — a comment that is nothing but a path. */
 const FENCED_HEADER = new RegExp('^\\s*(?://|#|\\*|/\\*)\\s*' + PATHISH + ':\\d');
 
 /* ⭐ A ninth spelling, and the census counted none of them: a bare backticked
- * number, tilde-prefixed — `` ~`326` `` for "about line 326". It carries no
+ * number, tilde-prefixed — a `~` then a backticked line number, `` ~`NNN` ``,
+ * written for "about line 326". It carries no
  * path, so it cannot be resolved to anything; ADR-0056 alone held 13.
  *
  * ⚠️ Only the TILDE form is judged. A bare `` `403` `` or `` `4096` `` is an
@@ -370,7 +376,7 @@ export function extractAnchors(markdown) {
      * and the census counted those among its 343 — so skipping fences wholesale
      * would leave five rotted anchors behind. Everything else in a fence is
      * quoted material (sample code, CI output) and is NOT judged: an example
-     * that happens to contain `foo.ts:12` is not an anchor. */
+     * that happens to contain `<file>.ts:12` is not an anchor. */
     if (inFence) {
       if (!FENCED_HEADER.test(text)) return;
       for (const m of text.matchAll(LINE_ANCHOR)) {
@@ -450,7 +456,7 @@ export function extractAnchors(markdown) {
  * corpus unusable. Measured over the 216 tracked `scripts/**` `.mjs` files on
  * `5315098df`: 251 live line citations raw against 128 through this projection.
  * The 123 that vanish are not rot -- they are a gate's own self-test FIXTURES,
- * string literals like `'p.ts:2'` and `'content/docs/other.mdx:1'` written to
+ * string literals like `'<file>.ts:2'` and `'<dir>/<file>.mdx:1'` written to
  * provoke that gate's own line-reporting. Judging those would red a gate for
  * testing itself, which is the fabrication direction
  * `scripts/js-comment-mask.mjs` exists to close.
