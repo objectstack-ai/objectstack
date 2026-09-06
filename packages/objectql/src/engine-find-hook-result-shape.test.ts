@@ -44,6 +44,11 @@
 // holds it to that.
 
 import { describe, it, expect } from 'vitest';
+// [check:test-source-alias] Module-top, not `await import(...)` inside the case
+// below: objectql resolves this specifier through `dist/`, so a first load paid
+// inside a test body transforms that whole module graph while `testTimeout` is
+// running. Collection is clocked against nothing; test bodies are.
+import { ErrorCode } from '@objectstack/spec/api';
 import { ObjectQL } from './engine.js';
 import {
   FIND_HOOK_RESULT_NOT_ARRAY_CODE,
@@ -246,8 +251,7 @@ describe('#15823 (d) — the case the ruling did not name: undefined / null', ()
 });
 
 describe('#15823 — the refusal is registered ADR-0112 vocabulary', () => {
-  it('the code is a member of the generated ErrorCode union', async () => {
-    const { ErrorCode } = await import('@objectstack/spec/api');
+  it('the code is a member of the generated ErrorCode union', () => {
     expect(ErrorCode.safeParse(FIND_HOOK_RESULT_NOT_ARRAY_CODE).success).toBe(true);
     // Control: the union really does reject an unregistered spelling, so the
     // assertion above is a reading rather than a schema that accepts anything.
