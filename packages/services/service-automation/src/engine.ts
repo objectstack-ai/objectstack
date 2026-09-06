@@ -2279,8 +2279,14 @@ export class AutomationEngine implements IAutomationService {
      * cache-only qualifier is not yet set. Evicting it is bounded -- the run
      * stays resumable through the store-first strict load and only the
      * cache-only listing under-reports -- and
-     * `suspended-run-mid-park-eviction-window.test.ts` pins both the window and
-     * the one compound case that escapes those bounds.
+     * `suspended-run-mid-park-eviction-window.test.ts` pins that window.
+     *
+     * [#16151] The one COMPOUND case that escaped those bounds -- an eviction
+     * here, and then that same save FAILING, leaving the run with neither a
+     * durable row nor a map entry -- no longer does: `persistSuspendedRun`'s
+     * catch re-seats the entry alongside the cache-only marking, so guard 2
+     * above has something to guard again. The same pin file carries it, now at
+     * the intended outcome rather than at the measured loss.
      *
      * A store read that THROWS must never reach here: an outage means the
      * run's existence is UNKNOWN, not "gone". Every caller below is on a path
