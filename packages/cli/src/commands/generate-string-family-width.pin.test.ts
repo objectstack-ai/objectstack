@@ -730,13 +730,18 @@ describe('#16091 — the character column both generators emit is the driver\'s'
     // ⛔ NOT "because `packages/cli` does not depend on the driver at runtime"
     // — it does, and this file imports it 500 lines up. That sentence was this
     // pin's own first answer, it is false, and `generate.ts` now carries it
-    // with a ⛔ so nobody restates it. The ceiling is transcribed because
-    // `MAX_VARCHAR_CHARS` is `protected static` on `SqlDriver` and reaches no
-    // exported surface, and because #5726 leaves a CLI production module only
-    // `await import()` for a driver package — which these SYNCHRONOUS
-    // generators cannot use. This is the assertion that makes the transcription
-    // safe: the two must be the same number, and a driver that moves fails here
-    // rather than leaving the generators quietly wrong.
+    // with a ⛔ so nobody restates it. ⛔ NOR "because `MAX_VARCHAR_CHARS` is
+    // `protected static` on `SqlDriver` and reaches no exported surface" —
+    // the second false answer, and this file refutes it by construction:
+    // `protected` is compile-time visibility only, the member is on the
+    // exported `SqlDriver` and in the package's `dist/index.d.ts`, and the
+    // subclass below reaches the driver's `protected` judgments precisely
+    // because they are still there. The ceiling is transcribed for ONE reason:
+    // #5726 leaves a CLI production module only `await import()` for a driver
+    // package, and these generators are SYNCHRONOUS, so they cannot use it — a
+    // choice this package makes, not a law. This is the assertion that makes
+    // the transcription safe: the two must be the same number, and a driver
+    // that moves fails here rather than leaving the generators quietly wrong.
     const m = GENERATE_SOURCE.match(/^const MAX_VARCHAR_CHARS = (\d+);$/m);
     expect(m, 'generate.ts no longer declares MAX_VARCHAR_CHARS at top level').not.toBeNull();
     expect(Number(m![1])).toBe(MAX_CHARS);

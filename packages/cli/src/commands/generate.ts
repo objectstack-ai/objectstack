@@ -1201,21 +1201,33 @@ const STRING_FAMILY_TYPES: ReadonlySet<string> = new Set(['email', 'url', 'phone
  * (MySQL 8.0.46 refuses `varchar(16384)` with `ERROR 1074`; it is the LOWEST of
  * the three dialects' ceilings and is applied to all of them deliberately).
  *
- * Transcribed rather than imported, for two independent reasons — the second
- * one holds even if the first is ever lifted:
+ * Transcribed rather than imported for ONE reason, and that reason is a CHOICE
+ * this package makes rather than anything about the constant:
  *
- *   - it is `protected static` on `SqlDriver`, so it is not on the driver
- *     package's exported surface at all;
  *   - #5726 forbids a CLI production module any static value import of an
  *     `@objectstack/driver-*` package, and `schema-migrate.lazy-driver-import.test.ts`
- *     enforces it. oclif `import()`s every command module on every invocation,
- *     so one such edge here charges an unbuilt driver to whatever command the
- *     operator actually ran.
+ *     enforces it over every non-test `.ts` under `packages/cli/src`. oclif
+ *     `import()`s every command module on every invocation, so one such edge
+ *     here charges an unbuilt driver to whatever command the operator actually
+ *     ran. What #5726 leaves open is `await import()` at the point of use —
+ *     and these generators are SYNCHRONOUS, so they cannot take it. Make them
+ *     async and the transcription can go.
  *
  * ⛔ NOT "because `packages/cli` does not depend on the driver at runtime" —
  * it does: `@objectstack/driver-sql` is in this package's `dependencies` at
  * `workspace:^`. A missing dependency was never the reason, and stating it as
  * one invites the next reader to "simplify" the transcription away.
+ *
+ * ⛔ NOR "because it is `protected static`, so it reaches no exported surface"
+ * — this block gave that as its FIRST reason and it is false. `protected` is
+ * compile-time visibility only; it removes the member from neither the exported
+ * class nor the published types. `SqlDriver` is exported from
+ * `@objectstack/driver-sql`, `SqlDriver.MAX_VARCHAR_CHARS` is an own static
+ * property that reads `16383` at runtime, and the built `dist/index.d.ts`
+ * declares it as `protected static readonly MAX_VARCHAR_CHARS`. The pin test
+ * reaches this and the driver's other `protected` judgments by subclassing,
+ * which is the same point. The constant IS reachable; what is unavailable
+ * here is a SYNCHRONOUS import of it.
  *
  * Pinned rather than trusted: `generate-string-family-width.pin.test.ts` reads
  * the constant out of `sql-driver.ts` and fails here if the two part.
@@ -1343,16 +1355,21 @@ function isUniqueScopeDeclared(unique: unknown): boolean {
  * ruling (2026-08-13), not an oversight, so the two readings stay apart here
  * too.
  *
- * ⚠️ Unlike {@link MAX_VARCHAR_CHARS}, this one IS on `driver-sql`'s exported
- * surface, so "not exported" is not the reason it is spelled here — say the
- * real one instead of borrowing that block's: these generators are SYNCHRONOUS,
+ * ⚠️ "Not exported" is not the reason this is spelled here — and it is not the
+ * reason {@link MAX_VARCHAR_CHARS} is either: both reach `driver-sql`'s
+ * exported surface, that block says why, and neither is spelled here for it.
+ * The reason is one and the same for both: these generators are SYNCHRONOUS,
  * and #5726 leaves a CLI production module only `await import()` for a driver
  * package, which a synchronous function cannot use. Spec's own
  * `isOrganizationUnique` is not a substitute either: it detects the WORD and
  * not the scope, so it omits the bare `true` this predicate exists to include.
- * What makes the spelling safe is the oracle in
- * `generate-string-family-width.pin.test.ts`, which recomputes this whole key
- * set from the driver's own exported builders and fails when the two disagree.
+ * What makes the spelling safe is the AUTHORITY in
+ * `generate-string-family-width.pin.test.ts` — `SqlDriver.initObjects` on an
+ * in-memory database, read back with `PRAGMA table_info` — which fails when
+ * the column the platform creates and the one these generators emit disagree.
+ * The leaf differential over the driver's exported builders is kept beneath it
+ * and is explicitly NOT the authority: recomposing the leaves' answers here is
+ * exactly what once left every layer between them and the real chain unread.
  */
 function isOrganizationScopedUnique(unique: unknown): boolean {
   return unique === true || unique === 'organization';
@@ -1443,8 +1460,11 @@ function indexKeyColumns(obj: Record<string, any>): ReadonlySet<string> {
     // nullSafeColumns: ['zzz'] }` the driver keys `{f}` and this keyed
     // `{organization_id, f}` — a column bounded here that the platform leaves
     // unbounded, this card's defect pointed the other way. Found by the
-    // differential in `generate-string-family-width.pin.test.ts`, which now
-    // recomputes this whole set from the driver's own exported builders.
+    // differential in `generate-string-family-width.pin.test.ts`, whose
+    // authority is now the real chain — `SqlDriver.initObjects` on an
+    // in-memory database, read back with `PRAGMA table_info`. The leaf
+    // differential that recomputes this set from the driver's own exported
+    // builders is kept beneath that chain and is NOT the authority.
     const preNormalized = Array.isArray(idx?.nullSafeColumns) && idx.nullSafeColumns.length > 0;
     if (!preNormalized && idx?.unique === 'organization' && tenantField && !listed.includes(tenantField)) {
       out.add(tenantField);
