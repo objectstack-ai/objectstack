@@ -6,21 +6,7 @@ fix(client)!: `oauth.applications.delete` resolves on the zero-byte 200 its rout
 
 **BREAKING** on two independent axes, and it makes a published method usable for the first time. Before this change `client.oauth.applications.delete(id)` **rejected on every successful delete** — there was no success path a caller could observe. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`); the version number is not the migration signal here, this entry is.
 
-<!-- ADR-0087 disposition: BLOCKED ON A DECISION, and deliberately not claimed. This is
-     NOT a disposition marker and must not be read as one; the gate is expected to red on
-     this changeset until a maintainer settles which category applies. Measured, both legs:
-     (1) `type-surface-only packages/client/src/index.ts#delete` is REFUSED at predicate 4
-     -- a reference is a bare identifier resolved to the FIRST same-named definition, and
-     this file declares TEN members named `delete`; the first (line 2397) is unannotated at
-     both revs, so the gate reads "still UNANNOTATED" about a member this diff never
-     touched. That is issue #15627, filed off PR #15445 where the same ambiguity cost the
-     `get` member its place in the marker -- here it blocks the ONLY member there is.
-     (2) `no-migration-prescription` is mechanically ACCEPTED (the detector finds no
-     prescription in this body) and is not claimed for that reason: ADR-0087's own D7
-     records that #8277 held this exemption on a detector MISS rather than a positive
-     finding, and names that as the pattern the sixth category was created to stop.
-     Claiming it here, with the measurement in hand, would repeat it knowingly.
-     Neighbouring open card: #14502. Full analysis in this PR's body. -->
+<!-- adr-0087: registered client-oauth-applications-delete-void -->
 
 The fifth and last method of the `oauth.*` family, and the one #14312 / PR #15445 deliberately could not close: its ruling fenced that card to *narrowing published return types*, and no declared return type could be true while the `res.json()` call stood.
 
