@@ -154,7 +154,7 @@
 // `scripts/error-status-unpinned-baseline.json`; a NEW one fails the gate, and a
 // row that becomes pinned fails it too (ratchet down with `--update`).
 import { readdirSync, readFileSync, writeFileSync, statSync, existsSync } from 'node:fs';
-import { maskComments, scanSource, blank } from './js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { join, relative } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -401,7 +401,8 @@ function classBodies(src) {
 const lineOf = (src, idx) => src.slice(0, idx).split('\n').length;
 
 /**
- * The two projections a rule may read, from ONE scan of the source.
+ * The two projections a rule may read, both `js-comment-mask.mjs`'s own exports
+ * (#15776) rather than a composition re-derived here.
  *
  *   `src`         comments blanked, string/template/regex CONTENT intact — what
  *                 every rule matches on, because a gate's signal (`code:
@@ -414,10 +415,7 @@ const lineOf = (src, idx) => src.slice(0, idx).split('\n').length;
  *                 mask, so a line number read off either is true of the original.
  */
 function projections(raw) {
-  const { comment, literal } = scanSource(raw);
-  const both = new Uint8Array(raw.length);
-  for (let k = 0; k < both.length; k++) both[k] = comment[k] || literal[k];
-  return { src: blank(raw, comment), structural: blank(raw, both) };
+  return { src: maskComments(raw), structural: maskCommentsAndLiterals(raw) };
 }
 
 /**

@@ -75,7 +75,10 @@ reads those as field filters, so one naming no field could only match zero
 records and is rejected rather than answered with an empty page — plus every
 other read axis that names a field: `select`, `expand` (a real field that holds
 no reference gets its own message), `searchFields` (a real field outside the
-searchable set gets its own message), `groupBy`, and `aggregations[].field`.
+searchable set gets its own message, and so does a value with the wrong shape —
+an array entry that is not a string, or a value that is itself neither a
+comma-separated string nor an array of field names), `groupBy`, and
+`aggregations[].field`.
 Off the request path the same code answers `backfillSummaryNulls`'s
 `recomputeUndefinedOnEmpty` (`os migrate summary-nulls
 --recompute-undefined-on-empty object.field`) when an entry is not a roll-up

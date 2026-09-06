@@ -837,7 +837,7 @@ describe('validateRuleCompilability — reads only keys the spec declares (meta-
     // the rule walk and the registered-format vocabulary became shared handles
     // (`walkObjectValidationRules`, `registeredFormatNames`) — array `.push` /
     // `.length` / `.sort`, never a key off authored metadata.
-    const PLUMBING = new Set(['findings', 'v', 'out', 'walked', 'names']);
+    const PLUMBING = new Set(['findings', 'out', 'walked', 'names']);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
 
     // …and no excuse outlives the read it excuses. A stale name in either list

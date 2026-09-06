@@ -16,7 +16,8 @@
 // heading lives in one file, the link in another, and until this script nothing
 // in CI related them: a rename that updates the heading and not the inbound
 // `#anchor` shipped green. #7465 exists because exactly that pairing had already
-// drifted once — `cli.mdx:458` pointed at a heading whose text had been correct
+// drifted once — `content/docs/deployment/cli.mdx` (line 458 as measured then)
+// pointed at a heading whose text had been correct
 // in 2024 — and PR #7483 could only catch its own rename by hand, with a slug
 // computed in a REPL and a repo-wide grep. Neither runs on anyone else's PR.
 //

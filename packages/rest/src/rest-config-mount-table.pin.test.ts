@@ -18,9 +18,20 @@
  *
  * ⛔ This file pins CURRENT mount behaviour. It is not a judgement that each
  * switch's radius is the right one — where a radius disagrees with the
- * switch's own `describe()` that is a defect filed elsewhere (#15542 for
- * `metadata.endpoints.items`), and the table below records the radius as
- * MEASURED so such a defect is visible here rather than hidden.
+ * switch's own `describe()` that is a defect filed elsewhere, and the table
+ * below records the radius as MEASURED so such a defect is visible here rather
+ * than hidden.
+ *
+ * That is exactly how it earned its keep. The two disagreements this file
+ * recorded on arrival — `metadata.endpoints.items` gating the whole-store
+ * family including a write door (#15542), `metadata.endpoints.item` gating
+ * four reads and none of its own writes (#15854) — were ruled and RESOLVED,
+ * and the rows below are re-stated on the new radii rather than deleted
+ * (#15542 ruling item 5): the whole-store family answers to its own key,
+ * `metadata.endpoints.maintenance`, `items` gates one mount, and `item` gates
+ * the whole per-item face. ⛔ Do not thin these rows back to one route per
+ * switch "because the describe() now says so" — the describe() being right is
+ * a claim, and this table is the measurement that keeps it true.
  *
  * ## What is pinned, and why it is a diff rather than an existence check
  *
@@ -32,8 +43,12 @@
  *     `POST {dataPrefix}/:object/query`. The query door has no switch of its
  *     own, so a pin asserting "the list route disappeared" passes while half
  *     the intent is broken.
- *   - `metadata.endpoints.items` gates FOUR, one of them the write door
- *     `POST {prefix}/_migrate-stored`, while its `describe()` names one read.
+ *   - `metadata.endpoints.item` gates TWELVE — the per-item reads, `PUT`,
+ *     `DELETE` and the whole history family. A pin that only watched
+ *     `GET {prefix}/:type/:name` would sit green through eleven of them
+ *     moving, which is the state #15854 measured.
+ *   - `metadata.endpoints.maintenance` gates THREE, one of them the write
+ *     door `POST {prefix}/_migrate-stored`.
  *
  * Asserting the difference is EXACTLY a named set catches a gate that grows a
  * route as loudly as one that loses a route.
@@ -116,7 +131,7 @@ const ALL_TRUE = {
     },
     crud: { operations: { create: true, read: true, update: true, delete: true, list: true } },
     batch: { enableBatchEndpoint: true, operations: { createMany: true, updateMany: true, deleteMany: true } },
-    metadata: { endpoints: { types: true, items: true, item: true } },
+    metadata: { endpoints: { types: true, items: true, item: true, maintenance: true } },
 };
 
 /** Deep-merge just enough to flip one leaf switch off inside ALL_TRUE. */
@@ -167,24 +182,45 @@ const CASES: Array<{ path: string; removes: string[] }> = [
     // --- metadata.endpoints.* ----------------------------------------------
     // Two spellings, one handler.
     { path: 'metadata.endpoints.types', removes: [`GET ${META}`, `GET ${META}/types`] },
-    // ⚠️ FOUR routes, and one of them is a WRITE door (#15542): the declared
-    // meaning is "GET /meta/:type - List items of type", but switching it off
-    // also disarms `_migrate-stored`, `_drafts` and `diagnostics`.
+    // [#15542] ONE route — the per-type list its `describe()` names, and
+    // nothing else. It used to take three whole-store routes with it,
+    // `POST {prefix}/_migrate-stored` among them; those are `maintenance`'s
+    // now. ⛔ A fourth route reappearing in this row is the old defect
+    // returning, not a table that needs widening.
+    { path: 'metadata.endpoints.items', removes: [`GET ${META}/:type`] },
+    // [#15542] THREE whole-store operations, one of them a WRITE door. The key
+    // the ruling created so that closing a listing read stops disarming a
+    // migration door.
     {
-        path: 'metadata.endpoints.items',
-        removes: [`GET ${META}/:type`, `GET ${META}/_drafts`, `GET ${META}/diagnostics`, `POST ${META}/_migrate-stored`],
+        path: 'metadata.endpoints.maintenance',
+        removes: [`GET ${META}/_drafts`, `GET ${META}/diagnostics`, `POST ${META}/_migrate-stored`],
     },
-    // ⚠️ FOUR routes, and NOT the ones a reader would guess: the per-item
-    // WRITES (`PUT`/`DELETE {prefix}/:type/:name`) and the history family
-    // (`history`, `audit`, `diff`, `published`, `publish`, `rollback`) are NOT
-    // gated by it — they answer to `api.enableMetadata` alone.
+    // [#15854] TWELVE routes — the WHOLE per-item face, which is what the
+    // switch's name has always promised: the reads, the per-item WRITES
+    // (`PUT` / `DELETE {prefix}/:type/:name`) and the history family
+    // (`history`, `audit`, `diff`, `published`, `publish`, `rollback`). Before
+    // the ruling it gated the four reads alone and the rest answered to
+    // `api.enableMetadata`.
+    //
+    // ⚠️ `GET {prefix}/object/:name/state/:field` is deliberately NOT here.
+    // It is the object FSM read, addressed by object name rather than by
+    // `:type/:name`, and no per-family switch gates it — see the
+    // `api.enableMetadata` row, which is the only one that removes it.
     {
         path: 'metadata.endpoints.item',
         removes: [
+            `DELETE ${META}/:type/:name`,
             `GET ${META}/:type/:name`,
+            `GET ${META}/:type/:name/audit`,
+            `GET ${META}/:type/:name/diff`,
+            `GET ${META}/:type/:name/history`,
             `GET ${META}/:type/:name/layers`,
+            `GET ${META}/:type/:name/published`,
             `GET ${META}/:type/:name/references`,
             `GET ${META}/book/:name/tree`,
+            `POST ${META}/:type/:name/publish`,
+            `POST ${META}/:type/:name/rollback`,
+            `PUT ${META}/:type/:name`,
         ],
     },
 
@@ -238,9 +274,10 @@ describe('[#15544] §0 the harness measures something', () => {
     it('the case table is exhaustive at its measured size', () => {
         // ⛔ A table-driven pin that silently iterates zero cases is the
         // failure this number exists to prevent. Nineteen mount-gating
-        // switches were measured on `origin/main` `cc5b3dd0c27`. A switch
-        // retired or added moves this number DELIBERATELY, with its row.
-        expect(CASES.length).toBe(19);
+        // switches were measured on `origin/main` `cc5b3dd0c27`; #15542 added
+        // `metadata.endpoints.maintenance`, making TWENTY. A switch retired or
+        // added moves this number DELIBERATELY, with its row.
+        expect(CASES.length).toBe(20);
         expect(new Set(CASES.map((c) => c.path)).size).toBe(CASES.length);
         expect(CASES.every((c) => c.removes.length > 0)).toBe(true);
     });

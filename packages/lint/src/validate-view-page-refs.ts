@@ -79,6 +79,7 @@
  */
 
 import type { ReferenceIntegrityFinding } from './reference-integrity-suite.js';
+import { recordsOf } from './object-graph.js';
 
 export type ViewPageRefSeverity = 'error' | 'warning';
 export type ViewPageRefFinding = ReferenceIntegrityFinding;
@@ -94,19 +95,12 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter(isRec);
-  if (isRec(v)) return Object.entries(v).map(([name, def]) => (isRec(def) ? { name, ...def } : { name }));
-  return [];
-}
-
 /** See the module docblock — an interpolated target resolves at render time. */
 const isInterpolated = (s: string): boolean => s.includes('${') || s.includes('{');
 
 function declaredPageNames(stack: AnyRec): Set<string> {
   const out = new Set<string>();
-  for (const page of asArray(stack.pages)) {
+  for (const page of recordsOf(stack.pages)) {
     const n = strName(page.name);
     if (n) out.add(n);
   }
@@ -148,7 +142,7 @@ export function validateViewPageRefs(stack: unknown): ViewPageRefFinding[] {
   };
 
   // ── The object's built-in named list views ──
-  for (const [oi, obj] of asArray(stack.objects).entries()) {
+  for (const [oi, obj] of recordsOf(stack.objects).entries()) {
     const objName = strName(obj.name);
     const label = objName ? `object "${objName}"` : `objects[${oi}]`;
     if (!isRec(obj.listViews)) continue;

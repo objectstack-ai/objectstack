@@ -236,6 +236,9 @@ importers:
       '@objectstack/formula':
         specifier: workspace:*
         version: link:../../packages/formula
+      '@objectstack/lint':
+        specifier: workspace:*
+        version: link:../../packages/lint
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../packages/objectql
