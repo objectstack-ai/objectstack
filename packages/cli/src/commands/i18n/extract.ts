@@ -21,6 +21,7 @@ import {
   extractTranslations,
   renderTranslationModule,
   renderSourceHashModule,
+  stackAuthoredSubtree,
   parseSourceHashModule,
   narrowToCommittedSections,
   type FillStrategy,
@@ -87,13 +88,14 @@ export default class I18nExtract extends Command {
       default: false,
     }),
     'objects-only': Flags.boolean({
-      description: 'Emit only the objects/globalActions subtree (default). Disable to include apps/dashboards.',
+      description:
+        'Emit only the objects/globalActions subtree (default). Disable to include apps/dashboards. Never carries the Studio metadata-form baseline either way — that is --metadata-forms, which writes it to its own file.',
       default: true,
       allowNo: true,
     }),
     'metadata-forms': Flags.boolean({
       description:
-        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin.',
+        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin. This is the only control over it: no other flag emits or suppresses that baseline.',
       default: true,
       allowNo: true,
     }),
@@ -197,6 +199,16 @@ export default class I18nExtract extends Command {
       // only its own objects passes `--no-metadata-forms`; without it, `--check`
       // demands a baseline copy the package deliberately does not commit and
       // fails on a tree that is in fact in sync.
+      //
+      // ⚠️ That orthogonality was a claim this file made and did not keep
+      // (#14894). It held only while `--objects-only` was in effect: under
+      // `--no-objects-only` the renderer's `kind: 'full'` folded the baseline
+      // into the objects module, so `--no-metadata-forms` suppressed a copy
+      // that was still being written next door — and with the flag left on,
+      // both copies were written. This predicate is now the ONLY thing that
+      // decides whether the baseline is emitted, because the stack module no
+      // longer carries it (`stackAuthoredSubtree`). Nothing here picks a winner
+      // between the two flags; there is no longer anything for them to contest.
       const emitsMetadataForms = (locale: string): boolean =>
         flags['metadata-forms'] && (metadataFormsCounts[locale] ?? 0) > 0;
 
@@ -251,9 +263,19 @@ export default class I18nExtract extends Command {
           totalExpected: result.totalExpected,
           counts: result.counts,
           metadataFormsCounts,
-          bundles: objectsOnly
-            ? Object.fromEntries(localesEmitted.map((l) => [l, result.bundles[l].objects ?? {}]))
-            : result.bundles,
+          // The same payload the files carry, for the same reason (#14894):
+          // `--json` is documented as "output JSON instead of writing files",
+          // so a sub-tree that cannot reach a bundle file must not reach this
+          // either. `metadataForms` never could under `--objects-only`, and
+          // reached this payload under `--no-objects-only` only through the
+          // same `kind: 'full'` fold the emitter has stopped doing — its size
+          // is still reported, in `metadataFormsCounts`.
+          bundles: Object.fromEntries(
+            localesEmitted.map((l) => [
+              l,
+              objectsOnly ? (result.bundles[l].objects ?? {}) : stackAuthoredSubtree(result.bundles[l]),
+            ]),
+          ),
           duration: timer.elapsed(),
         });
         return;
