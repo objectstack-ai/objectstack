@@ -277,7 +277,12 @@ describe('#7733 runtime email_template write materializes without a restart', ()
         ...template({ subject: 'The packaged subject' }),
         _diagnostics: { valid: true },
         _packageId: 'com.objectstack.auth',
-        _provenance: { source: 'code' },
+        // [#16152] Was `{ source: 'code' }` — an object, where
+        // `MetadataProvenanceSchema` is `z.enum(['package','org','env-forced'])`.
+        // It was never spec-legal; the blanket `_` sweep deleted it before the
+        // parse could say so, which is the silent swallow this card removes.
+        // Corrected to the spelling the rest of the repo's fixtures use.
+        _provenance: 'package',
       },
     }));
     const { engine } = await boot({ protocol });
