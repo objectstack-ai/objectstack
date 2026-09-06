@@ -1,12 +1,28 @@
 #!/usr/bin/env node
 /**
- * Launch-window guard: a PR may not INTRODUCE a changeset that declares a
- * `major` bump.
+ * Two questions about the changesets a PR INTRODUCES, answered in one run:
+ *
+ *   1. LAUNCH-WINDOW GUARD — a PR may not introduce a changeset that declares a
+ *      `major` bump. Everything above "The LEVEL axis" below is this.
+ *   2. THE LEVEL AXIS (#16055) — a PR that DECLARES clause ② (a new key on a
+ *      published payload) may not grade a package it grew `patch`. Read the
+ *      block headed "The LEVEL axis" for what it cross-checks, where the
+ *      declaration comes from, and the three residuals it records.
+ *
+ * The run exits with the WORSE of the two verdicts and prints both, because
+ * they are independent facts about one changeset set.
  *
  * Run:  node scripts/check-changeset-no-major.mjs --base <ref-or-sha> [--head <ref>]
  *       node scripts/check-changeset-no-major.mjs              # base defaults to origin/main
  *       node scripts/check-changeset-no-major.mjs --self-test  # verify the checker itself
  *       node scripts/check-changeset-no-major.mjs --list       # audit the whole .changeset dir
+ *
+ *       # the level axis driven offline: `--event` names a GitHub Actions
+ *       # `pull_request` payload and makes it the WHOLE declaration input, so a
+ *       # verdict is exactly reproducible and never half a document and half a
+ *       # live board. In CI the same payload is already on disk at
+ *       # `$GITHUB_EVENT_PATH` and is read with no flag, no token and no network.
+ *       node scripts/check-changeset-no-major.mjs --base <sha> --event event.json
  *
  * `--base` names the BRANCH POINT to judge against, not the first commit of the
  * diff: the scan always starts at `merge-base(<base>, <head>)`. See "Where the
@@ -362,6 +378,13 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+// #16055, the level axis below. Both are IMPORTED rather than restated: the
+// clause-② declaration has exactly one legal spelling and exactly one label
+// carrier, and a second copy of either here would be a reader that can drift
+// from the gate the PM protocol actually runs. Both modules import node
+// builtins only, so this file still runs before `pnpm install`.
+import { CONTRACT_REVIEW_LABEL } from './pm/check-half-states.mjs';
+import { readClause2Line } from './pm/check-clause2-carriers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -370,7 +393,8 @@ const REPO_ROOT = resolve(__dirname, '..');
 
 /**
  * Extract the YAML frontmatter block (between the first two `---` fences) and
- * return the list of `major`-bumped package names declared in it.
+ * return EVERY entry declared in it, as `{ pkg, bump }` with the bump
+ * lower-cased.
  *
  * A frontmatter line looks like:  "@objectstack/spec": major
  * (single or double quotes, any surrounding whitespace).
@@ -384,25 +408,47 @@ const REPO_ROOT = resolve(__dirname, '..');
  * See the dialect table in the header for where they agree with
  * `@changesets/parse` and where they deliberately do not.
  *
+ * ⛔ This function holds the family's ONE copy of that literal in this file, and
+ * `majorPackagesIn` below is a filter over it rather than a second parse. A
+ * second `.exec(` of the same shape anywhere in this file breaks the sibling's
+ * `found.length === 1` extraction — which is the mechanism that keeps the four
+ * readers byte-identical — so the level reading added by #16055 reads THIS list
+ * instead of parsing the block again.
+ *
  * @param {string} text
- * @returns {string[]}
+ * @returns {{ pkg: string, bump: string }[]}
  */
-export function majorPackagesIn(text) {
-  const lines = text.split(/\r?\n/);
+export function entriesIn(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
   let i = 0;
   while (i < lines.length && lines[i].trim() === '') i++; // tolerate leading blank lines
   if (lines[i]?.trim() !== '---') return [];
 
-  const majors = [];
+  const entries = [];
   for (let j = i + 1; j < lines.length; j++) {
     if (lines[j].trim() === '---') break; // end of frontmatter
     if (/^\s*#/.test(lines[j])) continue; // a whole-line YAML comment declares nothing
     // "<name>": <bump>   |   '<name>': <bump>   |   <name>: <bump>
     // with an optionally quoted bump value and an optional trailing ` # comment`.
     const m = /^\s*["']?([^"':]+)["']?\s*:\s*["']?([A-Za-z]+)["']?(?:\s+#.*)?\s*$/.exec(lines[j]);
-    if (m && m[2].toLowerCase() === 'major') majors.push(m[1].trim());
+    if (m) entries.push({ pkg: m[1].trim(), bump: m[2].toLowerCase() });
   }
-  return majors;
+  return entries;
+}
+
+/**
+ * The `major`-bumped package names declared in a changeset's frontmatter.
+ *
+ * A filter over `entriesIn`, deliberately: see the note there on why this file
+ * may hold only one copy of the family's entry regex.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+export function majorPackagesIn(text) {
+  return entriesIn(text)
+    .filter((entry) => entry.bump === 'major')
+    .map((entry) => entry.pkg);
 }
 
 /** `.changeset/README.md` is documentation, never a changeset. */
@@ -476,8 +522,19 @@ export function mergeBase(base, head, cwd) {
  * correction that lived in the CLI could be dropped from it without a single
  * fixture noticing.
  *
+ * `levels` (#16055) is the SAME diff read one axis over: every `{ pkg, bump }`
+ * entry this side of the fork introduces, majors included. It is collected in
+ * the same pass and from the same `entriesIn` list, so the level reading can
+ * never be computed against a different set of files, a different branch point
+ * or a different frontmatter dialect than the major reading it sits beside.
+ *
  * @param {{ cwd: string, base: string, head?: string }} opts
- * @returns {{ introduced: { file: string, majors: string[] }[], exempt: string[], base: string }}
+ * @returns {{
+ *   introduced: { file: string, majors: string[] }[],
+ *   levels: { file: string, entries: { pkg: string, bump: string }[] }[],
+ *   exempt: string[],
+ *   base: string,
+ * }}
  * @throws when `base` and `head` have no merge base (#4690: not a pass)
  */
 export function scan({ cwd, base, head = 'HEAD' }) {
@@ -493,6 +550,7 @@ export function scan({ cwd, base, head = 'HEAD' }) {
   const out = git(['diff', '--name-status', '--diff-filter=AMR', from, head, '--', '.changeset/*.md'], cwd);
 
   const introduced = [];
+  const levels = [];
   const exempt = [];
 
   for (const line of out.split('\n')) {
@@ -509,8 +567,7 @@ export function scan({ cwd, base, head = 'HEAD' }) {
 
     const headText = showOrNull(head, file, cwd);
     if (headText === null) continue; // vanished under us; nothing to judge
-    const majors = majorPackagesIn(headText);
-    if (majors.length === 0) continue;
+    const headEntries = entriesIn(headText);
 
     // `A` means the path is not at the branch point at all, so there is nothing
     // to read and nothing it could already have declared.
@@ -525,7 +582,21 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     // For `M` the guard is a no-op, because `basePath` is the path already
     // accepted above. Same guard, same reason, as the two siblings (#7106).
     const baseText = status === 'A' || !isChangesetFile(basePath) ? null : showOrNull(from, basePath, cwd);
-    const already = baseText === null ? [] : majorPackagesIn(baseText);
+    const baseEntries = baseText === null ? [] : entriesIn(baseText);
+
+    // #16055, the level axis. An entry is INTRODUCED when the branch point did
+    // not already carry that package at that same bump — so a PR that rewrites
+    // `"@objectstack/cli": minor` down to `patch` introduces the `patch`, which
+    // is the direction this reading exists for, while an untouched entry it
+    // merely carries along introduces nothing.
+    const introducedEntries = headEntries.filter(
+      (entry) => !baseEntries.some((prior) => prior.pkg === entry.pkg && prior.bump === entry.bump),
+    );
+    if (introducedEntries.length) levels.push({ file, entries: introducedEntries });
+
+    const majors = headEntries.filter((entry) => entry.bump === 'major').map((entry) => entry.pkg);
+    if (majors.length === 0) continue;
+    const already = baseEntries.filter((entry) => entry.bump === 'major').map((entry) => entry.pkg);
     // Per PACKAGE, not per file: adding a second `major` entry to a changeset
     // that already declared one is still introducing that second one.
     const added = majors.filter((pkg) => !already.includes(pkg));
@@ -534,7 +605,7 @@ export function scan({ cwd, base, head = 'HEAD' }) {
     else exempt.push(file);
   }
 
-  return { introduced, exempt, base: from };
+  return { introduced, levels, exempt, base: from };
 }
 
 // ── The judgement ────────────────────────────────────────────────────────────
@@ -659,6 +730,338 @@ export function render(result) {
   }
 }
 
+// ── The LEVEL axis (#16055) ──────────────────────────────────────────────────
+//
+// Everything above this line answers "is this bump `major`". Nothing answered
+// "is this bump RIGHT", and #16055 measured what that costs: on PR #16044 the
+// same source tree at two heads — `e0938d3fdce` grading `@objectstack/cli`
+// `patch`, `98179cae022` grading it `minor`, and `git diff` between them
+// returning the one changeset path and nothing else — every level-sensitive
+// gate was green on BOTH. `Check Changeset`'s green is routinely read as "the
+// changeset is OK"; on this axis it could not fail, so it carried no
+// information about the level at all while looking exactly like a green that
+// does.
+//
+// The repair principle the card states, and the one this block is built to
+// satisfy: NAME THE AXIS YOUR CONTROL DISCRIMINATES ON, AND CHECK IT IS THE
+// AXIS THAT CAN FAIL. So the self-test drives the two real heads' changeset
+// bytes and asserts red on `patch` and green on `minor` for a byte-identical
+// tree — a control that would have caught #16044 rather than one that grades
+// the checker's own fixtures.
+//
+// ## What is cross-checked, and why nothing new is asked of an author
+//
+// Two declarations about the same PR already exist and were never compared:
+//
+//   ① the CLAUSE-② declaration — "this PR puts a new key on a published
+//      payload" — carried by the `needs:contract-review` gate label and/or by
+//      the fixed `Clause-②: yes` line the PM protocol spells (read here through
+//      `check-clause2-carriers.mjs`'s own `readClause2Line`, imported rather
+//      than restated, so the two readers cannot drift);
+//   ② the CHANGESET LEVEL for the package whose `packages/*/src/**` the diff
+//      moves.
+//
+// A declaration of ① plus a `patch` in ② is a self-contradiction inside one
+// PR. The maintainer's ruling of 2026-09-04 (decision batch #35, on #15294) is
+// already written out in the `Check Changeset` step's "WHICH LEVEL" prose: a
+// purely additive widening of a published package's public surface takes AT
+// LEAST `minor`, and the commit type may raise a bump but never lower it. This
+// block mechanizes that sentence for exactly the PRs where the widening is
+// already DECLARED, and for no others. It invents no author obligation — the
+// input is a declaration the seat has already made — which is why sketch 3 of
+// the filing card (a precedent lookup, a new obligation on every PR) is
+// deliberately NOT here.
+//
+// ⭐ And it can only ever fire on a PR that is ALREADY held: the clause-②
+// carrier is what keeps a PR outside the merge queue until the contract review
+// clears it. So the refusal adds no new blocking state to the board; it turns a
+// silent wrong level into a loud one inside a window the PR is already waiting
+// out.
+//
+// ## Where the declaration is read from — the event payload, and nothing else
+//
+// This gate makes NO API call and needs NO token. Its whole input is the
+// `pull_request` payload the job already receives on disk at
+// `$GITHUB_EVENT_PATH` (labels + body) plus the diff it already has. That is a
+// deliberate boundary, not a shortcut: the sibling reading — the card's claim
+// comment — needs a credentialled network read inside a required gate, and
+// MEASURED ON THE ACCEPTANCE CASE it would have answered nothing anyway.
+// `cardDeclaration()` over card #15549's real comment thread returns
+// `{ state: 'absent' }`: that card's claim comment is a `## Claim` heading with
+// no `Clause-②:` line at all. The carrier label is what the #16044 heads
+// actually carried — labelled on the PR at 2026-09-05T21:43:58Z, stripped at
+// 22:38:26Z when the review passed, so it was on for the whole life of BOTH
+// heads (`e0938d3fdce` was HEAD from 21:43:58Z until 22:18:39Z, `98179cae022`
+// from then until the strip).
+//
+// ## Two residuals, recorded rather than implied
+//
+//   * THE PAYLOAD LABEL SET IS A SNAPSHOT. A carrier applied after the event
+//     fired is invisible to that run — the same stale cell this job documents
+//     at length for `skip-changeset` and `allow-major`, and closed the same
+//     way: `pull_request` here is triggered on `labeled`/`unlabeled` too, so
+//     hanging the carrier fires a run that DOES see it. Measured on #16044: the
+//     `opened` run at 21:40Z would have read NOT MEASURED, and the `labeled`
+//     run three minutes later reads the carrier and refuses the `patch`.
+//   * THE CARRIER IS STRIPPED AT REVIEW PASS, so a run after the PASS reads NOT
+//     MEASURED and this axis stands down. That is the intended order — the
+//     human review that clears the carrier is the authority on the level, and
+//     on #16044 its verdict comment concurred with the `minor` grading
+//     explicitly — but it means this axis is a PRE-review reading, never a
+//     landing-time one.
+//   * THE `allow-major` LABEL SKIPS THE WHOLE STEP, this block included,
+//     because the step it lives in is the launch-window major guard. A PR that
+//     is granted a whole-stack major and ALSO grades a clause-②-declared
+//     package `patch` in the same changeset set is therefore not caught. It is
+//     a two-condition case with no motive, and the alternative — a second step
+//     — is refused by `check-empty-changeset.mjs`'s pin on this job's failable
+//     step count.
+
+/** The paths whose movement makes a package's PUBLISHED surface the thing that grew. */
+const PUBLISHED_SOURCE_PATH = /^packages\/([^/]+)\/src\//;
+
+/**
+ * The workspace package names whose `src/**` this diff moves, read from the
+ * HEAD tree rather than from the working directory — the self-test and the
+ * acceptance run both drive commits that are not checked out.
+ *
+ * `unreadable` is returned beside them, never folded into them: a
+ * `packages/<dir>/src/**` path whose manifest could not be read is a package
+ * this reading could not name, and a name it could not read must not look like
+ * a package the diff did not touch (#4690).
+ *
+ * @param {{ cwd: string, from: string, head: string }} opts
+ * @returns {{ packages: string[], unreadable: string[] }}
+ */
+export function packagesTouched({ cwd, from, head }) {
+  let out = '';
+  try {
+    out = git(['diff', '--name-only', from, head], cwd);
+  } catch {
+    return { packages: [], unreadable: [] };
+  }
+  const dirs = new Set();
+  for (const line of out.split('\n')) {
+    const m = PUBLISHED_SOURCE_PATH.exec(line.trim());
+    if (m) dirs.add(m[1]);
+  }
+  const packages = [];
+  const unreadable = [];
+  for (const dir of [...dirs].sort()) {
+    const manifest = showOrNull(head, `packages/${dir}/package.json`, cwd);
+    let name = null;
+    if (manifest !== null) {
+      try {
+        name = JSON.parse(manifest).name ?? null;
+      } catch {
+        name = null;
+      }
+    }
+    if (typeof name === 'string' && name) packages.push(name);
+    else unreadable.push(`packages/${dir}`);
+  }
+  return { packages, unreadable };
+}
+
+/**
+ * The clause-② declaration this PR carries, read from the event payload alone.
+ *
+ * Three answers, never two — `null` is NOT MEASURED and is the reason this
+ * function returns readings alongside the value: a run that could not read a
+ * declaration must say which carriers it looked at, or its silence is
+ * indistinguishable from a `no` (#4690, and the shape `check-clause2-carriers`
+ * calls "a missing reading and a decision must not look the same").
+ *
+ * The disjunction is the filing card's own wording — the carrier OR the
+ * declaration line — so a seat that hangs the gate without writing the line,
+ * which is what #16044 did, is still read.
+ *
+ * @param {{ labels?: ({ name?: string }|string)[], body?: string }|null} pr
+ * @returns {{ value: 'yes'|'no'|null, readings: string[] }}
+ */
+export function declarationFromPullRequest(pr) {
+  const readings = [];
+  if (!pr || typeof pr !== 'object') {
+    return { value: null, readings: ['no `pull_request` payload was available to read a declaration from'] };
+  }
+
+  const labels = Array.isArray(pr.labels)
+    ? pr.labels.map((l) => (typeof l === 'string' ? l : String(l?.name ?? ''))).filter(Boolean)
+    : null;
+  let carrier = false;
+  if (labels === null) {
+    readings.push('the payload carried no readable label list, so the clause-② carrier could not be read');
+  } else if (labels.includes(CONTRACT_REVIEW_LABEL)) {
+    carrier = true;
+    readings.push(`carrier: \`${CONTRACT_REVIEW_LABEL}\` IS on this PR`);
+  } else {
+    readings.push(`carrier: \`${CONTRACT_REVIEW_LABEL}\` is not on this PR (${labels.length} label(s) read)`);
+  }
+
+  const line = readClause2Line(pr.body ?? '');
+  if (line?.kind === 'declared') readings.push(`declaration line: \`${line.line}\``);
+  else if (line?.kind === 'malformed') readings.push(`declaration line: MALFORMED, not a declaration — ${line.line}`);
+  else if (line?.kind === 'near-miss') readings.push(`declaration line: a near miss, not a declaration — ${line.line}`);
+  else readings.push('declaration line: the PR body carries no `Clause-②:` line');
+
+  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', readings };
+  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', readings };
+  return { value: null, readings };
+}
+
+/**
+ * Decide the level axis. Pure, for the same reason `judge` is: the self-test
+ * drives the real decision rather than an imitation of it.
+ *
+ *   unreadable-diff  the diff could not be computed          -> exit 1 (#4690)
+ *   not-measured     no declaration was readable             -> exit 0, LOUD
+ *   not-declared     the declaration reads `no`              -> exit 0
+ *   clean            declared `yes`, no `patch` on a grown package -> exit 0
+ *   enforce          declared `yes`, `patch` on a grown package    -> exit 1
+ *
+ * `not-measured` and `not-declared` are separate verdicts and must stay so: one
+ * is a missing reading and the other is a decision, and the card this block
+ * closes is precisely about two readings that looked alike.
+ *
+ * @param {{
+ *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
+ *   touched: { packages: string[], unreadable: string[] },
+ *   declaration: { value: 'yes'|'no'|null, readings: string[] },
+ * }} input
+ */
+export function judgeLevel({ levels, touched, declaration }) {
+  const readings = declaration?.readings ?? [];
+  if (!levels) return { verdict: 'unreadable-diff', offenders: [], readings, unreadable: [] };
+  const unreadable = touched?.unreadable ?? [];
+  if (declaration?.value === null || declaration?.value === undefined) {
+    return { verdict: 'not-measured', offenders: [], readings, unreadable };
+  }
+  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], readings, unreadable };
+
+  const grown = new Set(touched?.packages ?? []);
+  const offenders = [];
+  for (const { file, entries } of levels) {
+    const bad = entries.filter((entry) => entry.bump === 'patch' && grown.has(entry.pkg)).map((entry) => entry.pkg);
+    if (bad.length) offenders.push({ file, packages: bad });
+  }
+  // An unread manifest can only ever hide an offender, so it cannot be reported
+  // under a tick: `clean` states it, and the reader is told what was not named.
+  if (offenders.length) return { verdict: 'enforce', offenders, readings, unreadable };
+  return { verdict: 'clean', offenders: [], readings, unreadable };
+}
+
+/**
+ * Render the level verdict. Separated from `judgeLevel` and from `console` for
+ * the same reason `render` is: the self-test asserts the MESSAGE, and "exits 1"
+ * does not tell an author which word to change.
+ *
+ * @param {ReturnType< typeof judgeLevel >} result
+ * @returns {{ exitCode: number, stdout: string[], stderr: string[] }}
+ */
+export function renderLevel(result) {
+  const stdout = [];
+  const stderr = [];
+  const readings = (result?.readings ?? []).map((r) => `   · ${r}`);
+  const unreadableNote =
+    (result?.unreadable ?? []).length > 0
+      ? [`   ⚠️ ${result.unreadable.length} touched package dir(s) could not be named: ${result.unreadable.join(', ')} — an offender there could not be seen.`]
+      : [];
+
+  switch (result?.verdict) {
+    case 'unreadable-diff':
+      stderr.push(
+        '⛔ check-changeset-no-major (level axis): the diff against the branch point could not be computed, ' +
+          'so the changeset level was not judged either. Missing input is a failure, never a pass (#4690).',
+      );
+      return { exitCode: 1, stdout, stderr };
+
+    case 'not-measured':
+      stdout.push(
+        'ℹ️ LEVEL AXIS: NOT MEASURED — no clause-② declaration was readable for this PR, so whether ' +
+          '`patch` fits the surface was not judged. This is neither a pass nor a failure (#4690).',
+        ...readings,
+        ...unreadableNote,
+      );
+      return { exitCode: 0, stdout, stderr };
+
+    case 'not-declared':
+      stdout.push('✓ LEVEL AXIS: this PR declares clause-② `no`, so no package here is declared to have grown a published surface.', ...readings, ...unreadableNote);
+      return { exitCode: 0, stdout, stderr };
+
+    case 'clean':
+      stdout.push(
+        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and no package whose `packages/*/src/**` it moves is graded `patch`.',
+        ...readings,
+        ...unreadableNote,
+      );
+      return { exitCode: 0, stdout, stderr };
+
+    case 'enforce':
+      stderr.push('⛔ This PR declares clause-② YES and grades a package it grew `patch`.\n');
+      for (const { file, packages } of result.offenders) {
+        stderr.push(`   ${file}`);
+        for (const pkg of packages) stderr.push(`     - ${pkg}: patch   ← this PR moves ${pkg}'s packages/*/src/**`);
+      }
+      stderr.push(
+        '\nThe two declarations disagree, inside one PR:\n' +
+          `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
+          '\n' +
+          'A purely additive widening of a published package\'s public surface takes AT LEAST `minor`;\n' +
+          'the commit type may raise a bump but never lower it below what the act requires (maintainer\n' +
+          'ruling 2026-09-04, decision batch #35, on #15294 — written out in full under "WHICH LEVEL" in\n' +
+          'the `Check Changeset` step of .github/workflows/pr-automation.yml).\n' +
+          '\n' +
+          'TWO ways forward, and they are not interchangeable:\n' +
+          '  1. The declaration is right and the level is wrong -> raise it to `minor`. This is the\n' +
+          '     ordinary case; #16044 is the measured one, one word in one changeset.\n' +
+          '  2. The level is right and the DECLARATION is wrong -> correct it at the producer: the\n' +
+          `     \`${CONTRACT_REVIEW_LABEL}\` carrier is the review seat's to place and to clear, and the\n` +
+          '     `Clause-②:` line is the claim\'s. ⛔ Do not add a tolerance here to route around a\n' +
+          '     declaration that says something its author did not mean.\n' +
+          '\n' +
+          'Only what THIS diff introduces is listed above — an entry the branch point already carried at\n' +
+          'the same bump is not this PR\'s to answer for (#7005).',
+      );
+      return { exitCode: 1, stdout, stderr };
+
+    default:
+      stderr.push(
+        `⛔ internal: check-changeset-no-major produced an unknown level verdict ${JSON.stringify(result?.verdict ?? null)}. ` +
+          'A guard that cannot classify its own input has verified nothing.',
+      );
+      return { exitCode: 1, stdout, stderr };
+  }
+}
+
+/**
+ * The `pull_request` object out of a GitHub Actions event payload, or `null`
+ * when there is none to read.
+ *
+ * Naming a file with `--event` makes it the WHOLE input — nothing is fetched
+ * and nothing else is consulted — which is what makes the two #16044 heads
+ * drivable offline and exactly reproducible. The same shape arrives for free in
+ * CI at `$GITHUB_EVENT_PATH`, which is why this gate needs no token.
+ *
+ * @param {string|null|undefined} path
+ * @returns {{ labels?: unknown[], body?: string }|null}
+ */
+export function readEventPullRequest(path) {
+  if (!path) return null;
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(text);
+    const pr = payload?.pull_request ?? null;
+    return pr && typeof pr === 'object' ? pr : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Reading the real tree ────────────────────────────────────────────────────
 
 /**
@@ -746,6 +1149,10 @@ function main(argv) {
   };
   const head = readFlag('--head') ?? 'HEAD';
   const requested = readFlag('--base');
+  // `--event` names a GitHub Actions `pull_request` payload and makes it the
+  // WHOLE declaration input (#16055); with no flag the reading comes from the
+  // payload CI already put on disk. Neither path makes a network call.
+  const eventPath = readFlag('--event') ?? process.env.GITHUB_EVENT_PATH ?? null;
 
   let base = null;
   let baseLabel = requested;
@@ -795,7 +1202,23 @@ function main(argv) {
 
   for (const line of stdout) console.log(line);
   for (const line of stderr) console.error(line);
-  process.exit(exitCode);
+
+  // ── The level axis (#16055) ───────────────────────────────────────────────
+  //
+  // Run unconditionally beside the major verdict rather than instead of it, and
+  // the exit code is the MAX of the two: two independent facts about one
+  // changeset set, and a gate that reported only the first one it found would
+  // hand an author one word to change and then fail them again on the next run.
+  const levelResult = judgeLevel({
+    levels: scanned?.levels ?? null,
+    touched: scanned ? packagesTouched({ cwd: REPO_ROOT, from: scanned.base, head }) : { packages: [], unreadable: [] },
+    declaration: declarationFromPullRequest(readEventPullRequest(eventPath)),
+  });
+  const level = renderLevel(levelResult);
+  for (const line of level.stdout) console.log(line);
+  for (const line of level.stderr) console.error(line);
+
+  process.exit(Math.max(exitCode, level.exitCode));
 }
 
 // ── Self-test ────────────────────────────────────────────────────────────────
@@ -836,11 +1259,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#6129 proper: main drift must not move the verdict': 5,
   'Missing input is a failure, never a pass (#4690)': 4,
   'The wiring: these fixtures must actually run on every PR': 15,
+  "The LEVEL axis: #16044's two heads, one word apart (#16055)": 41,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1473,6 +1897,210 @@ function selfTest() {
       }
       assert(threw, '#4690: no merge base is a failure rather than a silent pass — scan throws rather than falling back to the raw base');
     }
+    // ── The LEVEL axis: #16044's two heads, one word apart (#16055) ──────────
+    //
+    // The acceptance condition the filing card sets, discharged with the real
+    // bytes rather than with a synthetic pair: the SAME changeset body, the two
+    // bump words #16044 actually shipped, and the level verdict required to
+    // differ. `LEVEL_BODY` is written once and the word substituted into it, so
+    // the two fixtures are byte-identical BY CONSTRUCTION — a typo cannot make
+    // the negative pass for the wrong reason, which is the failure mode a
+    // hand-copied pair has.
+    //
+    // Measured out of the tree, not recalled: `git show <head>:.changeset/
+    // lint-eval-generator-load-envelope.md` at `e0938d3fdce` and `98179cae022`
+    // differ in exactly the bump word, and `git diff` between the two commits
+    // returns that one path.
+    //
+    // Every negative below states which positive it differs from, the same
+    // control discipline the parser batteries above use.
+    battery('The LEVEL axis: #16044\'s two heads, one word apart (#16055)');
+    {
+      const LEVEL_BODY = '\n---\n\n`os lint --eval --json` now carries the ADR-0112 error carriers on its generator-load failure, instead of a bare `{error}`.\n';
+      const PATCH_HEAD = `---\n"@objectstack/cli": patch${LEVEL_BODY}`;
+      const MINOR_HEAD = `---\n"@objectstack/cli": minor${LEVEL_BODY}`;
+      const CHANGESET = '.changeset/lint-eval-generator-load-envelope.md';
+      const CLI = '@objectstack/cli';
+      const declaredYes = { value: 'yes', readings: ['carrier: on'] };
+      const touchedCli = { packages: [CLI], unreadable: [] };
+      const levelsFor = (text) => [{ file: CHANGESET, entries: entriesIn(text) }];
+
+      // The pair. One word apart, opposite verdicts — this is the axis.
+      const patchVerdict = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: declaredYes });
+      const minorVerdict = judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: declaredYes });
+      assert(patchVerdict.verdict === 'enforce', `#16044's patch head must be REFUSED — got ${patchVerdict.verdict}`);
+      assert(minorVerdict.verdict === 'clean', `#16044's minor head must PASS — got ${minorVerdict.verdict}`);
+      assert(
+        renderLevel(patchVerdict).exitCode === 1 && renderLevel(minorVerdict).exitCode === 0,
+        'the two heads must differ in EXIT CODE, not merely in verdict name — that is what CI reads',
+      );
+      assert(
+        PATCH_HEAD.replace('patch', 'minor') === MINOR_HEAD,
+        'control: the two fixtures must differ by exactly the bump word — a fixture pair that differs elsewhere is not the #16044 measurement',
+      );
+      assert(
+        patchVerdict.offenders.length === 1 &&
+          patchVerdict.offenders[0].file === CHANGESET &&
+          patchVerdict.offenders[0].packages.includes(CLI),
+        `the refusal must NAME the file and the package — got ${JSON.stringify(patchVerdict.offenders)}`,
+      );
+      const patchText = renderLevel(patchVerdict).stderr.join('\n');
+      assert(patchText.includes(CLI) && patchText.includes(CHANGESET), 'the refusal MESSAGE must name the package and the changeset, not merely exit 1');
+      assert(patchText.includes('`minor`'), 'the refusal message must name the level to raise to — an author reading it must know which word to change');
+
+      // The declaration axis, held against the SAME patch head. Each of these
+      // is the byte-identical offending tree with one input changed, so a green
+      // here is about the declaration and cannot be about the changeset.
+      const notMeasured = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: null, readings: [] } });
+      assert(notMeasured.verdict === 'not-measured', `no readable declaration is NOT MEASURED, never a pass and never a failure (#4690) — got ${notMeasured.verdict}`);
+      assert(renderLevel(notMeasured).exitCode === 0 && renderLevel(notMeasured).stdout.join('\n').includes('NOT MEASURED'), 'NOT MEASURED must exit 0 AND say so in words — a silent 0 is the reading this whole card is about');
+      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', readings: [] } });
+      assert(declaredNo.verdict === 'not-declared', `a declaration of \`no\` is a DECISION, distinct from an unread one — got ${declaredNo.verdict}`);
+      assert(
+        renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasured).stdout.join('\n'),
+        'a decision and a missing reading must not print the same thing — collapsing them is the defect #16055 records',
+      );
+
+      // The package axis, same patch head: `patch` for a package this diff did
+      // not grow is not this gate's business.
+      const untouched = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: { packages: ['@objectstack/spec'], unreadable: [] }, declaration: declaredYes });
+      assert(untouched.verdict === 'clean', `\`patch\` for a package the diff does not move under packages/*/src/** is not refused — got ${untouched.verdict}`);
+
+      // #4690, on this axis too.
+      assert(judgeLevel({ levels: null, touched: touchedCli, declaration: declaredYes }).verdict === 'unreadable-diff', 'an uncomputable diff is a failure on the level axis as well');
+      assert(renderLevel({ verdict: 'unreadable-diff', offenders: [], readings: [], unreadable: [] }).exitCode === 1, 'unreadable-diff exits 1');
+      assert(renderLevel({ verdict: 'no-such-verdict' }).exitCode === 1, 'an unclassifiable level verdict exits 1 rather than printing a tick');
+      const withUnread = renderLevel(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: { packages: [CLI], unreadable: ['packages/mystery'] }, declaration: declaredYes }));
+      assert(withUnread.stdout.join('\n').includes('packages/mystery'), 'a touched package dir that could not be NAMED is printed beside the tick — an offender there could not have been seen');
+
+      // The declaration reader, against the real #16044 PR body.
+      const prBody = '## Clause ② — declared per limb, from the delivered diff\n\n- **Mechanical floor — YES.**\n';
+      assert(
+        declarationFromPullRequest({ labels: [{ name: 'needs:contract-review' }], body: prBody }).value === 'yes',
+        'the carrier alone is a declaration — it is what #16044 actually carried',
+      );
+      assert(
+        declarationFromPullRequest({ labels: [{ name: 'tooling' }], body: prBody }).value === null,
+        "control: #16044's own PR-body prose is NOT a declaration — the same body with the carrier off reads NOT MEASURED, so the positive above is about the label",
+      );
+      assert(
+        declarationFromPullRequest({ labels: [{ name: 'tooling' }], body: prBody }).readings.some((r) => /near miss/.test(r)),
+        'and the near miss is QUOTED, so an unread declaration is actionable rather than silent',
+      );
+      assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: yes\n' }).value === 'yes', 'the fixed declaration line is read with no carrier at all');
+      assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: no\n' }).value === 'no', 'and `no` is read as `no`, not as absent');
+      assert(declarationFromPullRequest({ labels: [], body: 'Clause-②: probably\n' }).value === null, 'a malformed value is NOT a declaration (#12409: no tolerant reading)');
+      assert(declarationFromPullRequest({ labels: [], body: 'nothing here\n' }).value === null, 'control: a body with neither reads null, so the three above are about their lines');
+      assert(declarationFromPullRequest(null).value === null && declarationFromPullRequest(null).readings.length > 0, 'no payload is NOT MEASURED and says which carrier it could not read');
+      assert(
+        declarationFromPullRequest({ labels: [{ name: 'needs:contract-review' }], body: 'Clause-②: no\n' }).value === 'yes',
+        'the carrier wins over a body that says `no`: the carrier is the review seat\'s, and only the seat clears it',
+      );
+
+      // The event payload reader — `--event` makes the file the WHOLE input.
+      const evDir = initRepo('changeset-no-major-event-');
+      writeFileSync(join(evDir, 'ev.json'), JSON.stringify({ pull_request: { labels: [{ name: 'needs:contract-review' }], body: '' } }));
+      writeFileSync(join(evDir, 'not-json.txt'), 'nope');
+      writeFileSync(join(evDir, 'no-pr.json'), JSON.stringify({ action: 'opened' }));
+      assert(declarationFromPullRequest(readEventPullRequest(join(evDir, 'ev.json'))).value === 'yes', 'a real event payload on disk is read');
+      assert(readEventPullRequest(join(evDir, 'not-json.txt')) === null, 'an unparseable payload reads null (⇒ NOT MEASURED), never a fabricated declaration');
+      assert(readEventPullRequest(join(evDir, 'no-pr.json')) === null, 'a payload with no `pull_request` reads null');
+      assert(readEventPullRequest(join(evDir, 'absent.json')) === null, 'an absent payload reads null');
+      assert(readEventPullRequest(null) === null, 'no path at all reads null');
+
+      // End to end over a real temp git repository: the diff, the manifest
+      // lookup and the verdict, with nothing stubbed.
+      const MANIFEST = JSON.stringify({ name: CLI, version: '0.0.0' });
+      const e2e = (bump, extra = {}) =>
+        makeRepo(
+          { 'packages/cli/package.json': MANIFEST, 'packages/cli/src/commands/lint.ts': 'export const before = 1;\n' },
+          { 'packages/cli/src/commands/lint.ts': 'export const after = 2;\n', [CHANGESET]: bump, ...extra },
+        );
+      {
+        const { dir, base } = e2e(PATCH_HEAD);
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        assert(touched.packages.includes(CLI), `packagesTouched must name the package from its own manifest — got ${JSON.stringify(touched)}`);
+        assert(touched.unreadable.length === 0, 'and report nothing unreadable when every touched dir has a manifest');
+        assert(
+          judgeLevel({ levels: scanned.levels, touched, declaration: declaredYes }).verdict === 'enforce',
+          'end to end: a real diff that moves packages/cli/src/** and grades it `patch` under a `yes` declaration is REFUSED',
+        );
+      }
+      {
+        const { dir, base } = e2e(MINOR_HEAD);
+        const scanned = scan({ cwd: dir, base });
+        assert(
+          judgeLevel({ levels: scanned.levels, touched: packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' }), declaration: declaredYes }).verdict === 'clean',
+          'end to end control: the same repository one word along PASSES — so the refusal above is about the level, not about the diff',
+        );
+      }
+      {
+        // The same `patch`, but the diff moves only the package's TESTS.
+        const { dir, base } = makeRepo(
+          { 'packages/cli/package.json': MANIFEST, 'packages/cli/test/x.test.ts': 'a\n' },
+          { 'packages/cli/test/x.test.ts': 'b\n', [CHANGESET]: PATCH_HEAD },
+        );
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        assert(touched.packages.length === 0, `a diff outside packages/*/src/** grows no published surface — got ${JSON.stringify(touched.packages)}`);
+        assert(
+          judgeLevel({ levels: scanned.levels, touched, declaration: declaredYes }).verdict === 'clean',
+          'end to end: `patch` beside a tests-only diff is not this gate\'s business, even under a `yes` declaration',
+        );
+      }
+      {
+        // #7005 on this axis: an entry the branch point ALREADY carried at the
+        // same bump is not introduced by this PR.
+        const { dir, base } = makeRepo(
+          { 'packages/cli/package.json': MANIFEST, 'packages/cli/src/a.ts': 'a\n', [CHANGESET]: PATCH_HEAD },
+          { 'packages/cli/src/a.ts': 'b\n', '.changeset/second.md': '---\n"@objectstack/cli": minor\n---\n\nbody\n' },
+        );
+        const scanned = scan({ cwd: dir, base });
+        assert(
+          judgeLevel({ levels: scanned.levels, touched: packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' }), declaration: declaredYes }).verdict === 'clean',
+          '#7005 on the level axis: a `patch` entry already on the branch point is stock, not something this PR introduced',
+        );
+      }
+      {
+        // ...and the direction that MUST still fire: a PR that rewrites an
+        // existing `minor` DOWN to `patch` introduces the `patch`.
+        const { dir, base } = makeRepo(
+          { 'packages/cli/package.json': MANIFEST, 'packages/cli/src/a.ts': 'a\n', [CHANGESET]: MINOR_HEAD },
+          { 'packages/cli/src/a.ts': 'b\n', [CHANGESET]: PATCH_HEAD },
+        );
+        const scanned = scan({ cwd: dir, base });
+        assert(
+          judgeLevel({ levels: scanned.levels, touched: packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' }), declaration: declaredYes }).verdict === 'enforce',
+          'a DOWNGRADE of an existing entry to `patch` is introduced by this PR and is refused — the control for the exemption above',
+        );
+      }
+      {
+        // A touched dir with no readable manifest is reported, never silently
+        // dropped: it is a package this reading could not name.
+        const { dir, base } = makeRepo(
+          { 'packages/mystery/src/a.ts': 'a\n' },
+          { 'packages/mystery/src/a.ts': 'b\n', [CHANGESET]: PATCH_HEAD },
+        );
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        assert(
+          touched.packages.length === 0 && touched.unreadable.includes('packages/mystery'),
+          `an unnameable package dir is reported as unreadable, not as absent (#4690) — got ${JSON.stringify(touched)}`,
+        );
+      }
+
+      // The refactor's own control: `majorPackagesIn` is now a FILTER over
+      // `entriesIn`, and the family's byte-identical entry regex lives in the
+      // latter. If the two ever disagree, the major half of this gate is
+      // reading a different block than the level half.
+      assert(entriesIn(MINOR_HEAD).length === 1 && entriesIn(MINOR_HEAD)[0].bump === 'minor', 'entriesIn reads the non-major bumps the old reader threw away');
+      assert(
+        JSON.stringify(majorPackagesIn(MAJOR)) === JSON.stringify(entriesIn(MAJOR).filter((e) => e.bump === 'major').map((e) => e.pkg)),
+        'majorPackagesIn must equal the `major` filter over entriesIn — one block, one parse',
+      );
+    }
+
   } finally {
     for (const dir of repos) rmSync(dir, { recursive: true, force: true });
   }
@@ -1634,7 +2262,7 @@ function selfTest() {
   }
   console.log(
     `✓ check-changeset-no-major --self-test: ${checked} assertions ` +
-      '(frontmatter dialects measured against @changesets/parse + the pre/exit exemption switch in both directions + the #7005 diff scoping over real temp git repos + the #4690 pins + the wiring).',
+      '(frontmatter dialects measured against @changesets/parse + the pre/exit exemption switch in both directions + the #7005 diff scoping over real temp git repos + the #4690 pins + the LEVEL axis on #16044\'s two real heads + the wiring).',
   );
 
   return SELF_TEST_VERDICT;
