@@ -763,7 +763,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         verdict: 'boot-refusal',
         why:
             'Raised by `PluginLoader.validatePluginContract` when a plugin object does not satisfy the '
-            + 'declared `PluginSchema` — an unknown `type`, an invalid `slug`, an invalid `homepage`. It is '
+            + 'declared `PluginSchema` on any of the EIGHT keys that enforcement covers — `id`, `type`, '
+            + '`staticPath`, `slug`, `default`, `description`, `author`, `homepage` — including an explicit '
+            + '`null` on any of them, since all eight are `.optional()` and admit absence but not `null`. '
+            + '`version` is excluded from the enforcement, and unknown keys are not refused at all (the '
+            + 'schema carries no `.strict()`), so the narrowing stops at those eight. It is '
             + 'raised while the kernel is still registering plugins, before bootstrap and therefore before '
             + 'any HTTP boundary exists: `ObjectKernel.use()` re-wraps it into a fresh `Error` that the host '
             + 'rethrows and the process aborts on, so no door can answer with it and no door can demote it. '

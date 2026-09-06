@@ -425,6 +425,36 @@ export class PluginLoader {
      * mounted routes. A wrong `type` surfaced (if at all) at route mount; it
      * now surfaces here, named, at `kernel.use()`.
      *
+     * ## What this refuses: the EIGHT declared keys, and `null` on any of them
+     *
+     * `PluginSchema` declares nine optional keys; the filter below drops
+     * `version` (see below), so the accept-set narrowing this method
+     * performs covers exactly these eight, each reported as `at '<key>'`:
+     *
+     * - `id` — a non-string, or the empty string (`z.string().min(1)`).
+     * - `type` — outside the closed set `'standard'` + `CORE_PLUGIN_TYPES`.
+     * - `staticPath` — a non-string.
+     * - `slug` — a non-string, or not matching `/^[a-z0-9-_]+$/`.
+     * - `default` — a non-boolean.
+     * - `description` — a non-string.
+     * - `author` — a non-string; an object such as `{ name }` is refused.
+     * - `homepage` — a non-string, or a string that is not a URL.
+     *
+     * All eight are `.optional()`, which admits absence and `undefined` but
+     * never an explicit `null` — so `null` on any of the eight is refused too.
+     *
+     * ⛔ ENUMERATE ALL EIGHT wherever this is restated. The changeset ships to
+     * consumers as `CHANGELOG.md` and is what an upgrading author greps after
+     * the refusal, so a shorter enumeration there does not merely omit keys —
+     * it tells an author refused `at 'author'` that their key is not enforced.
+     * This comment, the changeset and the `PLUGIN_CONTRACT_VIOLATION` row in
+     * `dispatcher-error-vocabulary.ts` are the three places that restate it.
+     *
+     * What this does NOT refuse, which is what bounds the narrowing: UNKNOWN
+     * keys. `PluginSchema` is a plain `z.object` with no `.strict()` — the
+     * strip posture — and the parse output is discarded here, so a plugin
+     * carrying keys the schema never declares still loads, stored verbatim.
+     *
      * ## ⛔ safeParse for VALIDATION ONLY — the parse output is discarded
      *
      * The returned object is a COPY, and {@link toPluginMetadata} exists
@@ -451,10 +481,10 @@ export class PluginLoader {
      *
      * So enforcing the schema's `version` here would not enforce the protocol —
      * it would RETIRE a pinned capability, silently, under a card that ruled on
-     * `type`. The ruling's own changeset note enumerates what this refuses:
-     * an unknown `type`, an invalid `slug`, an invalid `homepage`. Version is
-     * not in it, and the version check that already runs is the wider, correct
-     * one. Reconciling the two spellings belongs in `packages/spec` beside
+     * `type`. Version is not among the eight keys enumerated above, and the
+     * version check that already runs is the wider, correct one: a version-less
+     * plugin loads, and so do `1.0.0-alpha.1` and `1.0.0+20230101`.
+     * Reconciling the two spellings belongs in `packages/spec` beside
      * #16334; until then this exclusion is declared here rather than performed
      * by leaving the disagreement unmeasured.
      */
