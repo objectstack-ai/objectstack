@@ -139,8 +139,11 @@ describe('string-family columns take their declared maxLength (#11431)', () => {
     driver = new SqlDriver(dialectCell('sqlite').config());
     await driver.initObjects([parentObject(), stringObject()]);
     const shapes = await columnShapes(driver as any, T);
-    // A lookup holds the referenced row's ID, not the declared value: a
-    // platform id is 26 characters, so `varchar(20)` could hold none of them.
+    // A lookup holds the referenced row's ID, not the declared value — and
+    // [#15522] that id's width is not this field's to declare. The driver
+    // mints 16 characters when the caller supplies none, and stores a
+    // SUPPLIED id verbatim at whatever width the caller chose, so no
+    // `maxLength` can be known to fit one.
     expect(shapes.a_lookup).toBe('varchar(255)');
     expect(shapes.a_user).toBe('varchar(255)');
     // Runtime-issued; `maxLength` has no write-time counterpart on this type.
