@@ -138,7 +138,20 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // payload would have had read-only fields stripped. Exported so an in-process
 // caller (a cron / server-side plugin) can narrow on the class; the `code` is
 // the boundary-crossing identity.
-export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
+// [#16159] `READONLY_FIELD_REJECTED_CODE` joins it, so that identity is
+// something a consumer can IMPORT rather than re-spell.
+// `content/docs/kernel/contracts/data-engine.mdx` already tells readers, of
+// this very refusal, to "Catch it by `code`, not `instanceof`" — and until
+// now offered nothing to import, so following the published instruction meant
+// authoring the string in the consumer's own package (a
+// `check:error-code-provenance` stamp site there, free to drift from what this
+// engine throws with no compile error to say so). The class stays exported as
+// it already was — this adds the affordance the docs assume, it removes
+// nothing — but `code` is what survives the two-realm split #14936 measured:
+// this package declares BOTH realms in its own `exports`, so a consumer
+// holding the other realm's copy of the class gets `instanceof` === false,
+// silently.
+export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
 // [#14095] Thrown by `engine.insert` when a driver refuses a row as a unique
 // violation. Exported so an application implementing the platform's own
 // "declare a unique index, attempt the insert, swallow the violation" idiom can
