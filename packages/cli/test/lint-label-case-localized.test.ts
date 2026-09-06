@@ -18,8 +18,9 @@
  *     the property that makes a guard the uncontroversial floor, so it is
  *     pinned per carrier rather than asserted in prose. Falsified by any guard
  *     that also swallows strings (a `typeof` typo, an early return placed
- *     above the string branch, a `label != null` guard that changes the
- *     empty-string case): every lowercase row below stops reporting.
+ *     above the string branch, or the guard inverted to
+ *     `typeof label === 'string'`): every lowercase row below stops
+ *     reporting.
  *  2. **NO CRASH** — a localized label is walked without throwing, on every
  *     carrier whose schema accepts the map. Falsified by removing the guard:
  *     each of those rows throws a `TypeError` instead of returning issues.

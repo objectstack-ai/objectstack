@@ -1,5 +1,5 @@
 ---
-"@objectstack/cli": patch
+"@objectstack/cli": minor
 ---
 
 `os lint` no longer crashes on a localized label.
