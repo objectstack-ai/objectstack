@@ -95,8 +95,51 @@ function failureMessage(error: unknown): string {
  * Identified by `code` rather than `instanceof` so it survives crossing package
  * boundaries.
  */
+/**
+ * [#16159] The ADR-0112 `code` {@link DriverConnectError} carries, as a
+ * constant a consumer can import instead of re-spelling.
+ *
+ * The docblock below already says this refusal is "Identified by `code` rather
+ * than `instanceof` so it survives crossing package boundaries" — and until now
+ * offered nothing to import, so the only way to FOLLOW that instruction was to
+ * re-author the wire string in the consumer's own package. That acquires a
+ * `check:error-code-provenance` stamp site there and is then free to drift from
+ * what this engine throws, with no compile error to say so. The guidance and
+ * the surface disagreed; this closes that half of #16159's table.
+ *
+ * ⛔ The string is byte-identical to the literal it replaces. This moves where a
+ * spelling lives, never what it says; renaming the code is a separate breaking
+ * decision and never a rider on this conversion.
+ *
+ * ⚠️ `ERR_DRIVER_CONNECT` IS registered in `ERROR_CODE_LEDGER` under
+ * `@objectstack/objectql`, so this declaration is a `constdef` stamp site
+ * `check:error-code-provenance` DOES see (that gate skips unregistered codes),
+ * and it is listed under this package's own owner key, which is what makes the
+ * gate accept it. Equally, no row moves in
+ * `packages/runtime/src/dispatcher-error-vocabulary.ts`: that table records
+ * UNREGISTERED code sites, so a registered code is invisible to it by
+ * construction. The two gates are exactly inverted — measured on this branch,
+ * not assumed.
+ *
+ * The `_CODE` NAME and the bare `readonly code = DRIVER_CONNECT_CODE;`
+ * spelling are load-bearing rather than cosmetic: the first is the shape
+ * `check:error-code-provenance`'s `constdef` pattern can see, the second is the
+ * shape `check:dispatcher-error-vocabulary` classifies as `classconst` (an
+ * `as const` suffix on the FIELD would take it out of that pattern). ⛔ Never
+ * rename out of either shape to quiet a gate.
+ *
+ * Dropping the `ERR_` prefix from the CONSTANT's name follows this package's
+ * existing precedents (`HOOK_TARGET_REBIND_ERROR_CODE`,
+ * `READONLY_FIELD_REJECTED_CODE`). Re-exported from the `index.ts` barrel and,
+ * like every other `*_CODE` here, NOT from the lean `core.ts` entry — even
+ * though `DriverConnectError` itself IS on `core.ts`. That asymmetry is real,
+ * it is #16260's subject for the whole family, and ⛔ this mechanical sweep does
+ * not decide it.
+ */
+export const DRIVER_CONNECT_CODE = 'ERR_DRIVER_CONNECT' as const;
+
 export class DriverConnectError extends Error {
-  readonly code = 'ERR_DRIVER_CONNECT' as const;
+  readonly code = DRIVER_CONNECT_CODE;
 
   /**
    * The first failure's `Error`, so its stack stays reachable for `DEBUG`
@@ -170,8 +213,34 @@ export interface DatasourceUnavailableInfo {
  * says which of those to read. A host that wants to tell tenants something
  * specific sets `publicReason` on its connect decision.
  */
+/**
+ * [#16159] The ADR-0112 `code` {@link DatasourceUnavailableError} carries, as a
+ * constant a consumer can import instead of re-spelling.
+ *
+ * This row has a live first-party consumer making the card's argument for it:
+ * `packages/rest/src/error-response.ts` matches this refusal by `code` and then
+ * re-authors the same spelling into the response envelope it builds — two
+ * spellings of one refusal, in two packages, with nothing but a grep keeping
+ * them equal.
+ *
+ * ⛔ The string is byte-identical to the literal it replaces — the conversion
+ * moves where a spelling lives, never what it says.
+ *
+ * ⚠️ `ERR_DATASOURCE_UNAVAILABLE` is registered in `ERROR_CODE_LEDGER` under
+ * BOTH `@objectstack/objectql` and the datasource-service owner key (it is one
+ * refusal raised from two sides), so this declaration is a `constdef` stamp
+ * site `check:error-code-provenance` sees and accepts under this package's own
+ * key, while `check:dispatcher-error-vocabulary` stays blind to it by
+ * construction. See the note on {@link DRIVER_CONNECT_CODE} for why those two
+ * gates answer oppositely.
+ *
+ * Naming, field spelling and barrel placement follow {@link DRIVER_CONNECT_CODE}
+ * exactly, including the `core.ts` asymmetry #16260 owns.
+ */
+export const DATASOURCE_UNAVAILABLE_CODE = 'ERR_DATASOURCE_UNAVAILABLE' as const;
+
 export class DatasourceUnavailableError extends Error {
-  readonly code = 'ERR_DATASOURCE_UNAVAILABLE' as const;
+  readonly code = DATASOURCE_UNAVAILABLE_CODE;
 
   constructor(
     public readonly datasource: string,

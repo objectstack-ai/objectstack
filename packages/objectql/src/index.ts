@@ -206,7 +206,22 @@ export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.j
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
-export { DriverConnectError, DatasourceUnavailableError } from './driver-connect-errors.js';
+// [#16159] `DRIVER_CONNECT_CODE` and `DATASOURCE_UNAVAILABLE_CODE` join the two
+// classes they name, for the same reason: both refusals' docblocks say they are
+// "Identified by `code` rather than `instanceof` so it survives crossing package
+// boundaries", and neither offered anything to import.
+// `packages/rest/src/error-response.ts` already matches the datasource refusal
+// by `code` and re-authors the same spelling into the envelope it builds.
+// ⚠️ Both CLASSES are also published from the lean `./core` entry while these
+// constants, like every other `*_CODE` in this package, are batteries-only —
+// #16260 owns that asymmetry for the whole family and ⛔ this sweep does not
+// decide it.
+export {
+  DriverConnectError,
+  DatasourceUnavailableError,
+  DRIVER_CONNECT_CODE,
+  DATASOURCE_UNAVAILABLE_CODE,
+} from './driver-connect-errors.js';
 export type {
   DriverConnectFailure,
   DriverHealth,
