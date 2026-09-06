@@ -47,7 +47,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,35 +58,55 @@ const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
- * The fixture lives under `packages/cli` rather than in `tmpdir` because
- * `bundle-require` resolves the config's own `@objectstack/spec` import from
- * the config file's directory — from outside the workspace there is no
- * `node_modules` to find it in.
+ * Both roots live in the SYSTEM TEMP DIR, and neither is under the repo.
+ *
+ * An earlier revision put the fixture at `packages/cli/test/.tmp-i18n-14894`.
+ * Nothing tracked ignores `.tmp-*` — the repo's rules cover `tmp/` and `*.tmp`
+ * — so `dispatch-gates --self-test` failed its "every in-tree directory this
+ * tree's sources create is covered by a tracked ignore rule, or is tracked
+ * itself" case, naming this file. ⛔ The repair for that is NOT a bespoke
+ * ignore rule for one test: it is not creating the directory in the tree.
+ *
+ * ⚠️ Which is why the config below imports NOTHING. `bundle-require` writes its
+ * bundled module NEXT TO the config and Node then resolves the config's bare
+ * specifiers from THAT directory, so a `defineStack` import out here fails —
+ * measured: `Cannot find package '@objectstack/spec' imported from
+ * /tmp/…/stack.config.bundled_….mjs`. A plain object default export is what
+ * `os i18n extract` actually consumes (it calls `normalizeStackInput` on
+ * whatever the config exports), and the readings are identical either way.
+ *
+ * ⚠️ The cost, stated rather than hidden: `defineStack` used to validate this
+ * fixture at load, and a plain object is not validated the same way. Measured
+ * on the same tree — dropping `type` from the field is REFUSED under
+ * `defineStack` ("Invalid field type ''") and accepted silently without it. The
+ * assertions below are the remaining guard, and they are exact leaf counts, so
+ * a fixture that stopped describing this stack moves them; but a malformed
+ * fixture that happens to keep the counts would now pass. Worth knowing before
+ * anyone grows this fixture.
  */
-const FIXTURE_DIR = join(HERE, '.tmp-i18n-14894');
-const CONFIG = join(FIXTURE_DIR, 'stack.config.ts');
+let fixtureRoot: string;
+let CONFIG: string;
 
 const CONFIG_SOURCE = [
-  "import { defineStack } from '@objectstack/spec';",
-  '',
-  'export default defineStack({',
+  'export default {',
   "  i18n: { defaultLocale: 'zh-CN', supportedLocales: ['zh-CN'] },",
   "  objects: [{ name: 'kpi_metric', label: 'Metric', fields: { name: { type: 'text', label: 'Name' } } }],",
   "  apps: [{ name: 'kpi', label: 'KPI Console' }],",
-  '});',
+  '};',
   '',
 ].join('\n');
 
 let outRoot: string;
 
 beforeAll(() => {
-  mkdirSync(FIXTURE_DIR, { recursive: true });
+  fixtureRoot = mkdtempSync(join(tmpdir(), 'os-i18n-14894-fixture-'));
+  CONFIG = join(fixtureRoot, 'stack.config.ts');
   writeFileSync(CONFIG, CONFIG_SOURCE, 'utf8');
   outRoot = mkdtempSync(join(tmpdir(), 'os-i18n-14894-'));
 });
 
 afterAll(() => {
-  rmSync(FIXTURE_DIR, { recursive: true, force: true });
+  rmSync(fixtureRoot, { recursive: true, force: true });
   rmSync(outRoot, { recursive: true, force: true });
 });
 
