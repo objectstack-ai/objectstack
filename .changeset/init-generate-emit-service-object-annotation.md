@@ -1,5 +1,5 @@
 ---
-"@objectstack/cli": minor
+"@objectstack/cli": patch
 ---
 
 `os init -t app`, `os init -t plugin` and `os g object` now emit an object file that compiles. All three wrote `const … : Data.Object`, and `@objectstack/spec/data` exports no member named `Object`, so the first command a new user runs produced a project that failed its own `pnpm typecheck`.
@@ -13,7 +13,11 @@ tsc exit 2
 
 Identical at TypeScript 5.3.3, 5.8.3 and 6.0.3, so it was never a compiler-version effect. `os create example` type-checked clean on the same tarball in the same run — the failure was specific to these emissions.
 
-The annotation is now `Data.ServiceObject`, which is `z.input<typeof ObjectSchemaBase>` — the authoring shape of an object, and the exact structural analogue of the annotations the sibling generators already emit (`UI.View`, `UI.Action`, `UI.Dashboard`, `Automation.Flow` are each the `z.input` of their own schema). **Nothing was added to `@objectstack/spec`**: `ServiceObject` has always been exported from `@objectstack/spec/data`, and the hand-written docs already annotate authored objects with it (`concepts/metadata-driven.mdx`, `getting-started/quick-reference.mdx`). The scaffolders had simply drifted off the spelling the rest of the repo uses.
+The annotation is now `Data.ServiceObject`. That name was not chosen here — it is what [ADR-0122](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0122-schema-type-alias-naming-convention.md) D1 already ruled: for a schema `XSchema`, the **bare** alias denotes the author state (`z.input<typeof XSchema>`), and it is "the name documentation, examples, skills and AI authoring surfaces use for the thing an author writes". An emitted scaffold is the thing an author writes, so the bare alias is the one it owes. The sibling generators were already on that convention — `UI.View`, `UI.Action`, `UI.Dashboard` and `Automation.Flow` are each the bare alias of their own schema — and only the object emitters had drifted off it.
+
+**Nothing was added to `@objectstack/spec`**: `ServiceObject` has been exported from `@objectstack/spec/data` throughout.
+
+The parsed-state alias is not an alternative here. Annotating the same emitted literal `Data.ServiceObjectParsed` fails all three cases with `error TS2740`, because every field literal is then missing the keys the schema supplies by default — which is exactly the author-state/parsed-state distinction ADR-0122 D2 draws.
 
 `content/docs/deployment/cli.mdx` taught the broken spelling too, and is corrected with them — a reader copying from the docs wrote the same uncompilable line.
 
