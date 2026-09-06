@@ -1658,6 +1658,13 @@ function check(root, registry) {
           // #12570 reading over the registry) and nowhere in the text the author reads; the #15978
           // round paid a full cycle for that gap, which is what #16000 records.
           //
+          // Re-measured for this card rather than taken from the filing, on the same pair and
+          // through the same program: `@objectstack/runtime` -> `@objectstack/service-realtime`
+          // via `tsconfig.test.json`, with this message's own remedy applied to
+          // `packages/runtime/tsconfig.json`. That program goes from 191 errors to 204 — +13,
+          // ALL of them TS6059 naming `packages/services/service-realtime/src/**`, and not one
+          // new code error. Every other diagnostic code's count is unchanged.
+          //
           // ⚠️ Written as a CONDITION and never as a blanket closure. `paths` remains the correct
           // remedy wherever the consuming program's `rootDir` DOES contain the dependency's source,
           // and a message overstating the closure would turn an author away from a route that is
