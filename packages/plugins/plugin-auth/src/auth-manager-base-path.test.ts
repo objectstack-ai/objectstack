@@ -130,3 +130,50 @@ describe('#16025 what better-auth is actually configured with', () => {
     expect(manager.getBasePath()).toBe('/api/v1/auth');
   });
 });
+
+/**
+ * The MIRROR direction of the same split, pinned where it breaks.
+ *
+ * The three real-instance cases above guard ONE side: an edit that normalises
+ * the string handed to better-auth turns them red. Nothing guarded the other
+ * side. Point `betterAuthEndpointPath` at `configuredBasePath()` instead of
+ * `getBasePath()` — the mistake in the same shape, one method along — and
+ * every pin in this package stays green while `ownsRoute` stops recognising
+ * better-auth's own routes on every configured spelling that is not ALREADY
+ * normalised.
+ *
+ * ⚠️ That is #15928's class returning, not a cosmetic drift. `ownsRoute`
+ * answering `false` is what lets the auth catch-all YIELD better-auth's own
+ * 404s (`auth-catchall-yield.test.ts`), so a downstream wildcard answers
+ * `200 {}` where a real refusal stood — under a trailing-slash or
+ * no-leading-slash deployment only, which is exactly why no existing pin and no
+ * default composition could see it.
+ *
+ * ⭐ The two cases below discriminate BECAUSE the configured spelling is not
+ * the normalised one; the control that follows them does not, and is here to
+ * say so. `${getBasePath()}/get-session` is the URL an adapter that mounts on
+ * `getBasePath()` actually produces, so these ask the shipped question.
+ */
+describe('#16025 the ownership walk follows getBasePath(), not the configured spelling', () => {
+  const withSecret = (basePath: string) =>
+    new AuthManager({ basePath, secret: 'x'.repeat(40) } as unknown as AuthManagerOptions);
+
+  /** `ownsRoute` for a route better-auth really routes, addressed at the mount. */
+  const ownsGetSession = (configured: string) => {
+    const manager = withSecret(configured);
+    const url = `http://localhost:3000${manager.getBasePath()}/get-session`;
+    return manager.ownsRoute(new Request(url, { method: 'GET' }));
+  };
+
+  it('⭐ owns …/get-session when a TRAILING SLASH is configured', async () => {
+    await expect(ownsGetSession('/api/v1/auth/')).resolves.toBe(true);
+  });
+
+  it('⭐ owns …/get-session when the LEADING SLASH is missing', async () => {
+    await expect(ownsGetSession('api/v1/auth')).resolves.toBe(true);
+  });
+
+  it('control — the already-normalised spelling, which the mirror mutation cannot move', async () => {
+    await expect(ownsGetSession('/api/v1/auth')).resolves.toBe(true);
+  });
+});
