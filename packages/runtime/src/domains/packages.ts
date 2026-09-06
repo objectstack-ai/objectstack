@@ -61,6 +61,15 @@ import { clientFacingFailureText, seedRequestValidationError } from '@objectstac
 // [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide this
 // the same way rather than through a second copy. Behaviour unchanged.
 import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
+// [#15591] The DECLARED removal of our OWN read-time annotations, imported
+// from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
+// re-spelled here. `applyPublishedSeeds` below re-parses a SERVED document, and
+// `spec/kernel/metadata-read-decorations.ts` states the rule this door was
+// missing: "a served body is NOT a valid input to the schema that produced it
+// until these are removed". Same helper, same reason, as the three consumers
+// that already call it — the dataset query in `rest-server.ts`, the cold-boot
+// flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -1533,7 +1542,34 @@ _context: HttpProtocolContext,
             ? item
             : (item?.item ?? item?.metadata ?? item?.body);
         if (seed?.object && Array.isArray(seed?.records)) {
-            datasets.push(seed);
+            // [#15591] Strip the READ-TIME decorations before the closed parse
+            // below. `getMetaItem` exits through `decorateMetadataItem`, which
+            // stamps `_diagnostics` on every body whose type has a registered
+            // schema — `seed` has one — so the document this door reads back is
+            // the platform's own output and `SeedSchema` (closed since #4001)
+            // refused it by name: `unrecognized_keys: ["_diagnostics"]`, minted
+            // as a 422 by the `safeParse` below, delivered on a **200** as
+            // `seedApplied.error`. Zero rows loaded, and the author told their
+            // seed body failed spec validation when nothing about it is wrong.
+            //
+            // ⛔ NOT a blanket `startsWith('_')` strip, and deliberately not the
+            // one `assemblePackageManifest` runs 300 lines up: the two paths
+            // have opposite obligations, and the spec states both.
+            // `METADATA_READ_DECORATIONS` is `['_diagnostics', '_draft']` and
+            // its module says the ADR-0010 envelope (`_packageId`,
+            // `_provenance`, …) is "deliberately NOT" a member — "the closed
+            // metadata schemas allowlist them precisely so a served document
+            // keeps its provenance on re-parse". `SeedSchema` is one of those:
+            // it spreads `MetadataProtectionFields` on purpose. Measured on the
+            // real producer, the served body carries BOTH keys and the schema
+            // refuses exactly one — `_packageId` alone parses clean. So the
+            // export path's blanket strip would drop provenance this schema
+            // accepts, which is why the DECLARED list is the one to use here.
+            //
+            // ⛔ And NOT a widened schema: nothing about the request contract
+            // changes. This removes an annotation the READ path added, which is
+            // the only reason the round trip was not already closed.
+            datasets.push(stripReadDecorations(seed));
         } else {
             readErrors.push(`seed "${name}" body unreadable (keys: ${item ? Object.keys(item).join(',') : 'none'})`);
         }

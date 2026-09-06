@@ -1839,6 +1839,22 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
 // ─── Serialization ─────────────────────────────────────────────────────
 
 /**
+ * One locale's translations MINUS the registry-driven `metadataForms`
+ * baseline — everything the stack itself authors (#14894).
+ *
+ * The baseline is not part of any stack's authored surface: it is derived from
+ * the platform's metadata-form registry, is identical for every stack, and has
+ * its own module (`<locale>.metadata-forms.generated.ts`) under its own flag
+ * (`--metadata-forms`). Folding it into the module beside them gave it a SECOND
+ * home, and the two homes then disagreed about who governed it — see
+ * {@link renderTranslationModule}.
+ */
+export function stackAuthoredSubtree(data: TranslationData): Omit<TranslationData, 'metadataForms'> {
+  const { metadataForms: _registryBaseline, ...authored } = data;
+  return authored;
+}
+
+/**
  * Render a TranslationData skeleton as a TypeScript module body.
  *
  * The module exports a single named const (`<exportName>`) typed against
@@ -1846,9 +1862,46 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
  *
  *   kind: 'objects'        → `NonNullable<TranslationData['objects']>`
  *   kind: 'metadataForms'  → `NonNullable<TranslationData['metadataForms']>`
- *   kind: 'full'           → `TranslationData`
+ *   kind: 'stack'          → `Omit<TranslationData, 'metadataForms'>`
  *
- * `objectsOnly: true` (default) is a legacy alias for `kind: 'objects'`.
+ * ⚠️ The three are NOT three disjoint cells, and calling them a partition was
+ * imprecise enough to correct: `'objects'` is a SUB-SELECTION of `'stack'`, not
+ * a sibling of it. The invariant that actually holds — and the one this
+ * function exists to keep — is about a PAIR: whichever of `'objects'` /
+ * `'stack'` a run picks for the module it writes, that module and the
+ * `'metadataForms'` companion beside it are disjoint, and under `'stack'` the
+ * two together are the whole of what the extractor built. Measured on the
+ * fixture below: 3 + 773 = 776, which is the extractor's own count for that
+ * run — none dropped, none duplicated.
+ *
+ * `'stack'` was called `'full'` and rendered the whole `TranslationData`, which
+ * broke exactly that pairing — `metadataForms` landed in the stack module AND
+ * in its own companion.
+ *
+ * That is the #14894 defect, and it had two user-visible halves. Both were
+ * driven on a `defaultLocale: 'zh-CN'` stack (one object, one app) before this
+ * function changed:
+ *
+ *   • `--no-metadata-forms` stopped suppressing the baseline the moment
+ *     `--no-objects-only` was passed. The flag gated only the companion, while
+ *     `'full'` inlined the same keys next door: `zh-CN.objects.generated.ts`
+ *     came out holding 773 metadata-form leaves under an explicit
+ *     `--no-metadata-forms`, against 2 object leaves and 1 app leaf. Those 773
+ *     were ENGLISH — the default locale is filled from the source labels, and
+ *     the registry authors them in English — so a non-English default locale
+ *     shipped the platform's English Studio baseline inside its own bundle.
+ *   • With `--metadata-forms` left ON, the same run emitted those 773 keys
+ *     TWICE, once in each module.
+ *
+ * `--objects-only` and `--metadata-forms` are documented as independent, and
+ * they are: the first picks the stack module's sub-tree (`objects` alone, or
+ * everything the stack authors), the second decides whether the baseline is
+ * emitted at all. Neither has to win over the other, and this change invents no
+ * precedence between them — the overlap was in the emitter, never in the two
+ * meanings.
+ *
+ * `objectsOnly: true` (default) is a legacy alias for `kind: 'objects'`, and
+ * `objectsOnly: false` for `kind: 'stack'`.
  */
 export function renderTranslationModule(
   data: TranslationData,
@@ -1858,17 +1911,17 @@ export function renderTranslationModule(
     /** Legacy: when true, emit only the `objects` sub-tree (typed accordingly). */
     objectsOnly?: boolean;
     /** Explicit sub-tree selector. Overrides `objectsOnly` when provided. */
-    kind?: 'objects' | 'metadataForms' | 'full';
+    kind?: 'objects' | 'metadataForms' | 'stack';
     /** Header comment lines. */
     header?: string[];
   },
 ): string {
-  const kind: 'objects' | 'metadataForms' | 'full' =
-    options.kind ?? (options.objectsOnly === false ? 'full' : 'objects');
+  const kind: 'objects' | 'metadataForms' | 'stack' =
+    options.kind ?? (options.objectsOnly === false ? 'stack' : 'objects');
   const defaultExport =
     kind === 'metadataForms'
       ? `${camelize(options.locale)}MetadataForms`
-      : kind === 'full'
+      : kind === 'stack'
       ? `${camelize(options.locale)}Translations`
       : `${camelize(options.locale)}Objects`;
   const exportName = options.exportName ?? defaultExport;
@@ -1877,13 +1930,13 @@ export function renderTranslationModule(
       ? (data.metadataForms ?? {})
       : kind === 'objects'
       ? (data.objects ?? {})
-      : data;
+      : stackAuthoredSubtree(data);
   const typeSig =
     kind === 'metadataForms'
       ? "NonNullable<TranslationData['metadataForms']>"
       : kind === 'objects'
       ? "NonNullable<TranslationData['objects']>"
-      : 'TranslationData';
+      : "Omit<TranslationData, 'metadataForms'>";
   const header = options.header ?? [
     `Auto-generated by 'os i18n extract' for locale '${options.locale}'.`,
     'Edit translations in place; re-run extract (with --merge) to fill new gaps.',

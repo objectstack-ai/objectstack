@@ -21,6 +21,7 @@ import {
   extractTranslations,
   renderTranslationModule,
   renderSourceHashModule,
+  stackAuthoredSubtree,
   parseSourceHashModule,
   narrowToCommittedSections,
   type FillStrategy,
@@ -87,13 +88,14 @@ export default class I18nExtract extends Command {
       default: false,
     }),
     'objects-only': Flags.boolean({
-      description: 'Emit only the objects/globalActions subtree (default). Disable to include apps/dashboards.',
+      description:
+        'Emit only the objects/globalActions subtree (default). Disable to include apps/dashboards. Never carries the Studio metadata-form baseline either way — that is --metadata-forms, which writes it to its own file.',
       default: true,
       allowNo: true,
     }),
     'metadata-forms': Flags.boolean({
       description:
-        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin.',
+        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin. This is the only control over it: no other flag emits or suppresses that baseline.',
       default: true,
       allowNo: true,
     }),
@@ -197,6 +199,16 @@ export default class I18nExtract extends Command {
       // only its own objects passes `--no-metadata-forms`; without it, `--check`
       // demands a baseline copy the package deliberately does not commit and
       // fails on a tree that is in fact in sync.
+      //
+      // ⚠️ That orthogonality was a claim this file made and did not keep
+      // (#14894). It held only while `--objects-only` was in effect: under
+      // `--no-objects-only` the renderer's `kind: 'full'` folded the baseline
+      // into the objects module, so `--no-metadata-forms` suppressed a copy
+      // that was still being written next door — and with the flag left on,
+      // both copies were written. This predicate is now the ONLY thing that
+      // decides whether the baseline is emitted, because the stack module no
+      // longer carries it (`stackAuthoredSubtree`). Nothing here picks a winner
+      // between the two flags; there is no longer anything for them to contest.
       const emitsMetadataForms = (locale: string): boolean =>
         flags['metadata-forms'] && (metadataFormsCounts[locale] ?? 0) > 0;
 
@@ -251,9 +263,42 @@ export default class I18nExtract extends Command {
           totalExpected: result.totalExpected,
           counts: result.counts,
           metadataFormsCounts,
-          bundles: objectsOnly
-            ? Object.fromEntries(localesEmitted.map((l) => [l, result.bundles[l].objects ?? {}]))
-            : result.bundles,
+          // `--json` is documented as "output JSON instead of writing files",
+          // so this payload mirrors the FILE SET: `bundles` is the stack
+          // module, `metadataForms` below is the companion (#14894).
+          bundles: Object.fromEntries(
+            localesEmitted.map((l) => [
+              l,
+              objectsOnly ? (result.bundles[l].objects ?? {}) : stackAuthoredSubtree(result.bundles[l]),
+            ]),
+          ),
+          // The baseline's JSON home, gated by {@link emitsMetadataForms} —
+          // the SAME predicate that decides the companion file, deliberately
+          // not a second one.
+          //
+          // ⚠️ Two predicates is what the review of this card's first commit
+          // caught, and the reading is worth keeping: that commit stopped the
+          // `kind: 'full'` fold on this face too, and left the baseline with no
+          // JSON home at all. Driven on a one-object, one-app stack with
+          // `defaultLocale: 'zh-CN'`, `--json --no-objects-only` with the flag
+          // ON and with `--no-metadata-forms` produced payloads that were equal
+          // in every field but `duration` — 3 leaves in `bundles`, no baseline
+          // in either, and `metadataFormsCounts` reporting 773 in both. So on
+          // this face the flag decided NOTHING, in the opposite direction from
+          // the defect the card reported (where it was the fold that ignored
+          // it). A flag that is ignored is a flag that is ignored, whichever
+          // way the output falls.
+          //
+          // Keyed by locale and PRESENT ONLY for the locales whose companion is
+          // written, so the key set here and the `*.metadata-forms.generated.ts`
+          // set are the same set by construction. The map itself is always
+          // emitted — an empty map says "no baseline in this run", which is a
+          // reading; a missing key would be indistinguishable from an older CLI.
+          metadataForms: Object.fromEntries(
+            localesEmitted
+              .filter((l) => emitsMetadataForms(l))
+              .map((l) => [l, result.bundles[l].metadataForms ?? {}]),
+          ),
           duration: timer.elapsed(),
         });
         return;
