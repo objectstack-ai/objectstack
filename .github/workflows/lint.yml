@@ -2325,6 +2325,30 @@ jobs:
       # PR. The checklist is a QA ledger, not a code gate; keeping it out of the
       # per-PR path means an unrelated PR is never blocked by checklist drift.
       # Run it by hand: `pnpm check:platform-checklist`. See that dir's README.
+      # Its red does have a reporting channel now, and it is NOT this file:
+      # `.github/workflows/platform-checklist-watchdog.yml` runs the gate on `main`
+      # daily and files or refreshes one issue when it is red.
+
+      # ⛔ …and the step below is NOT that wiring. `check:platform-checklist` still
+      # never runs on a pull request. What runs here is the STATIC PIN over the
+      # watchdog workflow: it asserts the file exists, fires on `schedule:` +
+      # `workflow_dispatch:`, carries NO `pull_request:` / `pull_request_target:` /
+      # `merge_group:` trigger, and invokes the gate through its package script
+      # rather than an inlined copy of its command. Two file reads, no socket.
+      #
+      # It has to live HERE rather than inside the watchdog. The watchdog runs on no
+      # pull request by construction — that absence is the very thing being pinned —
+      # so it cannot judge the PR that edits it, and a PR DELETING it would silence
+      # any check that lived inside it. This job is the only place where the absence
+      # of that file is observable before it merges.
+      #
+      # Invoked as `node scripts/…` rather than a `pnpm check:*` alias: see the GATE
+      # INVOCATION IDIOM note at the top of this file. The `--self-test` leg runs
+      # first because a checker whose own cases failed has no verdict worth printing.
+      - name: Platform-checklist watchdog workflow pin
+        run: |
+          node scripts/check-platform-checklist-watchdog.mjs --self-test
+          node scripts/check-platform-checklist-watchdog.mjs
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
