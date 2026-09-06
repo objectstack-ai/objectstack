@@ -562,7 +562,7 @@ export default defineStack({
 `,
       'src/objects/__name___item.object.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item: Data.Object = {
+const ${toCamelCase(namespace)}Item: Data.ServiceObject = {
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   fields: {
@@ -650,7 +650,7 @@ export default defineStack({
 `,
       'src/objects/__name___item.object.ts': (_name, namespace) => `import * as Data from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item: Data.Object = {
+const ${toCamelCase(namespace)}Item: Data.ServiceObject = {
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   fields: {

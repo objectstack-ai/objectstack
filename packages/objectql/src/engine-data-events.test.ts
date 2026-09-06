@@ -445,6 +445,25 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
     },
   };
 
+  /**
+   * [#15688] Genuinely NOT tenant-scoped — and the declared opt-out is the ONLY
+   * way for a fixture to be that. `registerObject` INJECTS the kernel
+   * `organization_id` column (`TENANT_SCOPE_FIELD_DEF`, gated on the injection
+   * plan's `tenant` flag) into every object that does not opt out, so an object
+   * is never unscoped by simply omitting the field from its `fields` map. The
+   * first edition of the pin below was written on `task` in the belief that it
+   * was, and passed for a different reason than it stated.
+   */
+  const unscoped = {
+    name: 'audit_note',
+    label: 'Audit note',
+    tenancy: { enabled: false },
+    fields: {
+      id: { name: 'id', type: 'text' as const, primaryKey: true },
+      body: { name: 'body', type: 'text' as const },
+    },
+  };
+
   // A SYSTEM context: `isSystem` is what lets a caller file a row under an
   // organization that is not its own active one (the tenant write wall, #2946,
   // rejects a foreign `organization_id` for everyone else). `tenantId` is the
@@ -460,6 +479,13 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
   const payloadOf = (i = 0) => published[i].payload as Record<string, unknown>;
   const hasOrgKey = (i = 0) =>
     Object.prototype.hasOwnProperty.call(payloadOf(i), 'organizationId');
+  /**
+   * [#15688] The columns the REGISTRY holds after the injection pass — never
+   * the ones the fixture above authored. This is the difference the pins below
+   * assert rather than assume.
+   */
+  const registeredColumns = (name: string) =>
+    Object.keys((engine.registry.getObject(name) as { fields?: Record<string, unknown> } | undefined)?.fields ?? {});
 
   beforeEach(async () => {
     published = [];
@@ -474,6 +500,7 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
     await engine.init();
     engine.registry.registerObject(invoice);
     engine.registry.registerObject(task);
+    engine.registry.registerObject(unscoped);
     engine.setRealtimeService(realtime);
     vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   });
@@ -564,14 +591,25 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
     expect(event.organizationId).not.toBe(CALLER_ORG);
   });
 
-  it('an object that is not tenant-scoped OMITS the key on all three actions', async () => {
-    // `task` declares no `organization_id`, so `resolveTenantFieldName` finds
-    // no column and nothing is published — rather than the caller's org being
-    // used as a stand-in, which is what makes this pin more than a tautology:
-    // the caller carries `tenantId: CALLER_ORG` on every one of these writes.
-    const record = await engine.insert('task', { title: 'no wall' }, { context: sysCtx } as any);
-    await engine.update('task', { id: record.id, title: 'edited' }, { context: sysCtx } as any);
-    await engine.delete('task', { where: { id: record.id }, context: sysCtx } as any);
+  it('an object that is not tenant-scoped has the column WITHHELD, and OMITS the key on all three actions', async () => {
+    // [#15688] The premise is MEASURED before it is used, because prose that
+    // merely claims it is how this pin went wrong once: `audit_note` declares
+    // `tenancy: { enabled: false }`, so the injection pass withholds the kernel
+    // column and `resolveTenantFieldName` resolves nothing at all. `task` is
+    // the CONTROL for that assertion — registered without the opt-out, it has
+    // `organization_id` INJECTED, so it cannot serve as an unscoped fixture.
+    // These two lines turn "not tenant-scoped" from an assumption into a
+    // reading, and a future edit that moves the injection reddens them here
+    // rather than leaving a stale sentence behind.
+    expect(registeredColumns('audit_note')).not.toContain('organization_id');
+    expect(registeredColumns('task')).toContain('organization_id');
+
+    // What makes the omission more than a tautology: the caller carries
+    // `tenantId: CALLER_ORG` on every one of these writes, so an implementation
+    // reaching for the caller's org as a stand-in fails here.
+    const record = await engine.insert('audit_note', { body: 'no wall' }, { context: sysCtx } as any);
+    await engine.update('audit_note', { id: record.id, body: 'edited' }, { context: sysCtx } as any);
+    await engine.delete('audit_note', { where: { id: record.id }, context: sysCtx } as any);
 
     expect(published.map((e) => e.type)).toEqual([
       'data.record.created', 'data.record.updated', 'data.record.deleted',
@@ -584,10 +622,35 @@ describe('#14970 — a published DataEvent names the RECORD\'s organization', ()
     }
   });
 
+  it('an INJECTION-scoped object whose rows carry no organization OMITS the key on all three actions', async () => {
+    // [#15688] The population the pin above used to be written on, kept and
+    // described as what it actually is. `task`'s fixture names no
+    // `organization_id`, but `registerObject` injects one, so
+    // `resolveTenantFieldName` answers `organization_id` here: the key is
+    // omitted because the ROW carries no organization, NEVER because the
+    // object has no column. Same caller-org discrimination as above.
+    expect(registeredColumns('task')).toContain('organization_id');
+
+    const record = await engine.insert('task', { title: 'no wall' }, { context: sysCtx } as any);
+    await engine.update('task', { id: record.id, title: 'edited' }, { context: sysCtx } as any);
+    await engine.delete('task', { where: { id: record.id }, context: sysCtx } as any);
+
+    expect(published.map((e) => e.type)).toEqual([
+      'data.record.created', 'data.record.updated', 'data.record.deleted',
+    ]);
+    for (let i = 0; i < 3; i += 1) {
+      expect(hasOrgKey(i)).toBe(false);
+      expect(DataEventSchema.parse(published[i].payload).organizationId).toBeUndefined();
+    }
+  });
+
   it('a tenant-scoped object whose ROW carries no organization OMITS the key', async () => {
-    // Distinct from the case above: the column EXISTS, it is simply empty —
-    // "not behind any organization wall" for this row. The caller still has an
-    // active organization, and it still must not be substituted.
+    // [#15688] Distinct from the case above in PROVENANCE and in the row: there
+    // the kernel column is INJECTED and the row never mentions it; here the
+    // object AUTHORS `organization_id` and the row sets it explicitly to
+    // `null`. Both are "not behind any organization wall" for this row, and in
+    // both the caller still has an active organization that must not be
+    // substituted.
     const record = await engine.insert(
       'invoice',
       { amount: '7', organization_id: null },

@@ -67,6 +67,41 @@ describe('RestServer metadata routes — anonymous-deny gate (#3963)', () => {
         expect(protocol.getMetaItems).toHaveBeenCalled();
     });
 
+    // [#15542 / #15854] The per-item family's later members register through
+    // `registerPerItemRoute` rather than by a direct `this.routeManager.register(`
+    // call. That helper reads `this.routeManager` at CALL time, so it registers
+    // through the same `guardedRouteManager` swap the direct sites do — but that
+    // is a source argument, and the gate is worth a MEASUREMENT. Without this
+    // case the whole helper-routed half of the surface (`PUT`, `DELETE`,
+    // `/history`, `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) had
+    // no test proving it is still anonymously denied, and a future refactor that
+    // captured `this.routeManager` at definition time would register all eight
+    // past the gate with every existing test still green.
+    //
+    // It is also what licenses `authz-probe-blind-spot.census.ts` counting those
+    // 8 as REACHABLE by `meta:rest-server.ts:registerMetadataEndpoints`.
+    it('401s an anonymous helper-routed per-item route — the gate travels with `registerPerItemRoute` (#15542)', async () => {
+        const protocol: any = { historyMetaItem: vi.fn().mockResolvedValue({ events: [] }) };
+        const rest = new RestServer(makeServer() as any, protocol, {} as any);
+        rest.registerRoutes();
+        const route = rest
+            .getRoutes()
+            .find((r) => r.method === 'GET' && /\/meta\/:type\/:name\/history$/.test(r.path));
+        if (!route) throw new Error('GET /meta/:type/:name/history route not registered');
+
+        const { res, state } = makeRes();
+        await (route.handler as (req: any, res: any) => Promise<void>)(
+            { method: 'GET', params: { type: 'object', name: 'sys_metadata' }, query: {}, headers: {} },
+            res,
+        );
+
+        expect(state.status).toBe(401);
+        expect(state.body?.error).toBe('UNAUTHENTICATED');
+        // Short-circuited BEFORE the history read — the per-org event log did
+        // not leak, which is the same property the direct sites are pinned for.
+        expect(protocol.historyMetaItem).not.toHaveBeenCalled();
+    });
+
     it('still 401s an anonymous /meta/object — the opt-out is retired (#3963)', async () => {
         // `api.requireAuth: false` used to serve object schemas anonymously. The
         // opt-out is gone: object metadata is never public. (Only the book/doc

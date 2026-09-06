@@ -215,7 +215,7 @@ import YAML from 'yaml';
 
 import { fencedBlocks } from './check-react-page-adapter-contract.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { maskCommentsAndLiterals, scanSource } from './js-comment-mask.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -444,14 +444,17 @@ export function docsFiles(root) {
 /**
  * The two projections of one scan. Both share byte offsets with `body`.
  *
+ * `codeOnly` is `js-comment-mask.mjs`'s own `maskCommentsAndLiterals` (#15776),
+ * not a composition re-derived here; the raw `comment`/`literal` flags are what
+ * this gate still needs `scanSource` for (a rule below reads `literal[i] === 0`
+ * directly), and they address `body` at the same offsets the mask does.
+ *
  * @param {string} body
  * @returns {{ codeOnly: string, comment: Uint8Array, literal: Uint8Array }}
  */
 export function project(body) {
   const { comment, literal } = scanSource(body);
-  const both = new Uint8Array(body.length);
-  for (let i = 0; i < body.length; i++) both[i] = comment[i] || literal[i] ? 1 : 0;
-  return { codeOnly: blank(body, both), comment, literal };
+  return { codeOnly: maskCommentsAndLiterals(body), comment, literal };
 }
 
 /**

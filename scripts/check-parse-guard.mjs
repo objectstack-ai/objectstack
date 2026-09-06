@@ -122,7 +122,12 @@ import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, scanSource } from './js-comment-mask.mjs';
+// This gate's `codeOnly` IS the tree's one comments+literals projection, not a
+// local re-derivation of it (#15776): `js-comment-mask.mjs` owns the projections
+// and its `--self-test` pins this one. The name stays because this gate's prose,
+// its self-test rows and its findings all read `codeOnly`.
+import { maskCommentsAndLiterals as codeOnly } from './js-comment-mask.mjs';
+export { codeOnly };
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -380,14 +385,6 @@ function walkOutside(dir, out = []) {
     else if (OUTSIDE_EXT.test(name) && !name.endsWith('.d.ts')) out.push(p);
   }
   return out;
-}
-
-/** Code only: comments, strings, templates and regex literals all blanked. */
-export function codeOnly(source) {
-  const { comment, literal } = scanSource(source);
-  const both = new Uint8Array(comment.length);
-  for (let i = 0; i < both.length; i++) both[i] = comment[i] || literal[i];
-  return blank(source, both);
 }
 
 function lineOf(source, index) {

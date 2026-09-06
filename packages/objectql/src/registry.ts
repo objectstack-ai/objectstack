@@ -1262,6 +1262,56 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
 }
 
 /**
+ * [#16159] The ADR-0112 `code` strings this file's three install-time and
+ * registration refusals carry, as constants a consumer can import.
+ *
+ * Every one of the three classes below already tells the reader, in its own
+ * docblock, that it "carries the ADR-0112 envelope (`code` + `status`)". That
+ * convention is sound and `instanceof` is not: `@objectstack/objectql`
+ * declares BOTH realms in its own `exports` (`import` reaches
+ * `dist/index.mjs`, `require` reaches `dist/index.js`), so a consumer holding
+ * the other realm's copy of a class gets `instanceof` === false — measured,
+ * and silent (#14936). A `code` compare is the check that survives crossing
+ * that boundary. Until now a consumer following the convention had to
+ * RE-SPELL the string itself, which acquires a `check:error-code-provenance`
+ * stamp site in the consumer's own package and can then drift from what this
+ * engine throws with no compile error to say so.
+ *
+ * ⛔ The strings are byte-identical to the literals they replace. This moves
+ * where a spelling lives, never what it says; renaming any of these codes is
+ * a separate breaking decision and never a rider on this conversion.
+ *
+ * The `*_CODE` NAME is load-bearing rather than cosmetic, in two gates at
+ * once: it is the shape `check:error-code-provenance`'s `constdef` pattern
+ * can see, and `readonly code = X_CODE;` is the shape
+ * `check:dispatcher-error-vocabulary` classifies as `classconst` (the three
+ * rows in `packages/runtime/src/dispatcher-error-vocabulary.ts` move from
+ * `classfield` to `classconst` with this change, and the scanner resolves the
+ * constant back to the same value). ⛔ Never rename out of that shape to
+ * quiet a gate: a spelling a gate cannot see is the failure mode the gate
+ * exists to catch, not a clean result.
+ *
+ * Shape and placement follow the six `*_CODE` constants already in this
+ * package (`DUPLICATE_RECORD_CODE`, `HOOK_TARGET_REBIND_ERROR_CODE`,
+ * `HOOK_UNSCOPED_DATA_ACCESS_CODE`,
+ * `MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE`, `EMPTY_CREDENTIAL_REFUSAL_CODE`,
+ * `SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE`) — re-exported from the
+ * `index.ts` barrel and, like all six, deliberately NOT from the lean
+ * `core.ts` entry, which carries none of them.
+ *
+ * ⛔ Deliberately NOT a recognizer factory: #16156 measured that a
+ * `makeRecognizer(code)` signature still requires every call site to supply
+ * the code, which RELOCATES the literal rather than removing it.
+ */
+export const NAMESPACE_CONFLICT_CODE = 'NAMESPACE_CONFLICT' as const;
+
+/** {@link ArtifactObjectNameConflictError}'s code — ADR-0130 D3, one artifact. */
+export const DUPLICATE_ARTIFACT_OBJECT_NAME_CODE = 'DUPLICATE_ARTIFACT_OBJECT_NAME' as const;
+
+/** {@link ObjectOwnershipConflictError}'s code — ADR-0029 D3, single owner per name. */
+export const OBJECT_OWNERSHIP_CONFLICT_CODE = 'OBJECT_OWNERSHIP_CONFLICT' as const;
+
+/**
  * Raised when a package is installed whose `manifest.namespace` is already owned
  * by a **different** installed package in this installation (ADR-0048 Phase 1).
  *
@@ -1289,8 +1339,10 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
  * already correct and specific.
  */
 export class NamespaceConflictError extends Error {
-  readonly code = 'NAMESPACE_CONFLICT';
+  readonly code = NAMESPACE_CONFLICT_CODE;
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The namespace both packages claim. */
   readonly namespace: string;
   /** The installed package that already owns the namespace. */
@@ -1401,8 +1453,10 @@ function declaredOwnedObjectNames(manifest: ObjectStackManifest): string[] {
  * repository's rejection tests assert against, never a bare throw.
  */
 export class ArtifactObjectNameConflictError extends Error {
-  readonly code = 'DUPLICATE_ARTIFACT_OBJECT_NAME';
+  readonly code = DUPLICATE_ARTIFACT_OBJECT_NAME_CODE;
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The object name both packages claim. */
   readonly objectName: string;
   /** The co-owning package that already owns the name. */
@@ -1460,8 +1514,10 @@ export class ArtifactObjectNameConflictError extends Error {
  * nothing is refused there.
  */
 export class ObjectOwnershipConflictError extends Error {
-  readonly code = 'OBJECT_OWNERSHIP_CONFLICT';
+  readonly code = OBJECT_OWNERSHIP_CONFLICT_CODE;
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The fully-qualified object name both packages claim. */
   readonly objectName: string;
   /** The package that already owns the name. */

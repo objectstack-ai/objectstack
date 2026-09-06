@@ -185,7 +185,8 @@
  * suite stays green, and the comment claiming the built entry stays plausible.
  *
  * `@oclif/core@4.13.3` skips its TypeScript path lookup only when `isProd()`,
- * which `lib/util/util.js:66` defines as a NEGATED membership test -- a leading
+ * which its `lib/util/util.js` (line 66 as pinned -- a dependency file, outside
+ * this tree) defines as a NEGATED membership test -- a leading
  * logical-NOT over `['development', 'test'].includes(process.env.NODE_ENV ?? '')`.
  * Measured directly against `Config.load()` on `packages/cli`, with
  * `packages/cli/dist` present, reading back the root plugin's `commandsDir`:
@@ -1056,7 +1057,8 @@ const BUILT_ENTRYPOINT = 'bin/run.js';
  * The `NODE_ENV` values that send `@oclif/core`'s command lookup to `src/`.
  *
  * `@oclif/core@4.13.3` skips its TypeScript path lookup only when `isProd()`,
- * which `lib/util/util.js:66` defines as a NEGATED membership test:
+ * which its `lib/util/util.js` (line 66 as pinned -- a dependency file, outside
+ * this tree) defines as a NEGATED membership test:
  * `!['development', 'test'].includes(process.env.NODE_ENV ?? '')`. So these two
  * values -- and only these two -- turn the reroute ON. `production` and unset
  * both leave it off, which is why the rule below refuses a SET of values rather

@@ -97,10 +97,79 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
+
+// ───────────────────────────────────────────────────────────────────────────
+// The mask every scan below reads -- IMPORTED, not re-derived (#15776)
+// ───────────────────────────────────────────────────────────────────────────
+//
+// `maskCommentsAndLiterals` is the tree's one comments+literals projection and
+// `js-comment-mask.mjs` owns it; this gate used to spell a private `maskLiterals`
+// that composed the same shared scanner by hand. What follows is the fact that
+// belongs to THIS gate -- why a bracket counter here may read nothing else, and
+// what the conversion onto the shared scanner measured when it happened.
+//
+// Blank out everything a bracket counter must not read: comment bodies, string
+// and template contents, and regex literals. Returns a string of the SAME LENGTH
+// as the input, so every index still addresses the original source — callers
+// count structure on the mask and slice text from the original.
+//
+// Length-preserving masking rather than a `strip`: the first draft of this gate
+// stripped comments and counted brackets over the rest, and one unbalanced paren
+// inside PROSE — `.describe('Screen Flows (ADR-0019)')` — closed the
+// `ObjectStackDefinitionSchema` literal 14 collections early. The gate then
+// reconciled all seven sites against a truncated source of truth and reported
+// 114 deviations, every one of them its own. A parser that fails toward "less
+// schema" makes every consumer look wrong, which is the loudest possible way to
+// be useless.
+//
+// String DELIMITERS survive (their contents do not), so a quoted object key and
+// an array of string literals are both still locatable by index.
+//
+// ## CONVERTED onto the shared scanner (#13143)
+//
+// This body used to be a private left-to-right scanner written out here, and it
+// was the one piece of comment-scanning code in this directory that no gate
+// could see. `check-comment-mask-adoption.mjs` watches for exactly this shape
+// and walks `packages` + `examples` only; `check-parse-guard.mjs` walks this
+// directory for a different subject (the three TypeScript parser entry points).
+// A private stripper here sits inside one gate's population and outside its
+// subject, and inside the other's subject and outside its population, so
+// nothing reds. Routing through the shared module is the half of that gap a
+// caller can close on its own.
+//
+// A conversion is a MEASUREMENT rather than a mechanical edit, so here is the
+// reading. The private scanner against `scanSource()`'s `comment | literal`
+// projection, over THE POPULATION THIS GATE ACTUALLY READS (the seven SITE
+// files plus `stack.zod.ts`, 1,028,984 chars): 3 of the 8 files disagree, 49
+// spans, 247 characters. Two classes, and only one of them is a defect.
+//
+//   - 18 spans are a PROJECTION difference and nothing else: the private copy
+//     blanked a regex literal's slash delimiters, the shared scanner keeps them
+//     as code. No bracket is a slash, so no caller here could ever see it.
+//   - 31 spans are the private scanner mis-reading a NESTED TEMPLATE. It closed
+//     an outer template at the first backtick inside a `${...}`, which flipped
+//     the parity of every backtick after it and handed the bracket counter 20
+//     bracket characters out of the interiors of string and template literals.
+//     Both files it happens in are live SITE files: `packages/objectql/src/
+//     engine.ts` and `packages/metadata/src/plugin.ts`. That is the same family
+//     as the `(ADR-0019)` incident above, arriving through a different door.
+//
+// Both directions of that defect are pinned in `--self-test` on synthetic
+// bodies, because today's tree happens to punish neither: a nested template
+// holding a `]` makes `stringArrayItems` DROP a real key, and one holding a
+// quote makes it FABRICATE `${v}` as an enumerated key. The gate's verdict does
+// NOT move on this tree -- `--list` is byte for byte identical before and after
+// -- which is a fact about where this tree's nested templates sit, not a reason
+// the private copy was safe.
+//
+// The instrument was shown able to fail before its empty results were read as
+// agreement: the naive two-regex pair diffed against the shared scanner over
+// the same eight files disagrees on 8 of 8, and the shared scanner diffed
+// against itself returns nothing.
 
 // ───────────────────────────────────────────────────────────────────────────
 // Extraction -- pure, over source text
@@ -124,7 +193,7 @@ const repoRoot = resolve(here, '..');
 export function sliceBody(source, anchor, from = 0) {
   const at = source.indexOf(anchor, from);
   if (at === -1) return null;
-  const mask = maskLiterals(source);
+  const mask = maskCommentsAndLiterals(source);
   const openAt = at + anchor.length - 1;
   const open = source[openAt];
   const close = open === '{' ? '}' : ']';
@@ -141,78 +210,11 @@ export function sliceBody(source, anchor, from = 0) {
 }
 
 /**
- * Blank out everything a bracket counter must not read: comment bodies, string
- * and template contents, and regex literals. Returns a string of the SAME LENGTH
- * as the input, so every index still addresses the original source — callers
- * count structure on the mask and slice text from the original.
- *
- * Length-preserving masking rather than a `strip`: the first draft of this gate
- * stripped comments and counted brackets over the rest, and one unbalanced paren
- * inside PROSE — `.describe('Screen Flows (ADR-0019)')` — closed the
- * `ObjectStackDefinitionSchema` literal 14 collections early. The gate then
- * reconciled all seven sites against a truncated source of truth and reported
- * 114 deviations, every one of them its own. A parser that fails toward "less
- * schema" makes every consumer look wrong, which is the loudest possible way to
- * be useless.
- *
- * String DELIMITERS survive (their contents do not), so a quoted object key and
- * an array of string literals are both still locatable by index.
- *
- * ## CONVERTED onto the shared scanner (#13143)
- *
- * This body used to be a private left-to-right scanner written out here, and it
- * was the one piece of comment-scanning code in this directory that no gate
- * could see. `check-comment-mask-adoption.mjs` watches for exactly this shape
- * and walks `packages` + `examples` only; `check-parse-guard.mjs` walks this
- * directory for a different subject (the three TypeScript parser entry points).
- * A private stripper here sits inside one gate's population and outside its
- * subject, and inside the other's subject and outside its population, so
- * nothing reds. Routing through the shared module is the half of that gap a
- * caller can close on its own.
- *
- * A conversion is a MEASUREMENT rather than a mechanical edit, so here is the
- * reading. The private scanner against `scanSource()`'s `comment | literal`
- * projection, over THE POPULATION THIS GATE ACTUALLY READS (the seven SITE
- * files plus `stack.zod.ts`, 1,028,984 chars): 3 of the 8 files disagree, 49
- * spans, 247 characters. Two classes, and only one of them is a defect.
- *
- *   - 18 spans are a PROJECTION difference and nothing else: the private copy
- *     blanked a regex literal's slash delimiters, the shared scanner keeps them
- *     as code. No bracket is a slash, so no caller here could ever see it.
- *   - 31 spans are the private scanner mis-reading a NESTED TEMPLATE. It closed
- *     an outer template at the first backtick inside a `${...}`, which flipped
- *     the parity of every backtick after it and handed the bracket counter 20
- *     bracket characters out of the interiors of string and template literals.
- *     Both files it happens in are live SITE files: `packages/objectql/src/
- *     engine.ts` and `packages/metadata/src/plugin.ts`. That is the same family
- *     as the `(ADR-0019)` incident above, arriving through a different door.
- *
- * Both directions of that defect are pinned in `--self-test` on synthetic
- * bodies, because today's tree happens to punish neither: a nested template
- * holding a `]` makes `stringArrayItems` DROP a real key, and one holding a
- * quote makes it FABRICATE `${v}` as an enumerated key. The gate's verdict does
- * NOT move on this tree -- `--list` is byte for byte identical before and after
- * -- which is a fact about where this tree's nested templates sit, not a reason
- * the private copy was safe.
- *
- * The instrument was shown able to fail before its empty results were read as
- * agreement: the naive two-regex pair diffed against the shared scanner over
- * the same eight files disagrees on 8 of 8, and the shared scanner diffed
- * against itself returns nothing.
- */
-export function maskLiterals(source) {
-  const { comment, literal } = scanSource(source);
-  const both = new Uint8Array(source.length);
-  for (let i = 0; i < source.length; i++) both[i] = comment[i] | literal[i];
-  return blank(source, both);
-}
-
-/**
  * Top-level keys of an object-literal body, each with its value's source text.
  * Depth-aware: a nested literal never contributes its own keys.
  */
 export function objectEntries(body) {
-  const mask = maskLiterals(body);
+  const mask = maskCommentsAndLiterals(body);
   const out = [];
   let depth = 0;
   let i = 0;
@@ -255,7 +257,7 @@ export function objectEntries(body) {
 
 /** String literals at depth 0 of an array-literal body. */
 export function stringArrayItems(body) {
-  const mask = maskLiterals(body);
+  const mask = maskCommentsAndLiterals(body);
   const out = [];
   let depth = 0;
   for (let i = 0; i < body.length; i++) {
@@ -287,7 +289,7 @@ export function stringArrayItems(body) {
  * answer at all, not to rescue the gate from a silent pass it never had.
  */
 export function tupleFirstItems(body) {
-  const mask = maskLiterals(body);
+  const mask = maskCommentsAndLiterals(body);
   const out = [];
   let depth = 0;
   let taken = false;

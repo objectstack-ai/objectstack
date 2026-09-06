@@ -2275,7 +2275,22 @@ const ObjectSchemaBase = strictObject(
         'external access is that key, one level up.',
     },
   }, {
-    /** Master switch. When false (default), no share links can be issued for this object. */
+    /**
+     * Master switch — a STANDING policy held at every redemption, not a
+     * mint-time check (#14033; the same shape as the `eligibility` predicate
+     * below, #13608).
+     *
+     * When false (default), no share links can be issued for this object AND
+     * no share link on it resolves: `resolveToken` re-reads this switch on
+     * every redemption, so links minted while it was on stop serving the
+     * moment it is turned off — links minted through the system-context /
+     * `permissive` mint bypass included (redemption is an anonymous act; how
+     * the row got there buys it nothing). Not a revocation: no row moves, and
+     * re-enabling the block serves them again. Off ⇒ nothing inside this block
+     * is evaluated; on ⇒ the sibling keys apply at redemption. The refusal is
+     * the undifferentiated `null` documented on `IShareLinkService.resolveToken`
+     * (`contracts/share-link-service.ts`).
+     */
     enabled: z.boolean().default(false).describe('Allow records of this object to be published via share link'),
     /**
      * Audiences the platform will accept when issuing a link.

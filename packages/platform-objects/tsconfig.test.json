@@ -1,0 +1,95 @@
+// The TEST-layer type-check program (#12511), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
+// stays exactly as it is: it is the BUILD config, and its `**/*.test.ts`
+// exclusion has a reason — ci.yml gates that no test file reaches the published
+// artifact. This sibling puts the excluded layer back in front of tsc, and
+// `package.json`'s `typecheck` script NAMES it (via `check:test-typecheck
+// --project`), as a THIRD leg beside the existing `tsconfig.scripts.json` one,
+// because a config no script invokes is exactly the phantom this mechanism is
+// about.
+//
+// ⚠️ THIS PACKAGE IS THE CARD'S OWN LIVE EXEMPLAR, and its two-config shape is
+// the reason: `typecheck` already ran TWO programs (`tsconfig.json` and
+// `tsconfig.scripts.json`), and a reader who checked only whether a sibling
+// `tsconfig.*.json` existed would have scored the package repaired. It was not.
+// Measured at 6a1e38244 with the workspace closure built first, both named
+// programs put **0** of this package's 35 `src/**/*.test.ts` files in the
+// program — `tsconfig.json` 419 files / 91 own `src` / 0 tests,
+// `tsconfig.scripts.json` 371 / 72 / 0 (its `include` is `scripts/**/*`).
+// Positive controls in the SAME run, same binary, same worktree:
+// `packages/rest`'s test program 186 test files, `packages/metadata-core`'s 15,
+// `packages/drivers/driver-memory`'s build config 44 — without them every zero
+// above is unfalsifiable. Under this file the count is **35 of 35** (579 files
+// in the program).
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS. This package is NOT `"type": "module"`, so the
+//     inherited NodeNext compiles as CommonJS what vitest executes as ESM.
+//     Matching vitest is fidelity, not laxity. ⚠️ Measured subtraction on
+//     today's tree: **zero** — unlike `packages/formula`, no test file here
+//     reaches for `import.meta` or writes an extension-less relative import, so
+//     the mismatch costs nothing TODAY. It is declared anyway because the
+//     alternative is that the first test file to use either gets a config-tier
+//     diagnostic ledgered as if it were a defect, which is the exact confusion
+//     this mechanism's header spends its length on. ⚠️ `bundler` resolution also
+//     stops requiring `.js` on this package's own `src` relative imports in this
+//     program; nothing is lost, because leg 1 still compiles `src` under
+//     NodeNext and is where that rule is enforced.
+//   - `lib: ["ES2022"]`: the root config's `lib` is ES2020 while vitest runs on
+//     a Node with ES2022 builtins, so the gap reports as TS2550 about the CHECK.
+//     Measured effect today: **zero**. Fidelity, not error reduction.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `types: ["node"]` and `rootDir` are inherited and none is re-declared.
+//     `rootDir` (`./src`) needs no widening even though
+//     `src/pages/canonical-expression-envelopes.test.ts` imports
+//     `../../../../scripts/js-comment-mask.mjs`: that path lands on a checked-in
+//     `js-comment-mask.d.mts`, so it resolves as a declaration file and the raw
+//     program carries no TS6059. Measured, not reasoned. ⚠️ A child declaring
+//     its own `paths` would REPLACE the parent map rather than merge into it, so
+//     this file declares none.
+//
+// MEASURED at 6a1e38244 with the dependency closure built (an error count taken
+// against an unbuilt closure is not a reading): this layer reports **3 errors
+// across 1 file** (`src/feature-gate-guard.test.ts` — TS2339 x2, TS7006 x1),
+// which is the same 3 `scripts/check-type-check-coverage.mjs` recorded in its
+// per-PACKAGE `TEST_DEBT` ledger, class for class and file for file. That entry
+// GRADUATES in this change rather than being paid down.
+//
+// ⭐ THE READING THAT PUT THIS PACKAGE ON THE CARD is not in the 3. PR #15874
+// hit a real TS2339 on `Intl.supportedValuesOf` here and had to build a scratch
+// tsconfig to see it, because the effective `lib` was `lib.es2020.d.ts` and no
+// program this package's `typecheck` invoked read the file at all. Both halves
+// of that are closed above: the tests are in a program, and the program's `lib`
+// is the one vitest actually provides.
+//
+// Every one of the 3 is PRE-EXISTING: this change edits no test file, and each
+// would have been reported on `origin/main` had this program always existed.
+// They are ledgered per file and per signature in `test-typecheck-debt.json`
+// beside this config, EXACT and shrink-only — a file that gains an error is red,
+// one that loses one is red until re-recorded, one that reaches zero is red
+// until its entry is deleted, a signature that ARRIVES or VANISHES is red even
+// at an unchanged file total, and a file NOT listed there may have no errors at
+// all. ⛔ The 3 are NOT repaired here. 34 of the 35 files carry no entry, so any
+// error any of them gains is red on arrival — that is the half of this gate that
+// starts working today. This layer holds ZERO `@ts-expect-error` directives
+// (grepped with a positive control — the same grep hits `packages/spec/src`).
+//
+// ⚠️ ONE DISAGREEMENT THIS FILE DOES NOT CLOSE, declared so it is not read as an
+// oversight: `vitest.config.ts` aliases `@objectstack/lint` to that package's
+// SOURCE, while this program resolves its TYPES through `dist/`. `paths` is
+// measured to be the wrong repair for an ONBOARDING program (PR #12570 billed
+// other packages' source diagnostics into the onboarding package's ledger), so
+// the exposure is declared in `scripts/check-type-source-resolution.mjs`'s
+// shrink-only registry instead. That file's #12511 doc-block has the numbers.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

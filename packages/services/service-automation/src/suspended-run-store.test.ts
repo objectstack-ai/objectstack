@@ -844,14 +844,20 @@ describe('#14333 ObjectStoreSuspendedRunStore.claimSuspension — the production
         expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step', correlation: 'areq_1' }))
             .toBe('claimed');
 
-        expect(seen).toHaveLength(1);
+        // [#15832] TWO calls now, and the first one is not a claim: the
+        // capability probe runs once per store instance BEFORE anything is
+        // consumed. `suspended-run-claim-probe.test.ts` owns what it is and
+        // what it may cost; here it is only skipped past so this case keeps
+        // asserting the same thing it always did about the CLAIM.
+        expect(seen).toHaveLength(2);
+        const claim = seen[1];
         // The condition really is carried: id AND the parking, not id alone.
-        expect(seen[0].where).toEqual({ id: 'run_abc', node_id: 'approve_step', correlation: 'areq_1' });
+        expect(claim.where).toEqual({ id: 'run_abc', node_id: 'approve_step', correlation: 'areq_1' });
         // THE decision, taken by the producer's predicate over the very options
         // bag the store built. `by-id` would bind only the primary key and
         // silently discard the condition; `reject` is what a missing `multi`
         // produces, and it THROWS in a running server.
-        expect(assertEngineDeleteDispatch(seen[0])).toEqual({ kind: 'multi' });
+        expect(assertEngineDeleteDispatch(claim)).toEqual({ kind: 'multi' });
         // …and it actually removed the row.
         expect(engine.rows.has('run_abc')).toBe(false);
     });
@@ -867,8 +873,9 @@ describe('#14333 ObjectStoreSuspendedRunStore.claimSuspension — the production
         await parkRun(store, { correlation: undefined });
 
         expect(await store.claimSuspension('run_abc', { nodeId: 'approve_step' })).toBe('claimed');
-        expect(seen[0].where).toEqual({ id: 'run_abc', node_id: 'approve_step' });
-        expect(assertEngineDeleteDispatch(seen[0])).toEqual({ kind: 'multi' });
+        // [#15832] `seen[0]` is the one-time capability probe; the claim is next.
+        expect(seen[1].where).toEqual({ id: 'run_abc', node_id: 'approve_step' });
+        expect(assertEngineDeleteDispatch(seen[1])).toEqual({ kind: 'multi' });
     });
 
     it('maps the affected-row COUNT to the outcome: 1 is claimed, 0 is lost', async () => {

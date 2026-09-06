@@ -23,21 +23,13 @@ import {
   renderSourceHashModule,
   parseSourceHashModule,
   narrowToCommittedSections,
+  translationModulePayload,
+  countTranslationLeaves,
   type FillStrategy,
+  type TranslationModuleKind,
 } from '../../utils/i18n-extract.js';
 
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
-
-/** Count string-leaf entries under a nested object — used for reporting. */
-function countLeaves(obj: unknown): number {
-  if (!obj || typeof obj !== 'object') return 0;
-  let n = 0;
-  for (const v of Object.values(obj as Record<string, unknown>)) {
-    if (typeof v === 'string') n += 1;
-    else if (v && typeof v === 'object') n += countLeaves(v);
-  }
-  return n;
-}
 
 /**
  * `os i18n extract` — scaffold translation skeletons.
@@ -87,13 +79,14 @@ export default class I18nExtract extends Command {
       default: false,
     }),
     'objects-only': Flags.boolean({
-      description: 'Emit only the objects/globalActions subtree (default). Disable to include apps/dashboards.',
+      description:
+        'Emit only the objects/globalActions subtree (default). Disable to include apps/dashboards. Never carries the Studio metadata-form baseline either way — that is --metadata-forms, which writes it to its own file.',
       default: true,
       allowNo: true,
     }),
     'metadata-forms': Flags.boolean({
       description:
-        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin.',
+        'Also write <locale>.metadata-forms.generated.ts for the Studio metadata-form baseline (default). Pass --no-metadata-forms in a package that owns only its own objects — that baseline belongs to one package, not every plugin. This is the only control over it: no other flag emits or suppresses that baseline.',
       default: true,
       allowNo: true,
     }),
@@ -182,11 +175,34 @@ export default class I18nExtract extends Command {
       const localesEmitted = Object.keys(result.bundles);
       const objectsOnly = flags['objects-only'];
 
-      // Count metadataForms keys per locale (computed separately so we
-      // can show users an honest summary even when --objects-only).
+      /**
+       * The sub-tree the stack module holds, and the selector that picks it.
+       *
+       * ⭐ Every key count this command reports — the summary line, each
+       * `Wrote … (N keys)` line, the `--json` payload — is a leaf count of one
+       * of these payloads, taken with the same selector the module is RENDERED
+       * from. It is never `result.counts`: that is the whole skeleton the
+       * extractor built for the locale, sections this run does not write
+       * included, which under the default `--objects-only` is the ~773-key
+       * metadata-form baseline plus every non-`objects` group the stack
+       * authors. Reporting it beside a 2-leaf file is #16121.
+       *
+       * A third emission mode later (`--apps-only`, say) adds a `kind` and is
+       * counted correctly without a number here moving, because no number here
+       * is arithmetic over another one. ⛔ In particular nothing subtracts the
+       * baseline at a print site: that repairs today's two modes and leaves the
+       * next one wrong in the same way.
+       */
+      const stackKind: TranslationModuleKind = objectsOnly ? 'objects' : 'stack';
+      const stackPayload = (locale: string) => translationModulePayload(result.bundles[locale], stackKind);
+
+      // Counted for every locale, emitted or not, so the operator can still see
+      // how big the baseline is when their flags suppress it.
       const metadataFormsCounts: Record<string, number> = {};
       for (const locale of localesEmitted) {
-        metadataFormsCounts[locale] = countLeaves(result.bundles[locale]?.metadataForms);
+        metadataFormsCounts[locale] = countTranslationLeaves(
+          translationModulePayload(result.bundles[locale], 'metadataForms'),
+        );
       }
       const anyMetadataForms = Object.values(metadataFormsCounts).some((n) => n > 0);
       // Whether the companion `<locale>.metadata-forms.generated.ts` file is
@@ -197,8 +213,77 @@ export default class I18nExtract extends Command {
       // only its own objects passes `--no-metadata-forms`; without it, `--check`
       // demands a baseline copy the package deliberately does not commit and
       // fails on a tree that is in fact in sync.
+      //
+      // ⚠️ That orthogonality was a claim this file made and did not keep
+      // (#14894). It held only while `--objects-only` was in effect: under
+      // `--no-objects-only` the renderer's `kind: 'full'` folded the baseline
+      // into the objects module, so `--no-metadata-forms` suppressed a copy
+      // that was still being written next door — and with the flag left on,
+      // both copies were written. This predicate is now the ONLY thing that
+      // decides whether the baseline is emitted, because the stack module no
+      // longer carries it (`stackAuthoredSubtree`). Nothing here picks a winner
+      // between the two flags; there is no longer anything for them to contest.
       const emitsMetadataForms = (locale: string): boolean =>
         flags['metadata-forms'] && (metadataFormsCounts[locale] ?? 0) > 0;
+
+      /** One module this run's flags CONSIDER for one locale. */
+      interface CandidateModule {
+        /** Written to `<locale>.<suffix>` when {@link CandidateModule.emitted}. */
+        suffix: string;
+        /** Sub-tree selector — picks the payload AND the rendered module's type. */
+        kind: TranslationModuleKind;
+        /** How this module is named in a `--dry-run` heading and in the summary. */
+        label: string;
+        /** Leaves this module holds. The ONE number reported for it, anywhere. */
+        keys: number;
+        /** Whether this run writes it. A candidate a flag SUPPRESSED is still
+         *  reported — how big the thing they switched off is, is a reading the
+         *  operator needs, and 8 of this repo's 9 extract configs are on that
+         *  path (`--no-metadata-forms`). */
+        emitted: boolean;
+      }
+
+      /**
+       * Every module one locale's run considers, in file order — the single
+       * list the summary, `--dry-run`, `--check` and the write loop all read,
+       * so no two of them can disagree about what this run produces. The last
+       * three take the `emitted` ones; the summary reports all of them and adds
+       * up only the `emitted` ones.
+       *
+       * A module with no leaves is not a candidate at all. The write gate used
+       * to be `result.counts[locale] > 0`, which is a property of the SKELETON:
+       * on a stack whose only surface is apps, the default `--objects-only`
+       * wrote an `<locale>.objects.generated.ts` holding `{}` and announced it
+       * as 774 keys. Measured on this repair's fixture at `f5aec38a6af`.
+       */
+      const candidatesFor = (locale: string): CandidateModule[] => {
+        const mods: CandidateModule[] = [];
+        const stackKeys = countTranslationLeaves(stackPayload(locale));
+        if (stackKeys > 0) {
+          mods.push({
+            suffix: 'objects.generated.ts',
+            kind: stackKind,
+            label: 'objects',
+            keys: stackKeys,
+            emitted: true,
+          });
+        }
+        if ((metadataFormsCounts[locale] ?? 0) > 0) {
+          mods.push({
+            suffix: 'metadata-forms.generated.ts',
+            kind: 'metadataForms',
+            label: 'metadataForms',
+            keys: metadataFormsCounts[locale] ?? 0,
+            emitted: emitsMetadataForms(locale),
+          });
+        }
+        return mods;
+      };
+      const candidates: Record<string, CandidateModule[]> = {};
+      for (const locale of localesEmitted) candidates[locale] = candidatesFor(locale);
+      /** The candidates this run actually writes — what every file face iterates. */
+      const emittedModules = (locale: string): CandidateModule[] =>
+        candidates[locale].filter((m) => m.emitted);
 
       /**
        * The provenance table for one locale, narrowed to the sections this run
@@ -229,9 +314,8 @@ export default class I18nExtract extends Command {
        * coupling ADR-0029 D8 and each package's `bundle-ownership.test.ts` exist
        * to keep out of its committed bundles.
        *
-       * So the section list is decided by the SAME predicates that decide the
-       * bundle files, never by a second rule: `result.counts` for `objects` and
-       * {@link emitsMetadataForms} for `metadataForms`. A set that commits both —
+       * So the section list is decided by the SAME list that decides the
+       * bundle files — {@link emittedModules} — never by a second rule. A set that commits both —
        * `platform-objects` is the one today — keeps every record it had. The
        * narrowing itself is `narrowToCommittedSections`, a pure function in the
        * extractor's utils so it can be pinned without driving oclif; this layer
@@ -241,19 +325,67 @@ export default class I18nExtract extends Command {
         const table = result.sourceHashes[locale];
         if (!table) return undefined;
         const committed: string[] = [];
-        if ((result.counts[locale] ?? 0) > 0) committed.push('objects');
-        if (emitsMetadataForms(locale)) committed.push('metadataForms');
+        if (emittedModules(locale).some((m) => m.kind !== 'metadataForms')) committed.push('objects');
+        if (emittedModules(locale).some((m) => m.kind === 'metadataForms')) committed.push('metadataForms');
         return narrowToCommittedSections(table, committed);
       };
 
       if (flags.json) {
         await emitJson({
           totalExpected: result.totalExpected,
-          counts: result.counts,
+          // Leaves of the `bundles` payload below, locale by locale, so this
+          // count describes the tree printed beside it.
+          //
+          // It used to forward `result.counts`, the extractor's per-locale
+          // SKELETON size, while `bundles` carried only the sub-tree this run
+          // emits: on a one-object stack under the default `--objects-only`
+          // that was 776 against a 2-leaf `bundles` payload (#16121). The
+          // skeleton total is still here — it is `totalExpected`.
+          //
+          // ⚠️ This is NOT the relationship `metadataFormsCounts` has to
+          // `metadataForms`, and an earlier revision of this comment claimed it
+          // was. `metadataFormsCounts` reports the baseline's size whether or
+          // not the baseline is emitted — under `--no-metadata-forms` the
+          // payload carries `metadataFormsCounts: { 'zh-CN': 773 }` beside
+          // `metadataForms: {}`, deliberately, and a sibling pin holds it there
+          // so an operator can still see how big the thing they switched off
+          // is. So this payload carries TWO count semantics: `counts` is what
+          // was emitted, `metadataFormsCounts` is what was built. Whether it
+          // SHOULD is a question for the maintainer; this change neither
+          // settles it nor moves either face.
+          counts: Object.fromEntries(localesEmitted.map((l) => [l, countTranslationLeaves(stackPayload(l))])),
           metadataFormsCounts,
-          bundles: objectsOnly
-            ? Object.fromEntries(localesEmitted.map((l) => [l, result.bundles[l].objects ?? {}]))
-            : result.bundles,
+          // `--json` is documented as "output JSON instead of writing files",
+          // so this payload mirrors the FILE SET: `bundles` is the stack
+          // module, `metadataForms` below is the companion (#14894).
+          bundles: Object.fromEntries(localesEmitted.map((l) => [l, stackPayload(l)])),
+          // The baseline's JSON home, gated by {@link emitsMetadataForms} —
+          // the SAME predicate that decides the companion file, deliberately
+          // not a second one.
+          //
+          // ⚠️ Two predicates is what the review of this card's first commit
+          // caught, and the reading is worth keeping: that commit stopped the
+          // `kind: 'full'` fold on this face too, and left the baseline with no
+          // JSON home at all. Driven on a one-object, one-app stack with
+          // `defaultLocale: 'zh-CN'`, `--json --no-objects-only` with the flag
+          // ON and with `--no-metadata-forms` produced payloads that were equal
+          // in every field but `duration` — 3 leaves in `bundles`, no baseline
+          // in either, and `metadataFormsCounts` reporting 773 in both. So on
+          // this face the flag decided NOTHING, in the opposite direction from
+          // the defect the card reported (where it was the fold that ignored
+          // it). A flag that is ignored is a flag that is ignored, whichever
+          // way the output falls.
+          //
+          // Keyed by locale and PRESENT ONLY for the locales whose companion is
+          // written, so the key set here and the `*.metadata-forms.generated.ts`
+          // set are the same set by construction. The map itself is always
+          // emitted — an empty map says "no baseline in this run", which is a
+          // reading; a missing key would be indistinguishable from an older CLI.
+          metadataForms: Object.fromEntries(
+            localesEmitted
+              .filter((l) => emitsMetadataForms(l))
+              .map((l) => [l, result.bundles[l].metadataForms ?? {}]),
+          ),
           duration: timer.elapsed(),
         });
         return;
@@ -263,13 +395,31 @@ export default class I18nExtract extends Command {
       console.log(chalk.bold('  Skeleton summary'));
       const nameWidth = Math.max(8, ...localesEmitted.map((l) => l.length));
       for (const locale of localesEmitted) {
-        const n = result.counts[locale];
-        const tone = n === 0 ? chalk.green : chalk.yellow;
-        const mfN = metadataFormsCounts[locale] ?? 0;
-        const mfTail = mfN > 0 ? chalk.dim(`  + ${mfN} metadataForms key(s)`) : '';
+        const mods = candidates[locale];
+        // The modules are disjoint sub-trees of the skeleton, so this line is a
+        // partition of it: how many of the locale's keys reach a module, out of
+        // how many were built, and which module holds which. The old line added
+        // the baseline to a number that already contained it and read as 1549
+        // of 776 (#16121).
+        //
+        // A candidate a flag SUPPRESSED is named too, with its size and the
+        // words that keep it out of the sum. Dropping it was an information
+        // regression on the commonest path: `--no-metadata-forms` is what 8 of
+        // this repo's 9 extract configs pass, and the old line at least told
+        // those runs how big the baseline they switched off was.
+        const emittedKeys = mods.filter((m) => m.emitted).reduce((n, m) => n + m.keys, 0);
+        const skeleton = result.counts[locale] ?? 0;
+        // Green means there is nothing to translate for this locale, which is a
+        // property of the SKELETON. `0 of 774 emitted` is not that: it is a run
+        // whose flags excluded everything built, and reading green there is the
+        // same conflation this card is about.
+        const tone = skeleton === 0 ? chalk.green : chalk.yellow;
+        const breakdown = mods.length > 1 || mods.some((m) => !m.emitted)
+          ? chalk.dim(`   ${mods.map((m) => `${m.label} ${m.keys}${m.emitted ? '' : ' not emitted'}`).join(' · ')}`)
+          : '';
         console.log(
-          `    ${locale.padEnd(nameWidth)} ${tone(String(n).padStart(5))} key(s)` +
-          chalk.dim(`  (of ${result.totalExpected} expected)`) + mfTail,
+          `    ${locale.padEnd(nameWidth)} ${tone(String(emittedKeys).padStart(5))}` +
+          chalk.dim(` of ${skeleton} key(s) emitted`) + breakdown,
         );
       }
       console.log('');
@@ -280,18 +430,9 @@ export default class I18nExtract extends Command {
 
       if (flags['dry-run'] || !flags.out) {
         for (const locale of localesEmitted) {
-          if (result.counts[locale] === 0 && metadataFormsCounts[locale] === 0) continue;
-          console.log(chalk.dim(`── ${locale} (objects) ──`));
-          console.log(renderTranslationModule(result.bundles[locale], {
-            locale,
-            objectsOnly,
-          }));
-          if (emitsMetadataForms(locale)) {
-            console.log(chalk.dim(`── ${locale} (metadataForms) ──`));
-            console.log(renderTranslationModule(result.bundles[locale], {
-              locale,
-              kind: 'metadataForms',
-            }));
+          for (const mod of emittedModules(locale)) {
+            console.log(chalk.dim(`── ${locale} (${mod.label}) ──`));
+            console.log(renderTranslationModule(result.bundles[locale], { locale, kind: mod.kind }));
           }
         }
         printInfo('Dry run — no files written (pass --out=<dir> to write).');
@@ -306,18 +447,11 @@ export default class I18nExtract extends Command {
       // what a real extract writes.
       const emitted: Array<{ file: string; content: string; keys: number }> = [];
       for (const locale of localesEmitted) {
-        if (result.counts[locale] > 0) {
+        for (const mod of emittedModules(locale)) {
           emitted.push({
-            file: path.join(resolvedOutDir, `${locale}.objects.generated.ts`),
-            content: renderTranslationModule(result.bundles[locale], { locale, objectsOnly }),
-            keys: result.counts[locale],
-          });
-        }
-        if (emitsMetadataForms(locale)) {
-          emitted.push({
-            file: path.join(resolvedOutDir, `${locale}.metadata-forms.generated.ts`),
-            content: renderTranslationModule(result.bundles[locale], { locale, kind: 'metadataForms' }),
-            keys: metadataFormsCounts[locale],
+            file: path.join(resolvedOutDir, `${locale}.${mod.suffix}`),
+            content: renderTranslationModule(result.bundles[locale], { locale, kind: mod.kind }),
+            keys: mod.keys,
           });
         }
         // The provenance companion rides in the SAME list, so `--check` compares

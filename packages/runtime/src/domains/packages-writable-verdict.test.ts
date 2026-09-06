@@ -11,10 +11,16 @@
  * `isWritablePackage` (ADR-0070 D2), and it is a different predicate: it reads
  * `engine.manifests` FIRST — a package booted from an artifact through
  * `registerApp` is read-only whatever its scope says — and only then the
- * `system` / `cloud` scopes. The two rules split on exactly the row ADR-0130
- * introduces: a scope-less `type: module` carried by a multi-package artifact
- * is in `engine.manifests` (read-only) while a scope-less Studio-created base
- * is not (writable). Nothing in the raw row distinguishes them; `engine.manifests`
+ * `system` / `cloud` scopes. The two rules split on the scope-less pair: a
+ * scope-less BOOTED package is in `engine.manifests` (read-only) while a
+ * scope-less Studio-created base is not (writable). ⛔ Neither half of that
+ * pair is a module carried by a multi-package artifact: `defineStack` parses
+ * every `packages[]` entry through `ManifestSchema`, whose `scope` is
+ * `.default('project')`, so no package of a compiled artifact is ever
+ * scope-less. A row is scope-less only where it reached the registry WITHOUT
+ * that parse — a marketplace install / offline file import for the booted
+ * half, `POST /api/v1/packages` for the base. Nothing in the raw row
+ * distinguishes them; `engine.manifests`
  * does, and only the server holds it. So the server says it.
  *
  * ## What is asserted
@@ -36,9 +42,14 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 /** Pin 1 — booted code package, explicit `scope: 'project'` (today's hotcrm shape). */
 const CODE_PROJECT = 'app.acme.crm';
 /**
- * Pin 2 — booted code package with NO scope key: the `type: 'module'` sub-package a
- * multi-package artifact carries (ADR-0130 D4/D5). The raw body is what the
- * load path registers (D7), so the row has no `scope` at all. THE row #14375
+ * Pin 2 — booted code package with NO scope key: a marketplace install / offline
+ * file import, whose RAW body reaches the registry through
+ * `manifestService.register(rawBody)` → `ql.registerApp` with no
+ * `ManifestSchema` parse, so the row has no `scope` at all. ⛔ Not the
+ * sub-package a multi-package artifact carries — `defineStack` parses every
+ * `packages[]` entry through `ManifestSchema`, whose `scope` is
+ * `.default('project')`, so no package of a compiled artifact is ever
+ * scope-less. THE row #14375
  * exists for: the client heuristic said "writable"; the server says read-only.
  */
 const CODE_MODULE = 'app.acme.crm.billing';
@@ -72,8 +83,10 @@ function make() {
     registry.installPackage(manifest(DB_BASE));
     registry.installPackage(manifest(DB_PROJECT, { scope: 'project' }));
 
-    // Only the two code packages booted from an artifact — this is what
-    // `ObjectQL.registerApp` records for every package of a loaded artifact.
+    // Only the two code packages are booted — this is what `ObjectQL.registerApp`
+    // records, both for every package of a loaded artifact (which is CODE_PROJECT,
+    // parsed and therefore `scope: 'project'`) and for a marketplace / offline
+    // import (CODE_MODULE, unparsed and therefore scope-less).
     const manifests = new Map<string, any>([
         [CODE_PROJECT, manifest(CODE_PROJECT, { scope: 'project', type: 'app' })],
         [CODE_MODULE, manifest(CODE_MODULE, { type: 'module' })],
@@ -117,7 +130,7 @@ describe('GET /packages — every row carries the server\'s writable verdict (#1
         expect(byId(rows, CODE_PROJECT).writable).toBe(false);
     });
 
-    it('pin 2: a booted, SCOPE-LESS module (multi-package artifact sub-package) is writable: false', async () => {
+    it('pin 2: a booted, SCOPE-LESS package (marketplace / offline import) is writable: false', async () => {
         const rows = await list(make().dispatcher);
         const row = byId(rows, CODE_MODULE);
         // The raw row really has no scope — the verdict is not coming from it.

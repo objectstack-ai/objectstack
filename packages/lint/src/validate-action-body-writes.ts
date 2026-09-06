@@ -99,6 +99,7 @@ import {
   type BodyWritePatternExclusion,
   type HookBodyWritePattern,
 } from './validate-hook-body-writes.js';
+import { recordsOf } from './object-graph.js';
 
 export type ActionBodyWriteSeverity = 'warning';
 
@@ -199,18 +200,6 @@ type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => isRec(x));
-  if (isRec(v)) {
-    return Object.entries(v).map(([name, def]) => ({
-      name,
-      ...(isRec(def) ? def : {}),
-    }));
-  }
-  return [];
-}
-
 /**
  * One L2 action body found in the stack, with the location to report it at.
  *
@@ -284,7 +273,7 @@ export function collectActionBodies(stack: AnyRec): ActionBodySite[] {
   const seen = new Set<string>();
 
   const collect = (actions: unknown, pathPrefix: string, parentObject?: string): void => {
-    asArray(actions).forEach((action, index) => {
+    recordsOf(actions).forEach((action, index) => {
       // Same default the spec declares, and the same one the runtime gate
       // applies — a stack may reach lint unparsed, so an omitted `type` is
       // `'script'`, not "unknown".
@@ -303,7 +292,7 @@ export function collectActionBodies(stack: AnyRec): ActionBodySite[] {
   };
 
   collect(stack.actions, 'actions');
-  asArray(stack.objects).forEach((obj, objIndex) => {
+  recordsOf(stack.objects).forEach((obj, objIndex) => {
     const parentObject = typeof obj.name === 'string' && obj.name ? obj.name : undefined;
     collect(obj.actions, `objects[${objIndex}].actions`, parentObject);
   });

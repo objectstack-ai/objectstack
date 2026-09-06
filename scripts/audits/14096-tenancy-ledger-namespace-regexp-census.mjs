@@ -94,7 +94,8 @@ const REPO_ROOT = resolve(HERE, '../..');
 // ---------------------------------------------------------------------------
 // §1. Discover every registered platform-namespace object by AST-lite census
 //     of `ObjectSchema.create(` calls — the same method the ledger's own
-//     header (`platform-object-tenancy.ts:32-37`) documents using.
+//     header (`packages/objectql/src/tenancy/platform-object-tenancy.ts`, its
+//     opening comment — lines 32-37 as measured) documents using.
 // ---------------------------------------------------------------------------
 
 /** Blank out `//` and `/* *\/` comments and string contents (chars only,

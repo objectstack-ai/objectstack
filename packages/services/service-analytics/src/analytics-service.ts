@@ -33,6 +33,11 @@ import {
 // docblock for why the edge is acyclic and why it was worth adding.
 import { matchMissingColumnOfRelation } from '@objectstack/types';
 import { CubeRegistry } from './cube-registry.js';
+// [#15768] The measure result-type rule — which aggregates return a value of
+// the aggregated field's own type, and which are numeric whatever they read.
+// Owned in its own module so the enumerated verdict per `AggregationFunction`
+// member has one home rather than being inlined at the enrichment site.
+import { measureResultType } from './measure-result-type.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
 import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
@@ -1105,27 +1110,28 @@ export class AnalyticsService implements IAnalyticsService {
           query: async (q: AnalyticsQuery) => evaluateAnalyticsQueryOverRows(q, compiled.cube, seedRows!),
         } as IAnalyticsService;
         const previewResult = await new DatasetExecutor(previewService).execute(compiled, selection, context);
-        // Label resolution is skipped on purpose: drafted seed rows reference
-        // lookups by NAME (the seed convention), which already reads well.
+        // ADR-0021 result-column enrichment runs on this path too. Every key it
+        // writes describes the dataset's OWN authored columns — a measure's
+        // `label` / `format` / `currency` / `percentScale` / `builtinAggregate`
+        // and the `type` its aggregate really returns, plus a dimension column's
+        // header `label` — all read off the dataset definition and
+        // `sourceFieldMeta`, never off the rows. #16097: this early `return`
+        // used to sit ~250 lines ahead of that block, so the same dataset in the
+        // same widget described its columns differently depending only on
+        // whether a pending seed draft existed — and preview is what an author
+        // is looking at WHILE authoring the dataset, which is when column
+        // metadata matters most.
+        this.enrichResultColumns(previewResult, dataset, selection, context);
+        // ⛔ What stays skipped here, deliberately, is dimension VALUE label
+        // resolution — turning a stored lookup id into the related record's
+        // display name. Drafted seed rows reference lookups by NAME (the seed
+        // convention), so the value already reads well and there is no id to
+        // resolve. That reasoning is about ROW VALUES and only about them; it
+        // never covered the COLUMN descriptors above, which come from the
+        // authored measure and so are neither unnecessary nor unavailable here.
         return previewResult;
       }
     }
-
-    // [#6761] The audience's language for THIS request, and the only locale
-    // either field-label enrichment site below is entitled to use.
-    //
-    // `ExecutionContext.locale` is the BCP-47 tag `resolveExecutionContext`
-    // resolves per request — the caller's `Accept-Language` when it expressed a
-    // preference, else the workspace `localization` setting. It is the same
-    // context field the currency chain a few lines down already reads, so both
-    // display decisions in this response answer to one request identity.
-    //
-    // `undefined` (no context, or an anonymous request that skips localization)
-    // is passed through deliberately rather than defaulted here: the shared
-    // resolver documents nullish as "no locale known" and answers `en`, the
-    // platform's source language. Choosing a different default in this file
-    // would be this service disagreeing with the renderer about the same map.
-    const requestLocale = context?.locale;
 
     // #3602 — every label lookup in this request (sort keys below, display
     // labels further down) reads the REFERENCED object, so bind that object's
@@ -1218,9 +1224,7 @@ export class AnalyticsService implements IAnalyticsService {
 
     // Selected dimensions resolved against the dataset definition — shared by
     // drill metadata, label resolution, and dimension field-label enrichment.
-    const selectedDims = (selection.dimensions ?? [])
-      .map((name) => dataset.dimensions?.find((d) => d.name === name))
-      .filter((d): d is NonNullable<typeof d> => !!d);
+    const selectedDims = this.selectedDimensions(dataset, selection);
 
     // ADR-0021 D2 — drill-through metadata. A host (dashboard/report) drills a
     // clicked bucket back to the underlying records, but it only knows the
@@ -1359,6 +1363,72 @@ export class AnalyticsService implements IAnalyticsService {
       }
     }
 
+    this.enrichResultColumns(result, dataset, selection, context);
+    return result;
+  }
+
+  /**
+   * The dataset dimensions this selection GROUPED THE GRID BY, resolved against
+   * the dataset definition. Shared by drill metadata, row-value label
+   * resolution and — through {@link enrichResultColumns} — the dimension column
+   * headers, so all three answer "which dimensions" the same way.
+   */
+  private selectedDimensions(dataset: Dataset, selection: DatasetSelection) {
+    return (selection.dimensions ?? [])
+      .map((name) => dataset.dimensions?.find((d) => d.name === name))
+      .filter((d): d is NonNullable<typeof d> => !!d);
+  }
+
+  /**
+   * ADR-0021 — describe the result's COLUMNS from the dataset's own authored
+   * definition: a measure's `label` / `format` / `currency` / `percentScale` /
+   * `builtinAggregate` and the `type` its aggregate really returns, then a
+   * dimension column's header `label`.
+   *
+   * **Every key here is read off the DATASET** (the authored measure or
+   * dimension) **and `sourceFieldMeta`** (the source object's declared field
+   * metadata). Not one is read off `result.rows`. That is what makes this one
+   * seam serve both paths that produce a dataset response — the live engine
+   * query and the ADR-0037 P3 draft-data preview — and it is why #16097 was a
+   * defect rather than a deliberate omission: the preview branch returns ~250
+   * lines before this ran, so a response over drafted seed rows carried none of
+   * these keys and a renderer fell back to humanizing the raw measure name and
+   * guessing a percent scale from magnitude — the exact failures #5537,
+   * objectui#3136 and #14492 each closed on the live path.
+   *
+   * Extracted rather than copied onto the second path, for the reason the
+   * `type` correction below already gives for living here at all: this is ONE
+   * rule holding both halves of the question, and a per-path copy would be two
+   * implementations of it, free to drift.
+   *
+   * ⛔ Not here, and deliberately: dimension VALUE label resolution
+   * ({@link resolveDimensionLabels}), which rewrites the grouped value in each
+   * ROW. That reads the rows, it is the one enrichment a seed-draft row set can
+   * make unnecessary, and the preview path skips it on purpose — see the note
+   * at that early return.
+   */
+  private enrichResultColumns(
+    result: AnalyticsResult,
+    dataset: Dataset,
+    selection: DatasetSelection,
+    context: ExecutionContext | undefined,
+  ): void {
+    // [#6761] The audience's language for THIS request, and the only locale
+    // either field-label enrichment site below is entitled to use.
+    //
+    // `ExecutionContext.locale` is the BCP-47 tag `resolveExecutionContext`
+    // resolves per request — the caller's `Accept-Language` when it expressed a
+    // preference, else the workspace `localization` setting. It is the same
+    // context field the currency chain a few lines down already reads, so both
+    // display decisions in this response answer to one request identity.
+    //
+    // `undefined` (no context, or an anonymous request that skips localization)
+    // is passed through deliberately rather than defaulted here: the shared
+    // resolver documents nullish as "no locale known" and answers `en`, the
+    // platform's source language. Choosing a different default in this file
+    // would be this service disagreeing with the renderer about the same map.
+    const requestLocale = context?.locale;
+
     // ADR-0021 — enrich measure columns with their display `label` + `format`
     // so presentations show "Tasks" / "$616,000" instead of the raw measure
     // name "task_count" / "616000". Carried on the result fields; the renderer
@@ -1426,6 +1496,23 @@ export class AnalyticsService implements IAnalyticsService {
         if (f.percentScale == null) {
           f.percentScale = m.derived?.op === 'ratio' ? 'fraction' : percentScaleOf(meta);
         }
+        // [#15768] The column's TYPE, which until now every producer of this
+        // shape minted as a flat `'number'` for every measure — so a `min`/`max`
+        // over a `date`/`datetime`/`time` field described an ISO instant as a
+        // number, in the same line that carried the instant. `measureResultType`
+        // owns the enumerated verdict per `AggregationFunction` member and
+        // answers `undefined` for every column it has nothing to say about, so
+        // the producer's own value stands unless the rule actively corrects it.
+        //
+        // Corrected HERE rather than in the four producers for the reason the
+        // display chains above are: this is the one seam every path to
+        // `POST /analytics/dataset/query` passes through — the route relays this
+        // method's return verbatim (`res.json(result)`) — and it is the only one
+        // holding both halves of the question, the AUTHORED measure (`aggregate`
+        // + `field`) and the source field's declared type. A per-producer copy
+        // would be four implementations of one rule, free to drift.
+        const resultType = measureResultType(m.aggregate, meta?.type);
+        if (resultType) f.type = resultType;
       }
     }
 
@@ -1454,12 +1541,13 @@ export class AnalyticsService implements IAnalyticsService {
     // `result.fields` already carries, so an entry that stays a pure window
     // contributes no column and receives no descriptor.
     //
-    // Kept out of `selectedDims` deliberately. Drill metadata and row-value
-    // label resolution above answer a different question — which dimensions the
-    // caller GROUPED THE GRID BY, i.e. what a click can be turned back into
-    // records — and widening those would change drill payloads and row values,
-    // not table headers.
-    const describableDims = [...selectedDims];
+    // Kept out of the SELECTED set deliberately, which is why the widening
+    // happens here and not in {@link selectedDimensions}. Drill metadata and
+    // row-value label resolution (both in `queryDataset`) answer a different
+    // question — which dimensions the caller GROUPED THE GRID BY, i.e. what a
+    // click can be turned back into records — and widening those would change
+    // drill payloads and row values, not table headers.
+    const describableDims = [...this.selectedDimensions(dataset, selection)];
     for (const t of selection.timeDimensions ?? []) {
       if (describableDims.some((d) => d.name === t.dimension)) continue;
       const d = dataset.dimensions?.find((x) => x.name === t.dimension);
@@ -1480,7 +1568,6 @@ export class AnalyticsService implements IAnalyticsService {
         if (label !== undefined) f.label = label;
       }
     }
-    return result;
   }
 
   /**

@@ -325,6 +325,7 @@ import {
     sandboxBusinessMessage,
     classifiedRefusalAnswer,
     boundedDeclaredUserMessage,
+    declaredHttpStatus,
     declaredServerFaultAnswer,
     sendThrownError,
     sendDeclaredFault,
@@ -856,10 +857,20 @@ type NormalizedRestServerConfig = {
          * mask entirely (the data plane is unaffected either way).
          */
         maskObjectFields: boolean;
+        /**
+         * [#15542 / #15854] One switch per FACE, each gating exactly what its
+         * name states — `types` the type list, `items` the per-type list,
+         * `item` the whole per-item face (reads, `PUT`, `DELETE` and the
+         * history family), `maintenance` the whole-store operations
+         * (`/diagnostics`, `/_drafts`, `POST /_migrate-stored`). The radius of
+         * each is pinned route by route in
+         * `rest-config-mount-table.pin.test.ts`.
+         */
         endpoints: {
             types: boolean;
             items: boolean;
             item: boolean;
+            maintenance: boolean;
         };
     };
     batch: {
@@ -1209,6 +1220,93 @@ async function wiredEngineOrLoud<T>(
         // part an operator actually needs.
         throw new AuthzStoreUnavailableError('objectql', err);
     }
+}
+
+/**
+ * [#15685] The `/meta/:type/:name/references` door's PROTOCOL-RAISED refusal,
+ * re-dressed in the ADR-0112 NESTED envelope that door's other refusal exit
+ * already publishes. Answers `undefined` for everything else, so the caller
+ * keeps `handleRouteError` for the rest.
+ *
+ * ## The defect this closes
+ *
+ * The door can refuse in two ways and, measured on one boot, the two answers
+ * agreed on neither the envelope nor the message:
+ *
+ * ```
+ * A  protocol-raised, unanswerable TARGET type (#9327)
+ *    501 {"error":"Internal server error","code":"NOT_IMPLEMENTED"}
+ * B  the resolved kernel has no `findReferencesToMeta` at all (#9326)
+ *    501 {"error":{"code":"NOT_IMPLEMENTED","message":"protocol.findReferencesToMeta() is not available in this kernel"}}
+ * ```
+ *
+ * Two facts are lost on A, and both of them are the operator's:
+ *
+ *  1. **The PRESCRIPTION.** A's message is not decoration — `findReferencesToMeta`
+ *     says so in as many words ("The message is prescriptive per ADR-0110 D3:
+ *     it names the answerable question"). It tells the operator what to ask
+ *     INSTEAD: `Ask the owning object instead: GET /api/v1/meta/object/<owner>/references`.
+ *     That sentence is what keeps "the question was never asked" from being
+ *     read as "nothing depends on this item" — the whole of ADR-0110 D3
+ *     (#8896), in front of an operator whose next click is a delete, because
+ *     the admin "Used by" panel renders its empty case as "Nothing in the
+ *     metadata graph points at this item. Safe to delete." On the wire the
+ *     sentence was replaced by "Internal server error".
+ *  2. **The `code`'s POSITION.** `body.error.code` reads on B and `undefined`
+ *     on A. This door's own comment on the B branch warns against precisely
+ *     that dialect ("never the bare-string or sibling-`code` dialects, which
+ *     make `body.error.code` read `undefined`") — so the route was violating
+ *     its own written rule at its other exit, reached by a different path.
+ *
+ * ## Why the repair is HERE and not at the relay
+ *
+ * A reaches the wire through `handleRouteError` → {@link declaredServerFaultAnswer},
+ * which keeps `status` and `code` and replaces the prose with
+ * `INTERNAL_ERROR_MESSAGE`. That arm is correct and argued for a server FAULT
+ * (#11718, #5582) — a fault message may carry driver internals, and withholding
+ * it is the point. What it cannot see is that a producer-declared 5xx might be
+ * a deliberate REFUSAL whose message is authored FOR the caller. Teaching it
+ * that distinction would change platform-wide behaviour for every
+ * producer-declared 5xx at every door; that is a maintainer's decision and is
+ * handed back as its own finding, not taken here. This arm is the bounded half:
+ * ONE door, re-dressing ONE refusal in the dialect it already publishes.
+ *
+ * ⛔ It is therefore NOT a general "5xx prose is relayed now" rule, and the
+ * three conditions below are what keep it from becoming one.
+ *
+ * ## The three conditions, and why each is exactly this narrow
+ *
+ *  - **`501`**, read through {@link declaredHttpStatus} so both declaration
+ *    spellings (`status` / `statusCode`, #7525) reach the same verdict rather
+ *    than through a fourth local opinion about which field declares a status.
+ *  - **`code === 'NOT_IMPLEMENTED'`**, the literal this route already publishes
+ *    on its B exit. Matching the LITERAL rather than "any declared code" is
+ *    also how the #9232 vocabulary narrowing is honoured by CONSTRUCTION: an
+ *    unregistered producer spelling can never reach this exit, so no second
+ *    copy of `thrownCodeFields`' demotion rule is needed and no new door ships
+ *    an un-narrowed code. ⚠️ The cost is stated rather than hidden: a future
+ *    SECOND refusal code on this route would fall back to the flat fault answer
+ *    until whoever adds it comes here. That is a visible, one-line extension,
+ *    not a silent gap.
+ *  - **A non-empty message.** This arm exists to relay PROSE; with none
+ *    declared there is nothing to relay, and inventing one is the half
+ *    {@link declaredServerFaultAnswer} refuses to invent too.
+ *
+ * ⛔ And it does not re-derive `REFERENCE_SITES.unanswerableTargetTypes` to
+ * decide whether the target was answerable. That set, its canonical-type fold
+ * and its refusal all belong to `findReferencesToMeta`; a second copy at the
+ * transport is the tolerant-consumer direction, and it would drift the moment
+ * the set changed. The route reads what the protocol DECLARED, which is what a
+ * transport is for.
+ */
+function notImplementedRefusalAnswer(
+    error: any,
+): { status: number; body: { error: { code: string; message: string } } } | undefined {
+    if (declaredHttpStatus(error) !== 501) return undefined;
+    if (error?.code !== 'NOT_IMPLEMENTED') return undefined;
+    const message = typeof error?.message === 'string' ? error.message : '';
+    if (message.length === 0) return undefined;
+    return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
 }
 
 export class RestServer {
@@ -3957,6 +4055,12 @@ export class RestServer {
                     types: metadata.endpoints?.types ?? true,
                     items: metadata.endpoints?.items ?? true,
                     item: metadata.endpoints?.item ?? true,
+                    // [#15542] The whole-store family's own switch. Default ON,
+                    // like its three siblings: an embedder who authored only
+                    // `items: false` before keeps `/diagnostics`, `/_drafts` and
+                    // the `POST /_migrate-stored` door, which used to leave with
+                    // that switch — the compatibility cost the ruling priced.
+                    maintenance: metadata.endpoints?.maintenance ?? true,
                     // `schema` is a tombstone since #14691: it gated a route that
                     // does not exist.
                 },
@@ -4808,7 +4912,8 @@ export class RestServer {
      * local: the two passes share this method, not their routes.
      *
      * What actually mounts is gated further by `metadata.endpoints.types` /
-     * `.items` / `.item` — the routes below are the maximum, not a guarantee.
+     * `.items` / `.item` / `.maintenance` — the routes below are the maximum,
+     * not a guarantee.
      *
      * Families, in registration order: the type list (`/meta`, and its
      * `/meta/types` spelling) → whole-store operations (`/diagnostics`,
@@ -4817,6 +4922,36 @@ export class RestServer {
      * (`/:type/:name`) with its sub-resources (`references`, `layers`,
      * `history`, `audit`, `diff`, `publish`, `rollback`, `published`, and the
      * object FSM read `state/:field`).
+     *
+     * **[#15542 / #15854] One switch per FAMILY, and the families above are
+     * exactly the switches.** The taxonomy in the paragraph above predates the
+     * switch surface by a while, and the two disagreed in both directions: the
+     * whole-store family rode `endpoints.items` (a switch whose `describe()`
+     * named the per-type list, so closing a listing read silently disarmed the
+     * `POST /_migrate-stored` write door), while the per-item family's own
+     * `PUT`, `DELETE` and history sub-resources rode nothing but
+     * `api.enableMetadata` (so closing the per-item surface left its writes
+     * mounted). Now: `types` → the type list; `items` → `/:type` alone;
+     * `maintenance` → the whole-store family; `item` → the whole per-item
+     * face, book tree included, reads and writes alike.
+     *
+     * Two consequences when adding a route here:
+     *  1. **Pick its switch deliberately.** A route added inside an existing
+     *     `if` block inherits that block's switch by position alone, which is
+     *     how the drift above accumulated. The per-item family's gate is
+     *     spelled as {@link registerPerItemRoute} at its later members for
+     *     exactly this reason — the gate travels with the registration rather
+     *     than with a brace several hundred lines up.
+     *  2. **Extend the pin in the same PR.** Every switch's radius is asserted
+     *     route by route in `rest-config-mount-table.pin.test.ts`, in both
+     *     directions, so a new mount reddens it. That redness is the review
+     *     prompt, not an obstacle: add the route to the switch's row.
+     *
+     * ⚠️ `GET {metaPath}/object/:name/state/:field` is deliberately in NO
+     * per-family switch and answers to `api.enableMetadata` alone. It is the
+     * object FSM read, addressed by object name rather than by `:type/:name`,
+     * and the ruling that drew these four radii does not name it. Moving it
+     * under a switch is a decision, not a tidy-up.
      *
      * [#12195] The compound-name twins spelled `/:type/:section/:name` used to
      * close that list. They are RETIRED (stage 3 of #12176): every item is
@@ -4844,6 +4979,38 @@ export class RestServer {
         const { metadata } = this.config;
         const metaPath = `${basePath}${metadata.prefix}`;
         const isScoped = basePath.includes('/environments/:environmentId');
+
+        /**
+         * [#15542 / #15854] Register a route only when the per-item switch —
+         * `metadata.endpoints.item` — is on. Its radius is the WHOLE per-item
+         * face: `GET` / `PUT` / `DELETE {metaPath}/:type/:name`, the
+         * `/references` and `/layers` reads, the history family (`/history`,
+         * `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and the
+         * book tree. The first four of those are inside the `if` block further
+         * down; every later member goes through this call.
+         *
+         * A call rather than one more `if` block, for two reasons that are not
+         * cosmetic:
+         *  1. **No single brace pair contains exactly the right set.** The
+         *     later members are spread across ~1200 lines with
+         *     `GET {metaPath}/object/:name/state/:field` — deliberately NOT
+         *     part of this face — sitting among them.
+         *  2. **A gate that travels with its registration cannot be inherited
+         *     or shed by moving a route past a brace**, which is exactly how
+         *     this switch came to gate four reads and none of its own writes:
+         *     `PUT` and `DELETE` were registered below the block's closing
+         *     brace and answered to `api.enableMetadata` alone.
+         *
+         * ⚠️ Reads `this.routeManager` at CALL time, deliberately.
+         * {@link registerMetadataEndpoints} swaps the anonymous-deny wrapping
+         * registrar in for the duration of this method and restores it in a
+         * `finally`, so a reference captured at definition time would register
+         * past that gate.
+         */
+        const registerPerItemRoute = (entry: Parameters<RouteManager['register']>[0]): void => {
+            if (metadata.endpoints.item === false) return;
+            this.routeManager.register(entry);
+        };
 
         // GET /meta - List all metadata types
         //
@@ -4911,7 +5078,13 @@ export class RestServer {
         //
         // Registered BEFORE `/meta/:type` so the `diagnostics` segment
         // is not captured as a `:type` parameter.
-        if (metadata.endpoints.items !== false) {
+        //
+        // [#15542] First of the three WHOLE-STORE operations, and they share
+        // one switch of their own — `metadata.endpoints.maintenance`. They
+        // used to ride `endpoints.items`, whose declared meaning is the
+        // per-type list, so closing a listing read silently took this sweep,
+        // `/_drafts` and the `POST /_migrate-stored` write door with it.
+        if (metadata.endpoints.maintenance !== false) {
             this.routeManager.register({
                 method: 'GET',
                 path: `${metaPath}/diagnostics`,
@@ -5107,7 +5280,9 @@ export class RestServer {
         //
         // Registered BEFORE `/meta/:type` so the `_drafts` segment is not
         // captured as a `:type` parameter.
-        if (metadata.endpoints.items !== false) {
+        //
+        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
+        if (metadata.endpoints.maintenance !== false) {
             this.routeManager.register({
                 method: 'GET',
                 path: `${metaPath}/_drafts`,
@@ -5199,7 +5374,12 @@ export class RestServer {
         //
         // Registered BEFORE `/meta/:type` so the leading-underscore segment is
         // not captured as a `:type` parameter (same reason as `_drafts`).
-        if (metadata.endpoints.items !== false) {
+        //
+        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
+        // This is the WRITE door the card was filed about: it used to be
+        // unmounted by `endpoints.items: false`, a switch declared as "list
+        // items of type".
+        if (metadata.endpoints.maintenance !== false) {
             this.routeManager.register({
                 method: 'POST',
                 path: `${metaPath}/_migrate-stored`,
@@ -5277,6 +5457,9 @@ export class RestServer {
         }
 
         // GET /meta/:type - List items of a type
+        //
+        // [#15542] The whole of `metadata.endpoints.items` — this one mount,
+        // and nothing else, which is what its `describe()` has always said.
         if (metadata.endpoints.items !== false) {
             this.routeManager.register({
                 method: 'GET',
@@ -5736,6 +5919,13 @@ export class RestServer {
         }
 
         // GET /meta/:type/:name - Get specific item
+        //
+        // [#15542 / #15854] The first four members of the per-item face. The
+        // rest of it — `PUT`, `DELETE` and the history family — is registered
+        // below this block's closing brace and goes through
+        // {@link registerPerItemRoute}, which carries the SAME switch. ⛔ The
+        // brace is not the radius: read the pin table in
+        // `rest-config-mount-table.pin.test.ts` for what `item` gates.
         if (metadata.endpoints.item !== false) {
             // Phase 3a-references: /meta/:type/:name/references must be
             // registered BEFORE /meta/:type/:name so the more-specific
@@ -5844,16 +6034,37 @@ export class RestServer {
                         // laundering it into an org-unscoped 200.
                         const referencesCtx = await this.resolveExecCtx(environmentId, req)
                             .catch(rethrowAuthzStoreUnavailable);
-                        const result = await (p as any).findReferencesToMeta({
-                            type: req.params.type,
-                            name: req.params.name,
-                            // SPREAD, never `organizationId: x ?? null` — the
-                            // implementation declares `organizationId?: string`
-                            // (optional plain string, not nullable), and it
-                            // forwards on truthiness.
-                            ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                        });
+                        // [#15685] The protocol's OWN refusal is re-answered in
+                        // the nested envelope the branch above already uses —
+                        // see {@link notImplementedRefusalAnswer} for why the
+                        // repair is here and how narrow it is. The catch is
+                        // scoped to the protocol call ALONE, so what this arm
+                        // can re-dress is mechanically the set of things
+                        // `findReferencesToMeta` raised: neither
+                        // `resolveProtocol` nor the `resolveExecCtx` seam above
+                        // can reach it, whatever they declare.
+                        let result: unknown;
+                        try {
+                            result = await (p as any).findReferencesToMeta({
+                                type: req.params.type,
+                                name: req.params.name,
+                                // SPREAD, never `organizationId: x ?? null` — the
+                                // implementation declares `organizationId?: string`
+                                // (optional plain string, not nullable), and it
+                                // forwards on truthiness.
+                                ...(referencesCtx?.tenantId ? { organizationId: referencesCtx.tenantId } : {}),
+                                ...(environmentId ? { environmentId } : {}),
+                            });
+                        } catch (raised: any) {
+                            const refusal = notImplementedRefusalAnswer(raised);
+                            // Anything else is the outage it always was — the
+                            // 503 `getMetaItems` raises for a `sys_metadata`
+                            // failure (#8896) still propagates to the terminal
+                            // below, message-withheld and logged, unchanged.
+                            if (refusal === undefined) throw raised;
+                            res.status(refusal.status).json(refusal.body);
+                            return;
+                        }
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error);
@@ -6606,7 +6817,7 @@ export class RestServer {
         // PUT /meta/:type/:name - Save metadata item
         // We always register this route, but return 501 if protocol doesn't support it
         // This makes it discoverable even if not implemented
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'PUT',
             path: `${metaPath}/:type/:name`,
             handler: async (req: any, res: any) => {
@@ -6862,7 +7073,7 @@ export class RestServer {
         // DELETE /meta/:type/:name - Reset metadata item to artifact default
         // Removes a customization overlay row from sys_metadata (ADR-0005).
         // Returns 200 even when no overlay existed (idempotent reset).
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'DELETE',
             path: `${metaPath}/:type/:name`,
             handler: async (req: any, res: any) => {
@@ -7027,7 +7238,7 @@ export class RestServer {
         // (view/dashboard/report/email_template) return real events;
         // non-overlay types return `{ events: [] }` (the legacy raw-engine
         // path does not record history).
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/history`,
             handler: async (req: any, res: any) => {
@@ -7162,7 +7373,7 @@ export class RestServer {
         // 日志 / Audit log" tab can show who tried what and whether
         // a lock blocked it. Empty array on environments where the
         // table is not yet provisioned.
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/audit`,
             handler: async (req: any, res: any) => {
@@ -7287,7 +7498,7 @@ export class RestServer {
 
         // POST /meta/:type/:name/publish — promote the pending draft
         // overlay to live. 404 [no_draft] when nothing to publish.
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'POST',
             path: `${metaPath}/:type/:name/publish`,
             handler: async (req: any, res: any) => {
@@ -7488,7 +7699,7 @@ export class RestServer {
 
         // POST /meta/:type/:name/rollback — restore a historical version
         // as the new live overlay. Body: { toVersion: <number>, message? }.
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'POST',
             path: `${metaPath}/:type/:name/rollback`,
             handler: async (req: any, res: any) => {
@@ -7606,7 +7817,7 @@ export class RestServer {
 
         // GET /meta/:type/:name/diff?from=N&to=M — structural diff
         // between two historical versions (or one version vs current).
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/diff`,
             handler: async (req: any, res: any) => {
@@ -7810,7 +8021,7 @@ export class RestServer {
         // was removed WITHOUT removing the capability — D1's "any stored junk
         // name remains listable and clearable" still holds through this door.
         {
-            this.routeManager.register({
+            registerPerItemRoute({
                 method: 'GET',
                 path: `${metaPath}/:type/:name/published`,
                 handler: async (req: any, res: any) => {

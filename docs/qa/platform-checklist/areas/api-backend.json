@@ -87,7 +87,12 @@
           "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 3, "date": "2026-08-18", "change": "corrected three separate wrong shapes, each of which made correct behaviour read as a defect. (a) capabilities.transactionalBatch is a CapabilityDescriptor object on the wire, so the clause's literal == true is always false — only the @objectstack/client getter flattens it to a boolean. (b) Steps 2-3 sent atomic inside an options wrapper; CrossObjectBatchRequestSchema declares a TOP-LEVEL atomic and no options, so Zod strips the wrapper and atomic defaults to true — the atomic:false probe therefore succeeds instead of answering BATCH_NOT_ATOMIC. (c) Clause 3 attached the #4793 per-row codes to the cross-object door, whose response schema is { results, droppedFields? } with no per-row error envelope; those codes live on the per-object door (#9417)", "ref": "#9386" }
+        {
+          "revision": 3,
+          "date": "2026-08-18",
+          "change": "corrected three separate wrong shapes, each of which made correct behaviour read as a defect. (a) capabilities.transactionalBatch is a CapabilityDescriptor object on the wire, so the clause's literal == true is always false — only the @objectstack/client getter flattens it to a boolean. (b) Steps 2-3 sent atomic inside an options wrapper; CrossObjectBatchRequestSchema declares a TOP-LEVEL atomic and no options, so Zod strips the wrapper and atomic defaults to true — the atomic:false probe therefore succeeds instead of answering BATCH_NOT_ATOMIC. (c) Clause 3 attached the #4793 per-row codes to the cross-object door, whose response schema is { results, droppedFields? } with no per-row error envelope; those codes live on the per-object door (#9417)",
+          "ref": "#9386"
+        }
       ]
     },
     {
@@ -433,7 +438,12 @@
           "change": "new — query-contract matrix over the spec operator vocabulary with known-answer checks, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "re-pointed automated.ref off a source module. packages/objectql/src/filter-comparand-shape.ts is not a test — it exports invalidFilterError / assertListComparandShapes / assertFilterIsMaterializable and declares no describe block; the #5869 gate is actually pinned by engine-filter-array-lowering.test.ts. Also recorded the pin's real reach, since it spans one clause of nine and a pass read off it would be a false green (#9401)", "ref": "#9386" }
+        {
+          "revision": 2,
+          "date": "2026-08-18",
+          "change": "re-pointed automated.ref off a source module. packages/objectql/src/filter-comparand-shape.ts is not a test — it exports invalidFilterError / assertListComparandShapes / assertFilterIsMaterializable and declares no describe block; the #5869 gate is actually pinned by engine-filter-array-lowering.test.ts. Also recorded the pin's real reach, since it spans one clause of nine and a pass read off it would be a false green (#9401)",
+          "ref": "#9386"
+        }
       ]
     },
     {
@@ -533,7 +543,12 @@
           "change": "new — error-envelope conformance sampling grounded in the two-tier code ledger, per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
         },
-        { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 1 and steps 8/9 at ErrorCode, the canonical ADR-0112 D4 union export. The item asked the runner to hand-union StandardErrorCode with ERROR_CODE_LEDGER, but the latter is a Record of package name to code array rather than a flat code list, and three of the item's own sampled codes (VALIDATION_FAILED, UNSUPPORTED_QUERY_PARAM, BATCH_NOT_ATOMIC) are not in StandardErrorCode at all — they resolve only through REGISTERED_ERROR_CODES. error-code-ledger.zod.ts already exports ErrorCode as exactly that union, so the clause now names one export instead of prescribing a union the runner has to rebuild (#9417)", "ref": "#9386" },
+        {
+          "revision": 2,
+          "date": "2026-08-18",
+          "change": "re-pointed clause 1 and steps 8/9 at ErrorCode, the canonical ADR-0112 D4 union export. The item asked the runner to hand-union StandardErrorCode with ERROR_CODE_LEDGER, but the latter is a Record of package name to code array rather than a flat code list, and three of the item's own sampled codes (VALIDATION_FAILED, UNSUPPORTED_QUERY_PARAM, BATCH_NOT_ATOMIC) are not in StandardErrorCode at all — they resolve only through REGISTERED_ERROR_CODES. error-code-ledger.zod.ts already exports ErrorCode as exactly that union, so the clause now names one export instead of prescribing a union the runner has to rebuild (#9417)",
+          "ref": "#9386"
+        },
         {
           "revision": 3,
           "date": "2026-08-21",
@@ -1085,7 +1100,9 @@
       "revision": 2,
       "priority": "P1",
       "surface": "api",
-      "personas": ["seeded admin"],
+      "personas": [
+        "seeded admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -1155,7 +1172,9 @@
         "export": "ACCEPTED_FILTER_COMPARAND_TYPES",
         "expect": 6
       },
-      "traps": ["silent-coercion"],
+      "traps": [
+        "silent-coercion"
+      ],
       "source": [
         "packages/spec/src/data/filter-comparand-type.ts#ACCEPTED_FILTER_COMPARAND_TYPES (ACCEPTED_FILTER_COMPARAND_TYPES, ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE, FILTER_COMPARAND_BIGINT_EXACT_LIMIT, isAcceptedFilterComparand, normalizeFilterComparandTypes)",
         "packages/spec/src/data/filter-comparand-shape.ts",
@@ -1189,7 +1208,9 @@
       "revision": 1,
       "priority": "P2",
       "surface": "api",
-      "personas": ["seeded admin"],
+      "personas": [
+        "seeded admin"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -1259,7 +1280,10 @@
         "export": "DATE_RANGE_PRESETS",
         "expect": 13
       },
-      "traps": ["clock-skew", "timezone-boundary"],
+      "traps": [
+        "clock-skew",
+        "timezone-boundary"
+      ],
       "source": [
         "packages/spec/src/data/date-range-presets.ts#DATE_RANGE_PRESETS (DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, isDateRangePresetName, bareDateRangePresetComparandMessage)",
         "packages/spec/src/migrations/entries/semantic/18.filter-preset-ordering-comparand-refused.ts",
@@ -1283,7 +1307,10 @@
       "revision": 1,
       "priority": "P1",
       "surface": "build",
-      "personas": ["seeded admin", "build-time author (no session)"],
+      "personas": [
+        "seeded admin",
+        "build-time author (no session)"
+      ],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -2163,10 +2190,10 @@
     },
     {
       "id": "api-backend.rest-metadata-config-contract",
-      "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, three endpoint switches gate more routes than their names suggest, maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
+      "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2192,8 +2219,9 @@
         "as the restricted persona GET /api/v1/meta/object/showcase_account and diff the served fields against the admin's copy of the same document",
         "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
         "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
-        "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type AND {prefix}/diagnostics AND {prefix}/_drafts AND the POST {prefix}/_migrate-stored write door — four mounts, not the one its describe() names",
-        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: GET {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers and {prefix}/book/:name/tree",
+        "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts or POST /_migrate-stored leave with it is the old radius returning)",
+        "harness: construct with { metadata: { endpoints: { maintenance: false } } } and enumerate: GET {prefix}/diagnostics, GET {prefix}/_drafts and the POST {prefix}/_migrate-stored write door — three whole-store operations, the key #15542 created so that closing a listing read stops disarming a migration door",
+        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: the WHOLE per-item face — GET, PUT and DELETE {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers, the history family (/history, /audit, /diff, /published, /publish, /rollback) and {prefix}/book/:name/tree; twelve mounts, writes included (#15854)",
         "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
         "harness: construct with { metadata: { maskObjectFields: false } }; separately construct with the default and metaType != 'object'",
         "harness: construct with { metadata: { cacheTtl: 3600 } }, then 0, then -1, then { metadata: { endpoints: { schema: false } } }; capture each refusal text"
@@ -2212,10 +2240,10 @@
           "evidence": "route table + discovery body at the non-default prefix"
         },
         {
-          "clause": "the three endpoint switches gate MORE than their describe() strings say, and the run must enumerate what each removes: `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes four INCLUDING the POST {prefix}/_migrate-stored write door and the diagnostics sweep, `item` takes four including the book-tree read",
+          "clause": "each of the FOUR endpoint switches gates exactly the face its name states, and the run must ENUMERATE what each removes rather than trust the describe(): `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes exactly one ({prefix}/:type), `maintenance` takes the three whole-store operations INCLUDING the POST {prefix}/_migrate-stored write door, `item` takes the whole per-item face (twelve mounts, PUT and DELETE and the history family included)",
           "oracle": "test",
-          "verify": "per-switch route-table diffs against the all-true baseline; the diff sets must be exactly the routes enumerated in the steps. An operator reading `items` as 'list items of type' would silently disarm a migration door — the run records the real radius whatever it finds",
-          "evidence": "the three route-table diffs"
+          "verify": "per-switch route-table diffs against the all-true baseline; the diff sets must be exactly the routes enumerated in the steps, in both directions — a switch that GROWS a route is as much a FAIL as one that loses one. ⛔ The run records the real radius whatever it finds: the describe() strings now claim to be exhaustive (#15542/#15854), so a diff that disagrees with them is a defect in the code or in the declaration, never a reason to relax this clause",
+          "evidence": "the four route-table diffs"
         },
         {
           "clause": "`maskObjectFields` defaults ON and is a real disclosure gate: a caller who cannot read a field gets a served object schema without that field at all — not its name, label, type, options, formula, visibleWhen, defaultValue or requiredPermissions — and `false` serves the full schema to every authenticated caller (ADR-0106 D8)",
@@ -2244,8 +2272,9 @@
       "variants": [
         "knob:prefix",
         "switch:endpoints.types (2 mounts)",
-        "switch:endpoints.items (4 mounts)",
-        "switch:endpoints.item (4 mounts)",
+        "switch:endpoints.items (1 mount)",
+        "switch:endpoints.item (12 mounts)",
+        "switch:endpoints.maintenance (3 mounts)",
         "switch:enableCache (+6 carve-outs)",
         "switch:maskObjectFields",
         "tombstone:cacheTtl",
@@ -2259,13 +2288,13 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§D pins prefix/enableCache/maskObjectFields survival and the partial endpoints shape; §E pins cacheTtl and endpoints.schema); the mount-table, masking-effect and cache-branch halves have no pin"
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§D pins prefix/enableCache/maskObjectFields survival and the partial endpoints shape; §E pins cacheTtl and endpoints.schema); packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the MOUNT half: every switch's radius asserted route by route as ABSENCE from the mounted table, in both directions, including all four endpoints.* rows); the masking-effect and cache-branch halves have no pin"
       },
       "source": [
         "packages/spec/liveness/metadata_endpoints.json (the ADR-0049 ledger this item answers: prefix, enableCache, maskObjectFields and three endpoints.* live, cacheTtl and endpoints.schema dead)",
-        "packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema (the declared contract, the ADR-0106 D8 docblock and the two retiredKey tombstones)",
-        "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (metaPath and the three endpoint gates with their real radius), (resolveObjectMasker — the metaType/maskObjectFields fork), (normalizeConfig — isObjectSchemaMaskingEnabled and the OS_ALLOW_UNMASKED_OBJECT_METADATA escape hatch), (registerDiscoveryEndpoints — discovery.routes.metadata built from prefix), (getRoutes)",
-        "ADR-0106 D8 (per-caller field masking of served object schemas) · #14691 (the two retirements) · #7526 (the /meta/types ordering fix the `types` switch takes with it) · ADR-0076 D12",
+        "packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema (the declared contract — four endpoints.* switches whose describe() strings enumerate every mount they gate since #15542/#15854, the ADR-0106 D8 docblock and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (metaPath, the four endpoint gates and registerPerItemRoute — the per-item switch spelled as a call so the later members of that face carry it), (resolveObjectMasker — the metaType/maskObjectFields fork), (normalizeConfig — isObjectSchemaMaskingEnabled and the OS_ALLOW_UNMASKED_OBJECT_METADATA escape hatch), (registerDiscoveryEndpoints — discovery.routes.metadata built from prefix), (getRoutes)",
+        "ADR-0106 D8 (per-caller field masking of served object schemas) · #14691 (the two retirements) · #7526 (the /meta/types ordering fix the `types` switch takes with it) · ADR-0076 D12 · #15542 / #15854 (the switch-radius ruling that created `maintenance` and gave `item` its own writes) · #15543 (why the measured blast radius of that move is zero: no shipped boot path authors a RestServerConfig)",
         "sibling clause: platform-core.metadata-registry-serving (it drives the served REGISTRY on the default config; this item covers the config that decides what is served and to whom) · platform-core.docs-audience-gate (the audience-gated types that are a cache carve-out here)"
       ],
       "history": [
@@ -2274,6 +2303,12 @@
           "date": "2026-09-04",
           "change": "new — `metadata_endpoints` was UNCLASSIFIED in coverage.json: metadata-registry-serving drove /meta on a default boot and nothing covered the sub-object that decides the prefix, which endpoints exist, whether the cached read path is taken, or whether served object schemas are masked. The switch radii were enumerated from registerMetadataEndpointsInner rather than from the schema's describe() strings, which name one route each and understate three of them — `endpoints.items` also gates the POST _migrate-stored write door",
           "ref": "#14961"
+        },
+        {
+          "revision": 2,
+          "date": "2026-09-06",
+          "change": "the radii this item enumerates MOVED, by ruling rather than by drift (#15542 comment 5557095147): every endpoints.* switch now gates exactly the face its name states. The whole-store operations (/diagnostics, /_drafts, POST /_migrate-stored) left `items` for a new key `maintenance`; `items` is down to its one declared mount; `item` gained the per-item PUT/DELETE and the history family it never gated. The acceptance clause is kept SATISFIABLE and non-vacuous exactly as the ruling requires — it still demands the run enumerate each switch's real radius from a route-table diff, and the new radii are what it enumerates; what changed is the expected sets, not the obligation to measure them",
+          "ref": "#15542"
         }
       ]
     },

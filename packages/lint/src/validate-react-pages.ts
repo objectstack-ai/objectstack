@@ -12,6 +12,7 @@
 
 import { createRequire } from 'node:module';
 import type { transform as sucraseTransform } from 'sucrase';
+import { collectionEntries } from './collection-entries.js';
 
 // Sucrase must NOT be imported at module top level: it is ~1.5 MB of CJS
 // (~16 ms cold require), and @objectstack/lint sits on the kernel boot path —
@@ -57,22 +58,19 @@ export interface ReactPageFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-const asArray = (v: unknown): AnyRec[] => (Array.isArray(v) ? (v as AnyRec[]) : []);
 
 export function validateReactPages(stack: AnyRec): ReactPageFinding[] {
   const findings: ReactPageFinding[] = [];
-  const pages = asArray(stack.pages);
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
+  for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     if (!page || page.kind !== 'react') continue;
-    const name = String(page.name ?? `#${p}`);
+    const name = String(page.name ?? pagePath);
     const source = page.source;
     if (typeof source !== 'string' || source.trim() === '') {
       findings.push({
         severity: 'error',
         rule: 'react-page-empty-source',
         where: `page "${name}"`,
-        path: `pages[${p}].source`,
+        path: `${pagePath}.source`,
         message: "kind:'react' page has no `source`.",
         hint: 'Author the page as a real React component string in `source`.',
       });
@@ -90,7 +88,7 @@ export function validateReactPages(stack: AnyRec): ReactPageFinding[] {
         severity: 'error',
         rule: 'react-page-syntax',
         where: `page "${name}"`,
-        path: `pages[${p}].source`,
+        path: `${pagePath}.source`,
         message: `kind:'react' source has a syntax error: ${message.split('\n')[0]}`,
         hint: 'The source is transpiled (never executed) at build to catch syntax errors early — fix the JS/JSX.',
       });

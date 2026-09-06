@@ -1167,6 +1167,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.save-flow-canonicalization.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2124,6 +2139,16 @@
     {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-positions-name-authority.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-positions-name-authority.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -3142,6 +3167,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-declarative-update.test.ts",
       "verb": "update",
       "pinned": 1
@@ -3208,6 +3238,21 @@
     },
     {
       "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3378,6 +3423,16 @@
     },
     {
       "file": "packages/services/service-automation/src/stranded-run-object-store.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-claim-probe.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-claim-probe.test.ts",
       "verb": "update",
       "pinned": 1
     },

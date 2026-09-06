@@ -91,9 +91,11 @@
  *
  * Nested function bodies are deliberately NOT entered: a closure defined inside
  * a hook and handed to a collaborator runs when that collaborator calls it, not
- * during the hook. `plugin-audit`'s `getLocale` (`audit-plugin.ts:200`) is the
- * measured case — it is passed to `installAuditWriters` and invoked from
- * `resolveWriteLocale` on CRUD writes (`audit-writers.ts:781`), i.e. long after
+ * during the hook. `plugin-audit`'s `getLocale`
+ * (`packages/plugins/plugin-audit/src/audit-plugin.ts`, line 200 as measured)
+ * is the measured case — it is passed to `installAuditWriters` and invoked from
+ * `packages/plugins/plugin-audit/src/audit-writers.ts#resolveWriteLocale` on
+ * CRUD writes (line 781 as measured), i.e. long after
  * the window closed. `packages/rest`'s `settingsServiceProvider` and
  * `ObjectQLPlugin`'s `getSettings` are the same shape.
  *
