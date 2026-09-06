@@ -99,7 +99,8 @@
  *     esbuild re-emits `"…definition's…"`. Same characters, different bytes, so a
  *     literal substring search over source text misses it.
  *   - 19/44 constant-folded concatenation. Source splits a long description as
- *     `'… declares ' + '`_packageId`.'` (api/protocol.zod.ts:341-342 is one);
+ *     `'… declares ' + '`_packageId`.'` (`packages/spec/src/api/protocol.zod.ts`
+ *     is one, lines 341-342 as measured);
  *     the bundler folds it to one literal that exists in no source file.
  *
  * A missed probe here reads as "not expired" — a SILENT PASS, the same failure

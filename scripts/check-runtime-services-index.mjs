@@ -28,7 +28,8 @@
 // time, and nothing reads them: `check:docs-audit-scope` derives WHICH pages the
 // docs-accuracy audit covers, never whether an index enumerates them. #9604
 // measured the result -- `services.sms` had a page, a `meta.json` entry, a
-// registered slot (`sms-plugin.ts:181`) and a canonical-source row, and was
+// registered slot (`packages/services/service-sms/src/sms-plugin.ts`, line 181
+// as measured) and a canonical-source row, and was
 // still missing from BOTH index lists. It shipped that way and every gate was
 // green. #9588 was the same page drifting on a different line.
 //
@@ -124,7 +125,8 @@
 // This gate deliberately did NOT read that list until now, and the reason is
 // worth keeping: it was a superset by exactly one row on purpose-of-record.
 // `Security: packages/spec/src/contracts/security-service.ts` named a real,
-// registered slot (`security-plugin.ts:1157`) for a service this chapter has no
+// registered slot (`packages/plugins/plugin-security/src/security-plugin.ts`,
+// line 1157 as measured) for a service this chapter has no
 // page for, while `services.security` was documented NOWHERE under
 // `content/docs/`. Whether that row should become a page, move to another
 // chapter, or be dropped was a product-surface question, and encoding ANY of the
@@ -256,7 +258,8 @@ const IS_TEST_PATH = (rel) =>
 
 // MULTILINE-AWARE ON PURPOSE. `\s*` spans newlines, so a registration whose key
 // sits on the line after the `(` is still found -- `plugin-audit` really is
-// written that way (`audit-plugin.ts:117`), and a `^.*registerService\('x'` style
+// written that way (`packages/plugins/plugin-audit/src/audit-plugin.ts`, line
+// 117 as measured), and a `^.*registerService\('x'` style
 // line-at-a-time grep reports a confident ZERO for it. An absence measured with
 // the wrong tool is the failure mode this whole check exists to rule out, so the
 // self-test pins the split-line form explicitly.

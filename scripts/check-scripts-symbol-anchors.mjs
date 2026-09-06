@@ -55,15 +55,30 @@
  *
  * ## What this corpus judges, and what it declines to
  *
- * `judgeUntrackedLineAnchors: false`. The 96 citations that name no tracked
- * file are 66 bare filenames inside census tables (`engine.ts` at some line --
- * an abbreviation no resolver can bind to one of this tree's several files of
- * that name), 22 continuations inheriting no path, 11 directory-qualified
- * illustrations or sibling-repo paths, and 1 tilde form. They are a real defect
- * class and are recorded as a follow-up, exactly as the 1,056 bare paths under
- * `checkBarePaths` were for `docs/adr/**` -- but this gate cannot tell their
- * author how to fix them, and a gate whose only remedy is "stop writing that"
- * is the permanently-red gate this repo retired.
+ * `judgeUntrackedLineAnchors: false`. A citation that names no tracked file is
+ * SEEN, COUNTED and ENUMERATED, and judged by nothing: this gate cannot tell
+ * its author how to fix it, and a gate whose only remedy is "stop writing that"
+ * is the permanently-red gate this repo retired. They were a real defect class
+ * and were carded as a follow-up (#15809), exactly as the 1,056 bare paths
+ * under `checkBarePaths` were for `docs/adr/**`.
+ *
+ * ⭐ THAT FOLLOW-UP IS MOSTLY DONE, AND THE REST IS A LIST, NOT A NUMBER. When
+ * the corpus was registered it declined 96 citations; #15809 migrated 81 of
+ * them by the same method PR #15806 used on the tracked-target ones -- the file
+ * as a file-level anchor, the number kept beside it as data, the placeholder
+ * spelling `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines for an
+ * illustration, and prose naming the repo for a third-party or dependency
+ * source no in-repo resolver could ever check. ⛔ Not one digit was repaired or
+ * repointed; every number that was in an anchor is still on its page, as data.
+ *
+ * The residual after that migration is 15, and every one of them is a file
+ * another lane holds OPEN right now -- not an ambiguity. ⚠️ That is why the
+ * flag is still `false`: the fence #15809 was dispatched under is that it flips
+ * only when the residual is ZERO and a self-test pins the flip, and a residual
+ * of 15 would make this gate permanently red for the length of somebody else's
+ * pull request. `--list-unresolvable` prints the residual so the next author
+ * inherits a worklist rather than a count; the day it prints nothing, the flag
+ * is a one-line change with a case to pin it.
  *
  * `checkBarePaths: false`, for the same reason and on a measurement: judging
  * every bare path code span in this corpus produces 1,617 findings, nearly all
