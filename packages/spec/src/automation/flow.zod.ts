@@ -934,7 +934,7 @@ export const FlowSchema = lazySchema(() => strictObject(
   // in `control-flow.zod.ts`, at `registerFlow()`); the flow's own top-level
   // `nodes[]` parsed with the collision intact. This pass judges the top-level
   // array ALONE: a region's nodes are judged by `analyzeRegion`, and whether the
-  // two spaces are one is a separate decision, not taken here.
+  // two spaces are one is a separate decision (#16134), not taken here.
   const firstNodeIndexById = new Map<string, number>();
   flow.nodes.forEach((node, index) => {
     const first = firstNodeIndexById.get(node.id);

@@ -2124,9 +2124,10 @@ describe('FlowSchema — top-level node ids are unique (#15713)', () => {
   // Scope boundary, pinned so the rule cannot silently widen: it judges the
   // flow's OWN top-level `nodes[]`. A region body (`loop.config.body.nodes`) is
   // `analyzeRegion`'s to judge, at `registerFlow()`, and whether a region node
-  // may reuse a top-level id — one id space or two — is an open decision that
-  // this rule neither takes nor pre-empts. This pin records today's accept set
-  // at that boundary; the decision, when taken, moves it deliberately.
+  // may reuse a top-level id — one id space or two — is an open decision
+  // (#16134) that this rule neither takes nor pre-empts. This pin records
+  // today's accept set at that boundary; the decision, when taken, moves it
+  // deliberately.
   it('judges the top-level nodes[] only — a region node reusing a top-level id is outside this rule', () => {
     const result = FlowSchema.safeParse(flowWith([
       { id: 'start', type: 'start', label: 'Start' },

@@ -43,7 +43,7 @@ every other refusal are untouched; a flow with unique top-level node ids
 parses exactly as before. The rule judges the flow's **own top-level**
 `nodes[]` only — a region body's nodes remain `analyzeRegion`'s to judge, and
 whether a region node may reuse a top-level node id (one id space or two) is a
-separate decision this change neither takes nor pre-empts.
+separate decision (#16134) this change neither takes nor pre-empts.
 
 The shape that is refused, and what the author does about it — a four-node
 excerpt, the later node renamed and its edge re-pointed:
