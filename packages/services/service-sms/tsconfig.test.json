@@ -1,3 +1,95 @@
+// The TEST-layer type-check program (#12511), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
+// stays exactly as it is: it is the BUILD config, and its `**/*.test.ts`
+// exclusion has a reason — ci.yml gates that no test file reaches the published
+// artifact. This sibling puts the excluded layer back in front of tsc, and
+// `package.json`'s `typecheck` script NAMES it (via `check:test-typecheck
+// --project`), because a config no script invokes is exactly the phantom this
+// whole mechanism is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, measured
+// rather than read off the config. At 6a1e38244 with the workspace closure
+// built first, `tsc --noEmit --listFiles -p tsconfig.json` — the only config
+// this package's `typecheck` named — puts 751 files in the program, 7 of
+// them this package's own `src/**`, and **0** of its 5 `src/**/*.test.ts`.
+// So the zero is the `exclude` line and not a probe that sees nothing. Positive
+// controls in the SAME run, same binary, same worktree: `packages/rest`'s test
+// program 186 test files, `packages/metadata-core`'s 15,
+// `packages/drivers/driver-memory`'s build config 44 — without them every zero
+// above is unfalsifiable. Under this file the count is **5 of 5**
+// (792 files in the program).
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS. This package is NOT `"type": "module"`, so the
+//     inherited NodeNext compiles as CommonJS the files vitest executes as ESM.
+//     Matching vitest is fidelity, not laxity. ⚠️ Measured subtraction on
+//     today's tree: **zero** — no test file here reaches for `import.meta` or
+//     writes an extension-less relative import, so on THIS tree the mismatch
+//     costs nothing. Of the seven packages onboarded by this card only
+//     `packages/formula` measured a subtraction (TS1470 x2), which is exactly
+//     why eight mechanical copies of one config would not have been eight
+//     correct configs. The override is declared anyway, because the alternative
+//     is that the first test file to use either construct gets a config-tier
+//     diagnostic ledgered as though it were a defect. ⚠️ `bundler` resolution
+//     also stops requiring `.js` on this package's own `src` relative imports IN
+//     THIS PROGRAM; nothing is lost by that, because leg 1 of `typecheck` still
+//     compiles `src` under the build config's NodeNext and is where that rule is
+//     enforced.
+//   - `lib: ["ES2022"]`, for the reason `packages/rest` and `packages/lint`
+//     state: the root config's `lib` is ES2020 while vitest runs these files on
+//     a Node with ES2022 builtins, so the gap is reported as TS2550 about the
+//     CHECK rather than about the code. ⚠️ Measured effect today: **zero** —
+//     this layer carries no TS2550 either way. Fidelity to the runtime, not
+//     error reduction, and it is stated that way rather than claimed as a
+//     subtraction. It is also the exact trap the card that ordered this file was
+//     filed about: `Object.hasOwn` in a new test is TS2550 against a pre-ES2022
+//     lib, and the package's advertised `typecheck` said nothing about it. No
+//     `DOM`: nothing in this layer touches a browser global.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `types: ["node"]` and `rootDir` are inherited from `tsconfig.json` and
+//     through it the root config, and none of them is re-declared here.
+//     `rootDir` (`./src`) needs no widening: every test file here lives under
+//     `src` and none reaches outside the package, so the TS6059 pile
+//     `packages/cli`'s sibling had to widen `rootDir` to clear does not arise —
+//     measured, the raw program carries no TS6059. ⚠️ A child that declared its
+//     own `paths` would REPLACE the parent map rather than merge into it,
+//     silently sending a source-resolved specifier back to `dist/`, so this file
+//     declares none. Nothing here may loosen a type rule; if a test does not
+//     compile, that is the finding.
+//
+// MEASURED at 6a1e38244 with the dependency closure built (an error count taken
+// against an unbuilt closure is not a reading — unresolved-import cascades
+// inflate it): this layer reports **1 error across 1 file**, which is the same 1 that
+// `scripts/check-type-check-coverage.mjs` recorded for this package in its
+// per-PACKAGE `TEST_DEBT` ledger, reproduced class for class (TS2493 x1) and
+// file for file. That entry GRADUATES in this change rather than being paid
+// down: the identical population is now held one level finer, per file and per
+// signature, in `test-typecheck-debt.json` beside this config. There is no
+// config-tier subtraction here and nothing was exposed behind one, so the
+// attribution has no remainder in either direction.
+//
+// // The single error is `Tuple type '[]' of length '0' has no element at index '0'`
+// in `src/transports/transports.test.ts` — the same one the deleted `TEST_DEBT`
+// entry named, and it has survived two arrivals of new hidden test files without
+// moving. ⚠️ A one-entry ledger is the MOST exposed to a bad regeneration, not
+// the least: a recomputation that writes zero deletes the whole record.
+//
+// Every one of the 1 is PRE-EXISTING: this change edits no test file, and each
+// would have been reported on `origin/main` had this program always existed.
+// They are ledgered EXACT and shrink-only — a file that gains an error is red,
+// one that loses one is red until re-recorded, one that reaches zero is red
+// until its entry is deleted, a signature that ARRIVES or VANISHES is red even
+// at an unchanged file total, and a file NOT listed there may have no errors at
+// all. ⛔ The 1 are NOT repaired here: seeding the ledger is the deliverable,
+// and turning an onboarding into a cleanup is how it stops landing at all.
+//
+// ⚠️ 4 of the 5 files carry NO ledger entry, and that is load-bearing
+// rather than incidental: any error any one of them ever gains is red on
+// arrival. That is the half of this gate that starts working today. This layer
+// also holds ZERO `@ts-expect-error` directives (grepped with a positive control
+// — the same grep hits `packages/spec/src`), so no pin here was silently dead;
+// what the gap cost was the other half.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

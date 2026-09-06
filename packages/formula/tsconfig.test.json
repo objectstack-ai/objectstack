@@ -1,3 +1,82 @@
+// The TEST-layer type-check program (#12511), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
+// stays exactly as it is: it is the BUILD config, and its `**/*.test.ts`
+// exclusion has a reason — ci.yml gates that no test file reaches the published
+// artifact. This sibling puts the excluded layer back in front of tsc, and
+// `package.json`'s `typecheck` script NAMES it (via `check:test-typecheck
+// --project`), because a config no script invokes is exactly the phantom this
+// whole mechanism is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, measured
+// rather than read off the config. At 6a1e38244 with the workspace closure
+// built first, `tsc --noEmit --listFiles -p tsconfig.json` — the only config
+// this package's `typecheck` named — puts 181 files in the program, 15 of them
+// this package's own `src/**`, and **0** of its 29 `src/**/*.test.ts`. Positive
+// controls in the SAME run: `packages/rest`'s test program 186 test files,
+// `packages/metadata-core`'s 15, `packages/drivers/driver-memory`'s build
+// config 44. Under this file the count is **29 of 29** (271 files in program).
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS, and this is the ONE package of the seven onboarded with
+//     this card where the change subtracts a measured error pile. This package
+//     is NOT `"type": "module"`, so the inherited NodeNext compiles as CommonJS
+//     the files vitest executes as ESM, and two of them use `import.meta.url` to
+//     locate fixtures. Measured cost of that mismatch: TS1470 x2 ("the
+//     `import.meta` meta-property is not allowed in files which will build into
+//     CommonJS output", `src/rls-predicate.test.ts` and
+//     `src/skill-catalog-sync.test.ts`). Those 2 are about the CHECK, never
+//     about the code, and they are the whole of the 17 -> 15 step below.
+//     Matching vitest is fidelity, not laxity.
+//     ⚠️ `bundler` resolution also stops requiring `.js` on this package's own
+//     `src` relative imports IN THIS PROGRAM — nothing is lost by that, because
+//     leg 1 of `typecheck` still compiles `src` under the build config's
+//     NodeNext and is where that rule is enforced.
+//   - `lib: ["ES2022"]`, for the reason `packages/rest` and `packages/lint`
+//     state: the root config's `lib` is ES2020 while vitest runs on a Node with
+//     ES2022 builtins, so the gap is reported as TS2550 about the CHECK.
+//     ⚠️ Measured effect on today's tree: **zero** — this layer carries no
+//     TS2550 either way. Fidelity to the runtime, not error reduction, and it is
+//     stated that way rather than claimed as a subtraction. No `DOM`: nothing in
+//     this layer touches a browser global.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     and `rootDir` are inherited from `tsconfig.json` and through it the root
+//     config. `rootDir` needs no widening: every test file here lives under
+//     `src` and none reaches outside the package. ⚠️ A child declaring its own
+//     `paths` would REPLACE the parent map rather than merge into it, so this
+//     file declares none. Nothing here may loosen a type rule; if a test does
+//     not compile, that is the finding.
+//
+// MEASURED at 6a1e38244 with the dependency closure built: the raw program
+// (build semantics, test glob dropped) reports **17**, reproducing the 17 that
+// `scripts/check-type-check-coverage.mjs` recorded in its per-PACKAGE
+// `TEST_DEBT` ledger; under this config it reports **15 errors across 5 files**.
+// The -2 is the TS1470 pair above, and NOTHING was exposed behind it — there was
+// no unresolved-import cascade to collapse, so the attribution has no remainder
+// in either direction.
+//
+// ⚠️ A COMPOSITION CORRECTION the deleted ledger entry earned: it attributed its
+// TS2591 x6 to «`process`». Measured here, all six are node builtins named as
+// bare module specifiers — `node:fs` x2, `node:path` x2, `node:url` x2, in those
+// same two files — and the TS2339 x2 beside them read `Property 'url' does not
+// exist on type 'ImportMeta'`. Both classes SURVIVE this move, and both have one
+// cause: this package declares no `@types/node` and its tsconfig names no
+// `types`, so the node typings never reach its program. That is real debt with a
+// real repair. ⛔ It is deliberately NOT repaired here — seeding the ledger is
+// the deliverable, and turning an onboarding into a cleanup is how it stops
+// landing at all.
+//
+// Every one of the 15 is PRE-EXISTING: this change edits no test file, and each
+// would have been reported on `origin/main` had this program always existed.
+// They are ledgered per file and per signature in `test-typecheck-debt.json`
+// beside this config, EXACT and shrink-only — a file that gains an error is red,
+// one that loses one is red until re-recorded, one that reaches zero is red
+// until its entry is deleted, a signature that ARRIVES or VANISHES is red even
+// at an unchanged file total, and a file NOT listed there may have no errors at
+// all. 24 of the 29 files carry no entry, so any error any of them gains is red
+// on arrival. This layer holds ZERO `@ts-expect-error` directives (grepped with
+// a positive control — the same grep hits `packages/spec/src`), so no pin here
+// was silently dead.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

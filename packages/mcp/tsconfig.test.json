@@ -1,3 +1,96 @@
+// The TEST-layer type-check program (#12511), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised, and which 31 sibling configs now
+// use. `tsconfig.json` beside this file stays exactly as it is: it is the BUILD
+// config, and its `**/*.test.ts` exclusion has a reason — ci.yml gates that no
+// test file reaches the published artifact. This sibling puts the excluded
+// layer back in front of tsc, and `package.json`'s `typecheck` script NAMES it
+// (via `check:test-typecheck --project`), because a config no script invokes is
+// exactly the phantom this whole mechanism is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, and that
+// is measured rather than read off the config. At 6a1e38244 with the workspace
+// closure built first, `tsc --noEmit --listFiles -p tsconfig.json` — the ONLY
+// config this package's `typecheck` named — puts 412 files in the program, 11
+// of them this package's own `src/**`, and **0** of its 26 `src/**/*.test.ts`.
+// So the zero is the `exclude` line and not a probe that sees nothing. Positive
+// controls in the SAME run, same binary, same worktree: `packages/rest`'s test
+// program 186 test files, `packages/metadata-core`'s 15,
+// `packages/drivers/driver-memory`'s build config 44 — without them every zero
+// above is unfalsifiable. Under this file the count is **26 of 26** (553 files
+// in the program).
+//
+// ⚠️ MODULE SEMANTICS ARE UNTOUCHED HERE, unlike `packages/rest`'s sibling and
+// most of the family — and that is this package's own judgement, not an
+// omission. `@objectstack/mcp` IS `"type": "module"`, so the build config's
+// inherited NodeNext already reads these files as ESM; it is also the STRICTER
+// of the two readings, since it holds the `.js` import extensions this package
+// must ship, which `bundler` resolution would let a missing extension compile
+// past and fail at run time under Node. Measured rather than assumed: this
+// layer writes **zero** extension-less relative imports, and switching to
+// `esnext`/`bundler` subtracts nothing from the 53 below. `metadata-core`'s
+// sibling is the precedent for this shape; `rest`'s is not.
+//
+//   - `lib: ["ES2022"]` IS declared, and it is the one departure. The root
+//     config's `lib` is ES2020 while vitest runs these files on a Node with
+//     ES2022 builtins, so the gap is reported as TS2550 about the CHECK rather
+//     than about the code. ⚠️ Measured effect on today's tree: **zero** — this
+//     layer carries no TS2550 either way. It is fidelity to the runtime, not
+//     error reduction, and it is stated that way on purpose. It is also the
+//     exact trap the card that ordered this file was filed about: a dev wrote
+//     `Object.hasOwn` in a new test, which against a pre-ES2022 lib is TS2550,
+//     and the package's advertised `typecheck` said nothing while a full-closure
+//     build was the only thing that could see it.
+//   - `rootDir` is INHERITED (`./src`) and needs no widening, which is worth
+//     recording because `packages/cli`'s sibling had to widen its own. This
+//     package's tests all live under `src`. The one import that escapes the
+//     package —`src/canonical-expression-envelopes.test.ts` reaching
+//     `../../../scripts/js-comment-mask.mjs` — lands on a checked-in
+//     `js-comment-mask.d.mts`, so it resolves as a declaration file and reports
+//     no TS6059. Measured, not reasoned: the raw program carries no TS6059.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     and `types: ["node"]` are inherited from `tsconfig.json` and through it
+//     the root config, and none is re-declared here. ⚠️ A child declaring its
+//     own `paths` would REPLACE the parent map rather than merge into it, so
+//     this file declares none. Nothing here may loosen a type rule; if a test
+//     does not compile, that is the finding.
+//
+// MEASURED at 6a1e38244 with the dependency closure built (an error count taken
+// against an unbuilt closure is not a reading — unresolved-import cascades
+// inflate it): this layer reports **53 errors across 6 files**, which is the
+// same 53 `scripts/check-type-check-coverage.mjs` recorded for this package in
+// its per-PACKAGE `TEST_DEBT` ledger, reproduced class for class (TS18046 x51,
+// TS2352 x1, TS6133 x1) and file for file. That entry GRADUATES in this change
+// rather than being paid down: the identical population is now held one level
+// finer, per file and per signature, in `test-typecheck-debt.json` beside this
+// config. 51 of the 53 are one idiom — `await res.json()` bound without a
+// narrowing — across four suites, so one helper there is very nearly the whole
+// ledger.
+//
+// Every one of the 53 is PRE-EXISTING: this change edits no test file, and each
+// would have been reported on `origin/main` had this program always existed.
+// They are ledgered EXACT and shrink-only — a file that gains an error is red,
+// one that loses one is red until re-recorded, one that reaches zero is red
+// until its entry is deleted, a signature that ARRIVES or VANISHES is red even
+// at an unchanged file total, and a file NOT listed there may have no errors at
+// all. ⛔ The 53 are NOT repaired here: seeding the ledger is the deliverable,
+// and turning an onboarding into a cleanup is how it stops landing at all.
+//
+// ⚠️ 20 of the 26 files carry NO ledger entry, and that is load-bearing rather
+// than incidental: any error any one of them ever gains is red on arrival. That
+// is the half of this gate that starts working today. This layer also holds
+// ZERO `@ts-expect-error` directives (grepped with a positive control — the
+// same grep hits `packages/spec/src`), so no pin here was silently dead; what
+// the gap cost was the other half.
+//
+// ⚠️ ONE DISAGREEMENT THIS FILE DOES NOT CLOSE, declared so it is not read as an
+// oversight: `vitest.config.ts` aliases `@objectstack/metadata-core` and
+// `@objectstack/lint` to those packages' SOURCE, while this program resolves
+// their TYPES through `dist/`. `paths` is the obvious repair and is measured to
+// be the wrong one for an ONBOARDING program (PR #12570 billed other packages'
+// source diagnostics into the onboarding package's ledger), so the exposure is
+// declared in `scripts/check-type-source-resolution.mjs`'s shrink-only registry
+// instead, where it stays visible. That file's #12511 doc-block has the numbers.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
