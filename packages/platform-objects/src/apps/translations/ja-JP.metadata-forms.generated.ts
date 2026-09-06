@@ -120,6 +120,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "最小長",
         helpText: "最小文字数"
       },
+      "fields.valueDomain": {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+      },
       "fields.rows": {
         label: "Rows",
         helpText: "Inline editor height (text rows)"
@@ -384,6 +388,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "最大長",
         helpText: "最大文字数"
       },
+      valueDomain: {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+      },
       rows: {
         label: "Rows",
         helpText: "Inline editor height in text rows"
@@ -547,8 +555,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "エラー時"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -932,9 +940,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       gap: {
         label: "間隔",
-        helpText: "グリッド間隔（Tailwind 単位）"
+        helpText: "ウィジェット間の間隔、0.25rem 刻み（4 = 1rem）"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "更新間隔",
         helpText: "自動更新（秒）"
       },

@@ -137,6 +137,7 @@
  */
 
 import { compileCelToFilter } from '@objectstack/formula';
+import { recordsOf } from './object-graph.js';
 
 /** A `condition` outside the pushdown subset — the rule is never seeded. */
 export const SHARING_RULE_UNLOWERABLE_CONDITION = 'sharing-rule-unlowerable-condition';
@@ -164,15 +165,6 @@ export interface SharingRuleEnforceabilityFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
@@ -264,7 +256,7 @@ function effectiveSharingModelOf(obj: AnyRec): 'private' | 'read' | 'public' {
 
 /** The master a `controlled_by_parent` detail derives its access from, if named. */
 function masterOf(obj: AnyRec): string | undefined {
-  for (const f of asArray(obj.fields)) {
+  for (const f of recordsOf(obj.fields)) {
     if (f.type === 'master_detail') {
       const ref = f.reference;
       if (typeof ref === 'string' && ref) return ref;
@@ -428,12 +420,12 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
   const cfg = (stack ?? {}) as AnyRec;
 
   const objectsByName = new Map<string, AnyRec>();
-  for (const obj of asArray(cfg.objects)) {
+  for (const obj of recordsOf(cfg.objects)) {
     const name = str(obj.name);
     if (name) objectsByName.set(name, obj);
   }
 
-  asArray(cfg.sharingRules).forEach((rule, index) => {
+  recordsOf(cfg.sharingRules).forEach((rule, index) => {
     anchorFindings(rule, index, objectsByName).forEach((f) => findings.push(f));
 
     const input = toCompilerInput(rule.condition);

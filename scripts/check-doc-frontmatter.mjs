@@ -251,12 +251,21 @@
  * fails the battery instead of reading as zero extra roots.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { requireDependency } from './import-prerequisite.mjs';
+import {
+  EXIT_FINDINGS,
+  EXIT_PREREQUISITE_NOT_MET,
+  INSTALL_FIX,
+  entryPointOnDisk,
+  findPackageDir,
+  importerCommandPath,
+  reportPrerequisiteNotMet,
+  requireDependency,
+} from './import-prerequisite.mjs';
 const { parse, parseDocument } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
 import { isEntrypoint } from './invoked-as.mjs';
@@ -289,11 +298,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(9) the blog root\'s OWN keys, each observed firing': 16,
   '(10) ROOTS is pinned to `apps/docs/source.config.ts`': 8,
   '(8) WIRING: the gate and its self-test really run in CI': 2,
+  '(11) an unmet prerequisite REFUSES, it does not blame the battery': 14,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -859,6 +869,150 @@ export function main(roots = ROOTS) {
 }
 
 // ---------------------------------------------------------------------------
+// The self-test's ONE prerequisite: the docs build's own extractor
+// ---------------------------------------------------------------------------
+
+/**
+ * The module battery (7) resolves from `apps/docs`, named ONCE so the probe
+ * below and the battery that imports it cannot drift apart. A probe that asked
+ * about a different module than the battery loads is a phantom check: it would
+ * answer "met" for a tree the battery still cannot read, and the floor would go
+ * back to blaming itself.
+ */
+const DOCS_EXTRACTOR = 'fumadocs-core/content/md/frontmatter';
+
+/** The package that subpath belongs to -- what an install actually puts on disk. */
+const DOCS_EXTRACTOR_PKG = 'fumadocs-core';
+
+/** The app whose `node_modules` the extractor is resolved through. */
+const DOCS_APP = 'apps/docs';
+
+/**
+ * Everything this gate loads, for the copied checkout battery (11) refuses in.
+ *
+ * Self-verifying rather than remembered: a module added to this file's graph and
+ * not added here fails to LOAD in the child, and the exit-3 case reds instead of
+ * passing on a process that died for an unrelated reason.
+ */
+const CHILD_MODULE_GRAPH = [
+  'scripts/check-doc-frontmatter.mjs',
+  'scripts/import-prerequisite.mjs',
+  'scripts/cli-build-prerequisite.mjs',
+  'scripts/invoked-as.mjs',
+];
+
+/**
+ * Is battery (7)'s prerequisite met -- `null` when it is, a refusal verdict for
+ * `reportPrerequisiteNotMet` when it is not.
+ *
+ * ## The defect this removes
+ *
+ * `apps/docs`'s dependencies are absent in the checkout shape `CLAUDE.md`
+ * mandates -- a fresh per-task worktree, before `pnpm install`. Battery (7)
+ * could not resolve the extractor there, so its ONE resolvability assertion
+ * failed and its other nine cases never registered. The floor then fired on top
+ * of that and said, in this gate's own words:
+ *
+ *   self-test battery "(7) ..." registered 1 case(s), below its pinned floor of 10
+ *   A battery at or below its floor means cases STOPPED RUNNING -- the battery is
+ *   the bug, not the number.
+ *
+ * Both readings were wrong in the same direction. `1` is a FINDING's exit code
+ * and nothing had been found; the cases had not stopped running, they had never
+ * been reachable; and the remedy the text prescribes -- hunt for a deleted case
+ * -- looks for code nobody deleted. An absent prerequisite is NOT MEASURED, and
+ * this repo already answers that with exit 3 `PREREQUISITE NOT MET` across the
+ * scripts that print those two words. This gate was the one outside the
+ * convention, not the one proposing it, so nothing here is designed:
+ * `scripts/import-prerequisite.mjs` owns the wording, the exit code and the
+ * load-bearing "Nothing was measured" clause, and its header carries the
+ * argument for the number.
+ *
+ * ## What is a prerequisite here, and what is deliberately NOT
+ *
+ * ⛔ A probe that refused on anything the extractor leg can throw would replace
+ * one misleading verdict with another -- the failure `import-prerequisite.mjs`'s
+ * header refuses one file over. Only the two ON-DISK facts are a prerequisite,
+ * and they are read with that module's OWN probes rather than re-spelled here:
+ *
+ *   - `${DOCS_EXTRACTOR_PKG}` is nowhere on the resolution path from `${DOCS_APP}` -> install
+ *   - it is there, but the entry point its own package.json declares is not     -> install
+ *
+ * Everything else stays a FINDING, judged by battery (7) at exit 1 as before:
+ *
+ *   - the package is whole and the SUBPATH does not resolve -- the build's
+ *     extractor moved, which is exactly the drift battery (7) exists to catch;
+ *   - it resolves and the import THROWS -- a real defect in an installed
+ *     dependency, and this gate has no standing to prescribe an install for it.
+ *
+ * `root` is a parameter rather than `REPO_ROOT` so the self-test can pin every
+ * branch against constructed trees without an uninstalled checkout to run on.
+ *
+ * @param {string} root a repo root to ask about
+ * @returns {{ pkg: string, headline: string, detail: string[], fix: string } | null}
+ *   -- `pkg` is the shape `classifyImportFailure` returns, so the shared frame's
+ *   closure step reads this verdict exactly as it reads its own.
+ */
+export function docsExtractorPrerequisite(root) {
+  const from = join(root, DOCS_APP);
+  const modules = join(from, 'node_modules');
+  const notAShrunkenBattery = [
+    ``,
+    `⛔ This is NOT a shrunken battery. Battery (7) registers its cases only once the`,
+    `extractor is in hand, so with it unreadable there is nothing to count -- and a floor`,
+    `reported against that count sends the reader hunting for a deleted case that was never`,
+    `deleted.`,
+    ``,
+    `NO battery ran, including the ones that never touch \`${DOCS_APP}\`: the refusal is raised`,
+    `before the first case registers, so the "nothing was measured" clause below is literal.`,
+    ``,
+    `The ENFORCING run does not need this and is unaffected:`,
+    `\`node ${importerCommandPath(import.meta.url)}\` judges the corpus with \`yaml\` alone.`,
+  ];
+
+  const pkgDir = findPackageDir(DOCS_EXTRACTOR_PKG, from);
+  if (!pkgDir) {
+    return {
+      pkg: DOCS_EXTRACTOR_PKG,
+      headline: `\`${DOCS_EXTRACTOR_PKG}\` is not installed for \`${DOCS_APP}\``,
+      detail: [
+        `Battery (7) resolves \`${DOCS_EXTRACTOR}\` from \`${DOCS_APP}/package.json\` and`,
+        `cross-checks this gate's extraction against it, so that the regex copied from the docs`,
+        `build cannot drift into a private idea of where a page's frontmatter starts.`,
+        ``,
+        existsSync(modules)
+          ? `\`${modules}\` exists, so this checkout was installed at least once -- but no`
+          : `\`${modules}\` does not exist, and no`,
+        `\`node_modules/${DOCS_EXTRACTOR_PKG}\` is on the resolution path from ${from}.`,
+        ...notAShrunkenBattery,
+      ],
+      fix: INSTALL_FIX,
+    };
+  }
+
+  const entry = entryPointOnDisk(pkgDir);
+  // `unknown` is the deferral this family owes everywhere: a manifest that could
+  // not be read, or one declaring no default entry, is not evidence of anything.
+  // The verdict stays with battery (7), which is where it was.
+  if (entry.present !== false) return null;
+
+  return {
+    pkg: DOCS_EXTRACTOR_PKG,
+    headline: `\`${DOCS_EXTRACTOR_PKG}\` is installed for \`${DOCS_APP}\` but incomplete`,
+    detail: [
+      `\`${pkgDir}\` exists, but the entry point its package.json declares is missing:`,
+      ``,
+      `  ${entry.file}`,
+      ``,
+      `That is a broken or partial install rather than an uninstalled tree; the remedy is the`,
+      `same, and battery (7) can read the extractor through neither.`,
+      ...notAShrunkenBattery,
+    ],
+    fix: INSTALL_FIX,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Self-test -- the battery observed going RED, plus REAL unreadable trees
 // ---------------------------------------------------------------------------
 
@@ -903,6 +1057,40 @@ export function main(roots = ROOTS) {
 let selfTestReachedVerdict = false;
 
 export async function selfTest() {
+  // ── The ONE prerequisite, asked BEFORE a single case runs ────────────────
+  //
+  // Placed here rather than beside battery (7), the only battery that needs it,
+  // so the shared frame's load-bearing clause -- "this gate exited before
+  // running a single check" -- is literally true when it prints. Every gate that
+  // imports that frame inherits the sentence verbatim, so a refusal issued after
+  // six batteries had already judged would make it false in all of them at once.
+  //
+  // The price is real and worth naming: on a tree where `apps/docs` is not
+  // installed, batteries (1)-(10) no longer report their own findings. That tree
+  // is a local one -- CI's `lint` job runs `pnpm install --frozen-lockfile` over
+  // the whole workspace, so this line is never reached there -- and the run still
+  // FAILS either way. What a reader loses is a finding they could not have
+  // trusted the count of; what they gain is a verdict that does not lie about
+  // what was measured.
+  //
+  // ⛔ This is not a weaker gate. Exit 3 is non-zero and every consumer of this
+  // script treats any non-zero as failure, so nothing that used to red goes
+  // green -- what changes is that an unmeasurable condition stops arriving
+  // wearing a finding's exit code. A run that gets PAST this line is in a
+  // checkout where the extractor is readable, and every battery below judges
+  // exactly as it did before this guard existed.
+  const unmetPrerequisite = docsExtractorPrerequisite(REPO_ROOT);
+  if (unmetPrerequisite) {
+    // Prints the shared frame and exits `EXIT_PREREQUISITE_NOT_MET`; never returns.
+    reportPrerequisiteNotMet(
+      import.meta.url,
+      unmetPrerequisite,
+      // Short on purpose: the frame inlines this into a sentence it does not
+      // wrap, and a long clause there buries the reading it carries.
+      'any battery in this self-test can go red',
+    );
+  }
+
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -1194,8 +1382,8 @@ export async function selfTest() {
     let extract = null;
     let resolveError = null;
     try {
-      const req = cr(join(REPO_ROOT, 'apps/docs/package.json'));
-      const mod = await import(pathToFileURL(req.resolve('fumadocs-core/content/md/frontmatter')).href);
+      const req = cr(join(REPO_ROOT, `${DOCS_APP}/package.json`));
+      const mod = await import(pathToFileURL(req.resolve(DOCS_EXTRACTOR)).href);
       extract = mod.frontmatter;
     } catch (err) {
       resolveError = err?.message ?? String(err);
@@ -1369,6 +1557,167 @@ export async function selfTest() {
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
   }
 
+  // ── (11) an unmet prerequisite REFUSES, it does not blame the battery ────
+  //
+  // The two conditions that used to print the same verdict, pinned apart. An
+  // unreadable extractor is NOT MEASURED -- exit 3, the prerequisite named. A
+  // battery that genuinely stopped registering is a FINDING -- exit 1, the
+  // battery named. The floor above is not one case weaker for it; what changed
+  // is that the unmeasurable condition no longer reaches it wearing a finding's
+  // clothes.
+  //
+  // ⛔ What is pinned is the PRINTED refusal, never the exit code alone. A run
+  // that exits 3 while still printing "the battery is the bug" would satisfy a
+  // code-only assertion and leave the reader exactly where this card found them
+  // -- hunting for a deleted case that was never deleted. So the negative half
+  // is asserted too: that sentence must be ABSENT from what the refusal prints.
+  battery('(11) an unmet prerequisite REFUSES, it does not blame the battery');
+  const { cpSync } = await import('node:fs');
+  const { spawnSync } = await import('node:child_process');
+
+  /** A throwaway repo root carrying `apps/docs` and nothing else. */
+  const prereqRoot = () => {
+    const root = mkdtempSync(join(tmpdir(), 'doc-frontmatter-prereq-'));
+    mkdirSync(join(root, DOCS_APP), { recursive: true });
+    return root;
+  };
+  /** Put a `fumadocs-core` on that root's resolution path, with the manifest given. */
+  const withExtractor = (root, manifest, entryFile) => {
+    const d = join(root, DOCS_APP, 'node_modules', DOCS_EXTRACTOR_PKG);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, 'package.json'), JSON.stringify(manifest));
+    if (entryFile) writeFileSync(join(d, entryFile), '// built\n');
+    return root;
+  };
+  const WHOLE = { name: DOCS_EXTRACTOR_PKG, main: 'index.js' };
+
+  const uninstalled = prereqRoot();
+  const installedEmpty = prereqRoot();
+  mkdirSync(join(installedEmpty, DOCS_APP, 'node_modules'), { recursive: true });
+  const whole = withExtractor(prereqRoot(), WHOLE, 'index.js');
+  const partial = withExtractor(prereqRoot(), WHOLE, null);
+  const noEntryDeclared = withExtractor(prereqRoot(), { name: DOCS_EXTRACTOR_PKG }, null);
+  const childRoot = mkdtempSync(join(tmpdir(), 'doc-frontmatter-uninstalled-'));
+
+  try {
+    // The negative control the whole battery rests on: THIS checkout meets the
+    // prerequisite, so every battery above judged exactly as it did before the
+    // guard existed. Without it, an always-refusing probe would pass the rest.
+    assert(
+      docsExtractorPrerequisite(REPO_ROOT) === null,
+      `the checkout this run loaded from MEETS the prerequisite, so batteries (1)-(10) above are unaffected -- ` +
+        `got ${JSON.stringify(docsExtractorPrerequisite(REPO_ROOT))}`,
+    );
+    assert(
+      docsExtractorPrerequisite(whole) === null,
+      'a tree that HAS the extractor is not refused -- the probe answers about the package, not about being run',
+    );
+
+    const absent = docsExtractorPrerequisite(uninstalled);
+    assert(
+      absent !== null && absent.headline.includes(DOCS_EXTRACTOR_PKG) && absent.headline.includes(DOCS_APP),
+      `an uninstalled \`${DOCS_APP}\` is a prerequisite miss naming the package -- got ${JSON.stringify(absent)}`,
+    );
+    assert(
+      absent?.fix === INSTALL_FIX,
+      `and it prescribes the install, never a hunt for code nobody deleted -- got ${absent?.fix}`,
+    );
+    assert(
+      absent?.detail.some((l) => l.includes('does not exist')),
+      'the detail says the `node_modules` it looked for is not there -- a fresh worktree, not a broken one',
+    );
+    const halfInstalled = docsExtractorPrerequisite(installedEmpty);
+    assert(
+      halfInstalled !== null && halfInstalled.detail.some((l) => l.includes('installed at least once')),
+      `a \`node_modules\` without the package reads as a PARTIAL install, not an absent tree -- ` +
+        `got ${JSON.stringify(halfInstalled?.detail)}`,
+    );
+    const incomplete = docsExtractorPrerequisite(partial);
+    assert(
+      incomplete !== null && incomplete.headline.includes('incomplete')
+        && incomplete.detail.some((l) => l.includes('index.js')),
+      `a package present without its declared entry point names that entry point -- got ${JSON.stringify(incomplete)}`,
+    );
+    // The deferral this family owes everywhere: a manifest naming no default
+    // entry is not evidence of anything, so the verdict stays with battery (7).
+    assert(
+      docsExtractorPrerequisite(noEntryDeclared) === null,
+      'a manifest declaring no default entry is DEFERRED to battery (7), never guessed at as an install miss',
+    );
+
+    // ── end to end, on the card's own repro ────────────────────────────────
+    //
+    // A copied checkout with no `apps/docs` at all, read back through the exit
+    // code a shell actually sees. `yaml` is copied in because this gate refuses
+    // on THAT prerequisite at module load otherwise -- the child would exit 3
+    // for the wrong reason, and the text assertions below are what would catch
+    // it. The copied module graph is self-verifying: an import added here and
+    // not added there fails to load, and the exit-3 case reds rather than
+    // passing on a process that died for an unrelated reason.
+    //
+    // ⛔ The child must never spawn a child of its own. It reaches this battery
+    // only when the probe did NOT refuse, and there its fixture tree is a
+    // perfect seed for the next copy. A marked run refuses to spawn and FAILS
+    // these cases with the reason, in the same number of them -- a HANG is the
+    // worst reading a gate can return, neither green nor red.
+    const childArgv = [join(childRoot, 'scripts/check-doc-frontmatter.mjs'), '--self-test', '--fixture-child'];
+    const nestedFixture = process.argv.includes('--fixture-child');
+    let refused;
+    if (nestedFixture) {
+      refused = {
+        status: null,
+        stdout: '',
+        stderr: 'this run was spawned BY the prerequisite battery and then reached that battery itself, '
+          + 'which can only happen when the probe did not refuse. Refusing to spawn a grandchild.',
+      };
+    } else {
+      mkdirSync(join(childRoot, 'scripts'), { recursive: true });
+      for (const rel of CHILD_MODULE_GRAPH) cpSync(join(REPO_ROOT, rel), join(childRoot, rel));
+      // Dereferenced: pnpm links `node_modules/yaml` into the store, and a
+      // symlink copied AS a symlink would point back at this checkout.
+      cpSync(join(REPO_ROOT, 'node_modules/yaml'), join(childRoot, 'node_modules/yaml'), {
+        recursive: true,
+        dereference: true,
+      });
+      refused = spawnSync(process.execPath, childArgv, {
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 120_000,
+      });
+    }
+    const said = `${refused.stderr ?? ''}${refused.stdout ?? ''}`;
+    assert(
+      childArgv.includes('--fixture-child') && nestedFixture === false,
+      'the fixture child is marked so it can never spawn one of its own',
+    );
+    assert(
+      refused.status === EXIT_PREREQUISITE_NOT_MET,
+      `an uninstalled \`${DOCS_APP}\` refuses end to end with that very code -- status=${refused.status} ` +
+        `${said.slice(0, 400)}`,
+    );
+    assert(
+      EXIT_PREREQUISITE_NOT_MET === 3 && EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS,
+      `the refusal code is the repo-wide 3 and never a finding's ${EXIT_FINDINGS}`,
+    );
+    assert(
+      said.includes('PREREQUISITE NOT MET') && said.includes(DOCS_EXTRACTOR_PKG) && said.includes(INSTALL_FIX),
+      `and the refusal names the class, the prerequisite and the remedy -- ${said.slice(0, 400)}`,
+    );
+    assert(
+      said.includes('Nothing was measured') && said.includes('It is NOT a finding'),
+      `and states in words that NOTHING was measured -- ${said.slice(0, 400)}`,
+    );
+    // The half a code-only assertion cannot reach: the confidently wrong
+    // diagnosis is GONE from what the reader is handed.
+    assert(
+      !said.includes('below its pinned floor') && !said.includes('the battery is the bug')
+        && !said.includes('cases that used to run no longer do'),
+      `and the confidently wrong diagnosis is GONE from what it prints -- ${said.slice(0, 400)}`,
+    );
+  } finally {
+    for (const d of [uninstalled, installedEmpty, whole, partial, noEntryDeclared, childRoot]) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -1431,8 +1780,10 @@ export async function selfTest() {
       `observed firing on a mapping and a number while absence stays clean and neither root's keys leak onto the ` +
       `other, main() returning 1 rather ` +
       `than throwing on both a violation and a refusal, extraction cross-checked against the docs build's own ` +
-      `extractor, ROOTS pinned against every defineDocs call in source.config.ts, and the CI wiring read out of ` +
-      `lint.yml.`,
+      `extractor, ROOTS pinned against every defineDocs call in source.config.ts, the CI wiring read out of ` +
+      `lint.yml, and an \`${DOCS_APP}\` whose extractor cannot be read observed REFUSING end to end with ` +
+      `exit ${EXIT_PREREQUISITE_NOT_MET} \`PREREQUISITE NOT MET\` -- the misleading floor diagnosis absent from ` +
+      `what it prints.`,
   );
   selfTestReachedVerdict = true;
   return 0;

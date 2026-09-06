@@ -28,7 +28,7 @@ Architecture Alignment:
 - Microsoft Dynamics: Web API with entity operations
 - Strapi: Auto-generated REST endpoints from schemas
 
-@example Serving routes from a plugin (imperative `http.server` mount)
+**Serving routes from a plugin (imperative `http.server` mount)**
 ```typescript
 // Routes are mounted in CODE — resolve the `http.server` service from the
 // plugin context and register handlers on `kernel:ready` (the service is
@@ -182,10 +182,12 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **tags** | `string[]` | optional | OpenAPI tags for grouping |
 | **requestSchema** | `string` | optional | Request schema name (for validation) |
 | **responseSchema** | `string` | optional | Response schema name (for documentation) |
-| **timeout** | `integer` | optional | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional | Request timeout in milliseconds |
 | **rateLimit** | `string` | optional | Rate limit policy name |
 | **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
-| **cacheTtl** | `integer` | optional | Cache TTL in seconds |
+| **cacheTtlSeconds** | `integer` | optional | Cache TTL in seconds |
+| **timeout** | `never` | optional | [REMOVED] `RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
+| **cacheTtl** | `never` | optional | [REMOVED] `RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring request timeout two lines above is in MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
 
 
@@ -207,7 +209,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **openApi** | `{ enabled: boolean; version: Enum<'3.0.0' \| '3.0.1' \| '3.0.2' \| '3.0.3' \| '3.1.0'>; title: string; description?: string; … }` | optional | OpenAPI documentation configuration |
 | **globalMiddleware** | `{ name: string; type: Enum<'authentication' \| 'authorization' \| 'logging' \| 'validation' \| 'transformation' \| 'error' \| 'custom'>; enabled: boolean; order: integer; … }[]` | optional | Global middleware stack |
 | **cors** | `{ enabled: boolean; origins?: string[]; methods?: Enum<'GET' \| 'POST' \| 'PUT' \| 'DELETE' \| 'PATCH' \| 'HEAD' \| 'OPTIONS'>[]; credentials: boolean }` | optional | CORS configuration |
-| **performance** | `{ enableCompression: boolean; enableETag: boolean; enableCaching: boolean; defaultCacheTtl: integer }` | optional | Performance optimization settings |
+| **performance** | `{ enableCompression: boolean; enableETag: boolean; enableCaching: boolean; defaultCacheTtlSeconds: integer }` | optional | Performance optimization settings |
 
 ### Nested Shape: `RestApiPluginConfig.routes[number]`
 
@@ -302,7 +304,8 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **enableCompression** | `boolean` | optional (default: `true`) | Enable response compression |
 | **enableETag** | `boolean` | optional (default: `true`) | Enable ETag generation |
 | **enableCaching** | `boolean` | optional (default: `true`) | Enable HTTP caching |
-| **defaultCacheTtl** | `integer` | optional (default: `300`) | Default cache TTL in seconds |
+| **defaultCacheTtlSeconds** | `integer` | optional (default: `300`) | Default cache TTL in seconds |
+| **defaultCacheTtl** | `never` | optional | [REMOVED] `RestApiPluginConfig.performance.defaultCacheTtl` was renamed to `defaultCacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `defaultCacheTtlSeconds`; the value (seconds) is unchanged. |
 
 
 ---
@@ -357,10 +360,12 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **tags** | `string[]` | optional | OpenAPI tags for grouping |
 | **requestSchema** | `string` | optional | Request schema name (for validation) |
 | **responseSchema** | `string` | optional | Response schema name (for documentation) |
-| **timeout** | `integer` | optional | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional | Request timeout in milliseconds |
 | **rateLimit** | `string` | optional | Rate limit policy name |
 | **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
-| **cacheTtl** | `integer` | optional | Cache TTL in seconds |
+| **cacheTtlSeconds** | `integer` | optional | Cache TTL in seconds |
+| **timeout** | `never` | optional | [REMOVED] `RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
+| **cacheTtl** | `never` | optional | [REMOVED] `RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the neighbouring request timeout two lines above is in MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged. |
 | **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
 
 ### Nested Shape: `RestApiRouteRegistration.middleware[number]`

@@ -555,6 +555,9 @@ approvals, decided by the register (check-governed-merges.mjs), not here.
 
 Verdict source: check-governed-merges.mjs --test (governed) +
 authorizedApprovalVerdict/GOVERNED_APPROVERS from check-governed-queue-guard.mjs.
-Deliberate exception (you know this one is right): OS_ALLOW_GOVERNED_ENQUEUE=1.
+Deliberate exception (you know this one is right): set OS_ALLOW_GOVERNED_ENQUEUE=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
 exit 2

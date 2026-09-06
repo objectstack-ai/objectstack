@@ -22,6 +22,9 @@
  *                   multi-value field `[]` is an empty value (#9476 — the
  *                   #9447 ruling: required means non-empty array).
  *  - `maxLength` / `minLength`            (text/textarea/email/url/phone/password)
+ *  - `valueDomain`  a declared standard domain's membership, judged by the
+ *                   spec's shared `isValueDomainMember` — the WRITTEN value
+ *                   only (#14168, maintainer ruling 2026-09-02 option A)
  *  - `min` / `max`                        (number/currency/percent/rating/slider)
  *  - `scale`        more decimal places than declared → `max_scale` (#7501;
  *                   rejection, NEVER rounding — maintainer ruling 2026-08-11)
@@ -48,11 +51,13 @@ import {
   ALL_OPERATORS,
   RETIRED_FILTER_OPERATORS,
   BOUNDED_STRING_FIELD_TYPES,
+  VALUE_DOMAIN_FIELD_TYPES,
   REFERENCE_VALUE_TYPES,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
+import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
   objectFieldLabelKey,
@@ -168,6 +173,15 @@ interface FieldDef {
   max?: number;
   /** Max decimal places for number types — enforced by rejection (#7501). */
   scale?: number;
+  /**
+   * Standard value domain the WRITTEN value must be a member of (#14168) —
+   * the same closed vocabulary and the same membership predicate a settings
+   * specifier's `valueDomain` uses, so a time zone accepted in Settings is the
+   * time zone accepted in a field. Typed as the spec's `ValueDomain` rather
+   * than `string`: an unknown domain word has no membership test to run, and
+   * `isValueDomainMember` is a total function over exactly this union.
+   */
+  valueDomain?: ValueDomain;
   options?: Array<{ value: string | number; label?: string } | string | number>;
 }
 
@@ -473,6 +487,47 @@ export function coerceBooleanFields<T extends Record<string, unknown>>(
   return (copy ?? row) as T;
 }
 
+/**
+ * The one parse issue an author can act on, out of everything zod reported for
+ * a value-shape rejection.
+ *
+ * NOT `issues[0]`. zod reports per-member issues before the object-level
+ * `unrecognized_keys` one, so on a value whose keys were RENAMED the actionable
+ * message sorts LAST. A `location` stored as `{latitude, longitude}` — the
+ * exact legacy shape `scan-value-shapes` names in its own header as one the
+ * scan exists to find — reports:
+ *
+ *     [0] invalid_type       lat   Invalid input: expected number, received undefined
+ *     [1] invalid_type       lng   Invalid input: expected number, received undefined
+ *     [2] unrecognized_keys        ... Did you mean `latitude` -> `lat`, `longitude` -> `lng`? ...
+ *
+ * The rename IS the prescription, and edit distance cannot reach it
+ * (`latitude` -> `lat`), which is exactly why `LocationValueSchema` curates an
+ * `aliases` map. Reading positionally builds that hint and then discards it,
+ * leaving an operator running `os migrate value-shapes` to derive the rename
+ * themselves while the identically-shaped `address` case is handed it.
+ *
+ * The preference is a NO-OP for every other class rather than merely harmless
+ * to it, which is what makes it safe as a blanket rule: of the sixteen types
+ * these readers cover, only `location` and `address` are backed by a
+ * `strictObject`, so only they can emit `unrecognized_keys` at all. The
+ * reference and file-reference classes are strings, `composite` / `record` /
+ * `repeater` / `vector` are open records and arrays, `json` is `z.unknown()`,
+ * and the one deliberately loose object shape (`FileValueSchema`) never refuses
+ * a key. For the other fourteen this cannot change a single character; both
+ * classes it does reach curate the alias map that makes the undeclared key the
+ * more actionable half of the rejection.
+ *
+ * Shared by both readers for the reason `valueShapeViolation` is exported
+ * rather than re-derived one layer up: two readings of the same rejection
+ * drifting by one clause is how one path prescribes the rename and the other
+ * hands out `expected number, received undefined`.
+ */
+function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message: string }> }): string {
+  const { issues } = error;
+  return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
+}
+
 function validateOne(
   name: string,
   def: FieldDef,
@@ -572,6 +627,51 @@ function validateOne(
     }
     if (def.minLength !== undefined && s.length < def.minLength) {
       return fail('min_length', { minLength: def.minLength, actual: s.length });
+    }
+    // ── `valueDomain` — membership in a published standard (#14168) ──
+    // Maintainer ruling 2026-09-02 (option A): ONE closed vocabulary and ONE
+    // membership predicate, shared by settings specifiers and object fields —
+    // so a currency code accepted in Settings is the code accepted in a field.
+    // The predicate is imported, never re-implemented: the repo already carries
+    // hand-rolled copies of the IANA probe, and a second opinion on membership
+    // is how "accepted in Settings, refused in a field" happens.
+    //
+    // The applicability door is the SPEC'S `VALUE_DOMAIN_FIELD_TYPES`, read as
+    // a constant for the same reason this branch reads `BOUNDED_STRING_FIELD_TYPES`
+    // (#11875): two seams reading one constant cannot drift into two opinions.
+    // The set is a strict subset of the bounded-string family (`text` alone
+    // today, against twelve) — which is why the check sits inside this branch
+    // and why the subset relation is pinned as a test rather than assumed.
+    // `FieldSchema` refuses the key outside the set at parse with a located
+    // issue at [valueDomain], and its refusal message states this seam's half
+    // of the contract verbatim: "the write-time validator applies `valueDomain`
+    // to exactly those types". Judging a hand-built runtime schema's key on the
+    // other eleven would make that sentence false.
+    //
+    // WRITTEN VALUE ONLY — the `min`/`max`/`maxLength` transition-gate class: a
+    // stored value outside a domain declared later is never re-read and survives
+    // unrelated edits (an omitted field never reaches here on update), and an
+    // absent/empty value is the `required` check's business above, not this one.
+    if (
+      def.valueDomain !== undefined &&
+      VALUE_DOMAIN_FIELD_TYPES.has(t) &&
+      !isValueDomainMember(def.valueDomain, s)
+    ) {
+      // One wire code — the ADR-0114 catalog member `value_domain`, with the
+      // domain shipped in `constraint` so a client can name it. The finer
+      // per-domain message key spells the standard out for a human ("a valid
+      // ISO 4217 currency code, e.g. CHF") in all four locales; it is a
+      // RENDERING choice and never reaches the wire, the same code/messageKey
+      // split `invalid_value_shape` and `required_cleared` use. The value is
+      // echoed because every one of those templates interpolates `{{value}}` —
+      // an uninterpolated placeholder ships `{{value}}` to the user verbatim.
+      return fail(
+        'value_domain',
+        { valueDomain: def.valueDomain },
+        `value_domain_${def.valueDomain}`,
+        undefined,
+        s,
+      );
     }
     if (t === 'email' && !EMAIL_RE.test(s)) {
       return fail('invalid_email');
@@ -733,7 +833,7 @@ function validateOne(
   if (REFERENCE_VALUE_TYPES.has(t) || FILE_REFERENCE_TYPES.has(t) || STRUCTURED_JSON_TYPES.has(t)) {
     const parsed = shapeSchemaFor(def).safeParse(value);
     if (!parsed.success) {
-      const detail = parsed.error.issues[0]?.message ?? 'invalid value shape';
+      const detail = valueShapeDetail(parsed.error);
       const isMedia = FILE_REFERENCE_TYPES.has(t);
       if (isMedia ? mediaStrictEffective(mediaStrict) : valueShapeStrictEffective(valueStrict)) {
         return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
@@ -872,7 +972,9 @@ export function mediaPostureSetByEnv(): boolean {
  * not recognise, which is precisely the borrowed-evidence failure the ADR's
  * addendum forbids one layer up.
  *
- * Returns the first parse issue's message, or `null` when the value conforms.
+ * Returns the actionable parse issue's message (see `valueShapeDetail` — the
+ * undeclared-key one when present, which is the half carrying the rename),
+ * or `null` when the value conforms.
  * A value that is missing (per `isMissing`) is never a violation: absence is
  * the `required` check's business, not the shape contract's.
  */
@@ -884,7 +986,7 @@ export function valueShapeViolation(def: FieldDef, value: unknown): string | nul
   }
   const parsed = shapeSchemaFor(def).safeParse(value);
   if (parsed.success) return null;
-  return parsed.error.issues[0]?.message ?? 'invalid value shape';
+  return valueShapeDetail(parsed.error);
 }
 
 /**
@@ -950,7 +1052,11 @@ export interface AdmittedValueShapeViolation {
   field: string;
   /** The declared field type, so a report can group by what went wrong. */
   type: string;
-  /** The first parse issue — the prescription an author acts on. */
+  /**
+   * The prescription an author acts on — `valueShapeDetail`'s reading of the
+   * rejection, the same string the warn-first log line and the
+   * `os migrate value-shapes` finding carry. Not positional.
+   */
   detail: string;
 }
 

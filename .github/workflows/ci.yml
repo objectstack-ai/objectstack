@@ -539,7 +539,7 @@ jobs:
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
             --shard ${{ matrix.shard }}/6 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
-          echo "Packages on this shard:"
+          echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
@@ -587,11 +587,69 @@ jobs:
           # vitest's own "use the default" signal. Needs turbo.json's
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
-          FILTERS=$(sed 's/^/--filter=/' "$RUNNER_TEMP/shard-packages.txt" | tr '\n' ' ')
           mkdir -p "$RUNNER_TEMP/stall-reports"
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
-            --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+
+          # Split the shard's ITEMS into the whole packages, which share one
+          # turbo run as they always have, and the file-level slices, which
+          # cannot: `--shard=k/n` is passed through to vitest by turbo as a
+          # RUN-level argument, so it would reach every package in the run —
+          # and on any package with fewer test files than n that is a hard
+          # vitest failure (or, with --passWithNoTests, silently no tests at
+          # all). A slice therefore gets its own invocation, filtered to the one
+          # package the partitioner sliced.
+          FILTERS=""
+          SLICES=""
+          while read -r PKG SLICE; do
+            [ -n "$PKG" ] || continue
+            if [ -n "$SLICE" ]; then
+              SLICES="$SLICES $PKG=$SLICE"
+            else
+              FILTERS="$FILTERS --filter=$PKG"
+            fi
+          done < "$RUNNER_TEMP/shard-packages.txt"
+
+          # Each leg tees to its OWN log — run-with-stall-guard opens the log
+          # with 'w', so a second leg pointed at one path would truncate the
+          # first leg's output and the completeness guard below would grade half
+          # a shard. They are concatenated afterwards, and that concatenation
+          # happens even when a leg failed, because a red suite is exactly when
+          # the completeness guard earns its keep.
+          #
+          # ⛔ A failing leg STOPS the remaining ones, the same way turbo stops
+          # scheduling on the first failure inside one run. Carrying on would add
+          # a second full suite to a job that is already red and already inside a
+          # 30-minute wall — turning an informative red into a killed job with no
+          # attestation at all, which is the #16173 failure mode itself.
+          STATUS=0
+          LOGS=""
+          for LEG in __whole__ $SLICES; do
+            if [ "$LEG" = __whole__ ]; then
+              [ -n "$FILTERS" ] || continue
+              LOG="$RUNNER_TEMP/test-core-packages.log"
+              set -- pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+            else
+              PKG="${LEG%%=*}"
+              SLICE="${LEG#*=}"
+              LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+            fi
+            LOGS="$LOGS $LOG"
+            node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
+              --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
+          done
+
+          # Only over logs that EXIST, and via an explicit `if` rather than a
+          # `&&` chain: a leg whose guard never got far enough to open its log
+          # would otherwise make `cat` non-zero, and under `set -e` that replaces
+          # the SUITE's exit status with cat's — the step would report the wrong
+          # reason for its own red.
+          : > "$RUNNER_TEMP/test-core.log"
+          for LOG in $LOGS; do
+            if [ -f "$LOG" ]; then
+              cat "$LOG" >> "$RUNNER_TEMP/test-core.log"
+            fi
+          done
+          exit $STATUS
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
@@ -634,6 +692,31 @@ jobs:
           path: .turbo/runs/
           if-no-files-found: ignore
           retention-days: 1
+
+      # ⛔ THE DRIFT STEP IS DELIBERATELY NOT WIRED HERE YET (#16173).
+      #
+      # partition-test-shards.mjs carries a fully-tested `--check-drift` mode —
+      # it reads the summary uploaded above back and reds when a shard's MEASURED
+      # test total outruns its PREDICTED one past MAX_MEASURED_OVER_PREDICTED. The
+      # code, its self-tests and its ablation are all on this branch; only this
+      # invocation waits, and the wait is a SEQUENCING decision, not an oversight.
+      #
+      # Why: scripts/test-shard-timings.json is still stale for @objectstack/cli
+      # (458.15s recorded, 1231.52s measured), so wiring the step today would red
+      # the shard carrying a CLI slice on every single PR — a true reading, but one
+      # that blocks everything until the dataset is refreshed. The file-level split
+      # above already removes the urgent hazard on its own, taking the worst shard
+      # from ~1445s (80% of this job's 30-minute wall) to ~1059s (59%) with the
+      # dataset untouched, because the CLI is halved across two runners instead of
+      # falling on one.
+      #
+      # ⇒ The refresh and this step land TOGETHER in the follow-up, in that order.
+      # The refresh recipe is in PR #16220's body. When it lands, restore a step
+      # here that runs `--check-drift` over `.turbo/runs/*.json` with
+      # `--label "Test Core (${{ matrix.shard }}/6)"`, with NO `if:` and NO
+      # `continue-on-error` (the point is the red), placed ABOVE the attestation
+      # pair for the #6082 reason documented on the upload above — so a drift red
+      # also withholds the attestation, which is the fail-closed direction.
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1491,6 +1574,19 @@ jobs:
 
       - name: Build packages (excluding docs)
         run: pnpm build
+
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
 
       # A package that builds with plain `tsc` and does not exclude tests emits
       # `dist/**/*.test.js`. Two costs, and the second is the dangerous one:

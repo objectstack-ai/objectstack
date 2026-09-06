@@ -33,3 +33,8 @@ export * from './resilient-fetch';
 // specifiers and object fields (maintainer ruling 2026-09-02). Declared here so
 // `system/` and `data/` both reference one schema instead of carrying a copy.
 export * from './value-domain.zod';
+// [#15676] The shared epoch-milliseconds INSTANT (`EpochMs`), and the first of
+// the two structural exemptions ruling B of #14478 declares ON THE SCHEMA
+// rather than in a gate ledger: a key whose value is this schema is an instant,
+// not a duration, and `check:duration-unit-keys` recognises it structurally.
+export * from './epoch.zod';

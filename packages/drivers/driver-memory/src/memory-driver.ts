@@ -201,9 +201,9 @@ export interface InMemoryDriverConfig {
    * - `'auto'` — Auto-detect environment (browser → localStorage, Node.js → file, serverless → disabled)
    * - `'file'` — File-system persistence with defaults (Node.js only)
    * - `'local'` — localStorage persistence with defaults (Browser only)
-   * - `{ type: 'file', path?: string, autoSaveInterval?: number }` — File-system with options
+   * - `{ type: 'file', path?: string, autoSaveIntervalMs?: number }` — File-system with options
    * - `{ type: 'local', key?: string }` — localStorage with options
-   * - `{ type: 'auto', path?: string, key?: string, autoSaveInterval?: number }` — Auto-detect with options
+   * - `{ type: 'auto', path?: string, key?: string, autoSaveIntervalMs?: number }` — Auto-detect with options
    * - `{ adapter: PersistenceAdapterInterface }` — Custom adapter
    *
    * Durability is **opt-in**, as #815 specified ("默认情况下不启用持久化（纯内存，行为不变）",
@@ -222,7 +222,7 @@ export interface InMemoryDriverConfig {
     type?: 'file' | 'local' | 'auto';
     path?: string;
     key?: string;
-    autoSaveInterval?: number;
+    autoSaveIntervalMs?: number;
     adapter?: PersistenceAdapterInterface;
   };
 }
@@ -553,7 +553,15 @@ export class InMemoryDriver implements IDataDriver {
   // CRUD
   // ===================================
 
-  async find(object: string, query: DriverQuery, options?: DriverOptions) {
+  /**
+   * Declared as the contract declares it (#14435): `IDataDriver.find()` says
+   * `Promise<Record<string, unknown>[]>`, and the explicit annotation is what
+   * keeps that visible to `tsc`. Left to inference the return type collapses
+   * to `any[]` through the backing store's `any[]` rows (`db` -> `getTable`),
+   * so the published `.d.ts` read `Promise<any[]>` and every field read off a
+   * result was unchecked. Same repair shape as `update`/`upsert` (#13878).
+   */
+  async find(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]> {
     this.logger.debug('Find operation', { object, query });
     
     const table = this.getTable(object);
@@ -627,7 +635,15 @@ export class InMemoryDriver implements IDataDriver {
   // row — the whole table was already in memory before the first `yield`. Nothing
   // called it. Page through `find()` with `limit`/`offset`.
 
-  async findOne(object: string, query: DriverQuery, options?: DriverOptions) {
+  /**
+   * Declared as the contract declares it (#14435): the `null` arm is the
+   * "no row matched" answer the `results[0] || null` below has always given,
+   * and the explicit annotation is what keeps that arm visible to `tsc` —
+   * left to inference it is swallowed by the `any` arriving from `find()`,
+   * so the published `.d.ts` read `Promise<any>` and no caller was ever asked
+   * to narrow. The same shape `update()` was repaired with (#13878).
+   */
+  async findOne(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.logger.debug('FindOne operation', { object, query });
     
     const results = await this.find(object, { ...query, limit: 1 }, options);
@@ -642,7 +658,17 @@ export class InMemoryDriver implements IDataDriver {
   // column of the created row vanishes from the caller's view (#4311 — the
   // driver's own tests read `.name` off a create() result and no tsc had ever
   // told them it wasn't there).
-  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, any>> {
+  //
+  // #14435: this annotation existed but read `Record<string, any>`, so it
+  // named the arity of the contract without its element type — the emitted
+  // `.d.ts` published `Promise<Record<string, any>>` and every property read
+  // off a `create()` result stayed unchecked, exactly the hole #4311 opened
+  // this annotation to close. It now spells the contract's own
+  // `Record<string, unknown>`. The parameter is deliberately left
+  // `Record<string, any>`: narrowing an INPUT would be a caller-visible
+  // breaking change, and method parameters compare bivariantly against the
+  // contract's `Record<string, unknown>`, so the declaration is satisfied.
+  async create(object: string, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown>> {
     this.logger.debug('Create operation', { object, hasData: !!data });
     
     const table = this.getTable(object);
@@ -2267,7 +2293,7 @@ export class InMemoryDriver implements IDataDriver {
           const { FileSystemPersistenceAdapter } = await import('./persistence/file-adapter.js');
           this.persistenceAdapter = new FileSystemPersistenceAdapter({
             path: persistence.path,
-            autoSaveInterval: persistence.autoSaveInterval,
+            autoSaveIntervalMs: persistence.autoSaveIntervalMs,
           });
           this.logger.debug('Auto-detected Node.js environment, using file persistence');
         }
@@ -2275,7 +2301,7 @@ export class InMemoryDriver implements IDataDriver {
         const { FileSystemPersistenceAdapter } = await import('./persistence/file-adapter.js');
         this.persistenceAdapter = new FileSystemPersistenceAdapter({
           path: persistence.path,
-          autoSaveInterval: persistence.autoSaveInterval,
+          autoSaveIntervalMs: persistence.autoSaveIntervalMs,
         });
       } else if (persistence.type === 'local') {
         const { LocalStoragePersistenceAdapter } = await import('./persistence/local-storage-adapter.js');

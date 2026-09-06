@@ -1336,10 +1336,10 @@ describe('DatabaseLoader read-through cache', () => {
     expect(stats.load).toBeNull();
   });
 
-  it('honors custom maxSize/ttl via cache options', async () => {
+  it('honors custom maxSize/ttlMs via cache options', async () => {
     const loader = new DatabaseLoader({
       driver: mockDriver,
-      cache: { enabled: true, maxSize: 1, ttl: 60_000 },
+      cache: { enabled: true, maxSize: 1, ttlMs: 60_000 },
     });
     await loader.save('object', 'a', { name: 'a' });
     await loader.save('object', 'b', { name: 'b' });

@@ -33,8 +33,9 @@ const result = DashboardSchema.parse(data);
 | **header** | `{ showTitle: boolean; showDescription: boolean; actions?: object[] }` | optional | Dashboard header configuration |
 | **widgets** | `{ id: string; title?: string \| Record<string, string>; description?: string \| Record<string, string>; type: Enum<'bar' \| 'horizontal-bar' \| 'column' \| 'line' \| 'area' \| 'pie' \| 'donut' \| …>; … }[]` | ✅ | Widgets to display |
 | **columns** | `integer` | optional | Number of grid columns (default 12) |
-| **gap** | `integer` | optional | Grid gap in Tailwind spacing units |
-| **refreshInterval** | `number` | optional | Auto-refresh interval in seconds |
+| **gap** | `integer` | optional | Space between widgets, in steps of 0.25rem (4 = 1rem) |
+| **refreshIntervalSeconds** | `number` | optional | Auto-refresh interval in seconds |
+| **refreshInterval** | `never` | optional | [REMOVED] `dashboard.refreshInterval` was renamed to `refreshIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `refreshIntervalSeconds`; the value (seconds) is unchanged. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand. |
 | **dateRange** | `{ field?: string; defaultRange: Enum<'today' \| 'yesterday' \| 'this_week' \| 'last_week' \| 'this_month' \| 'last_month' \| …>; allowCustomRange: boolean }` | optional | Global dashboard date range filter configuration |
 | **globalFilters** | `{ name?: string; field: string; object?: string; label?: string \| Record<string, string>; … }[]` | optional | Global filters that apply to all widgets in the dashboard |
 | **aria** | `never` | optional | [REMOVED] `dashboard.aria` was removed in @objectstack/spec 17.0.0 (audit close-out) — no dashboard renderer ever applied it, so declared ARIA attributes silently did not reach the DOM. Delete the key. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |

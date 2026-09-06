@@ -26,18 +26,33 @@
  * measurement is the reason this file exists. `applySystemFields`
  * (`registry.ts`) provisions the tenant COLUMN unconditionally: its existence
  * was deliberately decoupled from whether tenancy is on, so that sudo writers
- * can always stamp it. Measured on this tree by AST census of every
- * `ObjectSchema.create` in `packages/`:
+ * can always stamp it.
  *
- *   - 84 platform-namespace objects are registered in this repository;
- *   - 25 resolve NO tenant field (24 `managedBy: 'better-auth'`, plus
- *     `sys_sso_provider`'s `tenancy.enabled: false`) and are already outside
- *     the machinery — they exit at `resolveTenantFieldName` returning null;
- *   - **59 carry a tenant column**, `sys_permission_set` — #8672's own example
- *     of a legitimately org-less object — among them.
+ * ⛔ The census that measures this is NOT restated here. It is derived by
+ * `scripts/platform-object-tenancy-census.mjs`, committed as
+ * `scripts/platform-object-tenancy-census.json`, and held to the tree by
+ * `scripts/check-platform-object-tenancy-census.mjs` (#14957). Its PREDICATE is
+ * the half this paragraph used to leave out: an object is inside the machinery
+ * when `resolveTenantFieldName` answers non-null on the registered schema —
+ * after `applySystemFields`, because the injected column is what the engine
+ * sees, not what the author typed. The artefact records, per object, the
+ * declaration on its OWN schema that puts it outside.
  *
- * So a schema read admits 59 of 84 in one stroke, i.e. it replaces a wholesale
- * exemption with a wholesale inclusion. The ruling's classification source is
+ * ⛔ Do not restate a count here "for reference". This paragraph carried three
+ * hand-written digits and a parenthetical explaining them, and each half failed
+ * in its own direction. The parenthetical mis-attributed the exclusion — it
+ * named an object as an addition to the set it was already in — while its
+ * arithmetic stayed right, which is why nothing caught it. The digits then went
+ * stale when an object opted out of the tenant column (`systemFields: { tenant:
+ * false }`, a third mechanism the parenthetical's taxonomy had no slot for), and
+ * CI was green throughout. A number in this comment has no second party; the
+ * artefact has a gate.
+ *
+ * The ARGUMENT survives that measurement, and no digit was load-bearing for it:
+ * the great majority of platform-namespace objects carry the tenant column —
+ * `sys_permission_set`, #8672's own example of a legitimately org-less object,
+ * among them — so a schema read admits nearly all of them in one stroke, i.e.
+ * it replaces a wholesale exemption with a wholesale inclusion. The ruling's classification source is
  * "有列**且有写手填**" — the column AND a writer that fills it — and the second
  * half is not a runtime fact. It is a fact about the CODE, established once by
  * inventory and written down here.

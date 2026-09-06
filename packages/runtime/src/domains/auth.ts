@@ -13,9 +13,54 @@ import { CoreServiceName } from '@objectstack/spec/system';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
+/**
+ * The route this domain claims — `/auth` and its slash-separated sub-paths,
+ * and NOTHING ELSE (#16026).
+ *
+ * ## Why `match: 'segment'` is spelled out rather than left to the default
+ *
+ * `DomainRoute.match` defaults to `'prefix'`, i.e. a bare
+ * `path.startsWith('/auth')` with no segment boundary — the legacy if-chain's
+ * shape, which `DomainHandlerRegistry` preserved deliberately when the domains
+ * were lifted out of it. On this prefix that rough edge claims SIBLING
+ * NAMESPACES: `/authx`, `/authx/foo` and `/authentication/foo` are not auth
+ * paths by any reading, and `/authx` is a plausible namespace someone mounts
+ * later. Measured on a real boot — a real `ObjectKernel` with `AuthPlugin`,
+ * `createHonoApp({ kernel, prefix: '/api/v1' })`, authenticated as the dev
+ * admin, requests injected through the returned app — all three were claimed
+ * here, forwarded to better-auth, and answered `200 {}`:
+ *
+ *     GET /api/v1/authx              -> 200 {}          (claimed here)
+ *     GET /api/v1/authx/foo          -> 200 {}          (claimed here)
+ *     GET /api/v1/authentication/foo -> 200 {}          (claimed here)
+ *     GET /api/v1/aut/foo            -> 404 ROUTE_NOT_FOUND   (control)
+ *     GET /api/v1/zzz/foo            -> 404 ROUTE_NOT_FOUND   (control)
+ *
+ * The two control rows are what prove the boundary is the `auth` prefix and
+ * not the whole catch-all; they are unchanged by this route's `match`.
+ *
+ * ⛔ This narrows the CLAIM only — it does not remove the fallthrough, and it
+ * must not. `/auth/me/permissions` and `/auth/me/localization` are not
+ * better-auth endpoints, so the adapter's `/auth/*` mount disclaims them and
+ * they arrive HERE (#4088; objectui's permission layer reads the former).
+ * `'segment'` claims `'/auth'` exactly and everything under `'/auth/'`, so
+ * both keep reaching `dispatch()` — that is the whole point of choosing this
+ * mode over anything narrower.
+ *
+ * `'segment'` is also what the registry's other boundary-correct domains
+ * already declare (`/keys`, `/mcp`, `/mcp/skill`), so this is the codebase's
+ * own established spelling for the fix, not a new convention.
+ *
+ * ⚠️ What this does NOT fix, deliberately: the `200 {}` those rows carried.
+ * That answer is manufactured one layer OUT, where the adapter renders a
+ * dispatcher result — the auth service itself answers an honest 404 for every
+ * path above. Tracked separately on #16026; ⛔ do not "fix" it by narrowing
+ * this claim further.
+ */
 export function createAuthDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
         prefix: '/auth',
+        match: 'segment',
         handler: (req, context) =>
             handleAuthRequest(deps, req.path.substring(5), req.method, req.body, context),
     };

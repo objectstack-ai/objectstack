@@ -207,13 +207,31 @@ export async function handleKeysRequest(
         // request is the mirror-image failure that made the founding incident's
         // `warn` unreadable in the first place.
         //
-        // Do NOT "repair" this site by adding a log. The correct declaration is
-        // an entry in check-durability-degradation-log-level.mjs's
-        // FAILURE_PROPAGATION_SITES, keyed `keys.ts::handleKeysRequest`, and it
-        // belongs to the LAST step of the #12981 programme -- the one that
-        // widens DURABILITY_CRITICAL_CALLEES. Declared before that step it would
-        // go red as a STALE entry, because that vocabulary has no `insert` and
-        // so matches no seam in this function today.
+        // Do NOT "repair" this site by adding a log, and do NOT declare it in
+        // check-durability-degradation-log-level.mjs's
+        // FAILURE_PROPAGATION_SITES either: no gate entry is owed here. An
+        // earlier revision of this note promised one "in the step that widens
+        // DURABILITY_CRITICAL_CALLEES"; that promise is FALSIFIED by the
+        // widening the programme actually sanctioned -- the seeder wrappers
+        // `tryInsert`/`tryUpdate`, which match no seam in this function. The
+        // only name that would match is bare `insert`, which the census refuses
+        // by design, so an entry keyed `keys.ts::handleKeysRequest` would not
+        // be early, it would be STALE on arrival -- and the gate deletes
+        // entries that excuse nothing (#12981 comment 5543738972, Q1 = A).
+        //
+        // What stands in its place is already mechanical, and it cross-checks
+        // MORE than a gate entry would. The delivery stated above was measured
+        // with the gate's own `catchDeliversFailure()`: with a matching
+        // vocabulary name present, every path out of this catch reaches
+        // `deps.error`. The determination itself is carried by the DETERMINED
+        // register row for
+        // `packages/runtime/src/domains/keys.ts::handleKeysRequest` in
+        // scripts/measure-durability-swallow-family.mjs, which re-verifies on
+        // EVERY census run that this file exists, that the determination
+        // sentence above is still written at this site, and that the census
+        // still reports the site as a tier-1 DARK member -- going STALE, and
+        // loudly, the moment any of the three stops holding. A gate entry would
+        // have proved the delivery alone.
         //
         // The delivery this ruling rests on is pinned in
         // `http-dispatcher.keys.test.ts`; if you change what this catch

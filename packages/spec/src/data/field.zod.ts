@@ -205,9 +205,10 @@ const MULTILINE_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
  * This is the PROTOCOL's statement of that ownership, so the consumers that act
  * on it read one vocabulary instead of each carrying its own literal: objectql's
  * write-path strips (`isRuntimeOwnedField` / `stripRuntimeOwnedFields`, which
- * treat these types as implicitly read-only), and the DataProtocol create
- * ingress, which defers to those strips rather than pre-empting them with its
- * own narrower exemption set (`stripReadonlyForInsert`, #5628).
+ * treat these types as implicitly read-only), and the create-side static
+ * `readonly` strip, which EXCLUDES these types rather than pre-empting a
+ * whitelist it does not implement (`staticReadonlyInsertSubject`, #5628/#14147
+ * — the exclusion the deleted DataProtocol ingress copy used to carry).
  *
  * Keep the set to types whose value is (a) persisted, (b) issued by the runtime,
  * and (c) never legitimately supplied by a caller. `formula` and `summary` are
@@ -1134,10 +1135,19 @@ export const FieldSchema = lazySchema(() => {
    * 
    * For `master_detail` fields, the parent record controls the lifecycle of child records
    * (e.g., cascade delete). For `lookup` fields, the reference is a soft link.
+   *
+   * On a `tree` field the key is OPTIONAL and, when present, must name the
+   * declaring object itself (#14892): a hierarchy is parent/child within one
+   * object, so the value is a redundant self-annotation. This schema cannot
+   * judge it — a field does not know which object declares it — so the
+   * refusal of any other target lives on `ObjectSchema` / `ObjectExtensionSchema`
+   * (`object.zod.ts`, `refuseForeignTreeReference`), where the own name is known.
    */
   reference: z.string().optional().describe(
     'Target object name (snake_case) for lookup/master_detail fields. '
-    + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects.'
+    + 'Required for relationship types. Used by $expand to resolve foreign key IDs into full objects. '
+    + 'On a `tree` field it is optional and, if given, must be the declaring object\'s own name — '
+    + 'the object schema refuses any other target.'
   ),
   /**
    * Polymorphic pointer declaration (ADR-0052 §5 — the ActivityPointer model).

@@ -2377,6 +2377,20 @@ const TEXT_PATTERN_OPERATORS: ReadonlySet<string> = new Set([
 const LIKE_PATTERN_OPERATORS: ReadonlySet<string> = new Set(['$like', '$ilike']);
 
 /**
+ * [#14079] Every operator that reads the column as TEXT — the union of
+ * {@link TEXT_PATTERN_OPERATORS} and {@link LIKE_PATTERN_OPERATORS}. The two
+ * families ask opposite things of their COMPARAND (the docblocks above), but
+ * they ask the same thing of the COLUMN: that its stored value be a string. The
+ * one place that question is answered at compile time is
+ * {@link SqlDriver.applyTextOperatorOverNonTextColumn}, and this set is what
+ * routes an operator there.
+ */
+const TEXT_OPERATORS: ReadonlySet<string> = new Set([
+  ...TEXT_PATTERN_OPERATORS,
+  ...LIKE_PATTERN_OPERATORS,
+]);
+
+/**
  * [#5234] Operators for which an ARRAY is the legitimate comparand, so it is
  * each MEMBER that must be individually compilable.
  *
@@ -2850,10 +2864,32 @@ function mysqlAsciiLowerBinary(expr: string): string {
  * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
  *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
  *   would change every other query's meaning. Of the operand-level tricks,
- *   `CAST(col AS BLOB) LIKE ?` was measured to return NOTHING at all (SQLite's
- *   LIKE is false for a BLOB operand), so the operator has to change. `GLOB` is
- *   case-exact by definition and carries its own escape mechanism
- *   ({@link escapeGlobComparand}). `lower()` in front of it is still the
+ *   `CAST(col AS BLOB) LIKE ?` is disqualified by something worse than
+ *   failing: it means TWO DIFFERENT THINGS on the two SQLite builds this repo
+ *   ships. Whether `LIKE` is false for a BLOB operand is not a property of
+ *   SQLite the language — it is set when SQLite is COMPILED, by
+ *   `SQLITE_LIKE_DOESNT_MATCH_BLOBS`. Measured over the shared
+ *   `FILTER_TEXT_ROWS` fixture, `{name: {$contains: 'acme'}}` compiled to that
+ *   construct:
+ *
+ *   | build | `SQLITE_LIKE_DOESNT_MATCH_BLOBS` | rows |
+ *   |---|---|---|
+ *   | better-sqlite3 13.0.3 (SQLite 3.53.4) | compiled in | `[]` |
+ *   | sql.js 1.14.1 (SQLite 3.49.1) | absent | `['1','2']` — `ACME Corp` AND `acme corp` |
+ *
+ *   So one build silently answers nothing and the other silently answers
+ *   exactly the ASCII over-fold this whole function exists to end, and which
+ *   one a caller gets is decided by a flag upstream of us. That divergence is
+ *   the rejection on its own: a construct whose meaning depends on how the
+ *   driver's SQLite was BUILT cannot carry a read scope (#3948) whatever value
+ *   it happens to return in any one container — the `[]` above is a build's
+ *   answer, not SQLite's. The CAST itself is not the part that differs:
+ *   `typeof CAST(name AS BLOB)` is `'blob'` on BOTH builds, so what diverges is
+ *   purely `LIKE`'s rule for a blob operand, which is the compile-time half. So
+ *   the operator has to change. `GLOB` is case-exact by definition, answers
+ *   `['2']` on BOTH builds above, and carries its own
+ *   escape mechanism ({@link escapeGlobComparand}). `lower()` in front of it is
+ *   still the
  *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
  *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
  *   answers row 3 — the Q1 = A boundary, executed rather than argued.
@@ -4160,6 +4196,26 @@ interface RowWidthContribution {
   name: string;
   chars: number;
   bytes: number;
+}
+
+/**
+ * Render the duplicate groups a unique pre-flight probe found, for an operator
+ * message: at most five groups, then a count of the rest.
+ *
+ * Module-local on purpose (#14902). The two sites that report a blocked unique
+ * — the drift entry and the boot-time durability log — must name the SAME rows
+ * in the SAME shape, and a second hand-rolled `.slice(0, 5).join('; ')` is
+ * exactly how the plain and the NULL-safe path drifted apart in the first
+ * place. Not a method, and not exported: `SqlDriver`'s `.d.ts` carries its
+ * protected members, so a new method there would move a published entry point
+ * for a string helper.
+ */
+function formatDuplicateGroups(duplicates: ReadonlyArray<{ key: string; rows: number }>): string {
+  const shown = duplicates
+    .slice(0, 5)
+    .map((g) => `(${g.key}) \u00d7 ${g.rows} rows`)
+    .join('; ');
+  return duplicates.length > 5 ? `${shown}; \u2026and ${duplicates.length - 5} more group(s)` : shown;
 }
 
 export class SqlDriver implements IDataDriver {
@@ -10582,8 +10638,27 @@ export class SqlDriver implements IDataDriver {
 
   // ── Managed-schema drift & reconcile (#2186) ───────────────────────────────
 
-  /** Canonical dialect name for the drift differ. */
-  protected get dialectName(): SqlDialectName {
+  /**
+   * Canonical dialect name for the drift differ — and, since #15684, the one
+   * answer to "which SQL does this driver speak" that anything outside the
+   * driver may read.
+   *
+   * PUBLIC for exactly one consumer: `service-analytics` compiles its own
+   * statements (an analytics `where`, an ADR-0021 D-C read scope, the
+   * `/analytics/sql` echo) and executes them through this driver, so it needs
+   * the same per-dialect construct choices {@link textMatchPredicate} makes —
+   * a plain `LIKE` folds ASCII case on SQLite, which made a case-SENSITIVE
+   * `$contains` admit rows the predicate excludes, over-reach (#3948) on the
+   * read scope. That package depends on no driver and reads this structurally
+   * through `IDataEngine.getDriverForObject`; exposing the getter is what
+   * keeps the answer THIS driver's rather than a second dialect-resolution
+   * table drifting one knex spelling behind {@link SQLITE_EMIT_CLIENTS} and
+   * friends.
+   *
+   * Read-only and derived: there is nothing to set, and `'unknown'` is a real
+   * answer (a client neither emission set names), not a missing one.
+   */
+  public get dialectName(): SqlDialectName {
     if (this.isSqlite) return 'sqlite';
     if (this.isPostgres) return 'postgres';
     if (this.isMysql) return 'mysql';
@@ -10686,10 +10761,12 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * ADR-0120 D4 — duplicate pre-flight for NULL-safe organization uniques.
+   * ADR-0120 D4 — duplicate pre-flight for unique index CREATEs.
    *
-   * Probes every index op that would CREATE a unique index whose organization
-   * key part is the NULL-safe COALESCE form, by grouping over that exact key:
+   * Probes every index op that would create a UNIQUE index over data that
+   * already violates it, grouping by the exact key the index will enforce —
+   * `COALESCE(<org>, '__global__')` for a NULL-safe organization key part, the
+   * bare column otherwise:
    *
    *   - `recreate_index` marked `tightenNullSafeOnly` (the bare composite
    *     tightening into its COALESCE form — same identities, physical fully
@@ -10697,10 +10774,26 @@ export class SqlDriver implements IDataDriver {
    *     `autoMigrate: 'safe'` and a plain `os migrate apply` may apply it; a
    *     dirty probe keeps it blocked (`destructive` + a re-probe refusal in
    *     {@link applyIndexDriftOp}) and reports the offending rows.
-   *   - `create_index` for a unique NULL-safe index: a dirty probe demotes the
-   *     default `safe` to blocked with the same row report — the CREATE could
-   *     only fail at apply time otherwise, with a raw driver error naming no
-   *     rows.
+   *   - `create_index` for a unique index: a dirty probe demotes the default
+   *     `safe` to blocked with the same row report — the CREATE could only
+   *     fail at apply time otherwise, with a raw driver error naming no rows.
+   *
+   * ⚠️ #14902 — the second bullet covers the PLAIN unique too: an index with no
+   * organization key part at all, reached by an object with
+   * `tenancy: { enabled: false }` or by any explicit `unique: 'global'`. The
+   * `nullSafeColumns.length > 0` guard used to exclude it, so `os migrate plan`
+   * classified the one op that was about to take the boot down `safe` — an
+   * instrument reporting nothing wrong about the thing that kills the boot.
+   * Nothing new was needed to probe it:
+   * {@link probeNullSafeUniqueDuplicates} groups by the bare columns when the
+   * NULL-safe set is empty, so the guard MOVED rather than a second copy of the
+   * check appearing beside the first — one pre-flight, two key shapes, no way
+   * for them to drift apart again.
+   *
+   * A PLAIN unique `recreate_index` stays unprobed: it has no
+   * `tightenNullSafeOnly` shape, and `diffManagedIndexes` already categorises a
+   * unique recreate `destructive`, so it never carried the `safe` claim this
+   * pre-flight exists to withdraw.
    *
    * `replace_unique_index` is deliberately NOT probed: the legacy index it
    * retires is a platform-wide unique, strictly stronger than the NULL-safe
@@ -10710,15 +10803,20 @@ export class SqlDriver implements IDataDriver {
     for (const d of entries) {
       const op = d.op;
       if (op.type !== 'recreate_index' && op.type !== 'create_index') continue;
-      if (!op.unique || !op.nullSafeColumns || op.nullSafeColumns.length === 0) continue;
+      if (!op.unique) continue;
+      const nullSafeColumns = op.nullSafeColumns ?? [];
+      const nullSafeKey = nullSafeColumns.length > 0;
       const tighten = op.type === 'recreate_index' && op.tightenNullSafeOnly === true;
       // A generic unique recreate (columns differ beyond the key-part form)
       // keeps its pre-ADR-0120 semantics untouched.
       if (op.type === 'recreate_index' && !tighten) continue;
+      // …and a PLAIN unique has no tightening shape at all, so only its CREATE
+      // reaches the probe (#14902).
+      if (!nullSafeKey && op.type !== 'create_index') continue;
 
       let duplicates: Array<{ key: string; rows: number }>;
       try {
-        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, op.nullSafeColumns);
+        duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, nullSafeColumns);
       } catch (e: any) {
         // Probe failure must fail SAFE: without evidence the data is clean the
         // op may not claim eligibility for auto-apply.
@@ -10743,18 +10841,23 @@ export class SqlDriver implements IDataDriver {
         continue;
       }
 
-      const report = duplicates
-        .slice(0, 5)
-        .map((g) => `(${g.key}) × ${g.rows} rows`)
-        .join('; ');
-      const more = duplicates.length > 5 ? `; …and ${duplicates.length - 5} more group(s)` : '';
+      const report = formatDuplicateGroups(duplicates);
       d.category = 'destructive';
       d.severity = 'error';
-      d.message =
-        `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
-        `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): ` +
-        `${report}${more}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
-        `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`;
+      d.message = nullSafeKey
+        ? `${op.table}: cannot ${tighten ? 'tighten' : 'create'} '${op.indexName}' as ${signature} — existing rows ` +
+          `already violate the NULL-safe unique constraint (duplicates the old index wrongly admitted, #5030): ` +
+          `${report}. The op is BLOCKED: apply re-probes and refuses, and the existing index stays in place ` +
+          `(ADR-0120 D4). Deduplicate the listed rows, then re-run "os migrate plan".`
+        : // #14902: the plain unique has no #5030 history behind it — nothing
+          // ever admitted these rows, the constraint is simply newly declared
+          // over data that does not satisfy it. So the message says what IS
+          // true, and above all withdraws the `safe` claim: this op is not
+          // applied by `os migrate apply` and not auto-applied at boot.
+          `${op.table}: cannot create '${op.indexName}' as ${signature} — existing rows already violate it: ` +
+          `${report}. The op is BLOCKED: neither "os migrate apply" nor dev autoMigrate: 'safe' will create it, ` +
+          `so the constraint is NOT enforced. Deduplicate the listed rows, then re-run "os migrate plan" ` +
+          `(ADR-0120 D4).`;
     }
   }
 
@@ -11708,6 +11811,11 @@ export class SqlDriver implements IDataDriver {
    *   at `error` (a declared constraint is not enforced — the
    *   durability-degradation rule) and surfaces as drift with a row report via
    *   the ADR-0120 D4 pre-flight, instead of failing the whole boot.
+   * - #14902: a PLAIN unique — no organization key part, i.e.
+   *   `tenancy: { enabled: false }` or an explicit `unique: 'global'` — over
+   *   data that already violates it gets the SAME disposition, where it used to
+   *   throw the database's raw error and take the boot down naming no rows and
+   *   no remedy.
    */
   protected async syncDeclaredIndexes(
     tableName: string,
@@ -11873,6 +11981,40 @@ export class SqlDriver implements IDataDriver {
               `violate it (duplicates the previous NULL-distinct index admitted, #5030). The constraint ` +
               `'${columns.join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
               `for the conflicting rows (ADR-0120 D4).`,
+            msg,
+          );
+          continue;
+        }
+        if (unique && isUniqueViolationError(e)) {
+          // #14902 — the PLAIN unique: no organization key part at all, reached
+          // by `tenancy: { enabled: false }` or by an explicit
+          // `unique: 'global'`. It used to fall through to `throw e`, so the
+          // boot DIED carrying the database's own error, which names the index
+          // and the column and NO rows and NO remedy — while the arm above,
+          // one branch away, kept the boot up and told the operator exactly
+          // what to do. Same defect, same disposition: the declared constraint
+          // is not enforced, say so on the durability channel, name the
+          // conflicting groups, and let the boot continue. The D4 pre-flight
+          // reports the same rows in `os migrate plan`.
+          //
+          // ⚠️ The `unique` limb is load-bearing, not decoration. A NON-unique
+          // index cannot raise a uniqueness violation, so a failure that reads
+          // as one while creating a non-unique index is something else
+          // entirely and must keep failing loudly rather than being absorbed
+          // into a log line here.
+          let report = '';
+          try {
+            const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
+            if (duplicates.length > 0) {
+              report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
+            }
+          } catch {
+            // The probe is a diagnostic; the report below stands without it.
+          }
+          this.logDurabilityFailure(
+            `[sql-driver] cannot create unique index '${name}' on "${tableName}" — existing rows violate ` +
+              `it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the data is ` +
+              `deduplicated: run "os migrate plan" for the conflicting rows.`,
             msg,
           );
           continue;
@@ -12875,6 +13017,90 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
+   * [#14079] Is `localField` a column on `table` whose STORED value is never
+   * text — a declared numeric or boolean scalar?
+   *
+   * Reads the two registries `formatOutput`'s read-coercion already reads —
+   * `numericFields` (`NUMERIC_SCALAR_TYPES`, non-`multiple`) and
+   * `booleanFields` (`boolean` / `toggle`) — which `initObjects` and
+   * `registerExternalObject` both fill from the declared field type. Asking
+   * THOSE rather than growing a third list is the same discipline
+   * {@link isJsonColumn} states for `jsonFields`: one registry per column
+   * class, filled at the one place the declaration is read. Spec-side the
+   * same two classes are `NON_TEXT_STORED_VALUE_TYPES`; this driver's registries
+   * add its SQL aliases (`integer` / `int` / `float`) on top, as that
+   * constant's docblock says drivers do.
+   *
+   * A table with no entry answers `false`, exactly like {@link isJsonColumn}:
+   * a table this driver was never told about has no declared types, and the
+   * gate fires only where the column class is KNOWN — never from a guess.
+   *
+   * Temporal columns are deliberately NOT here. On SQLite a `Field.datetime` /
+   * `Field.date` / `Field.time` column's stored value IS text (canonical ISO,
+   * ADR-0053), so "the stored value is not a string" is a dialect question for
+   * them and the contract row this predicate serves declares nothing about
+   * them — `NON_TEXT_STORED_VALUE_TYPES`' docblock records the same boundary.
+   */
+  protected isNonTextColumn(table: string | null | undefined, localField: string): boolean {
+    if (!table) return false;
+    return (
+      this.numericFields[table]?.includes(localField) === true ||
+      this.booleanFields[table]?.includes(localField) === true
+    );
+  }
+
+  /**
+   * [#14079] Emit the DECLARED answer for a text operator aimed at a column
+   * whose stored value is never text ({@link isNonTextColumn}): the positive
+   * operators (`$contains` / `$startsWith` / `$endsWith` / `$icontains` /
+   * `$like` / `$ilike`) compile to the FALSE constant — no row's number
+   * contains a substring — and `$notContains` to the TRUE constant, its exact
+   * complement. `FILTER_TEXT_CASES`' `score` rows are the pin, on every face.
+   *
+   * # What compiled before, per dialect — three answers to one filter
+   *
+   * Measured on `origin/main` over a `Field.number` column holding `5`
+   * (#14079): the SQLite dialects compiled `col GLOB '*5*'` and COERCED the
+   * REAL to text in the storage class's own spelling (`'5.0'`, so
+   * `$contains: '.0'` matched and `$endsWith: '5'` did not); live Postgres
+   * compiled `col LIKE $1 ESCAPE $2` and REFUSED at query time with SQLSTATE
+   * 42883 (`operator does not exist: real ~~ text`) — a 500 for a filter the
+   * spec accepts; MySQL's `CAST(col AS BINARY) LIKE ?` reads as coercion (not
+   * executed — no server was provisionable). The maintainer ruled the cell on
+   * 2026-09-05 (option A, type-gate; coercion refused on the measurement) and
+   * the constants are that ruling compiled: the same row set on every dialect,
+   * decided by the DECLARED type at compile time because the stored value is
+   * not visible until run time.
+   *
+   * # Why constants compose with the NULL rules rather than fight them
+   *
+   * A row with no value already satisfies `$notContains` (#5298,
+   * {@link SqlDriver.applyNullSafeNegative}) and fails every positive
+   * operator, so `1 = 1` / `1 = 0` agree with the null polarity on every row —
+   * there is no cell where the two rules disagree. Under `$not` the leaf is
+   * totalised first ({@link nullSafeNegationOperand}): `NOT (col IS NOT NULL
+   * AND 1 = 0)` is TRUE for every row, which is what the JS faces answer for
+   * `!contains` on a number, and `NOT (col IS NULL OR 1 = 1)` is FALSE for
+   * every row, what they answer for `!notContains`. Complementarity holds
+   * through the negation too.
+   *
+   * Every refusal stays AHEAD of this: the comparand gates on the validating
+   * walk (`reduceFilterKey`: an empty or non-string `$icontains` comparand, a
+   * non-string or dangling `$like` pattern) and {@link assertCompilableComparand}
+   * all run before the caller reaches here, so a filter the contract refuses
+   * is still refused — the constant answers only a filter the contract
+   * accepts. `1 = 0` is {@link applyFalseConstant}'s spelling; `1 = 1` is its
+   * mirror, valid on every dialect this driver targets and free of bindings.
+   */
+  private applyTextOperatorOverNonTextColumn(builder: any, logicalOp: 'and' | 'or', op: string): void {
+    if (op === '$notContains') {
+      builder[logicalOp === 'or' ? 'orWhereRaw' : 'whereRaw']('1 = 1');
+      return;
+    }
+    this.applyFalseConstant(builder, logicalOp);
+  }
+
+  /**
    * [#7398] The column-type half of the filter gate: refuse a DECLARED operator
    * that the column it was aimed at cannot give a meaningful answer for.
    *
@@ -13471,6 +13697,15 @@ export class SqlDriver implements IDataDriver {
           // the plain `whereIn` arms below NOR the normalised `whereRaw` arms
           // an external multi-value datetime column is routed to.
           this.assertOperatorAppliesToColumn(table, localField, field, rawOp, false, value);
+          // [#14079] The type-gated answer for a text operator over a column
+          // whose stored value is never text — AFTER every refusal above (a
+          // filter the contract refuses is still refused) and BEFORE both
+          // emitters, so neither a `GLOB` nor a `LIKE` is ever built against a
+          // number. See {@link SqlDriver.applyTextOperatorOverNonTextColumn}.
+          if (TEXT_OPERATORS.has(rawOp) && this.isNonTextColumn(table, localField)) {
+            this.applyTextOperatorOverNonTextColumn(builder, logicalOp, rawOp);
+            continue;
+          }
           // Calendar-day upper bounds first (#3777): `$lte` on a bare
           // `YYYY-MM-DD` against a datetime column compiles half-open, and a
           // `$between` whose max is a bare day decomposes into the same pair —
@@ -15795,12 +16030,30 @@ export class SqlDriver implements IDataDriver {
         // not anything this field declared. Measured on MySQL 8.0.46: the FK
         // itself is content with mismatched widths (`varchar(20)` child →
         // `varchar(255)` parent `id` creates cleanly, and Postgres 16 accepts
-        // it too), so the type system gives no warning — but the first write
-        // is refused, because a platform id is 26 characters and
-        // `INSERT … VALUES ('01JQ8XKZ9M4N7P2R5T6V8W0Y3B')` into `varchar(20)`
-        // is `ERROR 1406 Data too long`. Honouring `maxLength` here would make
-        // the column structurally incapable of holding ANY id — a strictly
-        // worse defect than the one #11431 fixes.
+        // it too), so the type system gives no warning — the refusal arrives on
+        // the first write too wide for the child, as `ERROR 1406 Data too long`.
+        //
+        // [#15522] ⛔ An id's width is NOT a fixed number, and it is NOT this
+        // field's to declare. Both halves are this driver's own behaviour: when
+        // the caller supplies no id it mints `nanoid(DEFAULT_ID_LENGTH)` — 16
+        // characters, from the constant above and the three mint sites it feeds
+        // — and when the caller DOES supply one it is stored verbatim at
+        // whatever width the caller chose (measured on this arm's own driver:
+        // 10-, 17- and 18-character ids all landed unaltered). Nothing on this
+        // path bounds an id's width at all, so `maxLength: 20` already cannot
+        // hold a 24-character supplied id, and any `maxLength` under 16 cannot
+        // hold even a minted one. Honouring it here would make the column
+        // structurally incapable of holding ids it will be asked to hold — a
+        // strictly worse defect than the one #11431 fixes.
+        //
+        // ⛔ Do not restore the number this sentence used to carry. It called a
+        // platform id 26 characters long and spelled out a ULID
+        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`). `DEFAULT_ID_LENGTH` has been 16 for the
+        // whole life of this file and no ULID is minted anywhere in this repo, so
+        // at the real numbers the worked example did not hold either — 16
+        // characters FIT in `varchar(20)`. Four `packages/cli` sites still cite
+        // this arm BY NAME for that number; they are filed as #16114, not fixed
+        // here.
         //
         // [#11567] ⛔ This arm emits NO `FOREIGN KEY`, and that is the ruled
         // contract rather than an omission. It used to carry

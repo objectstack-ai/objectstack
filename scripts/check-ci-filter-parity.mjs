@@ -676,14 +676,24 @@ export async function selfTest() {
   // is the one of the three no earlier declaration had reached. Its two
   // siblings move nothing here -- `content/**` and `skills/**` were already
   // unique members of this set from #10015 and #12201.
-  // Ten plus one plus two plus one plus one plus one: the rollback now uncovers
-  // sixteen. This pin is judged over the LIVE declaration table on
-  // purpose: a declaration added under a root the rollback keeps leaves the
-  // count alone, one under a new root moves it and is recorded here by name.
+  // Plus, since #14824, the three doc pages that card declared for
+  // @objectstack/cli: `os create`'s emitted plugin shape is stated nowhere but
+  // its documentation, so the pin holding the template to it reads all three
+  // pages, each covered only through the `content/**` root #10015 added.
+  // Plus, since #15818, the two doc pages THAT card declared for the same
+  // package: the TypeScript floor both scaffolders emit was chosen because those
+  // two pages already promise it, so the pin holding the emitted range to that
+  // promise reads both -- and each is covered only through the same `content/**`
+  // root, exactly like #14824's three.
+  // Ten plus one plus two plus one plus one plus one plus three plus two: the
+  // rollback now uncovers twenty-one. This pin is judged over the LIVE
+  // declaration table on purpose: a declaration added under a root the rollback
+  // keeps leaves the count alone, one under a new root moves it and is recorded
+  // here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 16,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 21,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     uncoveredGlobs(preFix).includes('skills/**'),
@@ -709,6 +719,25 @@ export async function selfTest() {
     uncoveredGlobs(preFix).includes('docs/**'),
     `-- and #14561 added the authored-prose root the discovered teaching-site population reads, by name`,
   );
+  for (const page of [
+    'content/docs/plugins/index.mdx',
+    'content/docs/protocol/kernel/index.mdx',
+    'content/docs/protocol/kernel/plugin-spec.mdx',
+  ]) {
+    assert(
+      uncoveredGlobs(preFix).includes(page),
+      `-- and #14824 added the \`os create plugin\` scaffold-listing page ${page}, by name`,
+    );
+  }
+  for (const page of [
+    'content/docs/deployment/troubleshooting.mdx',
+    'content/docs/getting-started/index.mdx',
+  ]) {
+    assert(
+      uncoveredGlobs(preFix).includes(page),
+      `-- and #15818 added the TypeScript-floor page ${page}, by name`,
+    );
+  }
 
   // ── (7) WIRING: the gate and its self-test really run in CI ──────────────
   battery('(7) WIRING: the gate and its self-test really run in CI');
@@ -780,7 +809,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one, ` +
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one plus #14824's three plus #15818's two, ` +
       `and the CI wiring read out of lint.yml.`,
   );
   selfTestReachedVerdict = true;

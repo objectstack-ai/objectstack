@@ -256,17 +256,31 @@ export function defineSolutionBlueprint(config: z.input<typeof SolutionBlueprint
 // SolutionBlueprintSchema} (and every existing consumer/test) is unchanged.
 // ---------------------------------------------------------------------------
 
+// Identifier leaves in this mirror carry the SAME `SNAKE_CASE` constraint the
+// lenient schema above enforces (cloud#1967). They had drifted: the mirror is
+// what the model may GENERATE, the lenient schema is what `apply_blueprint`
+// VALIDATES, so an identifier legal here and illegal there produced a proposal
+// the applier rejected wholesale — `1_49` from a 「1-49人」 label, staging
+// nothing on the turn the user clicked 「确认，开始搭建」. Declaring the constraint
+// on the generating side makes that value impossible to propose rather than
+// impossible to apply. The `strict mirror ↔ lenient schema — VALUE parity` test
+// walks both schemas leaf by leaf and fails on any future divergence.
+const strictIdent = (description: string) => z.string().regex(SNAKE_CASE).describe(description);
+/** The same identifier, `.nullable()` — this mirror's spelling of "optional". */
+const strictIdentOrNull = (description: string) =>
+  z.string().regex(SNAKE_CASE).nullable().describe(description);
+
 // The roll-up config, strict-shaped: every key present, "optional" → nullable,
 // and the predicate as a flat `conditions` ARRAY because strict mode cannot
 // express the canonical `filter` map (open-ended additionalProperties). The
 // blueprint tools compile `conditions` back into a real query filter.
 const StrictSummaryOperations = z.object({
-  object: z.string().describe('The CHILD object whose records are aggregated (snake_case). It MUST have a lookup/master_detail field pointing back at this parent.'),
+  object: strictIdent('The CHILD object whose records are aggregated (snake_case). It MUST have a lookup/master_detail field pointing back at this parent.'),
   function: z.enum(['count', 'sum', 'avg', 'min', 'max']).describe('Aggregation: "数量/个数/计数" → count; "合计/总额/累计" → sum; "平均" → avg'),
-  field: z.string().nullable().describe('Numeric field on the CHILD to aggregate; null (or "id") for count'),
-  relationshipField: z.string().nullable().describe('Child FK field back to this parent, or null to auto-detect'),
+  field: strictIdentOrNull('Numeric field on the CHILD to aggregate; null (or "id") for count'),
+  relationshipField: strictIdentOrNull('Child FK field back to this parent, or null to auto-detect'),
   conditions: z.array(z.object({
-    field: z.string().describe('Field on the CHILD object'),
+    field: strictIdent('Field on the CHILD object'),
     op: z.enum(['lt', 'lte', 'gt', 'gte', 'eq', 'ne']).describe('Comparison operator'),
     value: z.union([z.number(), z.string(), z.boolean()]).describe('Comparison value — a select field\'s option VALUE, never its label'),
   })).nullable()
@@ -274,12 +288,15 @@ const StrictSummaryOperations = z.object({
 });
 
 const StrictField = z.object({
-  name: z.string().describe('Field machine name (snake_case)'),
+  name: strictIdent('Field machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable field label, or null'),
   type: FieldType.describe('Field data type'),
   required: z.boolean().nullable().describe('Whether the field is required, or null'),
-  reference: z.string().nullable().describe('Target object for lookup/master_detail, or null'),
-  options: z.array(z.object({ label: z.string(), value: z.string() })).nullable()
+  reference: strictIdentOrNull('Target object for lookup/master_detail, or null'),
+  options: z.array(z.object({
+    label: z.string().describe('What the user reads on the dropdown — free text in the user\'s own language (「1-49人」, 「已完成」).'),
+    value: strictIdent('The STORED machine value: snake_case, and it may NEVER start with a digit — give it a word prefix instead (「1-49人」 → "size_1_49", 「2024年」 → "year_2024"). The label carries the human wording; this key only has to be a legal identifier.'),
+  })).nullable()
     .describe('Choices for select-family fields, or null'),
   summaryOperations: StrictSummaryOperations.nullable()
     .describe('REQUIRED when type is "summary" (a roll-up of child records onto this parent: 任务总数 / 报名人数 / 合计金额 / 已完成任务数); null for every other field type. A "summary" field without it is runtime-dead — it reads 0/empty everywhere.'),
@@ -288,39 +305,36 @@ const StrictField = z.object({
 });
 
 const StrictObject = z.object({
-  name: z.string().describe('Object machine name (snake_case)'),
+  name: strictIdent('Object machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable singular label, or null'),
   description: z.string().nullable().describe('What this object represents, or null'),
   fields: z.array(StrictField).describe('Fields to create on the object'),
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).nullable()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users (ADR-0090), or null to accept the platform default (business object → public_read_write; master-detail child → controlled_by_parent). SET it when the user\'s description implies a visibility intent: personal/private data (HR, 绩效, salary, 个人隐私) → "private" (owner-only); "public_read" = everyone reads, owner writes; "public_read_write" = everyone reads+writes; "controlled_by_parent" ONLY for an object with a master_detail reference field. Null on privacy-sensitive data silently over-shares it.'),
-  nameField: z.string().nullable()
-    .describe('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object\'s text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Declaring it is strongly preferred over null.'),
+  nameField: strictIdentOrNull('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object\'s text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Declaring it is strongly preferred over null.'),
 });
 
 const StrictView = z.object({
-  object: z.string().describe('Object this view displays (snake_case)'),
-  name: z.string().describe('View machine name (snake_case)'),
+  object: strictIdent('Object this view displays (snake_case)'),
+  name: strictIdent('View machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable view label, or null'),
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).nullable().describe('View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor.'),
-  columns: z.array(z.string()).nullable().describe('Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
-  groupBy: z.string().nullable().describe('REQUIRED for kanban: the select/status field whose options become the board columns (e.g. "stage"). Optional for gantt (groups leaf tasks). Null for list/form/calendar/gallery.'),
+  columns: z.array(z.string().regex(SNAKE_CASE)).nullable().describe('Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
+  groupBy: strictIdentOrNull('REQUIRED for kanban: the select/status field whose options become the board columns (e.g. "stage"). Optional for gantt (groups leaf tasks). Null for list/form/calendar/gallery.'),
 });
 
 const StrictDashboard = z.object({
-  name: z.string().describe('Dashboard machine name (snake_case)'),
+  name: strictIdent('Dashboard machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable dashboard label, or null'),
   widgets: z.array(z.object({
-    id: z.string().describe('Widget id (snake_case)'),
+    id: strictIdent('Widget id (snake_case)'),
     title: z.string().nullable().describe('Widget title, or null'),
-    object: z.string().nullable().describe('Source object, or null'),
+    object: strictIdentOrNull('Source object, or null'),
     chart: z.enum(['metric', 'bar', 'line', 'pie', 'table']).nullable().describe('Visualization, or null'),
-    measure: z.string().nullable()
-      .describe('The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records, or null to infer from the title. The aggregation (sum vs average) is chosen automatically from the field type — name the FIELD, not "total_amount". "total revenue" → "amount"; "average win rate" → "win_rate"; "number of deals" → "count".'),
-    groupBy: z.string().nullable()
-      .describe('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"), or null for a single-number metric. A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field.'),
+    measure: strictIdentOrNull('The field this widget aggregates (e.g. "amount", "probability"), or "count" to count records, or null to infer from the title. The aggregation (sum vs average) is chosen automatically from the field type — name the FIELD, not "total_amount". "total revenue" → "amount"; "average win rate" → "win_rate"; "number of deals" → "count".'),
+    groupBy: strictIdentOrNull('The field to break the widget down by — the category or time axis (e.g. "stage", "created_at"), or null for a single-number metric. A "by status" chart MUST set this to the status field; the title and this field MUST name the SAME field.'),
     condition: z.object({
-      field: z.string().describe('Field on the widget object to filter by (e.g. "stock_quantity", "status")'),
+      field: strictIdent('Field on the widget object to filter by (e.g. "stock_quantity", "status")'),
       op: z.enum(['lt', 'lte', 'gt', 'gte', 'eq', 'ne']).describe('Comparison operator'),
       value: z.union([z.number(), z.string(), z.boolean()]).describe('Comparison value (e.g. 10, "open")'),
     }).nullable()
@@ -330,13 +344,13 @@ const StrictDashboard = z.object({
 
 const StrictNavItem = z.object({
   type: z.enum(['object', 'dashboard']).describe('What this nav entry opens'),
-  target: z.string().describe('Object or dashboard machine name to surface (snake_case)'),
+  target: strictIdent('Object or dashboard machine name to surface (snake_case)'),
   label: z.string().nullable().describe('Nav entry label, or null'),
   icon: z.string().nullable().describe('Lucide icon name, or null'),
 });
 
 const StrictApp = z.object({
-  name: z.string().describe('App machine name (snake_case)'),
+  name: strictIdent('App machine name (snake_case)'),
   label: z.string().nullable().describe('App display label, or null'),
   icon: z.string().nullable().describe('Lucide icon for the App Launcher, or null'),
   nav: z.array(StrictNavItem).nullable()

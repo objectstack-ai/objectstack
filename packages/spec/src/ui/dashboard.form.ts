@@ -22,8 +22,8 @@ export const dashboardForm = defineForm({
       columns: 3,
       fields: [
         { field: 'columns', type: 'number', colSpan: 1, helpText: 'Grid columns (default 12)' },
-        { field: 'gap', type: 'number', colSpan: 1, helpText: 'Grid gap (Tailwind units)' },
-        { field: 'refreshInterval', type: 'number', colSpan: 1, helpText: 'Auto-refresh (seconds)' },
+        { field: 'gap', type: 'number', colSpan: 1, helpText: 'Space between widgets, in steps of 0.25rem (4 = 1rem)' },
+        { field: 'refreshIntervalSeconds', type: 'number', colSpan: 1, helpText: 'Auto-refresh (seconds)' },
         { field: 'header', type: 'composite', colSpan: 3, helpText: 'Dashboard header config (title, subtitle, actions)' },
       ],
     },

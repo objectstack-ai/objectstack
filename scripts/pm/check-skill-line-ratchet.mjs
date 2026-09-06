@@ -288,7 +288,11 @@ export const CEILINGS = new Map([
   // ≤5-same-family batch convention that replaces them costs less than they
   // did. Landed count, headroom 0, same convention (lowering is always
   // legitimate).
-  ['.claude/skills/pm-dispatch/SKILL.md', 1005],
+  // Lowered 1005 → 811 by the rules-only rewrite (maintainer ruling: provenance
+  // narratives, incident post-mortems and rationale tails leave the corpus; one
+  // rule per ≤120-byte line, 红线 first, templates last). Landed count, headroom
+  // 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 811],
   // Raised 223 → 244 by the triage reading-cost card (maintainer ruling
   // 2026-08-20, quoted in the raising PR): three mandated conventions land in
   // the runbook's triage sections. Landed count, headroom 0, same convention.
@@ -310,7 +314,12 @@ export const CEILINGS = new Map([
   // which is what forecloses the compact two-row table the card and its triage both used. Funding
   // the growth by deleting sibling rationale was refused by the same ruling (option D). Landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 280],
+  // Lowered 280 → 241 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 241],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
@@ -325,7 +334,12 @@ export const CEILINGS = new Map([
   // packed to its own minimum at the 120-byte cap (measured per bullet), so the
   // only in-place payment available was deleting a ruled clause. Landed count,
   // headroom 0 again, same convention.
-  ['.claude/skills/pm-dispatch/references/state-machine.md', 44],
+  // Lowered 44 → 42 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/state-machine.md', 42],
   // Raised 48 → 51 by the clause-② CONTENT-limb applicability ruling (maintainer
   // 2026-08-31, 第 6 场总监席决裁批 #12, verbatim 「同意」, adopting A + C: published
   // `skills/**` changes making a falsifiable operator/contract semantic claim fall
@@ -428,7 +442,12 @@ export const CEILINGS = new Map([
   // there is no source deletion to pay with, and manufacturing one to dodge a
   // ruled raise would grow the corpus by exactly the same lines with the
   // warrant hidden. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 68],
+  // Lowered 68 → 60 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -455,7 +474,12 @@ export const CEILINGS = new Map([
   // 2026-08-17 rule in any case; the only other in-place payment was deleting a
   // ruled clause, refused on the state-machine precedent. Landed count, headroom
   // 0 again, same convention.
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 54],
+  // Lowered 54 → 50 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 50],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -525,7 +549,11 @@ export const CEILINGS = new Map([
   // `ruledRaises` records quoting their own rulings, which is what keeps that
   // declaration's `was` at this file's literal pre-move 314 while the move's own
   // raise still reads +10 against the sources' −11.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 397],
+  // Lowered 397 → 359 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 359],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -561,9 +589,23 @@ export const CEILINGS = new Map([
   // file's own header already routes the queue-section readings there and
   // refuses to keep a second copy, so nothing is left behind but the rows that
   // are channel mappings. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 88],
-  ['.claude/skills/pm-dispatch/references/review-checklist.md', 84],
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 80],
+  // Lowered 88 → 82 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 82],
+  // Lowered 84 → 77 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/review-checklist.md', 77],
+  // Lowered 80 → 69 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 69],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
   // rolls to production, which the landing window (ends at MERGED) never
   // covered: post-roll placement/latency reading with the waker-bias re-draw
@@ -574,8 +616,17 @@ export const CEILINGS = new Map([
   // deliberately not restated here: a live number copied into a neighbour's
   // comment goes stale the next time that file moves — which is what happened to
   // the arithmetic this sentence replaces.
-  ['.claude/skills/pm-dispatch/references/release-aftercare.md', 58],
-  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 105],
+  // Lowered 58 → 50 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/release-aftercare.md', 50],
+  // Lowered 105 → 91 by the rules-only rewrite of the seven core references
+  // (maintainer ruling: provenance narratives, incident post-mortems and rationale
+  // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
+  // SKILL.md). Landed count, headroom 0, same convention (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 91],
   // Per-repo「真绿」跑法索引 — the canonical test invocation, the gates a CI-log
   // grep cannot see, and the local preflight, one fact per line per repo. Added
   // by the protocol-text family PR, which could not carry its own ceiling: that
@@ -586,7 +637,11 @@ export const CEILINGS = new Map([
   // (that one is the published `skills/` catalog, and only it). Set at the landed
   // line count read from this ratchet's own run — headroom 0, same convention as
   // the entries above.
-  ['.claude/skills/pm-dispatch/references/true-green.md', 34],
+  // Lowered 34 → 32 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/true-green.md', 32],
   // Per-surface compile/typecheck coverage index — which surfaces a repo-wide
   // typecheck actually reaches, which are compiled only by their own package's
   // script, and the frozen ones. #12098: after true-green.md above it was the
@@ -598,7 +653,11 @@ export const CEILINGS = new Map([
   // from this ratchet's own run — headroom 0, same convention. ⚠️ Its seven
   // over-120B lines are all `table` rows, structurally exempt and NOT
   // re-wrappable; they are metered instead by MAX_TABLE_ROW_BYTES below.
-  ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 26],
+  // Lowered 26 → 24 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/compile-surfaces.md', 24],
   // Plain-language digest of the corpus's binding rules, one rule per line, added
   // under the 2026-09-04 rules-only ruling so the maintainer reviews the rules
   // instead of the corpus. Set at the landed line count (headroom 0, same
@@ -620,23 +679,51 @@ export const CEILINGS = new Map([
   // 2026-08-23) — the patrol-anchor sentence was carried verbatim by all seven
   // lanes and now lives once in SKILL.md 执行座位职责, so every lane drops it.
   // cli.md pays −2 because it was carrying the map's last line of headroom.
-  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 40],
+  // Lowered 40 → 32 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/engine.md', 32],
   // Lowered 30 → 28 and 35 → 31 as the other two SOURCES of the cross-file
   // move recorded on platform-readings.md above. A per-repo gate reading in a
   // lane charter is read by one lane and missed by the other six, which is the
   // whole defect the move repairs: services.md gave up the two aggregate-
   // reading boundaries, cli.md the required-check set with its `in_progress`
   // and advisory clauses. Landed counts, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/lanes/services.md', 28],
-  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 31],
-  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 39],
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
-  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 46],
+  // Lowered 28 → 27 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/services.md', 27],
+  // Lowered 31 → 29 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 29],
+  // Lowered 39 → 38 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/devx.md', 38],
+  // Lowered 35 → 33 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 33],
+  // Lowered 46 → 43 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/spec.md', 43],
   // repo:hotcrm lane charter (maintainer rulings 2026-08-20: exemplar-app repo —
   // platform capabilities implemented upstream, 展现平台能力, 不扩散需求, runs on
   // community edition). Set at landed line count (headroom 0, same convention).
   // 45 → 44: same patrol-anchor hoist deletion as the six lanes above.
-  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 57],
+  // Lowered 57 → 53 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
   // Project Director seat charter (maintainer ruling 2026-08-27, verbatim in the
   // file: 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」) — a
   // human-invoked seat owning the contract-review chain, the adjudication duty and
@@ -648,7 +735,18 @@ export const CEILINGS = new Map([
   // directive; the file sat at headroom 0 with no losslessly compressible slack in
   // the touched sections (arithmetic in the raising PR), so the directive is the
   // ruling that pays for exactly the two lines it dictates.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 77],
+  // Lowered 77 → 72 by the rules-only rewrite (maintainer 2026-09-04:
+  // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
+  // ruling citations and incident narrative left; every rule stayed. Landed count,
+  // headroom 0, same convention (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 72],
+  // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
+  // alternates between the two multi-lane repos, oldest-first inside a repo, with a
+  // 4-hour starvation guard). A seat charter is read per seat session like every
+  // entry above. Set at the landed line count read from this ratchet's own run
+  // (headroom 0, same convention as above); it is a NEW file, so this is an added
+  // row and no other row moves.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 7],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -674,7 +772,12 @@ export const CEILINGS = new Map([
   // machine-readable proxy. Measured both ways before reverting to the raise.
   // The density fix is legitimate on its own and belongs in a net-reducing PR
   // (2026-08-29 ruling), not this one. Landed count, headroom 0, same convention.
-  ['.claude/agents/os-dev.md', 469],
+  // Lowered 469 → 403 by the rules-only rewrite (maintainer ruling: provenance
+  // narratives, incident post-mortems and rationale tails leave the corpus; one
+  // rule per ≤120-byte line; the frontmatter, section order, pinned spellings and
+  // the report JSON keep their operative content). Landed count, headroom 0, same
+  // convention (lowering is always legitimate).
+  ['.claude/agents/os-dev.md', 403],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
@@ -736,7 +839,11 @@ export const CEILINGS = new Map([
   // anything smaller drops ruled content), fold 0. Maintainer batch ruling
   // 2026-08-29, verbatim and untranslated: 「执行，批 #1 其他卡同意」 — recorded
   // on #12756 and quoted in the PR. Headroom is 0 again by construction.
-  ['AGENTS.md', 1162],
+  //
+  // 1162 → 1058: the rules-only rewrite — every incident narrative, ruling date and
+  // quotation out, every rule kept as one sentence; re-pinned at the landed count,
+  // headroom 0 (lowering is always legitimate).
+  ['AGENTS.md', 1058],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
@@ -746,7 +853,9 @@ export const CEILINGS = new Map([
   // 5353931707) — rationale on record: a one-line ceiling now prevents compound
   // growth cheaply. Set at its line count on `origin/main` (headroom 0, same
   // convention as the entries above).
-  ['CLAUDE.md', 86],
+  // 86 → 41: the ownership excerpt rewritten by role in the same rules-only pass;
+  // re-pinned at the landed count, headroom 0.
+  ['CLAUDE.md', 41],
 ]);
 
 /**
@@ -838,22 +947,22 @@ export const CROSS_FILE_MOVES = new Map([
           date: '2026-09-04',
           delta: 34,
         },
-        {
-          // The third increment, ruled the same day as the one above and in the
-          // same way. Quoted beside this entry's ceiling too, where the +39 is
-          // accounted for member by member. Copied from there, not paraphrased.
-          ruling:
-            'the third-increment raise on `.claude/skills/pm-dispatch/references/platform-readings.md`'
-            + ' — maintainer, decision batch #34, 2026-09-04, verbatim and untranslated:'
-            + ' 「决裁批 #34 同意」 on the presented recommendation, item 1 = A; and the director'
-            + ' record\'s own sentence for that item: "raise the ceiling by the measured +39,'
-            + ' 358 → 397". Measured per member rather than estimated: attribution-footer'
-            + ' scoping +12, the MCP-side rate refusal read as a window reading +6, the CDN'
-            + ' cause behind the payload channel\'s absence rule +5, and the Routine transport'
-            + ' family +16 = +39 exactly.',
-          date: '2026-09-04',
-          delta: 39,
-        },
+        // RETIRED HERE, and retired rather than re-numbered, because the ceiling
+        // above no longer stands high enough to carry both records. The rules-only
+        // rewrite gave 38 of these 73 ruled lines back (397 → 359), so 35 of them
+        // still stand while the destination is only 45 above `was` — and a set of
+        // records claiming more than that reads as an over-claim, which is exactly
+        // what `crossFileMoveVerdict` refused. The header names the remedy: a ruled
+        // raise since given back is spent, so retire its record. The THIRD-INCREMENT
+        // record is the one retired (maintainer, decision batch #34, 2026-09-04,
+        // 「决裁批 #34 同意」, +39, quoted in full beside the ceiling above) rather
+        // than the intake-family record below it, and the choice is the conservative
+        // direction rather than a preference: 34 declared against 35 actually
+        // standing prices this move at +11 for a raise that took +10, while keeping
+        // the +39 instead would price it at +6 — under-pricing the move is the
+        // failure the header warns about. Neither ruling is reopened by this: both
+        // are still quoted beside the ceiling, which is where a reader gets back to
+        // them, and the lines they bought are the lines this rewrite handed back.
       ],
       sources: [
         ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
@@ -917,7 +1026,11 @@ export const CROSS_FILE_MOVES = new Map([
 export const MAX_TABLE_ROW_BYTES = new Map([
   // The five files that carry a table row today, each seeded at its own widest.
   // The corpus's #1 longest LINE of any shape is the AGENTS.md row below.
-  ['.claude/skills/pm-dispatch/SKILL.md', 642],
+  // Lowered 642 → 342 by the rules-only rewrite: the state-model and domain
+  // rows lost their in-cell provenance and rationale; the widest survivor is
+  // the `domain:engine` row. Landed width, headroom 0 (lowering is always
+  // legitimate).
+  ['.claude/skills/pm-dispatch/SKILL.md', 342],
   ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 0],
   ['.claude/skills/pm-dispatch/references/state-machine.md', 0],
   ['.claude/skills/pm-dispatch/references/contract-review.md', 0],
@@ -940,12 +1053,15 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
   ['.claude/agents/os-dev.md', 0],
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],
   ['.claude/skills/dogfood-verification/SKILL.md', 0],
   ['.claude/skills/spec-property-retirement/SKILL.md', 328],
-  ['AGENTS.md', 1081],
+  // Lowered 1081 → 768 by the rules-only rewrite: the translations row lost its
+  // in-cell narrative; the widest survivor is that same row. Landed width, headroom 0.
+  ['AGENTS.md', 768],
   ['CLAUDE.md', 0],
 ]);
 

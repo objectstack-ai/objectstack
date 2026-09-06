@@ -147,18 +147,12 @@ export function builtinPhoneSmsBody(topic: string, locale: string | undefined): 
 
 /** Minimal engine surface the loader/seeder needs. */
 export interface PhoneSmsTemplateEngine {
-  find(objectName: string, query?: unknown): Promise<unknown>;
+  find(objectName: string, query?: unknown): Promise<Array<Record<string, unknown>>>;
   insert(objectName: string, data: unknown, options?: unknown): Promise<unknown>;
 }
 
 const TEMPLATE_OBJECT = 'sys_notification_template';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
-
-function rowsOf(result: unknown): Array<Record<string, unknown>> {
-  if (Array.isArray(result)) return result as Array<Record<string, unknown>>;
-  const data = (result as { data?: unknown } | null)?.data;
-  return Array.isArray(data) ? (data as Array<Record<string, unknown>>) : [];
-}
 
 /**
  * Load the tenant's template body for `(topic, 'sms', locale chain)`.
@@ -179,7 +173,7 @@ export async function loadPhoneSmsTemplateBody(
         limit: 1,
         context: SYSTEM_CTX,
       });
-      const row = rowsOf(result)[0];
+      const row = result[0];
       const body = row?.body;
       if (typeof body === 'string' && body.trim()) return body;
     } catch {
@@ -207,7 +201,7 @@ export async function seedPhoneSmsTemplates(
         limit: 1,
         context: SYSTEM_CTX,
       });
-      if (rowsOf(existing).length > 0) continue;
+      if (existing.length > 0) continue;
       await engine.insert(TEMPLATE_OBJECT, { ...tpl }, { context: SYSTEM_CTX });
     } catch (err) {
       logger?.warn(

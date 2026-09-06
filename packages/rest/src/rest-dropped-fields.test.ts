@@ -94,7 +94,7 @@ describe('PATCH /data/:object/:id — X-ObjectStack-Dropped-Fields (#3431)', () 
 });
 
 describe('POST /data/:object — X-ObjectStack-Dropped-Fields on create (#3431)', () => {
-  it('sets the header (status still 201) when the create ingress stripped a readonly field', async () => {
+  it('sets the header (status still 201) when `createData` relays a readonly field dropped by the create-side strip in `engine.insert`', async () => {
     const createData = vi.fn().mockResolvedValue({
       object: 'approval_case', id: 'rec-1', record: { id: 'rec-1', title: 'A' }, droppedFields: DROPPED,
     });

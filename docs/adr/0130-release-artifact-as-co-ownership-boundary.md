@@ -1,8 +1,6 @@
 # ADR-0130: The release artifact is the co-ownership boundary — one artifact, N packages
 
-**Status**: Proposed (2026-09-01) — awaiting the maintainer's hand-merge, which is itself the
-acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing below is settled until
-this record merges; the implementation cards are cut **from** the merged ADR, never ahead of it.
+**Status**: Accepted (2026-09-01) — accepted by the merge that landed it on `main` ([#14151](https://github.com/objectstack-ai/objectstack/pull/14151), commit `682d03ba7`), which is itself the acceptance act for a governed surface (Prime Directive #14).
 **Scope bounded by the 2026-09-02 addendum**
 ([#14487](https://github.com/objectstack-ai/objectstack/issues/14487)): the permission matrix
 §1.3(a) measures is **not** part of this boundary's payoff — permission sets stay whole in the

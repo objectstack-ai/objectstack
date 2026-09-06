@@ -78,7 +78,7 @@
  */
 
 import { expandViewContainerWithDiagnostics, isAggregatedViewContainer } from '@objectstack/spec';
-import { listNames, suggestName } from './object-graph.js';
+import { listNames, recordsOf, suggestName } from './object-graph.js';
 
 export interface ViewRefFinding {
   where: string;
@@ -89,14 +89,6 @@ export interface ViewRefFinding {
 }
 
 type AnyRec = Record<string, any>;
-
-/** Normalise a record-or-map metadata slot into an array, injecting `name` from
- *  the map key (mirrors the helper in the sibling authoring lints). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  return [];
-}
 
 export const VIEW_KEY_COLLISION = 'view-key-collision';
 export const VIEW_REF_FORM_TARGET_MISSING = 'view-ref-form-target-missing';
@@ -185,7 +177,7 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
 
   // 1) Gather every aggregated container: top-level `views` + object-nested.
   const containers: Array<{ object: string; container: AnyRec }> = [];
-  for (const v of asArray(stack.views)) {
+  for (const v of recordsOf(stack.views)) {
     if (v.viewKind) {
       // Already an independent, expanded ViewItem — index it directly.
       const kind = v.viewKind === 'form' ? 'form' : 'list';
@@ -200,7 +192,7 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
     const object = viewContainerObjectName(v);
     if (object) containers.push({ object, container: v });
   }
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const object = typeof obj.name === 'string' ? obj.name : undefined;
     if (!object) continue;
     if (obj.list || obj.form || obj.listViews || obj.formViews) {
@@ -281,11 +273,11 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
   };
 
   // Object-nested first so the retained (deduped) finding keeps object context.
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const object = typeof obj.name === 'string' ? obj.name : undefined;
-    for (const action of asArray(obj.actions)) checkAction(action, object);
+    for (const action of recordsOf(obj.actions)) checkAction(action, object);
   }
-  for (const action of asArray(stack.actions)) checkAction(action);
+  for (const action of recordsOf(stack.actions)) checkAction(action);
 
   // 4) Validate every app-navigation `viewName` against its object's list views.
   //    The second door into the same `listViews` namespace as (3) — see the
@@ -366,12 +358,12 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
     }
   };
 
-  for (const [ai, app] of asArray(stack.apps).entries()) {
+  for (const [ai, app] of recordsOf(stack.apps).entries()) {
     const appName = typeof app.name === 'string' && app.name ? app.name : `#${ai}`;
     walkNav(app.navigation, appName);
     // `areas[]` is the other nav container; it was once skipped wholesale in
     // `stack.zod.ts`, so an areas-based app got no nav validation at all.
-    for (const area of asArray(app.areas)) {
+    for (const area of recordsOf(app.areas)) {
       walkNav(area.items, appName);
       walkNav(area.navigation, appName);
     }

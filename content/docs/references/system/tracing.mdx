@@ -142,7 +142,8 @@ OpenTelemetry span
 | **kind** | `Enum<'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'>` | optional (default: `"internal"`) | Span kind |
 | **startTime** | `string` | ✅ | Span start time |
 | **endTime** | `string` | optional | Span end time |
-| **duration** | `number` | optional | Duration in milliseconds |
+| **durationMs** | `number` | optional | Duration in milliseconds |
+| **duration** | `never` | optional | [REMOVED] `Span.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
 | **status** | `{ code: Enum<'unset' \| 'ok' \| 'error'>; message?: string }` | optional |  |
 | **attributes** | `Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]>` | optional (default: `{}`) | Span attributes |
 | **events** | `{ name: string; timestamp: string; attributes?: Record<string, string \| number \| boolean \| string[] \| number[] \| boolean[]> }[]` | optional (default: `[]`) |  |

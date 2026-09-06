@@ -172,6 +172,58 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // `coversDirectory` is the check, and it is why the narrower spelling was
       // tried first and rejected by this gate.
       'skills/**',
+      // src/system/compliance-families-retirement.test.ts is the #15513
+      // tree-scoped absence pin (ADR-0049 whole-family retirement). It walks
+      // FIVE repo roots -- `packages`, `examples`, `skills`, `content`,
+      // `scripts` -- seeded off `import.meta.url` and descending with
+      // `readdirSync(dir)` on a LOOP VARIABLE, so the escape verdict resolves
+      // and no name does; every glob below that no roster path holds names
+      // the pin in `heldBy`. The declaration is what puts the pin into
+      // `turbo ls --affected` and the `test` task's cache key for a
+      // resurrection anywhere inside the radius -- the half the retirement
+      // playbook mandates (its ⭐ 半径按包申报一次 rule, #15566) and the
+      // #14477 pin lacked (#15528).
+      //
+      // ⛔ Per EXTENSION under `packages/`, never `packages/**`: the
+      // dispatch-gates self-test pins that no cross-package hint reaches
+      // `packages/client-react`'s `realtime-hooks.test.tsx`, and a bare
+      // `packages/**` was the one entry that covered a `.tsx` file (the
+      // `@objectstack/core` entry above records the measurement). The pin's
+      // scanner skips `.tsx` for the same reason -- extensions and globs widen
+      // together or not at all; a typed `.tsx` import of a retired name fails
+      // `tsc` in its own package, which is the enforced channel there.
+      // `packages/**/*.ts` and `*.mts` subsume this entry's narrower `.ts`
+      // globs above, which are left as the tests that declared them spelled
+      // them. `content/**` is declared whole (the pin scans its JSON / MD /
+      // MDX / YAML too; it subsumes the two `content/docs/...` rows above).
+      // `examples/` is declared per NON-CODE extension only: every example is
+      // a workspace package with its own `typecheck` (`tsc --noEmit`), so a
+      // typed resurrection there fails `tsc` in its own package, and the pin
+      // scans only JSON / MD / MDX / YAML under it. ⛔ Not `examples/**` — that
+      // glob covers the CRM example's smoke test, and the dispatch-gates
+      // self-test pins that no cross-package hint reaches a test file outside
+      // `packages/**` (its `OUTSIDE_PACKAGES` specimen; the path is not spelled
+      // here for the reason the `@objectstack/types` entry gives — a quoted
+      // whole path in this module becomes the very hint the case refuses);
+      // a `.json` / `.md` glob cannot match a `.ts` path. `skills/**` and
+      // `scripts/**` were already declared by the tests named at their rows.
+      'packages/**/*.ts',
+      'packages/**/*.mts',
+      'packages/**/*.cts',
+      'packages/**/*.js',
+      'packages/**/*.mjs',
+      'packages/**/*.cjs',
+      'packages/**/*.json',
+      'packages/**/*.md',
+      'packages/**/*.mdx',
+      'packages/**/*.yaml',
+      'packages/**/*.yml',
+      'examples/**/*.json',
+      'examples/**/*.md',
+      'examples/**/*.mdx',
+      'examples/**/*.yaml',
+      'examples/**/*.yml',
+      'content/**',
     ],
     heldBy: {
       // The two repo-wide `*.object.ts` walkers. Each seeds a recognised
@@ -183,11 +235,43 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
         'packages/spec/src/data/api-methods-batch-conformance.test.ts',
         'packages/spec/src/system/constants/platform-object-names.test.ts',
       ],
+      // The #15513 absence pin's walk radius (see the globs' comment above):
+      // one witness per glob no literal path on this package's roster holds.
+      'packages/**/*.mts': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.cts': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.js': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.mjs': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.cjs': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.json': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.md': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.mdx': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.yaml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'packages/**/*.yml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.json': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.md': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.mdx': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.yaml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
+      'examples/**/*.yml': ['packages/spec/src/system/compliance-families-retirement.test.ts'],
     },
   },
   '@objectstack/core': {
-    // src/security/operation-private-keys.pin.test.ts walks `git ls-files` over
-    // the whole repo and reads every matching source file.
+    // src/security/operation-private-keys.pin.test.ts asks `git ls-files` for
+    // every authored source file under `packages/` -- tracked plus untracked --
+    // and reads the ones a fixed-string prefilter says mention its two symbols.
+    //
+    // ⛔ `.ts` and NOT `.tsx`, and this half of that boundary is load-bearing in
+    // the same way the `@objectstack/types` entry below is. That pin's scanner
+    // used to match `.ts` and `.tsx` while this glob covered only `.ts`, so it
+    // judged a population neither scoping layer re-runs it for -- the #7802
+    // shape, one extension wide. It was repaired by narrowing the SCANNER to
+    // this glob, never by widening this glob to the scanner: these globs are
+    // inherited as watch hints by `check:cross-package-test-inputs`, and the
+    // dispatch-gates self-test pins that no hint of that family reaches
+    // the `realtime-hooks.test.tsx` file in `packages/client-react`. Measured on
+    // b548e438d, by adding a `.tsx` glob here and re-deriving that family's
+    // hints: the case flipped from true to false with the added glob itself as
+    // the covering hint. ⇒ Extensions and glob widen together or not at all,
+    // and that pin's header carries the measurement of what the boundary costs.
     globs: ['packages/**/*.ts'],
   },
   '@objectstack/types': {
@@ -264,6 +348,29 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // any package here, and a subtree glob would put cli's e2e suite on every
     // documentation PR.
     //
+    // The three pages added for #14824 are read by
+    // test/create-plugin-docs-parity.test.ts, which holds the `plugin` template's
+    // emitted file set equal to the tree each page PRINTS. They are the only
+    // statement of that template's shape -- it emits no `objectstack.config.ts`,
+    // so `ManifestSchema` does not govern it and the manifest sweep cannot see
+    // it. The coupling runs both ways and so must the re-run: a template that
+    // grows a file must redden the pages that no longer list it, and a page
+    // rewrite must redden if it drops or invents one. Undeclared, a
+    // documentation-only PR would leave cli outside the affected set and the
+    // merge queue would be the first signal -- the shape the three e2e pages
+    // above were declared for.
+    //
+    // The two pages added for #15818 are read by
+    // test/scaffold-emission-policy.e2e.test.ts, which holds the TypeScript range
+    // BOTH scaffolders emit equal to the floor those pages promise a reader
+    // ("ObjectStack works with TypeScript 5.3+", "TypeScript 5.3.0 or later").
+    // That promise is what settled which of three restated ranges survived the
+    // extraction, so the pin is the only thing that keeps the emitted value and
+    // the documented one from parting again. Same both-ways coupling as the
+    // #14824 trio: a range moved in `init.ts` must redden the pages that still
+    // promise the old floor, and a page rewritten to a new floor must redden
+    // until the scaffolders follow.
+    //
     // `connector-mcp-plugin.ts` is read by test/serve-capability-identity.test.ts,
     // which pins that the connector still registers the name the #7652 repro uses
     // rather than importing the class. It surfaced with the three above and has the
@@ -322,7 +429,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/ui/pages/task-triage.page.ts',
       'content/docs/deployment/cli.mdx',
       'content/docs/deployment/index.mdx',
+      'content/docs/deployment/troubleshooting.mdx',
+      'content/docs/getting-started/index.mdx',
       'content/docs/permissions/authentication.mdx',
+      'content/docs/plugins/index.mdx',
+      'content/docs/protocol/kernel/index.mdx',
+      'content/docs/protocol/kernel/plugin-spec.mdx',
       'scripts/check-nul-bytes.mjs',
       // This gate's OWN script, the third entry of the mention shape on this
       // package: test/scaffold-workspace-consistency.test.ts quotes it while
@@ -487,7 +599,49 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // count changes if the mask does.
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      // [#15608] ⭐ THE WHOLE-REPO WALK, declared for the root the incident came
+      // from. `envelope-caller-census.test.ts` resolves the workspace root and
+      // walks EVERY `.ts` / `.tsx` / `.js` / `.mjs` / `.cjs` file in the tree at
+      // module load, so its inputs are the repo -- but the two globs above name
+      // only the mask it imports, and `turbo ls --affected` reaches this package
+      // from the dependency graph alone. A diff under `scripts/` therefore
+      // selected this package for NOTHING, and the census could not report until
+      // the merge queue.
+      //
+      // Measured, not modelled: PR #13596 added a gate refusal MESSAGE containing
+      // two `client.analytics.query(` call shapes. It masks comments and
+      // leaves string literals intact by design (#13874, suspended and NOT
+      // reopened here -- what it counts is unchanged), so it counted them:
+      // `expected 21 to be 19`. That PR touched `scripts/` and nothing else, so
+      // no PR-side run could have reddened; it reddened in the merge queue, where
+      // speculative stacking ejected five PRs, four of them bystanders inheriting
+      // the same count off the stacked tree.
+      //
+      // `scripts/**` and not the whole census radius, and the difference is a
+      // PRICE, not an oversight. Layer B mirrors every glob here into
+      // `@objectstack/client#test` inputs, so a declared `packages/**` would
+      // re-run this suite on virtually every commit -- the bound that test's
+      // header has recorded as declined since #13079, and this entry does not
+      // buy it. `scripts/**` is the root where a QUOTED example lives (refusal
+      // messages, usage banners, embedded fixtures) and the one the incident
+      // came from; it also needs no ci.yml `crosspkg:` filter change, because
+      // `@objectstack/spec` already declares it verbatim, so Layer C reaches it
+      // today. What stays uncovered stays recorded in that test's header.
+      'scripts/**',
     ],
+    heldBy: {
+      // `scripts/**` is rostered TODAY through the census's own
+      // `scripts/js-comment-mask.mjs` import, so this witness is not what makes
+      // the glob held -- it is what keeps the glob attributed to the read that
+      // actually needs it. The walk is seeded from a recognised expression and
+      // then descends on a LOOP VARIABLE, so it resolves an escape verdict and
+      // NO name (`pathExpression`): if the mask import ever moves, the roster
+      // loses `scripts/` entirely while the whole-repo walk goes right on
+      // reading it, and #10566's limb would name this glob rather than the read.
+      // The witness is checked -- this test must still be one of this package's
+      // escaping tests -- so it cannot rot into prose.
+      'scripts/**': ['packages/client/src/envelope-caller-census.test.ts'],
+    },
   },
   '@objectstack/lint': {
     // authoring-rule-wiring / validate-rule-compilability /
@@ -641,6 +795,24 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // is what gives `stripComments` its type, so this package's `tsc --noEmit`
     // verdict is a function of it too — the reason the `@objectstack/cli` entry
     // above declares the pair rather than the module alone.
+    globs: [
+      'scripts/js-comment-mask.mjs',
+      'scripts/js-comment-mask.d.mts',
+    ],
+  },
+  '@objectstack/service-settings': {
+    // src/value-domains.shared-predicate.pin.test.ts (#15162) imports
+    // `stripComments` from `js-comment-mask.mjs` to decide which text in this
+    // package's `src/` is prose and which is code — the ratchet that keeps the
+    // settings door answering from the ONE shared value-domain predicate
+    // instead of re-acquiring a membership table of its own. The coupling is
+    // real in both directions: the guard's verdicts are census over the whole
+    // non-test source, and its banned tokens (`supportedValuesOf`,
+    // `Intl.DateTimeFormat`) are named in the very TSDoc that explains why they
+    // are banned — so a change in what the module counts as a comment changes
+    // every verdict here. The `.d.mts` sibling is declared alongside it because
+    // it is what types the import, so this package's `tsc --noEmit` verdict is
+    // a function of it too.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',

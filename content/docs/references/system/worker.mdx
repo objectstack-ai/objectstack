@@ -21,7 +21,7 @@ Features:
 - Dead letter queues
 - Task monitoring and logging
 
-@example Basic task
+**Basic task**
 ```typescript
 const task: Task = {
   id: 'task-123',
@@ -75,7 +75,7 @@ const result = BatchProgressSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Queue name (snake_case) |
 | **concurrency** | `integer` | optional (default: `5`) | Max concurrent task executions |
-| **rateLimit** | `{ max: integer; duration: integer }` | optional | Rate limit configuration |
+| **rateLimit** | `{ max: integer; durationMs: integer }` | optional | Rate limit configuration |
 | **defaultRetryPolicy** | `{ maxRetries: integer; backoffStrategy: Enum<'fixed' \| 'linear' \| 'exponential'>; initialDelayMs: integer; maxDelayMs: integer; … }` | optional | Default retry policy for tasks |
 | **deadLetterQueue** | `string` | optional | Dead letter queue name |
 | **priority** | `integer` | optional (default: `0`) | Queue priority (lower = higher priority) |
@@ -86,7 +86,8 @@ const result = BatchProgressSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **max** | `integer` | ✅ | Maximum tasks per duration |
-| **duration** | `integer` | ✅ | Duration in milliseconds |
+| **durationMs** | `integer` | ✅ | Duration in milliseconds |
+| **duration** | `never` | optional | [REMOVED] `QueueConfig.rateLimit.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and `TaskResult.durationMs` on this same file already spelled it that way. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
 
 ### Nested Shape: `QueueConfig.defaultRetryPolicy`
 

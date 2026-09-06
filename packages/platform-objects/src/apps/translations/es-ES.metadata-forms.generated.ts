@@ -120,6 +120,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Longitud mínima",
         helpText: "Mínimo de caracteres"
       },
+      "fields.valueDomain": {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
+      },
       "fields.rows": {
         label: "Rows",
         helpText: "Inline editor height (text rows)"
@@ -384,6 +388,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Longitud máxima",
         helpText: "Longitud máxima de caracteres"
       },
+      valueDomain: {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+      },
       rows: {
         label: "Rows",
         helpText: "Inline editor height in text rows"
@@ -547,8 +555,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "Al error"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -932,9 +940,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       gap: {
         label: "Separación",
-        helpText: "Separación de cuadrícula (unidades Tailwind)"
+        helpText: "Espacio entre widgets, en incrementos de 0.25rem (4 = 1rem)"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "Intervalo de actualización",
         helpText: "Actualización automática (segundos)"
       },

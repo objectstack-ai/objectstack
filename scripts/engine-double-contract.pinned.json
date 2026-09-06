@@ -92,6 +92,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/stdio-tenancy-posture-api-key-matrix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/migrations/recorded-by-sentinel.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -158,6 +173,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-endpoint-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-object-field-refs.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1032,6 +1062,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.readonly-insert.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.record-not-found.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1128,6 +1163,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.runtime-gate-stored-universe.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2097,6 +2147,26 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/business-unit-member-org-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/business-unit-member-org-screen.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/manager-approver-org-screen.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2123,6 +2193,26 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/record-reader-visibility.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/restored-approval-continuation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/restored-approval-continuation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/subflow-hosted-approval-strand.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/subflow-hosted-approval-strand.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2512,6 +2602,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-engine.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2782,6 +2882,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/recipient-width.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3047,6 +3157,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-server-meta-references-refusal-envelope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-declarative-update.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-execution-calldata-batch-retired.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3093,6 +3213,36 @@
     },
     {
       "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-read-decorations.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3263,6 +3413,16 @@
     },
     {
       "file": "packages/services/service-automation/src/stranded-run-object-store.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-claim-probe.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-claim-probe.test.ts",
       "verb": "update",
       "pinned": 1
     },

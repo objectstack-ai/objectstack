@@ -811,21 +811,64 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
 
 
 /**
- * How {@link composeStacks} treats one top-level key (#5005).
+ * How {@link composeStacks} treats one top-level key of the artifact envelope
+ * (#5005) — the value half of {@link COMPOSE_KEY_DISPOSITIONS}.
  *
- * - `'concat'`    — array collection; concatenated in stack order.
- * - `'single'`    — one scalar/object value; identical declarations pass
- *                   through, differing ones are a composition ERROR.
- * - `'manifest'`  — chosen by the `manifest` option.
- * - `'objects'`   — merged by the `objectConflict` strategy.
- * - `'functions'` — named-handler collection; merged by name.
- * @internal
+ * - `'concat'`    — an array collection; the inputs' arrays are concatenated
+ *                   in stack order. Every metadata collection (`objects` aside)
+ *                   and the envelope's `packages` / `requires` lists compose
+ *                   this way, so a downstream seam that merges N artifacts may
+ *                   concatenate a `'concat'` key without reading its element
+ *                   type.
+ * - `'single'`    — one scalar/object configuration value; identical
+ *                   declarations pass through, differing ones are a
+ *                   composition ERROR naming the key and both stacks (never
+ *                   last-wins, never deep-merge).
+ * - `'manifest'`  — the singular package identity; picked by the `manifest`
+ *                   option (`'first'` / `'last'` / index, or folded into
+ *                   `packages` under `'preserve'`).
+ * - `'objects'`   — merged per object name by the `objectConflict` strategy.
+ * - `'functions'` — a named-handler map; merged by handler name, a duplicate
+ *                   name is an ERROR.
  */
-type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
+export type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
+
+/**
+ * Every top-level key {@link ObjectStackDefinitionSchema} declares — the
+ * artifact envelope's key set: the two envelope-only keys (`manifest`,
+ * `packages`) plus every member of the collections shape. The key half of
+ * {@link COMPOSE_KEY_DISPOSITIONS}; {@link STACK_DEFINITION_KEYS} is its
+ * runtime value.
+ */
+export type StackDefinitionKey = 'manifest' | 'packages' | keyof typeof STACK_DEFINITION_COLLECTIONS_SHAPE;
 
 /**
  * The composition rule for EVERY top-level key of `ObjectStackDefinition`
- * (#5005).
+ * (#5005) — and, since #14877, THE exported source of the artifact envelope's
+ * top-level key set.
+ *
+ * ## Exported, frozen: derive from it, never copy it (#14877)
+ *
+ * A downstream seam that walks an artifact's top level — a hosted publish, an
+ * artifact merge, an assembler — needs two answers: *which keys exist* and
+ * *what composing each one means*. The collection half of the first answer
+ * was already derivable (`PLURAL_TO_SINGULAR`, `METADATA_ALIASES`); the rest
+ * (`manifest`, `requires`, `packages`, …) had to be hand-copied per consumer,
+ * and the copy drifted silently twice (cloud#897: `roles` → `positions` dropped
+ * every hosted `positions[]`; cloud#1888: an artifact merge dropped
+ * `packages[]`). So this table is public: read its keys for the key set
+ * ({@link STACK_DEFINITION_KEYS} is that derivation, done once), and index it
+ * for the rule (`COMPOSE_KEY_DISPOSITIONS[key] === 'concat'` is the question
+ * "may I concatenate this across artifacts?"). A key added to the schema
+ * reaches every deriving consumer the day it lands — a copy would not.
+ *
+ * It is `Object.freeze`d: the contract is read-only, and a consumer cannot
+ * widen or retarget it by assignment. It is literal-typed (`as const`), so
+ * `(typeof COMPOSE_KEY_DISPOSITIONS)[K]` is K's disposition rather than the
+ * union — the derivations below depend on that. The pin
+ * `compose-key-dispositions-export.pin.test.ts` holds this key set equal to
+ * `ObjectStackDefinitionSchema`'s shape in both directions, so the table cannot
+ * drift from the schema without a red test naming the key.
  *
  * ## Why a total table and not a list
  *
@@ -867,12 +910,8 @@ type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functi
  * `translations` bundles each stack ships are written against its own
  * `supportedLocales`, so overriding one stack's declaration leaves the other
  * stack's bundles addressing locales the composed app no longer admits.
- *
- * @internal
  */
-type StackDefinitionKey = 'manifest' | 'packages' | keyof typeof STACK_DEFINITION_COLLECTIONS_SHAPE;
-
-const COMPOSE_KEY_DISPOSITIONS = {
+export const COMPOSE_KEY_DISPOSITIONS = Object.freeze({
   // ── Bespoke strategies (unchanged by #5005) ──
   manifest: 'manifest',
   objects: 'objects',
@@ -952,14 +991,29 @@ const COMPOSE_KEY_DISPOSITIONS = {
   onEnable: 'single',
   // #5051: the last key still on last-wins; aligned here, see the note above.
   i18n: 'single',
-} as const satisfies Record<StackDefinitionKey, ComposeDisposition>;
+} as const satisfies Record<StackDefinitionKey, ComposeDisposition>);
+
+/**
+ * The artifact envelope's top-level key set — every key
+ * {@link ObjectStackDefinitionSchema} declares — as a frozen list (#14877).
+ *
+ * DERIVED from {@link COMPOSE_KEY_DISPOSITIONS} by `Object.keys`, never a
+ * second literal: the table is total over the schema's declared keys, so this
+ * list is too, and a consumer that iterates it sees a new top-level key the
+ * day the schema declares one. Read it where a seam needs "the keys an
+ * artifact may carry" without caring what composing each one means; index the
+ * table where it does.
+ */
+export const STACK_DEFINITION_KEYS: readonly StackDefinitionKey[] = Object.freeze(
+  Object.keys(COMPOSE_KEY_DISPOSITIONS) as StackDefinitionKey[],
+);
 
 /**
  * All array fields on `ObjectStackDefinition` that are simply concatenated.
  * Derived from {@link COMPOSE_KEY_DISPOSITIONS} so the two cannot drift.
  * @internal
  */
-const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof ObjectStackDefinition)[])
+const CONCAT_ARRAY_FIELDS = STACK_DEFINITION_KEYS
   .filter((key) => COMPOSE_KEY_DISPOSITIONS[key] === 'concat');
 
 
@@ -1689,6 +1743,63 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
     );
   }
   return errors;
+}
+
+/**
+ * [ADR-0112] The cross-reference refusal `defineStack` raises when a stack's
+ * items name objects the stack does not define — carried as an envelope
+ * (`code` + `status`), never a bare `Error`.
+ *
+ * Before it carried one, all five REFUSED item classes of the ADR-0130 matrix
+ * (action `objectName`, view `data.object`, permission-set `objects`, seed
+ * dataset `object`, import mapping `targetObject`) plus the `hooks[].object`
+ * rule threw `new Error(message)` with `code` and `status` both `undefined`,
+ * so they were distinguishable only by MESSAGE TEXT — the fragile shape the
+ * ADR-0112 envelope exists to remove, and one that five message-substring pins
+ * had already come to depend on.
+ *
+ * ⭐ Why the code names the rule FAMILY and not one item class: there is
+ * exactly ONE raise site. {@link validateCrossReferences} returns every
+ * finding as a `string[]` and `defineStack` throws the whole set at once, so a
+ * single refusal can carry findings from several classes together — a
+ * per-class code would have to pick one of several true answers. The classes
+ * stay machine-readable in {@link StackCrossReferenceError.issues}, one entry
+ * per finding, which is the structured form of what was previously only
+ * newline-joined prose. The family is also WIDER than "undefined object": the
+ * same aggregate carries the duplicate-action-key, global-`update`-action and
+ * mapping `javascript`-transform findings, so a
+ * `…_UNDEFINED_OBJECT` spelling would be false for those.
+ *
+ * `status: 422` matches both precedents for this defect class
+ * (`ObjectOwnershipConflictError`, `NamespaceConflictError` in
+ * `packages/objectql/src/registry.ts`) — an unprocessable authored entity, not
+ * a server fault.
+ *
+ * ⛔ Deliberately NOT exported. `packages/spec/src/index.ts` re-exports this
+ * module with `export *`, so exporting this class would widen the PUBLISHED
+ * api-surface of the contract package; the ADR-0112 contract is the `code` /
+ * `status` fields, which every reader — `resolveThrownHttpError` and this
+ * repo's rejection pins alike — reads structurally rather than by `instanceof`.
+ * Export it the day a consumer needs the narrowed type, as its own change.
+ *
+ * ⛔ Not registered in the ADR-0112 ledger, for the same reason its two
+ * precedents are not: no wire door raises it. `defineStack` runs at authoring
+ * and boot time (`os validate`, `os build`, the `os serve` / `os migrate` host
+ * configs and `DevPlugin`); no HTTP domain handler calls it. The classification
+ * row lives in `packages/runtime/src/dispatcher-error-vocabulary.ts` as
+ * `door: 'none'` / `verdict: 'boot-refusal'`.
+ */
+class StackCrossReferenceError extends Error {
+  readonly code = 'STACK_CROSS_REFERENCE_INVALID';
+  readonly status = 422;
+  /** One entry per finding, in the order `validateCrossReferences` collected them. */
+  readonly issues: readonly string[];
+
+  constructor(message: string, issues: readonly string[]) {
+    super(message);
+    this.name = 'StackCrossReferenceError';
+    this.issues = issues;
+  }
 }
 
 /**
@@ -2459,7 +2570,10 @@ export function defineStack(
   if (crossRefErrors.length > 0) {
     const header = `defineStack cross-reference validation failed (${crossRefErrors.length} issue${crossRefErrors.length === 1 ? '' : 's'}):`;
     const lines = crossRefErrors.map((e) => `  ✗ ${e}`);
-    throw new Error(`${header}\n\n${lines.join('\n')}`);
+    // [ADR-0112 · #14552] The message is byte-for-byte what the bare `Error`
+    // carried — this adds the envelope's fields, it does not reword a
+    // sentence. See {@link StackCrossReferenceError}.
+    throw new StackCrossReferenceError(`${header}\n\n${lines.join('\n')}`, crossRefErrors);
   }
 
   const nsErrors = validateNamespacePrefix(data);
@@ -2502,7 +2616,15 @@ export function defineStack(
  *
  * - `'error'`    — Throw an error when a duplicate name is detected (default).
  * - `'override'` — Last stack wins; later definitions replace earlier ones.
- * - `'merge'`    — Shallow-merge items with the same name (later fields win).
+ * - `'merge'`    — Shallow-merge `fields` of same-name objects (later fields
+ *                  win, earlier fields are kept). Every OTHER object-level
+ *                  collection (`actions`, `indexes`, `listViews`,
+ *                  `validations`, …) is not merged: when both objects declare
+ *                  one with different values the composition is REFUSED,
+ *                  naming the object, the collection and both stacks (#14848)
+ *                  — declare it in one stack only, or use `'override'`.
+ *                  Identical declarations pass through; a scalar or config
+ *                  object the later object declares replaces the earlier one.
  */
 export const ConflictStrategySchema = lazySchema(() => z.enum(['error', 'override', 'merge']));
 export type ConflictStrategy = z.input<typeof ConflictStrategySchema>;
@@ -2770,7 +2892,160 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
 }
 
 /**
+ * Does this schema declare a COLLECTION — an array, or a record of named
+ * members — once the optional/default/nullable wrappers are stripped, reading
+ * through a `lazy` or a `pipe` and into a union's members? (#14848)
+ *
+ * The one structural question {@link objectCollectionKeys} asks of each key
+ * on the object shape. A union counts when ANY member is a collection
+ * (`requiredPermissions` admits a `string[]` beside its object form): the
+ * author may have written the array form, and the loss the caller refuses is
+ * the same. A fixed-shape config object (`enable`, `access`, `protection`, …)
+ * is not a collection — its members are declared keys, not authored entries —
+ * and stays on the scalar rule.
+ * @internal
+ */
+function declaresCollection(schema: unknown, depth = 0): boolean {
+  if (depth > 8) return false;
+  const def = (schema as {
+    _zod?: { def?: { type?: string; innerType?: unknown; in?: unknown; options?: unknown[]; getter?: () => unknown } };
+  })._zod?.def;
+  if (!def?.type) return false;
+  switch (def.type) {
+    case 'array':
+    case 'record':
+      return true;
+    case 'optional':
+    case 'nullable':
+    case 'default':
+    case 'prefault':
+    case 'readonly':
+    case 'nonoptional':
+    case 'catch':
+      return declaresCollection(def.innerType, depth + 1);
+    case 'lazy':
+      return declaresCollection(def.getter?.(), depth + 1);
+    case 'pipe':
+      return declaresCollection(def.in, depth + 1);
+    case 'union':
+      return (def.options ?? []).some((option) => declaresCollection(option, depth + 1));
+    default:
+      return false;
+  }
+}
+
+let objectCollectionKeysCache: ReadonlySet<string> | undefined;
+
+/**
+ * The object-level keys `objectConflict: 'merge'` refuses to combine (#14848).
+ *
+ * DERIVED from `ObjectSchema`'s shape at first use, never transcribed: every
+ * key whose declared type is a collection ({@link declaresCollection}) is a
+ * member, except `fields` — the one collection `'merge'` merges, by its
+ * documented shallow spread. A hand-written list would be a second statement
+ * of the object shape (the drift ADR-0116 exists about) and would fail in the
+ * silent direction: a collection key added to the object schema tomorrow
+ * would fall back to the wholesale replacement this rule exists to refuse.
+ * Derived, it joins the refusal set the moment the shape declares it. A key
+ * the shape does not declare at all is no member either — the strict parse
+ * refuses it on every authored object before composition sees one.
+ *
+ * Resolved lazily rather than at module init: `ObjectSchema` is a lazy schema
+ * whose factory must not run while `stack.zod.ts` is still loading.
+ * @internal
+ */
+function objectCollectionKeys(): ReadonlySet<string> {
+  if (objectCollectionKeysCache === undefined) {
+    const keys = new Set<string>();
+    for (const [key, schema] of Object.entries(ObjectSchema.shape)) {
+      if (key === 'fields') continue;
+      if (declaresCollection(schema)) keys.add(key);
+    }
+    objectCollectionKeysCache = keys;
+  }
+  return objectCollectionKeysCache;
+}
+
+/**
+ * The collection keys `obj` declares — own, non-`undefined`, the reading
+ * {@link composeSingleValue} takes of a top-level declaration — each mapped
+ * to the declaring stack. Seeds {@link mergeObjects}' per-object ownership on
+ * a first sighting and on `'override'`.
+ * @internal
+ */
+function declaredCollections(obj: object, index: number): Map<string, number> {
+  const owners = new Map<string, number>();
+  const record = obj as Record<string, unknown>;
+  for (const key of objectCollectionKeys()) {
+    if (record[key] !== undefined) owners.set(key, index);
+  }
+  return owners;
+}
+
+/**
+ * The `'merge'` refusal (#14848): the later object declares a collection the
+ * composed object already carries, with a DIFFERENT value. Records the later
+ * stack as owner of every collection it is the first to declare, so a third
+ * stack disagreeing with it is named against it. Identical declarations pass,
+ * the way {@link composeSingleValue} passes identical top-level values.
+ * @internal
+ */
+function refuseUnmergeableCollections(
+  stacks: ObjectStackDefinition[],
+  existing: object,
+  later: object,
+  owners: Map<string, number>,
+  index: number,
+): void {
+  const held = existing as Record<string, unknown>;
+  const incoming = later as Record<string, unknown>;
+  const name = (later as { name: string }).name;
+  for (const key of objectCollectionKeys()) {
+    const value = incoming[key];
+    if (value === undefined) continue;
+    const holder = owners.get(key);
+    if (holder === undefined || held[key] === undefined) {
+      owners.set(key, index);
+      continue;
+    }
+    if (deepEqualAuthored(held[key], value)) continue;
+
+    throw new Error(
+      `composeStacks conflict: object '${name}' is defined in multiple stacks and its '${key}' ` +
+        `is declared with different values by ${stackLabel(stacks[holder], holder)} and ` +
+        `${stackLabel(stacks[index], index)}.\n` +
+        `objectConflict: 'merge' shallow-merges 'fields' only. Any other object-level collection ` +
+        `(${[...objectCollectionKeys()].join(', ')}) is not merged: the later declaration would ` +
+        `replace the earlier one wholesale, silently dropping every entry ` +
+        `${stackLabel(stacks[holder], holder)} wrote.\n` +
+        `Fix: declare '${key}' on '${name}' in exactly one of the two stacks, make the two ` +
+        `declarations identical, or use { objectConflict: 'override' } to hand the whole object ` +
+        `to the later stack.`,
+    );
+  }
+}
+
+/**
  * Merge objects from multiple stacks according to the chosen conflict strategy.
+ *
+ * Under `'merge'` only `fields` is merged — the documented shallow spread,
+ * later fields winning, earlier fields kept. Every other object-level
+ * COLLECTION ({@link objectCollectionKeys}: `actions`, `indexes`, `listViews`,
+ * `validations`, …) is carried from exactly one stack: a later object that
+ * declares one the composed object already carries, with a different value,
+ * is refused (#14848, {@link refuseUnmergeableCollections}) — the refusal
+ * `'error'` uses, naming the object, the collection and both stacks — instead
+ * of the spread replacing the earlier stack's entries wholesale and in silence
+ * (the top-level key loss #5005 closed, one level down). Identical
+ * declarations pass through: two built stacks that each bind one standalone
+ * action to the same object carry the same copy of it, and nothing is
+ * dropped. A scalar or a fixed-shape config object (`label`, `sharingModel`,
+ * `enable`, `access`, …) the later object declares still replaces the earlier
+ * one — the ruling narrows collections only, and that half is stated here so
+ * the difference reads as the rule rather than as an oversight. An explicit
+ * `undefined` is not a declaration anywhere in this composer, and the spread
+ * agrees: it is dropped from the later object before spreading, so it neither
+ * counts as a differing value nor erases what the earlier stack declared.
  *
  * Besides the merged list it reports, per composed object name, WHICH input
  * stack's `actions` array the composed object carries (`actionsOwner`, a stack
@@ -2780,9 +3055,12 @@ function warnUncomposedStackKey(key: string, rule: ComposeDisposition): void {
  * from the strategy elsewhere (a second statement of one rule is the drift
  * ADR-0116 exists about): a first sighting and `'override'` hand the whole
  * object to stack `i`; under `'merge'` the shallow spread hands `actions` to
- * the LATER object only when that object carries the key itself — an absent
- * key leaves the earlier stack's array in place — which is exactly what an
- * own-property check reads.
+ * the LATER object only when that object declares the key itself — an absent
+ * (or explicitly `undefined`) key leaves the earlier stack's array in place —
+ * which is exactly what a defined-value check reads. The owner model stays
+ * per-object: a differing `actions` pair is refused before ownership could
+ * matter, and an identical pair is one declaration whichever stack it is
+ * attributed to.
  * @internal
  */
 function mergeObjects(
@@ -2793,6 +3071,9 @@ function mergeObjects(
   const map = new Map<string, Obj>();
   const result: Obj[] = [];
   const actionsOwner = new Map<string, number>();
+  // Per composed object, the stack that FIRST declared each collection key —
+  // the one a `'merge'` refusal names beside the disagreeing later stack.
+  const collectionOwner = new Map<string, Map<string, number>>();
 
   for (const [i, stack] of stacks.entries()) {
     if (!stack.objects) continue;
@@ -2802,6 +3083,7 @@ function mergeObjects(
         map.set(obj.name, obj);
         result.push(obj);
         actionsOwner.set(obj.name, i);
+        collectionOwner.set(obj.name, declaredCollections(obj, i));
         continue;
       }
 
@@ -2817,14 +3099,19 @@ function mergeObjects(
           result[idx] = obj;
           map.set(obj.name, obj);
           actionsOwner.set(obj.name, i);
+          collectionOwner.set(obj.name, declaredCollections(obj, i));
           break;
         }
         case 'merge': {
-          const merged = { ...existing, ...obj, fields: { ...existing.fields, ...obj.fields } } as Obj;
+          refuseUnmergeableCollections(stacks, existing, obj, collectionOwner.get(obj.name)!, i);
+          const declared = Object.fromEntries(
+            Object.entries(obj).filter(([, value]) => value !== undefined),
+          ) as Partial<Obj>;
+          const merged = { ...existing, ...declared, fields: { ...existing.fields, ...obj.fields } } as Obj;
           const idx = result.indexOf(existing);
           result[idx] = merged;
           map.set(obj.name, merged);
-          if (Object.prototype.hasOwnProperty.call(obj, 'actions')) actionsOwner.set(obj.name, i);
+          if (obj.actions !== undefined) actionsOwner.set(obj.name, i);
           break;
         }
       }
@@ -2851,10 +3138,13 @@ function mergeObjects(
  *   `'concat'` collection), attributed to the stack that wrote it.
  * - An embedded action reaches the output through exactly ONE stack's object —
  *   the one `mergeObjects` handed the object's `actions` to (`actionsOwner`).
- *   Under `objectConflict: 'override'` / `'merge'` the other stacks' embedded
- *   declarations on that object are not in the artifact at all, so they cannot
- *   collide with anything; that loss is the object strategy's own semantics,
- *   not an action collision.
+ *   Under `objectConflict: 'override'` the other stacks' embedded declarations
+ *   on that object are not in the artifact at all, so they cannot collide with
+ *   anything; that loss is the object strategy's own semantics, not an action
+ *   collision. Under `'merge'` two objects declaring DIFFERENT `actions` are
+ *   refused at `mergeObjects` before this walk runs (#14848), and identical
+ *   ones are one declaration carried once — so the array attributed here never
+ *   displaced another stack's entries.
  * - Only a key declared by TWO OR MORE DISTINCT stacks is reported. A key an
  *   input repeats within itself is `defineStack`'s door (which `strict: false`
  *   opts out of by choice) — and every input BUILT by `defineStack` repeats
@@ -3090,8 +3380,14 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * object, or drop it from one stack. One global and one object-bound action
  * may still share a name (two keys); a key an input repeats within itself is
  * `defineStack`'s door rather than this one; and an embedded action that
- * `objectConflict: 'override'` / `'merge'` did not carry into the composed
- * object cannot collide.
+ * `objectConflict: 'override'` did not carry into the composed object cannot
+ * collide.
+ * **`objectConflict: 'merge'`** shallow-merges `fields` only (#14848): two
+ * objects that both declare any other object-level collection (`actions`,
+ * `indexes`, `listViews`, `validations`, …) with different values are refused,
+ * naming the object, the collection and both stacks — nothing is dropped in
+ * silence. Identical declarations pass; a scalar the later object declares
+ * wins.
  *
  * @param stacks  - Stack definitions to compose (order matters for conflict resolution)
  * @param options - Composition options (conflict strategy, manifest selection, etc.)
@@ -3111,7 +3407,8 @@ function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody
  * // Override strategy — later stacks win
  * const combined = composeStacks([crm, todo], { objectConflict: 'override' });
  *
- * // Merge strategy — fields from later stacks are shallow-merged
+ * // Merge strategy — `fields` shallow-merged; a collection both objects
+ * // declare differently (actions, indexes, …) throws instead of being replaced
  * const combined = composeStacks([crm, todo], { objectConflict: 'merge' });
  *
  * // Preserve — one artifact carrying BOTH packages, each assembled (ADR-0130 D4)

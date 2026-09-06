@@ -358,7 +358,7 @@ describe('EventPersistenceSchema', () => {
   it('should accept valid minimal persistence config', () => {
     const config: EventPersistence = {
       enabled: true,
-      retention: 30,
+      retentionDays: 30,
     };
 
     expect(() => EventPersistenceSchema.parse(config)).not.toThrow();
@@ -366,7 +366,7 @@ describe('EventPersistenceSchema', () => {
 
   it('should apply default values', () => {
     const config = EventPersistenceSchema.parse({
-      retention: 30,
+      retentionDays: 30,
     });
 
     expect(config.enabled).toBe(false);
@@ -375,42 +375,42 @@ describe('EventPersistenceSchema', () => {
   it('should accept config with all fields', () => {
     const config = {
       enabled: true,
-      retention: 90,
+      retentionDays: 90,
       filter: (event: Event) => event.name.startsWith('audit.'),
     };
 
     const parsed = EventPersistenceSchema.parse(config);
     expect(parsed.enabled).toBe(true);
-    expect(parsed.retention).toBe(90);
+    expect(parsed.retentionDays).toBe(90);
     expect(parsed.filter).toBeDefined();
   });
 
   it('should accept different retention periods', () => {
     const retentions = [1, 7, 30, 90, 365];
 
-    retentions.forEach(retention => {
-      const config = { enabled: true, retention };
+    retentions.forEach(retentionDays => {
+      const config = { enabled: true, retentionDays };
       const parsed = EventPersistenceSchema.parse(config);
-      expect(parsed.retention).toBe(retention);
+      expect(parsed.retentionDays).toBe(retentionDays);
     });
   });
 
   it('should reject negative retention', () => {
     expect(() => EventPersistenceSchema.parse({
       enabled: true,
-      retention: -1,
+      retentionDays: -1,
     })).toThrow();
 
     expect(() => EventPersistenceSchema.parse({
       enabled: true,
-      retention: 0,
+      retentionDays: 0,
     })).toThrow();
   });
 
   it('should accept filter function', () => {
     const config = {
       enabled: true,
-      retention: 60,
+      retentionDays: 60,
       filter: (event: Event) => {
         return event.name.startsWith('critical.') || 
                event.metadata.source === 'security.plugin';
@@ -423,7 +423,7 @@ describe('EventPersistenceSchema', () => {
   it('should handle disabled persistence', () => {
     const config = {
       enabled: false,
-      retention: 30,
+      retentionDays: 30,
     };
 
     const parsed = EventPersistenceSchema.parse(config);
@@ -479,7 +479,7 @@ describe('Event System Integration', () => {
     // Configure persistence
     const persistence: EventPersistence = {
       enabled: true,
-      retention: 90,
+      retentionDays: 90,
       filter: (e: Event) => e.name.startsWith('user.'),
     };
 
@@ -567,7 +567,7 @@ describe('EventSourcingConfigSchema', () => {
     const config = {
       enabled: true,
       snapshotInterval: 100,
-      retention: 365,
+      retentionDays: 365,
       aggregateTypes: ['order', 'customer'],
     };
 
@@ -580,7 +580,7 @@ describe('EventSourcingConfigSchema', () => {
     expect(config.enabled).toBe(false);
     expect(config.snapshotInterval).toBe(100);
     expect(config.snapshotRetention).toBe(10);
-    expect(config.retention).toBe(365);
+    expect(config.retentionDays).toBe(365);
   });
 });
 
@@ -751,7 +751,7 @@ describe('EventBusConfigSchema', () => {
     const config: EventBusConfig = {
       persistence: {
         enabled: true,
-        retention: 365,
+        retentionDays: 365,
       },
       queue: {
         concurrency: 20,
@@ -814,5 +814,36 @@ describe('Enhanced Event Handler', () => {
     };
 
     expect(() => EventHandlerSchema.parse(handler)).not.toThrow();
+  });
+});
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. Both old spellings are `retiredKey()`
+// tombstones, so the refusal carries the RENAME (the prescription IS the
+// payload) rather than a bare unrecognized-key error, and the value survives at
+// the same magnitude. Asserting the message, not just `.toThrow()`: a bare
+// throw stays green when the schema throws for some unrelated reason.
+describe('Event bus retention windows carry their unit (#15678)', () => {
+  it.each([
+    ['EventPersistence', EventPersistenceSchema, { enabled: true }],
+    ['EventSourcingConfig', EventSourcingConfigSchema, {}],
+  ])('%s REFUSES the retired `retention` with the rename in the message', (def, schema, base) => {
+    const result = schema.safeParse({ ...base, retention: 90 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'retention');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(`\`${def}.retention\` was renamed to \`retentionDays\``);
+  });
+
+  it('accepts `retentionDays` at the same magnitude on both defs', () => {
+    expect(EventPersistenceSchema.parse({ enabled: true, retentionDays: 90 }).retentionDays).toBe(90);
+    expect(EventSourcingConfigSchema.parse({ retentionDays: 90 }).retentionDays).toBe(90);
+  });
+
+  it('keeps the count-valued `snapshotRetention` bare — a count has no unit to carry', () => {
+    const parsed = EventSourcingConfigSchema.parse({ snapshotRetention: 10, retentionDays: 365 });
+    expect(parsed.snapshotRetention).toBe(10);
+    expect(parsed.retentionDays).toBe(365);
   });
 });

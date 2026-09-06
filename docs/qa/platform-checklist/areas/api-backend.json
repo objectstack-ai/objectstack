@@ -842,7 +842,7 @@
         "object_operation target — the task feed (authed read)",
         "flow target — delegates to a flow",
         "policy: authRequired (default true)",
-        "policy: cacheTtl → Cache-Control",
+        "policy: cacheTtlSeconds → Cache-Control",
         "script/proxy target — answer 501 in the open framework"
       ],
       "steps": [
@@ -854,7 +854,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the object_operation endpoint answers 200 authed with the delegated data, and carries the declared cache policy (Cache-Control: private, max-age=30 when cacheTtl is set)",
+          "clause": "the object_operation endpoint answers 200 authed with the delegated data, and carries the declared cache policy (Cache-Control: private, max-age=30 when cacheTtlSeconds is set)",
           "oracle": "api",
           "verify": "authed GET status 200 + body + Cache-Control header vs the declared policy",
           "evidence": "response + headers"
@@ -1931,6 +1931,446 @@
           "date": "2026-08-30",
           "change": "new — the enable.apiMethods verb gate had no item of its own: identity-auth.session-list-revoke asserts one consequence on one object, and nothing covered the three-state contract, the derived allowed[] closure, bulk∧child, writeMode-precise import, the legacy strip-and-warn (with its deny-all cliff), or the batch per-op ordering. Register corrections folded in during source verification: the strip lives at object.zod.ts wired via z.preprocess (the register's '' pointed at the guidance table); the enforcement docblock is rest-server.ts with the denial producer; and the stock free negatives are richer than 'three system objects' — sys_session/sys_device_code/sys_api_key give three whitelist shapes and sys_oauth_* adds the apiEnabled:false 404 fork",
           "ref": "#sweep-2026-08-30"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-crud-config-contract",
+      "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin, authenticated — on the live-boot half a 401 must never be mistaken for an absent mount",
+        "no persona for the variant half: a non-default `crud` block is authorable only by a programmatic embedder (knownGaps), so those clauses are driven in a scratch harness, not by a signed-in user"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot for the default-config half (dataPrefix defaults to /data — every mounted data route proves the default)",
+          "a scratch vitest harness in packages/rest for the variant half: construct a RestServer with the config under test, call registerRoutes(), and read the route table back with getRoutes() — packages/rest/src/rest-batch-size-cap.test.ts is the shape to copy"
+        ],
+        "knownGaps": [
+          "NO stock boot authors this sub-object. `os serve` constructs the REST plugin with a fixed config (only project scoping is threaded) and `os dev` passes none at all, so `crud.operations` / `crud.dataPrefix` are reachable only through createRestApiPlugin({ api: ... }) or createHonoServerPlugin({ restConfig }) in embedder code. Every non-default clause below is therefore scored with oracle `test` against a real RestServer, and the run record must say so instead of claiming a live deployment was reconfigured",
+          "the MOUNT half has no permanent pin: packages/rest/src/rest-sub-config-parse-not-cast.test.ts asserts the NORMALIZED CONFIG a switch produces, and nothing asserts that the route disappears from the route table — the scratch harness is the only observation until that pin exists (recorded in FOLLOW-UPS.md)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin fire the six default-config data mounts and capture status per route: GET /api/v1/data/showcase_task (list), GET /api/v1/data/showcase_task/<id> (read), POST /api/v1/data/showcase_task (create), POST /api/v1/data/showcase_task/query (the QueryAST door), PATCH /api/v1/data/showcase_task/<id> (update), DELETE /api/v1/data/showcase_task/<id> (delete)",
+        "fire the routing-404 control (GET /api/v1/definitely-not-a-route) and keep its body — every absence verdict below is scored against this shape, never against a bare status",
+        "GET /api/v1/discovery and read routes.data — it must equal the base plus the configured dataPrefix",
+        "harness: construct a RestServer with { crud: { operations: { create: false } } }, registerRoutes(), and read getRoutes() — POST {dataPrefix}/:object must be absent while the other five mounts remain",
+        "harness: repeat per switch — read, update, delete each remove exactly one mount; list removes TWO (GET {dataPrefix}/:object and POST {dataPrefix}/:object/query, which rides the same switch and has none of its own)",
+        "harness: construct with { crud: { dataPrefix: '/records' } } and confirm every data route, the data-action routes, the sharing routes and the batch routes all re-base together, and that the discovery body advertises the same new prefix",
+        "harness: construct with { crud: { patterns: { list: { method: 'GET', path: '/x' } } } } and then with { crud: { objectParamStyle: 'path' } } and with 'query'; capture the constructor's refusal text in each case",
+        "harness control: construct with an empty config and confirm all five switches normalize to true and dataPrefix to '/data' — the schema's own defaults, not a second copy"
+      ],
+      "acceptance": [
+        {
+          "clause": "on a stock boot all six default mounts answer something other than the routing-404 control — the default `crud` block is what every deployment actually runs",
+          "oracle": "api",
+          "verify": "per-route status table vs the step-2 control body; a data route answering the control shape is a FAIL (not mounted)",
+          "evidence": "the status table + the control trace"
+        },
+        {
+          "clause": "each of create / read / update / delete removes exactly ONE mount when set false, and `list` removes TWO — GET {dataPrefix}/:object and POST {dataPrefix}/:object/query, because the query door is gated by `operations.list` and has no switch of its own",
+          "oracle": "test",
+          "verify": "per-switch diff of getRoutes() against the all-true baseline: the set difference is exactly the routes named in the steps, and no other route moves",
+          "evidence": "the six route-table diffs"
+        },
+        {
+          "clause": "an unmounted route is NOT the object-level 404: `enable.apiEnabled: false` answers a handler envelope with OBJECT_API_DISABLED, while a switched-off operation has no handler at all and falls to the routing 404 — the two absences must stay distinguishable",
+          "oracle": "api",
+          "verify": "compare the switched-off route's answer with the routing-404 control and with an OBJECT_API_DISABLED body from api-backend.api-methods-verb-gate; a coded envelope where the mount was removed means the switch did not gate the mount",
+          "evidence": "the three bodies side by side"
+        },
+        {
+          "clause": "`dataPrefix` is the single knob that moves the data surface, and the advertisement moves with it: the CRUD, data-action, sharing and batch registrars all build their base from it, and registerDiscoveryEndpoints sets discovery.routes.data from the same value (ADR-0076 D12 — advertise only what is mounted)",
+          "oracle": "test",
+          "verify": "with dataPrefix '/records', getRoutes() shows no path under /data and the discovery body advertises /api/v1/records; a discovery body still naming /data while the mounts moved is a FAIL of the advertise-what-is-mounted rule",
+          "evidence": "route table + discovery body at the non-default prefix"
+        },
+        {
+          "clause": "the two #14691 tombstones are REFUSED at construction, not stripped: `crud.patterns` and `crud.objectParamStyle` (both former enum values) throw naming the sub-object, the declaring schema (CrudEndpointsConfigSchema), and the prescription — a declarative `api` endpoint for a custom path, the object name always being a path segment",
+          "oracle": "test",
+          "verify": "the constructor throws; the message contains `crud.patterns` / `crud.objectParamStyle`, `CrudEndpointsConfigSchema`, and the removal prescription. A clean construction is the silent-strip failure ADR-0049 forbids",
+          "evidence": "both refusal texts"
+        },
+        {
+          "clause": "the schema's defaults are the ONLY defaults: an absent `crud` block normalizes to five true switches and '/data', and a partial `operations` keeps the author's key while the rest default true (ADR-0122 author-state)",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-sub-config-parse-not-cast.test.ts — green (§C/§D pin the defaults and the partial-operations shape); then confirm the same normalized values in the harness the mount clauses used",
+          "evidence": "test output + the normalized config"
+        }
+      ],
+      "negative": [
+        "a route that stays mounted with its switch false is the declared-not-enforced shape ADR-0049 exists to catch, and is a FAIL rather than a nuisance — the switch would be config an operator can set and nothing honours",
+        "⛔ never score the absence of a mount from a 404 alone: an unauthenticated probe answers 401 before routing, and an object-level gate answers a coded 404 — both read as 'route gone' to a status-only oracle"
+      ],
+      "variants": [
+        "switch:operations.create",
+        "switch:operations.read",
+        "switch:operations.update",
+        "switch:operations.delete",
+        "switch:operations.list (two mounts)",
+        "knob:dataPrefix",
+        "tombstone:patterns",
+        "tombstone:objectParamStyle"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "absence-inference",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (the construction half only — §C/§D normalized defaults, §E the two tombstone refusals; the mount-table half has no pin)"
+      },
+      "source": [
+        "packages/spec/liveness/crud_endpoints.json (the ADR-0049 ledger this item answers: five live `operations.*` switches + `dataPrefix`, two dead keys)",
+        "packages/spec/src/api/rest-server.zod.ts#CrudEndpointsConfigSchema (the declared contract, its defaults and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerCrudEndpoints (the six mounts and their five gates), (normalizeConfig — the parsed sub-config every consumer reads), (parseDeclaredSubConfig — the construction-time refusal), (registerDiscoveryEndpoints — discovery.routes.data built from dataPrefix), (getRoutes — the route table the mount clauses read)",
+        "#14691 (the ADR-0049 retirement of patterns/objectParamStyle) · #11984 (parse-and-consume instead of cast) · ADR-0122 (author state) · ADR-0076 D12 (advertise only what is mounted)",
+        "sibling clause: api-backend.api-methods-verb-gate (the per-OBJECT exposure gate this config-level switch must stay distinguishable from) · api-backend.route-ledger-live-parity (the routing-404 control technique)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `crud_endpoints` was UNCLASSIFIED in coverage.json: the checklist drove the mounted CRUD routes (query-contract-matrix, crud-roundtrip) but nothing covered the deployment config that decides WHICH of them exist, what they are mounted under, or that the two retired keys refuse. Authored against the shipped surface rather than the ledger's prose: the six-mounts-from-five-switches asymmetry (POST /query rides `operations.list`) and the discovery co-movement were read out of registerCrudEndpoints and registerDiscoveryEndpoints",
+          "ref": "#14961"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-batch-config-contract",
+      "title": "RestServerConfig.batch is the bulk surface's construction contract: three switches and enableBatchEndpoint gate four per-object mounts (each ANDed with its protocol member), maxBatchSize is the one cap every bulk door measures, and both tombstones refuse at construction",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin, authenticated — the live-boot half",
+        "no persona for the variant half: a non-default `batch` block is authorable only by a programmatic embedder (knownGaps)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot for the default-config half (cap 200, all four per-object bulk doors mounted)",
+          "showcase_private_note or another baseline-writable object for the cap probe",
+          "a scratch vitest harness in packages/rest for the variant half — packages/rest/src/rest-batch-size-cap.test.ts already constructs a RestServer with a non-default cap and reads getRoutes(); copy that shape"
+        ],
+        "knownGaps": [
+          "NO stock boot authors this sub-object (same door as the crud block: `os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` against a real RestServer and the run record must say so",
+          "the mount half of `enableBatchEndpoint` / `operations.*Many` has no permanent pin — the existing pins assert the normalized config and the cap, not the route table (recorded in FOLLOW-UPS.md)"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin fire the four per-object bulk doors on the default config and capture status: POST /api/v1/data/showcase_private_note/batch, /createMany, /updateMany, /deleteMany; fire the routing-404 control alongside them",
+        "fire the cross-object door POST /api/v1/batch on the same boot — it is NOT gated by enableBatchEndpoint and must answer whether or not the per-object door is switched off",
+        "cap probe on the live boot: POST /createMany with 201 records against the default cap of 200; capture the status, code and the reported max",
+        "harness: construct with { batch: { enableBatchEndpoint: false } }, registerRoutes(), read getRoutes() — POST {dataPrefix}/:object/batch is absent, the three *Many mounts and POST {basePath}/batch remain",
+        "harness: repeat for operations.createMany / updateMany / deleteMany false, one at a time — each removes exactly its own mount",
+        "harness: construct with a protocol that omits batchData / createManyData / updateManyData / deleteManyData while leaving every switch true — the mount must be absent, because each gate is `switch AND protocol member`",
+        "harness: construct with { batch: { maxBatchSize: 5 } } and drive each of the four per-object doors plus the cross-object door with 6 records/ids; then with exactly 5",
+        "harness: construct with { batch: { operations: { upsertMany: false } } } and with { batch: { defaultAtomic: true } } and with false; capture each refusal text",
+        "harness controls: maxBatchSize 0, 2000 and 2.5 must each be refused by the declared bounds (int, 1..1000), and an empty config must normalize to 200 with all switches true"
+      ],
+      "acceptance": [
+        {
+          "clause": "on a stock boot all four per-object bulk doors are mounted and answer something other than the routing-404 control — the default `batch` block is what every deployment runs",
+          "oracle": "api",
+          "verify": "per-route status table vs the control body",
+          "evidence": "status table + control trace"
+        },
+        {
+          "clause": "`enableBatchEndpoint` gates ONLY POST {dataPrefix}/:object/batch — the cross-object POST {basePath}/batch is mounted unconditionally by the same registrar and survives the switch",
+          "oracle": "test",
+          "verify": "route-table diff with enableBatchEndpoint false: the per-object batch path is gone, {basePath}/batch is still there; a run that reads 'batch is off' from the cross-object door has read the wrong door",
+          "evidence": "the route-table diff"
+        },
+        {
+          "clause": "each of createMany / updateMany / deleteMany removes exactly its own mount, and every one of the four gates is an AND with the protocol member behind it — a protocol without createManyData mounts nothing even with the switch true",
+          "oracle": "test",
+          "verify": "per-switch route-table diffs, plus the protocol-member run where all switches stay true and the mounts are still absent",
+          "evidence": "the four diffs + the protocol-member run"
+        },
+        {
+          "clause": "`maxBatchSize` is the ONE cap all five bulk doors measure against, and the refusal names it: 400 BATCH_TOO_LARGE carrying count and max, with the protocol never called — at the configured value, not a hardcoded 200",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-batch-size-cap.test.ts — green (it pins all five doors, the exactly-at-cap pass, the configured-not-hardcoded case and shape-error precedence); reproduce the configured-cap leg in the harness at maxBatchSize 5 and confirm max: 5 in the body",
+          "evidence": "test output + the max:5 envelopes"
+        },
+        {
+          "clause": "the live cap holds on the real server too: 201 records against the default 200 answers 400 BATCH_TOO_LARGE and creates nothing",
+          "oracle": "api",
+          "verify": "step-3 response is 400 with code BATCH_TOO_LARGE and max 200; a follow-up count of that batch's marker rows is 0",
+          "evidence": "response + count"
+        },
+        {
+          "clause": "the two #14691 tombstones are REFUSED at construction with their prescriptions: `batch.operations.upsertMany` (no such route was ever built — upsert is an operation TYPE of the generic batch door) and `batch.defaultAtomic` (atomicity is the per-request options.atomic, ADR-0119 D4), whatever value is authored",
+          "oracle": "test",
+          "verify": "the constructor throws for both, and for defaultAtomic at true AND false; each message names the key, BatchEndpointsConfigSchema and the replacement",
+          "evidence": "both refusal texts"
+        },
+        {
+          "clause": "the declared bounds are enforced at construction, which is the #11984 defect closed: maxBatchSize 0 — the value that used to become the live cap because 0 is not nullish — is refused, as are 2000 and 2.5",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-sub-config-parse-not-cast.test.ts — green (§A pins all three); confirm the empty-config default of 200 in the same run",
+          "evidence": "test output"
+        }
+      ],
+      "negative": [
+        "a bulk door still mounted with its switch false, or a cap that answers 200-max while the config says 5, is the declared-not-enforced shape — a FAIL, not a rounding difference",
+        "⛔ do not read the cross-object POST /batch as evidence about enableBatchEndpoint in either direction: it is mounted unconditionally, so its presence proves nothing about the per-object switch and its 501 (no transactional runtime) proves nothing about the cap"
+      ],
+      "variants": [
+        "switch:enableBatchEndpoint",
+        "switch:operations.createMany",
+        "switch:operations.updateMany",
+        "switch:operations.deleteMany",
+        "knob:maxBatchSize",
+        "tombstone:operations.upsertMany",
+        "tombstone:defaultAtomic"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-batch-size-cap.test.ts (the cap on all five doors) + packages/rest/src/rest-sub-config-parse-not-cast.test.ts (bounds, defaults, both tombstone refusals); the mount-table half has no pin"
+      },
+      "source": [
+        "packages/spec/liveness/batch_endpoints.json (the ADR-0049 ledger this item answers: maxBatchSize, enableBatchEndpoint and three operations.* live, upsertMany and defaultAtomic dead)",
+        "packages/spec/src/api/rest-server.zod.ts#BatchEndpointsConfigSchema (declared bounds 1..1000 int, default 200, and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerBatchEndpoints (the four per-object gates, each ANDed with its protocol member, and the unconditionally-mounted cross-object door), (enforceBatchSize — the one envelope), (normalizeConfig), (parseDeclaredSubConfig)",
+        "packages/spec/src/api/error-code-ledger.zod.ts#BATCH_TOO_LARGE (the code the cap answers with)",
+        "#3939 (one cap, one envelope, every door) · #11984 (maxBatchSize 0 was the live cap under the old cast) · #14691 (the two retirements) · ADR-0119 D4 (per-request atomicity)",
+        "sibling clause: api-backend.bulk-write-contract and api-backend.batch-transactional-discovery (they drive the doors' BEHAVIOUR on the default config; this item covers the config that decides the doors exist)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `batch_endpoints` was UNCLASSIFIED in coverage.json: two items drove the bulk doors' behaviour on a default boot and neither covered the sub-object that mounts them. Two asymmetries were read out of registerBatchEndpoints rather than assumed: the cross-object POST /batch is NOT under enableBatchEndpoint, and all four per-object gates are ANDs with a protocol member, so a missing protocol member and a false switch are indistinguishable from the route table alone",
+          "ref": "#14961"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-metadata-config-contract",
+      "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, three endpoint switches gate more routes than their names suggest, maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin, authenticated — the live-boot half",
+        "a restricted member who cannot read every field of showcase_account — the masking clause is only observable as a non-admin",
+        "no persona for the variant half: a non-default `metadata` block is authorable only by a programmatic embedder (knownGaps)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a stock showcase boot for the default-config half (prefix /meta, cache on, masking ON by default)",
+          "a persona whose field-level security hides at least one field of a served object — without one, the masking clause scores blocked(fixture), never green",
+          "a scratch vitest harness in packages/rest for the variant half (construct, registerRoutes(), getRoutes())"
+        ],
+        "knownGaps": [
+          "NO stock boot authors this sub-object (`os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` and the run record must say so",
+          "OS_ALLOW_UNMASKED_OBJECT_METADATA is a deployment-wide escape hatch that also covers the runtime /metadata dispatcher; a boot that sets it makes the masking clause vacuous — record the env posture beside the verdict"
+        ]
+      },
+      "steps": [
+        "boot showcase isolated; as admin fire the default-prefix metadata mounts and capture status: GET /api/v1/meta, /meta/types, /meta/diagnostics, /meta/_drafts, GET /meta/object, GET /meta/object/showcase_task, /meta/object/showcase_task/references, /meta/object/showcase_task/layers, /meta/book/<a seeded book>/tree; fire the routing-404 control alongside",
+        "GET /api/v1/discovery and read routes.metadata — it must equal the base plus the configured prefix",
+        "as the restricted persona GET /api/v1/meta/object/showcase_account and diff the served fields against the admin's copy of the same document",
+        "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
+        "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
+        "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type AND {prefix}/diagnostics AND {prefix}/_drafts AND the POST {prefix}/_migrate-stored write door — four mounts, not the one its describe() names",
+        "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: GET {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers and {prefix}/book/:name/tree",
+        "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
+        "harness: construct with { metadata: { maskObjectFields: false } }; separately construct with the default and metaType != 'object'",
+        "harness: construct with { metadata: { cacheTtl: 3600 } }, then 0, then -1, then { metadata: { endpoints: { schema: false } } }; capture each refusal text"
+      ],
+      "acceptance": [
+        {
+          "clause": "on a stock boot every default-prefix metadata mount answers something other than the routing-404 control",
+          "oracle": "api",
+          "verify": "per-route status table vs the control body",
+          "evidence": "status table + control trace"
+        },
+        {
+          "clause": "`prefix` moves the whole metadata surface AND its advertisement together: registerMetadataEndpointsInner builds every metaPath from it and registerDiscoveryEndpoints sets discovery.routes.metadata from the same value (ADR-0076 D12)",
+          "oracle": "test",
+          "verify": "at prefix '/metadata' no route remains under /meta and the discovery body advertises /api/v1/metadata; a discovery body naming the old prefix is a FAIL",
+          "evidence": "route table + discovery body at the non-default prefix"
+        },
+        {
+          "clause": "the three endpoint switches gate MORE than their describe() strings say, and the run must enumerate what each removes: `types` takes two paths (one handler at {prefix} and {prefix}/types), `items` takes four INCLUDING the POST {prefix}/_migrate-stored write door and the diagnostics sweep, `item` takes four including the book-tree read",
+          "oracle": "test",
+          "verify": "per-switch route-table diffs against the all-true baseline; the diff sets must be exactly the routes enumerated in the steps. An operator reading `items` as 'list items of type' would silently disarm a migration door — the run records the real radius whatever it finds",
+          "evidence": "the three route-table diffs"
+        },
+        {
+          "clause": "`maskObjectFields` defaults ON and is a real disclosure gate: a caller who cannot read a field gets a served object schema without that field at all — not its name, label, type, options, formula, visibleWhen, defaultValue or requiredPermissions — and `false` serves the full schema to every authenticated caller (ADR-0106 D8)",
+          "oracle": "api",
+          "verify": "diff the restricted persona's /meta/object/showcase_account against the admin's on the default config: the hidden field is absent, not blanked. Then in the harness confirm maskObjectFields:false is preserved through normalizeConfig (it must not be re-defaulted to true) and that resolveObjectMasker returns the pass-through masker for it and for any metaType other than 'object'",
+          "evidence": "the two served documents + the normalized value"
+        },
+        {
+          "clause": "`enableCache` selects the protocol's cached item read, and the cached path is additionally conditional: app types, dashboard types, draft reads, preview-drafts reads, package-scoped reads and audience-gated types each bypass it with the switch still on — so a cache-miss is not evidence the switch is dead",
+          "oracle": "test",
+          "verify": "with enableCache false the item read calls the uncached protocol member; with it true, the six carve-outs still call the uncached member. Score each carve-out separately and name it in the record",
+          "evidence": "per-branch call trace"
+        },
+        {
+          "clause": "the two #14691 tombstones are REFUSED at construction with their prescriptions: `metadata.cacheTtl` at 3600, 0 and the -1 the old unbounded contract accepted, and the nested `metadata.endpoints.schema` — a tombstone inside a live block, which must not be stripped while its siblings parse",
+          "oracle": "test",
+          "verify": "the constructor throws for all four; each message names the key, MetadataEndpointsConfigSchema and the replacement (enableCache is the live switch; no GET /meta/:type/:name/schema route exists)",
+          "evidence": "the four refusal texts"
+        }
+      ],
+      "negative": [
+        "a served object schema that still carries a field the caller cannot read — its name alone is the disclosure ADR-0106 D8 closes — is a SECURITY finding, recorded under RUNNER.md rule 2's authentication/authorization carve-out rather than written out in full",
+        "⛔ never score masking from the admin's own document: an admin can read every field, so the masked and unmasked shapes are identical for them (wrong-persona)",
+        "a metadata route still mounted with its switch false is the declared-not-enforced shape and is a FAIL"
+      ],
+      "variants": [
+        "knob:prefix",
+        "switch:endpoints.types (2 mounts)",
+        "switch:endpoints.items (4 mounts)",
+        "switch:endpoints.item (4 mounts)",
+        "switch:enableCache (+6 carve-outs)",
+        "switch:maskObjectFields",
+        "tombstone:cacheTtl",
+        "tombstone:endpoints.schema"
+      ],
+      "traps": [
+        "dispatcher-vs-hono-route",
+        "wrong-persona",
+        "cache-staleness",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§D pins prefix/enableCache/maskObjectFields survival and the partial endpoints shape; §E pins cacheTtl and endpoints.schema); the mount-table, masking-effect and cache-branch halves have no pin"
+      },
+      "source": [
+        "packages/spec/liveness/metadata_endpoints.json (the ADR-0049 ledger this item answers: prefix, enableCache, maskObjectFields and three endpoints.* live, cacheTtl and endpoints.schema dead)",
+        "packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema (the declared contract, the ADR-0106 D8 docblock and the two retiredKey tombstones)",
+        "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (metaPath and the three endpoint gates with their real radius), (resolveObjectMasker — the metaType/maskObjectFields fork), (normalizeConfig — isObjectSchemaMaskingEnabled and the OS_ALLOW_UNMASKED_OBJECT_METADATA escape hatch), (registerDiscoveryEndpoints — discovery.routes.metadata built from prefix), (getRoutes)",
+        "ADR-0106 D8 (per-caller field masking of served object schemas) · #14691 (the two retirements) · #7526 (the /meta/types ordering fix the `types` switch takes with it) · ADR-0076 D12",
+        "sibling clause: platform-core.metadata-registry-serving (it drives the served REGISTRY on the default config; this item covers the config that decides what is served and to whom) · platform-core.docs-audience-gate (the audience-gated types that are a cache carve-out here)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `metadata_endpoints` was UNCLASSIFIED in coverage.json: metadata-registry-serving drove /meta on a default boot and nothing covered the sub-object that decides the prefix, which endpoints exist, whether the cached read path is taken, or whether served object schemas are masked. The switch radii were enumerated from registerMetadataEndpointsInner rather than from the schema's describe() strings, which name one route each and understate three of them — `endpoints.items` also gates the POST _migrate-stored write door",
+          "ref": "#14961"
+        }
+      ]
+    },
+    {
+      "id": "api-backend.rest-route-generation-tombstones",
+      "title": "RestServerConfig.routes is an all-tombstone sub-object: every one of the four retired selectors refuses at construction with the prescription that names where the contract moved, while the empty block still constructs",
+      "since": "v17",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "build",
+      "personas": [
+        "no persona — this is a construction-time and build-time contract, driven by an embedder authoring a config, not by a signed-in caller"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch vitest harness in packages/rest that constructs a RestServer (and the createRestApiPlugin path, so both cast hops are covered)",
+          "a TypeScript check over the authored config — a retiredKey is a tsc error as well as a parse error"
+        ],
+        "knownGaps": [
+          "the positive half of each prescription is proved by OTHER items, not here: per-object exposure by api-backend.api-methods-verb-gate (404/405) and the data base path by api-backend.rest-crud-config-contract. This item scores the REFUSAL and the accuracy of the prescription; a run that finds the prescription's named replacement broken files against those items"
+        ]
+      },
+      "steps": [
+        "harness: construct a RestServer with { routes: { includeObjects: ['showcase_account'] } }; capture the refusal text",
+        "repeat for { routes: { excludeObjects: ['sys_log'] } }, { routes: { nameTransform: 'none' } } and 'plural', and { routes: { overrides: { showcase_account: { enabled: false } } } }",
+        "drive the same four through the plugin door — createRestApiPlugin({ api: { routes: ... } }).start() — so the refusal is proved past both cast hops, not only at the direct constructor",
+        "author each key in a TypeScript source and run the package typecheck; capture the tsc diagnostic",
+        "control: construct with { routes: {} } and confirm it succeeds and normalizes to an empty object — the tombstones refuse KEYS, not the block",
+        "control: construct with { routes: { someUnknownKey: 1 } } and confirm it is silently STRIPPED — the schema is not .strict(), which is precisely why the four retired keys had to be tombstoned rather than deleted",
+        "read each refusal's prescription and check it against the surface it names: `enable.apiEnabled` / `enable.apiMethods` on the object for exposure, the object `name` as the canonical path segment, `crud.dataPrefix` for the base path, and a declarative `api` endpoint for a custom path"
+      ],
+      "acceptance": [
+        {
+          "clause": "all four `routes.*` keys are REFUSED at construction whatever value is authored — includeObjects, excludeObjects, nameTransform (both former enum values) and the per-object overrides record",
+          "oracle": "test",
+          "verify": "the constructor throws for each; the message names `routes.<key>`, RouteGenerationConfigSchema and 'was removed in @objectstack/spec 17'. A clean construction for any of them is the silent-strip state ADR-0049 forbids and a P1 FAIL",
+          "evidence": "the four refusal texts"
+        },
+        {
+          "clause": "the refusal survives the plugin path, not only the direct constructor — createRestApiPlugin({ api: { routes: ... } }).start() rejects with the same message",
+          "oracle": "test",
+          "verify": "pnpm --filter @objectstack/rest exec vitest run src/rest-sub-config-parse-not-cast.test.ts — green (§B drives a tombstone through the plugin path, §E drives all four routes.* keys); reproduce one leg in the harness",
+          "evidence": "test output + the harness rejection"
+        },
+        {
+          "clause": "each prescription names a replacement that actually exists today: exposure moved onto the object (enable.apiEnabled hides it 404, enable.apiMethods whitelists 405), the object name IS the path segment so there is no transform to configure, the base path is crud.dataPrefix, and a custom path is a declarative `api` endpoint",
+          "oracle": "test",
+          "verify": "for each prescription, confirm the named key/route exists in the shipped surface (the enable keys on the object schema, dataPrefix on CrudEndpointsConfigSchema, the object_operation endpoint type). A prescription pointing at something that does not exist is a documentation FAIL even though the refusal itself is correct",
+          "evidence": "the four prescription-to-surface mappings"
+        },
+        {
+          "clause": "authoring any of the four is ALSO a tsc error, not only a runtime refusal — the retiredKey mechanism closes the authoring door at build time",
+          "oracle": "build",
+          "verify": "the package typecheck fails on the authored key and the diagnostic points at it; a clean typecheck with a runtime-only refusal is a partial door and is recorded as such",
+          "evidence": "the tsc diagnostics"
+        },
+        {
+          "clause": "the block itself is still declared: `routes: {}` constructs cleanly and normalizes to an empty object, and an unknown key inside it is stripped rather than refused — the non-strict parse that makes the tombstones necessary",
+          "oracle": "test",
+          "verify": "both controls hold; if `routes: {}` throws, the retirement over-reached and every embedder that kept an empty block breaks",
+          "evidence": "the two control results"
+        }
+      ],
+      "negative": [
+        "a `routes.*` key that parses CLEAN anywhere — direct constructor, plugin path, or tsc — is the silent fourth state ADR-0049/0078 forbid, and the more dangerous direction: excludeObjects: ['sys_log'] reading as accepted would leave an operator believing an object is off the REST surface when every route is still mounted",
+        "⛔ do not score this item from the SCHEMA's own unit tests alone: packages/spec pins the schema, and what this item asks is whether the SERVER runs it — the two were separate for as long as the sub-objects were cast instead of parsed"
+      ],
+      "variants": [
+        "tombstone:includeObjects",
+        "tombstone:excludeObjects",
+        "tombstone:nameTransform",
+        "tombstone:overrides"
+      ],
+      "traps": [
+        "absence-inference",
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (§E pins all four routes.* refusals, the empty-block control and the plugin-path leg)"
+      },
+      "source": [
+        "packages/spec/liveness/route_generation.json (the ADR-0049 ledger this item answers: all four properties dead, removed 2026-09-03 — the sub-object ships nothing but its refusals)",
+        "packages/spec/src/api/rest-server.zod.ts#RouteGenerationConfigSchema (the four retiredKey tombstones and the section note explaining why the block stays declared)",
+        "packages/spec/src/shared/retired-key.ts (the retiredKey mechanism — refuse rather than strip)",
+        "packages/rest/src/rest-server.ts#parseDeclaredSubConfig (the construction-time refusal and its message shape), (normalizeConfig — `routes` threaded as nothing, the seat kept)",
+        "#14691 (the retirement) · #14369 (the liveness census that found the block read by nothing) · ADR-0049 enforce-or-remove · Prime Directive #6 (the object name is the canonical id on every surface)",
+        "sibling clause: api-backend.enforce-or-remove-authoring-gates (the same mechanism sampled across the ADR-0087 registries; this item is the REST-config instance, where the whole sub-object is tombstones)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-09-04",
+          "change": "new — `route_generation` was UNCLASSIFIED in coverage.json and is the one of the four kinds with no live property left: all four selectors were retired under ADR-0049 on 2026-09-03. Authored rather than waived because the retirement is itself the shipped behaviour — the sub-object stays declared so an authored key is refused with its prescription instead of silently stripped, and that refusal is exactly what a checklist can drive. The prescription-accuracy clause exists because a correct refusal pointing at a replacement that does not exist would still leave the operator stuck",
+          "ref": "#14961"
         }
       ]
     }

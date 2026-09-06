@@ -38,7 +38,12 @@
  * round-trip to an auth service that does not implement these paths.
  */
 
-import { IDataEngine, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import {
+    assembleExecutionContext,
+    IDataEngine,
+    resolveLocalizationContext,
+    resolveUserAuthzGrants,
+} from '@objectstack/core';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
@@ -555,7 +560,9 @@ export function annotateEffectiveApiOperations(
  * normalization, the platform-admin derivation and the `ai_seat` synthesis
  * arrive with it instead of being re-implemented — one copy fewer to drift.
  */
-export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
+export function makeExecutionContextResolver(
+    ctx: CurrentUserEndpointsContext,
+): (c: any) => Promise<ExecutionContext | undefined> {
     /**
      * The data engine, or `undefined` when the slot is unclaimed. GUARDED: the
      * locator's contract permits `getService` to THROW for an absent slot (the
@@ -568,7 +575,7 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
     const getObjectQL = (): IDataEngine | undefined => {
         try { return ctx.getService<IDataEngine>('objectql'); } catch { return undefined; }
     };
-    const resolveCtx = async (c: any): Promise<any | undefined> => {
+    const resolveCtx = async (c: any): Promise<ExecutionContext | undefined> => {
         try {
             const authService = ctx.getService<IAuthService>('auth');
             if (!authService) return undefined;
@@ -607,27 +614,70 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
             if (isPerfDisclosurePrincipal({ isSystem: false, posture: grants.posture } as ExecutionContext)) {
                 allowPerfDisclosure();
             }
-            return {
-                userId,
-                tenantId,
-                email: grants.email,
-                // `positions`, not `roles`: the ExecutionContext field name every
-                // reader here uses (ADR-0090 D3). Carries the ADR-0057 D4
-                // `sys_user_position` assignments, the normalized org-membership
-                // names, the implicit `everyone` anchor and the derived
-                // `platform_admin` — none of which this surface used to see.
-                positions: grants.positions,
-                permissions: grants.permissions,
-                systemPermissions: grants.systemPermissions,
-                tabPermissions: grants.tabPermissions,
-                posture: grants.posture,
-                isSystem: false,
-                org_user_ids: grants.org_user_ids,
-                // [ADR-0105 D2] The caller's org access set — the `group`
-                // posture's Layer 0 wall is `organization_id IN (...)`, so a
-                // context without it fails every read closed on this surface.
-                accessible_org_ids: grants.accessible_org_ids,
-            } as any;
+            // [#15747] THE assembly (the second delegation). This used to be a
+            // hand-rolled object literal cast `as any` — beside the very module
+            // that exists to make that shape unrepresentable. It omitted SIX
+            // fields of the closed entry set (`principalKind`, `onBehalfOf`,
+            // `audience`, `accessToken`, `authGate`, `oauthScopes`), which is
+            // the #6071 drift class exactly: a field exists on
+            // `ExecutionContext`, one transport carries it, another silently
+            // does not. `ExecutionContextEntryFields` closes that set with a
+            // type, so a field added to `ExecutionContext` from here on fails
+            // to COMPILE until this face decides it — and the `as any` that
+            // suppressed the whole question is gone.
+            //
+            // The DEFAULT, fail-closed entry (#6216 Option A), not the guest
+            // one: a sessionless request never reaches this line (the
+            // `session?.user?.id` guard above already returned `undefined`) and
+            // all three handlers answer their own no-session body. Adopting
+            // `assembleExecutionContextOrGuest` here would convert those into
+            // an authorization evaluation over a guest envelope, which is not
+            // these faces' semantics.
+            //
+            // Every per-face divergence below is passed EXPLICITLY, which is
+            // what turns each from an invisible omission into a named decision:
+            //
+            //  - `oauth` — this face resolves its principal from the better-auth
+            //    SESSION and opens no OAuth 2.1 door: `acceptOAuthAccessToken`
+            //    is set by the `/mcp` dispatch path alone, on a resolver this
+            //    one does not call. So `principalKind` here is 'human'
+            //    unconditionally, and `onBehalfOf` / `oauthScopes` are not
+            //    representable — pinned in
+            //    `current-user-endpoints-execution-context-envelope.test.ts`, so
+            //    acquiring such a door turns that pin red rather than silently
+            //    making an absent `principalKind` mean something new.
+            //  - `localization` / `requestLocale` — withheld. #15387 moved this
+            //    surface's `locale` / `timezone` / `currency` to the ENDPOINT,
+            //    which reads the cascade itself (`resolveCurrentUserLocalization`);
+            //    resolving it here too would add a `sys_setting` read to every
+            //    request to all three routes and give the localization endpoint
+            //    two readings of one cascade to keep in agreement.
+            //  - `accessToken` — withheld, the same stance the REST face takes:
+            //    surfacing the session bearer to hooks on a second transport is
+            //    a product decision, not a refactor.
+            //  - `authGate` — withheld. Its consumer reads it off the envelope
+            //    at the REST seam (`RestServer.enforceAuth`); nothing on these
+            //    three routes does, and `core/security/auth-gate.ts` allow-lists
+            //    `/me/apps` + `/me/localization` as endpoints a GATED user must
+            //    still reach, so carrying it here would be an unread copy on a
+            //    surface whose whole point is that the gate does not close it.
+            return assembleExecutionContext({
+                // `grants` IS the `ResolvedAuthzContext` core, minus the two
+                // values only the session knows. `positions`, not `roles`: the
+                // ExecutionContext field name every reader uses (ADR-0090 D3),
+                // carrying the ADR-0057 D4 `sys_user_position` assignments, the
+                // normalized org-membership names, the implicit `everyone`
+                // anchor and the derived `platform_admin`. [ADR-0105 D2]
+                // `accessible_org_ids` rides along: the `group` posture's Layer
+                // 0 wall is `organization_id IN (...)`, so a context without it
+                // fails every read closed on this surface.
+                authz: { ...grants, userId, tenantId },
+                oauth: undefined,
+                localization: undefined,
+                requestLocale: undefined,
+                accessToken: undefined,
+                authGate: undefined,
+            });
         } catch {
             return undefined;
         }
@@ -716,7 +766,7 @@ async function storedSignedInUserLocale(
     return rules.every((re) => re.test(value)) ? value : undefined;
 }
 
-/** Input of {@link resolveSignedInUserLocale}. */
+/** Input of {@link resolveCurrentUserLocalization} and {@link resolveSignedInUserLocale}. */
 export interface ResolveSignedInUserLocaleInput {
     /** The locator of the kernel that OWNS the request (see `withRequestContext`). */
     ctx: CurrentUserEndpointsContext;
@@ -728,9 +778,28 @@ export interface ResolveSignedInUserLocaleInput {
     acceptLanguage?: string | null;
 }
 
+/** Everything `/auth/me/localization` answers a signed-in caller. */
+interface CurrentUserLocalization {
+    /**
+     * The reference currency, or `undefined` when the deployment configures
+     * none. The ONE value here with no floor, deliberately: a deployment that
+     * has stated no currency has none, and inventing one would be a WRONG
+     * answer where `undefined` is merely a missing one (the renderer's
+     * documented degradation is a plain number).
+     */
+    currency?: string;
+    /** The signed-in user's language. Always a string — rung 3 has a floor. */
+    locale: string;
+    /** The reference time zone. Always a string — the cascade's floor is `UTC`. */
+    timezone: string;
+}
+
 /**
- * The signed-in user's language — the ONE read face (#14788, maintainer
- * ruling 2026-09-03, option D):
+ * The endpoint's whole answer, resolved from ONE reading of the deployment
+ * cascade (#15387).
+ *
+ * `locale` keeps the three rungs of #14788 (maintainer ruling 2026-09-03,
+ * option D):
  *
  *   1. `sys_user.locale` when set and shaped like the column's own rule says
  *      ({@link storedSignedInUserLocale});
@@ -742,24 +811,62 @@ export interface ResolveSignedInUserLocaleInput {
  *      `execCtx.locale` already derives from on the dispatcher
  *      (`localization.locale` settings → tenant `sys_setting` rows → `en-US`).
  *
- * Always answers a string for an authenticated caller: rung 3 has a floor.
- * Exported for the serverless host path that composes the resolver directly
- * (cloud#924) and for the pin that asserts the precedence.
+ * `currency` and `timezone` come off that same cascade reading, which is the
+ * repair #15387 names: they used to be read off the request
+ * `ExecutionContext`, and the resolver serving THIS surface
+ * ({@link makeExecutionContextResolver}) is a hand-rolled envelope that never
+ * carried them — so the endpoint answered `null` for both to every
+ * authenticated caller, whatever the `localization` settings said. The
+ * dispatcher's shared assembler fills them from this very function
+ * (`core/security/assemble-execution-context.ts` ⇒ `resolveLocalizationContext`),
+ * so reading the cascade here makes the two faces agree by construction
+ * instead of by comment.
+ *
+ * ONE reading, not two: rungs 1–2 no longer short-circuit it, because
+ * `currency` / `timezone` are needed whichever rung answers the language. That
+ * is one `sys_setting` read added to the requests where the caller's own
+ * column or header already decided the locale, and it replaces the second
+ * reading the obvious alternative (resolve again for the other two values)
+ * would have cost on every request. The two reads it does issue are
+ * INDEPENDENT — the caller's identity row and the deployment's settings — and
+ * run concurrently: the console races this endpoint against a 500 ms budget on
+ * a device's first visit (objectui `seedTenantLanguage`), so a needless serial
+ * round-trip here is a language flash there. Neither read throws by its own
+ * documented contract, which is what makes the concurrent form safe.
  */
-export async function resolveSignedInUserLocale(input: ResolveSignedInUserLocaleInput): Promise<string> {
+async function resolveCurrentUserLocalization(
+    input: ResolveSignedInUserLocaleInput,
+): Promise<CurrentUserLocalization> {
     const { ctx, userId, tenantId } = input;
     const ql = (() => {
         try { return ctx.getService<IDataEngine>('objectql'); } catch { return undefined; }
     })();
-    const stored = await storedSignedInUserLocale(ql, userId, ctx.logger);
-    if (stored) return stored;
-    const requested = preferredLocaleFromHeader(input.acceptLanguage);
-    if (requested) return requested;
     const settings = (() => {
         try { return ctx.getService<unknown>('settings'); } catch { return undefined; }
     })();
-    const localization = await resolveLocalizationContext({ ql, settings, tenantId, userId });
-    return localization.locale;
+    const [stored, deployment] = await Promise.all([
+        storedSignedInUserLocale(ql, userId, ctx.logger),
+        resolveLocalizationContext({ ql, settings, tenantId, userId }),
+    ]);
+    return {
+        currency: deployment.currency,
+        locale: stored ?? preferredLocaleFromHeader(input.acceptLanguage) ?? deployment.locale,
+        timezone: deployment.timezone,
+    };
+}
+
+/**
+ * The signed-in user's language — the ONE read face (#14788), the `locale`
+ * rung of {@link resolveCurrentUserLocalization} on its own.
+ *
+ * Always answers a string for an authenticated caller: rung 3 has a floor.
+ * Exported for the serverless host path that composes the resolver directly
+ * (cloud#924) and for the pin that asserts the precedence. Its ANSWER is
+ * unchanged by #15387; what changed underneath is that the deployment cascade
+ * is now read even when rung 1 or 2 wins (see above).
+ */
+export async function resolveSignedInUserLocale(input: ResolveSignedInUserLocaleInput): Promise<string> {
+    return (await resolveCurrentUserLocalization(input)).locale;
 }
 
 /**
@@ -1002,8 +1109,7 @@ export function registerCurrentUserEndpoints(
     // language (`locale`), exposed to EVERY authenticated user. The
     // `localization` SETTINGS are gated to `setup.access`, but the resolved
     // defaults are needed by every renderer to format currency/dates/numbers —
-    // so they ride on the request ExecutionContext (ADR-0053) and are surfaced
-    // here without that gate.
+    // so they are surfaced here without that gate.
     //
     // [#14788] `locale` is the ONE read face for "this user's language"
     // (maintainer ruling 2026-09-03, option D, which also retired the dead
@@ -1014,14 +1120,21 @@ export function registerCurrentUserEndpoints(
     //   2. the request's `Accept-Language` preference;
     //   3. the deployment default (`localization.locale`, the same cascade
     //      that feeds `execCtx.locale` on the dispatcher).
-    // See {@link resolveSignedInUserLocale}. `currency` / `timezone` and the
-    // unauthenticated answer are unchanged by that ruling.
+    //
+    // [#15387] All three come from {@link resolveCurrentUserLocalization} —
+    // ONE reading of that same cascade. `currency` / `timezone` used to be read
+    // off `execCtx` instead, citing ADR-0053; the resolver this surface uses
+    // ({@link makeExecutionContextResolver}) never carried them, so the
+    // endpoint answered `null` for both to every authenticated caller no matter
+    // what the deployment had configured. The `?? null` on `currency` is not
+    // that fallback returning: it is the cascade's own shape, which gives
+    // `timezone` a floor and `currency` none.
     rawApp.get(`${prefix}/auth/me/localization`, withRequestContext(async (c, ctx, resolveCtx) => {
         const execCtx = await resolveCtx(c);
         if (!execCtx?.userId) {
             return c.json({ authenticated: false });
         }
-        const locale = await resolveSignedInUserLocale({
+        const localization = await resolveCurrentUserLocalization({
             ctx,
             userId: execCtx.userId,
             tenantId: execCtx.tenantId ?? undefined,
@@ -1029,9 +1142,9 @@ export function registerCurrentUserEndpoints(
         });
         return c.json({
             authenticated: true,
-            currency: execCtx.currency ?? null,
-            locale,
-            timezone: execCtx.timezone ?? null,
+            currency: localization.currency ?? null,
+            locale: localization.locale,
+            timezone: localization.timezone,
         });
     }));
 

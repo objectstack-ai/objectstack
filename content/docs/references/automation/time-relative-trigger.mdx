@@ -30,7 +30,7 @@ automation context (so `{record.<field>}` interpolation and the start-node
 `condition` gate work exactly as they do for record-change flows). The
 descriptor is carried on the flow's start node as `config.timeRelative`.
 
-@example T-minus renewal reminders (fires on the day a contract is 60/30/7 days out)
+**T-minus renewal reminders (fires on the day a contract is 60/30/7 days out)**
 ```ts
 // flow start node
 config: {
@@ -45,14 +45,14 @@ config: {
 }
 ```
 
-@example "Expiring soon" range (fires every day a document is within 30 days of expiry)
+**"Expiring soon" range (fires every day a document is within 30 days of expiry)**
 ```ts
 config: {
   timeRelative: { object: 'hr_document', dateField: 'expires_on', withinDays: 30 },
 }
 ```
 
-@example Overdue sweep (fires for POs up to 14 days past due)
+**Overdue sweep (fires for POs up to 14 days past due)**
 ```ts
 config: {
   timeRelative: { object: 'purchase_order', dateField: 'due_date', withinDays: -14, filter: { status: 'open' } },

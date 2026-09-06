@@ -6,7 +6,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 // `activities`, … and the annotation stops being a contract check at all. This
 // only became visible when tsconfig.test.json put these files in front of tsc
 // (#5286).
-import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
+import { ObjectSchema, ObjectCapabilities, IndexSchema, ObjectFieldGroupSchema, ObjectExternalBindingSchema, ObjectAccessConfigSchema, LifecycleSchema, TenancyConfigSchema, isTenancyDisabled, isPublicSharingEnabled, resolveCrudAffordances, type ServiceObject } from './object.zod';
 import { resolveInjectedSystemColumns } from './injected-system-columns';
 import { Field } from './field.zod';
 import type { StateMachineValidation } from './validation.zod';
@@ -2098,6 +2098,75 @@ describe('isTenancyDisabled — platform-global posture predicate (#3249, ADR-00
     expect(isTenancyDisabled(undefined)).toBe(false);
     expect(isTenancyDisabled(null)).toBe(false);
     expect(isTenancyDisabled('sys_license')).toBe(false);
+  });
+});
+
+/**
+ * [#14935] `isPublicSharingEnabled` — the canonical read of the standing
+ * share-link switch, exported beside the `publicSharing` declaration.
+ *
+ * It replaces two spellings: this predicate was private to
+ * `plugin-sharing/src/share-link-service.ts` (#14637) and `@objectstack/runtime`
+ * carried a documented MIRROR of it for its `/share-links` dispatcher domain.
+ * Those two surfaces keep their own behavioural pins — `share-link-eligibility`
+ * and `share-links-enforcement-context`, which assert the same observable
+ * answer on both surfaces. What is pinned HERE is the predicate's own contract,
+ * which those tests can only observe indirectly: fail-CLOSED, with the three
+ * unreadable cases collapsing to ONE answer.
+ */
+describe('isPublicSharingEnabled — standing share-link policy predicate (#14935, #14637)', () => {
+  it('is true only for an explicit publicSharing.enabled === true', () => {
+    expect(isPublicSharingEnabled({ name: 'article', publicSharing: { enabled: true } })).toBe(true);
+    expect(isPublicSharingEnabled({ name: 'article', publicSharing: { enabled: false } })).toBe(false);
+  });
+
+  it('is false when the block, or the key, is absent — `enabled` defaults to OFF', () => {
+    expect(isPublicSharingEnabled({ name: 'article', fields: { title: { type: 'text' } } })).toBe(false);
+    expect(isPublicSharingEnabled({ name: 'article', publicSharing: {} })).toBe(false);
+    expect(isPublicSharingEnabled({ name: 'article', publicSharing: { allowedAudiences: ['link_only'] } })).toBe(false);
+  });
+
+  it('collapses the three unreadable cases to ONE answer, false', () => {
+    // An absent block, an absent schema, and an engine that cannot answer
+    // `getSchema` at all (`engine.getSchema?.(name)` -> undefined). A surface
+    // that cannot read the policy must refuse rather than answer from the
+    // share-link row: a distinguishable "sharing is off for this object" is an
+    // existence oracle for a caller holding nothing but a token.
+    const unreadable = [{ name: 'article' }, undefined, null];
+    for (const schema of unreadable) expect(isPublicSharingEnabled(schema)).toBe(false);
+    expect(new Set(unreadable.map(isPublicSharingEnabled)).size).toBe(1);
+  });
+
+  it('refuses a truthy non-boolean — only the boolean true publishes', () => {
+    // Nothing that reaches this predicate is guaranteed to have been through
+    // `ObjectSchema`: the runtime probe reads whatever the engine's schema
+    // registry holds. `=== true` is what keeps a stored `'true'` from
+    // publishing records.
+    for (const enabled of ['true', 1, {}, [], 'yes'] as unknown[]) {
+      expect(isPublicSharingEnabled({ name: 'article', publicSharing: { enabled } })).toBe(false);
+    }
+  });
+
+  it('tolerates null/undefined/non-object schemas', () => {
+    expect(isPublicSharingEnabled(undefined)).toBe(false);
+    expect(isPublicSharingEnabled(null)).toBe(false);
+    expect(isPublicSharingEnabled('article')).toBe(false);
+    expect(isPublicSharingEnabled(42)).toBe(false);
+  });
+
+  it('agrees with the schema it reads — the parsed default is OFF', () => {
+    const parsed = ObjectSchema.parse({
+      name: 'article',
+      fields: { title: { type: 'text' } },
+      publicSharing: { allowedAudiences: ['link_only'] },
+    });
+    expect(parsed.publicSharing?.enabled).toBe(false);
+    expect(isPublicSharingEnabled(parsed)).toBe(false);
+    expect(isPublicSharingEnabled(ObjectSchema.parse({
+      name: 'article',
+      fields: { title: { type: 'text' } },
+      publicSharing: { enabled: true },
+    }))).toBe(true);
   });
 });
 

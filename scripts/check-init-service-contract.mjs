@@ -78,6 +78,8 @@
  *     node scripts/check-init-service-contract.mjs --self-test # verify the checker
  */
 
+// dispatch-gates: wide-population -- walk(join(ROOT, 'packages')) admits every non-test .ts source under the packages root -- 2182 of 5837 tracked files (37.4%, base 2aa8456cf), recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE in scripts/pm/bare-root-worklist.mjs. The population is not a part of that root, it IS every source in it, so the only true subtree spelling is the bare root -- which would name this gate on every card touching a package. lint.yml carries no paths filter, so CI runs it on every PR regardless.
+
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -786,7 +788,8 @@ function selfTest() {
     }
   `;
 
-  // 13. #4772 VERBATIM, pre-fix (`f2eb85007^`, packages/plugins/plugin-auth/src/auth-plugin.ts:346):
+  // 13. #4772 VERBATIM, pre-fix — `packages/plugins/plugin-auth/src/auth-plugin.ts`
+  //     as it stood at `f2eb85007^` (line 346 there, a dated reading, not a pointer):
   //     init() resolves the workspace-provided `cache` through `getServiceAsync`,
   //     via an optional call on a cast `ctx`, inside a best-effort try/catch, and
   //     the plugin's declarations cover `data`/`manifest`/objectql — never `cache`.

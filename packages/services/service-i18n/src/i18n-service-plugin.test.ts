@@ -107,6 +107,17 @@ describe('I18nServicePlugin', () => {
       const registeredService = ctx.registerService.mock.calls[0][1];
       expect(registeredService.getDefaultLocale()).toBe('zh-CN');
     });
+
+    it('threads fallbackLocale through to the registered service (#14882)', async () => {
+      // What `os serve` / the dev plugin pass for a zh-CN workspace
+      // (`fallbackLocale || defaultLocale || 'en'`); the REST metadata reads
+      // read it back through `getFallbackLocale()`.
+      const plugin = new I18nServicePlugin({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
+      await plugin.init!(ctx as any);
+
+      const registeredService = ctx.registerService.mock.calls[0][1];
+      expect(registeredService.getFallbackLocale()).toBe('zh-CN');
+    });
   });
 
   // -- Route self-registration ----------------------------------------------

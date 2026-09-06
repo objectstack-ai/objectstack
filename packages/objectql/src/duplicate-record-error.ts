@@ -79,6 +79,8 @@ const DUPLICATE_RECORD_STATUS = 409 as const;
 export class DuplicateRecordError extends Error {
   readonly code = DUPLICATE_RECORD_CODE;
   readonly status = DUPLICATE_RECORD_STATUS;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = DUPLICATE_RECORD_STATUS;
   /**
    * The driver's own error, whole.
    *

@@ -80,47 +80,46 @@
  * character. A third hand-copy of this logic anywhere is the thing to refuse —
  * import from here, or add a consumer to that test.
  *
- * ## [#6518] Case sensitivity: why this file still emits a plain `LIKE`
+ * ## [#6518 / #15684] Case sensitivity: this file builds the PATTERN, not the keyword
  *
- * #4706 Q2 = A rules the `$contains` family case-SENSITIVE on every backend, and
- * #6518 moved the driver family onto that answer — `SqlDriver`'s
- * `textMatchPredicate` now picks the construct per DIALECT, because `LIKE` folds
- * ASCII on SQLite and follows the collation on MySQL. The obvious question is
- * why the compilers here did not move with it, and the answer is measured
- * rather than assumed:
+ * #4706 Q2 = A rules the `$contains` family case-SENSITIVE on every backend,
+ * and #6518 moved the driver family onto that answer — `SqlDriver`'s
+ * `textMatchPredicate` picks the construct per DIALECT, because `LIKE` folds
+ * ASCII on SQLite and follows the collation on MySQL.
  *
- *   1. **These compilers emit Postgres-shaped SQL, and on Postgres `LIKE` is
- *      already exactly the ruled semantics.** Both consumers number their
- *      placeholders `$1`, `$2`, … (`native-sql-strategy.ts`'s `buildFilterClause`
- *      and `objectql-strategy.ts`'s filter render), and `applyReadScope` /
- *      `generateSql` rewrite this file's `?` into `$N` on the way out;
- *      identifiers are `"double quoted"`. Measured on a live PostgreSQL 16
- *      against the shared nine-row fixture: `LIKE '%acme%'` answers row 2 alone
- *      and `LIKE '%ACME%'` answers row 1 alone — case-exact, which is the
- *      contract. So there is no divergence to close HERE, and changing the
- *      construct would create one.
- *   2. **The RLS fork the issue warned about does not open.** #6518's concern
- *      was that a driver-only fix would compile one permission rule into two row
- *      sets. It does not, because the two paths meet only on Postgres — where
- *      `textMatchPredicate`'s postgres arm is also a plain `LIKE`, unchanged.
+ * This file did not move with it, and the argument for staying was written
+ * here: that these compilers emit Postgres-shaped SQL, so `LIKE` was already
+ * exactly the ruled semantics and changing the construct would create a
+ * divergence rather than close one. **That argument was wrong, and #15684
+ * measured how.** The placeholders are Postgres-shaped; the STATEMENT is not
+ * addressed to Postgres. `plugin.ts`'s raw-SQL auto-bridge rewrites `$N` into
+ * `?` and hands the statement to whichever driver owns the object — so on a
+ * SQLite datasource these compilers' output runs on SQLite. Measured on sql.js
+ * over the shared `FILTER_TEXT_ROWS` fixture: `{name: {$contains: 'acme'}}`
+ * answered `['1','2']` — `ACME Corp` AND `acme corp` — where
+ * `FILTER_TEXT_CASES` says `['2']`. On `read-scope-sql.ts`'s output that is
+ * ADR-0021 read-scope over-reach, not a loose filter (#3948).
  *
- * What that reasoning DEPENDS on is the dialect, so it is the thing to re-open
- * rather than the code: **if these compilers ever emit for SQLite or MySQL, this
- * file is wrong and `$contains` silently over-matches there** — on
- * `read-scope-sql.ts`'s output that is ADR-0021 read-scope over-reach, not a
- * loose filter (#3948). Two things would have to arrive together: a dialect
- * input reaching these three compilers, and the per-dialect construct table
- * `textMatchPredicate` already carries. Neither exists today and neither is
- * invented here on speculation. `__tests__/like-metacharacter-escape.test.ts`
- * pins both halves of the claim — that the emitted statement is
- * Postgres-shaped, and that the family is compiled case-EXACT — so this
- * paragraph goes red rather than merely stale.
+ * The two things that had to arrive together arrived together: a dialect input
+ * reaching these three compilers (`DatasetScopedStrategyContext.sqlDialect`,
+ * answered by the driver that will execute the statement) and the per-dialect
+ * construct table (`text-match-sql.ts`, #6518's arm for arm). So the division
+ * of labour here is now explicit:
  *
- * `$icontains` IS implemented here since #6520, and it is a separate construct
- * rather than a flag on the family above: it folds ASCII case on BOTH sides via
- * {@link asciiLowerSqlExpr}, while the `$contains` family stays case-EXACT. The
- * two must not be collapsed — a shared "case-insensitive" path would give the
- * `$contains` family the fold the ruling took away from it.
+ *   - {@link likePattern} / {@link escapeLikePattern} build the LIKE PATTERN,
+ *     and are used by the `LIKE` arms — Postgres, MySQL, and the `unknown`
+ *     residue — for BOTH text families.
+ *   - Which KEYWORD those patterns hang off, and whether a GLOB pattern with a
+ *     different escaped character class is built instead, is
+ *     `text-match-sql.ts`'s answer. ⛔ Do not re-derive it here.
+ *
+ * [#15780] `$icontains` (#6520) goes through that same table, and its fold is a
+ * per-dialect construct too — {@link asciiLowerSqlExpr} is only the Postgres /
+ * `unknown` arm of it. What the two families share is the TABLE and the
+ * escaping; what separates them is one `fold` flag set on the `$icontains` row
+ * alone. ⛔ The two must never be collapsed into one case-insensitive path —
+ * that would give the `$contains` family back the fold #4706 Q2 = A took away
+ * from it, which is the failure `text-operator-case-exactness.test.ts` guards.
  *
  * ## `String(value)` is safe here because nothing unrenderable reaches it (#5234)
  *
@@ -180,9 +179,18 @@ export function likePattern(shape: LikeShape, value: unknown): string {
   return shape === 'starts' ? `${escaped}%` : shape === 'ends' ? `%${escaped}` : `%${escaped}%`;
 }
 
-/** `A`..`Z` and the `a`..`z` they fold onto — the #4706 Q1 = A domain, as data. */
-const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
+/**
+ * `A`..`Z` and the `a`..`z` they fold onto — the #4706 Q1 = A domain, as data.
+ *
+ * [#15780] EXPORTED, because the fold is now chosen per dialect and two of the
+ * three arms are built from this domain rather than from `translate()`:
+ * `text-match-sql.ts`'s MySQL arm nests one `REPLACE` per letter, and [#16028]
+ * its `unknown` arm nests the same chain without the binary cast. The domain
+ * itself stays here, in one copy — a second 26-character literal anywhere is
+ * how the Postgres arm and the MySQL arm start folding different alphabets.
+ */
+export const ASCII_UPPER_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+export const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
 
 /**
  * [#6520] Wrap a SQL expression in `$icontains`' ASCII-ONLY case fold.
@@ -202,17 +210,32 @@ const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
  * alone, so it is the fold the ruling names rather than the one the database
  * happens to offer.
  *
- * ## The dialect this assumes, stated so it can go red rather than stale
+ * ## The dialect this arm is FOR — no longer the dialect it assumes
  *
- * Postgres, like everything else these three compilers emit — the claim this
- * file's header already makes and `__tests__/like-metacharacter-escape.test.ts`
- * pins. `translate()` is Postgres/Oracle; SQLite has no such function. So the
- * warning in the header applies to this helper WORD FOR WORD: if these compilers
- * ever emit for SQLite or MySQL, this expression does not merely over-match, it
- * fails to parse. The remedy is the per-dialect construct table `driver-sql`'s
- * `textMatchPredicate` already carries — nested `REPLACE` for the dialects
- * without `translate` — not a quiet fallback to `LOWER()`, which would silently
- * restore the Unicode fold this function exists to avoid.
+ * Postgres, and the `unknown` residue. `translate()` is Postgres/Oracle and
+ * SQLite has no such function, so while this expression was emitted on EVERY
+ * dialect it did not merely over-match on SQLite — it failed to PARSE
+ * (`no such function: translate` on sql.js 1.14.1). That was #15780, and it is
+ * closed: this function is now ONE arm of `text-match-sql.ts`'s per-dialect
+ * table ({@link textMatchPredicateSql}, `fold: true`), reached on `postgres`
+ * ALONE, while SQLite gets `lower(col) GLOB lower(?)`, MySQL the nested-
+ * `REPLACE` binary fold and — since #16028 — `unknown` the same `REPLACE` chain
+ * without the binary cast.
+ *
+ * ⛔ Do NOT "simplify" this to `LOWER()`, on any arm. Postgres' `LOWER()` is
+ * locale-aware and would silently restore the Unicode fold #4706 Q1 = A rules
+ * out; SQLite's `lower()` is ASCII-only, which is why the SQLite arm may use it
+ * and this one may not. That asymmetry is the whole reason the fold is chosen
+ * per dialect rather than written once.
+ *
+ * ⛔ [#16028] Nor is this function the `unknown` arm's fold any more, and it may
+ * not be given back. `unknown` is not a dialect — it is everything
+ * `normalizeSqlDialect` could not name, SQLite and MariaDB included — so a
+ * PostgreSQL/Oracle function there is a statement those engines cannot PARSE.
+ * That arm folds with the portable `REPLACE` chain, which is ASCII-only by
+ * construction and therefore does not re-open the `LOWER()` question either.
+ * `driver-sql`'s `unknown` arm still folds with `LOWER()`, its own pre-#6518
+ * shape; each face keeps its own answer and neither claims the other's.
  *
  * The caller must apply it to BOTH sides of the comparison. Folding only the
  * comparand compares a folded needle against a raw column and matches just the

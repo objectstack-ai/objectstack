@@ -170,7 +170,7 @@ describe('Package Service Contract', () => {
         requiresMigration: true,
         migrationScripts: ['migrations/v2_add_account_fields.ts'],
         dependencyUpgrades: [{ packageId: 'com.acme.core', fromVersion: '1.2.0', toVersion: '2.0.0' }],
-        estimatedDuration: 120,
+        estimatedDurationSeconds: 120,
         summary: 'Major upgrade with 3 metadata changes and 1 migration',
       }),
       upgrade: async () => ({ success: true, phase: 'completed' }),
@@ -187,7 +187,7 @@ describe('Package Service Contract', () => {
     expect(plan.requiresMigration).toBe(true);
     expect(plan.migrationScripts).toHaveLength(1);
     expect(plan.dependencyUpgrades).toHaveLength(1);
-    expect(plan.estimatedDuration).toBe(120);
+    expect(plan.estimatedDurationSeconds).toBe(120);
   });
 
   it('should execute upgrade and support rollback', async () => {

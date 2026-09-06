@@ -79,7 +79,20 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
    */
   cache: z.object({
     enabled: z.boolean().default(true).describe('Enable caching'),
-    ttl: z.number().int().min(0).default(3600).describe('Cache TTL in seconds'),
+    /**
+     * Renamed from `ttl` (#14478): the unit lived only in this description
+     * while `databaseLoader.ttl`, fourteen lines below, was in MILLISECONDS —
+     * one word, two magnitudes 1000× apart. The unit now lives in the key.
+     * Tombstoned rather than deleted because this nested object is not
+     * `.strict()` — a plain deletion would strip the old key in silence.
+     */
+    ttlSeconds: z.number().int().min(0).default(3600).describe('Cache TTL in seconds'),
+    ttl: retiredKey(
+      '`cache.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 — ' +
+      'its unit (seconds) lived only in the description, while the nested `cache.databaseLoader.ttl` ' +
+      'spelled the same word in milliseconds, so one key name meant two magnitudes 1000× apart. ' +
+      'Rename the key to `ttlSeconds`; the value (seconds) is unchanged.',
+    ),
     maxSize: z.number().int().min(0).optional().describe('Max cache size in bytes'),
     /**
      * DatabaseLoader read-through cache.
@@ -87,13 +100,19 @@ export const MetadataManagerConfigSchema = lazySchema(() => z.object({
      * The DatabaseLoader caches `load`/`loadMany`/`list`/`stat` results in an
      * LRU keyed by `(type, name)`. All write paths invalidate the affected
      * entry, so reads always observe writes made through the same loader
-     * instance. External writes (out-of-band SQL) are honored within `ttl`
+     * instance. External writes (out-of-band SQL) are honored within `ttlMs`
      * milliseconds.
      */
     databaseLoader: z.object({
       enabled: z.boolean().default(true).describe('Enable DatabaseLoader cache'),
       maxSize: z.number().int().min(0).default(500).describe('Max cached entries'),
-      ttl: z.number().int().min(0).default(60_000).describe('Cache TTL in milliseconds'),
+      ttlMs: z.number().int().min(0).default(60_000).describe('Cache TTL in milliseconds'),
+      ttl: retiredKey(
+        '`cache.databaseLoader.ttl` was removed from `MetadataManagerConfig` in @objectstack/spec 17 ' +
+        '— its unit (milliseconds) lived only in the description, while the outer `cache.ttl` ' +
+        'spelled the same word in seconds, so one key name meant two magnitudes 1000× apart. ' +
+        'Rename the key to `ttlMs`; the value (milliseconds) is unchanged.',
+      ),
     }).optional().describe('DatabaseLoader read-through cache'),
   }).optional().describe('Cache settings'),
 

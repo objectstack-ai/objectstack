@@ -12,7 +12,7 @@ triggering executions, and querying execution history.
 
 Base path: /api/automation
 
-@example Endpoints
+**Endpoints**
 GET    /api/automation                         — List flows
 GET    /api/automation/:name                   — Get flow
 POST   /api/automation                         — Create flow
@@ -399,6 +399,7 @@ const result = AutomationApiErrorCode.parse(data);
 | **flowName** | `string` | ✅ | Machine name of the executed flow |
 | **flowVersion** | `integer` | optional | Version of the flow that was executed |
 | **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| …>` | ✅ | Current execution status |
+| **refusalMessage** | `string` | optional | Rendered `end` node `message` when `status` is `refused` — the per-record text the flow refused with. Absent on every other status. |
 | **trigger** | `{ type: string; recordId?: string; object?: string; userId?: string; … }` | ✅ | What triggered this execution |
 | **steps** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Ordered list of executed steps |
 | **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | Per-run rollup: records selected / acted on, gate skips, per-node status |
@@ -469,7 +470,7 @@ const result = AutomationApiErrorCode.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Flow machine name (snake_case) |
-| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying'>` | optional | Filter by execution status |
+| **status** | `Enum<'pending' \| 'running' \| 'paused' \| 'completed' \| 'failed' \| 'cancelled' \| 'timed_out' \| 'retrying' \| 'refused'>` | optional | Filter by execution status |
 | **limit** | `integer` | optional (default: `20`) | Maximum number of runs to return |
 | **cursor** | `string` | optional | Cursor for pagination |
 
@@ -607,11 +608,12 @@ const result = AutomationApiErrorCode.parse(data);
 | **error** | `string` | optional | Error message if execution failed |
 | **durationMs** | `number` | optional | Execution duration in milliseconds |
 | **code** | `Enum<'PERMISSION_DENIED' \| 'INVALID_SIGNAL' \| 'RUN_NOT_FOUND' \| 'STORE_UNAVAILABLE' \| …>` | optional | Machine-readable failure classification, set alongside `error` when the caller must distinguish WHY it failed. A closed union - the members and their transport mappings are documented on the contract (`AutomationResult.code`, contracts/automation-service.ts). |
-| **status** | `Enum<'completed' \| 'paused' \| 'failed' \| 'stranded'>` | optional | Lifecycle status. `paused` means the run suspended at a node and can be continued with the resume route. Absent or `completed`/`failed`/`stranded` means the run reached a terminal state. `stranded` is the terminally-failed-but-repairable run: a resume consumed the suspension and a downstream node threw, so the run is recorded as failed and can be re-armed only by an explicit operator verb - never by the resume route, which answers RUN_NOT_FOUND for it. |
+| **status** | `Enum<'completed' \| 'paused' \| 'failed' \| 'stranded' \| 'refused'>` | optional | Lifecycle status. `paused` means the run suspended at a node and can be continued with the resume route. Absent or `completed`/`failed`/`stranded`/`refused` means the run reached a terminal state. `refused` is a first-class refusal: the flow reached an `end` node declaring `outcome: 'refused'` — a successful evaluation that said no, so `success` is true, `successMessage` is absent and the per-record reason is on `refusalMessage`; a runner shows it with Close only. `stranded` is the terminally-failed-but-repairable run: a resume consumed the suspension and a downstream node threw, so the run is recorded as failed and can be re-armed only by an explicit operator verb - never by the resume route, which answers RUN_NOT_FOUND for it. |
 | **runId** | `string` | optional | Run id - set when `status` is `paused`, so callers can resume it |
 | **screen** | `{ nodeId: string; title?: string; description?: string; fields: object[]; … }` | optional | The screen to render - set when the run paused at a `screen` node awaiting user input. The client collects values for `screen.fields` and resumes the run with them. |
 | **successMessage** | `string` | optional | Friendly terminal message copied from the flow definition on terminal success, so a screen-flow runner can show a meaningful toast |
 | **errorMessage** | `string` | optional | Friendly terminal message copied from the flow definition on failure |
+| **refusalMessage** | `string` | optional | Rendered refusal, set when `status` is `refused` - the `end` node's `message` template interpolated against the run's variables, so it names the record. Authored per-record text (not a flow-level copy like the two above); absent on every other status. A runner shows it with Close only |
 | **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | What the run did - records selected / acted on, gate skips, per-node status. Set on a TERMINAL result (a paused run has not finished doing it yet). |
 
 

@@ -81,7 +81,18 @@
 // and `readTsconfig` keeps throwing it.
 //
 // Invariants, per workspace package (the root workspace package included --
-// #4311's audit counted its top-level TypeScript like any other package's):
+// #4311's audit counted its top-level TypeScript like any other package's).
+//
+// ⭐ "Included" is MECHANICAL for all of them since #15483, and was not before:
+// the root is walked by `testCoverage('.')` and asked the four per-package
+// clauses through `perPackageClauses`, against its `typecheck:root` script
+// rather than the `typecheck` aggregator. Until then it was a manifest read --
+// TESTS_COVERED, SOURCES_COVERED, PINS_CHECKED and GENERATED_COVERED were asked
+// of the enumerated packages and of nothing else, while THIS SENTENCE said
+// otherwise. It is the fourth axis of that blindness found in this gate by a
+// person rather than by an instrument (#14630, #14386, #14918), which is what
+// SCOPED_CLAUSES and the printed `clause scope:` line below now exist to make
+// impossible to repeat silently:
 //
 //   COVERED     the package declares a `typecheck` script, OR carries a DEBT
 //               entry (measured tsc error count + tracking issue) or an EXEMPT
@@ -126,10 +137,43 @@
 //               reads as coverage and delivers none, which is this gate's own
 //               subject matter.
 //   SOURCES_COVERED
-//               a package that DECLARES a `typecheck` script has no directory of
-//               non-test source sitting outside every tsc program that script
-//               runs, or the directory carries an UNCHECKED_SOURCE_DEBT entry
+//               NO workspace package -- ledgered or not -- has a directory of
+//               non-test source sitting outside every tsc program that ACCOUNTS
+//               for it, or the directory carries an UNCHECKED_SOURCE_DEBT entry
 //               below (#10756).
+//
+//               "Accounts for" is `accountedPrograms`, the same answer
+//               TESTS_COVERED reads: the configs the `typecheck` script invokes,
+//               or -- for a package with no such script -- `tsconfig.json`,
+//               which is what `measureDebt` runs to produce its DEBT number.
+//
+//               ASKED OF EVERY PACKAGE SINCE #14918, and the scoping that
+//               replaced is worth reading before trusting any green from this
+//               layer's history. It used to be asked ONLY of a package that
+//               DECLARES a `typecheck` script, on the argument that a DEBT
+//               package's answer is already "nothing reads this package" and
+//               billing it here too would put one hole in two ledgers. That
+//               argument does not survive contact with what a DEBT row is: the
+//               row records an ERROR COUNT, taken through `tsc -p
+//               tsconfig.json`, and a directory OUTSIDE that program is in
+//               neither the count nor anything else anybody reads. The ledger
+//               row says "this package's type errors are a recorded decision";
+//               it does NOT say "and some of its source is in no tsc program at
+//               all", yet it used to suppress the clause that would have said so.
+//
+//               MEASURED, not reasoned. `packages/core/examples` held 2
+//               non-test source files in no tsc program whatsoever, neither of
+//               which had EVER compiled, invisible for as long as
+//               `@objectstack/core` stayed ledgered. They surfaced only as a
+//               side effect of #14916 adding a `typecheck` script for unrelated
+//               reasons -- which flipped the package from covered-by-ledger to
+//               covered-by-script and ran this clause over it for the first
+//               time. Repairing the two broken module specifiers EXPOSED errors
+//               rather than removing them, 12 -> 29: 20 reads of `ObjectKernel`'s
+//               private logger, 4 scan-result members that do not exist, 2
+//               config literals passing unparsed shapes. That is drift from two
+//               separate retirements that edited a file no tsc program could
+//               check. ⭐ A file that never compiles does not stay still.
 //
 //               The layer above is package-granular and this one is not, which
 //               is the whole gap. COVERED asks "does a `typecheck` script
@@ -478,12 +522,13 @@
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
 import {
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 // `typecheck`-script -> tsconfig program set. Shared with
@@ -988,6 +1033,59 @@ const EXEMPT = {
 // So the shrink-only guarantee did not loosen here; it moved to a strictly
 // sharper instrument, one that also reddens on a wholesale substitution of
 // error IDENTITY at a constant total, which a per-package integer cannot see.
+//
+// ── #15145: `@objectstack/verify` GRADUATED — and this one WAS paid down ───
+//
+// `verify` (3) left this ledger on 2026-09-04. ⛔ Do NOT read it through the
+// blocks above it: those all warn that a deleted entry left its population
+// undiminished, and this one is the other case (`plugin-security` is the
+// nearest precedent, and even it ledgered nothing only because its 9 residual
+// errors were repaired by hand). Here the entry recorded
+// TS2835 x3 for three extension-less `./harness` imports, all three were given
+// their `.js`, and the re-measure then read the entry at ZERO before anything
+// was wired -- this gate's own line, quoted: "@objectstack/verify: TEST_DEBT
+// records 3, and tsc now reports 0 -- graduation candidate". So there is no
+// `packages/verify/test-typecheck-debt.json`: at zero residue a bare
+// `tsc --noEmit -p tsconfig.test.json` is the stronger gate, the call
+// `plugin-security`, `metadata-core`, `metadata-fs` and `trigger-record-change`
+// made before it, and every error any of the package's 10 test files ever gains
+// is red on arrival with no ledger to be added to.
+//
+// ⚠️ MEASURED IN THAT ORDER ON PURPOSE, because the entry's own note predicted
+// the outcome ("the same one-line fix graduates this entry") and a prediction is
+// not a licence. Collapsing a TS2835 cascade EXPOSES errors as well as removing
+// them -- the #8612 lesson this ledger carries twice above -- and the card that
+// filed this had itself watched the entry drift 3 -> 5 (+2 TS7006) the moment
+// two `.then` callbacks were added behind that same unresolved specifier. The
+// honest move on an upward count is to RE-TALLY, not to delete. Here it went
+// down, and only the measurement could say which.
+//
+// THE WIRING IS THE OTHER HALF, and it is what the entry's disappearance now
+// rests on: `packages/verify/tsconfig.test.json` compiles `src/**/*` with
+// vitest-matching module semantics and `package.json`'s `typecheck` NAMES it,
+// so `hidesTests` is false. Measured with the closure built: the build config
+// puts 0 of the package's 10 `src/*.test.ts` in its program (and all 9 non-test
+// `src/**` files); the test config puts 10 of 10. The package's own advertised
+// `typecheck` was green over a layer it had never read -- which is the defect
+// the card was about, and which deleting a ledger entry alone would have left
+// exactly where it was.
+//
+// ⚠️ The pin half reported nothing here in either direction and still does not:
+// this package's test layer holds ZERO `@ts-expect-error` directives (grepped
+// with a positive control -- the same grep hits `packages/spec/src`), so
+// PINS_CHECKED had no subject. The card's sharpest line -- that a
+// `ts-expect-error` in those files is a phantom check -- is a statement about
+// what WOULD happen, not about an existing dead pin, exactly as `cli`'s
+// graduation recorded for its own 115 files.
+//
+// ⚠️ ROUTE (b) WAS AVAILABLE HERE and was still not taken. The #11491 note
+// above names `verify` as one of the 4 entries whose exclusion could be dropped
+// with `check:type-source-resolution` staying green, and that split was
+// re-measured on 2026-09-04 under a trap-restored mutation and still holds for
+// this package (exit 0; 124 programs across 78 packages). It was declined on
+// module semantics: `tsconfig.json` inherits NodeNext from the repo root and
+// would hold the test layer to a resolver vitest never runs it under. Onboard
+// by WIRING, not by widening the build config.
 const TEST_DEBT = {
 // ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
 //
@@ -1025,6 +1123,48 @@ const TEST_DEBT = {
 // Measured: with `rootDir` inherited, the same program reports 116 additional
 // TS6059 — a config-tier pile that says nothing about any test.
 
+// ── #14917: `@objectstack/driver-mongodb` GRADUATED — and this one really is
+// at ZERO, which the six above are not ────────────────────────────────────────
+//
+// `driver-mongodb` (10) left this ledger on 2026-09-04, by the same route as
+// `runtime`, `cli`, `lint` and the three plugins: it now has a
+// `tsconfig.test.json` its `typecheck` script NAMES, so `hidesTests` is false
+// for it and this gate's per-PACKAGE approximation has nothing left to
+// approximate. ⛔ This change repairs no test file and edits none.
+//
+// ⭐ WHAT IS DIFFERENT HERE, and it is the whole reading: those six graduated
+// into a per-file `test-typecheck-debt.json` holding a residue. This one
+// graduates into NO LEDGER AT ALL. Measured at 6ed4b811af with the dependency
+// closure built, `tsc --noEmit -p tsconfig.test.json` reports **0 errors across
+// all 30 test files**. The recorded 10 was config-tier IN FULL — the same
+// dissolution measured for `lint`'s 16, but complete rather than partial.
+//
+// The attribution has no remainder in either direction. RECORDED here was
+// `TS1309 x7, TS2550 x3`; re-measured on the way out at 6ed4b811af by dropping
+// only the test glob (this gate's own `remeasureProject` shape), the raw
+// program reports those same 10, class for class and file for file. All 7
+// TS1309 are "cannot use `await` at the top level" — this package has no
+// `"type": "module"`, so NodeNext compiles as CJS the suites that await
+// `startMongod()` at module scope, which vitest executes as ESM. All 3 TS2550
+// are the same `Array.prototype.at` message in `mongodb-findone-options.test.ts`
+// against a `lib` older than es2022. Both classes are the CHECK being
+// misconfigured; neither is a defect in a test. Under vitest-matching module
+// semantics both dissolve and NOTHING is exposed behind them — there is no
+// `+n` term here, because there was no unresolved-import cascade to collapse.
+//
+// ⚠️ So the shrink-only guarantee did not merely move to a finer instrument
+// here, it STRENGTHENED twice over. All 30 files are unledgered, so any error
+// any one of them gains is red on arrival. And what the package's own
+// `typecheck` script reports about its test layer is now a PASS rather than a
+// NUMBER — which was this card's actual finding, once its false headline (that
+// the `Equals` / `IsAny` pins here were phantoms) had been corrected on the
+// thread. The pins were always real; they were read by THIS ratchet, and a
+// ratchet fails when a number moves, not when a type is wrong.
+//
+// ⚠️ PINS_CHECKED reported nothing for this package in either direction and
+// still does not: measured on the way out, its test layer holds ZERO
+// `@ts-expect-error` directives, so that half had no subject here either.
+
   '@objectstack/mcp': {
     errors: 53,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
@@ -1055,21 +1195,6 @@ const TEST_DEBT = {
       + 're-confirmed at 53 at 62b2655d8, so the next new error in this package goes red on arrival -- '
       + 're-establishing a margin deliberately remains a maintainer call (#5278 option A).',
   },
-  '@objectstack/driver-mongodb': {
-    errors: 10,
-    note: 'TS1309 x7, TS2550 x3. Was 43 (TS2345 x33 + these 10), measured at 5ab08428 and still exactly '
-      + '43 at d367f03d6^ -- the commit immediately before PR #6210. That PR (#6075) narrowed this '
-      + "driver's six IDataDriver query methods to `DriverQuery`, which is what retired all 33 TS2345: "
-      + "they were this package's OWN test literals failing `Property 'object' is missing in type` "
-      + 'against a `QueryAST` that still required it. The ledger was never ratcheted down, so 33 errors '
-      + 'of slack sat here. #6212 batch C lowers it to the measured 10 because that slack made the batch '
-      + "OWN change unpinnable: this package's tsconfig excludes `*.test.ts`, so `pnpm typecheck` cannot "
-      + "see `aggregate`'s narrowing at all, and its only consumers are those excluded tests. Reverting "
-      + '`aggregate(object, query: DriverQuery)` back to `QueryAST` measures 12 here -- which the old '
-      + '43-ceiling would have swallowed in silence. At 10 it goes red, which is the whole point of a '
-      + 'ratchet. Re-measured 10 at 2bc187641, and the pristine tree at that commit reports the same 10, '
-      + "so none of the -33 is this PR's doing.",
-  },
   '@objectstack/formula': {
     errors: 17,
     note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1. Re-measured 17 '
@@ -1081,16 +1206,6 @@ const TEST_DEBT = {
       + '(173,52), where the local `ok()` helper pins its second argument to the exact shape of the '
       + 'module-level `VARS` and a partial context cannot satisfy it; the same file already carries a '
       + 'hand-widened copy of that helper (`filterOf`) written for exactly that reason.',
-  },
-  '@objectstack/verify': {
-    errors: 3,
-    note: 'TS2835 x3 -- `harness.host-resolution`, `harness.posture-only` and `harness.posture` each '
-      + 'import `./harness` without the `.js` extension. Re-tallied from the 8 measured at 5ab08428 '
-      + '(TS2835 x4, TS7006 x4) when `derive.test.ts` gained its own extension: that ONE unresolved '
-      + 'import was carrying 1 x TS2835 plus every TS7006 in the file, because a specifier that does '
-      + 'not resolve under NodeNext makes every symbol it names `any` and so every callback parameter '
-      + 'implicitly any. The remainder is the same NodeNext pair from the top-of-ledger note, and the '
-      + 'same one-line fix graduates this entry.',
   },
   '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
   '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
@@ -1270,8 +1385,9 @@ const PHANTOM_PIN_DEBT = {};
 // used to say was deliberately deferred. `packages/services/
 // service-storage/scripts/i18n-extract.config.ts` is the ninth instance
 // #10868 annotated, and this ledger carried no line for it because
-// SOURCES_COVERED's invariant only asks its question of a package that
-// DECLARES a `typecheck` script, and service-storage declared none -- it was
+// SOURCES_COVERED's invariant only asked its question of a package that
+// DECLARED a `typecheck` script (the scoping #14918 removed -- it is asked of
+// every package now, ledgered or not), and service-storage declared none -- it was
 // covered instead by `DEBT['@objectstack/service-storage']` (51 errors), so
 // wiring a `typecheck` that ran ONLY `tsconfig.scripts.json` would have been
 // worse than leaving it: COVERED would have started passing on a script that
@@ -1545,6 +1661,136 @@ function gitIgnoredPaths(rels) {
 }
 
 /**
+ * Every repo-relative path this tree's own ignore rules exclude, in the two
+ * shapes a directory walk needs: whole directories to skip, and single files
+ * to drop.
+ *
+ * This is SOURCES_COVERED's (and TESTS_COVERED's, and PINS_CHECKED's) population
+ * filter since #15731. The rule those invariants apply is unchanged -- what
+ * changed is who they apply it to. A gate run while `pnpm --filter
+ * @objectstack/cli exec vitest run` was in flight reported `packages/cli/tmp: 1
+ * non-test source file(s) here sit outside every tsc program`, with the ledger's
+ * "closed to new entries" line beside it, over a scratch file a test wrote and
+ * removed again: the same text a real ratchet break produces, naming a repair
+ * (add a `tsconfig.scripts.json`, or widen `include`) that would have widened a
+ * config to cover a scratch directory. `.gitignore:53` excludes `tmp/`, and a
+ * path the repo excludes is by the repo's own declaration not a source of the
+ * package -- never committed, never published, and never seen at all by the
+ * clean checkout CI type-checks. The gate has no claim on it.
+ *
+ * ONE `ls-files` for the whole repo, memoised across the two walk sites
+ * (`workspacePackages` for the 79, `observed` for the root), for the reason
+ * `gitIgnoredPaths` gives above: the structural pass is the sub-second half of
+ * this gate, and a spawn per package -- let alone per file -- would end that.
+ * Measured on main @ 2dec9576d: 41ms for the whole repo.
+ *
+ * `--exclude-per-directory=.gitignore` rather than `--exclude-standard` is the
+ * load-bearing flag, and it draws the line `exposedScratchDirs` in
+ * `scripts/pm/dispatch-gates.mjs` already draws for this repo: a rule that lives
+ * only in `.git/info/exclude` -- or in a developer's `core.excludesFile`,
+ * emptied here as it is emptied ten lines up -- covers the clone it lives in and
+ * nothing else. What licenses dropping a path from this gate's subject is the
+ * REPO's declaration that the path is not part of the tree; a per-clone rule is
+ * one machine's opinion, and honouring it would let a developer quietly shrink
+ * the gate's population locally while CI, whose checkout has no such file, still
+ * judges the directory. A gate must conclude the same thing in both places.
+ *
+ * Two further properties come from the instrument rather than from a flag:
+ *
+ *   * TRACKED paths are never listed (`--others` is the whole point), so a
+ *     force-added file under an ignored directory keeps being judged -- it IS
+ *     present in a clean checkout. That is the same answer `gitIgnoredPaths`
+ *     reaches by consulting the index.
+ *   * `--directory` collapses a wholly-ignored directory to its own name, so
+ *     `node_modules/` costs one entry rather than a hundred thousand, while a
+ *     directory that still holds tracked files stays open and only its ignored
+ *     files are listed.
+ *
+ * A git that cannot answer is a THROW, never an empty set: reading a failed
+ * spawn as "this tree ignores nothing" would silently restore the phantom
+ * findings this filter exists to remove, which is the posture `gitIgnoredPaths`
+ * takes for its own question.
+ *
+ * @param {string} cwd repository to ask about -- ROOT in production, a fixture
+ *   repo in the self-test, which is the only way the tracked-vs-per-clone line
+ *   above can be pinned by an assertion rather than by this paragraph.
+ * @returns {{dirs: Set<string>, files: Set<string>}}
+ */
+function readIgnoredPaths(cwd) {
+  const res = spawnSync(
+    'git',
+    [
+      '-c',
+      'core.excludesFile=',
+      'ls-files',
+      '--others',
+      '--ignored',
+      '--exclude-per-directory=.gitignore',
+      '--directory',
+      '-z',
+    ],
+    { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (res.error) {
+    refusePrerequisite(
+      `git ls-files could not run, so the ignored paths cannot be told from source: ${res.error.message}`,
+    );
+  }
+  if (res.status !== 0) {
+    refusePrerequisite(
+      `git ls-files exited ${res.status}, so the ignored paths cannot be told from source: `
+        + String(res.stderr).trim(),
+    );
+  }
+  return ignoreIndex(res.stdout);
+}
+
+/**
+ * The `-z` listing above, split into the two lookups the walk performs.
+ *
+ * A trailing `/` is git's mark for a directory it collapsed whole; everything
+ * else is a single file. Parsed by a named function rather than inline so the
+ * self-test asserts the shape this gate actually reads out of git, and so the
+ * `--directory` contract above is stated in one place instead of two.
+ *
+ * @param {string} stdout NUL-separated `ls-files -z` output
+ * @returns {{dirs: Set<string>, files: Set<string>}}
+ */
+function ignoreIndex(stdout) {
+  const dirs = new Set();
+  const files = new Set();
+  for (const entry of stdout.split('\0')) {
+    if (entry === '') continue;
+    if (entry.endsWith('/')) dirs.add(entry.slice(0, -1));
+    else files.add(entry);
+  }
+  return { dirs, files };
+}
+
+/** ROOT's index, read once per run and shared by both walk sites. */
+let ignoredPathsMemo = null;
+function workspaceIgnoredPaths() {
+  ignoredPathsMemo ??= readIgnoredPaths(ROOT);
+  return ignoredPathsMemo;
+}
+
+/**
+ * Does the walk step over this path?
+ *
+ * Named rather than inlined for `isBuildSource`'s reason: the self-test then
+ * asserts the predicate the walk applies instead of a copy of it. Asked of
+ * directories and files alike -- a wholly-ignored directory is one entry, and
+ * skipping it there is what keeps this cheap.
+ *
+ * @param {{dirs: Set<string>, files: Set<string>}} index
+ * @param {string} rel REPO-relative posix path (the walk's package-relative
+ *   path joined onto the package directory), naming a file or a directory
+ */
+function isIgnoredPath(index, rel) {
+  return index.dirs.has(rel) || index.files.has(rel);
+}
+
+/**
  * Which tsc programs ACCOUNT for a package's test files -- the ones whose error
  * count somebody actually reads.
  *
@@ -1649,6 +1895,62 @@ function isUncheckedSourceCandidate(name, depth) {
 }
 
 /**
+ * One walk of a whole package: its test files, its non-test source files, and
+ * which of the tests carry a `@ts-expect-error` in directive position.
+ *
+ * Both halves need the same list: the hidden-file count is no longer confined
+ * to the include roots, because a file outside them is precisely the case
+ * TESTS_COVERED had been missing (#7353).
+ *
+ * Extracted from `testCoverage` and given the ignore index as an ARGUMENT
+ * (#15731) so the self-test drives the walk this gate runs -- over a fixture
+ * tree, against a stated index -- instead of asserting a copy of it. That is
+ * the whole of the population question: the same fixture walked with an empty
+ * index yields the file, and walked with the index git produces does not.
+ *
+ * @param {string} absDir absolute path of the package directory
+ * @param {string} dir the same directory, repo-relative posix (`.` for the root)
+ * @param {{dirs: Set<string>, files: Set<string>}} ignored `readIgnoredPaths`
+ * @returns {{testRels: string[], sourceRels: string[], pinned: Set<string>}}
+ *   package-relative posix paths, in walk order
+ */
+function walkPackageFiles(absDir, dir, ignored) {
+  const testRels = [];
+  const sourceRels = [];
+  const pinned = new Set();
+  const walk = (abs, rel, depth) => {
+    let entries = [];
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return; // no such root, or unreadable -- nothing to hide either way
+    }
+    for (const entry of entries) {
+      const child = join(abs, entry.name);
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      // #15731. A path this repo IGNORES is not this package's source by the
+      // repo's own declaration, so no invariant below has a claim on it --
+      // asked before the `isDirectory` fork, because a wholly-ignored
+      // directory is a single entry in the index and stepping over it there
+      // is what keeps one git call per run enough.
+      if (isIgnoredPath(ignored, posix.join(dir, childRel))) continue;
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
+        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
+        walk(child, childRel, depth + 1);
+      } else if (TEST_FILE.test(entry.name)) {
+        testRels.push(childRel);
+        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
+      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
+        sourceRels.push(childRel);
+      }
+    }
+  };
+  walk(absDir, '', 0);
+  return { testRels, sourceRels, pinned };
+}
+
+/**
  * What this package's tsc programs read, and what they leave out.
  *
  * `hidesTests` is the TESTS_COVERED trigger and means "at least one of this
@@ -1679,35 +1981,13 @@ function testCoverage(dir, scripts) {
   const named = configsNamedByTypecheck(scripts);
   const invoked = configs.filter((c) => named.has(c.file));
 
-  // One walk of the whole package. Both halves need the same list now: the
-  // hidden-file count is no longer confined to the include roots, because a
-  // file outside them is precisely the case this invariant had been missing.
-  const testRels = [];
-  const sourceRels = [];
-  const pinned = new Set();
-  const walk = (abs, rel, depth) => {
-    let entries = [];
-    try {
-      entries = readdirSync(abs, { withFileTypes: true });
-    } catch {
-      return; // no such root, or unreadable -- nothing to hide either way
-    }
-    for (const entry of entries) {
-      const child = join(abs, entry.name);
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
-        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
-        walk(child, childRel, depth + 1);
-      } else if (TEST_FILE.test(entry.name)) {
-        testRels.push(childRel);
-        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
-      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
-        sourceRels.push(childRel);
-      }
-    }
-  };
-  walk(join(ROOT, dir), '', 0);
+  // One walk of the whole package, minus whatever this repo declares is not
+  // in it (#15731 -- `walkPackageFiles` above carries both halves).
+  const { testRels, sourceRels, pinned } = walkPackageFiles(
+    join(ROOT, dir),
+    dir,
+    workspaceIgnoredPaths(),
+  );
 
   const hiddenTests = unreadFiles(testRels, accountedPrograms(configs, invoked));
   // PINS_CHECKED stays anchored to the INVOKED programs, not the accounted
@@ -1715,33 +1995,37 @@ function testCoverage(dir, scripts) {
   // `--re-measure` path a DEBT number comes from is not that check.
   const pinFiles = unreadFiles([...pinned], invoked).map((rel) => posix.join(dir, rel));
 
-  // SOURCES_COVERED (#10756), asked ONLY of a package that declares a
-  // `typecheck` script. A DEBT package's answer is already "nothing reads this
-  // package", which its own ledger owns; asking again here would bill the same
-  // hole to two ledgers and make the smaller one unreadable. The subject is a
-  // package the coverage headline counts as COVERED.
+  // SOURCES_COVERED (#10756), asked of EVERY package since #14918 -- ledgered
+  // or not -- over the programs that ACCOUNT for it, which is the same set
+  // TESTS_COVERED is decided against ten lines up. The scoping this replaces
+  // (`if (scripts.typecheck !== undefined)`) is argued at length in the header:
+  // a DEBT row records an error count taken through `tsconfig.json`, so a
+  // directory outside that program was reported by this clause, by that count,
+  // and by nothing else.
+  const sourcePrograms = accountedPrograms(configs, invoked);
   const uncheckedByDir = new Map();
-  if (scripts.typecheck !== undefined) {
-    for (const rel of unreadFiles(sourceRels, accountedPrograms(configs, invoked))) {
-      // `rel.indexOf('/')` is -1 for a package-ROOT file (#14386's
-      // `ROOT_SOURCE_FILES` admits those past `isUncheckedSourceCandidate`
-      // now) -- `.slice(0, -1)` on that would produce a garbage key (the
-      // basename minus its last character), not a missing one. `'.'` is the
-      // sensible root key: fed through `posix.join(dir, top)` below it
-      // collapses to the package's own directory, which is exactly what an
-      // unread root-level file is "inside" -- there is no narrower directory
-      // to name.
-      const top = rel.includes('/') ? rel.slice(0, rel.indexOf('/')) : '.';
-      uncheckedByDir.set(top, (uncheckedByDir.get(top) ?? 0) + 1);
-    }
+  for (const rel of unreadFiles(sourceRels, sourcePrograms)) {
+    // `rel.indexOf('/')` is -1 for a package-ROOT file (#14386's
+    // `ROOT_SOURCE_FILES` admits those past `isUncheckedSourceCandidate`
+    // now) -- `.slice(0, -1)` on that would produce a garbage key (the
+    // basename minus its last character), not a missing one. `'.'` is the
+    // sensible root key: fed through `posix.join(dir, top)` below it
+    // collapses to the package's own directory, which is exactly what an
+    // unread root-level file is "inside" -- there is no narrower directory
+    // to name.
+    const top = rel.includes('/') ? rel.slice(0, rel.indexOf('/')) : '.';
+    uncheckedByDir.set(top, (uncheckedByDir.get(top) ?? 0) + 1);
   }
 
   // GENERATED_COVERED's candidates (#10880): every `include` entry of every
   // config the `typecheck` script INVOKES, with the glob kept beside its root.
-  // Scoped exactly like SOURCES_COVERED above and for the same two reasons --
-  // a package with no `typecheck` script makes no coverage claim to falsify,
-  // and the question this invariant asks ("does the script run the generator")
-  // has no subject there. Which of these roots are actually generated is not
+  // Scoped to packages that declare a `typecheck` script -- the way
+  // SOURCES_COVERED above USED to be, and for a reason that holds here and did
+  // not hold there (#14918): the question this invariant asks is "does the
+  // script run the generator", and a package with no script runs no generator,
+  // invokes no config, and therefore has no `include` entry to ask about. There
+  // is no hidden population behind that scope, only an empty one -- but it IS a
+  // scope, so `SCOPED_CLAUSES` declares it and every run prints it. Which of these roots are actually generated is not
   // decided here: that is one batched git call in `workspacePackages`, because
   // it is a question about the repo rather than about this package.
   const declaredIncludes = scripts.typecheck === undefined
@@ -1761,6 +2045,23 @@ function testCoverage(dir, scripts) {
     // and before tsc" of. Carried on the package so `evaluate` stays a pure
     // function of observations, the way every other invariant here is tested.
     typecheckChain: typecheckScriptChain(scripts),
+    // The script body the four per-package clauses are decided against, carried
+    // rather than re-read from `scripts.typecheck` at the asking site (#15483).
+    // For a workspace package it IS `typecheck`; for the ROOT package the caller
+    // passes `typecheck:root`, because the root's `typecheck` slot is the
+    // workspace aggregator and names no config of the root's own. A clause that
+    // reached back into the manifest here would judge the root against that
+    // aggregator -- the one way this population could be joined WRONG.
+    coverageScript: scripts.typecheck,
+    // What accounts for this package's SOURCE layer, so the finding can name
+    // the claim it falsifies instead of naming a `typecheck` script the package
+    // may not have (#14918). 'script' -- the programs are the ones it invokes;
+    // 'primary' -- no such script, so `tsconfig.json` (what `measureDebt` runs)
+    // is all that reads it; 'unaccounted' -- neither, so NOTHING reads it and
+    // every source file below is unread by construction.
+    sourceBasis: scripts.typecheck !== undefined
+      ? 'script'
+      : (sourcePrograms.length > 0 ? 'primary' : 'unaccounted'),
     // Repo-relative, one entry per top-level directory, with the file count
     // DERIVED on this run and never written down anywhere -- #5826's ruling for
     // the test layer applies here for the same reason.
@@ -2004,154 +2305,233 @@ function compositionProblems(ledgerName, entries) {
  *           turboHasTask: boolean, ciInvokesTask: boolean, ciInvokesRoot: boolean }} state
  * @returns {string[]} problems, empty when the ratchet holds
  */
+/**
+ * The four invariants that are asked of a SUBJECT rather than of the tree --
+ * TESTS_COVERED, PINS_CHECKED, SOURCES_COVERED and GENERATED_COVERED.
+ *
+ * Extracted from `evaluate`'s package loop so that the LOOP is no longer what
+ * defines their population (#15483). It was: all four lived inside
+ * `for (const pkg of packages)`, `observed()` built the workspace root from its
+ * manifest alone -- `{ name, scripts }`, with none of the four observation
+ * fields -- and the root reached `evaluate` only through `byName` and the
+ * COVERED / REAL / RUNNABLE / RECONCILED checks written for it BY NAME. So the
+ * four were asked of the enumerated packages and of nothing else, while this
+ * file's own header said the root is counted "like any other package's". That is
+ * a fourth instance of the shape #14630, #14386 and #14918 each cost a person a
+ * round to find: a clause skipped for a population, with the run saying so
+ * nowhere.
+ *
+ * ⚠️ Nothing was hidden by it on the day it was closed, and the repair is a
+ * GUARD rather than a finding: measured on main @ 5023630b1, the root walk
+ * reaches 0 test files, 0 `@ts-expect-error` pins and 14 non-test source files,
+ * every one of them inside the root program (root `tsconfig.json` declares no
+ * `include`, so its root is the whole package minus the `packages`/`apps`/
+ * `examples`/`node_modules` it excludes). What the gap costs is the day that
+ * config grows an `include`, or a root `tsconfig.build.json` excludes a test
+ * glob, or the repo gains its first root-level test file carrying a pin.
+ *
+ * The subject's own coverage script is `pkg.coverageScript`, never
+ * `pkg.scripts.typecheck`: the root's `typecheck` slot is the workspace
+ * AGGREGATOR (`turbo run typecheck`, asserted under RUNNABLE), which names no
+ * config and type-checks nothing of the root's own. Reading that slot here would
+ * judge the root against a script that is not its coverage -- manufacturing
+ * findings instead of finding them, which is the objection this card was filed
+ * with. `coverageScriptName` is that script's NAME, so a finding quotes the slot
+ * its reader has to go and edit (`typecheck:root` at the root).
+ *
+ * @param {object} pkg a workspace package, or the workspace root
+ * @param {object} state the ledgers, as `evaluate` reads them
+ * @returns {string[]} findings, in clause order
+ */
+function perPackageClauses(pkg, state) {
+  const problems = [];
+  const coverageScript = pkg.coverageScript;
+  const scriptName = pkg.coverageScriptName ?? 'typecheck';
+  const inDebt = Object.hasOwn(state.debt, pkg.name);
+  const inExempt = Object.hasOwn(state.exempt, pkg.name);
+
+  // TESTS_COVERED, and its RECONCILED counterpart. Independent of whether the
+  // package is covered or in DEBT: this is about what the tsconfig hides, not
+  // about whether a script exists to run against it.
+  const inTestDebt = Object.hasOwn(state.testDebt, pkg.name);
+  if (pkg.hidesTests && pkg.testFiles > 0) {
+    if (!inTestDebt) {
+      problems.push(
+        `${pkg.name} (${pkg.dir}): ${pkg.testFiles} of its test file(s) sit outside every tsc program that ` +
+          `accounts for this package -- named by an \`exclude\`, or never reached by any \`include\` -- so ` +
+          `the check reports green over source it never read (${TRACKING_ISSUE}). Drop the ` +
+          `\`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, widen \`include\` to reach the test tree, add a ` +
+          `sibling \`tsconfig.test.json\` and name it in the \`${scriptName}\` script (the #5286 route, when the ` +
+          `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}. ` +
+          `⚠️ The sibling route usually needs \`rootDir\` widened as well, and leaving it inherited is the ` +
+          `way that route fails: test files outside the build config's \`rootDir\` report one TS6059 each -- ` +
+          `116 of them in one measured onboarding of a sibling \`test/\` tree under \`rootDir: "src"\`, and ` +
+          `\`"."\` still left 3 where tests read fixtures from another package. ${TEST_ROOTDIR_PRECEDENT} ` +
+          `widen it to \`"../.."\` (the repo root) for exactly this reason; \`rootDir\` steers emit layout ` +
+          `only and these programs emit nothing, so it widens the ROOT and never the strictness.`,
+      );
+    } else {
+      const entry = state.testDebt[pkg.name];
+      if (!entry || typeof entry.errors !== 'number' || entry.errors <= 0) {
+        problems.push(
+          `${pkg.name}: TEST_DEBT entry has no measured error count -- put the files in a program, run ` +
+            `\`tsc --noEmit\`, record the number, or put them in a program for good.`,
+        );
+      }
+    }
+  } else if (inTestDebt) {
+    problems.push(
+      `${pkg.name}: has a TEST_DEBT entry but ${pkg.testFiles === 0 ? 'has no test files' : 'no longer hides its tests'} -- ` +
+        `it graduated; delete its entry from TEST_DEBT in ${SELF}.`,
+    );
+  }
+
+  // PINS_CHECKED. A `@ts-expect-error` outside every invoked tsc program is a
+  // retirement guard that cannot fail -- deleting the directive changes
+  // nothing, which is the definition of a phantom check (${PIN_ISSUE}).
+  for (const file of pkg.pinFiles ?? []) {
+    if (!Object.hasOwn(state.phantomPins, file)) {
+      problems.push(
+        `${file}: carries a \`@ts-expect-error\` directive but no tsc program the \`${scriptName}\` script ` +
+          `runs compiles it, so the directive is never evaluated -- delete the line and every gate stays ` +
+          `green (${PIN_ISSUE}). Put the file in a program (drop the exclusion, widen \`include\`, or add a ` +
+          `sibling \`tsconfig.test.json\` the \`${scriptName}\` script names), or replace the pin with a runtime ` +
+          `assertion. PHANTOM_PIN_DEBT in ${SELF} is closed to new entries.`,
+      );
+    } else if (!String(state.phantomPins[file] ?? '').trim()) {
+      problems.push(`${file}: PHANTOM_PIN_DEBT entry has no reason -- say why the pin is still unchecked.`);
+    }
+  }
+
+  // SOURCES_COVERED (#10756). A whole source directory outside every program
+  // that ACCOUNTS for the package -- asked of every package since #14918,
+  // which is why the finding names the claim it falsifies instead of assuming
+  // that claim is a `typecheck` script. A covered-by-script package and a
+  // ledgered one are wrong in the same way and repaired the same way; what
+  // differs is the sentence that was silently true about them.
+  for (const { dir, files } of pkg.uncheckedSources ?? []) {
+    if (!Object.hasOwn(state.uncheckedSources, dir)) {
+      const falsified = coverageScript !== undefined
+        ? `\`${pkg.name}\`'s \`${scriptName}\` script runs, while that script is what makes the package `
+          + 'count as COVERED'
+        : pkg.sourceBasis === 'unaccounted'
+          ? `accounts for \`${pkg.name}\` -- it declares no \`${scriptName}\` script and has no `
+            + '`tsconfig.json` either, so NOTHING reads a line of this directory'
+          : `accounts for \`${pkg.name}\` -- it declares no \`${scriptName}\` script, so \`tsconfig.json\` `
+            + `is all that reads it${inDebt
+              ? ', and its DEBT entry records the ERROR COUNT tsc reports through that program'
+              : inExempt
+                ? ', and its EXEMPT entry says type-checking does not apply to this package at all -- '
+                  + 'these files say otherwise'
+                : ''}`;
+      problems.push(
+        `${dir}: ${files} non-test source file(s) here sit outside every tsc program that ` +
+          `${falsified} -- so the gate reports green over a directory nothing type-checks ` +
+          `(${TRACKING_ISSUE}).${coverageScript === undefined
+            ? ' ⛔ A ledger row is not a substitute: it records a NUMBER, never a directory no program '
+              + 'reads (#14918).'
+            : ''} Add a sibling \`tsconfig.scripts.json\` and NAME it in the \`${scriptName}\` ` +
+          `script (the ${SPEC_SCRIPTS_PRECEDENT} pattern), or widen \`include\` to reach the directory. ` +
+          `⛔ Widening \`include\` on the BUILD config is not the same repair: it puts the directory in ` +
+          `front of the emit too, and \`rootDir\` will reject it. UNCHECKED_SOURCE_DEBT in ${SELF} is ` +
+          `closed to new entries.`,
+      );
+    } else if (!String(state.uncheckedSources[dir] ?? '').trim()) {
+      problems.push(
+        `${dir}: UNCHECKED_SOURCE_DEBT entry has no reason -- say why this directory is still ` +
+          `outside every program, or put it in one.`,
+      );
+    }
+  }
+
+  // GENERATED_COVERED (#10880). An `include` entry rooted in a path the repo
+  // does not check in: the program tsc gets is only as complete as whatever
+  // produced that path, and a missing one is SILENT -- the check exits 0
+  // having compiled none of it. Scoped by the observation half to packages
+  // that declare a coverage script, exactly as SOURCES_COVERED is -- and for
+  // the ROOT that script is `typecheck:root`, which is what `coverageScript`
+  // carries (#15483).
+  for (const { config, glob, root } of pkg.generatedIncludes ?? []) {
+    const where = `${pkg.name} (${pkg.dir}/${config})`;
+    if (!Object.hasOwn(state.generatedRoots, root)) {
+      problems.push(
+        `${where}: \`include\` names "${glob}", rooted in \`${root}\` -- a path the repo's own ignore ` +
+          `rules say is NOT checked in, so it is empty until something produces it -- and no row in ` +
+          `GENERATED_INCLUDE_ROOTS in ${SELF} says what does. tsc then reports green over a program ` +
+          `missing every file that glob promised, which is the one failure COVERED, REAL and RUNNABLE ` +
+          `all pass through (${GENERATED_INCLUDE_ISSUE}). Add a row naming the command the \`${scriptName}\` ` +
+          `script has to run first -- or, if nothing a typecheck runs should produce it, a row with ` +
+          `\`generator: null\` and the argument for why its absence cannot make this check read green. ` +
+          `⛔ Deleting the glob is not automatically the repair: a framework that writes the config ` +
+          `back (Next's \`writeConfigurationDefaults\`) will re-add it.`,
+      );
+      continue;
+    }
+    const row = state.generatedRoots[root] ?? {};
+    const declares = row.generator === null || (typeof row.generator === 'string' && row.generator.trim() !== '');
+    if (!declares) {
+      problems.push(
+        `GENERATED_INCLUDE_ROOTS["${root}"] in ${SELF} declares no generator -- give it the command ` +
+          `that produces the directory, or \`generator: null\` to say out loud that nothing a typecheck ` +
+          `runs produces it. A row with the key missing would read as the second answer while nobody ` +
+          `ever decided it.`,
+      );
+      continue;
+    }
+    if (!String(row.why ?? '').trim()) {
+      problems.push(
+        `GENERATED_INCLUDE_ROOTS["${root}"] in ${SELF} has no reason -- say what writes this path and ` +
+          `why the \`${scriptName}\` script's relationship to it is the right one. For a \`generator: null\` ` +
+          `row that reason is the whole guard: nothing mechanical can check that an ungenerated ` +
+          `directory's absence cannot make tsc read green.`,
+      );
+      continue;
+    }
+    if (row.generator === null) continue; // declared, and deliberately not generated
+    const verdict = generatorVerdict(pkg.typecheckChain ?? [], row.generator);
+    if (verdict === 'missing') {
+      problems.push(
+        `${where}: \`include\` names "${glob}", which nothing checked in provides -- ` +
+          `GENERATED_INCLUDE_ROOTS says \`${row.generator}\` writes it -- and this package's ` +
+          `\`${scriptName}\` script never runs that command ("${coverageScript ?? ''}"). So tsc compiles whatever an ` +
+          `earlier build happened to leave in \`${root}\`, and in a clean checkout it compiles nothing ` +
+          `from there and still exits 0 (${GENERATED_INCLUDE_ISSUE}). Put \`${row.generator}\` in the ` +
+          `\`${scriptName}\` script ahead of tsc.`,
+      );
+    } else if (verdict === 'after') {
+      problems.push(
+        `${where}: the \`${scriptName}\` script runs \`${row.generator}\` -- which is what writes "${glob}" -- ` +
+          `AFTER tsc in the same command ("${coverageScript ?? ''}"), so the program tsc read was still the one ` +
+          `from before the generator ran, and the files that glob promises were checked by nothing ` +
+          `(${GENERATED_INCLUDE_ISSUE}). Move it in front: \`${row.generator} && tsc --noEmit\`.`,
+      );
+    }
+  }
+
+  return problems;
+}
+
 function evaluate(packages, root, state) {
   const problems = [];
   const byName = new Map(packages.map((p) => [p.name, p]));
   byName.set(root.name, root);
+  // The population the four per-package clauses are asked of: every enumerated
+  // package AND the workspace root (#15483). Used by the RECONCILED sweeps
+  // below for the same reason it is used to ask the clauses -- an entry retired
+  // against a smaller population than the one that can create it is a ratchet
+  // that eats its own rows (a root PHANTOM_PIN_DEBT row would read as stale the
+  // moment it was written).
+  const clauseSubjects = [...packages, root];
 
   for (const pkg of packages) {
     const script = pkg.scripts.typecheck;
     const inDebt = Object.hasOwn(state.debt, pkg.name);
     const inExempt = Object.hasOwn(state.exempt, pkg.name);
 
-    // TESTS_COVERED, and its RECONCILED counterpart. Independent of whether the
-    // package is covered or in DEBT: this is about what the tsconfig hides, not
-    // about whether a script exists to run against it.
-    const inTestDebt = Object.hasOwn(state.testDebt, pkg.name);
-    if (pkg.hidesTests && pkg.testFiles > 0) {
-      if (!inTestDebt) {
-        problems.push(
-          `${pkg.name} (${pkg.dir}): ${pkg.testFiles} of its test file(s) sit outside every tsc program that ` +
-            `accounts for this package -- named by an \`exclude\`, or never reached by any \`include\` -- so ` +
-            `the check reports green over source it never read (${TRACKING_ISSUE}). Drop the ` +
-            `\`*.test.ts\`/\`*.spec.ts\` entry from \`exclude\`, widen \`include\` to reach the test tree, add a ` +
-            `sibling \`tsconfig.test.json\` and name it in the \`typecheck\` script (the #5286 route, when the ` +
-            `build config must keep the exclusion), or measure what surfaces and add a TEST_DEBT entry in ${SELF}. ` +
-            `⚠️ The sibling route usually needs \`rootDir\` widened as well, and leaving it inherited is the ` +
-            `way that route fails: test files outside the build config's \`rootDir\` report one TS6059 each -- ` +
-            `116 of them in one measured onboarding of a sibling \`test/\` tree under \`rootDir: "src"\`, and ` +
-            `\`"."\` still left 3 where tests read fixtures from another package. ${TEST_ROOTDIR_PRECEDENT} ` +
-            `widen it to \`"../.."\` (the repo root) for exactly this reason; \`rootDir\` steers emit layout ` +
-            `only and these programs emit nothing, so it widens the ROOT and never the strictness.`,
-        );
-      } else {
-        const entry = state.testDebt[pkg.name];
-        if (!entry || typeof entry.errors !== 'number' || entry.errors <= 0) {
-          problems.push(
-            `${pkg.name}: TEST_DEBT entry has no measured error count -- put the files in a program, run ` +
-              `\`tsc --noEmit\`, record the number, or put them in a program for good.`,
-          );
-        }
-      }
-    } else if (inTestDebt) {
-      problems.push(
-        `${pkg.name}: has a TEST_DEBT entry but ${pkg.testFiles === 0 ? 'has no test files' : 'no longer hides its tests'} -- ` +
-          `it graduated; delete its entry from TEST_DEBT in ${SELF}.`,
-      );
-    }
-
-    // PINS_CHECKED. A `@ts-expect-error` outside every invoked tsc program is a
-    // retirement guard that cannot fail -- deleting the directive changes
-    // nothing, which is the definition of a phantom check (${PIN_ISSUE}).
-    for (const file of pkg.pinFiles ?? []) {
-      if (!Object.hasOwn(state.phantomPins, file)) {
-        problems.push(
-          `${file}: carries a \`@ts-expect-error\` directive but no tsc program the \`typecheck\` script ` +
-            `runs compiles it, so the directive is never evaluated -- delete the line and every gate stays ` +
-            `green (${PIN_ISSUE}). Put the file in a program (drop the exclusion, widen \`include\`, or add a ` +
-            `sibling \`tsconfig.test.json\` the typecheck script names), or replace the pin with a runtime ` +
-            `assertion. PHANTOM_PIN_DEBT in ${SELF} is closed to new entries.`,
-        );
-      } else if (!String(state.phantomPins[file] ?? '').trim()) {
-        problems.push(`${file}: PHANTOM_PIN_DEBT entry has no reason -- say why the pin is still unchecked.`);
-      }
-    }
-
-    // SOURCES_COVERED (#10756). A package that ADVERTISES a `typecheck` script
-    // and keeps a whole source directory outside every program that script
-    // runs. The observation half asks this only of such packages, so no DEBT
-    // package reaches here.
-    for (const { dir, files } of pkg.uncheckedSources ?? []) {
-      if (!Object.hasOwn(state.uncheckedSources, dir)) {
-        problems.push(
-          `${dir}: ${files} non-test source file(s) here sit outside every tsc program that ` +
-            `\`${pkg.name}\`'s \`typecheck\` script runs, while that script is what makes the package ` +
-            `count as COVERED -- so the gate reports green over a directory nothing type-checks ` +
-            `(${TRACKING_ISSUE}). Add a sibling \`tsconfig.scripts.json\` and NAME it in the \`typecheck\` ` +
-            `script (the ${SPEC_SCRIPTS_PRECEDENT} pattern), or widen \`include\` to reach the directory. ` +
-            `⛔ Widening \`include\` on the BUILD config is not the same repair: it puts the directory in ` +
-            `front of the emit too, and \`rootDir\` will reject it. UNCHECKED_SOURCE_DEBT in ${SELF} is ` +
-            `closed to new entries.`,
-        );
-      } else if (!String(state.uncheckedSources[dir] ?? '').trim()) {
-        problems.push(
-          `${dir}: UNCHECKED_SOURCE_DEBT entry has no reason -- say why this directory is still ` +
-            `outside every program, or put it in one.`,
-        );
-      }
-    }
-
-    // GENERATED_COVERED (#10880). An `include` entry rooted in a path the repo
-    // does not check in: the program tsc gets is only as complete as whatever
-    // produced that path, and a missing one is SILENT -- the check exits 0
-    // having compiled none of it. Scoped by the observation half to packages
-    // that declare a `typecheck` script, exactly as SOURCES_COVERED is.
-    for (const { config, glob, root } of pkg.generatedIncludes ?? []) {
-      const where = `${pkg.name} (${pkg.dir}/${config})`;
-      if (!Object.hasOwn(state.generatedRoots, root)) {
-        problems.push(
-          `${where}: \`include\` names "${glob}", rooted in \`${root}\` -- a path the repo's own ignore ` +
-            `rules say is NOT checked in, so it is empty until something produces it -- and no row in ` +
-            `GENERATED_INCLUDE_ROOTS in ${SELF} says what does. tsc then reports green over a program ` +
-            `missing every file that glob promised, which is the one failure COVERED, REAL and RUNNABLE ` +
-            `all pass through (${GENERATED_INCLUDE_ISSUE}). Add a row naming the command the \`typecheck\` ` +
-            `script has to run first -- or, if nothing a typecheck runs should produce it, a row with ` +
-            `\`generator: null\` and the argument for why its absence cannot make this check read green. ` +
-            `⛔ Deleting the glob is not automatically the repair: a framework that writes the config ` +
-            `back (Next's \`writeConfigurationDefaults\`) will re-add it.`,
-        );
-        continue;
-      }
-      const row = state.generatedRoots[root] ?? {};
-      const declares = row.generator === null || (typeof row.generator === 'string' && row.generator.trim() !== '');
-      if (!declares) {
-        problems.push(
-          `GENERATED_INCLUDE_ROOTS["${root}"] in ${SELF} declares no generator -- give it the command ` +
-            `that produces the directory, or \`generator: null\` to say out loud that nothing a typecheck ` +
-            `runs produces it. A row with the key missing would read as the second answer while nobody ` +
-            `ever decided it.`,
-        );
-        continue;
-      }
-      if (!String(row.why ?? '').trim()) {
-        problems.push(
-          `GENERATED_INCLUDE_ROOTS["${root}"] in ${SELF} has no reason -- say what writes this path and ` +
-            `why the \`typecheck\` script's relationship to it is the right one. For a \`generator: null\` ` +
-            `row that reason is the whole guard: nothing mechanical can check that an ungenerated ` +
-            `directory's absence cannot make tsc read green.`,
-        );
-        continue;
-      }
-      if (row.generator === null) continue; // declared, and deliberately not generated
-      const verdict = generatorVerdict(pkg.typecheckChain ?? [], row.generator);
-      if (verdict === 'missing') {
-        problems.push(
-          `${where}: \`include\` names "${glob}", which nothing checked in provides -- ` +
-            `GENERATED_INCLUDE_ROOTS says \`${row.generator}\` writes it -- and this package's ` +
-            `\`typecheck\` script never runs that command ("${script ?? ''}"). So tsc compiles whatever an ` +
-            `earlier build happened to leave in \`${root}\`, and in a clean checkout it compiles nothing ` +
-            `from there and still exits 0 (${GENERATED_INCLUDE_ISSUE}). Put \`${row.generator}\` in the ` +
-            `\`typecheck\` script ahead of tsc.`,
-        );
-      } else if (verdict === 'after') {
-        problems.push(
-          `${where}: the \`typecheck\` script runs \`${row.generator}\` -- which is what writes "${glob}" -- ` +
-            `AFTER tsc in the same command ("${script ?? ''}"), so the program tsc read was still the one ` +
-            `from before the generator ran, and the files that glob promises were checked by nothing ` +
-            `(${GENERATED_INCLUDE_ISSUE}). Move it in front: \`${row.generator} && tsc --noEmit\`.`,
-        );
-      }
-    }
+    // The four per-package clauses. Asked here of every enumerated package and
+    // once more of the ROOT below -- this loop stopped being what defines their
+    // population in #15483.
+    problems.push(...perPackageClauses(pkg, state));
 
     if (script !== undefined) {
       // REAL: the script must put tsc in front of the package's sources.
@@ -2240,6 +2620,12 @@ function evaluate(packages, root, state) {
     );
   }
 
+  // The four per-package clauses, asked of the ROOT on the same terms as of
+  // every package above (#15483). After the root's own coverage checks, so a
+  // run reports COVERED/REAL for the root before what its programs leave out --
+  // the order the package loop reports them in too.
+  problems.push(...perPackageClauses(root, state));
+
   // RECONCILED, other direction: ledger entries must point at live packages.
   for (const name of Object.keys(state.debt)) {
     if (!byName.has(name)) {
@@ -2278,7 +2664,7 @@ function evaluate(packages, root, state) {
   // is an unchecked pin. Once it is compiled -- or loses its directives, or
   // moves -- the entry is a claim about nothing, and a worklist that outlives
   // its work is the failure mode this repo keeps paying for.
-  const phantomSeen = new Set(packages.flatMap((p) => p.pinFiles ?? []));
+  const phantomSeen = new Set(clauseSubjects.flatMap((p) => p.pinFiles ?? []));
   for (const file of Object.keys(state.phantomPins)) {
     if (!phantomSeen.has(file)) {
       problems.push(
@@ -2290,9 +2676,11 @@ function evaluate(packages, root, state) {
 
   // RECONCILED for SOURCES_COVERED, on the same terms (#10756). An entry lives
   // only while its directory really is unread: once a `tsconfig.scripts.json`
-  // names it -- or the directory is deleted, or the package stops declaring a
-  // `typecheck` script and moves into DEBT -- the line is a claim about nothing.
-  const uncheckedSeen = new Set(packages.flatMap((p) => (p.uncheckedSources ?? []).map((u) => u.dir)));
+  // names it -- or the directory is deleted -- the line is a claim about
+  // nothing. ⛔ Dropping the `typecheck` script is NOT one of those ways since
+  // #14918: the clause follows a package into the ledger, so an entry can no
+  // longer be retired by making its package stop claiming coverage.
+  const uncheckedSeen = new Set(clauseSubjects.flatMap((p) => (p.uncheckedSources ?? []).map((u) => u.dir)));
   for (const dir of Object.keys(state.uncheckedSources)) {
     if (!uncheckedSeen.has(dir)) {
       problems.push(
@@ -2309,7 +2697,7 @@ function evaluate(packages, root, state) {
   // a debt entry for a repaired directory, and it is worse than inert: the next
   // author reads it as evidence that the shape is still in use. A row survives
   // exactly as long as some typecheck-invoked config names its root.
-  const generatedSeen = new Set(packages.flatMap((p) => (p.generatedIncludes ?? []).map((g) => g.root)));
+  const generatedSeen = new Set(clauseSubjects.flatMap((p) => (p.generatedIncludes ?? []).map((g) => g.root)));
   for (const root of Object.keys(state.generatedRoots)) {
     if (!generatedSeen.has(root)) {
       problems.push(
@@ -2375,6 +2763,105 @@ function hiddenTestFiles(packages, testDebt) {
     (sum, pkg) => (Object.hasOwn(testDebt, pkg.name) ? sum + (pkg.testFiles ?? 0) : sum),
     0,
   );
+}
+
+// Every per-package invariant that is asked of a SUBSET of the workspace, with
+// the predicate that decides the subset and the reason it is legitimate
+// (#14918).
+//
+// ⭐ WHY A TABLE AND A PRINTED LINE, when the scope is three lines of code away.
+// This gate has now had three separate axes of blindness found by a PERSON
+// tripping over one -- a package with no ledger row was never noticed at all
+// (#14630), package-ROOT source was skipped by construction (#14386), and
+// SOURCES_COVERED was asked only of packages declaring a `typecheck` script
+// (#14918, this table's card). None was found by an instrument, and the shape
+// they share is not "the gate was wrong": each clause was skipped for a
+// population, deliberately, and the run said so NOWHERE. A green line that
+// names 79 packages reads as 79 packages checked. So the scope is declared
+// here, next to its predicate, and every green run prints who was left out of
+// what -- which turns the next such decision from an unwritten one into a line
+// somebody can disagree with.
+//
+// ⛔ A clause that skips a population and is not in this table is the defect
+// this table exists to prevent. Adding a row is the cheap half; the expensive
+// half is the argument in `why`, which is the part a reader judges.
+const SCOPED_CLAUSES = Object.freeze([
+  {
+    clause: 'GENERATED_COVERED',
+    // `coverageScript`, not `scripts.typecheck`: the ROOT is in this population
+    // since #15483 and its coverage script is `typecheck:root`, so a predicate
+    // reading the manifest slot would report the root as ASKED (its `typecheck`
+    // is the workspace aggregator, and always defined) on a run where the clause
+    // was not asked of it -- a scope line lying about scope.
+    asked: (pkg) => pkg.coverageScript !== undefined,
+    why: 'they declare no `typecheck` script (`typecheck:root` for the workspace root), so they invoke '
+      + 'no config and no `include` of theirs can promise a generated directory -- the population behind '
+      + 'this scope is EMPTY, not hidden',
+  },
+]);
+
+/**
+ * Who each scoped clause was NOT asked of on this run (#14918).
+ *
+ * Sums over live packages rather than over the table, so a row whose predicate
+ * excludes nobody today reports nothing instead of a standing footnote -- the
+ * line is about this run's silence, not about the table's size.
+ *
+ * @param {Array<{name: string, scripts?: Record<string, string>}>} packages
+ * @returns {Array<{clause: string, why: string, skipped: string[]}>}
+ */
+function skippedClauses(packages) {
+  return SCOPED_CLAUSES
+    .map(({ clause, asked, why }) => ({
+      clause,
+      why,
+      skipped: packages.filter((pkg) => !asked(pkg)).map((pkg) => pkg.name).sort(),
+    }))
+    .filter((row) => row.skipped.length > 0);
+}
+
+// WHO this line speaks for, said out loud rather than left to the word "every"
+// (#15483). Until that card the sentence here was a BOUNDARY: the workspace root
+// sat outside the population, `observed()` built it from its manifest alone, and
+// TESTS_COVERED / SOURCES_COVERED / PINS_CHECKED / GENERATED_COVERED were never
+// asked of it -- while this file's header said the root is counted "like any
+// other package's". The root is walked and asked like any other package now, so
+// the sentence states the population instead of warning about a hole in it.
+//
+// ⚠️ It is still PRINTED, and the count is why: the headline above counts the
+// ENUMERATED packages (79) and this line counts the clause population (80), so a
+// reader comparing the two numbers needs the one sentence that says where the
+// extra subject comes from. A count nobody can reconcile is read as a bug in one
+// of the two lines.
+const SCOPE_LINE_POPULATION = ' Counted over the enumerated workspace packages PLUS the ROOT package, '
+  + 'which is walked and asked the same four per-package clauses as the rest since #15483 -- against its '
+  + '`typecheck:root` script, the one that type-checks the root\'s own TypeScript.';
+
+/**
+ * That report as the line the green verdict prints.
+ *
+ * Names every skipped package up to `limit` and counts the rest: a list that
+ * grows unbounded stops being read, and a bare count cannot be checked against
+ * anything. Both failures end in the same place -- a reader who cannot tell
+ * WHICH packages a clause went quiet about.
+ *
+ * @param {ReturnType<typeof skippedClauses>} rows
+ * @param {number} total live package count
+ * @returns {string}
+ */
+function clauseScopeLine(rows, total, limit = 6) {
+  if (rows.length === 0) {
+    return `\n  clause scope: every per-package invariant was asked of all ${total} package(s) -- `
+      + `no clause went quiet about a population this run (#14918).${SCOPE_LINE_POPULATION}`;
+  }
+  const named = rows.map(({ clause, why, skipped }) => {
+    const shown = skipped.slice(0, limit).join(', ');
+    const rest = skipped.length > limit ? `, and ${skipped.length - limit} more` : '';
+    return `${clause} was NOT asked of ${skipped.length} of them (${shown}${rest}) -- ${why}`;
+  });
+  return `\n  clause scope: ${named.join('; ')}. Every other per-package invariant was asked of all `
+    + `${total}. ⭐ This line exists because SOURCES_COVERED was scoped exactly like that and said so `
+    + `nowhere (#14918).${SCOPE_LINE_POPULATION}`;
 }
 
 /**
@@ -3806,8 +4293,35 @@ function observed() {
   const turbo = JSON.parse(readFileSync(join(ROOT, 'turbo.json'), 'utf8'));
   const lintYml = readFileSync(join(ROOT, '.github/workflows/lint.yml'), 'utf8');
   const rootManifest = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  const rootScripts = rootManifest.scripts ?? {};
+  // The ROOT is WALKED, not just read (#15483). It used to be `{ name, scripts }`
+  // -- a manifest read with none of `testCoverage`'s four observation fields --
+  // so the four per-package clauses had nothing to ask of it and `evaluate`'s
+  // loop never reached it. `testCoverage('.')` produces them here exactly as it
+  // does for the 79: its `walk` already skips any subdirectory carrying a
+  // `package.json` at depth > 0, so the enumerated packages are not re-walked
+  // and nothing is billed twice (measured on main @ 5023630b1: 106 directories
+  // in 11ms, 0 test files, 0 pins, 14 source files and 0 of them unread).
+  //
+  // The scripts handed over are the root's COVERAGE scripts, not its manifest
+  // scripts: `typecheck:root` arrives under the `typecheck` key that
+  // `configsNamedByTypecheck` reads, and `coverageScriptName` below is what
+  // makes a finding quote `typecheck:root` back at its reader. Passing the
+  // manifest as-is would anchor PINS_CHECKED and GENERATED_COVERED on
+  // `turbo run typecheck` -- an aggregator that invokes no config of the
+  // root's -- which is how this clause would manufacture findings instead of
+  // finding them.
+  const rootCoverageScripts = rootScripts['typecheck:root'] === undefined
+    ? {}
+    : { typecheck: rootScripts['typecheck:root'] };
   return {
-    root: { name: rootManifest.name, scripts: rootManifest.scripts ?? {} },
+    root: {
+      name: rootManifest.name,
+      dir: '.',
+      scripts: rootScripts,
+      ...testCoverage('.', rootCoverageScripts),
+      coverageScriptName: 'typecheck:root',
+    },
     state: {
       debt: DEBT,
       exempt: EXEMPT,
@@ -3864,7 +4378,7 @@ const SELF_TEST_VERDICT = 'check-type-check-coverage self-test reached its verdi
 //     nowhere.
 //
 // The five family floors therefore equal the per-family numbers the green line
-// prints -- 57 observation (the line adds the 11 folded-in cases to that figure,
+// prints -- 64 observation (the line adds the 11 folded-in cases to that figure,
 // see below), 45 re-measure, 28 built-closure, 19 auto-lowering, 18 exit-code --
 // so a reader can check this roster against the verdict without re-deriving
 // either.
@@ -3873,7 +4387,7 @@ const SELF_TEST_VERDICT = 'check-type-check-coverage self-test reached its verdi
 // and `workspace-enumerator` are libraries whose `selfTest()` this one calls and
 // whose failures it adopts; their cases register into THEIR module's ledger (or
 // none), never into `batterySeen` below. Measured, not assumed: the observation
-// battery registers 57, not the 68 the green line prints for it. A fold-in is
+// battery registers 63, not the 74 the green line prints for it. A fold-in is
 // floored where it is defined, and `typecheck-configs` was floored there in
 // PR #15327's batch.
 //
@@ -3908,7 +4422,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'an unread ROOT-level source file in a COVERED package fails SOURCES_COVERED too, keyed at the package directory itself (#14386)': 1,
   'an UNCHECKED_SOURCE_DEBT entry covers it, but only with a reason': 1,
   'an UNCHECKED_SOURCE_DEBT entry whose directory is now read fails RECONCILED': 1,
-  'a DEBT package is not also billed for unread source': 1,
+  'a DEBT package IS billed for unread source, and the finding names its ledger row (#14918)': 1,
+  'an EXEMPT package with unread source is told its own entry says otherwise (#14918)': 1,
+  'a package nothing accounts for is told NOTHING reads the directory (#14918)': 1,
   'a generated `include` root with no declared row fails GENERATED_COVERED': 1,
   'a declared generator the typecheck script runs before tsc passes': 1,
   'a declared generator the script never runs fails': 1,
@@ -3948,11 +4464,21 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'a declaration equal to the field states nothing and is refused, so the field only ever shrinks away': 1,
   'a declaration over a note with no readable itemisation describes nothing and is refused': 1,
   'COMPOSITION reads TEST_DEBT on the same terms as DEBT': 1,
+  // The workspace ROOT as a clause subject (#15483) -- one row per clause, plus
+  // the RECONCILED half that keeps a root ledger row from reading as stale.
+  'a hidden test file at the workspace ROOT fails TESTS_COVERED, like any other package (#15483)': 1,
+  'an unread source directory at the workspace ROOT fails SOURCES_COVERED (#15483)': 1,
+  'a phantom pin at the workspace ROOT fails PINS_CHECKED (#15483)': 1,
+  'an ungenerated `include` root at the workspace ROOT fails GENERATED_COVERED (#15483)': 1,
+  'a PHANTOM_PIN_DEBT row for a ROOT pin is covered, not reported stale (#15483)': 1,
   // The five families the green line names, one battery each, at their measured
-  // counts. ⚠️ `observation cases` is 57 here and 68 on the printed line: the
+  // counts. ⚠️ `observation cases` is 86 here and 97 on the printed line: the
   // line adds `typecheck-configs`' 11 folded-in cases, which are floored in that
-  // module and register nowhere in this one.
-  'observation cases': 57,
+  // module and register nowhere in this one. The 22 that #15731 added are the
+  // population filter's four batteries -- how git's listing is read, the
+  // predicate the walk applies, the walk's own output, and what git is asked of
+  // a real repository.
+  'observation cases': 86,
   're-measure cases': 45,
   'built-closure cases': 28,
   'auto-lowering cases': 19,
@@ -3969,7 +4495,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the table
 // cross-check in `batteryFloorFailures()` is the other half, and names WHICH
 // label collided.
-const SELF_TEST_BATTERY_FLOOR = 56;
+const SELF_TEST_BATTERY_FLOOR = 61;
 
 // The ledger `batteryFloorFailures()` reads.
 //
@@ -4048,9 +4574,18 @@ function batteryFloorFailures(rowLabels) {
  */
 function selfTest() {
   const pkg = (name, extra = {}) => ({ name, dir: `packages/${name}`, scripts: {}, hasTsconfig: true, ...extra });
+  // The root is a clause SUBJECT since #15483, so its fixture carries what a
+  // subject carries: `dir`, the coverage script the four clauses are decided
+  // against, and the NAME of the slot a finding must quote. Its `typecheck` slot
+  // stays the aggregator on purpose -- a fixture whose two scripts were the same
+  // string could not tell the two apart, which is the confusion this card is
+  // about.
   const okRoot = {
     name: 'root',
+    dir: '.',
     scripts: { typecheck: 'turbo run typecheck', 'typecheck:root': 'tsc --noEmit' },
+    coverageScript: 'tsc --noEmit',
+    coverageScriptName: 'typecheck:root',
   };
   const okState = { debt: {}, exempt: {}, testDebt: {}, phantomPins: {}, uncheckedSources: {}, generatedRoots: {}, turboHasTask: true, ciInvokesTask: true, ciInvokesRoot: true };
   // GENERATED_COVERED's fixtures (#10880). A LITERAL fixture, never the real
@@ -4163,16 +4698,66 @@ function selfTest() {
       expect: [/UNCHECKED_SOURCE_DEBT entry for "packages\/a\/scripts" is no longer unread source/],
     },
     {
-      // The scope line. A DEBT package's uncovered source is already owned by
-      // DEBT ("nothing reads this package"), so billing it here too would put
-      // one hole in two ledgers. The observation half enforces this by asking
-      // only of packages with a `typecheck` script; this pins that a package
-      // WITHOUT one is not dragged in by some later refactor of evaluate().
-      label: 'a DEBT package is not also billed for unread source',
-      packages: [pkg('a', { scripts: {}, uncheckedSources: [] })],
+      // The scope line, INVERTED by #14918. This row used to assert the
+      // opposite -- "a DEBT package is not also billed for unread source" --
+      // on the argument that DEBT already owns "nothing reads this package".
+      // It does not: a DEBT row owns an ERROR COUNT taken through
+      // `tsconfig.json`, and a directory outside that program is in neither
+      // that count nor any other reading. `packages/core/examples` sat there
+      // with 2 files that had never compiled for as long as its package
+      // stayed ledgered. The finding must ALSO name the ledger rather than a
+      // `typecheck` script the package does not have, which is the half a
+      // scope change can get wrong while still firing.
+      label: 'a DEBT package IS billed for unread source, and the finding names its ledger row (#14918)',
+      packages: [
+        pkg('a', {
+          scripts: {},
+          sourceBasis: 'primary',
+          uncheckedSources: [{ dir: 'packages/a/examples', files: 2 }],
+        }),
+      ],
       root: okRoot,
       state: { ...okState, debt: { a: { errors: 4 } } },
-      expect: [],
+      expect: [
+        /packages\/a\/examples: 2 non-test source file\(s\) here sit outside every tsc program that accounts for `a` -- it declares no `typecheck` script, so `tsconfig\.json` is all that reads it, and its DEBT entry records the ERROR COUNT[\s\S]*A ledger row is not a substitute/,
+      ],
+    },
+    {
+      // The other ledger. An EXEMPT entry is a claim about the package's
+      // NATURE ("no TypeScript sources here"), so unread source in one is not
+      // a debt figure that needs updating -- it is the entry being wrong, and
+      // the message has to say which of the two sentences is contradicted.
+      label: 'an EXEMPT package with unread source is told its own entry says otherwise (#14918)',
+      packages: [
+        pkg('a', {
+          scripts: {},
+          sourceBasis: 'primary',
+          uncheckedSources: [{ dir: 'packages/a/examples', files: 1 }],
+        }),
+      ],
+      root: okRoot,
+      state: { ...okState, exempt: { a: 'a published build artifact -- no TypeScript sources.' } },
+      expect: [/EXEMPT entry says type-checking does not apply to this package at all -- these files say otherwise/],
+    },
+    {
+      // The third basis, and the loudest: no `typecheck` script AND no
+      // `tsconfig.json`, so `accountedPrograms` hands back nothing and every
+      // source file in the package is unread by construction. Worth its own
+      // row because the honest sentence there is not "outside the program" --
+      // there is no program -- and a message that named `tsconfig.json`
+      // anyway would send the reader to a file that does not exist.
+      label: 'a package nothing accounts for is told NOTHING reads the directory (#14918)',
+      packages: [
+        pkg('a', {
+          scripts: {},
+          hasTsconfig: false,
+          sourceBasis: 'unaccounted',
+          uncheckedSources: [{ dir: 'packages/a/src', files: 5 }],
+        }),
+      ],
+      root: okRoot,
+      state: { ...okState, debt: { a: { errors: 4 } } },
+      expect: [/no `tsconfig\.json` either, so NOTHING reads a line of this directory/],
     },
     {
       // The measured defect, as it stood before #10879: the script invokes tsc
@@ -4540,6 +5125,54 @@ function selfTest() {
       state: { ...okState, testDebt: { a: { errors: 355, note: 'code-tier 300; config-tier 9; noise 40.' } } },
       expect: [/a: TEST_DEBT note opens with a tier itemisation summing to 349/],
     },
+    // ── The workspace ROOT as a clause subject (#15483) ──────────────────────
+    // Four reds, one per clause, each planted on the ROOT and on nothing else
+    // (`packages: []`), because the defect this card closed was not a wrong
+    // answer -- it was FOUR QUESTIONS NEVER ASKED, which no amount of green
+    // over the 79 could distinguish from four answers of "nothing here". Each
+    // also pins the script NAME in the remedy: a finding that told a root
+    // reader to edit a `typecheck` script would send them to the workspace
+    // aggregator, which type-checks nothing of the root's own.
+    {
+      label: 'a hidden test file at the workspace ROOT fails TESTS_COVERED, like any other package (#15483)',
+      packages: [],
+      root: { ...okRoot, hidesTests: true, testFiles: 2 },
+      state: okState,
+      expect: [/^root \(\.\): 2 of its test file\(s\) sit outside every tsc program[\s\S]*`typecheck:root` script/],
+    },
+    {
+      label: 'an unread source directory at the workspace ROOT fails SOURCES_COVERED (#15483)',
+      packages: [],
+      root: { ...okRoot, uncheckedSources: [{ dir: 'tools', files: 3 }] },
+      state: okState,
+      expect: [/^tools: 3 non-test source file\(s\) here sit outside every tsc program that `root`'s `typecheck:root` script runs/],
+    },
+    {
+      label: 'a phantom pin at the workspace ROOT fails PINS_CHECKED (#15483)',
+      packages: [],
+      root: { ...okRoot, pinFiles: ['scripts/thing.test.ts'] },
+      state: okState,
+      expect: [/^scripts\/thing\.test\.ts: carries a `@ts-expect-error` directive but no tsc program the `typecheck:root` script runs compiles it/],
+    },
+    {
+      label: 'an ungenerated `include` root at the workspace ROOT fails GENERATED_COVERED (#15483)',
+      packages: [],
+      root: { ...okRoot, generatedIncludes: [{ config: 'tsconfig.json', glob: 'generated/**/*.ts', root: 'generated' }] },
+      state: okState,
+      expect: [/^root \(\.\/tsconfig\.json\): `include` names "generated\/\*\*\/\*\.ts", rooted in `generated`/],
+    },
+    {
+      // The other half of joining the population: the RECONCILED sweeps decide
+      // whether a ledger row is STALE, and they read the same subject list. A
+      // sweep that still ran over the enumerated packages alone would call a
+      // root row stale the moment it was written -- a ratchet eating the rows
+      // the clause above just made it possible to need.
+      label: 'a PHANTOM_PIN_DEBT row for a ROOT pin is covered, not reported stale (#15483)',
+      packages: [],
+      root: { ...okRoot, pinFiles: ['scripts/thing.test.ts'] },
+      state: { ...okState, phantomPins: { 'scripts/thing.test.ts': 'measured, and tracked' } },
+      expect: [],
+    },
   ];
 
   const failures = [];
@@ -4562,8 +5195,8 @@ function selfTest() {
   //
   // ⛔ NOT a battery of this file. `typecheck-configs` floors its own cases in
   // its own module-level ledger (PR #15327), so this call registers nothing
-  // here -- which is why the observation battery below floors at 57 while the
-  // green line prints 68 for that family. Flooring a fold-in from the calling
+  // here -- which is why the observation battery below floors at 63 while the
+  // green line prints 74 for that family. Flooring a fold-in from the calling
   // side would pin a number this file cannot keep true.
   for (const failure of typecheckConfigsSelfTest()) failures.push(failure);
 
@@ -4692,6 +5325,194 @@ function selfTest() {
     }
   }
 
+  // #15731. The population filter -- which paths this gate declines to judge
+  // because the repo itself declares they are not in the tree. Four batteries,
+  // one per joint: how git's answer is READ, the predicate the walk APPLIES,
+  // the walk's own OUTPUT, and what git is actually ASKED. A wrong answer at
+  // any of them is silent in both directions: too wide and a scratch file
+  // manufactures a ratchet finding (the card), too narrow and a real unread
+  // source directory stops being counted at all.
+  const ignoreIndexCases = [
+    {
+      label: 'a collapsed directory lands in `dirs`, stripped of the trailing slash git marks it with',
+      stdout: 'packages/cli/tmp/\0',
+      dirs: ['packages/cli/tmp'],
+      files: [],
+    },
+    {
+      label: 'an ignored file inside an otherwise tracked directory lands in `files`',
+      stdout: 'packages/cli/src/schema.gen.ts\0',
+      dirs: [],
+      files: ['packages/cli/src/schema.gen.ts'],
+    },
+    {
+      label: 'both shapes arrive in one listing and stay apart',
+      stdout: 'node_modules/\0packages/cli/src/schema.gen.ts\0',
+      dirs: ['node_modules'],
+      files: ['packages/cli/src/schema.gen.ts'],
+    },
+    {
+      // The empty listing is the common case (a tree with nothing ignored but
+      // node_modules), and it must be an index that answers "no" -- reading it
+      // as a missing index is the failure mode `readIgnoredPaths` refuses.
+      label: 'a listing with nothing in it is an EMPTY index, not a missing one',
+      stdout: '',
+      dirs: [],
+      files: [],
+    },
+  ];
+  for (const c of ignoreIndexCases) {
+    registerCase('observation cases');
+    const got = ignoreIndex(c.stdout);
+    const want = JSON.stringify({ dirs: c.dirs, files: c.files });
+    const have = JSON.stringify({ dirs: [...got.dirs], files: [...got.files] });
+    if (have !== want) failures.push(`ignoreIndex — ${c.label}: expected ${want}, got ${have}`);
+  }
+
+  const ignoreFixture = ignoreIndex('packages/cli/tmp/\0packages/cli/src/schema.gen.ts\0');
+  const ignoredPathCases = [
+    { label: 'the ignored scratch directory itself is stepped over', rel: 'packages/cli/tmp', expect: true },
+    { label: 'the tracked source directory beside it is NOT (the positive control)', rel: 'packages/cli/src', expect: false },
+    { label: 'a single ignored file is stepped over by name', rel: 'packages/cli/src/schema.gen.ts', expect: true },
+    { label: 'the tracked file beside THAT one is not', rel: 'packages/cli/src/schema.ts', expect: false },
+    // A prefix match here would take a whole tracked directory out of the
+    // gate's subject on the strength of a scratch directory's name.
+    { label: 'a path matches WHOLE -- `tmp` does not swallow the sibling `tmpl`', rel: 'packages/cli/tmpl', expect: false },
+    { label: 'and it is repo-relative -- the same basename under another package is a different path', rel: 'packages/spec/tmp', expect: false },
+  ];
+  for (const c of ignoredPathCases) {
+    registerCase('observation cases');
+    const got = isIgnoredPath(ignoreFixture, c.rel);
+    if (got !== c.expect) failures.push(`isIgnoredPath — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
+  // The walk itself, over a fixture package -- the same tree walked twice, once
+  // with an index that ignores nothing (which is what this gate did before
+  // #15731, and reproduces the card's finding) and once with the index the real
+  // tree produces. This is the red and the green of that card as an assertion.
+  const walkFixture = mkdtempSync(join(tmpdir(), 'objectstack-type-check-walk-'));
+  let ignoreWalkCases = [];
+  try {
+    mkdirSync(join(walkFixture, 'src'), { recursive: true });
+    mkdirSync(join(walkFixture, 'tmp'), { recursive: true });
+    writeFileSync(join(walkFixture, 'src', 'engine.ts'), 'export const engine = 1;\n');
+    writeFileSync(join(walkFixture, 'src', 'engine.test.ts'), '// @ts-expect-error a real pin\nexport {};\n');
+    writeFileSync(join(walkFixture, 'tmp', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(walkFixture, 'tmp', 'probe.test.ts'), '// @ts-expect-error a scratch pin\nexport {};\n');
+    const counted = walkPackageFiles(walkFixture, 'packages/cli', ignoreIndex(''));
+    const filtered = walkPackageFiles(walkFixture, 'packages/cli', ignoreIndex('packages/cli/tmp/\0'));
+    ignoreWalkCases = [
+      {
+        label: 'CONTROL: with nothing ignored, the scratch file IS counted as source -- the finding the card reported',
+        got: counted.sourceRels,
+        expect: ['src/engine.ts', 'tmp/probe.ts'],
+      },
+      {
+        label: 'with the scratch directory ignored, only the tracked source survives',
+        got: filtered.sourceRels,
+        expect: ['src/engine.ts'],
+      },
+      {
+        label: 'CONTROL: a scratch TEST file is counted too, so TESTS_COVERED had the same exposure',
+        got: counted.testRels,
+        expect: ['src/engine.test.ts', 'tmp/probe.test.ts'],
+      },
+      {
+        label: 'and it goes with the directory, leaving the package\'s own tests judged as before',
+        got: filtered.testRels,
+        expect: ['src/engine.test.ts'],
+      },
+      {
+        label: 'CONTROL: a `@ts-expect-error` in a scratch file was a phantom pin PINS_CHECKED would report',
+        got: [...counted.pinned].sort(),
+        expect: ['src/engine.test.ts', 'tmp/probe.test.ts'],
+      },
+      {
+        label: 'the real pin in the tracked tree is untouched by the filter',
+        got: [...filtered.pinned].sort(),
+        expect: ['src/engine.test.ts'],
+      },
+    ];
+  } finally {
+    rmSync(walkFixture, { recursive: true, force: true });
+  }
+  for (const c of ignoreWalkCases) {
+    registerCase('observation cases');
+    const want = JSON.stringify(c.expect);
+    const have = JSON.stringify(c.got);
+    if (have !== want) failures.push(`walkPackageFiles — ${c.label}: expected ${want}, got ${have}`);
+  }
+
+  // What git is ASKED, against a real repository -- the one battery here that
+  // spawns, because the distinction it pins cannot be observed any other way:
+  // `git check-ignore` answers the same for a tracked `.gitignore` and for a
+  // `.git/info/exclude`, and this gate must not. `exposedScratchDirs` in
+  // scripts/pm/dispatch-gates.mjs draws the same line for the same reason and
+  // pins it the same way.
+  const ignoreRepo = mkdtempSync(join(tmpdir(), 'objectstack-type-check-ignore-'));
+  let ignoreSourceCases = [];
+  try {
+    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8' });
+    g(['init', '-q', '.']);
+    g(['config', 'user.email', 'self-test@objectstack.invalid']);
+    g(['config', 'user.name', 'check-type-check-coverage self-test']);
+    mkdirSync(join(ignoreRepo, 'pkg', 'src'), { recursive: true });
+    mkdirSync(join(ignoreRepo, 'pkg', 'tmp'), { recursive: true });
+    mkdirSync(join(ignoreRepo, 'pkg', 'scratch'), { recursive: true });
+    writeFileSync(join(ignoreRepo, '.gitignore'), 'tmp/\n');
+    writeFileSync(join(ignoreRepo, 'pkg', 'src', 'engine.ts'), 'export const engine = 1;\n');
+    g(['add', '-A']);
+    g(['commit', '-qm', 'the fixture tree, with tmp/ ignored by a TRACKED rule']);
+    writeFileSync(join(ignoreRepo, 'pkg', 'tmp', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(ignoreRepo, 'pkg', 'scratch', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(ignoreRepo, '.git', 'info', 'exclude'), 'scratch/\n');
+    const index = readIgnoredPaths(ignoreRepo);
+    // ... and now force-add a file INTO the ignored directory, which is what
+    // makes that directory present in a clean checkout after all.
+    writeFileSync(join(ignoreRepo, 'pkg', 'tmp', 'kept.ts'), 'export const kept = 1;\n');
+    g(['add', '-f', 'pkg/tmp/kept.ts']);
+    g(['commit', '-qm', 'force-add a file inside the ignored directory']);
+    const forced = readIgnoredPaths(ignoreRepo);
+    ignoreSourceCases = [
+      {
+        label: 'a directory a TRACKED .gitignore covers is out of the gate\'s subject -- the scratch tree of the card',
+        got: isIgnoredPath(index, 'pkg/tmp'),
+        expect: true,
+      },
+      {
+        label: 'the tracked source directory beside it is judged exactly as before (the positive control)',
+        got: isIgnoredPath(index, 'pkg/src'),
+        expect: false,
+      },
+      {
+        label: 'a rule living ONLY in .git/info/exclude declares nothing about the repo -- CI\'s checkout has no such file',
+        got: isIgnoredPath(index, 'pkg/scratch'),
+        expect: false,
+      },
+      {
+        label: 'force-adding a file re-opens the directory: it IS in a clean checkout, so the gate judges it again',
+        got: isIgnoredPath(forced, 'pkg/tmp'),
+        expect: false,
+      },
+      {
+        label: 'the tracked file inside it is source like any other',
+        got: isIgnoredPath(forced, 'pkg/tmp/kept.ts'),
+        expect: false,
+      },
+      {
+        label: 'while the untracked file beside THAT one is still stepped over, by name this time',
+        got: isIgnoredPath(forced, 'pkg/tmp/probe.ts'),
+        expect: true,
+      },
+    ];
+  } finally {
+    rmSync(ignoreRepo, { recursive: true, force: true });
+  }
+  for (const c of ignoreSourceCases) {
+    registerCase('observation cases');
+    if (c.got !== c.expect) failures.push(`readIgnoredPaths — ${c.label}: expected ${c.expect}, got ${c.got}`);
+  }
+
   const accountedCases = [
     {
       label: 'the typecheck script\'s configs are what account for a covered package',
@@ -4805,6 +5626,85 @@ function selfTest() {
     const got = generatedIncludeLayer(c.packages, c.table);
     if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
       failures.push(`generatedIncludeLayer — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // The gate's report on its own scope (#14918). Pinned like any other
+  // observation, because the failure it guards against is the one this whole
+  // card is about: a clause that goes quiet for a population, and a run that
+  // does not say so. A `skippedClauses` that quietly returned `[]` would print
+  // the reassuring branch of `clauseScopeLine` forever.
+  // `coverageScript` is what the predicate reads (#15483); `scripts` stays
+  // beside it so the fixture keeps the shape of a real subject.
+  const scoped = (name, typecheck) => ({
+    name,
+    coverageScript: typecheck,
+    scripts: typecheck === undefined ? {} : { typecheck },
+  });
+  const scopeCases = [
+    {
+      label: 'the packages a scoped clause was not asked of are named',
+      packages: [scoped('a', 'tsc --noEmit'), scoped('b'), scoped('c')],
+      expect: [{ clause: 'GENERATED_COVERED', skipped: ['b', 'c'] }],
+    },
+    {
+      label: 'a scope that excludes nobody today reports nothing -- the line is about this run',
+      packages: [scoped('a', 'tsc --noEmit'), scoped('b', 'tsc --noEmit')],
+      expect: [],
+    },
+    {
+      label: 'the skipped list is SORTED, so two runs of the same tree read the same',
+      packages: [scoped('z'), scoped('a'), scoped('m', 'tsc --noEmit')],
+      expect: [{ clause: 'GENERATED_COVERED', skipped: ['a', 'z'] }],
+    },
+    {
+      // #15483's own trap, as a fixture. The ROOT is in this population now, and
+      // its manifest `typecheck` slot is ALWAYS defined (the aggregator) -- so a
+      // predicate reading `scripts.typecheck` would report the root as ASKED on
+      // a run where GENERATED_COVERED was not asked of it. A scope line lying
+      // about scope is worse than no scope line: it is the defect this table
+      // exists to report, wearing the report's own clothes.
+      label: 'the ROOT is in this population, and one with no `typecheck:root` is named like anyone else (#15483)',
+      packages: [
+        scoped('a', 'tsc --noEmit'),
+        { name: 'root', dir: '.', scripts: { typecheck: 'turbo run typecheck' }, coverageScriptName: 'typecheck:root' },
+      ],
+      expect: [{ clause: 'GENERATED_COVERED', skipped: ['root'] }],
+    },
+  ];
+  for (const c of scopeCases) {
+    registerCase('observation cases');
+    const got = skippedClauses(c.packages).map(({ clause, skipped }) => ({ clause, skipped }));
+    if (JSON.stringify(got) !== JSON.stringify(c.expect)) {
+      failures.push(`skippedClauses — ${c.label}: expected ${JSON.stringify(c.expect)}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  const scopeLineCases = [
+    {
+      label: 'no skipped population still PRINTS a sentence -- silence is what this line replaces',
+      rows: [],
+      total: 79,
+      expect: /every per-package invariant was asked of all 79 package\(s\) -- no clause went quiet[\s\S]*PLUS the ROOT package[\s\S]*#15483/,
+    },
+    {
+      label: 'a skipped population is named, counted, and carries its reason',
+      rows: [{ clause: 'GENERATED_COVERED', why: 'they declare no `typecheck` script', skipped: ['a', 'b'] }],
+      total: 5,
+      expect: /GENERATED_COVERED was NOT asked of 2 of them \(a, b\) -- they declare no `typecheck` script\. Every other per-package invariant was asked of all 5\.[\s\S]*PLUS the ROOT package[\s\S]*#15483/,
+    },
+    {
+      label: 'a long list is truncated with a remainder, never silently cut',
+      rows: [{ clause: 'X', why: 'because', skipped: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] }],
+      total: 9,
+      expect: /X was NOT asked of 8 of them \(a, b, c, d, e, f, and 2 more\)/,
+    },
+  ];
+  for (const c of scopeLineCases) {
+    registerCase('observation cases');
+    const got = clauseScopeLine(c.rows, c.total);
+    if (!c.expect.test(got)) {
+      failures.push(`clauseScopeLine — ${c.label}: expected ${c.expect}, got ${JSON.stringify(got)}`);
     }
   }
 
@@ -5929,6 +6829,7 @@ function selfTest() {
   // above: its cases are defined and run in `workspace-enumerator.mjs`, and a
   // floor written here would pin a count that module is free to change.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
+  failures.push(...workspaceEnumeratorFloorFailures());
 
   if (failures.length) {
     console.error(`✗ check:type-check-coverage --self-test — ${failures.length} failure(s)\n`);
@@ -5956,8 +6857,10 @@ function selfTest() {
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${TYPECHECK_CONFIGS_CASES + coverCases.length + unreadCases.length + accountedCases.length
-        + derivedCases.length + sourceCandidateCases.length + includeRootCases.length
-        + chainCases.length + generatorCases.length + layerCases.length} observation case(s) + ` +
+        + derivedCases.length + sourceCandidateCases.length + ignoreIndexCases.length
+        + ignoredPathCases.length + ignoreWalkCases.length + ignoreSourceCases.length + includeRootCases.length
+        + chainCases.length + generatorCases.length + layerCases.length + scopeCases.length
+        + scopeLineCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length
         + ceilingCases.length + heapEnvCases.length} re-measure case(s) + ` +
       `${typeEntryCases.length + closureCases.length + staleCases.length + sourceFileCases.length} ` +
@@ -5984,6 +6887,11 @@ if (process.argv.includes('--self-test')) {
 const packages = workspacePackages();
 const { root, state } = observed();
 const problems = evaluate(packages, root, state);
+// The same subject list `evaluate` asks the four per-package clauses of
+// (#15483). Every layer figure below is a count over the clauses' population,
+// so reading it from a narrower list would report the root's hidden tests,
+// unread source or ungenerated `include` as nobody's.
+const clauseSubjects = [...packages, root];
 
 if (problems.length) {
   console.error(`check-type-check-coverage: ${problems.length} problem(s)\n`);
@@ -5996,9 +6904,9 @@ const debtTotal = Object.values(DEBT).reduce((sum, e) => sum + (e.errors ?? 0), 
 const testDebtErrors = Object.values(TEST_DEBT).reduce((sum, e) => sum + (e.errors ?? 0), 0);
 // Counted on this run, not read from the ledger: the file count is the one
 // number here the gate already knows (#5826).
-const testDebtFiles = hiddenTestFiles(packages, TEST_DEBT);
-const sourceLayer = uncheckedSourceLayer(packages, UNCHECKED_SOURCE_DEBT);
-const generatedLayer = generatedIncludeLayer(packages, GENERATED_INCLUDE_ROOTS);
+const testDebtFiles = hiddenTestFiles(clauseSubjects, TEST_DEBT);
+const sourceLayer = uncheckedSourceLayer(clauseSubjects, UNCHECKED_SOURCE_DEBT);
+const generatedLayer = generatedIncludeLayer(clauseSubjects, GENERATED_INCLUDE_ROOTS);
 const declaredStale = [...Object.entries(DEBT), ...Object.entries(TEST_DEBT)]
   .filter(([, entry]) => typeof entry?.compositionAt === 'number');
 // Both numbers, always. Reporting only the src figure is how the first pass of
@@ -6015,7 +6923,7 @@ console.log(
     // how that stayed invisible.
     `\n  source layer: ${sourceLayer.dirs} directory(ies) of non-test source in ` +
     `${Object.keys(UNCHECKED_SOURCE_DEBT).length} ledgered entr(y/ies) sit outside every tsc program ` +
-    `their package's own \`typecheck\` runs (${sourceLayer.files} files as counted by this run).` +
+    `that accounts for their package (${sourceLayer.files} files as counted by this run).` +
     // The FOURTH layer (#10880), printed for the reason the other two are: an
     // `include` entry pointing at a directory nothing produces is invisible in
     // every count above, because those are all questions about files that
@@ -6025,6 +6933,11 @@ console.log(
     `${generatedLayer.packages} package(s) name a path this repo does not check in -- ` +
     `${generatedLayer.produced} produced by their own \`typecheck\` before tsc, ` +
     `${generatedLayer.ungenerated} declared deliberately ungenerated in GENERATED_INCLUDE_ROOTS.` +
+    // The gate's report on ITSELF (#14918). Every line above counts packages a
+    // clause was asked about; this one counts the packages a clause was not,
+    // which is the only figure that can distinguish "nothing to report" from
+    // "nobody was asked".
+    clauseScopeLine(skippedClauses(clauseSubjects), clauseSubjects.length) +
     // Printed on a GREEN run, for the same reason the surplus is (#6376): a
     // declared-stale composition is honest but it is still drift, and a
     // declaration nobody can see is the half that does the damage. Zero is the

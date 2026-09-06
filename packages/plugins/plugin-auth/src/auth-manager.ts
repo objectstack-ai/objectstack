@@ -32,7 +32,7 @@ import type { IDataEngine } from '@objectstack/core';
 // `auth-manager` used to re-derive that standing itself, in two spellings
 // that had drifted from the declared authority and from each other; both
 // now ask the authority. Nothing in this file reads the grant tables.
-import { hasPlatformAdminStanding } from '@objectstack/core';
+import { hasPlatformAdminStanding, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IEmailService, ISmsService } from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
@@ -42,8 +42,6 @@ import {
 } from '@objectstack/types';
 import { resolveMembershipLimitOption } from './membership-limit.js';
 import {
-  mapMembershipRole,
-  BUILTIN_IDENTITY_PLATFORM_ADMIN,
   MEMBERSHIP_ROLE_DELEGATED_ADMIN,
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
@@ -59,6 +57,10 @@ import {
 } from './auth-session-audit.js';
 import { SESSION_ERASURE_PATHS } from './session-tombstone.js';
 import { envelopeVendorAdminRefusal } from './vendor-admin-refusal-envelope.js';
+import {
+  buildBetterAuthRouteOwnership,
+  type BetterAuthRouteOwnership,
+} from './better-auth-route-ownership.js';
 import {
   ADMIN_SESSION_COOKIE_KEY,
   STOP_IMPERSONATING_PATH,
@@ -2059,6 +2061,57 @@ export class AuthManager {
                 message: refusal.errorDescription ?? refusal.error,
               });
             }
+
+            // ── [#15587] The UNIQUENESS refusal, raised here for the same
+            // reason the audience refusal above is — and STRICTLY after it.
+            //
+            // Same shield, its other arm. `shouldReturnGenericDuplicateResponse`
+            // (sign-up.mjs:163) is on whenever `requireEmailVerification` is on
+            // OR `autoSignIn === false`, and it guards TWO sites: the 403 catch
+            // at :235 (what the audience block above steps around) and the
+            // duplicate pre-check at :199. On the second, the vendor finds the
+            // existing row, logs it, and returns `buildGenericDuplicateResponse()`
+            // — a 200 carrying a freshly `generateId()`-ed user that is never
+            // written — INSTEAD of throwing USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
+            //
+            // We turn that shield on ourselves: a posture that permits
+            // self-registration FORCES `requireEmailVerification` on (see
+            // `createAuthInstance`), so `email_domain` and `open` sign-ups for an
+            // address that already exists answered 200 while `invite_only`
+            // answered 422 on the same population. Measured on a real ObjectQL
+            // engine with the posture held CONSTANT and only the verification flag
+            // moved, so the divergence is the flag's, not the posture's: zero
+            // inserts reach the engine, no `sys_account` appears, and the next
+            // sign-in is 401 with nothing anywhere explaining it. The silent
+            // success shape, on the recovery path a locked-out deployment walks.
+            //
+            // ORDER IS LOAD-BEARING: this runs only for a caller the posture
+            // ALREADY ADMITTED. Asking it first would hand an uninvited stranger
+            // an account-existence oracle under the `invite_only` DEFAULT (422 for
+            // a real address vs 403 for an unknown one) — inventing on the closed
+            // posture exactly what the vendor's shield exists to prevent. After
+            // the gate, `invite_only` is untouched: a stranger still gets
+            // SELF_REGISTRATION_CLOSED and learns nothing.
+            //
+            // UNCONDITIONAL, not a mirror of the vendor's predicate: the platform
+            // owns this refusal at one seam, so "an address that already has a
+            // `sys_user` row is refused" is one fact under every posture and every
+            // verification setting — rather than a contract that is a function of
+            // a vendor internal, and that a widened shield would silently reopen.
+            // Nothing is lost when the shield is off and the vendor would have
+            // answered: the code and message are the vendor's OWN constant, so the
+            // two lanes are byte-identical by construction rather than by copying.
+            // (The vendor's `onExistingUserSignUp` hook is not wired anywhere in
+            // this repo, and its timing-equalizing password hash equalizes against
+            // an oracle this 422 states outright.)
+            const signUpAddress = typeof ctx?.body?.email === 'string' ? ctx.body.email : '';
+            if (signUpAddress && (await this.hasExistingUserFor(signUpAddress))) {
+              const { APIError, BASE_ERROR_CODES } = await import('@better-auth/core/error');
+              throw APIError.from(
+                'UNPROCESSABLE_ENTITY',
+                BASE_ERROR_CODES.USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL,
+              );
+            }
             // fall through — the vendor still decides everything it owns
           }
 
@@ -3253,11 +3306,46 @@ export class AuthManager {
             );
             return;
           }
+          // #15106 — the recipient's OWN stored language, the last auth mail
+          // to reach the top rung of the #14788 option-D ladder. Same rung and
+          // same helper as the other four sends; only the predicate differs,
+          // because this callback is handed an address rather than a user row
+          // — the #14641 invitation shape, and for the same reason it has two
+          // branches:
+          //
+          //  1. the address HAS a `sys_user` row — the ordinary case, since a
+          //     magic link is how an existing account signs in without a
+          //     password → their own `locale`;
+          //  2. NO row — magic link doubles as sign-up (measured in the
+          //     installed 1.7.x: `/sign-in/magic-link` sends WITHOUT checking
+          //     for an account, and `/magic-link/verify` creates one unless
+          //     `disableSignUp`), so an unknown address is legitimate here and
+          //     its language is genuinely unknown → the rungs below stand.
+          //
+          // ⚠️ Lowercased, unlike the invitation predicate, and the difference
+          // is measured rather than stylistic: better-auth lowercases the
+          // invitee address on the invite route, but `signInMagicLinkBodySchema`
+          // applies no such transform, so what arrives here is whatever the
+          // caller typed. `internalAdapter.findUserByEmail` — the lookup
+          // `/magic-link/verify` resolves this very link with — matches on
+          // `email.toLowerCase()`. Reading the column on the same spelling
+          // keeps the row the mail is ABOUT identical to the row the link will
+          // sign into; an address that resolves nothing lands on the rungs
+          // below, which is the documented floor rather than a failure.
+          //
+          // ⛔ The request rung is NOT removed: ruling D inserts the column
+          // ABOVE `Accept-Language`, it does not replace it. A magic link is
+          // requested by its own recipient, so `ctx` here carries the
+          // recipient's own header and stays a legitimate second rung for an
+          // account that has stated no language.
+          const storedLocale = await this.storedRecipientLocale({
+            email: recipientEmail.toLowerCase(),
+          });
           try {
             await emailService.sendTemplate({
               template: 'auth.magic_link',
               to: recipientEmail,
-              ...this.emailLocaleArg(ctx),
+              ...this.emailLocaleArg(ctx, storedLocale),
               data: {
                 magicLinkUrl: url,
                 token,
@@ -3491,64 +3579,34 @@ export class AuthManager {
     }
 
     // customSession() — augments the session payload with the canonical
-    // `roles: string[]` array (ADR-0068 D1/D2): the stored `user.role` scalar
-    // split on commas, PLUS the active membership mapped to canonical
-    // `org_owner`/`org_admin`/`org_member`, PLUS `platform_admin` when the user
-    // resolves as a platform admin (ADR-0068 D2). `user.isPlatformAdmin` is a
-    // derived alias of `'platform_admin' in positions`.
+    // `positions: string[]` array (ADR-0068 D1/D2, renamed ADR-0090 D3) and its
+    // derived `isPlatformAdmin` alias.
     //
-    // IMPORTANT: `user.role` is NOT overwritten anymore — consumers must gate
-    // on `positions[]` / `isPlatformAdmin` (e.g. via objectui's useIsWorkspaceAdmin),
-    // never on `user.role === 'admin'`. Consumers that match individual role
-    // names (e.g. the Console approvals inbox resolving `role:<name>` approvers)
-    // also read `positions` — business names such as `manager` survive only there.
-    // The raw membership role stays on the organization plugin's `member` payload.
+    // [#15136] `positions[]` is the SECURITY axis — the same set
+    // `/auth/me/permissions` reports and every server-side evaluator resolves:
+    // the active organization's membership mapped to canonical
+    // `org_owner`/`org_admin`/`org_member`, the ADR-0057 D4 `sys_user_position`
+    // assignments, the ADR-0090 D5 `everyone` anchor, and `platform_admin`. It
+    // is not derived here; it is asked of `resolveUserAuthzGrants`, the ONE
+    // authority, for the reason spelled out at the call site below.
     //
-    // Better-auth's `sys_user` table doesn't carry a `role` column. We derive
-    // it from two sources:
+    // ⛔ The better-auth `user.role` scalar is NOT a source of it. It used to be
+    // (split on commas and unioned in), which put auth-layer role names on an
+    // array whose declared meaning — `EvalUserSchema`, "built-in identity names
+    // + position names" — is the security axis, and left the real position names
+    // off it entirely.
     //
-    //   1. **Platform admin** — the ADR-0068 D2 standing, resolved through
-    //      `core/security/resolve-authz-context.ts` (the single authority for
-    //      authorization derivation) and never re-read here. See
-    //      `isPlatformAdminUserId` below.
-    //   2. **Organization admin** — a `sys_member` row in the user's *active*
-    //      organization (`session.activeOrganizationId`) with role `owner` or
-    //      `admin`. Org owners/admins are entitled to manage org-scoped
-    //      metadata such as saved list views, dashboards, etc.
-    //
-    // ADR-0068 D2: rather than synthesizing `user.role = 'admin'`, both paths now
-    // contribute CANONICAL names to `user.positions` (platform_admin / org_*),
-    // and `user.isPlatformAdmin` is a derived alias. The raw membership role
-    // remains available via the `organization` plugin's `member` payload.
+    // IMPORTANT: `user.role` is NOT overwritten — consumers must gate on
+    // `positions[]` / `isPlatformAdmin` (e.g. via objectui's
+    // `useWorkspaceAdminStatus`), never on `user.role === 'admin'`. A consumer
+    // that genuinely wants the better-auth role reads `user.role`, which stays
+    // on the payload verbatim; the raw membership role stays on the organization
+    // plugin's `member` payload.
     const dataEngine = this.config.dataEngine;
     if (dataEngine) {
       const { customSession } = await import('better-auth/plugins/custom-session');
       plugins.push(customSession(async ({ user, session }) => {
         if (!user?.id) return { user, session };
-
-        // ADR-0068 D2 — surface CANONICAL org_* role names (not a boolean flag):
-        // a membership owner/admin/member maps to org_owner/org_admin/org_member.
-        const activeOrgRoles = async (): Promise<string[]> => {
-          try {
-            const orgId = (session as any)?.activeOrganizationId;
-            if (!orgId) return [];
-            const members = await dataEngine.find('sys_member', {
-              where: { user_id: user.id, organization_id: orgId },
-              limit: 5,
-            });
-            const out: string[] = [];
-            for (const m of (Array.isArray(members) ? members : [])) {
-              const raw = typeof m?.role === 'string' ? m.role : '';
-              for (const r of raw.split(',').map((s: string) => s.trim()).filter(Boolean)) {
-                const mapped = mapMembershipRole(r);
-                if (!out.includes(mapped)) out.push(mapped);
-              }
-            }
-            return out;
-          } catch {
-            return [];
-          }
-        };
 
         // ADR-0068 D1/D2 (renamed ADR-0090 D3) — emit ONE canonical
         // positions[] (identity names + position names), with NO singular
@@ -3557,14 +3615,71 @@ export class AuthManager {
         // [#10348] Asked through the ONE authority, exactly as `/sso/register`
         // and `/admin/impersonate-user` ask it — so the session payload can no
         // longer disagree with the gates about who a platform admin is.
-        const platformAdmin = await this.isPlatformAdminUserId(user.id);
-        const orgRoles = await activeOrgRoles();
-        const storedRole = typeof (user as any).role === 'string' ? (user as any).role : '';
-        const positions = Array.from(new Set([
-          ...storedRole.split(',').map((s: string) => s.trim()).filter(Boolean),
-          ...orgRoles,
-          ...(platformAdmin ? [BUILTIN_IDENTITY_PLATFORM_ADMIN] : []),
-        ]));
+        //
+        // [#15136 — maintainer ruling 2026-09-05, option A] ONE name, ONE
+        // meaning: `positions[]` is the SECURITY axis on every surface.
+        //
+        // This used to be a hand-rolled union — the better-auth `sys_user.role`
+        // scalar split on commas, plus the active membership mapped to `org_*`,
+        // plus `platform_admin`. It read NOTHING from `sys_user_position`, the
+        // ADR-0057 D4 table that is the source of truth for custom positions, so
+        // a user genuinely holding a business position got a payload without it
+        // and every client-side gate narrowed by that position answered FALSE —
+        // silently, because the root and the key were both bound and CEL raised
+        // nothing. `EvalUserSchema` had declared the opposite all along
+        // ("built-in identity names + position names", "evaluates identically
+        // wherever it is written"); the Console binds this array straight through
+        // as `current_user`, so the payload WAS the contract violation.
+        //
+        // The derivation is not repaired here — it is DELETED and asked of the
+        // authority instead. `resolve-authz-context.ts` states that every entry
+        // point must resolve authorization through it and never re-read the
+        // `sys_*` grant tables itself; this callback was doing exactly what that
+        // forbids, which is how it drifted out of agreement with
+        // `/auth/me/permissions` (served from the same `grants.positions`) and
+        // with every server-side evaluator (`ExecutionContext.positions`) in the
+        // first place. The same move `isPlatformAdminUserId` made at #10348.
+        //
+        // Scoped to the session's ACTIVE organization, so a position held in one
+        // organization does not answer while the caller operates in another —
+        // the resolver's own rule, now applied to the payload too.
+        //
+        // `isPlatformAdmin` comes from the posture RUNG on the same envelope,
+        // never from the array. ⛔ `positions.includes('platform_admin')` is the
+        // form `resolve-authz-context.ts` explicitly forbids, because an
+        // ADR-0057 D4 `sys_user_position` row MAY SPELL THAT VERY NAME and a
+        // platform-RBAC assignment is not the ADR-0068 D2 capability grant.
+        // Under ruling A that stopped being theoretical: moving `positions` to
+        // the security axis moved the string `platform_admin` into a space a
+        // tenant admin can WRITE (`sys_user_position` is `apiEnabled`), so an
+        // array read here would have let a tenant mint platform standing and
+        // pass the `/admin/*` mount gate. `grants.posture === 'PLATFORM_ADMIN'`
+        // is byte-for-byte what `hasPlatformAdminStanding` returns, so the
+        // payload, that predicate and `judgePlatformAdmin` cannot disagree.
+        // ADR-0068 D2 defines the alias as `'platform_admin' in roles`; that
+        // wording predates D4 rows being able to spell built-in names, and
+        // core's later ⛔ is the specific rule.
+        //
+        // Fail CLOSED on an unreadable grant store, matching what both halves of
+        // the old derivation already did (`isPlatformAdminUserId` returns false
+        // on any lookup error; `activeOrgRoles` caught to `[]`). Warned rather
+        // than swallowed — an empty `positions[]` hides UI, and this card is
+        // about exactly that going unannounced.
+        let positions: string[] = [];
+        let platformAdmin = false;
+        try {
+          const grants = await resolveUserAuthzGrants(dataEngine as any, user.id, {
+            tenantId: (session as any)?.activeOrganizationId ?? undefined,
+          });
+          positions = grants.positions;
+          platformAdmin = grants.posture === 'PLATFORM_ADMIN';
+        } catch (err: any) {
+          console.warn(
+            '[auth] could not resolve authorization grants for the session payload; '
+            + 'positions[] is empty and position-gated UI will be hidden:',
+            err?.message ?? String(err),
+          );
+        }
 
         // ADR-0069 — authentication-policy gate posture (password expiry,
         // enforced MFA). Computed only when a gate feature is enabled (else
@@ -3906,6 +4021,14 @@ export class AuthManager {
    * probe's read is narrowed to one address and its page chain is exhausted —
    * so the value only trades round trips against page size.
    */
+  /**
+   * [#15587] Page bound for the sign-up uniqueness probe
+   * ({@link hasExistingUserFor}). One matching row IS the answer, so this only
+   * has to be large enough that a store which folds case or accents cannot
+   * push the real row off the page behind near-misses.
+   */
+  private static readonly EXISTING_USER_PROBE_LIMIT = 50;
+
   private static readonly PENDING_INVITATION_PROBE_PAGE = 50;
 
   /**
@@ -4121,10 +4244,9 @@ export class AuthManager {
     if (!engine || typeof (engine as any).find !== 'function') return false;
     try {
       const reader = withSystemReadContext(engine) as any;
-      const raw = await reader.find(SystemObjectName.USER, {
+      const rows: any[] = await reader.find(SystemObjectName.USER, {
         limit: AuthManager.BOOTSTRAP_USER_PROBE_LIMIT,
       });
-      const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
       if (rows.some(isHumanUserRow)) return false;
       // A page that came back FULL of non-human rows cannot prove there is no
       // human on the next page — fail closed rather than guess.
@@ -4197,14 +4319,13 @@ export class AuthManager {
       const seenIds = new Set<unknown>();
       for (let pageIndex = 0; pageIndex < AuthManager.PENDING_INVITATION_PROBE_MAX_PAGES; pageIndex++) {
         const offset = pageIndex * page;
-        const raw = await reader.find('sys_invitation', {
+        const rows: any[] = await reader.find('sys_invitation', {
           where: { status: 'pending', email: target },
           limit: page,
           // Omitted on the first page so the ordinary single-page read sends
           // exactly the option shape every driver already answers.
           ...(offset > 0 ? { offset } : {}),
         });
-        const rows: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
         const idsBefore = seenIds.size;
         for (const row of rows) {
           if (row?.id != null) seenIds.add(row.id);
@@ -4239,6 +4360,78 @@ export class AuthManager {
     }
   }
 
+  /**
+   * [#15587] Does a `sys_user` row already carry this address? Asked on the
+   * `/sign-up/email` before-hook so the uniqueness refusal is raised as an
+   * explicit 422 instead of being converted into a synthetic 200 by
+   * better-auth's anti-enumeration shield — see the call site for the
+   * mechanism and for why the question is asked AFTER the audience gate.
+   *
+   * ## Fail-open here is not fail-open overall
+   *
+   * An unanswerable probe returns `false` and the request FALLS THROUGH to the
+   * vendor, which runs its own `findUserByEmail` and decides. This pre-check
+   * only ever NARROWS an answer the vendor was going to give: it can turn a
+   * synthetic 200 into the honest 422, and it can never admit a creation the
+   * vendor would have refused. That is the opposite of
+   * {@link hasPendingInvitationFor}, whose `false` must fail CLOSED because it
+   * grants a carve-out — the two neighbours differ on purpose.
+   *
+   * ## Matching, and why the JS re-check narrows
+   *
+   * The address is pushed into the query (`sys_user.email` carries a declared
+   * index) with a bounded page, and every returned row is re-checked in JS
+   * against the normalized target. `=` folds case on some collations (MySQL's
+   * default) and folds ACCENTS with it, so the store alone could report a row
+   * for an address that is merely accent-adjacent — a refusal nothing
+   * justifies. Case-only differences still match, which is correct: the
+   * vendor lowercases `user.email` on `createUser`, so a case variant IS the
+   * same account. The re-check therefore only ever removes false positives —
+   * the safe direction for a rule whose output is a refusal.
+   *
+   * A page that comes back FULL is not evidence of anything beyond it, but it
+   * does not need to be: one matching row is the whole answer, and no row in
+   * a full page matching means the store answered a different question than
+   * we asked (a driver ignoring the predicate), which falls through to the
+   * vendor exactly like an unanswerable probe.
+   */
+  private async hasExistingUserFor(email: string): Promise<boolean> {
+    const engine = this.config.dataEngine;
+    if (!engine || typeof (engine as any).find !== 'function') return false;
+    const target = email.trim().toLowerCase();
+    if (!target) return false;
+    try {
+      const reader = withSystemReadContext(engine) as any;
+      const rows: any[] = await reader.find(SystemObjectName.USER, {
+        where: { email: target },
+        limit: AuthManager.EXISTING_USER_PROBE_LIMIT,
+      });
+      return rows.some(
+        (row) => typeof row?.email === 'string' && row.email.trim().toLowerCase() === target,
+      );
+    } catch (error) {
+      // The fall-through DIRECTION stays (see above): the vendor runs its own
+      // `findUserByEmail` and still decides. What must not stay is the
+      // SILENCE. A total engine outage is loud by itself — the vendor's read
+      // goes through the same engine and the request answers 500 — but a
+      // failure specific to THIS query shape, or a transient one, is answered
+      // by the duplicate shield with a synthetic 200, which is #15587 exactly:
+      // the defect re-opens with no other signal anywhere. Measured by driving
+      // a throw scoped to this probe's own signature: the pre-fix response came
+      // back, and nothing named the probe. So the refusal that did not happen
+      // says so here, at the same level and through the same facility the
+      // sibling probe uses at its page ceiling.
+      this.audienceLogError(
+        '[audience] the sign-up existing-user probe could not be answered, so the uniqueness '
+          + 'refusal was NOT raised for this request — falling through to better-auth, whose '
+          + 'duplicate shield answers a synthetic 200 when email verification is forced on. '
+          + 'A sign-up for an already-registered address may report success and write nothing.',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      return false;
+    }
+  }
+
   /** At least one ACTIVE `sys_permission_set` row carries the declared name. */
   private async selfRegistrationSetResolvable(setName: string): Promise<boolean> {
     const rows = await this.findPermissionSetRows(setName);
@@ -4250,8 +4443,7 @@ export class AuthManager {
     if (!engine || typeof (engine as any).find !== 'function') return [];
     try {
       const reader = withSystemReadContext(engine) as any;
-      const raw = await reader.find('sys_permission_set', { where: { name: setName }, limit: 50 });
-      return Array.isArray(raw) ? raw : Array.isArray(raw?.records) ? raw.records : [];
+      return await reader.find('sys_permission_set', { where: { name: setName }, limit: 50 });
     } catch {
       return [];
     }
@@ -4474,9 +4666,36 @@ export class AuthManager {
       } catch {
         organizationId = null;
       }
-      const rows = (await this.findPermissionSetRows(staged.setName)).filter(
-        (r) => r?.active !== false && typeof r?.id === 'string' && r.id,
+      // ACTIVE is a selection predicate — a deactivated set legitimately does
+      // not resolve, so it stays a filter. A missing or blank `id` is NOT a
+      // selection: it is a MALFORMED row, and dropping it silently is the
+      // opposite defect from a dead limb, wrong in two ways that both look
+      // normal from outside. (1) The family narrows to nothing and the report
+      // below blames "no active row named X" while an active row named X is
+      // sitting right there — and that report is the only signal, because
+      // nothing retries this. (2) Worse, when the malformed row is the
+      // ORG-SCOPED one, the `organization_id == null` arm below then resolves
+      // the GLOBAL set and grants a permission set the organization never
+      // declared, and the `rows.length === 1` arm can fire on a family that
+      // was never singular — both computed AFTER the silent removal, so the
+      // "unambiguous single row" this code believes it selected is not that.
+      // So a malformed candidate REFUSES the grant and names itself, which is
+      // the same gap-not-empty-answer direction the rest of this method takes.
+      const candidates = (await this.findPermissionSetRows(staged.setName)).filter(
+        (r) => r?.active !== false,
       );
+      const malformed = candidates.filter((r) => !(typeof r?.id === 'string' && r.id));
+      if (malformed.length > 0) {
+        this.reportUngrantedSelfRegistrant(
+          userId,
+          staged.setName,
+          `${malformed.length} active sys_permission_set row(s) named '${staged.setName}' carry no usable id, ` +
+            'so which row this grant would resolve to cannot be decided — refusing rather than ' +
+            'silently dropping them and granting whichever row is left',
+        );
+        return;
+      }
+      const rows = candidates;
       const row =
         (organizationId ? rows.find((r) => r?.organization_id === organizationId) : undefined) ??
         rows.find((r) => r?.organization_id == null) ??
@@ -4491,15 +4710,10 @@ export class AuthManager {
         );
         return;
       }
-      const existingRaw = await sys.find('sys_user_permission_set', {
+      const existing: any[] = await sys.find('sys_user_permission_set', {
         where: { user_id: userId, permission_set_id: row.id },
         limit: 1,
       });
-      const existing: any[] = Array.isArray(existingRaw)
-        ? existingRaw
-        : Array.isArray(existingRaw?.records)
-          ? existingRaw.records
-          : [];
       if (existing.length > 0) return;
       const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
       await sys.insert('sys_user_permission_set', {
@@ -4942,9 +5156,10 @@ export class AuthManager {
    * #14641 added. Three predicates, one per caller shape: `sys_user.id` (the
    * sends that hold a user row), the unique `phone_number` (the SMS sends,
    * which are handed a number and nothing else), and the unique `email` (the
-   * invitation send, which is handed an address for an account that may not
-   * exist yet). All three are `unique: true` in the better-auth `user` table
-   * this object is backed by (`@better-auth/core` `db/get-tables.mjs`).
+   * two sends handed an address for an account that may not exist yet — the
+   * invitation since #14641 and the magic link since #15106). All three are
+   * `unique: true` in the better-auth `user` table this object is backed by
+   * (`@better-auth/core` `db/get-tables.mjs`).
    */
   private async storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
     const engine = this.getDataEngine();
@@ -5229,6 +5444,45 @@ export class AuthManager {
 
     return response;
   }
+
+  /**
+   * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
+   * router owns, whatever it then answers?
+   *
+   * The auth catch-all yields the request to the rest of the Hono chain when
+   * better-auth answers 404 (#4088), and it needs this to tell the two very
+   * different 404s apart: "I do not serve this path" (yieldable — that is how
+   * `plugin-hono-server`'s `/auth/me/*` routes stay reachable in either
+   * registration order) from "I serve it and the answer is 404" (NOT yieldable
+   * — a disabled capability's refusal is an answer, and handing it to a
+   * downstream wildcard is how it becomes `200 {}`). The mechanism, the
+   * measurement and the matching rules live in
+   * `better-auth-route-ownership.ts`.
+   *
+   * Keyed on the live instance and rebuilt whenever that instance is replaced,
+   * so a re-created auth (config change, test re-boot) never answers from a
+   * stale table. Returns `false` — the yielding, pre-#15417 answer — for any
+   * request it cannot decide, so a failure to enumerate can never take the
+   * #4088 surface down with it.
+   */
+  async ownsRoute(request: Request): Promise<boolean> {
+    const endpointPath = this.betterAuthEndpointPath(request);
+    if (endpointPath === undefined) return false;
+    try {
+      const auth = await this.getOrCreateAuth();
+      if (this.routeOwnershipFor !== auth || !this.routeOwnership) {
+        this.routeOwnership = buildBetterAuthRouteOwnership((auth as any)?.api);
+        this.routeOwnershipFor = auth;
+      }
+      return this.routeOwnership.owns(request.method, endpointPath);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Memoized `auth.api` ownership table, and the instance it was built from. */
+  private routeOwnership?: BetterAuthRouteOwnership;
+  private routeOwnershipFor?: unknown;
 
   /**
    * The better-auth endpoint path (`/admin/remove-user`) this request addresses,

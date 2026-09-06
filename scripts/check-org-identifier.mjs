@@ -203,10 +203,13 @@
 //   ... of them wrong today ............................................ 0
 //   the same literal in the SCANNED (non-test) population ............... 0
 //
-//     packages/spec/src/data/hook.test.ts:619                   #3290 absence pin
-//     packages/plugins/plugin-audit/src/audit-writers.test.ts:1666  absence pin
-//     packages/plugins/plugin-audit/src/comment-access-hooks.test.ts:529  #9691
-//     packages/services/service-storage/src/attachment-access-hooks.test.ts:750
+//   (the file, never a line in it — the recipe above re-derives the position on
+//   every run, and a `file:NNN` pointer written here would rot silently, #15765)
+//
+//     `packages/spec/src/data/hook.test.ts`                                  #3290 absence pin
+//     `packages/plugins/plugin-audit/src/audit-writers.test.ts`              absence pin
+//     `packages/plugins/plugin-audit/src/comment-access-hooks.test.ts`       #9691
+//     `packages/services/service-storage/src/attachment-access-hooks.test.ts`
 //
 // (The recipe reports 5 matches across those 4 files: `hook.test.ts` carries a
 // second one whose `tenantId` sits inside a COMMENT in the literal's body.)
@@ -275,6 +278,34 @@ import { maskComments } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const ROOTS = ['examples', 'apps', 'packages'];
+
+/**
+ * The population this gate enumerates, declared for
+ * `scripts/pm/dispatch-gates.mjs`.
+ *
+ * `sourceFiles` runs `git ls-files -- examples apps packages` — three SUBTREES,
+ * seeded from the `ROOTS` constant above. The derivation reads SOURCE TEXT and
+ * `hintCovers` refuses a bare single-segment literal by design (accepting them
+ * was priced at +139084 fabricated (gate, file) pairs, because these three words
+ * are path COMPONENTS in dozens of gates that never read those roots), so this
+ * gate declared nothing and was scored `undetermined` for EVERY card: it reached
+ * no dispatch brief and no `--commands` harvest while CI ran it on every pull
+ * request.
+ *
+ * ⛔ Not a whole-tree marker, and this gate is the reason that boundary is
+ * written down. It was held OUT of the whole-tree bucket with a
+ * `ROOT_WALK_RESIDUE_LEDGER` row precisely because the liveness predicate that
+ * vouches for a whole-tree declaration sees a `git ls-files` call and cannot
+ * tell a three-subtree enumeration apart from a repo-wide one — so a whole-tree
+ * marker here would be exactly the mis-declaration that predicate cannot catch.
+ * That ledger row named this declaration as the remedy; landing it clears the
+ * row, and the two moves are coupled by construction (a stale exclusion reds).
+ *
+ * The self-test derives the coupling from `ROOTS` on both sides rather than
+ * re-spelling it, so widening or renaming a root cannot leave this declaration
+ * describing the old population.
+ */
+const ROOT_DIR_WATCH_HINTS = ['examples/**', 'apps/**', 'packages/**'];
 const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.cts', '.mts'];
 const EXCLUDED = /(^|\/)(node_modules|dist|build|\.next|\.turbo)\//;
 // Dropped WHOLESALE: absence pins and fixtures that CONSTRUCT the removed
@@ -614,11 +645,12 @@ let selfTestReachedVerdict = false;
 // to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
   'check-org-identifier self-test': 31,
+  'the dispatch-gates population declaration': 4,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -747,6 +779,35 @@ check(() => {
         `  ✗ self-test "the binding population is discovered at all": expected 1 binding, got ${populated.length}`,
       );
       failed++;
+    }
+});
+
+  // ── The dispatch-gates population declaration ────────────────────────────
+  battery('the dispatch-gates population declaration');
+  const declFail = (msg) => { console.error(`  ✗ ${msg}`); failed++; };
+check(() => {
+    if (!ROOTS.filter((r) => !r.includes('/')).every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`))) {
+      declFail('a separator-less ROOT is not declared in the subtree spelling — a bare root is refused '
+        + 'as too generic, so the hint extractor reads nothing and this gate returns to scoring '
+        + '`undetermined` for every card.');
+    }
+});
+check(() => {
+    if (!ROOT_DIR_WATCH_HINTS.every((h) => ROOTS.includes(h.replace(/\/\*+$/, '')))) {
+      declFail('ROOT_DIR_WATCH_HINTS declares a root this gate does not enumerate — a declaration that '
+        + 'has drifted from the scan replaces a silent gate with a lying one.');
+    }
+});
+check(() => {
+    if (ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r))) {
+      declFail('the declared form is a ROOTS entry — the bare form is what `git ls-files` takes, and it '
+        + 'is exactly what the hint extractor cannot read.');
+    }
+});
+check(() => {
+    if (ROOT_DIR_WATCH_HINTS.length !== ROOTS.length) {
+      declFail('the declaration is not one hint per enumerated root — a short list reads exactly like '
+        + 'the undetermined verdict it exists to leave.');
     }
 });
 

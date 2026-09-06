@@ -182,6 +182,19 @@
 // Exit status: the child's own code when it finishes; 75 on a declared stall;
 // 1 when the child dies on a signal this guard did not send.
 
+// ## The dispatch-gates population
+//
+// This is a RUNNER, not a scanner. Its reads are `/proc` (process state for the
+// stall verdict) and, when CI passes `--report-dir`, a runner temp directory of
+// diagnostic reports -- neither is in the repository, and no card can contain
+// either. The family CI schedules on a pull request is `check:stall-guard`,
+// which is this file's `--self-test`. So there is no path population to declare,
+// and the marker says so rather than leaving the family in the unexamined pile.
+// A card that edits THIS file is already led to `check:stall-guard-budget`,
+// which declares this path as part of its own population.
+//
+// dispatch-gates: no-path-population -- this is a process runner: it reads /proc and, when given --report-dir, a runner temp dir, never a file in the repository; check:stall-guard is its --self-test
+
 import { spawn } from 'node:child_process';
 import {
   createWriteStream,

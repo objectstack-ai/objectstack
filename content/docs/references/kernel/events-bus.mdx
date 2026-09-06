@@ -27,9 +27,9 @@ const result = EventBusConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **persistence** | `{ enabled: boolean; retention: integer; filter?: any; storage: Enum<'database' \| 'file' \| 's3' \| 'custom'> }` | optional | Event persistence configuration |
+| **persistence** | `{ enabled: boolean; retentionDays: integer; filter?: any; storage: Enum<'database' \| 'file' \| 's3' \| 'custom'> }` | optional | Event persistence configuration |
 | **queue** | `{ name: string; concurrency: integer; retryPolicy?: object; deadLetterQueue?: string; … }` | optional | Event queue configuration |
-| **eventSourcing** | `{ enabled: boolean; snapshotInterval: integer; snapshotRetention: integer; retention: integer; … }` | optional | Event sourcing configuration |
+| **eventSourcing** | `{ enabled: boolean; snapshotInterval: integer; snapshotRetention: integer; retentionDays: integer; … }` | optional | Event sourcing configuration |
 | **replay** | `{ enabled: boolean }` | optional | Event replay configuration |
 | **webhooks** | `{ id?: string; eventPattern: string; url: string; method: Enum<'GET' \| 'POST' \| 'PUT' \| 'PATCH'>; … }[]` | optional | Webhook configurations |
 | **messageQueue** | `{ provider: Enum<'kafka' \| 'rabbitmq' \| 'aws-sqs' \| 'redis-pubsub' \| 'google-pubsub' \| 'azure-service-bus'>; topic: string; eventPattern: string; partitionKey?: string; … }` | optional | Message queue integration |
@@ -42,7 +42,8 @@ const result = EventBusConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable event persistence |
-| **retention** | `integer` | ✅ | Days to retain persisted events |
+| **retentionDays** | `integer` | ✅ | Days to retain persisted events |
+| **retention** | `never` | optional | [REMOVED] `EventPersistence.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. |
 | **filter** | `any` | optional | Optional filter function to select which events to persist |
 | **storage** | `Enum<'database' \| 'file' \| 's3' \| 'custom'>` | optional (default: `"database"`) | Storage backend for persisted events |
 
@@ -63,7 +64,8 @@ const result = EventBusConfigSchema.parse(data);
 | **enabled** | `boolean` | optional (default: `false`) | Enable event sourcing |
 | **snapshotInterval** | `integer` | optional (default: `100`) | Create snapshot every N events |
 | **snapshotRetention** | `integer` | optional (default: `10`) | Number of snapshots to retain |
-| **retention** | `integer` | optional (default: `365`) | Days to retain events |
+| **retentionDays** | `integer` | optional (default: `365`) | Days to retain events |
+| **retention** | `never` | optional | [REMOVED] `EventSourcingConfig.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. The neighbouring `snapshotRetention` is a COUNT of snapshots, not a duration, so it keeps its name. |
 | **aggregateTypes** | `string[]` | optional | Aggregate types to enable event sourcing for |
 | **storage** | `{ type: Enum<'database' \| 'file' \| 's3' \| 'eventstore'>; options?: Record<string, any> }` | optional | Event store configuration |
 

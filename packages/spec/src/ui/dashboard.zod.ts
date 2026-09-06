@@ -871,7 +871,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
     filters: 'globalFilters', globalFilter: 'globalFilters',
     grid: 'columns', columnCount: 'columns',
     spacing: 'gap',
-    refresh: 'refreshInterval', autoRefresh: 'refreshInterval', pollInterval: 'refreshInterval',
+    refresh: 'refreshIntervalSeconds', autoRefresh: 'refreshIntervalSeconds', pollInterval: 'refreshIntervalSeconds',
     dateFilter: 'dateRange', timeRange: 'dateRange',
   },
   guidance: {
@@ -899,11 +899,28 @@ export const DashboardSchema = lazySchema(() => strictObject({
   /** Grid column count — defaults to 12 for a standard 12-column grid */
   columns: z.number().int().min(1).max(24).optional().describe('Number of grid columns (default 12)'),
 
-  /** Grid gap in Tailwind spacing units (e.g. 4 = 1rem) */
-  gap: z.number().int().min(0).optional().describe('Grid gap in Tailwind spacing units'),
+  /** Space between widgets, in steps of 0.25rem (4 = 1rem) */
+  gap: z.number().int().min(0).optional().describe('Space between widgets, in steps of 0.25rem (4 = 1rem)'),
 
-  /** Auto-refresh */
-  refreshInterval: z.number().optional().describe('Auto-refresh interval in seconds'),
+  /**
+   * Auto-refresh
+   *
+   * Renamed from `refreshInterval` (#15680, ruling B on #14478): the unit lived
+   * only in the describe prose. The three rename-hint aliases beside it
+   * (`refresh` / `autoRefresh` / `pollInterval`) are the measure of how many
+   * spellings authors reach for, and not one of them names a unit either — so
+   * every door into this key left the cadence ambiguous until the canonical
+   * spelling carried it.
+   */
+  refreshIntervalSeconds: z.number().optional().describe('Auto-refresh interval in seconds'),
+
+  /** Tombstone for the rename above (#15680, ruling B on #14478). */
+  refreshInterval: retiredKey(
+    '`dashboard.refreshInterval` was renamed to `refreshIntervalSeconds` in @objectstack/spec 17 '
+    + '— the unit of a duration-shaped number lives in the key name, not only in the describe '
+    + 'prose. Rename the key to `refreshIntervalSeconds`; the value (seconds) is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+  ),
 
   /** Dashboard Date Range (Global time filter) */
   dateRange: strictObject({

@@ -30,8 +30,8 @@
 //   - `ctx.input.<field> = ...` / `Object.assign(ctx.input, ...)` -> the hook's
 //     own in-flight payload, a server stamp, survives the strip -> NEVER
 //     flagged.
-//   - `ctx.api.object('<lit>').update|updateById({ <field> })` -> a fresh
-//     non-elevated operation whose payload IS caller-supplied -> flagged.
+//   - `ctx.api.object('<lit>').update|updateById|insert({ <field> })` -> a
+//     fresh non-elevated operation whose payload IS caller-supplied -> flagged.
 //
 // A blanket "readonly field in any write set" rule would fail every correct
 // before-hook stamp in the corpus on day one and be switched off by the first
@@ -39,11 +39,29 @@
 //
 // --- SCOPE - deliberately narrow, so a finding is worth gating on ----------
 //
-//   - Only `update` / `updateById`. INSERT is engine-exempt from the
-//     author-declared static-`readonly` strip (`stripReadonlyForInsert`'s note
-//     in rule-validator.ts, #3043/#3413: "a create may legitimately seed
-//     read-only columns"), so `insert`/`create` are not no-ops and are never
-//     flagged. Exactly the reason the flow sibling skips `create_record`.
+//   - `update` / `updateById` on BOTH branches, `insert` on the STATIC branch
+//     only. `insert` used to be excluded because INSERT was engine-exempt from
+//     the author-declared static-`readonly` strip (#3043/#3413: "a create may
+//     legitimately seed read-only columns"). The maintainer ruling of
+//     2026-09-03 (option C, #14147) SUPERSEDED that row: `engine.insert` runs
+//     the SAME `stripReadonlyFields` under the SAME `isSystem` gate, and a hook
+//     body's `ctx.api` under a non-system trigger is exactly that caller — the
+//     row is created WITHOUT the column while the call returns success. So
+//     since #15394 a non-system `insert` of a static-`readonly` column is the
+//     same `error` an `update` of it is. The conditional half stays
+//     update-only: `stripReadonlyWhenFields` needs the record being written
+//     over, and `engine.ts` says at the strip that "INSERT stays exempt".
+//
+//     `create` is NOT a subject, for a reason that is about the SANDBOX, not
+//     the engine — see {@link READONLY_HOOK_METHOD_EXCLUSIONS}. The host
+//     `ObjectRepository` does alias `create()` to `insert()`, but this rule
+//     reads L2 bodies, which run in QuickJS, and the VM-side `ctx.api.object()`
+//     installs exactly `insert`/`update`/`delete`/`updateMany`/`deleteMany`/
+//     `upsert` (`installCtx`, runtime/src/sandbox/quickjs-runner.ts) — so a
+//     body's `.create()` is `TypeError: not a function` at run time: a LOUD
+//     failure on the first run, not the silent no-op this rule exists to
+//     report. Gating it as a silent drop would state something false, the
+//     mirror of the `sudo()` hint defect below.
 //
 //   - Only a NON-ELEVATED `ctx.api`. `ScopedContext.sudo()` returns a context
 //     with `isSystem: true`, which the strip skips entirely. A `.sudo()` chain
@@ -140,7 +158,8 @@ import {
   extractHookBodyWriteSet,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
-import { buildReadonlyIndex } from './validate-readonly-flow-writes.js';
+import { buildReadonlyIndex, buildInsertStripExemptObjects } from './validate-readonly-flow-writes.js';
+import { recordsOf } from './object-graph.js';
 
 export type ReadonlyHookWriteSeverity = 'error' | 'warning';
 
@@ -198,14 +217,44 @@ export const READONLY_HOOK_WRITE_EXCLUSIONS: readonly BodyWritePatternExclusion[
 const APPLICABLE_PATTERN_IDS: ReadonlySet<string> = new Set(READONLY_HOOK_WRITE_PATTERN_IDS);
 
 /**
- * `ctx.api` write methods whose payload is subject to the update-path strip.
- *
- * `insert` / `create` are absent BY DECISION, not by omission: the engine
- * exempts INSERT from the author-declared static-`readonly` strip so a create
- * may legitimately seed read-only columns (#3043/#3413), which is the same
- * reason the flow sibling never looks at a `create_record` node.
+ * `ctx.api` write methods whose payload this rule judges against the STATIC
+ * strip. `insert` joined in #15394, once the 2026-09-03 ruling (option C,
+ * #14147) put `stripReadonlyFields` on the create path under the same
+ * `isSystem` gate — the header carries the full reading. Exported so the test
+ * can pin the partition against {@link READONLY_HOOK_METHOD_EXCLUSIONS}.
  */
-const STRIP_SUBJECT_METHODS: ReadonlySet<string> = new Set(['update', 'updateById']);
+export const READONLY_HOOK_STRIP_SUBJECT_METHODS: readonly string[] = ['update', 'updateById', 'insert'];
+const STRIP_SUBJECT_METHODS: ReadonlySet<string> = new Set(READONLY_HOOK_STRIP_SUBJECT_METHODS);
+
+/**
+ * The methods {@link READONLY_HOOK_STRIP_SUBJECT_METHODS} judges on the
+ * CONDITIONAL branch too. A create has no prior record for a `readonlyWhen`
+ * predicate to read, and the engine runs no conditional strip on INSERT
+ * ("INSERT stays exempt" at the bulk strip in engine.ts), so `insert` is
+ * judged on the static branch alone.
+ */
+const CONDITIONAL_SUBJECT_METHODS: ReadonlySet<string> = new Set(['update', 'updateById']);
+
+/**
+ * `ctx.api.object()` write methods the shared extractor recognises
+ * (`API_WRITE_METHODS` in `validate-hook-body-writes.ts`) that this rule
+ * deliberately does NOT judge, each with its reason — the same discipline
+ * {@link READONLY_HOOK_WRITE_EXCLUSIONS} applies to pattern shapes. ⛔ A reason
+ * here may never be "INSERT is exempt": that sentence is false about the
+ * engine since the 2026-09-03 ruling.
+ */
+export const READONLY_HOOK_METHOD_EXCLUSIONS: readonly { method: string; reason: string }[] = [
+  {
+    method: 'create',
+    reason:
+      'this rule reads L2 bodies, which run in QuickJS, and the VM-side ctx.api.object() installs no ' +
+      '`create` leaf (installCtx in runtime/src/sandbox/quickjs-runner.ts: insert / update / delete / ' +
+      'updateMany / deleteMany / upsert) - so a body calling .create() is `TypeError: not a function` on ' +
+      'its first run, a LOUD failure, not the silent no-op this rule reports. The host ObjectRepository ' +
+      'does alias create() to insert(), but no body reaches the host repository. A fact about the ' +
+      'SANDBOX, not about INSERT: the same payload spelled .insert() IS judged',
+  },
+];
 
 /**
  * Methods whose payload carries the row ADDRESS rather than only field data.
@@ -223,18 +272,6 @@ function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
-
 /**
  * Validate L2 hook-body `ctx.api` writes against target-object readonly
  * declarations. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
@@ -242,11 +279,12 @@ function asArray(v: unknown): AnyRec[] {
  */
 export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFinding[] {
   const findings: ReadonlyHookWriteFinding[] = [];
-  const hooks = asArray(stack.hooks);
+  const hooks = recordsOf(stack.hooks);
   if (hooks.length === 0) return findings;
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.
   let roIndex: ReturnType<typeof buildReadonlyIndex> | null = null;
+  let insertStripExempt: Set<string> | null = null;
 
   hooks.forEach((hook, hookIndex) => {
     const body = hook.body;
@@ -282,7 +320,8 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
     );
     if (writes.length === 0) return;
 
-    roIndex ??= buildReadonlyIndex(asArray(stack.objects));
+    roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
+    insertStripExempt ??= buildInsertStripExemptObjects(recordsOf(stack.objects));
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
     const where = `hook "${hookName}" > body`;
@@ -311,6 +350,12 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
       if (reported.has(dedupeKey)) continue;
 
       const call = `ctx.api.object('${objectName}').${method}(...)`;
+      // The static branch judges every subject method; the conditional one
+      // only those with a prior record to lock on.
+      const isCreate = !CONDITIONAL_SUBJECT_METHODS.has(method);
+      // A platform object is outside the create-side strip entirely (see
+      // `buildInsertStripExemptObjects`); an update of it is still judged.
+      if (isCreate && insertStripExempt.has(objectName)) continue;
 
       if (meta.readonly) {
         reported.add(dedupeKey);
@@ -319,23 +364,36 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
           rule: HOOK_API_UPDATE_READONLY_FIELD,
           where,
           path,
-          // The static-`readonly` write-path strip is #2948; the id stays here,
-          // out of the message an author reads and cannot resolve.
-          message:
-            `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
-            `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
-            `on every non-system trigger the engine strips readonly keys from that UPDATE payload - ` +
-            `the write never lands, while the call still returns success.`,
-          hint:
-            `If automation is meant to maintain '${w.field}', stamp it on the record's OWN hook - ` +
-            `ctx.input.${w.field} = ... in beforeInsert/beforeUpdate survives the strip, and is the ` +
-            `recommended shape. To keep writing it CROSS-OBJECT from here, declare runAs: 'system' on ` +
-            `this hook: the strip skips a system context, so the write lands, and the triggering user ` +
-            `is still stamped on the record. Note that ctx.api.sudo() is NOT an option from a body: ` +
-            `sudo() lives on the in-process ScopedContext and is not marshalled into the sandbox, so ` +
-            `calling it here is a TypeError at run time. Otherwise drop readonly:true from '${w.field}'.`,
+          // The static-`readonly` write-path strip is #2948 on UPDATE and, since
+          // the 2026-09-03 ruling, #14147 on INSERT; the ids stay here, out of
+          // the message an author reads and cannot resolve.
+          message: isCreate
+            ? `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
+              `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
+              `on every non-system trigger the engine strips readonly keys from that INSERT payload exactly ` +
+              `as it does from an UPDATE - the row is created WITHOUT this column (it falls back to the ` +
+              `field's defaultValue), while the call still returns success.`
+            : `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
+              `readonly:true. A hook's ctx.api is a ScopedContext over the TRIGGERING operation's context, so ` +
+              `on every non-system trigger the engine strips readonly keys from that UPDATE payload - ` +
+              `the write never lands, while the call still returns success.`,
+          hint: isCreate
+            ? `Seeding a readonly column at create time is a SYSTEM act. To keep writing it from here, ` +
+              `declare runAs: 'system' on this hook: the strip skips a system context, so the write lands, ` +
+              `and the triggering user is still stamped on the record. Or stamp it on '${objectName}''s OWN ` +
+              `beforeInsert hook - ctx.input.${w.field} = ... is a server value and survives the strip. ` +
+              `Note that ctx.api.sudo() is NOT an option from a body: sudo() lives on the in-process ` +
+              `ScopedContext and is not marshalled into the sandbox, so calling it here is a TypeError at ` +
+              `run time. Otherwise drop '${w.field}' from this payload, or drop readonly:true from the field.`
+            : `If automation is meant to maintain '${w.field}', stamp it on the record's OWN hook - ` +
+              `ctx.input.${w.field} = ... in beforeInsert/beforeUpdate survives the strip, and is the ` +
+              `recommended shape. To keep writing it CROSS-OBJECT from here, declare runAs: 'system' on ` +
+              `this hook: the strip skips a system context, so the write lands, and the triggering user ` +
+              `is still stamped on the record. Note that ctx.api.sudo() is NOT an option from a body: ` +
+              `sudo() lives on the in-process ScopedContext and is not marshalled into the sandbox, so ` +
+              `calling it here is a TypeError at run time. Otherwise drop readonly:true from '${w.field}'.`,
         });
-      } else if (meta.readonlyWhen) {
+      } else if (meta.readonlyWhen && !isCreate) {
         reported.add(dedupeKey);
         findings.push({
           severity: 'warning',

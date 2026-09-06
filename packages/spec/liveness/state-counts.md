@@ -28,10 +28,10 @@ for both corollaries.
 | Type | live | exp | elsewhere | dead | planned | classified |
 |---|---|---|---|---|---|---|
 | `object` | 51 | 0 | 0 | 0 | 1 | 52 |
-| `field` | 89 | 0 | 0 | 1 | 3 | 93 |
+| `field` | 90 | 0 | 0 | 1 | 2 | 93 |
 | `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
 | `action` | 41 | 0 | 0 | 3 | 4 | 48 |
-| `hook` | 19 | 0 | 0 | 2 | 0 | 21 |
+| `hook` | 19 | 0 | 0 | 3 | 0 | 22 |
 | `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
 | `position` | 12 | 0 | 0 | 0 | 0 | 12 |
 | `agent` | 21 | 4 | 0 | 1 | 0 | 26 |
@@ -41,7 +41,7 @@ for both corollaries.
 | `page` | 23 | 0 | 0 | 0 | 1 | 24 |
 | `view` | 79 | 0 | 0 | 9 | 0 | 88 |
 | `report` | 21 | 0 | 0 | 0 | 0 | 21 |
-| `dashboard` | 34 | 0 | 0 | 7 | 0 | 41 |
+| `dashboard` | 34 | 0 | 0 | 8 | 0 | 42 |
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
 | `query` | 16 | 0 | 0 | 5 | 0 | 21 |
 | `datasource` | 30 | 0 | 0 | 0 | 0 | 30 |
@@ -49,12 +49,12 @@ for both corollaries.
 | `book` | 20 | 0 | 0 | 1 | 0 | 21 |
 | `doc` | 15 | 0 | 0 | 0 | 0 | 15 |
 | `email_template` | 21 | 0 | 0 | 0 | 0 | 21 |
-| `job` | 15 | 0 | 0 | 0 | 0 | 15 |
+| `job` | 15 | 0 | 0 | 1 | 0 | 16 |
 | `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
 | `seed` | 12 | 0 | 0 | 0 | 0 | 12 |
 | `translation` | 23 | 0 | 0 | 0 | 2 | 25 |
 | `validation` | 15 | 0 | 0 | 3 | 0 | 18 |
-| `api` | 25 | 0 | 0 | 0 | 2 | 27 |
+| `api` | 25 | 0 | 0 | 1 | 2 | 28 |
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 0 | 5 | 0 | 9 |
 | `manifest` | 23 | 0 | 1 | 15 | 0 | 39 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **844** | **5** | **1** | **90** | **13** | **953** |
+| **total** | **845** | **5** | **1** | **94** | **12** | **957** |

@@ -58,7 +58,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isSystem: {
         label: "系统内置",
-        helpText: "系统对象（受保护，不可删除）"
+        helpText: "系统对象（受保护，不可删除；共享默认为公开）"
       },
       fields: {
         label: "字段",
@@ -119,6 +119,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.minLength": {
         label: "最小长度",
         helpText: "最小字符数"
+      },
+      "fields.valueDomain": {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to; a write carrying a non-member is refused"
       },
       "fields.rows": {
         label: "Rows",
@@ -206,7 +210,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.trackHistory": {
         label: "历史跟踪",
-        helpText: "保留变更历史"
+        helpText: "在记录的活动时间线上概述该字段的变更"
       },
       "fields.visibleWhen": {
         label: "Visible When",
@@ -384,6 +388,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "最大长度",
         helpText: "最多字符数"
       },
+      valueDomain: {
+        label: "Value Domain",
+        helpText: "Standard the written value must belong to: iana_time_zone, iso_4217_currency or iso_3166_alpha2. A write carrying a non-member is refused"
+      },
       rows: {
         label: "Rows",
         helpText: "Inline editor height in text rows"
@@ -547,8 +555,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "错误处理"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -658,7 +666,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       filter: {
         label: "筛选",
-        helpText: "筛选规则"
+        helpText: "筛选条件——与列表工具栏相同的可视化构建器，运算符与取值输入随字段类型变化"
       },
       sort: {
         label: "排序",
@@ -744,7 +752,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "基础信息",
-        description: "名称、标题与图标"
+        description: "页面标识与模板"
       },
       data_context: {
         label: "数据上下文",
@@ -760,7 +768,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       advanced: {
         label: "高级设置",
-        description: "默认页、类型与分配"
+        description: "启用状态、适用人群与无障碍"
       }
     },
     fields: {
@@ -778,7 +786,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       type: {
         label: "类型",
-        helpText: "页面种类 — list / record / home / app / utility。列表页的展现形式（grid / kanban / calendar）是在 Interface 中设置的可视化，不是页面类型。"
+        helpText: "页面种类。\"List / Interface\" 把来源视图绑定为经过编排的界面——它的展现形式（grid / kanban / calendar / …）是在 Interface 中设置的可视化，不是页面类型。"
       },
       template: {
         label: "模板",
@@ -932,9 +940,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       gap: {
         label: "间距",
-        helpText: "栅格间距（Tailwind 单位）"
+        helpText: "组件之间的间距，每级 0.25rem（4 = 1rem）"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "刷新间隔",
         helpText: "自动刷新间隔（秒）"
       },
@@ -1012,7 +1020,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       defaultAgent: {
         label: "默认智能体",
-        helpText: "右下角浮动助手按钮调用的 AI 智能体"
+        helpText: "环境助手使用的平台智能体（默认 'ask'；创作类界面用 'build'）"
       },
       branding: {
         label: "品牌",
@@ -1041,7 +1049,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       advanced: {
         label: "高级设置",
-        description: "批量与 AI 暴露"
+        description: "AI 暴露与 API 请求体结构"
       }
     },
     fields: {
@@ -1079,7 +1087,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       body: {
         label: "正文",
-        helpText: "要执行的 JavaScript 代码"
+        helpText: "L1 表达式或 L2 沙箱 JS 体"
       },
       "body.language": {
         label: "Language",
@@ -1156,7 +1164,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "基础信息",
-        description: "名称与数据源"
+        description: "标识与报表类型"
       },
       dataset_binding: {
         label: "Dataset binding",
@@ -1164,7 +1172,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       joined_blocks: {
         label: "关联对象",
-        description: "跨对象联合查询"
+        description: "叠加进同一张报表的其他数据集分块（仅 joined 报表）"
       },
       filter_and_chart: {
         label: "筛选与图表",
@@ -1200,7 +1208,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       columns: {
         label: "列",
-        helpText: "报表中显示的列"
+        helpText: "横向展开的维度名（仅 matrix 报表）"
       },
       order: {
         label: "排序",
@@ -1364,11 +1372,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "基础信息",
-        description: "模板 ID 与正文类型"
+        description: "模板标识符，由 IEmailService.sendTemplate({ template: name, locale, ... }) 解析。"
       },
       subject: {
         label: "主题",
-        description: "邮件主题模板"
+        description: "主题行。支持 {{var.path}} 插值。"
       },
       html_body: {
         label: "HTML 正文",
@@ -1419,7 +1427,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       variables: {
         label: "变量",
-        helpText: "模板内可引用的变量与默认值"
+        helpText: "示例：[{ \"name\": \"user.name\", \"type\": \"string\", \"required\": true, \"description\": \"...\" }]"
       },
       fromOverride: {
         label: "发件人覆盖",
@@ -1452,15 +1460,15 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "身份",
-        description: "权限集或配置文件标识"
+        description: "权限集叠加在配置文件之上，用于授予额外访问权限。配置文件是按 1:1 分配给每个用户的基础权限集。"
       },
       system_permissions: {
         label: "系统权限",
-        description: "应用、API、管理与设置访问"
+        description: "不针对特定对象的高层能力——如 manage_users、view_audit_logs"
       },
       object_and_field_permissions: {
         label: "对象与字段权限",
-        description: "增删改查与字段可见性"
+        description: "对象级增删改查 + 字段级安全（FLS）。可用矩阵编辑器编辑，或在此粘贴 JSON。"
       },
       tab_and_row_level_security: {
         label: "标签页与行级安全",
@@ -1478,7 +1486,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       systemPermissions: {
         label: "系统权限",
-        helpText: "应用访问、API、管理操作"
+        helpText: "系统能力键列表"
       },
       objects: {
         label: "对象权限",
@@ -1654,7 +1662,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       triggers: {
         label: "触发条件",
-        description: "触发关键词与上下文"
+        description: "此技能应在何时激活"
       }
     },
     fields: {
@@ -1668,7 +1676,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       description: {
         label: "描述",
-        helpText: "AI 用来判断是否调用的简短说明"
+        helpText: "此技能的作用"
       },
       active: {
         label: "启用",

@@ -40,8 +40,9 @@
  * `normalizeConfig` reads is declared by the sub-object's schema (measured
  * key by key; the diff is empty for all four), so the PARSED output is what
  * the normalized config is built from and the schema's own defaults are the
- * defaults. `api` keeps #11637's validate-only posture — its `.omit()`ed
- * tombstone is the reason — and is not this file's subject.
+ * defaults. `api` held #11637's validate-only posture until [#14366] measured
+ * its key diff empty too and folded its `??` chain onto the parse; it keeps
+ * the `.omit()`ed `requireAuth` tombstone, and is not this file's subject.
  *
  * [#14691] Ten of the keys these pins originally exercised were RETIRED under
  * ADR-0049 enforce-or-remove (the #14369 liveness census found them normalized

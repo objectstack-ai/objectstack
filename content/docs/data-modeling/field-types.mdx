@@ -357,7 +357,7 @@ Self-referential hierarchy (e.g., categories, org chart).
 
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
-| `reference` | `string` | **required** | Same object (self-reference) |
+| `reference` | `string` | — | Optional. If given, must be this object (self-reference) — any other object is refused at parse |
 
 ```typescript
 { name: 'parent_category', label: 'Parent Category', type: 'tree', reference: 'category' }
@@ -653,7 +653,7 @@ These properties are available on **all** field types:
 | `description` | `string` | — | Field description / help text |
 | `type` | `FieldType` | **required** | One of the supported field types |
 | `required` | `boolean` | `false` | Whether the field is required |
-| `unique` | `boolean \| 'global' \| 'organization'` | `false` | Unique constraint **and its scope** (ADR-0120). `'organization'` = one holder per organization; `true` = that same per-organization scope (positional synonym — prefer the explicit spelling in new code); `'global'` = one holder across the whole installation; `false` = no constraint. `'tenant'`/`'org'` are rejected — the word is `'organization'`. Full rule in the `unique` doc block in [`FieldSchema`](/docs/references/data/field) |
+| `unique` | `boolean \| 'global' \| 'organization'` | `false` (`'organization'` on `autonumber`) | Unique constraint **and its scope** (ADR-0120). `'organization'` = one holder per organization; `true` = that same per-organization scope (positional synonym — prefer the explicit spelling in new code); `'global'` = one holder across the whole installation; `false` = no constraint. Omitted ⇒ `false`, except on an `autonumber` field, where omitted ⇒ `'organization'` — an auto-number is a business identifier, so the platform makes it unique per organization by default; write `unique: false` explicitly to opt out. `'tenant'`/`'org'` are rejected — the word is `'organization'`. Full rule in the `unique` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `multiple` | `boolean` | `false` | Allow array of values (multi-record lookup, multi-select, multi-file). An emptied multi-value lookup reads back as `[]`, never `null` — the `multiple` doc block in [`FieldSchema`](/docs/references/data/field) |
 | `searchable` | `boolean` | `false` | Include in search index |
 | `sortable` | `boolean` | `true` | Allow sorting by this field |

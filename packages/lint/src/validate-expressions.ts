@@ -79,13 +79,26 @@
  */
 
 import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROOTS } from '@objectstack/formula';
-import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import {
+  collectFlowGraphs,
+  predicateSlotRefusal,
+  resolveFlowNodeExpressions,
+  structuralConditionRefusal,
+} from '@objectstack/spec/automation';
+// [#15137] The `value`-role half. Same two published primitives the engine
+// composes at `registerFlow` (`AutomationEngine.valueEnvelopeRefusals`), in the
+// same order: the SHAPE rule lives in the spec's `AssignmentValueSchema` (it
+// refuses a non-`cel` dialect and the source-less `{ dialect: 'cel' }` that
+// `validateExpression` reads as "not authored"), the CEL rule in
+// `validateExpression('value', …)`. Neither refusal string is spelled here.
+import { AssignmentValueSchema, ASSIGNMENT_VALUE_ENVELOPE_REFUSAL } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
 import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
+import { recordsOf } from './object-graph.js';
 
 export interface ExprIssue {
   where: string;
@@ -100,15 +113,6 @@ export interface ExprIssue {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce an `objects` collection (array or name-keyed map) to an array. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 /**
  * object name → set of its field names, for schema-aware field checks.
@@ -876,7 +880,7 @@ function isBareReferenceToAny(diagnostic: string, roots: readonly string[]): boo
  */
 export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   const issues: ExprIssue[] = [];
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   const fieldIndex = buildFieldIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
   const nullableIndex = buildNullableFieldIndex(objects);
@@ -1058,15 +1062,57 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
    * bind the *screen's own* collected values, not the trigger record's fields, so
    * a field-existence pass would report every field name as unknown.
    */
-  const checkDeclaredPredicate = (where: string, raw: unknown): void => {
-    if (raw == null) return;
+  const checkDeclaredPredicate = (where: string, raw: unknown): { refused: boolean } => {
+    if (raw == null) return { refused: false };
+    // [#15572] The slot is declared bare CEL TEXT, so a non-string — the
+    // `{ dialect, source }` envelope above all — is refused on SHAPE before
+    // anything tries to read a source out of it. The refusal is the spec's,
+    // shared with the engine's `registerFlow` pass: `error`, because that pass
+    // throws, and a shape build refuses must not pass author time.
+    const shapeRefusal = predicateSlotRefusal(raw);
+    if (shapeRefusal) {
+      issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
+      return { refused: true };
+    }
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string });
     for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    return { refused: false };
+  };
+
+  /**
+   * A declared `value` slot (#15137) — today the `assignment` node's
+   * `assignments.*`, the one slot whose job is to compute a value into a
+   * variable.
+   *
+   * The resolver emits ONLY envelope-shaped objects for this role, so anything
+   * that arrives is an author declaring an expression. `error`, matching the
+   * engine's `registerFlow` throw: build and run time must agree about what
+   * registers, and a malformed envelope used to be stored verbatim and rendered
+   * by `notify` as JSON with nothing said at any layer.
+   */
+  const checkDeclaredValue = (where: string, raw: unknown): void => {
+    if (raw == null) return;
+    // `celSourceOf` — not a second read of `.source`: the same helper every
+    // other slot in this file locates its finding with.
+    const source = celSourceOf(raw) ?? '';
+    const shape = AssignmentValueSchema.safeParse(raw);
+    if (!shape.success) {
+      // Already prefixed by the spec's own refinement — do not say it twice.
+      for (const issue of shape.error.issues) issues.push({ where, message: issue.message, source, severity: 'error' });
+      return;
+    }
+    const res = validateExpression('value', raw as { dialect?: string; source?: string });
+    for (const e of res.errors) {
+      issues.push({ where, message: `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} ${e.message}`, source: e.source, severity: 'error' });
+    }
+    for (const w of res.warnings) {
+      issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    }
   };
 
   // ── Flows ──────────────────────────────────────────────────────────
-  for (const flow of asArray(stack.flows)) {
+  for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
     const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
     // The record-change target object — `record.*` refs resolve against it.
@@ -1115,12 +1161,44 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       }
     };
 
+    /**
+     * [#15662] A STRUCTURAL condition (`config.condition` on a node,
+     * `edge.condition`) refused on SHAPE before anything reads a source out of
+     * it. The refusal is the spec's, shared with the engine's `registerFlow`
+     * pass: `error`, because that pass throws, and a shape build refuses must
+     * not pass author time.
+     *
+     * ⚠️ Deliberately NOT `predicateSlotRefusal`, which the declared-slot arm
+     * above uses. A ledger `predicate` slot is declared `z.string()`; neither
+     * structural slot is — `FlowEdgeSchema.condition` is
+     * `ExpressionInputSchema`, so an envelope is the shape the parse itself
+     * produces, and a node's `config` is an open `z.record` that passes one
+     * through verbatim. Both are admitted here; a value that is neither text
+     * nor an expression is not, because the evaluator reads it as an EMPTY
+     * condition and answers a silent `false`.
+     *
+     * @returns whether the slot was refused, so the caller can skip the
+     *   value-reading passes that would otherwise re-report it as an empty one.
+     */
+    const checkStructuralCondition = (where: string, raw: unknown): { refused: boolean } => {
+      if (raw == null) return { refused: false };
+      const shapeRefusal = structuralConditionRefusal(raw);
+      if (shapeRefusal) {
+        issues.push({ where, message: shapeRefusal.message, source: shapeRefusal.source, severity: 'error' });
+        return { refused: true };
+      }
+      return { refused: false };
+    };
+
     for (const graph of graphs) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
       for (const node of graph.nodes as unknown as AnyRec[]) {
         const cfg = (node.config ?? {}) as AnyRec;
-        check(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
-        warnShadowedFieldReads(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition);
+        const nodeCondWhere = `${at} · node '${node.id}' (${node.type}) condition`;
+        if (!checkStructuralCondition(nodeCondWhere, cfg.condition).refused) {
+          check(nodeCondWhere, cfg.condition, objectName);
+          warnShadowedFieldReads(nodeCondWhere, cfg.condition);
+        }
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
         // hardcoded `condition` and assumed every other node string was a `{var}`
@@ -1135,9 +1213,21 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // reconciliation ratchet still sees the marker.
         const nodeType = typeof node.type === 'string' ? node.type : '';
         for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
-          if (found.entry.role !== 'predicate') continue;
           const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
-          checkDeclaredPredicate(slotWhere, found.value);
+          // [#15137] `value` slots are checkable too, by their own rule — see
+          // `checkDeclaredValue`. Not shadowing-checked: the shadow diagnostic is
+          // about a bare identifier resolving to a variable instead of a field,
+          // and a value envelope is evaluated in the flow-variable scope by
+          // design — there is no field reading to displace.
+          if (found.entry.role === 'value') {
+            checkDeclaredValue(slotWhere, found.value);
+            continue;
+          }
+          if (found.entry.role !== 'predicate') continue;
+          // [#15572] A slot refused on SHAPE gets no second diagnostic: the
+          // shadowing warning is about which scope a CEL source resolves in,
+          // and a value that is not CEL text has no source to resolve.
+          if (checkDeclaredPredicate(slotWhere, found.value).refused) continue;
           // [#14288] The shadowing warning is about the SCOPE an expression is
           // evaluated in, not about which key it was authored under — so it
           // belongs on every `predicate` slot the ledger declares, not just the
@@ -1223,8 +1313,11 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         }
       }
       for (const edge of graph.edges as unknown as AnyRec[]) {
-        check(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);
-        warnShadowedFieldReads(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition);
+        const edgeCondWhere = `${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`;
+        if (!checkStructuralCondition(edgeCondWhere, edge.condition).refused) {
+          check(edgeCondWhere, edge.condition, objectName);
+          warnShadowedFieldReads(edgeCondWhere, edge.condition);
+        }
       }
       // No `checkNullGuards` on node/edge conditions — and NOT for the reason
       // #4811 first recorded (#4811 re-measured it). The stated blocker was the
@@ -1258,7 +1351,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `validations` is the key `ObjectSchema` declares; `validationRules` is a
     // rejected alias of it (#5017) — see the `## Scope` table above.
     const validations = obj.validations;
-    for (const rule of asArray(validations)) {
+    for (const rule of recordsOf(validations)) {
       const where = `object '${objectName}' · validation '${(rule.name as string) ?? '?'}'`;
       // The declared predicate key is `condition` (see `rulePredicates`).
       // Validation predicates are `record`-scoped — no field flattening — so
@@ -1335,7 +1428,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // `checkFieldRuleRoot` above rejects it one level up, where nothing
       // binds it. Same helper, two verdicts, because the two surfaces have two
       // evaluators; neither verdict is a side effect of a shared root list.
-      for (const [oi, opt] of asArray(f.options).entries()) {
+      for (const [oi, opt] of recordsOf(f.options).entries()) {
         const label = typeof opt.value === 'string' ? `'${opt.value}'` : `#${oi}`;
         check(
           `object '${objectName}' · field '${fname}' option ${label} visibleWhen`,
@@ -1512,12 +1605,12 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `$select` projection (and, through `&&` short-circuiting, on row data),
     // neither of which this pass can see. Full reasoning in the ledger.
   };
-  for (const action of asArray(stack.actions)) {
+  for (const action of recordsOf(stack.actions)) {
     checkAction('stack', action);
   }
   for (const obj of objects) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
-    for (const action of asArray(obj.actions)) {
+    for (const action of recordsOf(obj.actions)) {
       checkAction(`object '${objectName}'`, action, objectName);
     }
   }
@@ -1529,7 +1622,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // test can tell this receiver apart from the VALIDATION rule one — the two
   // are governed by different schemas, and a scan that merged them would let a
   // key declared by either schema pass on both (#5017).
-  for (const sharingRule of asArray(stack.sharingRules)) {
+  for (const sharingRule of recordsOf(stack.sharingRules)) {
     const ruleObj = typeof sharingRule.object === 'string' ? sharingRule.object : undefined;
     const where = `sharingRule '${(sharingRule.name as string) ?? '?'}'${ruleObj ? ` (${ruleObj})` : ''} condition`;
     // `condition` is the authored key `SharingRuleSchema` declares. `criteria`
@@ -1544,7 +1637,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   // A lifecycle hook's `condition` skips the handler when false; it is
   // evaluated against the record, so a bare ref silently makes the hook
   // run on every record (or never) instead of the intended subset.
-  for (const hook of asArray(stack.hooks)) {
+  for (const hook of recordsOf(stack.hooks)) {
     const hookName = (hook.name as string) ?? '?';
     if (typeof hook.object === 'string') {
       check(`hook '${hookName}' (${hook.object}) condition`, hook.condition, hook.object, 'record');

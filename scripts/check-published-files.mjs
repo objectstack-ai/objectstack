@@ -50,6 +50,11 @@
 //   GATED       `exports` exists and names something (#12879). `files` decides
 //               what SHIPS; `exports` decides what a consumer may RESOLVE of
 //               what shipped, and without it those two are the same set.
+//   ANNOUNCED   a package whose resolvable surface NARROWS relative to the
+//               merge base -- a map added to a manifest that already published
+//               without one, or a subpath dropped from an existing map -- says
+//               so in a `minor` changeset naming the deep paths that stop
+//               resolving (#15715, #15589 option B as ruled B1).
 //
 // GATED, and the census control that keeps it honest (#12879)
 // ----------------------------------------------------------
@@ -101,11 +106,101 @@
 // accident is worse than one with a stated boundary. What ships from dist/ is
 // the build's business; this guard is about source leaking past it.
 
+// ANNOUNCED, and why it is the only clause here that reads history (#15715)
+// ------------------------------------------------------------------------
+//
+// GATED above asserts the map EXISTS. It is silent on the transition, and the
+// transition is where the damage is: 17.3.0 added a map to `@objectstack/cli`,
+// which had published without one, and every deep path a consumer had reached
+// through `dist/` stopped resolving at once. Two out-of-repo repos found out
+// after publish, during an upgrade -- cloud's `objectos-runtime` (#13662) and
+// hotcrm's hook-body harness (#15325). Nothing here could have gone red: an
+// `exports` map is a PACKAGING contract, and inside this monorepo nothing is
+// sealed, because every in-repo consumer reaches any file through a relative
+// import, a vitest alias or a `paths` entry.
+//
+// #15589 left two independent halves. Option A imports the missing knowledge
+// from outside -- `packages/qa/downstream-contract/consumer-specifiers.ledger.json`
+// records the specifiers NAMED out-of-repo consumers import, and a test resolves
+// each from a packed tarball. This is the other half, and its whole value is
+// that it does NOT depend on that ledger being complete: it fires on the PR
+// that narrows the surface, whether or not anyone has written the consumer
+// down. A red here is not "you broke a listed consumer" -- it is "you are
+// about to publish a narrowing nobody announced".
+//
+// BORN-SEALED IS NOT A NARROWING, and that distinction is the whole clause.
+// A package born with a map seals nobody: there is no published predecessor
+// whose consumers could have been deep-importing it. Measured over this repo
+// when #15715 was filed: 69 publishable packages declare a map, introduced by
+// 51 commits -- but 56 of those packages were born with it and only 13 were
+// retrofitted, from 7 commits. A clause that fires on all 51 would demand a
+// consumer note 44 times from packages that had no consumers and no deep paths
+// that stopped resolving, and every one of those 44 lands on a new-package PR,
+// where the demand is least likely to be read and most likely to be discharged
+// with boilerplate. A gate answered by boilerplate 44 times out of 51 has
+// stopped being read by the 7th time it matters. So the clause discriminates,
+// and the ruling on #15715 (B1) is what it implements.
+//
+// THE DISCRIMINATOR IS A BASE-vs-HEAD COMPARISON, deliberately -- the same
+// shape `check-adr-0087-registration --base` already uses here, and ⛔ NOT
+// `git log -S` archaeology, which would make the verdict depend on history
+// this gate has no business reading. It looks at exactly two trees:
+//
+//   package.json absent at the merge base            -> BORN, passes
+//   present but private/unnamed at the merge base    -> BORN, passes
+//     (no published predecessor either -- a package going public for the
+//      first time seals nobody, and gating it is the 44-false-positive shape)
+//   present and publishable, no map there, map here  -> RETROFIT, gated
+//   subpath in the base map, absent here             -> REMOVAL, gated
+//   anything else (unchanged, or WIDENED)            -> passes
+//
+// WHAT THE ANNOUNCEMENT MUST SAY. A `minor`-or-greater changeset on that
+// package, whose body NAMES deep paths that stop resolving -- checked against
+// the head map rather than for a form of words, which is what keeps it from
+// being dischargeable with boilerplate. For a removal, every dropped subpath
+// must be named. For a retrofit, at least one deep specifier of the package
+// must be named that the new map genuinely does NOT resolve: writing
+// `@objectstack/cli/console` when `./console` is in the map does not satisfy
+// it, because that path still resolves and naming it tells a consumer nothing.
+// The specifier a consumer actually wrote (`@objectstack/cli/dist/utils/console.js`)
+// does satisfy it, and is the sentence #13662 needed and never got.
+//
+// ⚠️ ABSENCE IS NEVER A PASS (#4690). This clause reads the base through git,
+// and every way that read can fail -- no `origin/main`, no merge base, an
+// unreadable `.changeset/` -- makes EVERY package look born-sealed and the
+// whole clause vacuously green. That is the failure this repo keeps paying
+// for, so each of those is a REFUSAL that names itself, never a skip, and the
+// base read carries its own census control (BASE_READ_FLOOR) exactly as GATED
+// carries EXPORTS_CENSUS_FLOOR. In CI the base comes from `Lint & Repo Gates`
+// checking out at `fetch-depth: 0` (.github/workflows/lint.yml) -- that is
+// what makes actions/checkout fetch `+refs/heads/*:refs/remotes/origin/*` so
+// `origin/main` exists at all, and on a `pull_request` event the merge base
+// with the merge-ref HEAD lands exactly on the PR's branch point.
+//
+// The HEAD side is read from the WORKING TREE, not from a rev, so the clause
+// fires on an uncommitted retrofit too -- before the commit rather than after
+// the push. In CI the two are the same tree.
+
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
+// The changeset frontmatter parser is REUSED, never re-typed. Four readers of
+// one block must agree on what counts as a declaration (#7004), and
+// check-empty-changeset's self-test asserts that agreement byte-for-byte across
+// all of them -- a fifth private copy here would be outside that assertion. The
+// module is entry-guarded, so importing it runs no gate (its own I1 case).
+import { parseChangeset } from './check-adr-0087-registration.mjs';
+
+// ⛔ Nothing in this file is `export`ed, deliberately. Its top level RUNS the
+// gate, and `check:entry-guard`'s second rule is that a `scripts/**` file which
+// exports a binding can be imported for it — whereupon this gate's `process.exit`
+// lands inside the importer. The self-test below is in the same module and calls
+// these helpers directly, so exporting them would buy nothing and owe an entry
+// guard around ~200 lines of top-level dispatch.
 import {
   readWorkspaceGlobs,
   selfTest as workspaceEnumeratorSelfTest,
+  workspaceEnumeratorFloorFailures,
   workspacePackageDirs,
 } from './workspace-enumerator.mjs';
 
@@ -417,6 +512,278 @@ function exportsVerdict(manifest) {
   return { ok: true };
 }
 
+// -- ANNOUNCED: the base-vs-HEAD discriminator (#15715) ----------------------
+//
+// Every function in this section is PURE -- it takes the two manifests and the
+// changeset texts and returns a verdict. The git reads that supply them are the
+// section after it, kept apart on purpose: the four cells the ruling names are
+// then testable without a repository, and the one thing that needs a real one
+// (does the base read actually reach the base tree) is testable on its own.
+
+/**
+ * The subpath keys a map DECLARES, as `"."` / `"./x"` strings.
+ *
+ * A bare string target, a fallback array and a conditions-only object all
+ * declare the root and nothing else -- Node resolves no subpath through any of
+ * them -- so all three answer `{'.'}` rather than an empty set. An empty set
+ * would read as "this map declared nothing", which is a different fact and one
+ * `exportsVerdict` already refuses.
+ */
+function exportSubpaths(map) {
+  if (typeof map === 'string' || Array.isArray(map)) return new Set(['.']);
+  if (!map || typeof map !== 'object') return new Set();
+  const declared = Object.keys(map).filter((k) => k === '.' || k.startsWith('./'));
+  return new Set(declared.length > 0 ? declared : ['.']);
+}
+
+/**
+ * Does `map` resolve `subpath` (spelled `"."` or `"./x"`)?
+ *
+ * Pattern keys are honoured, because generalising `"./console"` to `"./*"` is a
+ * WIDENING and must not read as a removal. One `*`, prefix + suffix, which is
+ * what Node's subpath-patterns are.
+ */
+function mapResolves(map, subpath) {
+  if (typeof map === 'string' || Array.isArray(map)) return subpath === '.';
+  if (!map || typeof map !== 'object') return false;
+  const declared = Object.keys(map).filter((k) => k === '.' || k.startsWith('./'));
+  if (declared.length === 0) return subpath === '.';
+  if (declared.includes(subpath)) return true;
+  for (const key of declared) {
+    const star = key.indexOf('*');
+    if (star === -1) continue;
+    const prefix = key.slice(0, star);
+    const suffix = key.slice(star + 1);
+    if (subpath.length < prefix.length + suffix.length) continue;
+    if (subpath.startsWith(prefix) && subpath.endsWith(suffix)) return true;
+  }
+  return false;
+}
+
+/**
+ * The four cells, decided from exactly two manifests (#15715, ruled B1).
+ *
+ * @param {string|null} baseText  `package.json` at the merge base, or null when
+ *                                the path does not exist there
+ * @param {object} headManifest   the manifest as it reads now
+ * @returns {{ kind: 'born'|'retrofit'|'removal'|'unchanged'|'ungated-head'|'unreadable-base', lost: string[] }}
+ */
+function narrowingVerdict(baseText, headManifest) {
+  // Cell 1a: no manifest at the base -> the package is born with whatever it
+  // declares. There is no published predecessor, so it seals nobody.
+  if (baseText === null || baseText === undefined) return { kind: 'born', lost: [] };
+  let base;
+  try {
+    base = JSON.parse(baseText);
+  } catch {
+    return { kind: 'unreadable-base', lost: [] };
+  }
+  if (!base || typeof base !== 'object') return { kind: 'unreadable-base', lost: [] };
+  // Cell 1b: present at the base but PRIVATE or unnamed -- npm never published
+  // it, so it has no consumers either. Gating a package on the PR that first
+  // makes it public is the same false positive as gating a new one, and it is
+  // the shape a `private: true` scaffold takes on its way to release.
+  if (!base.name || base.private === true) return { kind: 'born', lost: [] };
+
+  const headGated = exportsVerdict(headManifest).ok;
+  // No usable map at HEAD is GATED's finding, not this clause's: reporting both
+  // would tell one author two different things about one manifest.
+  if (!headGated) return { kind: 'ungated-head', lost: [] };
+
+  // Cell 2: publishable at the base with no usable map there, gated here. Every
+  // deep path a consumer reached through `dist/` stops resolving.
+  if (!exportsVerdict(base).ok) return { kind: 'retrofit', lost: [] };
+
+  // Cell 3: a subpath the base map declared that the head map no longer
+  // resolves. Judged by RESOLUTION, not by key equality, so a widening to a
+  // pattern key is not mistaken for a removal.
+  const lost = [...exportSubpaths(base.exports)]
+    .filter((sub) => !mapResolves(headManifest.exports, sub))
+    .sort();
+  if (lost.length > 0) return { kind: 'removal', lost };
+
+  // Cell 4: unchanged, or widened.
+  return { kind: 'unchanged', lost: [] };
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Every deep specifier of `pkg` a body names, returned as `"./x"` subpaths.
+ *
+ * The body is prose, so the trailing punctuation a sentence puts after a
+ * specifier (`...console.js`, `` `...` ``) is trimmed off the captured path.
+ */
+function deepSpecifiersNamed(body, pkg) {
+  const found = new Set();
+  const re = new RegExp(`${escapeRe(pkg)}\\/([A-Za-z0-9._*-]+(?:\\/[A-Za-z0-9._*-]+)*)`, 'g');
+  let m;
+  while ((m = re.exec(body)) !== null) {
+    const path = m[1].replace(/[.,;:]+$/, '');
+    if (path) found.add(`./${path}`);
+  }
+  return found;
+}
+
+/**
+ * Is the narrowing ANNOUNCED -- a `minor`-or-greater changeset on this package
+ * whose body names deep paths that genuinely stop resolving?
+ *
+ * The second half is checked against the head map rather than against a form of
+ * words. That is the whole anti-boilerplate property: a note that names a path
+ * the new map still resolves has told a consumer nothing, and reads here as
+ * unsatisfied rather than as a note.
+ *
+ * @returns {{ satisfied: boolean, reason: string, missing: string[] }}
+ */
+function announcementVerdict({ pkg, narrowing, headExports, changesets }) {
+  const bumped = changesets.filter((c) =>
+    parseChangeset(c.text).bumps.some((b) => b.pkg === pkg && (b.bump === 'minor' || b.bump === 'major')),
+  );
+  if (bumped.length === 0) return { satisfied: false, reason: 'no-bump', missing: narrowing.lost };
+
+  if (narrowing.kind === 'removal') {
+    // Every dropped subpath must be named, in either spelling an author would
+    // reach for: the map key (`./console`) or the specifier (`<pkg>/console`).
+    const missing = narrowing.lost.filter((sub) => {
+      const asSpecifier = sub === '.' ? pkg : `${pkg}${sub.slice(1)}`;
+      // The BODY, not the whole file: the frontmatter names the package on every
+      // changeset, so reading `c.text` would let the bump line answer the note.
+      return !bumped.some((c) => {
+        const body = parseChangeset(c.text).body;
+        return body.includes(sub) || body.includes(asSpecifier);
+      });
+    });
+    return missing.length > 0
+      ? { satisfied: false, reason: 'unnamed-removal', missing }
+      : { satisfied: true, reason: 'announced', missing: [] };
+  }
+
+  // Retrofit: at least one named deep specifier the new map does NOT resolve.
+  for (const c of bumped) {
+    for (const sub of deepSpecifiersNamed(parseChangeset(c.text).body, pkg)) {
+      if (!mapResolves(headExports, sub)) return { satisfied: true, reason: 'announced', missing: [] };
+    }
+  }
+  return { satisfied: false, reason: 'no-dead-path-named', missing: [] };
+}
+
+// -- ANNOUNCED: the base read, and the control that keeps it honest (#15715) -
+//
+// This is the only history-dependent read in this gate, so it is also the only
+// place it can go vacuously green: every failure mode of the read -- a missing
+// `origin/main`, an absent merge base, a `cat-file` that returns nothing --
+// makes every package look BORN and the clause silently unanimous. So the read
+// is controlled the way GATED's census is, in its own words.
+
+function git(args) {
+  // stderr piped, not inherited: the base read legitimately probes paths that
+  // do not exist at the merge base, and git's "does not exist" on the terminal
+  // would read as though the gate had failed while it is answering its question.
+  return execFileSync('git', args, {
+    cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+function resolveCommit(ref) {
+  try { return git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).trim() || null; } catch { return null; }
+}
+
+function mergeBaseOf(base, head) {
+  try { return git(['merge-base', base, head]).trim() || null; } catch { return null; }
+}
+
+/**
+ * Every path at one rev in a SINGLE `git cat-file --batch`, absent from the map
+ * when it does not exist there. ~80 manifests is ~80 process spawns done the
+ * naive way, on a gate that runs on every PR.
+ */
+function showManyOrNull(rev, paths) {
+  const found = new Map();
+  if (paths.length === 0) return found;
+  let out;
+  try {
+    out = execFileSync('git', ['cat-file', '--batch'], {
+      cwd: ROOT, input: `${paths.map((p) => `${rev}:${p}`).join('\n')}\n`,
+      maxBuffer: 512 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch { return found; }
+  // `<oid> <type> <size>\n<contents>\n` per hit; `<request> missing\n` per miss.
+  let off = 0;
+  for (const path of paths) {
+    const nl = out.indexOf(0x0a, off);
+    if (nl < 0) break;
+    const header = out.subarray(off, nl).toString('utf8');
+    if (header.endsWith(' missing')) { off = nl + 1; continue; }
+    const size = Number(header.split(' ')[2]);
+    if (!Number.isFinite(size)) break;
+    found.set(path, out.subarray(nl + 1, nl + 1 + size).toString('utf8'));
+    off = nl + 1 + size + 1;
+  }
+  return found;
+}
+
+/**
+ * Which of the pending changesets did THIS change introduce or edit?
+ *
+ * ⚠️ Measured, not assumed: an earlier draft of this clause accepted any pending
+ * changeset, and a real subpath removal went GREEN because an unrelated
+ * changeset already on main happened to contain the string `./console` in a
+ * sentence about a different release. The whole stock is ~1300 files of prose
+ * about this repo's own packages, so "some changeset somewhere mentions this
+ * path" is satisfied by accident constantly -- the boilerplate-answered gate
+ * #15715 exists to avoid, arrived at from the other direction.
+ *
+ * The announcement has to come from the change that does the narrowing, so the
+ * subject is the diff: a changeset absent at the merge base, or one whose text
+ * differs from its base copy.
+ */
+function introducedChangesets(all, baseTexts) {
+  return all.filter((c) => baseTexts.get(c.path) !== c.text);
+}
+
+/** Pending changesets in the working tree, or `null` when the directory is unreadable. */
+function pendingChangesets() {
+  const dir = join(ROOT, '.changeset');
+  if (!existsSync(dir)) return null;
+  const out = [];
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  for (const e of entries) {
+    // Non-recursive, so the consumed prerelease stock under `.changeset/pre/`
+    // is skipped by construction, as is README.md (documentation, never a
+    // changeset) and config.json.
+    if (!e.isFile() || !e.name.endsWith('.md') || e.name === 'README.md') continue;
+    try { out.push({ path: `.changeset/${e.name}`, text: readFileSync(join(dir, e.name), 'utf8') }); } catch { /* unreadable file */ }
+  }
+  return out;
+}
+
+/**
+ * The base read's census control: did the read actually reach the base tree?
+ *
+ * RELATIVE rather than absolute, unlike EXPORTS_CENSUS_FLOOR, because the
+ * legitimate reason for a package to be missing at the base is that the PR adds
+ * it -- and a PR may add several. What no PR does is more than double the
+ * publishable population, so a read that finds fewer than half of them at the
+ * base did not fail to find new packages: it failed.
+ */
+function baseReadControl({ publishable, foundAtBase }) {
+  if (publishable === 0) return { ok: true, lines: [] };
+  if (foundAtBase >= Math.ceil(publishable / 2)) return { ok: true, lines: [] };
+  return {
+    ok: false,
+    lines: [
+      `read a \`package.json\` at the merge base for ${foundAtBase} of ${publishable} publishable`,
+      'package(s), under half. Every package the base read MISSES reads as born-sealed and',
+      'passes ANNOUNCED, so a broken read makes this clause unanimously green while checking',
+      'nothing (#4690, #15715) -- and no PR adds more publishable packages than the repo',
+      'already had.',
+      'Fix: repair the read. This is the control, not a threshold to tune.',
+    ],
+  };
+}
+
 /**
  * The pattern semantics above are the one part of this guard that can be wrong
  * without any package being wrong -- a matcher that over-matches turns MINIMAL
@@ -440,11 +807,13 @@ function exportsVerdict(manifest) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'the dispatch-gates declaration (#10542)': 37,
   'GATED and its census floor (#12879)': 22,
+  'ANNOUNCED: the four base-vs-HEAD cells (#15715)': 26,
+  'ANNOUNCED: what satisfies the announcement (#15715)': 31,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 2;
+const SELF_TEST_BATTERY_FLOOR = 4;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -654,6 +1023,260 @@ function selfTest() {
   // self-test ran and returned nothing.
   expect(enumeratorFailures.length === 0, `the shared workspace enumerator reported ${enumeratorFailures.length} failure(s)`);
   failures.push(...enumeratorFailures);
+  failures.push(...workspaceEnumeratorFloorFailures());
+
+  // ── ANNOUNCED: the four base-vs-HEAD cells (#15715) ───────────────────────
+  battery('ANNOUNCED: the four base-vs-HEAD cells (#15715)');
+  //
+  // The ruling names four cells and each is pinned in BOTH directions, because
+  // the way this clause fails is by answering "born" to everything: a reader
+  // that returns nothing, a base that does not resolve, a verdict that falls
+  // through. Every case below flips when the clause is ablated, which is the
+  // property #15410 asks for -- a self-test that cannot fail is the 179th one
+  // nobody wanted.
+  const HEAD_MAP = { name: '@x/p', exports: { '.': './dist/index.js', './console': './dist/console.js' } };
+  const cellCases = [
+    // Cell 1: born-sealed passes. No manifest at the base at all.
+    ['cell 1 — absent at base is BORN', narrowingVerdict(null, HEAD_MAP).kind, 'born'],
+    [
+      'cell 1b — PRIVATE at base is BORN (npm never published it, so it seals nobody)',
+      narrowingVerdict('{"name":"@x/p","private":true}', HEAD_MAP).kind,
+      'born',
+    ],
+    [
+      'cell 1b — UNNAMED at base is BORN',
+      narrowingVerdict('{"version":"1.0.0"}', HEAD_MAP).kind,
+      'born',
+    ],
+    // Cell 2: retrofit is gated. Publishable at the base, no map there.
+    [
+      'cell 2 — publishable at base with no map, gated here, is a RETROFIT',
+      narrowingVerdict('{"name":"@x/p","version":"1.0.0"}', HEAD_MAP).kind,
+      'retrofit',
+    ],
+    [
+      'cell 2 — an EMPTY map at base is not a map: still a RETROFIT',
+      narrowingVerdict('{"name":"@x/p","exports":{}}', HEAD_MAP).kind,
+      'retrofit',
+    ],
+    // Cell 3: subpath removal is gated.
+    [
+      'cell 3 — a subpath declared at base and unresolvable here is a REMOVAL',
+      narrowingVerdict('{"name":"@x/p","exports":{".":"./d.js","./console":"./c.js","./hook":"./h.js"}}', HEAD_MAP).kind,
+      'removal',
+    ],
+    [
+      'cell 3 — the REMOVAL names exactly the lost subpath',
+      narrowingVerdict('{"name":"@x/p","exports":{".":"./d.js","./console":"./c.js","./hook":"./h.js"}}', HEAD_MAP).lost.join(','),
+      './hook',
+    ],
+    // Cell 4: unchanged passes -- and so does WIDENING, in both spellings.
+    [
+      'cell 4 — an identical map is UNCHANGED',
+      narrowingVerdict(JSON.stringify(HEAD_MAP), HEAD_MAP).kind,
+      'unchanged',
+    ],
+    [
+      'cell 4 — ADDING a subpath is a widening, not a narrowing',
+      narrowingVerdict('{"name":"@x/p","exports":{".":"./dist/index.js"}}', HEAD_MAP).kind,
+      'unchanged',
+    ],
+    [
+      'cell 4 — generalising a subpath to a PATTERN is a widening, not a removal',
+      narrowingVerdict(
+        '{"name":"@x/p","exports":{".":"./d.js","./console":"./c.js"}}',
+        { name: '@x/p', exports: { '.': './d.js', './*': './dist/*.js' } },
+      ).kind,
+      'unchanged',
+    ],
+    // The two verdicts that are deliberately NOT this clause's finding.
+    [
+      'a HEAD with no usable map is GATED’s finding, not this one’s',
+      narrowingVerdict('{"name":"@x/p","version":"1.0.0"}', { name: '@x/p' }).kind,
+      'ungated-head',
+    ],
+    [
+      'a base manifest that does not parse is refused, never read as born',
+      narrowingVerdict('{ not json', HEAD_MAP).kind,
+      'unreadable-base',
+    ],
+  ];
+  for (const [label, actual, expected] of cellCases) {
+    expect(actual === expected, `ANNOUNCED ${label}: got "${actual}", expected "${expected}"`);
+  }
+
+  // `mapResolves` decides cell 3, so its own semantics are pinned apart from it.
+  const resolveCases = [
+    ['exact subpath', { '.': './d.js', './console': './c.js' }, './console', true],
+    ['absent subpath', { '.': './d.js' }, './console', false],
+    ['pattern covers it', { './*': './dist/*.js' }, './console', true],
+    ['pattern prefix+suffix', { './dist/*.js': './dist/*.js' }, './dist/a.js', true],
+    ['pattern does not cover a different suffix', { './dist/*.js': './x' }, './dist/a.ts', false],
+    ['a bare string target resolves the root only', './dist/index.js', '.', true],
+    ['a bare string target resolves no subpath', './dist/index.js', './console', false],
+    ['a conditions-only object is root-only', { types: './d.ts', default: './d.js' }, '.', true],
+    ['a conditions-only object resolves no subpath', { types: './d.ts', default: './d.js' }, './console', false],
+    ['a fallback array resolves the root only', ['./dist/index.js'], '.', true],
+  ];
+  for (const [label, map, sub, expected] of resolveCases) {
+    expect(mapResolves(map, sub) === expected, `mapResolves(${label}, "${sub}") !== ${expected}`);
+  }
+
+  const subpathCases = [
+    ['an object map lists its subpath keys', { '.': 'a', './x': 'b' }, '.,./x'],
+    ['a conditions-only object is the root', { types: 'a', default: 'b' }, '.'],
+    ['a bare string is the root', './dist/index.js', '.'],
+    ['a fallback array is the root', ['./a.js'], '.'],
+  ];
+  for (const [label, map, expected] of subpathCases) {
+    expect([...exportSubpaths(map)].sort().join(',') === expected, `exportSubpaths: ${label}`);
+  }
+
+  // ── ANNOUNCED: what satisfies the announcement (#15715) ────────────────────
+  battery('ANNOUNCED: what satisfies the announcement (#15715)');
+  //
+  // The anti-boilerplate half. A `minor` bump alone never satisfies it; what
+  // satisfies it is a body naming a path the NEW map does not resolve, checked
+  // against the map rather than against a form of words.
+  const cs = (text) => [{ path: '.changeset/x.md', text }];
+  const RETROFIT = { kind: 'retrofit', lost: [] };
+  const REMOVAL = { kind: 'removal', lost: ['./hook'] };
+  const HEAD_EXPORTS = HEAD_MAP.exports;
+  const verdictOf = (narrowing, changesets) =>
+    announcementVerdict({ pkg: '@x/p', narrowing, headExports: HEAD_EXPORTS, changesets }).reason;
+
+  const announceCases = [
+    ['no changeset at all', RETROFIT, [], 'no-bump'],
+    ['a PATCH changeset is not an announcement', RETROFIT, cs('---\n"@x/p": patch\n---\n\nfix: x\n'), 'no-bump'],
+    [
+      'a minor changeset for a DIFFERENT package does not answer for this one',
+      RETROFIT,
+      cs('---\n"@x/other": minor\n---\n\nnames @x/p/dist/gone.js\n'),
+      'no-bump',
+    ],
+    [
+      'a minor bump whose body names NO dead path is boilerplate, not a note',
+      RETROFIT,
+      cs('---\n"@x/p": minor\n---\n\nSealed the package behind an exports map.\n'),
+      'no-dead-path-named',
+    ],
+    [
+      'naming a path the new map STILL resolves tells a consumer nothing',
+      RETROFIT,
+      cs('---\n"@x/p": minor\n---\n\nConsumers should use @x/p/console.\n'),
+      'no-dead-path-named',
+    ],
+    [
+      'naming a genuinely dead deep path IS the announcement',
+      RETROFIT,
+      cs('---\n"@x/p": minor\n---\n\n@x/p/dist/utils/console.js no longer resolves; use @x/p/console.\n'),
+      'announced',
+    ],
+    [
+      'a MAJOR bump counts as at least minor',
+      RETROFIT,
+      cs('---\n"@x/p": major\n---\n\n@x/p/dist/utils/console.js stops resolving.\n'),
+      'announced',
+    ],
+    ['a removal with no changeset', REMOVAL, [], 'no-bump'],
+    [
+      'a removal whose body names nothing',
+      REMOVAL,
+      cs('---\n"@x/p": minor\n---\n\nTidied the exports map.\n'),
+      'unnamed-removal',
+    ],
+    [
+      'a removal named by its MAP KEY is announced',
+      REMOVAL,
+      cs('---\n"@x/p": minor\n---\n\nDropped "./hook" from the map.\n'),
+      'announced',
+    ],
+    [
+      'a removal named by its SPECIFIER is announced',
+      REMOVAL,
+      cs('---\n"@x/p": minor\n---\n\n@x/p/hook no longer resolves.\n'),
+      'announced',
+    ],
+    [
+      'a removal of TWO subpaths is not answered by naming one',
+      { kind: 'removal', lost: ['./hook', './other'] },
+      cs('---\n"@x/p": minor\n---\n\n@x/p/hook no longer resolves.\n'),
+      'unnamed-removal',
+    ],
+  ];
+  for (const [label, narrowing, changesets, expected] of announceCases) {
+    const got = verdictOf(narrowing, changesets);
+    expect(got === expected, `announcementVerdict — ${label}: got "${got}", expected "${expected}"`);
+  }
+
+  // Only what THIS change wrote can announce what it narrows. The case below is
+  // the one that was measured going wrong: an untouched changeset already on
+  // main, containing the removed subpath in unrelated prose, satisfied a real
+  // subpath removal and the gate went green.
+  const stock = [
+    { path: '.changeset/untouched.md', text: 'mentions ./console in other prose' },
+    { path: '.changeset/edited.md', text: 'new text' },
+    { path: '.changeset/added.md', text: 'brand new' },
+  ];
+  const stockAtBase = new Map([
+    ['.changeset/untouched.md', 'mentions ./console in other prose'],
+    ['.changeset/edited.md', 'the text it had at the base'],
+  ]);
+  const introduced = introducedChangesets(stock, stockAtBase).map((c) => c.path).sort();
+  expect(
+    introduced.join(',') === '.changeset/added.md,.changeset/edited.md',
+    `introducedChangesets returns the ADDED and EDITED ones: got ${introduced.join(',')}`,
+  );
+  expect(
+    !introduced.includes('.changeset/untouched.md'),
+    'an untouched changeset already on main cannot announce this change — it was written about something else, and the stock is ~1300 files of prose about these same packages',
+  );
+  expect(
+    introducedChangesets([], new Map()).length === 0,
+    'introducedChangesets over an empty stock is empty, not everything',
+  );
+
+  const namedCases = [
+    ['a plain specifier', '@x/p/dist/a.js', './dist/a.js'],
+    ['trailing sentence punctuation is trimmed', 'see @x/p/dist/a.js, and', './dist/a.js'],
+    ['a backticked specifier', 'use `@x/p/console` instead', './console'],
+  ];
+  for (const [label, body, expected] of namedCases) {
+    expect(deepSpecifiersNamed(body, '@x/p').has(expected), `deepSpecifiersNamed — ${label}`);
+  }
+  expect(deepSpecifiersNamed('@x/other/dist/a.js', '@x/p').size === 0, 'deepSpecifiersNamed ignores another package');
+
+  // The base-read control, in both directions.
+  const controlCases = [
+    ['a full read passes', { publishable: 69, foundAtBase: 69 }, true],
+    ['a read that found half passes (a PR may add packages)', { publishable: 69, foundAtBase: 35 }, true],
+    ['a read that found NOTHING is the instrument breaking', { publishable: 69, foundAtBase: 0 }, false],
+    ['a read that found a third is the instrument breaking', { publishable: 69, foundAtBase: 23 }, false],
+    ['an empty workspace is not a failure', { publishable: 0, foundAtBase: 0 }, true],
+  ];
+  for (const [label, args, expected] of controlCases) {
+    expect(baseReadControl(args).ok === expected, `baseReadControl — ${label}`);
+  }
+  expect(
+    baseReadControl({ publishable: 69, foundAtBase: 0 }).lines.some((l) => l.startsWith('Fix:')),
+    'baseReadControl refuses with a Fix: line',
+  );
+
+  // ⭐ The reader itself, against THIS repository. Everything above is pure, and
+  // a pure battery cannot tell a working `git cat-file` reader from one that
+  // returns nothing for every path — which is the single shape that makes this
+  // whole clause vacuously green, since every unread manifest reads as born.
+  // So the reader is exercised for real, in both directions, at a rev that
+  // always exists.
+  const probe = showManyOrNull('HEAD', ['package.json', 'scripts/no-such-file.probe.json']);
+  expect(probe.has('package.json'), 'the base reader finds a path that EXISTS at HEAD (a reader that finds nothing makes every package read as born-sealed)');
+  expect(!probe.has('scripts/no-such-file.probe.json'), 'the base reader reports a path that does NOT exist at HEAD as absent');
+  let probeName = null;
+  try { probeName = JSON.parse(probe.get('package.json') ?? 'null')?.name ?? null; } catch { probeName = null; }
+  expect(probeName !== null, 'the base reader returns PARSEABLE content, not a truncated or empty blob');
+  expect(mergeBaseOf('HEAD', 'HEAD') !== null, 'mergeBaseOf resolves a rev against itself (the merge-base helper is wired)');
+  expect(resolveCommit('HEAD') !== null, 'resolveCommit resolves HEAD');
+  expect(resolveCommit('refs/heads/no-such-branch-xyz') === null, 'resolveCommit answers null for a ref that does not exist, so an unresolvable --base cannot read as resolved');
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
@@ -711,7 +1334,10 @@ function selfTest() {
       `${forbidden.length} classification case(s), ${declarationCases.length} ` +
       `population-declaration case(s), ${verdictCases.length} \`exports\` verdict case(s), ` +
       `${floorCases.length} census-floor case(s) (floor ${EXPORTS_CENSUS_FLOOR} vs ` +
-      `${liveDeclaring} of ${livePublishable} live) and the shared workspace enumerator's own ` +
+      `${liveDeclaring} of ${livePublishable} live), ${cellCases.length} ANNOUNCED cell case(s), ` +
+      `${resolveCases.length} subpath-resolution case(s), ${announceCases.length} announcement ` +
+      `case(s) and ${controlCases.length} base-read-control case(s) (plus the base reader itself, ` +
+      'exercised against this repository), and the shared workspace enumerator\'s own ' +
       `assertions, over ${liveGlobs.length} live workspace glob(s).`,
   );
 
@@ -732,6 +1358,10 @@ if (process.argv.includes('--self-test')) {
 
 const problems = [];
 const declaredExtrasByPackage = new Map();
+// The publishable manifests as HEAD reads them, kept for the ANNOUNCED clause
+// below: it needs the same population GATED just counted, paired with the path
+// to read at the merge base.
+const headManifests = [];
 let members = 0;
 let publishable = 0;
 let exportsDeclaring = 0;
@@ -750,6 +1380,7 @@ for (const dir of workspaceDirs()) {
   publishable++;
 
   const name = manifest.name;
+  headManifests.push({ dir, name, manifest, manifestPath });
   const lines = [];
 
   // --- GATED ---------------------------------------------------------------
@@ -912,6 +1543,156 @@ if (exportsDeclaring < EXPORTS_CENSUS_FLOOR) {
   });
 }
 
+// --- ANNOUNCED, the base-vs-HEAD clause -------------------------------------
+// Ruled B1 on #15715. Every refusal below is a #4690 refusal: it names itself
+// and reds, because the alternative -- reading an unavailable base as "no
+// package narrowed anything" -- is the vacuous green this clause exists inside
+// a gate that already documents that failure mode for GATED.
+let announcedRan = false;
+{
+  const flagAt = process.argv.indexOf('--base');
+  const requested = flagAt === -1 ? null : process.argv[flagAt + 1];
+  const refuse = (lines) => problems.push({ dir: SELF, name: 'ANNOUNCED base read', lines });
+
+  let baseRef = null;
+  if (requested) {
+    baseRef = resolveCommit(requested);
+    if (!baseRef) {
+      refuse([
+        `\`--base ${requested}\` does not resolve to a commit in this checkout.`,
+        'A base that cannot be resolved is a failure, never a pass (#4690): every package would',
+        'read as born-sealed and ANNOUNCED would pass unanimously without comparing anything.',
+        'Fix: pass a ref this checkout has, or omit --base to use origin/main.',
+      ]);
+    }
+  } else {
+    const ref = ['origin/main', 'main'].find((r) => resolveCommit(r));
+    baseRef = ref ? resolveCommit(ref) : null;
+    if (!baseRef) {
+      refuse([
+        'neither `origin/main` nor `main` resolves in this checkout, so the ANNOUNCED clause has',
+        'no base to compare against and would pass every package by default (#4690).',
+        'In CI this ref comes from `Lint & Repo Gates` checking out at `fetch-depth: 0`',
+        '(.github/workflows/lint.yml), which is what makes actions/checkout fetch',
+        '`+refs/heads/*:refs/remotes/origin/*` so the base branch exists locally at all.',
+        'Fix: `git fetch origin main`, or pass one explicitly: --base <ref-or-sha>.',
+      ]);
+    }
+  }
+
+  const mergeBase = baseRef ? mergeBaseOf(baseRef, 'HEAD') : null;
+  if (baseRef && !mergeBase) {
+    refuse([
+      `\`${requested ?? 'origin/main'}\` and HEAD have no merge base in this checkout, so this`,
+      'clause has no trustworthy starting point. Refusing to fall back to the raw base, and',
+      'refusing to pass by default (#4690) -- a shallow clone whose graft floor is newer than',
+      'the branch point produces exactly this, and answers "nothing narrowed" for every package.',
+      'Fix: deepen the checkout (`git fetch --deepen <n>` / `--unshallow`), or pass a --base',
+      '     this checkout can reach.',
+    ]);
+  }
+
+  const changesets = pendingChangesets();
+  if (mergeBase && changesets === null) {
+    refuse([
+      '`.changeset/` is missing or unreadable, and this clause judges changesets -- a tree where',
+      'they cannot be read would report every narrowing as unannounced, or (worse) be quietly',
+      'lowered to reporting none (#4690).',
+      'Fix: restore the directory, or teach this clause where it moved.',
+    ]);
+  }
+
+  if (mergeBase && changesets !== null) {
+    const basePaths = headManifests.map((h) => h.manifestPath);
+    const baseTexts = showManyOrNull(mergeBase, basePaths);
+    // Only what this change wrote can announce what this change narrows.
+    const baseChangesets = showManyOrNull(mergeBase, changesets.map((c) => c.path));
+    const announcing = introducedChangesets(changesets, baseChangesets);
+
+    const control = baseReadControl({ publishable, foundAtBase: baseTexts.size });
+    if (!control.ok) {
+      problems.push({ dir: SELF, name: 'ANNOUNCED base-read census control', lines: control.lines });
+    } else {
+      announcedRan = true;
+      for (const { dir, name, manifest, manifestPath } of headManifests) {
+        const baseText = baseTexts.has(manifestPath) ? baseTexts.get(manifestPath) : null;
+        const narrowing = narrowingVerdict(baseText, manifest);
+        if (narrowing.kind === 'unreadable-base') {
+          problems.push({
+            dir,
+            name,
+            lines: [
+              `has a \`package.json\` at the merge base (${mergeBase.slice(0, 9)}) that does not parse as`,
+              'JSON, so whether this PR narrows its resolvable surface cannot be decided. Absence of',
+              'an answer is not a pass (#4690).',
+            ],
+          });
+          continue;
+        }
+        if (narrowing.kind !== 'retrofit' && narrowing.kind !== 'removal') continue;
+
+        const announced = announcementVerdict({
+          pkg: name,
+          narrowing,
+          headExports: manifest.exports,
+          changesets: announcing,
+        });
+        if (announced.satisfied) continue;
+
+        const what =
+          narrowing.kind === 'retrofit'
+            ? [
+                'declares an `exports` map that its `package.json` at the merge base did not, so this',
+                'package was PUBLISHED without one. Every deep path a consumer reached through it --',
+                `\`${name}/dist/...\` and anything else outside the new map -- stops resolving on the`,
+                'next release, with no deprecation and no error the consumer can act on until they',
+                'upgrade (#13662, #15325 — both found after publish, by the consumer).',
+              ]
+            : [
+                `no longer resolves ${narrowing.lost.map((l) => `"${l}"`).join(', ')}, which its \`exports\` map`,
+                'declared at the merge base. A subpath removed from a published map is a break for',
+                'whoever imports it, and nothing in this monorepo can observe that: every in-repo',
+                'consumer reaches the file through a relative import, a vitest alias or a `paths`',
+                'entry, so the packaging contract is only exercised off-repo.',
+              ];
+
+        const fix =
+          announced.reason === 'no-bump'
+            ? [
+                `Fix: add a changeset declaring "${name}": minor, and say in its body which deep paths`,
+                '     stop resolving. That text ships to consumers as CHANGELOG.md inside the tarball',
+                '     and is what an upgrading agent greps after ERR_PACKAGE_PATH_NOT_EXPORTED.',
+              ]
+            : announced.reason === 'unnamed-removal'
+              ? [
+                  `Fix: name the dropped subpath(s) in that changeset's body — ${announced.missing.join(', ')}`,
+                  `     — either as the map key or as \`${name}<subpath>\`. A minor bump alone does not`,
+                  '     tell a consumer which import to change.',
+                ]
+              : [
+                  `Fix: name at least one deep specifier of \`${name}\` that the new map does NOT resolve`,
+                  `     (e.g. \`${name}/dist/...\`, the shape a consumer actually wrote). The body names`,
+                  '     only paths the map still resolves, which tells a consumer nothing — that is the',
+                  '     boilerplate answer this clause exists to refuse.',
+                ];
+
+        problems.push({
+          dir,
+          name,
+          lines: [
+            ...what,
+            ...fix,
+            `     If a named out-of-repo consumer imports one of them, ratify it in`,
+            '     packages/qa/downstream-contract/consumer-specifiers.ledger.json as well (#15589',
+            '     option A) — that ledger records WHO imports it; this clause only asks that the',
+            '     narrowing be announced at all.',
+          ],
+        });
+      }
+    }
+  }
+}
+
 if (problems.length > 0) {
   const plural = problems.length === 1 ? 'package publishes' : 'packages publish';
   console.error(`✗ check:published-files — ${problems.length} ${plural} the wrong thing (#4248)\n`);
@@ -937,5 +1718,9 @@ console.log(
     `and admits no test, test-harness config or build script; ${withExtras} publish more ` +
     'than dist/ + README.md + CHANGELOG.md, each with a registered reason; ' +
     `${exportsDeclaring} declare an \`exports\` map gating what of that is resolvable ` +
-    `(census control: floor ${EXPORTS_CENSUS_FLOOR}).`,
+    `(census control: floor ${EXPORTS_CENSUS_FLOOR}); ` +
+    (announcedRan
+      ? 'none narrows its resolvable surface against the merge base without a `minor` changeset ' +
+        'naming the deep paths that stop resolving.'
+      : 'ANNOUNCED DID NOT RUN.'),
 );

@@ -965,7 +965,7 @@ export const TimelineConfigSchema = lazySchema(() => strictObject({
   endDateField: z.string().optional().describe('Field for timeline item end date'),
   titleField: z.string().describe('Field to display as timeline item title'),
   groupByField: z.string().optional().describe('Field to group timeline rows'),
-  colorField: z.string().optional().describe('Field to determine item color'),
+  colorField: z.string().optional().describe('Field to derive each item color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the timeline default marker color'),
   scale: z.enum(['hour', 'day', 'week', 'month', 'quarter', 'year']).default('week').describe('Default timeline scale'),
 }).describe('Timeline view configuration'));
 
@@ -1300,7 +1300,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
   titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
-  colorField: z.string().optional().describe('Field whose value determines the event color'),
+  colorField: z.string().optional().describe('Field to derive each event color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else the calendar theme-aware palette color hashed from the value'),
 }));
 
 /**
@@ -1334,6 +1334,19 @@ export const GanttQuickFilterSchema = lazySchema(() => strictObject({
  * Beyond the core timeline fields, the renderer supports a two-level
  * parent/child hierarchy (parentField/typeField), planned-vs-actual baselines,
  * dynamic grouping, a resource/workload view, hover tooltips and quick filters.
+ *
+ * CLOSED against unknown keys (#15469). This block used to end in
+ * `.passthrough()` so renderer-ahead knobs could reach objectui's plugin-gantt
+ * without a spec release. That window is shut: a `strictObject` applied and
+ * then undone is two contracts on one surface (Prime Directive #12), and a
+ * mistyped key (`colourField`) parsed green and rendered an uncoloured bar —
+ * the exact silent class the calendar / timeline / map blocks already refuse.
+ * The ten members the renderer read through the window
+ * (`GANTT_CONFIG_EXTENSION_KEYS` in objectui `plugin-gantt/src/ObjectGantt.tsx`;
+ * types from `GanttConfigExtensionFields` in `@object-ui/types/zod`, measured
+ * at objectui pin `a472b07`) are declared below under "objectui-lifted
+ * members", each at the type the renderer reads. A renderer knob now needs
+ * its declaration here FIRST.
  */
 export const GanttConfigSchema = lazySchema(() => strictObject({
   surface: 'this gantt configuration',
@@ -1344,7 +1357,7 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   titleField: z.string().describe('Field displayed as the task title'),
   progressField: z.string().optional().describe('Field providing the task completion percentage'),
   dependenciesField: z.string().optional().describe("Field listing the task's predecessor (dependency) record ids"),
-  colorField: z.string().optional().describe('Field that drives the bar color'),
+  colorField: z.string().optional().describe('Field to derive each bar color from (it names a field, not a color): the option color declared on that field for the record value, else the value itself when it already is a color literal (hex, rgb() or hsl()), else a semantic color token derived from the value'),
   // Two-level hierarchy: a parent task id (summary bar) and a row type.
   parentField: z.string().optional().describe('Field holding the parent task id (builds the summary → step tree)'),
   typeField: z.string().optional().describe('Field whose value maps to task/summary/milestone'),
@@ -1364,12 +1377,12 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
     strictObject({
       surface: 'this gantt tooltip field',
       history: VIEW_HISTORY,
-      // ⚠️ The PARENT (`GanttConfigSchema`) is deliberately `.passthrough()` so
-      // renderer-ahead knobs reach plugin-gantt. That openness is the parent's
-      // and does NOT recurse: this entry is a closed `{ field, label }` pair,
-      // which is exactly the shape objectui's `GanttView` tooltip resolver
-      // reads. Closing the entry inside an open parent is the nested hole 批 13
-      // found on `responsive` — strictness is per object, not per subtree.
+      // This entry is a closed `{ field, label }` pair — exactly the shape
+      // objectui's `GanttView` tooltip resolver reads. 批 18 closed it while
+      // the PARENT was still `.passthrough()`, because strictness is per
+      // object, not per subtree (the nested hole 批 13 found on `responsive`);
+      // #15469 closed the parent too, so the whole gantt block is now one
+      // posture.
       aliases: { name: 'field', fieldName: 'field', text: 'label', title: 'label' },
     }, { field: z.string(), label: z.string().optional() }),
   ])).optional().describe('Fields to surface in the hover tooltip, in display order'),
@@ -1383,11 +1396,53 @@ export const GanttConfigSchema = lazySchema(() => strictObject({
   // materialized default would read as an explicit author choice and defeat
   // that seeding (same reasoning as the map block's defaultless `zoom`/`center`).
   viewMode: z.enum(['day', 'week', 'month', 'quarter', 'year']).optional().describe("Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day')"),
-// Forward-compatible: the gantt renderer (objectui plugin-gantt) keeps adding
-// config knobs (e.g. lockField / defaultCollapsedDepth) ahead of this schema.
-// Passthrough lets those extra fields reach the renderer instead of being
-// stripped here, so a renderer release no longer has to wait on a spec release.
-}).passthrough());
+  // ── objectui-lifted members (#15469) ──────────────────────────────────────
+  // The ten keys plugin-gantt read through the former `.passthrough()` window,
+  // declared at the types objectui's `GanttConfigExtensionFields` carries (pin
+  // a472b07) so the two authoring faces derive from ONE vocabulary. All
+  // optional; each describe says what the renderer does with the key.
+  borderColorField: z.string().optional().describe('Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke'),
+  lockField: z.string().optional().describe('Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable'),
+  objectField: z.string().optional().describe("Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object"),
+  summaryExtent: z.enum(['children', 'self']).optional().describe("How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history)"),
+  defaultCollapsedDepth: z.number().int().min(0).optional().describe('Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded'),
+  dependencyTypes: z.boolean().optional().describe('Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start'),
+  timeZone: z.string().optional().describe("Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning"),
+  exportFileName: z.string().optional().describe("Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended"),
+  interactions: strictObject({
+    surface: 'this gantt interactions block',
+    history: VIEW_HISTORY,
+    aliases: { drag: 'move', dependencies: 'link', links: 'link' },
+  }, {
+    move: z.boolean().optional().describe('Bar and subtree dragging along the timeline (default true)'),
+    resize: z.boolean().optional().describe('Edge resize grips that change a duration (default true)'),
+    progress: z.boolean().optional().describe('The progress drag handle (default true)'),
+    link: z.boolean().optional().describe('Dependency UI — the drag-to-link dots and the create/delete menu entries (default true)'),
+  }).optional().describe('Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow'),
+  timeSegments: strictObject({
+    surface: 'this gantt time-segments block',
+    history: VIEW_HISTORY,
+    aliases: { segments: 'bands', shifts: 'bands' },
+  }, {
+    dayStart: z.string().optional().describe("Clock time the shift-day begins, 'HH:mm' (24h); the day column starts here and runs 24h. Renderer default '00:00' (calendar day); for an 08:00 handover set '08:00'"),
+    bands: z.array(strictObject({
+      surface: 'this gantt shift band',
+      history: VIEW_HISTORY,
+      aliases: { name: 'label', title: 'label', from: 'start', to: 'end' },
+    }, {
+      key: z.string().optional().describe("Stable band id (e.g. 'day', 'night'); the renderer defaults to band plus the index"),
+      label: z.string().describe('Display label for the band header (e.g. Day shift, Night shift)'),
+      start: z.string().describe("Band start, 'HH:mm' (24h)"),
+      end: z.string().describe("Band end, 'HH:mm'; when end is not after start the band crosses midnight"),
+      color: z.string().optional().describe('Accent color (any CSS color) for the column tint'),
+    })).describe('Ordered bands covering the 24h shift-day, beginning at dayStart'),
+    showMidnight: z.boolean().optional().describe('Draw the dashed calendar-midnight (00:00) cue inside cross-midnight bands; renderer default true'),
+  }).optional().describe('Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted'),
+// Closed at #15469 (maintainer ruling A on the card, 2026-09-05): the
+// renderer-ahead `.passthrough()` window that used to end this block is shut —
+// an undeclared key is refused with the same named error the sibling view
+// configs give, and a renderer knob is declared HERE before it is read.
+}));
 
 /**
  * Tree (tree-grid) Settings
@@ -1406,8 +1461,12 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
   labelField: z.string().optional().describe('Field rendered indented in the first column (defaults to "name")'),
   fields: z.array(z.string()).optional().describe('Additional fields rendered as flat columns alongside the label'),
   defaultExpandedDepth: z.number().int().min(0).optional().describe('Initial expansion depth (0 = roots only; omit = expand all)'),
-// Forward-compatible: let renderer-ahead config knobs reach plugin-tree.
-}).passthrough());
+// Closed at #15469 (same ruling as the gantt block above): the renderer-ahead
+// `.passthrough()` window is shut. Measured before closing, at objectui pin
+// a472b07: plugin-tree's `getTreeConfig` reads exactly the four keys declared
+// here from the `tree` block — the undeclared read set was EMPTY, so the close
+// declares nothing new and refuses only what no renderer ever read.
+}));
 
 /**
  * Map View Settings
@@ -1428,11 +1487,12 @@ export const TreeConfigSchema = lazySchema(() => strictObject({
  * (same collision, same resolution as `ListChartConfigSchema` vs the
  * `chart.zod.ts` `ChartConfigSchema`).
  *
- * Closed (strict), unlike the gantt/tree blocks: their passthrough exists
- * because those renderers keep adding config knobs ahead of the spec, while
- * the map renderer's read set is itself closed — it validates `schema.map`
- * against a local zod schema with exactly these keys, so an extra key here
- * would be dropped there. Strict means a misspelling is a loud parse error
+ * Closed (strict) from the start: the map renderer's read set is itself closed
+ * — it validates `schema.map` against a local zod schema with exactly these
+ * keys, so an extra key here would be dropped there. The gantt / tree blocks
+ * above used to be this file's two `.passthrough()` exceptions (renderer-ahead
+ * knobs); #15469 closed both, so every view config block here now refuses an
+ * unknown key the same way. Strict means a misspelling is a loud parse error
  * instead of a marker silently falling back to default field names.
  */
 export const ListMapConfigSchema = lazySchema(() => strictObject({

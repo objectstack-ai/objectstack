@@ -213,7 +213,8 @@ import type * as M118 from './studio/object-designer.zod.js';
 import type * as M119 from './studio/plugin.zod.js';
 import type * as M120 from './system/auth-config.zod.js';
 import type * as M121 from './system/cache.zod.js';
-import type * as M122 from './system/change-management.zod.js';
+// M122 was './system/change-management.zod.js' — the change-management family retired whole at
+// #15513 (ADR-0049); the M-indices are positional, so the slot stays vacant.
 import type * as M123 from './system/collaboration.zod.js';
 import type * as M124 from './system/core-services.zod.js';
 import type * as M125 from './system/deploy-bundle.zod.js';
@@ -224,7 +225,8 @@ import type * as M129 from './system/email-template.zod.js';
 import type * as M130 from './system/encryption.zod.js';
 import type * as M131 from './system/environment-artifact.zod.js';
 import type * as M132 from './system/http-server.zod.js';
-import type * as M133 from './system/incident-response.zod.js';
+// M133 was './system/incident-response.zod.js' — the incident-response family retired whole at
+// #15513 (ADR-0049); the M-indices are positional, so the slot stays vacant.
 import type * as M134 from './system/job.zod.js';
 import type * as M135 from './system/license.zod.js';
 import type * as M136 from './system/logging.zod.js';
@@ -241,7 +243,8 @@ import type * as M147 from './system/settings-manifest.zod.js';
 import type * as M148 from './system/supplier-security.zod.js';
 import type * as M149 from './system/tenant.zod.js';
 import type * as M150 from './system/tracing.zod.js';
-import type * as M151 from './system/training.zod.js';
+// M151 was './system/training.zod.js' — the training family retired whole at
+// #15513 (ADR-0049); the M-indices are positional, so the slot stays vacant.
 import type * as M152 from './system/translation.zod.js';
 import type * as M153 from './system/worker.zod.js';
 import type * as M154 from './ui/action-params.zod.js';
@@ -268,9 +271,11 @@ import type * as M170 from './ui/component.zod.js';
 // [#10235] The served sortability projection — new module, next free index.
 import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
+// [#15676] The shared epoch-millisecond instant — new module, next free index.
+import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 826 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 813 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1044,6 +1049,11 @@ export type Iso501 = Assert<Eq< z.input< typeof M114.BaseMetadataRecordSchema >,
 // shared/protection.zod.ts
 export type Iso502 = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer< typeof M115.ProtectionSchema > >>;
 
+// shared/epoch.zod.ts — the shared epoch-millisecond INSTANT (#15676), the
+// first of the two exemptions ruling B on #14478 declares on the schema.
+// `z.number().int()`: no default, no transform, the (RISE) case.
+export type Iso868 = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof M185.EpochMs > >>;
+
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
 // `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
 // or fall together. A `z.enum` has no default or transform, the (RISE) case.
@@ -1083,12 +1093,6 @@ export type Iso522 = Assert<Eq< z.input< typeof M121.CacheStrategySchema >, z.in
 export type Iso523 = Assert<Eq< z.input< typeof M121.CacheInvalidationSchema >, z.infer< typeof M121.CacheInvalidationSchema > >>;
 export type Iso524 = Assert<Eq< z.input< typeof M121.CacheConsistencySchema >, z.infer< typeof M121.CacheConsistencySchema > >>;
 
-// system/change-management.zod.ts
-export type Iso525 = Assert<Eq< z.input< typeof M122.ChangeTypeSchema >, z.infer< typeof M122.ChangeTypeSchema > >>;
-export type Iso526 = Assert<Eq< z.input< typeof M122.ChangeStatusSchema >, z.infer< typeof M122.ChangeStatusSchema > >>;
-export type Iso527 = Assert<Eq< z.input< typeof M122.ChangePrioritySchema >, z.infer< typeof M122.ChangePrioritySchema > >>;
-export type Iso528 = Assert<Eq< z.input< typeof M122.ChangeImpactSchema >, z.infer< typeof M122.ChangeImpactSchema > >>;
-export type Iso529 = Assert<Eq< z.input< typeof M122.RollbackPlanSchema >, z.infer< typeof M122.RollbackPlanSchema > >>;
 
 // system/collaboration.zod.ts
 export type Iso530 = Assert<Eq< z.input< typeof M123.OTOperationType >, z.infer< typeof M123.OTOperationType > >>;
@@ -1145,12 +1149,6 @@ export type Iso563 = Assert<Eq< z.input< typeof M131.Sha256DigestSchema >, z.inf
 // system/http-server.zod.ts
 export type Iso564 = Assert<Eq< z.input< typeof M132.MiddlewareType >, z.infer< typeof M132.MiddlewareType > >>;
 
-// system/incident-response.zod.ts
-export type Iso568 = Assert<Eq< z.input< typeof M133.IncidentResponsePhaseSchema >, z.infer< typeof M133.IncidentResponsePhaseSchema > >>;
-export type Iso569 = Assert<Eq< z.input< typeof M133.IncidentSeveritySchema >, z.infer< typeof M133.IncidentSeveritySchema > >>;
-export type Iso570 = Assert<Eq< z.input< typeof M133.IncidentCategorySchema >, z.infer< typeof M133.IncidentCategorySchema > >>;
-export type Iso571 = Assert<Eq< z.input< typeof M133.IncidentStatusSchema >, z.infer< typeof M133.IncidentStatusSchema > >>;
-export type Iso572 = Assert<Eq< z.input< typeof M133.IncidentSchema >, z.infer< typeof M133.IncidentSchema > >>;
 
 // system/job.zod.ts
 export type Iso573 = Assert<Eq< z.input< typeof M134.IntervalScheduleSchema >, z.infer< typeof M134.IntervalScheduleSchema > >>;
@@ -1260,10 +1258,6 @@ export type Iso644 = Assert<Eq< z.input< typeof M150.SamplingStrategyType >, z.i
 export type Iso645 = Assert<Eq< z.input< typeof M150.TracePropagationFormat >, z.infer< typeof M150.TracePropagationFormat > >>;
 export type Iso646 = Assert<Eq< z.input< typeof M150.OtelExporterType >, z.infer< typeof M150.OtelExporterType > >>;
 
-// system/training.zod.ts
-export type Iso647 = Assert<Eq< z.input< typeof M151.TrainingCategorySchema >, z.infer< typeof M151.TrainingCategorySchema > >>;
-export type Iso648 = Assert<Eq< z.input< typeof M151.TrainingCompletionStatusSchema >, z.infer< typeof M151.TrainingCompletionStatusSchema > >>;
-export type Iso649 = Assert<Eq< z.input< typeof M151.TrainingRecordSchema >, z.infer< typeof M151.TrainingRecordSchema > >>;
 
 // system/translation.zod.ts
 export type Iso650 = Assert<Eq< z.input< typeof M152.FieldTranslationSchema >, z.infer< typeof M152.FieldTranslationSchema > >>;
@@ -1557,7 +1551,10 @@ export type Iso817 = Assert<Eq< z.input< typeof M155.ActionType >, z.infer< type
 // own input ≠ infer (`operator` is normalized on parse — `ViewFilterRuleParsed`
 // exists for exactly that reason), so `ElementNumberPropsParsed` is declared
 // and the pin deleted.
-export type Iso819 = Assert<Eq< z.input< typeof M170.ElementRecordPickerPropsSchema >, z.infer< typeof M170.ElementRecordPickerPropsSchema > >>;
+// `ElementRecordPickerPropsSchema` (Iso819) left the family the same way on
+// #14406 — the LAST record-form `filter` in `ComponentPropsMap`: its `filter`
+// now carries `z.array(ViewFilterRuleSchema)` too, so `ElementRecordPickerPropsParsed`
+// is declared and this pin deleted.
 export type Iso820 = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
 export type Iso821 = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
 // `record:reference_rail` (#8691) — deliberately default-free on the same
@@ -1682,7 +1679,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 826 isomorphic pins', () => {
+  it('still declares all 813 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2113,6 +2110,12 @@ describe('ADR-0122 type-alias convention', () => {
     // `SpecifierValueDomainSchema` became an alias of it, so its own pin
     // (`Iso758`) stays and the two hold or fall together. +1 added.
     //
+    // 825 -> 826 is #15676's `EpochMs` (shared/epoch.zod.ts) — the shared
+    // epoch-millisecond instant that ruling B on #14478 declares as the first
+    // of the duration rule's two structural exemptions. A bare
+    // `z.number().int()` with no default and no transform: the (RISE) case,
+    // one new pin (`Iso868`). +1 added.
+    //
     // 830 -> 828 is #14180's ADR-0049 retirement of the `metadata:changed`
     // event payload (kernel/cluster.zod.ts): `MetadataChangedEventPayloadSchema`
     // — a MUST-emit contract nothing ever produced or consumed, whose
@@ -2133,7 +2136,29 @@ describe('ADR-0122 type-alias convention', () => {
     // `ErrorMappingRuleSchema` and `ConnectorErrorCategorySchema` left whole
     // with the key (whole-def removal, `RETIRED_DEFS_BY_MAJOR[18]`), so the
     // two pins that named them (`Iso381` / `Iso382`) leave with the schemas.
-    expect(pins).toHaveLength(826);
+    //
+    // 826 -> 825 is #14406's ui#6206-B convergence of the LAST record-form
+    // `filter` in `ComponentPropsMap`: `ElementRecordPickerPropsSchema.filter`
+    // now carries `z.array(ViewFilterRuleSchema)`, whose own input ≠ infer
+    // (`operator` is normalized on parse — `ViewFilterRuleParsed` exists for
+    // exactly that reason), so `element:record_picker` left the isomorphic
+    // family the way ADR-0122 prescribes and `element:number` did one entry
+    // earlier: `ElementRecordPickerPropsParsed` declared, the Iso819 pin
+    // deleted. -1 converted to an `XParsed` pair; the Iso number stays vacant
+    // (ids are claims about pins, not positions).
+    // 825 -> 812 is #15513's ADR-0049 whole-family retirement of the
+    // incident-response, training and change-management schemas: the thirteen
+    // isomorphic enums and objects those three modules declared (Iso525–Iso529,
+    // Iso568–Iso572, Iso647–Iso649) left with their defs (whole-def removal,
+    // `RETIRED_DEFS_BY_MAJOR[18]`), so the pins that named them leave with the
+    // schemas; the M122 / M133 / M151 import slots stay vacant.
+    //
+    // 812 -> 813 is this branch's own `EpochMs` (#15676): the shared
+    // epoch-instant schema arrived as module slot M185 with one isomorphic
+    // pin (`Iso868`). The two movements are disjoint — the retirement drops
+    // pins those three modules declared, this adds one no module had — so
+    // the merged count is 825 - 13 + 1.
+    expect(pins).toHaveLength(813);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

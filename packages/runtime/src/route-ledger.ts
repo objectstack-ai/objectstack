@@ -367,7 +367,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: '[#12038] enveloped — the named schema is the `data`: `reassignOrphanedMetadata`\'s declared return, transcribed describe-only. Conformance: spec `api/package-lifecycle.test.ts`' },
   { route: 'POST /packages/:id/duplicate', domain: '/packages', disposition: 'sdk', client: 'packages.duplicate',
     responseSchema: 'DuplicatePackageResponseSchema',
-    note: '[#12038] enveloped — the named schema is the `data`: `duplicatePackage`\'s declared return, transcribed describe-only. ⚠ `data.success` is the operation\'s verdict; the envelope `success` is transport-level and true even for a partial/empty duplicate (the objectui#6593 defect). Conformance: spec `api/package-lifecycle.test.ts`' },
+    note: '[#12038] enveloped — the named schema is the `data`: `duplicatePackage`\'s declared return, transcribed describe-only. ⚠ `data.success` is the operation\'s verdict; the envelope `success` is transport-level and true even for a partial/empty duplicate (the objectui#6593 defect). The SOURCE must be a writable base: a code-loaded or platform/marketplace source is refused 422 `DUPLICATE_SOURCE_NOT_A_BASE` (`requireDuplicableSource`, `domains/packages.ts`), BEFORE the protocol call and therefore before the target package record is minted — `duplicatePackage` installs that record ahead of its copy loop, so refusing any later still left a real, listed, empty shell package behind. ADR-0070 D4 is declared-and-not-built and its object is a BASE, so cloning a code package\'s items would EXTEND D4 rather than implement it; the unbuilt case refuses loudly instead of answering 200 with `copiedCount: 0`, which no caller could tell from a base that really is empty. An empty WRITABLE base still answers 200 / `copiedCount: 0` — that read happened and found nothing. Pinned in `domains/packages-readonly-gate.test.ts`. Conformance: spec `api/package-lifecycle.test.ts`' },
 
   // ── automation ────────────────────────────────────────────────────────────
   { route: 'POST /automation/trigger/:name', domain: '/automation', disposition: 'sdk', client: 'automation.trigger',
@@ -497,7 +497,7 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + '`IHttpServer.setFallbackHandler` (Hono `app.notFound`) that runs only after every registered '
       + 'route has missed, and for paths under this prefix resolves the request\'s environment + '
       + 'identity, probes `metadata.matchEndpoint`, and on a match runs the full chain (#5040 E5b): '
-      + 'the policy keys authRequired / rateLimit / cacheTtl (E4), then target delegation (E5) — '
+      + 'the policy keys authRequired / rateLimit / cacheTtlSeconds (E4), then target delegation (E5) — '
       + '`object_operation` through the same `callData` as /data, `flow` through the automation '
       + 'service. `script` / `proxy` targets and the inputMapping / outputMapping keys are NOT '
       + 'executed and answer 501. A miss (or an occupant of the metadata slot with no matchEndpoint, '

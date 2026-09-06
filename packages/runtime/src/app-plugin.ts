@@ -1094,9 +1094,9 @@ export class AppPlugin implements Plugin {
                                     // branch exactly as before.
                                     return await handler(jobContext);
                                 },
-                                // #3494: thread the authored retryPolicy/timeout to the adapter
-                                (job.retryPolicy || job.timeout)
-                                    ? { retryPolicy: job.retryPolicy, timeout: job.timeout }
+                                // #3494: thread the authored retryPolicy/timeoutMs to the adapter
+                                (job.retryPolicy || job.timeoutMs)
+                                    ? { retryPolicy: job.retryPolicy, timeoutMs: job.timeoutMs }
                                     : undefined,
                             );
                             ok++;
@@ -1152,8 +1152,21 @@ export class AppPlugin implements Plugin {
         }
         
         // 2. Legacy: `manifest.data` (backward compatibility)
+        //
+        // [#15262] The reference guard is what makes the two-location read
+        // safe, and it is the same guard the sibling `translations` collector
+        // in `loadTranslations()` has always carried. On a FLAT bundle —
+        // manifest fields written directly on the bundle, no `manifest:` key,
+        // a shape `AppPlugin` supports by design (see the constructor's
+        // `bundle?.manifest || bundle`) — this base resolves to the bundle
+        // itself, so without the check step 2 re-reads the very array step 1
+        // just contributed and every dataset lands twice. `mergeSeedDatasets`
+        // is a plain `push` with no de-duplication, so both copies reach the
+        // shared registry, the inline loader and every later per-org replay:
+        // for a `mode: 'insert'` dataset that is the row applied twice per
+        // boot, not merely doubled work.
         const manifest = this.bundle.manifest || this.bundle;
-        if (manifest && Array.isArray(manifest.data)) {
+        if (manifest && Array.isArray(manifest.data) && manifest.data !== this.collections.data) {
             seedDatasets.push(...manifest.data);
         }
 
@@ -1790,6 +1803,29 @@ export class AppPlugin implements Plugin {
         if (i18nConfig?.defaultLocale && typeof i18nService.setDefaultLocale === 'function') {
             i18nService.setDefaultLocale(i18nConfig.defaultLocale);
             ctx.logger.debug('[i18n] Set default locale', { appId, locale: i18nConfig.defaultLocale });
+        }
+
+        // [#15694] Thread the declared `i18n.fallbackLocale` the same way, for
+        // the same reason: it is authorable on the stack artifact and this is
+        // the only layer that can see it. A provider CONSTRUCTED with it —
+        // `FileI18nAdapter`, which both boot paths build with
+        // `fallbackLocale || defaultLocale || 'en'` — has no `setFallbackLocale`
+        // (it does have the other two) and is skipped by the probe, keeping the
+        // value it was built with. The
+        // kernel's in-memory fallback (auto-registered above when no i18n
+        // plugin is installed) is constructed with nothing, so without this
+        // line the declaration was INERT there: a stack declaring
+        // `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` answered a
+        // missing `zh-CN` key from `en` under `I18nServicePlugin` and from
+        // `zh-CN` — i.e. not at all — under the fallback.
+        //
+        // Same optional-capability probe as `setDefaultLocale` above, and
+        // guarded on "declared something" for the same reason: several
+        // AppPlugins can share one kernel, and an app that declares no `i18n`
+        // block must not clear a fallback another app declared.
+        if (i18nConfig?.fallbackLocale && typeof i18nService.setFallbackLocale === 'function') {
+            i18nService.setFallbackLocale(i18nConfig.fallbackLocale);
+            ctx.logger.debug('[i18n] Set fallback locale', { appId, locale: i18nConfig.fallbackLocale });
         }
 
         // [#7679] Narrow what `getLocales()` REPORTS to the locales the app

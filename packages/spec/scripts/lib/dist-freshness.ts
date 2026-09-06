@@ -44,33 +44,49 @@
  * carries `schemaTreeIsStale` itself "so EVERY caller is covered rather than
  * this one". Same shape, same reason.
  *
- * ## Why the mtime rule and NOT `dist/.build-input-hash`
+ * ## Why the mtime rule CONVICTS, and what may acquit
  *
- * #7122 suggested reusing the content stamp that `scripts/check-dev-prereqs.mjs`
- * writes. Measured, it is the wrong primitive FOR THIS CONSUMER, in the
- * dangerous direction:
+ * #7122 suggested REPLACING the mtime rule with the content stamp that
+ * `scripts/check-dev-prereqs.mjs` writes. Measured, that swap is wrong FOR THIS
+ * CONSUMER, in the dangerous direction, and it stays rejected:
  *
- *   - The stamp is written by `packages/spec`'s build unconditionally, INCLUDING
- *     under `OS_SKIP_DTS=1` — that build emits JS, leaves whatever `.d.ts` was
- *     there before, and stamps anyway. check-dev-prereqs.mjs lists this as a
- *     known FALSE GREEN and names this gate as the one it breaks; AGENTS.md
- *     §"Added or removed a `packages/spec` export?" says the same in the other
- *     direction ("skips exactly the artifact the gate inspects, and the check
- *     passes locally while failing in CI"). A stamp-based guard would therefore
- *     be green on the one local build flag that guarantees the declarations this
- *     generator reads are stale.
+ *   - `dist/.build-input-hash` is written by `packages/spec`'s build
+ *     unconditionally, INCLUDING under `OS_SKIP_DTS=1` — that build emits JS,
+ *     leaves whatever `.d.ts` was there before, and stamps anyway.
+ *     check-dev-prereqs.mjs lists this as a known FALSE GREEN and names this
+ *     gate as the one it breaks; AGENTS.md §"Added or removed a `packages/spec`
+ *     export?" says the same in the other direction ("skips exactly the artifact
+ *     the gate inspects, and the check passes locally while failing in CI").
  *   - `distIsStale` keys on `dist/**` + `.d.ts` mtimes against `src/**` + `.ts`
  *     — the artifact this generator actually consumes — so it catches the
- *     `OS_SKIP_DTS=1` shape as well as #7122's rebase-behind-the-dist shape.
+ *     `OS_SKIP_DTS=1` shape as well as #7122's rebase-behind-the-dist shape,
+ *     and it sees the hand-edited dist and the toolchain change no digest can.
  *   - It is also the rule the other three consumers already read, so this adds
  *     no second notion of "is packages/spec/dist current"; a second copy drifts,
  *     and the direction it drifts in is the one that writes a confident wrong
  *     baseline (#4675).
  *
- * The stamp's own strength — content, not mtime (#5864) — is real and NOT
- * discarded: it still guards `pnpm dev`. It is simply blind to the half of the
- * dist that this generator is made of. Closing the `OS_SKIP_DTS` hole in the
- * stamp itself is a separate change to a separate script.
+ * What mtimes cannot see is a rewrite that left the BYTES alone, and #14985
+ * measured the cost of that blind spot. A `git merge` re-checks-out an unchanged
+ * `src/**` file, bumping its mtime; the build that follows correctly does not
+ * run (turbo's cache hashes content — measured `>>> FULL TURBO`, 56ms) and
+ * rewrites nothing; every `dist/` mtime stays where the previous build left it,
+ * and this guard refuses a dist that is exactly current. The remedy on offer was
+ * a full rebuild, minutes long and under the shared verify lock, of an artifact
+ * that needed none — and the refusal named `OS_SKIP_DTS` as the cause, which it
+ * was not.
+ *
+ * So the mtime rule keeps its power to CONVICT and gains one way to be answered:
+ * `dist/.build-input-hash-dts`, a sibling stamp written only by a build that
+ * really emitted declarations (`--stamp` skips it under `OS_SKIP_DTS=1`). When
+ * its digest equals the inputs on disk, the declarations demonstrably describe
+ * these sources. That evidence may only ACQUIT — absent or unreadable leaves the
+ * refusal standing — so the change cannot turn a pass into a refusal, and #7122's
+ * shape still convicts because its stamp is the other file.
+ *
+ * The `dist/.build-input-hash` stamp's own strength — content, not mtime (#5864)
+ * — is unchanged and still guards `pnpm dev`; it is simply not the file this
+ * reads.
  *
  * ## Why the caller names ITSELF, and why that is not a third `mode` (#7181)
  *
@@ -97,7 +113,11 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { bundlesAreStale, distIsStale } from '../../../../scripts/check-regen-pending.mjs';
+import {
+  bundlesAreStale,
+  declarationStamp,
+  distIsStale,
+} from '../../../../scripts/check-regen-pending.mjs';
 
 /** What the generator is about to do, so the refusal can name the real damage. */
 export type DistReadMode = 'generate' | 'check';
@@ -219,12 +239,38 @@ export function inspectDistFreshness(
         `   a FALSE GREEN on exactly the change it exists to catch (#7122).`;
 
   const label = packageDirLabel(pkgDir);
+  // Which of the three stale causes this is. Recomputed rather than threaded out
+  // of `distIsStale` because the boolean is the rule's whole contract and the
+  // wording is this file's; the second digest costs ~30ms and is spent only on
+  // the refusal path — the one that used to prescribe a multi-minute rebuild.
+  const stamp = state === 'stale' ? declarationStamp(pkgDir) : { state: 'unstamped' as const };
+  const digests =
+    'recorded' in stamp && stamp.recorded && stamp.actual
+      ? `\n   recorded ${stamp.recorded.slice(0, 16)}… · ${label}/src now hashes to ${stamp.actual.slice(0, 16)}…`
+      : '';
   const cause =
     state === 'missing'
       ? `${label}/dist holds no .d.ts declarations — the package is not built (or was built\n` +
         `   with OS_SKIP_DTS=1, which emits JS and skips exactly the artifact this reads).`
-      : `${label}/dist/**/*.d.ts is OLDER than ${label}/src — the declarations on disk\n` +
-        `   predate the sources. If you built with OS_SKIP_DTS=1, that build did not rebuild them.`;
+      : stamp.state === 'mismatch'
+        ? `${label}/dist/**/*.d.ts describe DIFFERENT sources than the ones on disk. The last\n` +
+          `   build that emitted declarations recorded a build-input digest in\n` +
+          `   ${label}/dist/.build-input-hash-dts, and ${label}/src no longer hashes to it — so this\n` +
+          `   is a real content change, not a timestamp artefact.${digests}`
+        : stamp.state === 'unstamped'
+          ? `${label}/dist/**/*.d.ts is OLDER than ${label}/src, and ${label}/dist/.build-input-hash-dts\n` +
+            `   is absent or unreadable, so there is nothing to check that timestamp against. Either\n` +
+            `   this dist predates that stamp, or the build that wrote it ran with OS_SKIP_DTS=1 and\n` +
+            `   never emitted declarations. One real build settles it and records the stamp, after\n` +
+            `   which a re-checkout that only bumps mtimes stops being refused.`
+          : // `match` while still refusing: the freshness rule and this wording
+            // read the tree at two different instants, so a build that landed
+            // between them arrives here. Say only what was measured — claiming
+            // a missing stamp that is right there is the wrong-cause defect
+            // #14985 was filed for, one branch over.
+            `${label}/dist/**/*.d.ts is OLDER than ${label}/src, while\n` +
+            `   ${label}/dist/.build-input-hash-dts matches those sources. The tree moved between the\n` +
+            `   two readings — most likely a build finished alongside this one. Re-run this check.`;
 
   return {
     fresh: false,
@@ -235,8 +281,9 @@ export function inspectDistFreshness(
       `   Build first, then re-run:\n\n` +
       `     pnpm --filter ${packageName(pkgDir)} build\n` +
       `     ${rerun}\n\n` +
-      `   (Do NOT use OS_SKIP_DTS=1 for this one — AGENTS.md §9 names it as the flag that emits JS\n` +
-      `   and skips exactly the declarations this reads.)`,
+      `   (Build THAT package directly — a repo-wide \`pnpm build\` may be a turbo cache hit that\n` +
+      `   rewrites nothing. And do NOT use OS_SKIP_DTS=1 for this one — AGENTS.md §9 names it as\n` +
+      `   the flag that emits JS and skips exactly the declarations this reads.)`,
   };
 }
 

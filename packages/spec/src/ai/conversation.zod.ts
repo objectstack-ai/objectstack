@@ -14,6 +14,7 @@ import { TokenUsageSchema } from './usage.zod';
  * Message Role
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const MessageRoleSchema = lazySchema(() => z.enum([
   'system',
   'user',
@@ -305,7 +306,19 @@ export const ConversationAnalyticsSchema = lazySchema(() => z.object({
   tokensSavedBySummarization: z.number().int().nonnegative().default(0),
   
   /** Duration */
-  duration: z.number().nonnegative().optional().describe('Session duration in seconds'),
+  // Renamed from `duration` (#15680, ruling B on #14478): the unit lived only in
+  // the describe prose, on a shape whose two neighbouring instants already spell
+  // themselves `firstMessageAt` / `lastMessageAt`. Every other number on this
+  // shape is a COUNT (messages, tokens, events), so the one measurement carrying
+  // a unit was the one key that named none.
+  durationSeconds: z.number().nonnegative().optional().describe('Session duration in seconds'),
+
+  /** Tombstone for the rename above (#15680, ruling B on #14478). */
+  duration: retiredKey(
+    '`ConversationAnalytics.duration` was renamed to `durationSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+    + 'prose. Rename the key to `durationSeconds`; the value (seconds) is unchanged.',
+  ),
   firstMessageAt: z.string().datetime().optional().describe('ISO 8601 timestamp'),
   lastMessageAt: z.string().datetime().optional().describe('ISO 8601 timestamp'),
 }));

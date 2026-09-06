@@ -31,9 +31,12 @@ tags in the public block manifest are accepted, props are checked against each b
 declared inputs, and an unknown tag is a hard error at save time. That is the tier for
 author- or AI-generated pages you have not reviewed.
 
-Those tags are the **registered type names, written verbatim** — lowercase and
-kebab-case, keeping the namespace prefix where a block has one: `<list-view>`,
-`<object-form>`, `<object-chart>`, `<record:related_list>`, `<flex>`. The **PascalCase**
+Those tags are the **registered type names, written verbatim** — whatever the registry
+spells, character for character, including a `record:` / `page:` / `element:` /
+`action:` namespace prefix and any underscore inside the name: `<list-view>`,
+`<object-form>`, `<object-chart>`, `<record:related_list>`, `<record:line_items>`,
+`<flex>`. A name re-spelled to look uniform is not registered: `<record:related-list>`
+is rejected at save time, only `<record:related_list>` exists. The **PascalCase**
 spellings further down this page (`<ListView>`, `<ObjectForm>`, `<ObjectChart>`) are the
 **react tier's** convention and are not registered names, so an html page that borrows
 one is rejected at save time with `<ListView> is not an allowed component`.
@@ -372,7 +375,7 @@ too:
 objectstack validate
 ```
 
-```
+```text transcript=os-validate
 ◆ Validate
 ────────────────────────────────────────
   → Loading configuration...

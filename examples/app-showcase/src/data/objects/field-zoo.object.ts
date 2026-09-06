@@ -14,8 +14,10 @@ import { cel } from '@objectstack/spec';
  * declared as raw `{ type, ... }` literals (the field input is
  * `Omit<Partial<Field>, 'type'>`, so any valid type string is accepted).
  *
- * Relationship types (`lookup`, `master_detail`, `tree`) point at the other
- * showcase objects so $expand and hierarchy resolution have real targets.
+ * Relationship types (`lookup`, `master_detail`) point at the other showcase
+ * objects so $expand has real targets; `tree` points at THIS object — a
+ * `tree` field's `reference` is optional and, if given, must be the declaring
+ * object (#14892), so `f_tree` is the zoo's own parent pointer.
  */
 export const FieldZoo = ObjectSchema.create({
   name: 'showcase_field_zoo',
@@ -105,7 +107,7 @@ export const FieldZoo = ObjectSchema.create({
     // see `f_users` below for the half that a fresh boot cannot seed.
     f_lookups: Field.lookup('showcase_account', { label: 'Lookup → Accounts (multiple)', multiple: true }),
     f_master_detail: Field.masterDetail('showcase_project', { label: 'Master-Detail → Project', required: true }),
-    f_tree: { type: 'tree', label: 'Tree (self/category)', reference: 'showcase_category' },
+    f_tree: { type: 'tree', label: 'Tree (self-reference)', reference: 'showcase_field_zoo' },
 
     // ── User (lookup specialized to sys_user) ────────────────────────────
     // NOT seeded, and deliberately so: `sys_user` rows are created by SIGN-UP,

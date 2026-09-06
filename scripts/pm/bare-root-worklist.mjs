@@ -70,12 +70,14 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import { auditSource } from '../check-watch-hint-literal.mjs';
 import {
   collapseHint,
+  declaredWidePopulation,
   discoverFamilies,
   extractWatchHints,
   hintCovers,
   maskComments,
   maskSelfTests,
   trackedFiles,
+  widePopulationRefusal,
 } from './dispatch-gates.mjs';
 
 const ROOT = new URL('../..', import.meta.url).pathname;
@@ -86,8 +88,35 @@ const ROOT = new URL('../..', import.meta.url).pathname;
  * the derivation, and it is deliberately narrow: it selects the shape an author
  * uses when saying "this is what I walk". Widening it is how this becomes the
  * wide sweep, which is the thing not to build.
+ *
+ * ⚠️ The bare `ROOTS` and `DIRS` were admitted on 2026-09-05 (#15468), and they
+ * are the one widening that makes the restriction MORE faithful to itself
+ * rather than less. Every alternative but `POPULATION` requires a literal
+ * underscore — `[A-Z0-9_]*` may be empty only if an `_` follows it — so
+ * `SCAN_ROOTS` matched and the PLAINEST spelling of the very shape this sweep
+ * exists to find did not. A gate whose author wrote `const ROOTS = [...]` was
+ * invisible to the instrument that reports on invisibility, and no reader of
+ * its output could infer the omission from the output.
+ *
+ * ⛔ It is admitted as two EXACT alternatives, never as `_?` on the two
+ * existing ones. That looser edit reads as the same repair and is not: it also
+ * admits `ROOT`, `DIR` and `SCANROOTS`, and the singular bare `ROOT` is the
+ * commonest name in this tree for a REPO ROOT — one path fragment, the exact
+ * thing this regex exists to exclude. The self-test pins both directions.
+ *
+ * Measured before the widening, on 66e68adc6, which is the half of this the
+ * card asked for and the half a regex edit cannot assert: the two names add 23
+ * rows across 11 gate source files, and the profile is the OPPOSITE of `--wide`
+ * — 21 of the 23 are real populations (a recursive `readdirSync` walk, or
+ * `git ls-files` over the root), 2 are a `label:`/`name:` field beside a
+ * separator-carrying path that was always visible, and NONE is a `join()` path
+ * component in a gate that never reads the root. That profile is why this
+ * widening is not the wide sweep in miniature: `--wide` finds roughly twice the
+ * rows and is overwhelmingly the component shape, and it remains untriaged.
+ * 12 of the 23 land REACHABLE — their gates already declare the root — and the
+ * remaining 11 are listed in `UNJUDGED` below.
  */
-const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[A-Z0-9_]*_SCOPE)$/;
+const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|ROOTS|DIRS|POPULATION|[A-Z0-9_]*_SCOPE)$/;
 
 /**
  * The recorded triage — the half of this file that a human decided and the tree
@@ -297,6 +326,27 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * at a time. ⛔ The gate is not edited from here either: it is correct, and what
  * went stale is the MAP, which recorded less than it judged.
  *
+ * ⭐ A TWENTIETH row was re-decided on 2026-09-05 (#15602) under that same
+ * authorisation sentence and no wider one: `check:declaration-mirrors
+ * SCRIPTS_DIR scripts`. Its refusal named the EXTENSION filter as the thing no
+ * spelling of the idiom describes, which is the identical collapse #12300
+ * retired, and the GATE had already acted on it before this map did: #15601
+ * declared both sides of the mirror beside the constant. So the row went on
+ * asserting that nothing honest was declarable while its own gate declared, and
+ * that pairing is one NO pin in this file reads — the declaration is read back
+ * out of a gate's source only for DECLARED-NARROWER rows, and `contradicted`
+ * fires only on a row the sweep finds REACHABLE, which this one is not, because
+ * neither declared hint reaches an arbitrary file at the top of the root. Green
+ * everywhere, therefore, and correctly so per assertion; the class is caught by
+ * re-measuring and by nothing else, which is what this docblock says of it.
+ * ⛔ Its numbers are re-measured on the 2026-09-05 tree in EVERY term at one
+ * commit and NOT carried from the row they replace — nor from the card that
+ * filed it, nor from that card's triage: the mirror count read 2, then 4, then 5
+ * and the module-side reach 214, then 216, then 218 across the filing, the
+ * triage and this fix in under two days. Three readings of three trees is the
+ * drift this docblock permits; pairing any one of those numerators with another
+ * reading's denominator is the defect it forbids, and the spread is why.
+ *
  * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
  * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
  * `check-skills-token-ratchet`'s walk RECURSIVE over whole skill directories, so
@@ -460,6 +510,22 @@ const SPELLINGS = new Map([
     holds: (s) => s[0] === 'scripts'
       && ((s.length === 2 && (s[1].endsWith('.mjs') || s[1].endsWith('.mts')))
         || (s.length === 3 && s[1] === 'pm' && s[2].endsWith('.mjs'))),
+  }],
+  ['scripts declaration mirrors and their modules', {
+    // BOTH sides of the mirror, because that is what the gate DECLARES: its walk
+    // discovers the declaration side by extension, and the pair check imports the
+    // module sitting beside each one, so either side moving breaks the mirror.
+    // The module-side hint over-names heavily and the row records by how much --
+    // recording anything narrower HERE would be a claim about a declaration
+    // nobody made, which the declaration pin below refuses in both directions,
+    // and the same reason the driver entry above records a whole subtree.
+    segments: [
+      ['scripts', '**', '*.d.mts'],
+      ['scripts', '**', '*.mjs'],
+    ],
+    claim: 'every hand-written declaration file or ESM module at any depth under the scripts root',
+    holds: (s) => s[0] === 'scripts' && s.length >= 2
+      && (s[s.length - 1].endsWith('.d.mts') || s[s.length - 1].endsWith('.mjs')),
   }],
 ]);
 
@@ -665,6 +731,48 @@ const TRIAGE = new Map([
       + 'nested script at any depth" this row carried until 2026-09-04 was true of the walk it '
       + 'was written about and false of this one',
   }],
+  ['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {
+    verdict: 'DECLARED-NARROWER',
+    spelling: 'scripts declaration mirrors and their modules',
+    why: 'RE-DECIDED 2026-09-05 (#15602) from REFUSE-UNSPELLABLE, whose stated reason — "what '
+      + 'cannot be spelled here is the EXTENSION filter" — was TRUE when written and is FALSE of '
+      + 'this tree. It rested on the collapse #12300 retired: judgedAsPattern routes a glob in a '
+      + 'non-final segment to triggerCovers now, so a population admitted BY EXTENSION under a '
+      + 'root became expressible and precise. That is the same retired collapse the seventeen '
+      + 'rows of 2026-08-26, the eighteenth of 2026-08-29 and the nineteenth of 2026-09-01 were '
+      + 'each re-decided under, and this row is re-decided under that authorisation sentence and '
+      + 'no wider one. ⛔ The verdict is NOT kept for having been the one recorded, and the three '
+      + 'alternatives were read off this map own vocabulary rather than inherited: '
+      + 'REFUSE-UNSPELLABLE asserts NO spelling of the idiom describes the population, and the '
+      + 'gate itself now spells one in its own source, so that refusal is false at the one place '
+      + 'it is checkable; SPELLABLE-UNDECLARED is the row whose gate declares NOTHING for the '
+      + 'population and nothing here is deferred; REFUSE-WIDE would need the population to BE the '
+      + 'root, and it is not. What is left is the verdict this shape is defined as — the gate '
+      + 'took the escape at a strictly narrower subtree — which #15601 landed beside SCRIPTS_DIR '
+      + 'under the ROOT_DIR_WATCH_HINTS idiom, ⛔ and this row does NOT edit that gate: the gate '
+      + 'is correct and the MAP is what went stale. RE-MEASURED 2026-09-05 at commit e581457b, '
+      + 'every term taken in ONE call on ONE tree and never refreshed apart: the walk discovers 5 '
+      + 'declaration files by extension and the pair check imports the 5 modules beside them, so '
+      + 'the gate opens 10 of the 336 tracked files under the bare root, 3.0%. The declared '
+      + 'mirror-side hint reaches 5 and the gate reads all 5, 100% precise; the module-side hint '
+      + 'reaches 218 and the gate reads 5 of them, 2.3%. That second figure is the price of '
+      + 'keeping the module side declared without a hand list of today pairs — the gate own '
+      + 'docblock prices it at ~1.6 s of fleet compute per 36 cards and takes the over-naming '
+      + 'trade deliberately — and it is RECORDED here rather than refused, the same direction the '
+      + 'driver package files entry records for its subtree. ⚠️ It is not what the PRECISION pin '
+      + 'below measures: that pin asks whether the recorded claim and hintCovers admit the SAME '
+      + 'files, and they do — 0 over-named, 0 missed, 223 of 336 covered, so the union is LIVE, '
+      + 'PRECISE and COMPLETE and a real narrowing rather than the bare root wearing a glob. The '
+      + 'recorded set is SET-EQUAL in BOTH directions to the array the gate declares at this '
+      + 'root, so no hint is passed over and this row carries no omits. ⛔ The previous reading, '
+      + '2 of 261, is superseded WHOLE and neither term is carried forward, which this docblock '
+      + 'forbids by name — nor are the filing card 4 of 214 or its triage 4 of 216: all three '
+      + 'readings are of trees that are gone, a FIFTH mirror pair having landed since, and the '
+      + 'spread is the argument for taking them together rather than a discrepancy. The row STAYS '
+      + 'in the sweep because the bare root is still not covered — a top-level script carrying '
+      + 'any other extension satisfies neither hint, so no arbitrary file at the top of the root '
+      + 'is reached — which is what this verdict says and is correct, not outstanding debt',
+  }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['scripts/check-skill-identifier-liveness.mjs IMPL_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
@@ -778,20 +886,6 @@ const TRIAGE = new Map([
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
   // ── Refused: the population is a filter the idiom cannot spell ────────────
-  ['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'a RECURSIVE walk admitted by EXTENSION — every `scripts/**/*.d.mts`, 2 of 261 (0.77%), '
-      + 'read from the gate own mirrorFiles(). NOT the shape of the row above it, and measured '
-      + 'here rather than inherited from it: mirrorFiles() descends into every nested directory '
-      + 'and its own docblock says so. What cannot be spelled here is the EXTENSION filter, not a '
-      + 'non-recursive walk — `scripts/**` is spellable and TRUE of this walk, and refused anyway '
-      + 'because it would name this gate for 261 files to reach 2. Same class as the '
-      + 'check:driver-conformance CASE_SETS_DIR row below, so lifting the row-above non-recursive '
-      + 'limit would leave this one exactly as refused. ⚠️ Its former third neighbour, the '
-      + 'check:skills-token-ratchet SKILLS_DIR row, LEFT this class on 2026-08-26 and is no '
-      + 'longer the company it was cited as: #12392 made that walk recursive over whole skill '
-      + 'directories, which is a subtree and not an extension filter',
-  }],
   ['scripts/check-driver-conformance.mjs CASE_SETS_DIR packages', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'a filename pattern inside one directory — 7 of 143 files (4.9%). Its sibling constant '
@@ -1247,6 +1341,138 @@ export const CENSUS_REFUSE_WIDE = new Map([
   }],
 ]);
 
+/**
+ * SEEN, NOT YET JUDGED — the rows the widened recogniser made visible, named
+ * here so the worklist above does not read as complete while they sit outside
+ * it (#15468).
+ *
+ * ⛔ This is NOT a verdict table and NOT an exemption. An entry records exactly
+ * one fact: the sweep SEES this row today and nobody has triaged it. This map
+ * is shrink-only and maintainer-ruled, so the pass that widened the recogniser
+ * may not write `TRIAGE` rows on the maintainer's behalf — and the thing it
+ * must not do INSTEAD is go quiet, which is what an unlisted row would be the
+ * moment someone made `--self-test` green again by any other means. A row that
+ * is seen and unjudged is a fact about this map's own debt; the only dishonest
+ * options are to judge it here or to hide it.
+ *
+ * The `why` is a MEASUREMENT, never a judgement: it says how the literal is
+ * used in the gate's own source, at file:line, which is the reading a triage
+ * decision starts from and the only thing this pass could take honestly. Two
+ * of the eleven are not populations at all — a `label:` / `name:` field beside
+ * a separator-carrying path that was always visible to the derivation — and
+ * recording that is a measurement too, not a pre-judged REFUSE. ⛔ Neither is a
+ * verdict: a row that turns out to name no population still has to be DECIDED,
+ * because the honest outcome for it may be that the recogniser should not have
+ * matched it at all, and that is a decision about this instrument.
+ *
+ * `--self-test` holds this bucket in BOTH directions, the same coupling
+ * `TRIAGE` gets and for the same reason: every key here must still be a live
+ * open row carrying no verdict (nothing outlives what it names), and every live
+ * open row carrying no verdict must be named here (nothing joins the species
+ * unlisted). Set equality, so the bucket cannot rot into an allowlist — it reds
+ * when a row is judged and its key stays, exactly as it reds when a row arrives
+ * and its key is missing. The `base` is the tree the notes were measured on,
+ * shared, and pinned to be shared, the way `CENSUS_REFUSE_WIDE` pins its own.
+ *
+ * ⚠️ Every path in the notes below is DESCRIBED rather than quoted — "a
+ * two-segment path under the content root", not the literal. That is not
+ * fussiness: a separator-carrying literal written here would enter THIS file's
+ * own hint set and name this tool for every card under that root, which is the
+ * trap its own `--self-test` closes by name and which this pass tripped on the
+ * first draft of these notes.
+ */
+export const UNJUDGED = new Map([
+  ['packages/lint/scripts/check-doc-security-posture.mjs ROOTS docs', {
+    population: false,
+    base: '66e68adc6',
+    why: 'the word is the `label` field at check-doc-security-posture.mjs:155, not a walk root: '
+      + 'that entry\'s population is the `path` field one line above it, a two-segment path under '
+      + 'the content root, which carries a separator and has always been visible to the '
+      + 'derivation. The recogniser matched the LABEL because it sits inside the ROOTS span',
+  }],
+  ['packages/lint/scripts/check-doc-security-posture.mjs ROOTS skills', {
+    population: true,
+    base: '66e68adc6',
+    why: '`path: \'skills\'` at check-doc-security-posture.mjs:164, walked recursively by the `walk` '
+      + 'at :189-:193 from the `for (const root of ROOTS)` at :462, for every `.md` file under it '
+      + 'minus the entry\'s own `exclude` list',
+  }],
+  ['scripts/check-doc-frontmatter.mjs ROOTS docs', {
+    population: false,
+    base: '66e68adc6',
+    why: 'the word is the `name` field at check-doc-frontmatter.mjs:436, not a walk root: that '
+      + 'entry\'s directory is a `join(REPO_ROOT, …)` of a two-segment path under the content root '
+      + 'on the next line, and both of this gate\'s roots are separator-carrying paths under that '
+      + 'root, which the derivation already sees',
+  }],
+  ['scripts/check-live-db-isolation.mjs ROOTS apps', {
+    population: true,
+    base: '66e68adc6',
+    why: 'one of `const ROOTS = [\'packages\', \'apps\', \'examples\']` at check-live-db-isolation.mjs:178, '
+      + 'each walked recursively at :278-:282. The gate carries the #15341 `wide-population` marker '
+      + 'at :58 and that marker is read here — but the marker excuses a COVERED row carrying a '
+      + 'recorded verdict, and this row is neither, so it is unjudged rather than declared. The '
+      + 'marker\'s own text records `check:live-db-isolation packages` in CENSUS_REFUSE_WIDE; that '
+      + 'table is keyed on (family, root) and is deliberately not coupled to this sweep (#14695), '
+      + 'and it says nothing about `apps`',
+  }],
+  ['scripts/check-live-db-isolation.mjs ROOTS examples', {
+    population: true,
+    base: '66e68adc6',
+    why: 'the `examples` member of the same walked triple at check-live-db-isolation.mjs:178, with '
+      + 'the same #15341 marker at :58 and the same reading — the marker resolves a contradiction '
+      + 'between a declaration and a verdict, and this row has neither. No CENSUS row names '
+      + '`examples` either',
+  }],
+  ['scripts/check-live-db-isolation.mjs ROOTS packages', {
+    population: true,
+    base: '66e68adc6',
+    why: 'the `packages` member of the same walked triple at check-live-db-isolation.mjs:178. This '
+      + 'is the one of the three that IS judged somewhere: `check:live-db-isolation packages` is a '
+      + 'recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE, at 90.3% of tracked packages/ files. It is '
+      + 'listed here anyway because that table is a different key space this sweep cannot produce, '
+      + 'and reading a census row as a sweep verdict is the coupling #14695 refused by name',
+  }],
+  ['scripts/check-vendor-version-stamps.mjs ROOTS apps', {
+    population: true,
+    base: '66e68adc6',
+    why: 'one of the four bare `path:` entries of `export const ROOTS` at '
+      + 'check-vendor-version-stamps.mjs:232, read by `collectFiles()` at :916 and walked '
+      + 'recursively at :885-:890 for the entry\'s own extension list',
+  }],
+  ['scripts/check-vendor-version-stamps.mjs ROOTS examples', {
+    population: true,
+    base: '66e68adc6',
+    why: 'the `examples` entry of the same walked list at check-vendor-version-stamps.mjs:232, on '
+      + 'the same `collectFiles()` walk',
+  }],
+  ['scripts/check-vendor-version-stamps.mjs ROOTS packages', {
+    population: true,
+    base: '66e68adc6',
+    why: 'the `packages` entry of the same walked list at check-vendor-version-stamps.mjs:232, on '
+      + 'the same `collectFiles()` walk',
+  }],
+  ['scripts/check-vendor-version-stamps.mjs ROOTS scripts', {
+    population: true,
+    base: '66e68adc6',
+    why: 'the `scripts` entry of the same walked list at check-vendor-version-stamps.mjs:232, on '
+      + 'the same `collectFiles()` walk. The gate\'s fifth root is a two-segment path under the '
+      + 'content root, which carries a separator and was already visible',
+  }],
+  ['scripts/check-whole-set-label-write.mjs ROOTS scripts', {
+    population: true,
+    base: '66e68adc6',
+    why: 'the third member of `export const ROOTS` at check-whole-set-label-write.mjs:152 — the '
+      + 'other two are workflow and action directories under the dotted github root, which carry a '
+      + 'separator and were already visible — walked at :492-:496. ⚠️ This gate already DECLARES at '
+      + 'this root and the declaration is strictly NARROWER: `ROOT_DIR_WATCH_HINTS` at :193 is three '
+      + 'recursive extension globs under the root (mjs, ts, sh), which is why `covered` still reads '
+      + 'false and the row stays open. That is the measured shape of a verdict this file already '
+      + 'defines, and naming which one is still the maintainer\'s call rather than this pass\'s',
+  }],
+]);
+
+
 // ---------------------------------------------------------------------------
 // The sweep — derived at runtime. Nothing below is listed in this file.
 // ---------------------------------------------------------------------------
@@ -1345,7 +1571,14 @@ export function sweep(families, files, { restrict = true } = {}) {
     for (const file of entry.files ?? []) {
       const abs = join(ROOT, file);
       if (!existsSync(abs)) continue;
-      const body = maskSelfTests(maskComments(readFileSync(abs, 'utf8')));
+      // The RAW source, read once and used twice. The literal sweep below needs
+      // it masked; the `wide-population` marker (#15341) is a COMMENT, so it
+      // only exists in the unmasked text -- reading it off `body` would find
+      // nothing, every row would read as undeclared, and the acceptance below
+      // would be silently vacuous rather than measurably so.
+      const raw = readFileSync(abs, 'utf8');
+      const wideDeclared = declaredWidePopulation(raw) !== null;
+      const body = maskSelfTests(maskComments(raw));
       const spans = restrict ? populationSpans(body) : [];
       for (const { word, index } of bareRootLiterals(body, dirs)) {
         let constant = null;
@@ -1355,7 +1588,7 @@ export function sweep(families, files, { restrict = true } = {}) {
           constant = span.name;
         }
         const key = restrict ? rowKey({ file, constant, word }) : `${file} ${word}`;
-        if (!byKey.has(key)) byKey.set(key, { file, constant, word, checks: [], coveringChecks: 0, key });
+        if (!byKey.has(key)) byKey.set(key, { file, constant, word, checks: [], coveringChecks: 0, key, wideDeclared });
         const row = byKey.get(key);
         if (row.checks.includes(check)) continue;
         row.checks.push(check);
@@ -1366,6 +1599,47 @@ export function sweep(families, files, { restrict = true } = {}) {
   return [...byKey.values()]
     .map((r) => ({ ...r, checks: r.checks.sort(), covered: r.coveringChecks === r.checks.length }))
     .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/**
+ * The rows a recorded verdict CONTRADICTS — pure, so the live sweep and the
+ * fixture cases beside it cannot disagree about what a contradiction IS.
+ *
+ * A row is contradicted when the sweep now finds it REACHABLE and a verdict is
+ * still recorded for it: the row then asserts both that the population is
+ * reachable by declaration and, in its own recorded reason, that it is not.
+ *
+ * ## The `wide-population` marker is the deliberate-declaration form (#15341)
+ *
+ * The message below has always offered two honest resolutions, and the second
+ * is "withdraw the VERDICT, if the declaration is deliberate". That resolution
+ * cost the row: withdrawing a verdict on a shrink-only map leaves the row
+ * printing REACHABLE with no reason under it, and a refusal that was measured
+ * per row stops being readable anywhere. Maintainer ruling, 2026-09-05
+ * (decision batch #43, verbatim reply 「同意」): `dispatch-gates.mjs` gains a
+ * third derivation channel, `wide-population`, the refused families move onto
+ * it, and ⛔ this file's rows are NOT deleted.
+ *
+ * So the marker IS that deliberate-declaration form, and it resolves the
+ * contradiction without withdrawing anything: a gate carrying it has declared,
+ * in its own source, the very fact the verdict records — that CI runs it over a
+ * population no subtree glob places. The two halves stop contradicting because
+ * they are now the same statement said twice, in the two places that need it,
+ * and the row keeps its measured reason where a reader can still find it.
+ *
+ * ⛔ What it is NOT is an escape from the refusal it accompanies. A gate that
+ * declares a real subtree hint reaching an arbitrary file at the top of the
+ * root is contradicted exactly as before, marker or no marker — that gate has
+ * taken the declaration the verdict refused, which is the FIRST resolution and
+ * a different decision. The marker resolves the pair only by agreeing with the
+ * verdict; a hint disagrees with it, and disagreement is what this assertion is
+ * for.
+ */
+export function contradictedRows(rows, triage = TRIAGE) {
+  return rows
+    .filter((r) => r.covered && triage.has(r.key) && !r.wideDeclared)
+    .map((r) => `${r.key} [recorded ${triage.get(r.key).verdict}]`)
+    .sort();
 }
 
 function report({ wide = false } = {}) {
@@ -1395,7 +1669,14 @@ function report({ wide = false } = {}) {
   );
   for (const r of rows) {
     const t = TRIAGE.get(r.key);
-    const state = r.covered ? 'REACHABLE' : (t ? t.verdict : '⛔ UNTRIAGED');
+    // UNJUDGED is a state of its own and NOT a quieter spelling of UNTRIAGED:
+    // it says a human has seen this row and owes it a verdict, where UNTRIAGED
+    // says nobody has seen it at all. Keeping the loud one for anything the
+    // bucket does not name is what stops the bucket from absorbing the next
+    // arrival silently — that row still prints ⛔ and still reds --self-test.
+    const state = r.covered
+      ? 'REACHABLE'
+      : (t ? t.verdict : (UNJUDGED.has(r.key) ? 'UNJUDGED' : '⛔ UNTRIAGED'));
     // The invocation count, never the invocations: a row folds every family CI
     // reaches this literal through, and the count is what says so without
     // putting an argv back on a line the key deliberately keeps it off.
@@ -1403,11 +1684,27 @@ function report({ wide = false } = {}) {
     console.log(`  ${state.padEnd(19)} ${r.key}${folded}`);
     if (t) console.log(`  ${' '.repeat(19)}   ${t.why}`);
   }
-  const untriaged = open.filter((r) => !TRIAGE.has(r.key));
+  const unjudged = open.filter((r) => !TRIAGE.has(r.key) && UNJUDGED.has(r.key));
+  const untriaged = open.filter((r) => !TRIAGE.has(r.key) && !UNJUDGED.has(r.key));
   console.log(
     `\n${untriaged.length} untriaged row(s). Every verdict above is a judgement recorded once, `
       + 'not a rule; the sweep itself is re-derived from the tree on every run.',
   );
+
+  console.log(
+    `\n${unjudged.length} UNJUDGED row(s) (#15468) — SEEN by this sweep and judged by nobody. `
+      + 'The constant-name recogniser was widened to admit the bare `ROOTS` / `DIRS` spellings, '
+      + 'these rows became visible with it, and writing a verdict for them belongs to whoever owns '
+      + 'this map — it is shrink-only, so the pass that made them visible may not judge them. They '
+      + 'are printed here, rather than left to sit unmentioned among the rows above, because the '
+      + 'failure this file exists to prevent is a debt list that READS as complete. ⛔ Each note is '
+      + 'a measurement of how the literal is used in its gate, never a judgement of it:',
+  );
+  for (const r of unjudged) {
+    const u = UNJUDGED.get(r.key);
+    console.log(`  ${(u.population ? 'population' : 'NOT a population').padEnd(19)} ${r.key}`);
+    console.log(`  ${' '.repeat(19)}   ${u.why}`);
+  }
 
   console.log(
     `\n${CENSUS_REFUSE_WIDE.size} CENSUS row(s) — found by #14325's wider fs-trace census, not by `
@@ -1448,8 +1745,8 @@ function report({ wide = false } = {}) {
 // a section head would be a source change this batch does not make, and leaving
 // them unattributed reds by the set difference below, which is the point.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'The FOLD: one row per literal, however many invocations reach it': 14,
-  'The triage coupling, both directions': 6,
+  'The FOLD: one row per literal, however many invocations reach it': 17,
+  'The triage coupling, both directions': 19,
   'The MECHANISM a repaired reason turns on, held mechanically': 4,
   'The RECORDED SPELLINGS, pinned: LIVENESS and PRECISION': 65,
   "The DECLARATION a row describes, read from the gate's own SOURCE": 43,
@@ -1610,6 +1907,26 @@ function selfTest() {
   t('the constant-name restriction actually restricts — a bare root outside a population '
     + 'constant yields no triple',
     populationSpans(`const somePath = ${JSON.stringify(someRoot)};`).length === 0);
+
+  // The two spellings #15468 admitted and the four it refused, pinned on the
+  // RECOGNISER rather than on any row. What that card repaired is a judgement
+  // about NAMES, so a row-shaped pin would hold it only for as long as the tree
+  // happens to contain a gate spelled that way — and the defect it repaired was
+  // precisely that such gates were unseen, which no row could have recorded.
+  // The negatives are the widening's price tag: they are the names the ONE-CHAR
+  // `_?` edit would have swept in alongside the two, and `ROOT` is the sharpest
+  // of them — the commonest name in this tree for a repo root, which is one path
+  // fragment and the exact thing this regex exists to keep out.
+  const admits = (name) => populationSpans(`const ${name} = ${JSON.stringify(someRoot)};`).length === 1;
+  t('the recogniser admits the bare `ROOTS` and `DIRS` spellings — the plainest spelling of the '
+    + 'shape this sweep exists to find (#15468)', admits('ROOTS') && admits('DIRS'));
+  t('…and admits them EXACTLY: the singular `ROOT` and `DIR`, the suffixed `ROOTS_X` and the '
+    + 'underscore-less `SCANROOTS` all stay out, so this is two named alternatives and not an '
+    + '`_?` loosening of the two that were already there',
+    !admits('ROOT') && !admits('DIR') && !admits('ROOTS_X') && !admits('SCANROOTS'));
+  t('control: the underscored spellings the restriction always admitted still match, so the case '
+    + 'above is measuring an addition rather than a replacement',
+    admits('SCAN_ROOTS') && admits('SCAN_DIRS') && admits('POPULATION'));
   t('the live sweep is non-empty, so the cases below judge something', rows.length > 0);
 
   // ── The FOLD: one row per literal, however many invocations reach it ──────
@@ -1722,12 +2039,58 @@ function selfTest() {
   // fabricated lead in every future dispatch prompt, which `hintCovers`' docblock
   // prices above a missing one. Refusing, with the measured reason, is a
   // first-class outcome here and most rows below are one.
-  const fresh = open.filter((r) => !TRIAGE.has(r.key)).map((r) => r.key).sort();
+  //
+  // ⚠️ A row named in `UNJUDGED` is NOT fresh, and the difference is the whole
+  // content of that bucket: fresh means nobody has seen it, and a listed row has
+  // been seen, measured and left for the maintainer to judge (#15468). ⛔ The
+  // exclusion is not an exemption, and it buys no silence — it is paid for by
+  // the two cases below, which hold the bucket set-equal to exactly these rows
+  // in both directions, so a row can only leave this case by being NAMED, and
+  // naming it is what puts it in front of a reader.
+  const unjudgedSeen = open.filter((r) => !TRIAGE.has(r.key)).map((r) => r.key).sort();
+  const fresh = unjudgedSeen.filter((k) => !UNJUDGED.has(k));
   t(`no gate has NEWLY joined the invisible bare-root species${fresh.length ? ` — FRESH: `
     + `${fresh.join(' · ')}. Record a verdict for it: REFUSE-WIDE, REFUSE-UNSPELLABLE, or a `
     + 'declaration beside the constant (the ROOT_DIR_WATCH_HINTS idiom — check-role-word.mjs, '
     + 'check-examples-live-imports.mjs, check-driver-conformance.mjs). ⛔ Declaring a root the '
     + 'gate does not read wholesale is the costlier error.' : ''}`, fresh.length === 0);
+
+  // The other direction of the same coupling. An entry that outlives its row is
+  // the allowlist shape one level along: the row is judged, or the gate takes a
+  // declaration, or the constant is renamed, and a key sits here still claiming
+  // something is owed. It reds by NAME rather than by count so the reader is
+  // told which entry to delete.
+  const bucketStale = [...UNJUDGED.keys()].filter((k) => !unjudgedSeen.includes(k)).sort();
+  t(`no UNJUDGED entry outlives the row it names${bucketStale.length ? ` — STALE: `
+    + `${bucketStale.join(' · ')}. The row was judged, declared or renamed; delete the entry — do `
+    + 'not re-point it at another row, and do not record a verdict here.' : ''}`,
+    bucketStale.length === 0);
+  // Stated as the identity the two cases above add up to, because "counted
+  // exactly" is the claim this bucket makes and a reader should not have to
+  // derive it from two negatives.
+  t(`the UNJUDGED bucket names EXACTLY the open rows carrying no verdict — ${UNJUDGED.size} `
+    + `entr(ies), ${unjudgedSeen.length} such row(s)`, UNJUDGED.size === unjudgedSeen.length);
+  // Key spaces stay disjoint for the reason CENSUS_REFUSE_WIDE's does: a key
+  // judged by two independent audits can have them disagree in silence.
+  const bucketOverlap = [...UNJUDGED.keys()].filter((k) => TRIAGE.has(k) || CENSUS_REFUSE_WIDE.has(k)).sort();
+  t(`no UNJUDGED key collides with a TRIAGE or CENSUS key${bucketOverlap.length
+    ? ` — COLLISION: ${bucketOverlap.join(' · ')}` : ''}`, bucketOverlap.length === 0);
+  // Every entry carries a measured note and the tree it was measured on, and
+  // the base is SHARED — mixing bases silently is what the tables above refuse
+  // by name, and a note is worthless without the tree it describes.
+  const bucketShape = [...UNJUDGED.values()].every((v) => (
+    typeof v.population === 'boolean'
+    && typeof v.base === 'string' && /^[0-9a-f]{7,40}$/.test(v.base)
+    && typeof v.why === 'string' && v.why.length > 20
+  ));
+  t('every UNJUDGED entry is well-formed: a boolean saying whether the literal is a real '
+    + 'population, a base commit spelled as a short hex sha, and a measured note over 20 chars',
+    bucketShape);
+  const bucketBases = new Set([...UNJUDGED.values()].map((v) => v.base));
+  t(`every UNJUDGED entry shares one base commit${bucketBases.size > 1
+    ? ` — MIXED: ${[...bucketBases].join(' · ')}` : ''}`, bucketBases.size <= 1);
+  t('the bucket judges something — it is non-empty, so the identity above is not holding over '
+    + 'an empty set while the sweep sees rows nobody named', UNJUDGED.size > 0);
 
   // CONTRADICTED: a refusal that outlived the reachability it refused. This is
   // the THIRD direction of the same coupling, and the one neither assertion
@@ -1757,10 +2120,7 @@ function selfTest() {
   // can honestly wear any of the three, and choosing between the two honest
   // resolutions RE-DECIDES a verdict on a shrink-only map — not something this
   // assertion may do quietly, so it names both and picks neither.
-  const contradicted = rows
-    .filter((r) => r.covered && TRIAGE.has(r.key))
-    .map((r) => `${r.key} [recorded ${TRIAGE.get(r.key).verdict}]`)
-    .sort();
+  const contradicted = contradictedRows(rows);
   t(`no recorded verdict sits on a row the sweep now finds REACHABLE${contradicted.length
     ? ` — CONTRADICTED: ${contradicted.join(' · ')}. That gate now declares a hint reaching an `
       + 'arbitrary file at the top of the root, so the row claims BOTH that the population is '
@@ -1773,14 +2133,68 @@ function selfTest() {
       + 'REACHABLE with no reason beneath it: that is the shrink this map already permits, and the '
       + 'seven reachable rows carrying no verdict today are its live shape. ⛔ Do NOT re-point the '
       + 'row at DECLARED-NARROWER: that verdict is defined for a row that stays UNCOVERED, and a '
-      + 'covered row is the bare root wearing a glob, not a narrower subtree.'
+      + 'covered row is the bare root wearing a glob, not a narrower subtree. A THIRD resolution '
+      + 'exists since 2026-09-05 and costs the row nothing: the gate declares `dispatch-gates: '
+      + 'wide-population -- REASON` in its own source, which AGREES with the refusal instead of '
+      + 'overriding it, and `contradictedRows` excuses the pair without any verdict being withdrawn.'
     : ''}`, contradicted.length === 0);
+
+  // The `wide-population` acceptance (#15341), both directions, on fixtures —
+  // because the live direction is VACUOUS on this tree and saying so is the
+  // point: no covered row carries the marker today, so a live-only pin would be
+  // an assertion over an empty set that reads exactly like a pass. The fixtures
+  // are what make the rule falsifiable, and the control under them names the
+  // gate that owns the shape this one excuses.
+  t('a covered row whose gate DECLARES a wide population is accepted — the deliberate-declaration form, '
+    + 'agreeing with the recorded refusal rather than withdrawing it',
+    contradictedRows(
+      [{ key: 'k', covered: true, wideDeclared: true }],
+      new Map([['k', { verdict: 'REFUSE-WIDE' }]]),
+    ).length === 0);
+  t('…and a covered row with NO such declaration is still CONTRADICTED — the refusal this assertion '
+    + 'has always made, unmoved by the acceptance above',
+    (() => {
+      const out = contradictedRows(
+        [{ key: 'k', covered: true, wideDeclared: false }],
+        new Map([['k', { verdict: 'REFUSE-WIDE' }]]),
+      );
+      return out.length === 1 && out[0].includes('REFUSE-WIDE');
+    })());
+  t('an UNCOVERED row is contradicted by neither — the marker changes nothing about a row that was '
+    + 'never reachable, which is every row this map actually holds today',
+    contradictedRows(
+      [{ key: 'k', covered: false, wideDeclared: false }, { key: 'j', covered: false, wideDeclared: true }],
+      new Map([['k', { verdict: 'REFUSE-WIDE' }], ['j', { verdict: 'REFUSE-UNSPELLABLE' }]]),
+    ).length === 0);
+  // The handoff. The shape excused above — a marker sitting above a hint that
+  // reaches the top of the root — is not unowned: `dispatch-gates` REFUSES it,
+  // in the file that owns markers, as a gate claiming two population shapes at
+  // once. This assertion excuses it HERE only because naming it here would name
+  // it wrongly, as a verdict problem rather than a declaration problem.
+  t('the excused shape is refused by the gate that owns markers, so no configuration is excused by both',
+    (widePopulationRefusal({ widePopulationReason: 'walks packages entire', hints: ['packages/**'] }) ?? '')
+      .includes('NAMES paths'));
+  t('CONTROL: and that refusal really can come back null, so the pin above is discriminating',
+    widePopulationRefusal({ widePopulationReason: 'walks packages entire', hints: [] }) === null);
+  // The live direction, stated as the measurement it is rather than left to
+  // read as a silent pass: this tree has no covered row carrying the marker, so
+  // the acceptance above is currently doing nothing to the report — which is
+  // exactly what "the rows are not deleted" was ruled to mean.
+  const wideCovered = rows.filter((r) => r.wideDeclared && r.covered).map((r) => r.key).sort();
+  const wideRows = rows.filter((r) => r.wideDeclared).map((r) => r.key).sort();
+  t(`the ten declaring gates reach ${wideRows.length} row(s) here and ${wideCovered.length} of them is covered, so the `
+    + 'acceptance withdraws no verdict on this tree — every recorded refusal still prints against its row'
+    + (wideCovered.length ? ` — covered-and-declared: ${wideCovered.join(' · ')}` : ''),
+    wideCovered.length === 0);
+  t(`control: the marker IS being read off the live sweep (${wideRows.length} row(s) carry it), so the case above is `
+    + 'measuring something rather than reporting a field nothing ever sets', wideRows.length > 0);
 
   // The spelling rule the triage docblock states, held mechanically: a key
   // spelled as a bare path would enter this file's own declared population.
   const asHints = (s) => extractWatchHints(`const L = ${JSON.stringify(s)};`);
-  t('no triage key enters this file\'s own hint set as a path',
-    [...TRIAGE.keys(), 'scripts/check-sample-gate.mjs SOME_ROOT someroot'].every((k) => asHints(k).length === 0));
+  t('no triage or UNJUDGED key enters this file\'s own hint set as a path',
+    [...TRIAGE.keys(), ...UNJUDGED.keys(), 'scripts/check-sample-gate.mjs SOME_ROOT someroot']
+      .every((k) => asHints(k).length === 0));
   t('…and that rule can FAIL: the bare-path spelling it forbids does build a hint',
     asHints('scripts/check-x.mjs').length === 1);
 
@@ -2073,7 +2487,10 @@ function selfTest() {
   }
   console.log(
     `OK  self-test: ${rows.length} live row(s), ${open.length} unreachable as spelled, `
-      + `${TRIAGE.size} recorded verdict(s) — none stale, none missing, none contradicted. `
+      + `${TRIAGE.size} recorded verdict(s) — none stale, none missing, none contradicted `
+      + `(${rows.filter((r) => r.wideDeclared).length} row(s) whose gate carries the dispatch-gates `
+      + 'wide-population declaration, the deliberate-declaration form this file accepts without '
+      + 'withdrawing a verdict; none of them is covered, so none is excused by it today). '
       + `Each row is one literal in one gate source file: ${perInvocation.size} invocation(s) of `
       + `those literals fold onto them, ${twins} of them as twins of a row that already existed, `
       + "and no folded row's invocations disagree about reachability. "
@@ -2085,7 +2502,12 @@ function selfTest() {
       + 'to discriminate (a '
       + 'separator-carrying and a dotted root are both refused as already visible), the '
       + 'constant-name restriction is proven to restrict, and neither the triage keys nor this '
-      + `file declare any population of their own. ${CENSUS_REFUSE_WIDE.size} CENSUS row(s) `
+      + 'file declare any population of their own. The recogniser is pinned to admit the '
+      + 'bare ROOTS and DIRS spellings EXACTLY, singulars and unsuffixed neighbours refused '
+      + `(#15468). ${UNJUDGED.size} UNJUDGED row(s) — seen by that widened recogniser and judged `
+      + 'by nobody — are held SET-EQUAL, in both directions, to the open rows carrying no verdict, '
+      + 'so none of them is exempted here and none of them is silently fresh. '
+      + `${CENSUS_REFUSE_WIDE.size} CENSUS row(s) `
       + '(#14695) are well-formed, disjoint from TRIAGE, contribute no hint of their own, and share '
       + 'one base commit.',
   );

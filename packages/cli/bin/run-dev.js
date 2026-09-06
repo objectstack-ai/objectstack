@@ -13,7 +13,7 @@
 // exactly as it did.
 import { flush, handle, run, settings } from '@oclif/core';
 
-import { keepStderrNonBlocking } from './stderr-nonblocking.mjs';
+import { keepStderrNonBlocking } from '../src/utils/stderr-nonblocking.ts';
 
 /**
  * How long stderr may make NO PROGRESS before this shim stops waiting for it.
@@ -189,11 +189,70 @@ settings.debug = true;
 // kernel with the diagnostic still unwritten, and only a reader or a kill ends
 // it. Measured that way on an unbuilt workspace with the reader gone — 27 of 30
 // cold-cache runs, main thread in `write(2)` on fd 2 at `sock_alloc_send_pskb`,
-// still alive at a 90 s ceiling. `stderr-nonblocking.mjs` carries the whole
+// still alive at a 90 s ceiling. `src/utils/stderr-nonblocking.ts` carries the whole
 // derivation, including who clears the flag (a child spawned with inherited
 // stdio — libuv clears `O_NONBLOCK` on the SHARED open file description) and
 // why the re-assert has to sit on the write path rather than run once here.
 keepStderrNonBlocking();
+
+/**
+ * Make a FAILED stderr write non-fatal, so a caller whose read end is gone
+ * still gets this CLI's own exit status instead of a crash. #14858.
+ *
+ * `process.stderr` is an `EventEmitter`, and an `error` event with nothing
+ * listening IS an uncaught exception. With the parent's read end DESTROYED
+ * (`stdio: ['ignore', 'ignore', 'pipe']`, then `child.stderr.destroy()`)
+ * oclif's `displayWarnings()` makes the first write, the pipe is already gone,
+ * node raises `write EPIPE` on `process.stderr`, and this process died of an
+ * uncaught exception — 12 of 12 runs, 938-1174 ms in, well before `run()`
+ * settles and before `writeStderr()` above is ever called. Traced with a
+ * `--import` observer that installs NO listener on this stream and wraps no
+ * write (`uncaughtExceptionMonitor`, which observes without preventing the
+ * default crash — an `uncaughtException` handler would have changed the very
+ * thing being read):
+ *
+ *     uncaughtException  code=EPIPE  msg=write EPIPE
+ *           at afterWriteDispatched (node:internal/stream_base_commons:159:15)
+ *     exit  code=1
+ *
+ * Every OTHER reader of the same child answers **2** — drained (1209-1217 ms,
+ * 147699 bytes delivered) and never-read (16178-16471 ms) both did, in the same
+ * conditions. 2 is what oclif's `handle()` produces, and #14715 pinned it for
+ * the never-read reader. So the closed reader was the one shape that could not
+ * tell "the command failed" from "the CLI crashed", on the only channel it had
+ * left.
+ *
+ * ⛔ Deliberately NOT narrowed to `error.code === 'EPIPE'`, even though EPIPE is
+ * the only code this path was measured to raise (4 events per run, no other
+ * code, observed with a listener installed on purpose for that one question).
+ * The reason to tolerate is not WHICH error it is: every event here means one
+ * thing — a write to stderr failed — the only channel it could be reported on
+ * is the stream that just failed, and there is no other action to take. A
+ * predicate would buy no decision and would keep exactly this crash for
+ * whatever code turns up next.
+ *
+ * ⚠️ What it costs, and it is not nothing. With the write no longer fatal the
+ * run continues into `writeStderr()`'s drain, which for this path had NEVER
+ * executed at all. Ablated 2x2 on this file, one contiguous run, shared box —
+ * so read the ratios, not the absolutes:
+ *
+ *     this listener   write callback     exit   elapsed
+ *     -------------   ---------------    ----   ---------------
+ *     present         kept (= HEAD)        2    1237-1312 ms
+ *     present         removed              2    16271-16294 ms   the 15 s bound
+ *     absent          kept                 1     983-1028 ms     the defect
+ *     absent          removed              1     843-1031 ms
+ *
+ * Row 1 against row 3 is the whole change, and it is ~250 ms: the child now
+ * ends the way a drained reader's child ends instead of dying on its first
+ * write. (The two runs are comparable because their unfixed rows agree — 938-
+ * 1174 ms above, 983-1028 ms here.) Row 2 is what the drain costs when only the
+ * no-progress bound can end it — a cost that is REACHABLE now and was not
+ * before, because rows 3-4 never got there at all.
+ */
+process.stderr.on('error', () => {
+  // Nothing to report, and nowhere left to report it.
+});
 
 const running = run(process.argv.slice(2), import.meta.url);
 
