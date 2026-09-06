@@ -624,7 +624,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     {
         code: 'NAMESPACE_CONFLICT',
         file: 'packages/objectql/src/registry.ts',
-        shape: 'classfield',
+        // [#16159] `classconst`, not `classfield`, since the literal became the
+        // exported `NAMESPACE_CONFLICT_CODE` constant in the producer. The VALUE is
+        // byte-identical and the scanner resolves the constant back to it; only the
+        // spelling the scan matches on moved. The verdict below is untouched.
+        shape: 'classconst',
         door: 'dispatcher',
         verdict: 'pending-registration',
         why:
@@ -907,7 +911,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     {
         code: 'DUPLICATE_ARTIFACT_OBJECT_NAME',
         file: 'packages/objectql/src/registry.ts',
-        shape: 'classfield',
+        // [#16159] `classconst`, not `classfield`, since the literal became the
+        // exported `DUPLICATE_ARTIFACT_OBJECT_NAME_CODE` constant in the producer. The VALUE is
+        // byte-identical and the scanner resolves the constant back to it; only the
+        // spelling the scan matches on moved. The verdict below is untouched.
+        shape: 'classconst',
         door: 'none',
         verdict: 'boot-refusal',
         why:
@@ -935,7 +943,11 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     {
         code: 'OBJECT_OWNERSHIP_CONFLICT',
         file: 'packages/objectql/src/registry.ts',
-        shape: 'classfield',
+        // [#16159] `classconst`, not `classfield`, since the literal became the
+        // exported `OBJECT_OWNERSHIP_CONFLICT_CODE` constant in the producer. The VALUE is
+        // byte-identical and the scanner resolves the constant back to it; only the
+        // spelling the scan matches on moved. The verdict below is untouched.
+        shape: 'classconst',
         door: 'none',
         verdict: 'boot-refusal',
         why:

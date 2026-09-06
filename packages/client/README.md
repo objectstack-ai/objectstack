@@ -259,10 +259,16 @@ await client.approvals.reject(requestId, 'Incomplete');
 await client.notifications.list({ read: false }); // unread only
 await client.notifications.markRead(['notif-1', 'notif-2']);
 
-// AI Services
-await client.ai.nlq({ query: 'Show me all active contacts' });
-await client.ai.suggest({ object: 'contact', field: 'industry' });
-await client.ai.insights({ object: 'sales', recordId: dealId });
+// AI Services — served by an AI service plugin (`service-ai`, a Cloud/EE
+// package). The `/ai` routes are mounted either way, so an environment without
+// it answers 501, not 404; discovery carries the same remedy under `services.ai`.
+const answer = await client.ai.chat({ messages: [{ role: 'user', content: 'How many open orders this quarter?' }] });
+console.log(answer.content, answer.usage?.totalTokens);
+await client.ai.complete({ prompt: 'Summarise this account in one line:' });
+await client.ai.models();                          // picker list — allowlist objects or bare ids, both live
+await client.ai.conversations.list({ limit: 20 });
+await client.ai.agents.chat('build', { messages: [{ role: 'user', content: 'Draft a follow-up' }] });
+await client.ai.pendingActions.list({ status: 'pending' });   // human-in-the-loop queue
 
 // Internationalization
 await client.i18n.getLocales();

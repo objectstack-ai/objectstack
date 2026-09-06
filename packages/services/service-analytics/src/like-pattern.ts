@@ -184,7 +184,8 @@ export function likePattern(shape: LikeShape, value: unknown): string {
  *
  * [#15780] EXPORTED, because the fold is now chosen per dialect and two of the
  * three arms are built from this domain rather than from `translate()`:
- * `text-match-sql.ts`'s MySQL arm nests one `REPLACE` per letter. The domain
+ * `text-match-sql.ts`'s MySQL arm nests one `REPLACE` per letter, and [#16028]
+ * its `unknown` arm nests the same chain without the binary cast. The domain
  * itself stays here, in one copy — a second 26-character literal anywhere is
  * how the Postgres arm and the MySQL arm start folding different alphabets.
  */
@@ -217,8 +218,9 @@ export const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
  * (`no such function: translate` on sql.js 1.14.1). That was #15780, and it is
  * closed: this function is now ONE arm of `text-match-sql.ts`'s per-dialect
  * table ({@link textMatchPredicateSql}, `fold: true`), reached on `postgres`
- * and on `unknown`, while SQLite gets `lower(col) GLOB lower(?)` and MySQL the
- * nested-`REPLACE` binary fold.
+ * ALONE, while SQLite gets `lower(col) GLOB lower(?)`, MySQL the nested-
+ * `REPLACE` binary fold and — since #16028 — `unknown` the same `REPLACE` chain
+ * without the binary cast.
  *
  * ⛔ Do NOT "simplify" this to `LOWER()`, on any arm. Postgres' `LOWER()` is
  * locale-aware and would silently restore the Unicode fold #4706 Q1 = A rules
@@ -226,11 +228,14 @@ export const ASCII_LOWER_LETTERS = 'abcdefghijklmnopqrstuvwxyz';
  * and this one may not. That asymmetry is the whole reason the fold is chosen
  * per dialect rather than written once.
  *
- * ⛔ Nor is `unknown` free to adopt `driver-sql`'s residue: that face folds
- * `unknown` with `LOWER()` because `LOWER()` is the shape it emitted before
- * #6518. This face's pre-existing shape is `translate()`, so `translate()` is
- * what its residue keeps. Each side keeps its own, and neither claims the
- * other's — an `unknown` dialect is by definition one nothing here measured.
+ * ⛔ [#16028] Nor is this function the `unknown` arm's fold any more, and it may
+ * not be given back. `unknown` is not a dialect — it is everything
+ * `normalizeSqlDialect` could not name, SQLite and MariaDB included — so a
+ * PostgreSQL/Oracle function there is a statement those engines cannot PARSE.
+ * That arm folds with the portable `REPLACE` chain, which is ASCII-only by
+ * construction and therefore does not re-open the `LOWER()` question either.
+ * `driver-sql`'s `unknown` arm still folds with `LOWER()`, its own pre-#6518
+ * shape; each face keeps its own answer and neither claims the other's.
  *
  * The caller must apply it to BOTH sides of the comparison. Folding only the
  * comparand compares a folded needle against a raw column and matches just the

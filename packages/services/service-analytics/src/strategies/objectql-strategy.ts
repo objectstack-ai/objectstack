@@ -1253,7 +1253,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // [#15684 / #15780] Both text families print what the DIALECT will run —
       // the case-EXACT four because `LIKE` is case-exact on Postgres alone, and
       // `$icontains` because its fold was `translate()`, which SQLite does not
-      // have at all. Asked of the same hook `NativeSQLStrategy` asks, on the
+      // have at all — [#16028] on the `unknown` arm too, which this compiler
+      // reaches by its OWN extra door: a caller that hands no target and no
+      // context gets `'unknown'` written in below, so the echo's residue arm is
+      // not merely inherited from the hook. Asked of the same hook
+      // `NativeSQLStrategy` asks, on the
       // same target, so the echo and the executed statement stay one
       // description — the whole reason this render block exists (#5333). An
       // echo that printed a parseable statement while the engine refused the

@@ -2,6 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import type {
   IEmailTransport,
   EmailAddress,
@@ -65,23 +66,6 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  * row; see {@link EmailServicePlugin.readEffectiveTemplate}.
  */
 const FAILED_READ = Symbol('email-template-read-failed');
-
-/**
- * Drop the underscore-prefixed keys a SERVED metadata item carries
- * (`_diagnostics`, `_packageId`, `_provenance`, `_draft`, …). Every one of
- * them is a read-time verdict the protocol attaches, never an authored field:
- * `EmailTemplateDefinitionSchema` is a `strictObject` and declares no
- * underscore key, so leaving them on turns a perfectly good declaration into a
- * validation failure.
- */
-function stripReadDecorations(item: unknown): unknown {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(item as Record<string, unknown>)) {
-    if (!k.startsWith('_')) out[k] = v;
-  }
-  return out;
-}
 
 /**
  * Plugin configuration.
@@ -1282,13 +1266,45 @@ export class EmailServicePlugin implements Plugin {
    * registry, which for a delete is the same baseline. The three outcomes are
    * kept apart on purpose: only "nothing declares it" may deactivate a row.
    *
-   * The body is stripped of read decorations before it is returned. A served
-   * item carries the protocol's own underscore keys (`_diagnostics` from
-   * `decorateMetadataItem`, `_packageId` / `_provenance` from the registry and
-   * the overlay row), `EmailTemplateDefinitionSchema` is a `strictObject`, and
-   * it declares no underscore key — so handing the decorated body to the
-   * upsert would reject the very baseline this read exists to restore. This is
+   * The body is stripped of read decorations before it is returned, using the
+   * SHARED `stripReadDecorations` from `@objectstack/spec/kernel` — the same
+   * helper the other read-back-envelope consumers call (the dataset query in
+   * `rest-server.ts`, the cold-boot flow bind in `service-automation`,
+   * `saveMetaItem`'s verbatim persist, and the route-level seed apply). This is
    * the read-side twin of the strip `saveMetaItem` does on the write side.
+   *
+   * ## [#16152] Why this is the shared list and NOT a blanket `_`-sweep
+   *
+   * This call used to be a module-local copy that dropped **every** key
+   * starting with `_`, justified in its own docblock by the claim that
+   * `EmailTemplateDefinitionSchema` "declares no underscore key". That claim is
+   * false, and the schema disagrees in both directions:
+   *
+   *  - `METADATA_READ_DECORATIONS` is `['_diagnostics', '_draft']`, and those
+   *    two genuinely must go: the schema is a `strictObject`, neither key is
+   *    declared, so an unstripped body rejects the very baseline this read
+   *    exists to restore.
+   *  - The ADR-0010 protection envelope (`_lock`, `_lockReason`, `_lockSource`,
+   *    `_provenance`, `_packageId`, `_packageVersion`, `_lockDocsUrl`) is
+   *    **declared** — `email-template.zod.ts` spreads `MetadataProtectionFields`
+   *    into the shape — and `metadata-read-decorations.ts` names it
+   *    "Deliberately NOT" a member of the strip list, because it is envelope
+   *    state the write path legitimately carries. Sweeping it here removed keys
+   *    the schema was deliberately widened to accept.
+   *
+   * A blanket sweep is also a silent swallow: an underscore key that is neither
+   * a decoration nor declared is exactly what the closed schema exists to
+   * reject (#4001), and dropping it before the parse converts a loud
+   * `unrecognized_keys` into a quiet success.
+   *
+   * ⭐ There is deliberately **no** second, envelope-stripping pass beside this
+   * one. The envelope cannot reach the written row in the first place:
+   * `upsertDeclaredEmailTemplate` projects the parsed template through
+   * `mapTemplateToRow`, a closed column list, and `sys_email_template` declares
+   * no underscore column. Spelling an envelope strip here would encode a rule
+   * this path does not have, as a second copy of a truth that already lives in
+   * that projection — which is the drift this fix removes, re-introduced one
+   * layer up.
    */
   private async readEffectiveTemplate(
     ctx: PluginContext,

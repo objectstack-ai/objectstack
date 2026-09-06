@@ -73,6 +73,8 @@
  * the signal has to be an authoring-time nudge rather than a build break.
  */
 
+import { recordsOf } from './object-graph.js';
+
 export const AGENT_AUTHORING_WITHDRAWN = 'agent-authoring-withdrawn';
 
 /** `app.defaultAgent` names something outside the platform agent roster. */
@@ -99,14 +101,6 @@ export interface AiAgentAuthoringFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => !!x && typeof x === 'object');
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -154,7 +148,7 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
   const findings: AiAgentAuthoringFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const agents = asArray(stack.agents);
+  const agents = recordsOf(stack.agents);
   for (let ai = 0; ai < agents.length; ai++) {
     const agent = agents[ai];
     const name = strName(agent.name) ?? `#${ai}`;
@@ -189,7 +183,7 @@ export function validateAiAgentAuthoring(stack: AnyRec): AiAgentAuthoringFinding
   }
 
   const roster = CANONICAL_AGENT_NAMES.join(', ');
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
   for (let appIdx = 0; appIdx < apps.length; appIdx++) {
     const app = apps[appIdx];
     const defaultAgent = strName(app.defaultAgent);

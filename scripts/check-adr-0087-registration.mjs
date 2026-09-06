@@ -60,10 +60,16 @@
 // breaking change must carry exactly one ADR-0087 disposition marker:
 //
 //   <!-- adr-0087: registered <id>[, <id>...] -->
-//   <!-- adr-0087: not-required (unpublished) <why> -->
-//   <!-- adr-0087: not-required (already-registered <id>[, <id>...]) <why> -->
-//   <!-- adr-0087: not-required (no-migration-prescription) <why> -->
-//   <!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->
+//   <!-- adr-0087: not-required (<category> ...) <why> -->
+//
+// `<category>` is one of `CATEGORIES` below -- not enumerated here. A hand-kept
+// copy of that list is the same defect #14378 found in a different file: an
+// illustrative restatement that must be kept in step with a real list is the
+// worst of both, and it already drifted once (#15915 measured this very
+// comment naming five forms while `CATEGORIES` and ADR-0087's addendum both
+// held `type-surface-only` as a sixth). Each category's own argument grammar
+// (`<id>`, `<path>#<Symbol>`, or none) lives at its assertion site below, not
+// here.
 //
 // The vocabulary is ratified in ADR-0087's addendum of 2026-08-13, and the two
 // halves are pinned to each other: `assertInputs` refuses to report a verdict
@@ -373,6 +379,7 @@ import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
+  'H1 (#15915): the header points at CATEGORIES, never restates it': 7,
   'G1: a non-breaking changeset is not this gate\'s business': 1,
   'R1: THE #6011 SHAPE -- declared breaking, no ledger entry, no marker': 5,
   'R2: the catch-all exemption cannot cover a FROM -> TO prescription': 4,
@@ -426,7 +433,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 49;
+const SELF_TEST_BATTERY_FLOOR = 50;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3819,6 +3826,38 @@ function selfTest() {
   const green = (label, res) => {
     assert(res.problems.length === 0, `${label}: expected GREEN, got:\n${res.problems.map((p) => p.file + ' ' + p.message).join('\n')}`);
   };
+
+  // ---- H1 (#15915): the header points at CATEGORIES, never restates it ------
+  // The header used to hand-enumerate every `not-required (<category>)` form,
+  // and it drifted (#15915: five forms listed while `CATEGORIES` and ADR-0087
+  // both already held six, `type-surface-only` among the missing). Pointing
+  // at `CATEGORIES` instead of restating it only holds if nobody quietly adds
+  // a name back in; this reads the gate's own source and refuses that.
+  battery('H1 (#15915): the header points at CATEGORIES, never restates it');
+  {
+    const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+    const ruleStart = src.indexOf('## The rule');
+    const ruleEnd = src.indexOf('## Which diff rows are judged');
+    assert(
+      ruleStart !== -1 && ruleEnd !== -1 && ruleStart < ruleEnd,
+      'H1: the header sections this pin reads by name have moved or been renamed -- update the anchors',
+    );
+    const header = ruleStart !== -1 && ruleEnd !== -1 ? src.slice(ruleStart, ruleEnd) : '';
+    assert(
+      header.includes('<!-- adr-0087: not-required (<category> ...) <why> -->'),
+      'H1: the header no longer points readers at `CATEGORIES` via the generic `<category>` line',
+    );
+    for (const cat of CATEGORIES) {
+      // `(${cat}` alone, not `(${cat})`: several forms carry an argument before
+      // the closing paren (`not-required (already-registered <id>...)`), and a
+      // check anchored on an immediate `)` would miss exactly those -- which is
+      // how the first version of this pin missed its own reverse-verification.
+      assert(
+        !header.includes(`(${cat}`),
+        `H1: the header names \`${cat}\` again -- a hand-kept enumeration is the #15915 defect returning`,
+      );
+    }
+  }
 
   // ---- G1: a non-breaking changeset is not this gate's business -------------
   battery('G1: a non-breaking changeset is not this gate\'s business');

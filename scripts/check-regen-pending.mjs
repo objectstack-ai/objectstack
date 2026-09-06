@@ -71,7 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
-import { inspectDeclarationStamp } from './build-input-hash.mjs';
+import { inspectBuildStamp, inspectDeclarationStamp } from './build-input-hash.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
@@ -151,6 +151,24 @@ function newestMtime(dir, pred, depth = 0) {
 export function declarationStamp(specDir = SPEC_DIR) {
   try {
     return inspectDeclarationStamp(REPO_ROOT, specDir);
+  } catch {
+    return { state: 'unstamped', recorded: null, actual: null };
+  }
+}
+
+/**
+ * Did a BUNDLE-emitting build produce `specDir/dist`'s `.mjs`/`.js` from the
+ * sources on disk right now? Same three verdicts, same one-way meaning, same
+ * wrapping argument as `declarationStamp` above — the repo root is supplied
+ * here so no caller can hash against the wrong one.
+ *
+ * The OTHER stamp file: `dist/.build-input-hash`, which every build writes.
+ * `inspectBuildStamp`'s docblock is the authority on why that is the right
+ * evidence for THIS axis and remains the wrong evidence for the declarations.
+ */
+export function buildStamp(specDir = SPEC_DIR) {
+  try {
+    return inspectBuildStamp(REPO_ROOT, specDir);
   } catch {
     return { state: 'unstamped', recorded: null, actual: null };
   }
@@ -276,6 +294,42 @@ export function schemaTreeIsStale(specDir = SPEC_DIR) {
  * Missing counts as stale, and the direction is the same conservative one its
  * two siblings take: a false "stale" costs a build, a false "fresh" costs a
  * verdict nobody can trust.
+ *
+ * ## The mtime rule accuses; the BUILD stamp may acquit
+ *
+ * The blind spot `distIsStale` documents above is shared here, and was measured
+ * on this axis too: after a `git merge`, `git checkout` or `git worktree add`
+ * re-checks-out a source file with IDENTICAL bytes, the build that follows
+ * correctly does not run (turbo's cache hashes content, so it is a cache hit
+ * that rewrites nothing) and every `dist/` mtime stays put — so this rule
+ * refused `check:browser-reachable-entries` over bundles that were exactly
+ * current, and the only remedy on offer was a multi-minute rebuild under the
+ * shared verify lock.
+ *
+ * The evidence that answers it is `dist/.build-input-hash` — the file #7122
+ * proposed for the DECLARATION rule, where it was measured wrong and stays
+ * rejected. It is the right file HERE for a reason that is specific to this
+ * axis, not a relaxation of that ruling:
+ *
+ *   - #7122's hole is that `--stamp` writes this file under `OS_SKIP_DTS=1`,
+ *     which emits JS and skips the declarations. On this axis that flag emits
+ *     exactly the artifact being vouched for — `inspectBundleFreshness`'s own
+ *     refusal already tells the reader "OS_SKIP_DTS=1 is fine for THIS gate";
+ *   - what makes it sound is the build script's ORDER rather than the flag:
+ *     `packages/spec`'s `build` runs the unconditional `tsup` before `--stamp`
+ *     in one `&&` chain, so nothing writes this stamp without having emitted
+ *     bundles first. Only the declaration pass is conditional, and skipping it
+ *     cannot refresh a stamp written after both;
+ *   - the digest's input set is a strict SUPERSET of the source set measured
+ *     above — every file under `src/` (`.test.ts` included) plus
+ *     `tsup.config.ts` and the rest of `PACKAGE_BUILD_CONFIG` plus turbo's
+ *     `globalDependencies` — so a `match` implies every input this rule counts
+ *     is byte-identical to the one the bundles were emitted from. A superset
+ *     can only ever withhold an acquittal, never grant one it should not.
+ *
+ * And it may only ACQUIT. `unstamped` — absent, unreadable, not 64 hex
+ * characters, or a package whose build does not stamp — leaves the mtime
+ * verdict standing (#4690), so nothing that passes today can start failing.
  */
 export function bundlesAreStale(specDir = SPEC_DIR) {
   const bundles = newestMtime(
@@ -289,7 +343,8 @@ export function bundlesAreStale(specDir = SPEC_DIR) {
   );
   const configPath = join(specDir, 'tsup.config.ts');
   const config = existsSync(configPath) ? statSync(configPath).mtimeMs : 0;
-  return Math.max(src, config) > bundles;
+  if (Math.max(src, config) <= bundles) return false;
+  return buildStamp(specDir).state !== 'match';
 }
 
 /**

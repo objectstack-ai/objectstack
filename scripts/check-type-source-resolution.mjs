@@ -186,7 +186,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'false positives': 3,
   'fail-closed': 2,
   '#11490: the population is per PROGRAM': 6,
-  'the registry, audited in BOTH directions': 10,
+  'the registry, audited in BOTH directions': 12,
   'census guard: sibling-config discovery going quiet is INVISIBLE': 14,
   'the import clause is bounded to ONE statement (#12555)': 8,
   'the declaration must still BE the workspace (#11510)': 22,
@@ -1650,7 +1650,36 @@ function check(root, registry) {
           '    then the program set itself moved, which since #11490 a package can do, and `paths` is\n' +
           '    measured to be the wrong tool for it: on PR #12570 it billed source diagnostics from\n' +
           '    other packages into this ledger. That case is a re-baseline, and it is\n' +
-          '    settled by the doc-block over the registry, not by this message. Read it first.',
+          '    settled by the doc-block over the registry, not by this message. Read it first.\n' +
+          // #16000: the `paths` limb is the FIRST remedy this message names, and for a consuming
+          // program whose `rootDir` excludes the dependency's source it is closed too — so an author
+          // reading this straight through walks into a SECOND wall nothing here mentioned. The
+          // knowledge was in this file the whole time (the header's with-`paths` red, and the PR
+          // #12570 reading over the registry) and nowhere in the text the author reads; the #15978
+          // round paid a full cycle for that gap, which is what #16000 records.
+          //
+          // Re-measured for this card rather than taken from the filing, on the same pair and
+          // through the same program: `@objectstack/runtime` -> `@objectstack/service-realtime`
+          // via `tsconfig.test.json`, with this message's own remedy applied to
+          // `packages/runtime/tsconfig.json`. That program goes from 191 errors to 204 — +13,
+          // ALL of them TS6059 naming `packages/services/service-realtime/src/**`, and not one
+          // new code error. Every other diagnostic code's count is unchanged.
+          //
+          // ⚠️ Written as a CONDITION and never as a blanket closure. `paths` remains the correct
+          // remedy wherever the consuming program's `rootDir` DOES contain the dependency's source,
+          // and a message overstating the closure would turn an author away from a route that is
+          // open — worse than today's silence. The condition is what was measured, not the verdict.
+          '    ⚠️ And `paths` is not always available — check its precondition before you take that\n' +
+          '    route. It puts the dependency\'s SOURCE into this program, so every file it pulls in has\n' +
+          '    to sit under the consuming program\'s `rootDir`. Where that `rootDir` excludes the\n' +
+          '    dependency (a package-local `./src`, whose `tsconfig*.json` header may say in so many\n' +
+          '    words that it will not widen), tsc admits those files and then reports TS6059 "is not\n' +
+          '    under rootDir" for that package\'s whole file graph — billed to THIS package\'s\n' +
+          '    test-typecheck ledger, which the package that owns the source cannot see. That is the\n' +
+          '    PR #12570 shape again, reached from the `paths` limb instead of the re-baseline one.\n' +
+          '    ⛔ In that case no self-serve remedy is left, and the honest move is to NOT take the\n' +
+          '    dependency: reach the subject through in-package source, or escalate. ⛔ Never widen\n' +
+          '    that ledger and ⛔ never widen a `rootDir` to make room — both are maintainer-only.',
       );
     if (gone.length > 0)
       failures.push(
@@ -2229,6 +2258,28 @@ function selfTest() {
       has(grown.failures, 'ONBOARDED'),
       'the failure text no longer names the one case the refusal does not cover — a package that moved '
         + 'the program set itself, which #11490 made possible and 14 queued onboardings each arrive at',
+    );
+
+    // #16000. `paths` is the FIRST remedy this message names, and it has a
+    // precondition the message did not state: the consuming program's `rootDir`
+    // must contain the dependency's source. Where it does not, that route ends in
+    // TS6059 billed to a ledger the owning package cannot see — measured by the
+    // #15978 round, which spent a full cycle discovering it, and re-measured in the
+    // PR for this card. Two pins, because the halves fail independently: the
+    // DIAGNOSTIC an author meets on that route, and the fact that what would clear
+    // it is not a dev seat's to take — a message naming neither recommends a route
+    // and then names no remaining self-serve option when it closes.
+    expect(
+      has(grown.failures, 'TS6059'),
+      'the failure text no longer names the diagnostic the `paths` remedy produces when the consuming '
+        + "program's `rootDir` excludes the dependency's source — the message then recommends a route "
+        + 'whose second wall is silent from here, which is the cycle #16000 recorded',
+    );
+    expect(
+      has(grown.failures, 'maintainer-only'),
+      'the failure text no longer says that the routes past that wall are closed to a dev seat — '
+        + 'without it this message names `paths` first and names NO remaining self-serve option for '
+        + 'the case where `paths` is unavailable, which is the whole of #16000',
     );
 
     const wide = check(root, { ...measuredNames, '@fx/violator': ['@fx/spec', '@fx/other', '@fx/gone'] });

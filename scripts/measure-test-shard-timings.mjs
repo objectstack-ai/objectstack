@@ -78,12 +78,51 @@ export function median(values) {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+// Which file-level slice a summary's tasks were run as, or null for a whole
+// package (#16173).
+//
+// turbo records the run's passthrough argv on EVERY task record as
+// `cliArguments` -- verified on turbo 2.10.10 against a real executed summary,
+// not only a `--dry=json` plan: `pnpm turbo run test --filter=<pkg> --summarize
+// -- --shard=1/2` writes `"cliArguments": ["--shard=1/2"]` and the child really
+// receives `pnpm run test --shard=1/2`. It is a RUN-level field replicated per
+// task, which is exactly the granularity this needs: ci.yml runs the sliced
+// package in its own turbo invocation, so a summary is either a whole-package
+// run or one slice's, never a mix.
+//
+// ⛔ WHY THIS CANNOT BE SKIPPED. The dataset stores each package's WHOLE cost.
+// Once the CLI is sharded k/n, a green queue build leaves n summaries each
+// holding ~1/n of it, and the median rule -- correct for repeat measurements of
+// one package -- would write one slice's duration as the whole package's
+// weight. That is the #16173 defect exactly, re-created by the fix for it, in
+// the same silent direction: a number that reads right and is n times too
+// small.
+export function sliceOfCliArguments(args) {
+  if (!Array.isArray(args)) return null;
+  for (const arg of args) {
+    const m = /^--shard[= ](\d+)\/(\d+)$/.exec(String(arg));
+    if (!m) continue;
+    const [index, count] = [Number(m[1]), Number(m[2])];
+    if (index < 1 || count < 1 || index > count) {
+      throw new Error(`a run summary carries an impossible slice spec ${JSON.stringify(arg)}`);
+    }
+    return { index, count };
+  }
+  return null;
+}
+
 // Pull every genuinely-executed `test` task out of one parsed run summary.
 //
 // The shape assertions are loud for the same reason the partitioner's are:
 // `--summarize` is stable but not contractual, and the failure this script can
 // cause is a dataset that looks fine and balances nothing. A summary that
 // carries no `tasks` array is a refusal, never an empty result.
+//
+// `slices` rides alongside `samples` rather than changing its shape: the drift
+// gate in partition-test-shards.mjs reads `samples` as name -> seconds and does
+// not need it (a shard runs exactly one slice, so its prediction follows from
+// the slice map, not from the summary), while buildDataset below cannot record
+// a correct weight without it.
 export function samplesFromSummary(parsed, label) {
   const tasks = parsed?.tasks;
   if (!Array.isArray(tasks)) {
@@ -94,6 +133,7 @@ export function samplesFromSummary(parsed, label) {
   }
   const samples = new Map();
   const skippedCached = [];
+  const slices = new Map();
   for (const task of tasks) {
     if (task?.task !== 'test') continue;
     const name = task.package;
@@ -113,8 +153,10 @@ export function samplesFromSummary(parsed, label) {
     const seconds = (endTime - startTime) / 1000;
     if (!(seconds >= 0)) throw new Error(`${label}: ${name}#test measured ${seconds}s`);
     samples.set(name, seconds);
+    const slice = sliceOfCliArguments(task.cliArguments);
+    if (slice) slices.set(name, slice);
   }
-  return { samples, skippedCached };
+  return { samples, skippedCached, slices };
 }
 
 // The weight an unmeasured package gets: its test-file count times this rate.
@@ -142,17 +184,59 @@ export function fallbackRate(measured, fileCounts) {
 export function buildDataset({ perSummary, fileCounts, provenance }) {
   const bySample = new Map();
   const cachedNames = new Set();
-  for (const { samples, skippedCached } of perSummary) {
+  const push = (name, seconds) => {
+    if (!bySample.has(name)) bySample.set(name, []);
+    bySample.get(name).push(seconds);
+  };
+
+  // A file-sharded package (#16173) arrives as n partial windows across n
+  // summaries, and the whole-package cost this dataset records is their SUM --
+  // not their median, which is the rule for repeat measurements of one package
+  // and would write 1/n of the truth here. So slices are held back and summed
+  // per (package, slice count) set; the sum then enters the median pool as ONE
+  // sample, which keeps the two rules composable when several runs are fed in.
+  const sliceLedger = new Map();
+  for (const { samples, skippedCached, slices } of perSummary) {
     for (const n of skippedCached) cachedNames.add(n);
     for (const [name, seconds] of samples) {
-      if (!bySample.has(name)) bySample.set(name, []);
-      bySample.get(name).push(seconds);
+      const slice = slices?.get(name) ?? null;
+      if (!slice) {
+        push(name, seconds);
+        continue;
+      }
+      if (!sliceLedger.has(name)) sliceLedger.set(name, new Map());
+      const byCount = sliceLedger.get(name);
+      if (!byCount.has(slice.count)) byCount.set(slice.count, new Map());
+      byCount.get(slice.count).set(slice.index, seconds);
     }
   }
+
+  // ⛔ An INCOMPLETE slice set is not summed. Summing 1 of 2 slices would record
+  // half a suite as the whole of it -- a wrong number that reads exactly like a
+  // right one, which is the hazard this file's cache rule already refuses in the
+  // other direction. The package instead drops out of `packages` entirely and is
+  // ESTIMATED from its test-file count like any unmeasured package, and it is
+  // named in the dataset so a refresh built on a partial artifact set is visible
+  // in the file rather than inferred from the split going strange later.
+  const incompleteSlices = [];
+  for (const [name, byCount] of sliceLedger) {
+    for (const [count, seen] of byCount) {
+      if (seen.size === count) {
+        push(name, [...seen.values()].reduce((a, b) => a + b, 0));
+        continue;
+      }
+      const missing = [];
+      for (let i = 1; i <= count; i++) if (!seen.has(i)) missing.push(`${i}/${count}`);
+      incompleteSlices.push(`${name} (missing ${missing.join(', ')})`);
+    }
+  }
+  incompleteSlices.sort((a, b) => a.localeCompare(b, 'en'));
+
   if (bySample.size === 0) {
     throw new Error(
-      'every `test` task in these summaries was a cache hit or a failure, so there is no ' +
-        'measurement here -- re-run with a cold cache (or `--force`) before regenerating.'
+      'every `test` task in these summaries was a cache hit, a failure or an incomplete slice ' +
+        'set, so there is no measurement here -- re-run with a cold cache (or `--force`) before ' +
+        'regenerating.'
     );
   }
   const measured = new Map(
@@ -171,6 +255,7 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
     secondsPerTestFileFallback: fallbackRate(measured, fileCounts),
     packages,
     skippedAsCached: [...cachedNames].sort((a, b) => a.localeCompare(b, 'en')),
+    skippedIncompleteSlices: incompleteSlices,
   };
 }
 
@@ -202,7 +287,7 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'measure-test-shard-timings self-test': 22,
+  'measure-test-shard-timings self-test': 34,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -365,6 +450,108 @@ function selfTest() {
       })
     )) {
       throw new Error('an all-cached run produced a dataset instead of refusing');
+    }
+  });
+
+  // File-level slices (#16173): a package the Test Core matrix shards below
+  // package granularity arrives as n partial windows, and the WHOLE cost this
+  // dataset records is their sum. Every case below fails in the same direction
+  // if the reassembly is dropped -- the heaviest package in the workspace
+  // recorded at 1/n of its real weight, which is #16173 again.
+  const slicedTask = (pkg, start, end, index, count) => ({
+    ...testTask(pkg, start, end),
+    cliArguments: [`--shard=${index}/${count}`],
+  });
+
+  check(() => {
+    if (sliceOfCliArguments(undefined) !== null || sliceOfCliArguments([]) !== null) {
+      throw new Error('slice: a run with no passthrough argv was read as a slice');
+    }
+  });
+  check(() => {
+    if (sliceOfCliArguments(['--log-order=stream']) !== null) {
+      throw new Error('slice: an unrelated passthrough argument was read as a slice');
+    }
+  });
+  check(() => {
+    const s = sliceOfCliArguments(['--shard=2/3']);
+    if (!s || s.index !== 2 || s.count !== 3) throw new Error(`slice: parsed as ${JSON.stringify(s)}`);
+  });
+  check(() => {
+    if (!threw(() => sliceOfCliArguments(['--shard=3/2']))) {
+      throw new Error('slice: an impossible slice spec was accepted');
+    }
+  });
+  check(() => {
+    const { slices } = samplesFromSummary(summary([slicedTask('cli', 0, 400_000, 1, 3)]), 'f');
+    const s = slices.get('cli');
+    if (!s || s.index !== 1 || s.count !== 3) throw new Error('slice: samplesFromSummary did not record the slice');
+  });
+  check(() => {
+    const { slices } = samplesFromSummary(summary([testTask('a', 0, 10_000)]), 'f');
+    if (slices.size !== 0) throw new Error('slice: a whole-package task was recorded as a slice');
+  });
+
+  // The load-bearing case: three slices of 400s are ONE 1200s package, not a
+  // 400s one. Median across the three windows -- the rule for repeat
+  // measurements -- would answer 400.
+  const sliced = buildDataset({
+    perSummary: [
+      samplesFromSummary(summary([slicedTask('cli', 0, 400_000, 1, 3)]), 'f'),
+      samplesFromSummary(summary([slicedTask('cli', 0, 380_000, 2, 3)]), 'g'),
+      samplesFromSummary(summary([slicedTask('cli', 0, 420_000, 3, 3), testTask('a', 0, 10_000)]), 'h'),
+    ],
+    fileCounts: new Map([['cli', 300], ['a', 5]]),
+    provenance: {},
+  });
+  check(() => {
+    if (sliced.packages.cli !== 1200) {
+      throw new Error(`slice: three 400s-ish slices summed to ${sliced.packages.cli}, expected 1200`);
+    }
+  });
+  check(() => {
+    if (sliced.skippedIncompleteSlices.length !== 0) {
+      throw new Error(`slice: a complete set was reported incomplete (${sliced.skippedIncompleteSlices.join('; ')})`);
+    }
+  });
+  check(() => {
+    if (sliced.packages.a !== 10) throw new Error('slice: an unsliced package in the same set was disturbed');
+  });
+
+  // A partial artifact set -- one shard's summary missing, or its slice a cache
+  // hit -- must NOT be summed. The package drops out and says so.
+  const partial = buildDataset({
+    perSummary: [
+      samplesFromSummary(summary([slicedTask('cli', 0, 400_000, 1, 3)]), 'f'),
+      samplesFromSummary(summary([slicedTask('cli', 0, 420_000, 3, 3), testTask('a', 0, 10_000)]), 'h'),
+    ],
+    fileCounts: new Map([['cli', 300], ['a', 5]]),
+    provenance: {},
+  });
+  check(() => {
+    if (Object.hasOwn(partial.packages, 'cli')) {
+      throw new Error(`slice: 2 of 3 slices were recorded as a weight (${partial.packages.cli})`);
+    }
+  });
+  check(() => {
+    if (!partial.skippedIncompleteSlices.some((s) => s.includes('cli') && s.includes('2/3'))) {
+      throw new Error(`slice: the incomplete set was not named (${partial.skippedIncompleteSlices.join('; ')})`);
+    }
+  });
+
+  // The two merge rules compose: sum WITHIN a run, median ACROSS runs.
+  const twoRuns = buildDataset({
+    perSummary: [
+      samplesFromSummary(summary([slicedTask('cli', 0, 500_000, 1, 2)]), 'r1a'),
+      samplesFromSummary(summary([slicedTask('cli', 0, 500_000, 2, 2)]), 'r1b'),
+      samplesFromSummary(summary([testTask('a', 0, 10_000)]), 'r1c'),
+    ],
+    fileCounts: new Map([['cli', 300], ['a', 5]]),
+    provenance: {},
+  });
+  check(() => {
+    if (twoRuns.packages.cli !== 1000) {
+      throw new Error(`slice: a 2-slice set summed to ${twoRuns.packages.cli}, expected 1000`);
     }
   });
 
@@ -549,6 +736,18 @@ function main() {
       `fallback ${dataset.secondsPerTestFileFallback}s/test-file, ` +
       `${dataset.skippedAsCached.length} skipped as cached -> ${path.relative(REPO_ROOT, out)}`
   );
+  // Loud, and on stderr beside the summary line: a file-sharded package that
+  // lost a slice is now ESTIMATED rather than measured, and it is the heaviest
+  // package in the workspace that this can happen to. Silence here would let a
+  // refresh built on five of six artifacts read like a complete one.
+  if (dataset.skippedIncompleteSlices.length > 0) {
+    console.error(
+      `measure-test-shard-timings: ⚠ ${dataset.skippedIncompleteSlices.length} package(s) reported an ` +
+        'INCOMPLETE set of file-level slices and were left unmeasured (they fall back to the ' +
+        `test-file-count estimate): ${dataset.skippedIncompleteSlices.join('; ')}. Feed every shard's ` +
+        'summary from ONE green run before trusting this dataset.'
+    );
+  }
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
