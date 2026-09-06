@@ -256,18 +256,20 @@ describe('#14419 (PR #14948 patch round 1) — a stale $error.code must not leak
   /**
    * The tier contract review's reproduction. `try_catch`'s catch region reads
    * `code` off the run-wide `$error` (necessarily — see the second describe
-   * block above). But the engine only REWRITES `$error` when a failing node
-   * RETURNS `{ success: false }`, or when it THROWS through a node with its
-   * OWN `fault` edge (`engine.ts`'s `executeNode`, the throw arm). A node
-   * inside a `try_catch`'s try region has no fault edge of its own — the
-   * region's synthetic sub-flow carries only the region's own edges — so a
-   * node that FAILS BY THROWING (a `timeoutMs` firing, here) leaves `$error`
-   * exactly as an EARLIER, unrelated failure left it. Without the identity
-   * guard in `try-catch-node.ts` (`innerError !== errorBefore`), that earlier
-   * failure's `DUPLICATE_RECORD` code leaks onto this one — a store failure
-   * misread as a duplicate and SWALLOWED, through a different door than
-   * #14419's original bug but the exact same failure mode: the very thing
-   * fence 4 of the ruling of record exists to rule out.
+   * block above), so a stale `$error` becomes a store failure misread as a
+   * duplicate and SWALLOWED — a different door than #14419's original bug,
+   * the exact same failure mode, and the very thing fence 4 of the ruling of
+   * record exists to rule out.
+   *
+   * Two independent things keep these two flows green, and this block pins the
+   * OUTCOME rather than either mechanism: the identity guard in
+   * `try-catch-node.ts` (`innerError !== errorBefore`), which is what closed
+   * them when this block was written, and #14955's removal of the underlying
+   * asymmetry — the engine's throw arm now publishes `$error` unconditionally,
+   * so the thrown timeout here names itself and carries no `code`, instead of
+   * leaving an earlier failure's `DUPLICATE_RECORD` standing. Either one alone
+   * holds these two; `throw-arm-error-refresh.test.ts` carries the shape that
+   * needs the second.
    */
   function registerProbes(engine: AutomationEngine, seen: Array<{ code?: string; message?: string }>, ran: string[]): void {
     engine.registerNodeExecutor({
