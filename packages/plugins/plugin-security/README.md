@@ -38,21 +38,24 @@ await kernel.bootstrap();
 `SecurityPlugin` is single-tenant by default. It enforces RBAC, owner-based RLS, and Field-Level Security regardless of mode.
 
 For **multi-tenant** (logical row-level Organization scoping) the organization wall itself
-is **not in this package and not in this repository**. It ships as the enterprise
-`@objectstack/organizations` runtime, whose `OrganizationsPlugin` registers the
-`org-scoping` service; a host app declares and installs it in its own `package.json`, and
-`objectstack serve` resolves it from the app rather than from the framework. It must be
-registered **before** `SecurityPlugin`, so the posture probe below finds it.
+is **not in this package**. It ships as the separate `@objectstack/organizations` runtime,
+whose `OrganizationsPlugin` registers the `org-scoping` service; a host app declares and
+installs it in its own `package.json`, and `objectstack serve` resolves it from the app
+rather than from the framework. It must be registered **before** `SecurityPlugin`, so the
+posture probe below finds it.
 
 Asking for the wall without the package is not a silent downgrade: `objectstack serve`
 prints `FATAL: tenancy posture '<posture>' was requested but @objectstack/organizations
 could not be loaded` and **refuses to boot** (ADR-0093 D5), unless the operator explicitly
 sets `OS_ALLOW_DEGRADED_TENANCY=1`. `objectstack doctor` reports the same missing runtime.
 
-> ⚠️ Earlier revisions of this page told readers to install `@objectstack/plugin-org-scoping`
-> and register an `OrgScopingPlugin` from it. No such package exists — not on npm, and in no
-> directory of this repo. The open edition ships no organization wall; there is nothing to
-> install *here* to get one.
+> ℹ️ `@objectstack/organizations` is Apache-2.0 and lives in this repository
+> (`packages/plugins/organizations`), as of ADR-0132 — earlier revisions of this page said
+> the wall was not open source at all, and that is no longer true. An enterprise / cloud
+> deployment resolves the same package name to a private, licence-gated subclass through its
+> own workspace declaration; which one a deployment mounts is decided by the manifest that
+> declares the name. The historical `@objectstack/plugin-org-scoping` spelling, and the
+> `OrgScopingPlugin` class name, remain as aliases.
 
 SecurityPlugin resolves the tenancy **posture** (`single` | `group` | `isolated`) once at start time — preferring the `tenancy` service, and falling back to probing `getService('org-scoping')` (present ⇒ the historical `isolated` posture). Two consequences:
 
