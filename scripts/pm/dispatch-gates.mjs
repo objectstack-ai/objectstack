@@ -4943,6 +4943,75 @@ export function runnableInvocation({ check, filter, direct, localCheck = null })
   return `pnpm ${check}`;
 }
 
+/**
+ * Does this invocation run ONLY the checker's own `--self-test`?
+ *
+ * ## The defect (#16030)
+ *
+ * The artifact-roster block tells its reader to run its rows. Two of them
+ * resolve to a `--self-test` invocation and nothing else, because the half
+ * that judges a pull request needs the `pull_request` event payload and runs
+ * in its own workflow. Their green is a statement about the checker's own
+ * fixtures: it cannot fail for anything in the diff. Printed in the same
+ * shape and the same list as rows whose green does grade the diff, it is the
+ * failure class this repo keeps re-deriving -- a reading that CANNOT fail is
+ * indistinguishable from one that passed. The repair principle is the card's
+ * own: name the axis your control discriminates on, and check that it is the
+ * axis that can fail.
+ *
+ * ## Why the card's own discriminator is NOT the one implemented here
+ *
+ * The card names the discriminator as "the echoed command ends in
+ * `--self-test`". Measured over the 39 roster rows on this tree, that reading
+ * selects five of them and MISSES BOTH ROWS IT WAS FILED FOR: those two are
+ * pnpm-spelled, so the flag lives in the manifest entry that defines the name
+ * and never in the bytes the block prints. A control read off the printed
+ * bytes alone would have discriminated on an axis that cannot fail for the
+ * population it exists for -- the same defect, one level up. So the row's
+ * invocation is resolved one hop through the manifest that DEFINES it, and
+ * this predicate is applied to the command body that actually runs.
+ *
+ * ## EVERY segment, never `some` and never a match on the whole string
+ *
+ * The conventional shape in this repo names its script twice
+ * (`node x.mjs --self-test && node x.mjs`), and that IS a PR-judging row: the
+ * second segment does the work. A `some`, or a test against the undivided
+ * string, would classify the conventional shape as checker-health and suppress
+ * a row a dev owes -- a false negative in the direction that reads as less
+ * work. Measured on this tree: 7 checker-health, 32 PR-judging, 0 unresolved.
+ */
+export function selfTestOnlyInvocation(body) {
+  if (typeof body !== 'string') return false;
+  const segments = body.split(/&&|\|\||;/).map((segment) => segment.trim()).filter(Boolean);
+  if (segments.length === 0) return false;
+  return segments.every((segment) => /(?:^|\s)--self-test(?:\s|$)/.test(segment));
+}
+
+/**
+ * The axis one artifact-roster row is classified on: `true` when running the
+ * row grades only the checker's own fixtures, `false` when running it grades
+ * the diff, and `null` when this derivation cannot resolve the invocation and
+ * may therefore assert NEITHER.
+ *
+ * ⛔ The third answer is not a hedge and it is deliberately not folded into
+ * `false`. A row this tool could not resolve, filed silently among the rows
+ * that judge, is the very defect the classification exists to close; so it is
+ * named in the block as unresolved and left to the reader. Zero members on
+ * this tree, which is the state that has to stay LOUD rather than become
+ * invisible the day it stops being empty.
+ *
+ * The two carriers are read where the flag actually lives, never one of them
+ * for both: a direct row IS its invocation, so the rendered command is the
+ * body; a pnpm-spelled row is a NAME, and the body is the manifest entry
+ * `discoverFamilies` already read for it -- the same manifest, from the same
+ * read, for the reason `ciOnlyMeasurement` states about `rootScripts`.
+ */
+export function rosterCheckerHealth(entry, command) {
+  if (entry?.direct) return selfTestOnlyInvocation(command);
+  if (typeof entry?.manifestCommand !== 'string') return null;
+  return selfTestOnlyInvocation(entry.manifestCommand);
+}
+
 // ---------------------------------------------------------------------------
 // The seam between this tool and its caller (#13462)
 // ---------------------------------------------------------------------------
@@ -5471,9 +5540,13 @@ export function hintCovers(hint, inputPath) {
     return zeroSegmentForms(hint).some((form) => triggerCovers(form, inputPath));
   const plain = collapseHint(hint);
   if (plain.length < 2) return false;
-  // `hint`, not `plain`: glob collapse destroys the separator this refusal is
-  // deciding on, and a declared subtree is not a bare word. See the docblock.
-  if (!hint.includes('/') && !plain.startsWith('.')) return false;
+  // `refusedAsTooGeneric`, not a second copy of its condition: the residue
+  // printer has to state WHICH refusal fired, and a rule spelled twice is the
+  // drift this file refuses everywhere else (#12797). The predicate reads
+  // `hint` and not `plain` for the reason the docblock gives -- glob collapse
+  // destroys the separator the refusal is deciding on, and a declared subtree
+  // is not a bare word.
+  if (refusedAsTooGeneric(hint)) return false;
   return (
     inputPath === plain ||
     inputPath.startsWith(`${plain}/`) ||
@@ -5484,6 +5557,29 @@ export function hintCovers(hint, inputPath) {
     // section above for the price and for what this deliberately cannot do.
     MODULE_SPECIFIER_EXTENSIONS.some((ext) => inputPath === plain + ext)
   );
+}
+
+/**
+ * The refusal `hintCovers` applies BEFORE it compares anything: a literal with
+ * no path separator anywhere in it, and not a dotted dir, is too generic to
+ * match with. Its own name because two readers need it and they must not
+ * answer it differently -- `hintCovers` to refuse the hint, and
+ * `unreachableReason` to say which refusal fired when it reports one dead
+ * (#12797).
+ *
+ * ⚠️ The SHORT-literal refusal one line above the call site is deliberately
+ * NOT folded in: "shorter than two characters" and "carries no separator" are
+ * two different rules, and a predicate that answered both could not tell the
+ * residue printer which of them it was reporting.
+ *
+ * A pattern-judged hint is excluded here rather than left to the caller: at
+ * `hintCovers` the exclusion is already structural (a pattern returns one
+ * branch earlier), but the residue printer reaches this with EVERY dead hint,
+ * and a glob whose collapse happens to lose its separators is not a bare word.
+ */
+export function refusedAsTooGeneric(hint) {
+  if (judgedAsPattern(hint)) return false;
+  return !hint.includes('/') && !collapseHint(hint).startsWith('.');
 }
 
 /**
@@ -6495,16 +6591,51 @@ export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
  * The ⛔ subset is the correlation the card asks for by name — the rosters
  * whose common directory contains one of THIS card's paths, where the silence
  * is not evidence in either direction.
+ *
+ * ## The SECOND axis, and why the block owes it (#16030)
+ *
+ * Everything above is about the `silent` VERDICT. This block also issues an
+ * instruction — "Run them, or read them" — and for some of its rows running
+ * them produces a second green that is not a clearance either: the row's
+ * invocation resolves to the checker's own `--self-test` and nothing else, so
+ * it cannot fail for anything in the diff. Two such rows
+ * (`pnpm check:partof-closing-keyword`, `pnpm check:single-claim-paths`) were
+ * harvested as PR clearance; the half of each gate that judges a pull request
+ * needs the event payload and runs in its own workflow, so the pnpm name is a
+ * checker-health invocation ON PURPOSE and the defect is that nothing said so.
+ *
+ * So the rows are SPLIT, and the split is derived (`rosterCheckerHealth`)
+ * rather than kept as a list here — a hand-kept list is a declaration that
+ * goes stale silently, which is the shape this whole file refuses.
+ *
+ * ⛔ The marker rides on the ROW, not only in the sub-heading, and that is the
+ * measured requirement rather than a decoration: `spellingDistribution`'s
+ * docblock records what consumers of this output actually do, which is grep
+ * ROWS out of the block. A caption a row-wise harvest never reads would leave
+ * the two greens indistinguishable in exactly the stream that matters.
+ *
+ * ⛔ And a row this tool cannot resolve is named as unresolved rather than
+ * defaulted into either side. Defaulting it to "judges the diff" would mint
+ * the same false clearance from a different door, and defaulting it the other
+ * way would suppress a row a dev owes.
  */
 export function artifactRosterLines(rosters = []) {
   if (rosters.length === 0) return [];
   const inverted = rosters.filter((r) => r.coversYourPath);
+  // Three-valued on purpose: `!== true` is not "judges", and `!== false` is not
+  // "checker-health". Every row lands in exactly one of the three.
+  const checkerHealth = rosters.filter((r) => r.checkerHealth === true);
+  const judging = rosters.filter((r) => r.checkerHealth === false);
+  const unresolved = rosters.filter((r) => r.checkerHealth !== true && r.checkerHealth !== false);
+  const byCommand = (a, b) => a.command.localeCompare(b.command);
+  const row = (r) => `  - ${r.command}${r.coversYourPath ? `   ⛔ roster under ${r.dir}, which one of your paths is in` : ''}`;
   const lines = [
     `Artifact rosters — ${rosters.length} famil(ies) whose \`silent\` verdict is a fact about a LIST, not about your paths:`,
     '  Each declares only tracked FILES — a baseline, an allowlist of the members it already has. A list of the files that',
     '  already exist can never contain one added tomorrow, so this derivation scores them silent for EVERY card in the tree,',
     '  and no path you pass can move them. ⛔ They are NOT in the runnable total above and are NOT counted among the derived',
-    '  families. Run them, or read them — but ⛔ never read their silence as a clearance.',
+    '  families. Run them, or read them — but ⛔ never read their silence as a clearance, and ⛔ never read a green from a row',
+    '  marked below as checker-health as one either: that command grades the checker\'s own fixtures and cannot fail for your diff.',
     '  ⇒ The fix is the gate\'s, not this tool\'s: declare the scan surface beside the roster (the subtree spelling), after',
     '  which the family is MATCHED here and leaves this block.',
   ];
@@ -6516,10 +6647,24 @@ export function artifactRosterLines(rosters = []) {
   } else {
     lines.push('  None of their rosters sits in a directory your paths are in, so none of them is a lead about this card.');
   }
-  for (const r of [...rosters].sort((a, b) => a.command.localeCompare(b.command))) {
+  for (const r of [...judging].sort(byCommand)) lines.push(row(r));
+  if (checkerHealth.length) {
     lines.push(
-      `  - ${r.command}${r.coversYourPath ? `   ⛔ roster under ${r.dir}, which one of your paths is in` : ''}`,
+      `  ⛔ ${checkerHealth.length} of these ${rosters.length} famil(ies) run ONLY the checker's own \`--self-test\` — they judge the`,
+      '  checker\'s fixtures and CANNOT judge your diff, so a green from one of them is not PR clearance in either direction:',
     );
+    for (const r of [...checkerHealth].sort(byCommand)) {
+      lines.push(`${row(r)}   ⚠ checker-health only (--self-test) — NOT a PR verdict`);
+    }
+  }
+  if (unresolved.length) {
+    lines.push(
+      `  ⚠ ${unresolved.length} row(s) whose invocation this derivation could not resolve to a command body, so it can say NEITHER`,
+      '  that they judge your diff nor that they cannot. ⛔ Read them before treating either answer as settled:',
+    );
+    for (const r of [...unresolved].sort(byCommand)) {
+      lines.push(`${row(r)}   ⚠ invocation not resolvable here — UNCLASSIFIED`);
+    }
   }
   return lines;
 }
@@ -8179,9 +8324,36 @@ export function unreachableReason(dead, cap = 3) {
   const shown = dead
     .slice(0, cap)
     .map(({ hint, deepest, target }) => {
-      // First, because it is the strongest statement available: the sweep knows
-      // the actual file. Every other branch reasons from a PREFIX, and for this
-      // shape every one of them lands on something false.
+      // One sentence, one spelling, whichever branch reaches it: the two
+      // callers below differ only in WHAT the tree has, and a second copy of
+      // this wording is a second thing to keep in step (#12797).
+      const tooGeneric = (what) =>
+        `'${hint}' — the tree HAS ${what}; the covering rule refuses the literal as too generic (no path separator)`;
+      // ── The refusal that ACTUALLY fired, ordered ahead of `target` (#12797)
+      //
+      // `hintCovers` rejects a separator-less literal BEFORE it compares
+      // anything, so for a bare hint every sentence below describes a
+      // comparison that was never performed. The `target` branch's wording
+      // ("no whole-segment comparison reaches") was a true statement about the
+      // RULE when it was written; #12514 then taught `hintCovers` to follow a
+      // dropped extension, after which a separator-CARRYING hint whose file the
+      // tree has is MATCHED and never enters `dead` at all. That leaves the
+      // bare hint as the only population the `target` branch can still reach —
+      // and it is the one population where its sentence is FALSE, because what
+      // this literal lacks is a separator, not an extension. Same species as
+      // the two cards that put the branch there: a residue row whose
+      // classification and whose evidence are both wrong about a file sitting
+      // right in front of the reader.
+      //
+      // ⛔ The repair is the ORDER, not a `target` sentence taught which
+      // refusal fired: that would add machinery to a branch which then has no
+      // live caller. `target` is evidence this row already carries, so naming
+      // the file here costs nothing and keeps the reader's escape (declare the
+      // subtree spelling) attached to the refusal that is actually blocking it.
+      if (target && refusedAsTooGeneric(hint)) return tooGeneric(target);
+      // Then the strongest statement available for everything else: the sweep
+      // knows the actual file. Every other branch reasons from a PREFIX, and
+      // for this shape every one of them lands on something false.
       if (target) {
         return `'${hint}' — the tree HAS ${target}; the literal is that file's extensionless module spelling, which no whole-segment comparison reaches`;
       }
@@ -8208,9 +8380,7 @@ export function unreachableReason(dead, cap = 3) {
           ? `'${hint}' — the tree HAS ${form}; this hint is a GLOB PATTERN and nothing under that root matches it — check with \`git ls-files '${hint}'\``
           : `'${hint}' — a glob pattern whose literal prefix ${form} is gone; the tree stops at ${deepest}, so the layout moved under it`;
       }
-      if (deepest === form) {
-        return `'${hint}' — the tree HAS it; the covering rule refuses the literal as too generic (no path separator)`;
-      }
+      if (deepest === form) return tooGeneric('it');
       return `'${hint}' — the tree stops at ${deepest}; the layout moved under it`;
     })
     .join(' · ');
@@ -10195,6 +10365,13 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // exists and can never match anything, which reads exactly like a gate
     // with an unspellable population.
     let files = entry.direct ? [entry.script] : resolveCheckToFiles(entry.check, rootScripts);
+    // The manifest BODY beside the files resolved out of it, from this one read
+    // (#16030). A pnpm-spelled row prints a NAME, and whether running that name
+    // grades the diff or only the checker's own fixtures is a fact about the
+    // body the name expands to. Captured here, where the manifest is already
+    // open, for the reason `ciOnlyMeasurement` states about `rootScripts`: no
+    // reader downstream can then answer from a different revision of the file.
+    if (!entry.direct) entry.manifestCommand = rootScripts[entry.check] ?? null;
     if (entry.filter) {
       // package-scoped check: resolve through that package's manifest when findable
       const pkgDirGuess = entry.filter.replace(/^@objectstack\//, '');
@@ -10202,6 +10379,10 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         const p = nodePath.join(ROOT, base, pkgDirGuess, 'package.json');
         if (existsSync(p)) {
           const pkgScripts = JSON.parse(readFileSync(p, 'utf8')).scripts ?? {};
+          // The package manifest is the one that DEFINES a `--filter`-spelled
+          // row, so its body is the body that runs -- it wins over a root
+          // script that happens to carry the same name (#16030).
+          if (typeof pkgScripts[entry.check] === 'string') entry.manifestCommand = pkgScripts[entry.check];
           // The manifest's own directory goes IN, and tracked paths come back
           // out — a package script may climb out of its package
           // (`tsx ../../scripts/x.mts`), and prefixing the result here instead
@@ -11268,8 +11449,14 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     // would make every card's total a different number for a reason unrelated
     // to the card. Their own key instead, so a machine consumer reads the same
     // omission the human block names rather than inferring it (#14880).
-    artifactRosterSilences: rosters.map(({ check, command, workflows, artifacts, dir, coversYourPath }) => ({
+    artifactRosterSilences: rosters.map(({ check, command, workflows, artifacts, dir, coversYourPath, checkerHealth }) => ({
       check, command, workflows, artifacts, dir, coversYourPath,
+      // The same three-valued axis the human block splits on (#16030), stated
+      // rather than left for a machine consumer to re-derive from the command
+      // string -- re-deriving it from the printed bytes is exactly the reading
+      // that misses the pnpm-spelled rows. `null` is "not resolvable here",
+      // never "judges the diff".
+      checkerHealth,
     })),
     pendingChangeset: {
       probePath: CHANGESET_PROBE_PATH,
@@ -11440,7 +11627,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const rosters = silent
     .map(([check, entry]) => {
       const roster = artifactOnlySilence(entry, paths, tree);
-      return roster ? { check, command: runnableInvocation(entry), workflows: [...entry.workflows], ...roster } : null;
+      if (!roster) return null;
+      const command = runnableInvocation(entry);
+      // The SECOND axis this block reports, beside `coversYourPath` and
+      // travelling on the row for the same reason (#16030): the human block,
+      // the `--commands` stderr accounting and the `--json` document are three
+      // readings of THESE rows, so none of them can name a different set.
+      const checkerHealth = rosterCheckerHealth(entry, command);
+      return { check, command, workflows: [...entry.workflows], checkerHealth, ...roster };
     })
     .filter(Boolean);
 
@@ -15769,8 +15963,8 @@ function selfTest() {
   // and names the families — and its whole contract is that it is a block
   // BESIDE the derived list, never a part of it.
   const blockRows = [
-    { check: 'check:b', command: 'pnpm check:b', workflows: ['lint.yml'], artifacts: ['scripts/a.mjs'], dir: 'scripts', coversYourPath: true },
-    { check: 'check:a', command: 'pnpm check:a', workflows: ['lint.yml'], artifacts: ['docs/x.md'], dir: 'docs', coversYourPath: false },
+    { check: 'check:b', command: 'pnpm check:b', workflows: ['lint.yml'], artifacts: ['scripts/a.mjs'], dir: 'scripts', coversYourPath: true, checkerHealth: false },
+    { check: 'check:a', command: 'pnpm check:a', workflows: ['lint.yml'], artifacts: ['docs/x.md'], dir: 'docs', coversYourPath: false, checkerHealth: false },
   ];
   const blockOut = artifactRosterLines(blockRows);
   t('no rosters, no block — an empty section is never printed', artifactRosterLines([]).length === 0);
@@ -15810,6 +16004,89 @@ function selfTest() {
     '⛔ a roster command is not in the runnable union, whatever the block prints',
     !commandsFor({ matchedRows: [{ check: 'check:m', command: 'pnpm check:m', ciOnly: null }], kindGroups: [], alwaysRunsRows: [] })
       .some((c) => c === 'pnpm check:a' || c === 'pnpm check:b'),
+  );
+
+  // ── A roster row whose green cannot grade the diff (#16030) ──────────────
+  //
+  // ⚠️ Every case here asserts the AXIS and where the row LANDED, never that
+  // the block still renders. The defect was a green in the right shape: a row
+  // that cannot fail for anything in the diff, sitting in the same list and the
+  // same syntax as rows that can. A case checking only that the command appears
+  // would have been green against the bug.
+  //
+  // The predicate first, on the two carriers and on the shape that must NOT
+  // move — the conventional `--self-test && <work>` pair, where the second
+  // segment is what judges the diff.
+  t('a lone --self-test invocation grades the checker, not the diff', selfTestOnlyInvocation('node scripts/x.mjs --self-test') === true);
+  t(
+    '⛔ ...and the conventional two-segment shape does NOT: its second segment does the work',
+    selfTestOnlyInvocation('node scripts/x.mjs --self-test && node scripts/x.mjs') === false,
+  );
+  t('...whichever separator joins the segments', selfTestOnlyInvocation('node scripts/x.mjs --self-test; node scripts/x.mjs') === false);
+  t('every segment counts, so a pair of self-tests is still checker-health', selfTestOnlyInvocation('node a.mjs --self-test && node b.mjs --self-test') === true);
+  t('a bare work invocation judges the diff', selfTestOnlyInvocation('node scripts/x.mjs') === false);
+  t('⛔ and a flag that merely CONTAINS the token is not the flag', selfTestOnlyInvocation('node scripts/x.mjs --self-testing') === false);
+  t('an empty or absent body is never read as checker-health', selfTestOnlyInvocation('') === false && selfTestOnlyInvocation(null) === false);
+  // ⭐ The carrier that the card's own discriminator misses. A direct row wears
+  // the flag in the bytes the block prints; a pnpm-spelled row is a NAME, and
+  // reading the printed bytes for it answers `false` — which is how both rows
+  // this card was filed for would have stayed unmarked by a fix that trusted
+  // the rendered command alone.
+  t(
+    'a direct row is classified from the invocation the block prints',
+    rosterCheckerHealth({ direct: true }, 'node scripts/x.mjs --self-test') === true
+      && rosterCheckerHealth({ direct: true }, 'node scripts/x.mjs') === false,
+  );
+  t(
+    '⭐ a pnpm-spelled row is classified from the manifest body, NOT from the name the block prints',
+    rosterCheckerHealth({ direct: false, manifestCommand: 'node scripts/x.mjs --self-test' }, 'pnpm check:x') === true
+      && rosterCheckerHealth({ direct: false, manifestCommand: 'node scripts/x.mjs --self-test && node scripts/x.mjs' }, 'pnpm check:x') === false,
+  );
+  t(
+    '⛔ an unresolvable invocation is null — NEITHER judging nor checker-health',
+    rosterCheckerHealth({ direct: false, manifestCommand: null }, 'pnpm check:x') === null,
+  );
+  // Now the rendering, which is where the harvest reads it.
+  const healthRow = { check: 'check:h', command: 'pnpm check:h', workflows: ['lint.yml'], artifacts: ['scripts/h.json'], dir: 'scripts', coversYourPath: false, checkerHealth: true };
+  const splitOut = artifactRosterLines([...blockRows, healthRow]);
+  t(
+    '⭐ a --self-test-only roster entry lands in the checker-health sub-list, under its own heading',
+    splitOut.some((l) => l.includes("1 of these 3 famil(ies) run ONLY the checker's own")),
+    splitOut.join('\n'),
+  );
+  // ⛔ ON THE ROW, not only in the heading: `spellingDistribution`'s docblock
+  // records that consumers grep ROWS out of this block, so a caption a row-wise
+  // harvest never reads would leave the two greens indistinguishable in the one
+  // stream that matters.
+  t(
+    '⛔ ...and the row itself carries the mark, because a harvest greps rows and not headings',
+    splitOut.some((l) => l.startsWith('  - pnpm check:h') && l.includes('NOT a PR verdict')),
+    splitOut.filter((l) => l.startsWith('  - ')).join('|'),
+  );
+  t(
+    '...while the rows that DO judge the diff keep their plain shape, so nothing is marked that can fail',
+    splitOut.filter((l) => l.startsWith('  - ') && !l.includes('NOT a PR verdict')).length === 2
+      && !splitOut.some((l) => l.startsWith('  - pnpm check:a') && l.includes('checker-health')),
+    splitOut.filter((l) => l.startsWith('  - ')).join('|'),
+  );
+  t(
+    'the instruction to run them now says what a green from such a row is worth',
+    splitOut.some((l) => l.includes('never read a green from a row')),
+  );
+  // ⛔ The third answer, pinned so it can never quietly become one of the other
+  // two. Zero members on this tree today; a row this tool cannot resolve must
+  // be NAMED, because filing it among the judging rows mints the same false
+  // clearance through a different door.
+  const unresolvedOut = artifactRosterLines([{ ...healthRow, check: 'check:u', command: 'pnpm check:u', checkerHealth: null }]);
+  t(
+    '⛔ an unclassified row is named as unclassified, never defaulted into either side',
+    unresolvedOut.some((l) => l.includes('could not resolve to a command body'))
+      && unresolvedOut.some((l) => l.startsWith('  - pnpm check:u') && l.includes('UNCLASSIFIED')),
+    unresolvedOut.join('\n'),
+  );
+  t(
+    '...and the block never claims of an unclassified row that it judges the diff',
+    !unresolvedOut.some((l) => l.startsWith('  - pnpm check:u') && l.includes('NOT a PR verdict')),
   );
 
   // ── The classifier returned a plausible WRONG CATEGORY (#13520) ───────────
@@ -19177,6 +19454,65 @@ function selfTest() {
   t('the renderer still names WHY: the tree HAS the file under the extension the specifier drops', /extensionless module spelling/.test(unreachableReason(extlessDead)));
   t('...and it names the FILE, so the reader has no prefix to guess from', unreachableReason(extlessDead).includes('packages/spec/src/index.ts'));
   t('...never reporting the short prefix as a layout move', !/layout moved/.test(unreachableReason(extlessDead)));
+
+  // ── The reason printed is the refusal that FIRED (#12797) ────────────────
+  //
+  // The sentence above is true only where the comparison really was a
+  // whole-segment one. `hintCovers` refuses a separator-less literal BEFORE it
+  // compares anything, so for a BARE hint that sentence describes a comparison
+  // that never ran — and since #12514 that is the only population the branch
+  // can still reach, because a separator-carrying hint whose file the tree HAS
+  // is MATCHED and never dead. Measured on this tree when the reorder landed:
+  // 236 dead hints, 0 of them reaching the `target` branch at all, so this is a
+  // LATENT wrong sentence pinned before it can go live — exactly the state the
+  // two closed cards of this species were in before a layout change woke them.
+  const bareTreeFixture = ['conversions.ts', 'packages/spec/src/index.ts'];
+  const bareDead = [
+    {
+      hint: 'conversions',
+      deepest: deepestTrackedPrefix('conversions', trackedPrefixes(bareTreeFixture)),
+      target: extensionlessModuleTarget('conversions', new Set(bareTreeFixture), trackedPrefixes(bareTreeFixture)),
+    },
+  ];
+  t(
+    'the fixture really is the residue population this is about: bare, dead, and extensionless-resolvable',
+    bareDead[0].target === 'conversions.ts' && !hintCovers('conversions', 'conversions.ts'),
+    JSON.stringify(bareDead[0]),
+  );
+  t(
+    '⭐ a BARE hint is told which refusal fired — the separator, not the extension',
+    /too generic \(no path separator\)/.test(unreachableReason(bareDead)),
+    unreachableReason(bareDead),
+  );
+  t(
+    '⛔ ...and is NOT told that no whole-segment comparison reaches it, which is a comparison that never ran',
+    !/whole-segment comparison/.test(unreachableReason(bareDead)),
+    unreachableReason(bareDead),
+  );
+  t(
+    '...while still naming the FILE the tree has, so the reader is not left guessing at a prefix',
+    unreachableReason(bareDead).includes('conversions.ts'),
+    unreachableReason(bareDead),
+  );
+  // ⛔ The ordering is the repair, so the OTHER population must be untouched: a
+  // separator-carrying hint still gets the extensionless sentence, byte for
+  // byte. A reorder that swallowed both would have retired a true sentence.
+  t(
+    '⛔ a separator-carrying hint keeps the extensionless sentence — the reorder moved one population, not two',
+    /extensionless module spelling/.test(unreachableReason(extlessDead)) && !/too generic/.test(unreachableReason(extlessDead)),
+  );
+  // One rule, one owner: the residue printer must refuse exactly what the
+  // matcher refuses, or it reports a refusal that did not fire.
+  t(
+    'the refusal the printer names is the refusal the matcher applies',
+    refusedAsTooGeneric('conversions') === true
+      && refusedAsTooGeneric('packages/spec/src/index') === false
+      && refusedAsTooGeneric('.changeset') === false,
+  );
+  t(
+    '⛔ ...and a PATTERN is never read as a bare word, however its collapse spells out',
+    refusedAsTooGeneric('.changeset/*.md') === false,
+  );
   t(
     'a family whose only dead hints are extensionless specifiers is BY CONSTRUCTION, not a miss to triage',
     unreachableClass(extlessDead) === 'by construction',
