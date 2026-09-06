@@ -555,8 +555,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "Al error"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -942,7 +942,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Separación",
         helpText: "Separación de cuadrícula (unidades Tailwind)"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "Intervalo de actualización",
         helpText: "Actualización automática (segundos)"
       },

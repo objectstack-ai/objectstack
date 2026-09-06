@@ -18,7 +18,7 @@ const salesDashboard = {
   name: 'sales_overview',
   label: 'Sales Overview',
   description: 'Key sales metrics and pipeline analysis',
-  refreshInterval: 300,     // Refresh every 5 minutes
+  refreshIntervalSeconds: 300,  // Refresh every 5 minutes
 
   dateRange: {
     field: 'close_date',
@@ -65,7 +65,7 @@ const salesDashboard = {
 | `label` | `string` | ✅ | Display label |
 | `description` | `string` | optional | Dashboard description |
 | `widgets` | `DashboardWidget[]` | ✅ | Chart and metric widgets |
-| `refreshInterval` | `number` | optional | Auto-refresh interval (seconds) |
+| `refreshIntervalSeconds` | `number` | optional | Auto-refresh interval (seconds) |
 | `dateRange` | `object` | optional | Global date range filter |
 | `globalFilters` | `GlobalFilter[]` | optional | Global filter controls |
 
@@ -449,7 +449,7 @@ const projectDashboard = {
   name: 'project_overview',
   label: 'Project Overview',
   description: 'Real-time project health metrics',
-  refreshInterval: 60,
+  refreshIntervalSeconds: 60,
 
   dateRange: {
     field: 'created_at',

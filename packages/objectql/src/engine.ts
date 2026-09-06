@@ -55,6 +55,7 @@ import {
   isDataMigrationFlagVerified,
   renderOperationMessage,
   objectLabelKey,
+  resolveBundleLocale,
 } from '@objectstack/spec/system';
 import { ExecutionContext, ExecutionContextSchema } from '@objectstack/spec/kernel';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -2581,7 +2582,13 @@ export class ObjectQL implements IObjectQLEngine {
   // i18n service backing validation-message + field-label localization (#3957).
   // Optional: without it, messages render from the built-in catalog against the
   // declared labels.
-  private i18nService?: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string };
+  private i18nService?: {
+    t?: (key: string, locale: string, params?: Record<string, unknown>) => string;
+    // [#15757] `II18nService` requires `getLocales()`; it is optional HERE for
+    // the same reason `t` is — the setter accepts any partial shim, and a shim
+    // that cannot say what it holds is simply not negotiated against.
+    getLocales?: () => string[];
+  };
 
   // Crypto provider backing `secret`-typed fields. Optional: when absent,
   // writing an object that declares a secret field fails closed (never
@@ -6072,7 +6079,7 @@ export class ObjectQL implements IObjectQLEngine {
    * a deployment's `validation.field.*` message overrides, and the field's
    * TRANSLATED label for apps whose declared labels are in another language.
    */
-  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string }): void {
+  setI18nService(service: { t?: (key: string, locale: string, params?: Record<string, unknown>) => string; getLocales?: () => string[] }): void {
     this.i18nService = service;
     this.logger.info('I18nService configured for validation messages');
   }
@@ -6096,9 +6103,60 @@ export class ObjectQL implements IObjectQLEngine {
     const t = this.i18nService?.t;
     return {
       objectName,
-      locale: context?.locale,
+      locale: this.negotiatedMessageLocale(context?.locale),
       translate: t ? (key, locale, params) => t.call(this.i18nService, key, locale, params) : undefined,
     };
+  }
+
+  /**
+   * The locale the bridged i18n service can actually ANSWER in, for the locale
+   * the caller asked for (#15757).
+   *
+   * `ExecutionContext.locale` is the `Accept-Language` header's first tag
+   * verbatim — `preferredLocaleFromHeader` reports what was ASKED FOR and
+   * expands nothing, deliberately, because every one of its callers negotiates
+   * differently. Handing that tag straight to `II18nService.t()` made this the
+   * one consumer that never negotiated at all: a served adapter resolves a
+   * locale EXACTLY and then falls to its declared fallback
+   * (`FileI18nAdapter.t()` is `resolveFromLocale(key, locale)` then
+   * `resolveFromLocale(key, fallbackLocale)`), so a bare `zh` missed a `zh-CN`
+   * bundle and the caller read an English refusal — on the same response whose
+   * dataset, view and object labels were Chinese, because those go through
+   * `pickData` and `pickData` negotiates.
+   *
+   * ⛔ The rule is NOT re-implemented here. `resolveBundleLocale`
+   * (`@objectstack/spec/system`) is the single negotiation rule the document
+   * translators already run — exact → case-insensitive → base language →
+   * variant expansion, which is the step that reaches `zh-CN` from `zh` — and
+   * this asks it the same question about a different set of available locales:
+   * the translators' set is the bundle's keys, and the service's set is what
+   * `getLocales()` reports it holds. A second rule living here is the defect,
+   * not the fix.
+   *
+   * Passes the requested tag through untouched whenever there is nothing to
+   * negotiate against — no service, no `getLocales`, an empty or non-array
+   * answer, a throwing one, or no match. Negotiation needs a list of what
+   * EXISTS; inventing one is how a second rule gets born.
+   */
+  private negotiatedMessageLocale(requested: string | undefined): string | undefined {
+    if (!requested) return requested;
+    const getLocales = this.i18nService?.getLocales;
+    if (typeof getLocales !== 'function') return requested;
+    let available: unknown;
+    try {
+      available = getLocales.call(this.i18nService);
+    } catch {
+      // A misbehaving i18n service must not turn a write into a 500.
+      return requested;
+    }
+    if (!Array.isArray(available) || available.length === 0) return requested;
+    // `resolveBundleLocale` matches against a bundle's KEYS; the offered
+    // locales are exactly that key set, with no data behind them.
+    const offered: Record<string, true> = {};
+    for (const code of available) {
+      if (typeof code === 'string' && code.length > 0) offered[code] = true;
+    }
+    return resolveBundleLocale(offered, requested) ?? requested;
   }
 
   /**

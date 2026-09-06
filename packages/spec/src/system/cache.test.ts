@@ -41,7 +41,7 @@ describe('CacheTierSchema', () => {
 
     expect(tier.name).toBe('memory_cache');
     expect(tier.type).toBe('memory');
-    expect(tier.ttl).toBe(300);
+    expect(tier.ttlSeconds).toBe(300);
     expect(tier.strategy).toBe('lru');
     expect(tier.warmup).toBe(false);
   });
@@ -59,13 +59,13 @@ describe('CacheTierSchema', () => {
       name: 'redis_tier',
       type: 'redis',
       maxSize: 512,
-      ttl: 600,
+      ttlSeconds: 600,
       strategy: 'lfu',
       warmup: true,
     });
 
     expect(tier.maxSize).toBe(512);
-    expect(tier.ttl).toBe(600);
+    expect(tier.ttlSeconds).toBe(600);
     expect(tier.strategy).toBe('lfu');
     expect(tier.warmup).toBe(true);
   });
@@ -145,7 +145,7 @@ describe('CacheConfigSchema', () => {
       enabled: true,
       tiers: [
         { name: 'l1', type: 'memory', maxSize: 128 },
-        { name: 'l2', type: 'redis', maxSize: 1024, ttl: 600 },
+        { name: 'l2', type: 'redis', maxSize: 1024, ttlSeconds: 600 },
       ],
       invalidation: [
         { trigger: 'update', scope: 'pattern', pattern: '*' },
@@ -198,7 +198,7 @@ describe('CacheAvalanchePreventionSchema', () => {
 
   it('should accept circuit breaker config', () => {
     const result = CacheAvalanchePreventionSchema.parse({
-      circuitBreaker: { enabled: true, failureThreshold: 10, resetTimeout: 60 },
+      circuitBreaker: { enabled: true, failureThreshold: 10, resetTimeoutSeconds: 60 },
     });
     expect(result.circuitBreaker?.failureThreshold).toBe(10);
   });
@@ -267,8 +267,8 @@ describe('DistributedCacheConfigSchema', () => {
     const config = DistributedCacheConfigSchema.parse({
       enabled: true,
       tiers: [
-        { name: 'l1', type: 'memory', maxSize: 100, ttl: 60, strategy: 'lru' },
-        { name: 'l2', type: 'redis', maxSize: 1000, ttl: 300, strategy: 'lru' },
+        { name: 'l1', type: 'memory', maxSize: 100, ttlSeconds: 60, strategy: 'lru' },
+        { name: 'l2', type: 'redis', maxSize: 1000, ttlSeconds: 300, strategy: 'lru' },
       ],
       invalidation: [{ trigger: 'update', scope: 'key' }],
       consistency: 'write_behind',
@@ -301,5 +301,54 @@ describe('DistributedCacheConfigSchema', () => {
 
     expect(config.prefetch).toBe(true);
     expect(config.compression).toBe(true);
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. Both old spellings are `retiredKey()` tombstones,
+// so each refusal carries the RENAME rather than a bare unrecognized-key error.
+// Asserted on the issue CODE and the prescription text, never on "it threw":
+// a bare `toThrow()` would stay green against a schema that rejected for any
+// other reason, which is the failure this pin exists to catch.
+describe('cache duration keys carry their unit (#15679)', () => {
+  it('REFUSES the retired `CacheTier.ttl` with the rename in the message', () => {
+    const result = CacheTierSchema.safeParse({ name: 'l1', type: 'memory', ttl: 600 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'ttl');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`CacheTier.ttl` was renamed to `ttlSeconds`');
+  });
+
+  it('accepts `ttlSeconds` at the same magnitude and keeps the 300 default', () => {
+    expect(CacheTierSchema.parse({ name: 'l1', type: 'memory', ttlSeconds: 600 }).ttlSeconds).toBe(600);
+    expect(CacheTierSchema.parse({ name: 'l1', type: 'memory' }).ttlSeconds).toBe(300);
+  });
+
+  it('REFUSES the retired `circuitBreaker.resetTimeout` with the rename in the message', () => {
+    const result = CacheAvalanchePreventionSchema.safeParse({
+      circuitBreaker: { enabled: true, failureThreshold: 5, resetTimeout: 30 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'circuitBreaker.resetTimeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`CacheAvalanchePrevention.circuitBreaker.resetTimeout` was renamed to',
+    );
+  });
+
+  it('accepts `resetTimeoutSeconds` and keeps the 30 default', () => {
+    const parsed = CacheAvalanchePreventionSchema.parse({
+      circuitBreaker: { enabled: true, failureThreshold: 5, resetTimeoutSeconds: 60 },
+    });
+    expect(parsed.circuitBreaker?.resetTimeoutSeconds).toBe(60);
+    expect(CacheAvalanchePreventionSchema.parse({ circuitBreaker: { enabled: true } })
+      .circuitBreaker?.resetTimeoutSeconds).toBe(30);
+  });
+
+  it('leaves `lockout.lockTimeoutMs` alone — it was already correct, and it is a DIFFERENT unit', () => {
+    const parsed = CacheAvalanchePreventionSchema.parse({ lockout: { enabled: true } });
+    expect(parsed.lockout?.lockTimeoutMs).toBe(5000);
   });
 });

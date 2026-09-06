@@ -16008,12 +16008,30 @@ export class SqlDriver implements IDataDriver {
         // not anything this field declared. Measured on MySQL 8.0.46: the FK
         // itself is content with mismatched widths (`varchar(20)` child →
         // `varchar(255)` parent `id` creates cleanly, and Postgres 16 accepts
-        // it too), so the type system gives no warning — but the first write
-        // is refused, because a platform id is 26 characters and
-        // `INSERT … VALUES ('01JQ8XKZ9M4N7P2R5T6V8W0Y3B')` into `varchar(20)`
-        // is `ERROR 1406 Data too long`. Honouring `maxLength` here would make
-        // the column structurally incapable of holding ANY id — a strictly
-        // worse defect than the one #11431 fixes.
+        // it too), so the type system gives no warning — the refusal arrives on
+        // the first write too wide for the child, as `ERROR 1406 Data too long`.
+        //
+        // [#15522] ⛔ An id's width is NOT a fixed number, and it is NOT this
+        // field's to declare. Both halves are this driver's own behaviour: when
+        // the caller supplies no id it mints `nanoid(DEFAULT_ID_LENGTH)` — 16
+        // characters, from the constant above and the three mint sites it feeds
+        // — and when the caller DOES supply one it is stored verbatim at
+        // whatever width the caller chose (measured on this arm's own driver:
+        // 10-, 17- and 18-character ids all landed unaltered). Nothing on this
+        // path bounds an id's width at all, so `maxLength: 20` already cannot
+        // hold a 24-character supplied id, and any `maxLength` under 16 cannot
+        // hold even a minted one. Honouring it here would make the column
+        // structurally incapable of holding ids it will be asked to hold — a
+        // strictly worse defect than the one #11431 fixes.
+        //
+        // ⛔ Do not restore the number this sentence used to carry. It called a
+        // platform id 26 characters long and spelled out a ULID
+        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`). `DEFAULT_ID_LENGTH` has been 16 for the
+        // whole life of this file and no ULID is minted anywhere in this repo, so
+        // at the real numbers the worked example did not hold either — 16
+        // characters FIT in `varchar(20)`. Four `packages/cli` sites still cite
+        // this arm BY NAME for that number; they are filed as #16114, not fixed
+        // here.
         //
         // [#11567] ⛔ This arm emits NO `FOREIGN KEY`, and that is the ruled
         // contract rather than an omission. It used to carry

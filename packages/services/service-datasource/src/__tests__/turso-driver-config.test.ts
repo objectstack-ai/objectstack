@@ -23,6 +23,7 @@
 // authoring-door version lives in `turso-bound-secret-authoring.test.ts`.
 
 import { describe, it, expect } from 'vitest';
+import { getDriverConfigSchema } from '@objectstack/spec/data';
 import {
   buildTursoDriverConfig,
   resolveTursoUrl,
@@ -44,7 +45,7 @@ describe('buildTursoDriverConfig (#7314)', () => {
         concurrency: 7,
         syncUrl: 'libsql://replica.turso.io',
         sync: { intervalSeconds: 30, onConnect: false },
-        timeout: 9000,
+        timeoutMs: 9000,
         mode: 'replica',
       },
     };
@@ -75,7 +76,7 @@ describe('buildTursoDriverConfig (#7314)', () => {
         concurrency: 1,
         syncUrl: 'libsql://y',
         sync: {},
-        timeout: 1,
+        timeoutMs: 1,
         mode: 'remote',
       },
     };
@@ -92,12 +93,12 @@ describe('buildTursoDriverConfig (#7314)', () => {
 
   // Empty strings are unset, not credentials of length zero — the open-core
   // arm's own type-tests, carried over unchanged. The number keys deliberately
-  // have no truthiness check: `concurrency: 0` / `timeout: 0` are values the
+  // have no truthiness check: `concurrency: 0` / `timeoutMs: 0` are values the
   // driver reads.
   it('treats empty string credentials as unset and keeps zero-valued numbers', () => {
     const spec: DatasourceConnectionSpec = {
       driver: 'turso',
-      config: { url: 'libsql://x', authToken: '', encryptionKey: '', syncUrl: '', concurrency: 0, timeout: 0 },
+      config: { url: 'libsql://x', authToken: '', encryptionKey: '', syncUrl: '', concurrency: 0, timeoutMs: 0 },
     };
     expect(buildTursoDriverConfig(spec, resolveTursoUrl(spec)))
       .toEqual({ url: 'libsql://x', concurrency: 0, timeout: 0 });
@@ -201,6 +202,135 @@ describe('buildTursoDriverConfig (#7314)', () => {
 
     const spec: DatasourceConnectionSpec = { ...base, schemaMode: 'external' };
     expect(buildTursoDriverConfig(spec, resolveTursoUrl(spec)).schemaMode).toBe('external');
+  });
+});
+
+// ── #16023 — the reader table reads the AUTHORED spelling, whatever it is now ──
+//
+// The defect this closes, and why the cases above could not have caught it.
+// `TursoConfigSource.config` is a bare string-keyed bag, so `tsc` cannot see a
+// key rename through it: when `TursoConfig.timeout` became `timeoutMs`
+// (#15680), the `timeout` reader kept consulting the spelling the authoring
+// contract had just started REFUSING, and every case above stayed green —
+// because every one of them authored the retired spelling too. A datasource
+// authored the canonical way reached the seam and had its timeout dropped, with
+// no diagnostic in any channel.
+//
+// "Grep by TYPE, not by name" — the discipline the rename stack used everywhere
+// else — fails at an untyped seam BY CONSTRUCTION. So these cases are derived
+// from the authoring contract rather than written against today's key list:
+// they read `TursoConfigSchema`'s own tombstones and hold for the NEXT rename
+// without being edited. A test that has to be remembered is the same defect one
+// layer up.
+describe('#16023 — every reader consults the spelling the authoring contract accepts', () => {
+  /** `retiredKey()` stamps this prefix on the description; that IS the marker. */
+  const RETIRED_PREFIX = '[REMOVED] ';
+
+  /** The turso authoring contract, through the published door the spec offers. */
+  function tursoShape(): Record<string, { description?: string; safeParse: (v: unknown) => { success: boolean } }> {
+    const schema = getDriverConfigSchema('turso') as unknown as { shape?: unknown; def?: { shape?: unknown } };
+    const raw = schema.shape ?? schema.def?.shape;
+    const shape = typeof raw === 'function' ? (raw as () => unknown)() : raw;
+    return shape as Record<string, { description?: string; safeParse: (v: unknown) => { success: boolean } }>;
+  }
+
+  /** Retired authoring keys, and the canonical key each prescription names. */
+  function retirements(): Array<{ retired: string; replacement: string | undefined }> {
+    return Object.entries(tursoShape())
+      .filter(([, field]) => (field.description ?? '').startsWith(RETIRED_PREFIX))
+      .map(([retired, field]) => ({
+        retired,
+        replacement: /was renamed to `([A-Za-z0-9_]+)`/.exec(field.description ?? '')?.[1],
+      }));
+  }
+
+  /**
+   * The JS types a reader can type-test for. Every probe below is run at all
+   * three rather than at one guessed type: a reader tests `typeof === 'number'`
+   * or `'string'`, so a probe of the wrong type passes vacuously.
+   */
+  const CANDIDATES: readonly unknown[] = [424_242, 'SENTINEL-424242', true];
+
+  /**
+   * A value the LIVE field accepts, chosen by asking the field rather than by
+   * guessing its type.
+   *
+   * ⚠️ Only ever called on a canonical key. A retired key is `z.never()`, so
+   * NOTHING parses against it — asking a tombstone for a valid sample is a
+   * category error, and this throws rather than answering one. (It did, on the
+   * first run of this file: the guard is here because it fired.)
+   */
+  function sampleFor(key: string): unknown {
+    const field = tursoShape()[key];
+    for (const candidate of CANDIDATES) {
+      if (field?.safeParse(candidate).success) return candidate;
+    }
+    throw new Error(
+      `no sample value of a supported JS type parses against \`${key}\` — extend the candidate list `
+      + 'rather than letting this case go vacuous',
+    );
+  }
+
+  const build = (config: Record<string, unknown>) => {
+    const spec = { driver: 'turso', config } as const;
+    return buildTursoDriverConfig(spec, resolveTursoUrl(spec));
+  };
+
+  // The vacuity guard. Every case below iterates the derived list, so an empty
+  // or mis-derived list would make all of them pass while testing nothing.
+  it('derives at least one retirement from the contract, including the known one', () => {
+    const retired = retirements().map((r) => r.retired);
+    expect(retired.length).toBeGreaterThan(0);
+    expect(retired).toContain('timeout');
+    expect(retirements().find((r) => r.retired === 'timeout')?.replacement).toBe('timeoutMs');
+  });
+
+  // ⭐ RED BEFORE THE FIX. The reproduction, stated as a property: a config
+  // authored the CANONICAL way must reach the driver. Before the fix this
+  // failed for `timeoutMs` — the built config was `{ url }` and the authored
+  // 424242 appeared nowhere.
+  it('reads every canonical replacement — an authored value reaches the driver config', () => {
+    for (const { retired, replacement } of retirements()) {
+      if (!replacement) continue; // a removal with no successor has nothing to read
+      const value = sampleFor(replacement);
+      const built = build({ url: 'libsql://x', [replacement]: value });
+      expect(
+        Object.values(built),
+        `no reader consults the canonical \`${replacement}\` (retired: \`${retired}\`) — `
+        + 'the rename moved the authoring contract and left this seam behind',
+      ).toContain(value);
+    }
+  });
+
+  // The other half, and the one that pins the DECISION rather than the fix: no
+  // reader keeps a tolerance arm for a retired spelling. Authoring is refused at
+  // the door and a stored row is canonicalized by the ADR-0087 chain before it
+  // arrives (`loadDatasourceRows` / `loadDatasourceRow`), so a `??` fallback
+  // here would be a consumer-side dialect for a spelling both doors closed —
+  // the sqlite `filename` and mongo `url` arms say exactly this.
+  it('reads NO retired spelling — a config authored the old way yields only `url`', () => {
+    for (const { retired } of retirements()) {
+      // Probed at every candidate type, not at the replacement's: a tolerance
+      // arm could have been written with any type-test, and the tombstone
+      // itself accepts nothing to sample from.
+      for (const value of CANDIDATES) {
+        const built = build({ url: 'libsql://x', [retired]: value });
+        expect(
+          Object.keys(built),
+          `a reader still consults the retired \`${retired}\` (probed with ${typeof value})`,
+        ).toEqual(['url']);
+      }
+    }
+  });
+
+  // The named, readable instance of the property above — the case #16023
+  // reported, spelled out so a reader of this file does not have to run the
+  // derivation in their head.
+  it('the reported instance: an authored `timeoutMs` lands on the driver `timeout`', () => {
+    expect(build({ url: 'libsql://x', timeoutMs: 9000 }))
+      .toEqual({ url: 'libsql://x', timeout: 9000 });
+    // ...and the retired spelling is not a second way to say it.
+    expect(build({ url: 'libsql://x', timeout: 9000 })).toEqual({ url: 'libsql://x' });
   });
 });
 

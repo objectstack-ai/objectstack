@@ -54,7 +54,8 @@ const result = EventHandlerSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable event persistence |
-| **retention** | `integer` | ✅ | Days to retain persisted events |
+| **retentionDays** | `integer` | ✅ | Days to retain persisted events |
+| **retention** | `never` | optional | [REMOVED] `EventPersistence.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. |
 | **filter** | `any` | optional | Optional filter function to select which events to persist |
 | **storage** | `Enum<'database' \| 'file' \| 's3' \| 'custom'>` | optional (default: `"database"`) | Storage backend for persisted events |
 
