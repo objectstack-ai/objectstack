@@ -47,7 +47,7 @@ nothing to do with elevation.
 | Declaration | What it is | This page? |
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts:269` | The elevation flag on an operation's context | ✅ |
-| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1595` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
+| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1634` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
 | `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts:125` | Built-in template; tenants may override but should not delete | ❌ |
 | `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts:137` | Platform-infrastructure environment, not user data | ❌ |
 
@@ -196,7 +196,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 | "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `metadata-protocol/src/seed-loader.ts:2032` (rationale at `:1942`–`1944`, #3760), `flow.zod.ts:743` |
 | "It skips the state machine" | **No.** That is `skipStateMachine`, carried by seed replay and by `treatAsHistorical` imports | `objectql/src/engine.ts` FSM gate; see [State Machine](/docs/protocol/objectql/state-machine) |
 | "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:10364`–`10381` |
-| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1581` (#3493 / #6640) |
+| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1590` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
 | "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:299` |
 | "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1565`, `:1594`; `domains/actions.ts:414` |
