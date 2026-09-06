@@ -57,7 +57,7 @@ const GENERATORS: Record<string, {
 /**
  * ${toTitleCase(name)} Object
  */
-const ${toCamelCase(name)}: Data.Object = {
+const ${toCamelCase(name)}: Data.ServiceObject = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
   pluralLabel: '${toTitleCase(name)}s',
