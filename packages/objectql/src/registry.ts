@@ -1291,6 +1291,8 @@ function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
 export class NamespaceConflictError extends Error {
   readonly code = 'NAMESPACE_CONFLICT';
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The namespace both packages claim. */
   readonly namespace: string;
   /** The installed package that already owns the namespace. */
@@ -1403,6 +1405,8 @@ function declaredOwnedObjectNames(manifest: ObjectStackManifest): string[] {
 export class ArtifactObjectNameConflictError extends Error {
   readonly code = 'DUPLICATE_ARTIFACT_OBJECT_NAME';
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The object name both packages claim. */
   readonly objectName: string;
   /** The co-owning package that already owns the name. */
@@ -1462,6 +1466,8 @@ export class ArtifactObjectNameConflictError extends Error {
 export class ObjectOwnershipConflictError extends Error {
   readonly code = 'OBJECT_OWNERSHIP_CONFLICT';
   readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
   /** The fully-qualified object name both packages claim. */
   readonly objectName: string;
   /** The package that already owns the name. */

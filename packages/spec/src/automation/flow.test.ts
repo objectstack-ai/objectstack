@@ -1981,3 +1981,169 @@ describe('FlowSchema — edge ids are unique (#14964)', () => {
     expect(issues![0].message).toContain('Duplicate edge id `dup`');
   });
 });
+
+describe('FlowSchema — top-level node ids are unique (#15713)', () => {
+  // The card's probe, reproduced: a four-node flow with `nodes[1].id ===
+  // nodes[2].id === 'n'`, parsed on green (`origin/main` 1f2a02ba re-measured
+  // before this rule landed). The two controls beside it — a node missing its
+  // required `label`, and an unknown key on a node, on the SAME schema instance
+  // — are what proved the acceptance was a missing rule rather than a disabled
+  // validator, so both are pinned here too. An invalid node `type` is NOT a
+  // control on this schema: the node-type vocabulary is open by contract
+  // (ADR-0018), so that lever never fires — recorded so nobody reuses it.
+  const edges: Flow['edges'] = [
+    { id: 'e1', source: 'start', target: 'n' },
+    { id: 'e2', source: 'n', target: 'end' },
+  ];
+  const flowWith = (nodes: Flow['nodes']): Flow => ({
+    name: 'node_id_flow',
+    label: 'Node id flow',
+    type: 'autolaunched',
+    nodes,
+    edges,
+  });
+  const duplicate = flowWith([
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'n', type: 'assignment', label: 'Assign A' },
+    { id: 'n', type: 'assignment', label: 'Assign B' },
+    { id: 'end', type: 'end', label: 'End' },
+  ]);
+
+  it('refuses a flow whose top-level nodes[] declares one id twice — the issue names the id and BOTH positions, anchored on the later node', () => {
+    const result = FlowSchema.safeParse(duplicate);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toHaveLength(1);
+    const [issue] = result.error.issues;
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['nodes', 2, 'id']);
+    expect(issue.message).toContain('Duplicate node id `n`');
+    expect(issue.message).toContain('`nodes[2]` reuses the id already declared by `nodes[1]`');
+  });
+
+  it('renders through formatZodError as a line that points at the node to rename', () => {
+    const result = FlowSchema.safeParse(duplicate);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const rendered = formatZodError(result.error);
+    expect(rendered).toContain('Validation failed (1 issue):');
+    expect(rendered).toContain(
+      '✗ nodes.2.id: Duplicate node id `n` — `nodes[2]` reuses the id already declared by `nodes[1]`',
+    );
+  });
+
+  it('raises one issue per later occurrence, each naming the FIRST declaration of that id', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'a', type: 'start', label: 'Start' },
+      { id: 'b', type: 'assignment', label: 'B' },
+      { id: 'a', type: 'assignment', label: 'A again' },
+      { id: 'b', type: 'assignment', label: 'B again' },
+      { id: 'a', type: 'end', label: 'A once more' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => i.path)).toEqual([
+      ['nodes', 2, 'id'],
+      ['nodes', 3, 'id'],
+      ['nodes', 4, 'id'],
+    ]);
+    expect(result.error.issues[0].message).toContain('`nodes[2]` reuses the id already declared by `nodes[0]`');
+    expect(result.error.issues[1].message).toContain('`nodes[3]` reuses the id already declared by `nodes[1]`');
+    expect(result.error.issues[2].message).toContain('`nodes[4]` reuses the id already declared by `nodes[0]`');
+  });
+
+  it('a duplicate node id and a duplicate edge id in one flow raise one issue each, nodes first, same shape', () => {
+    const result = FlowSchema.safeParse({
+      ...duplicate,
+      edges: [
+        { id: 'dup', source: 'start', target: 'n' },
+        { id: 'dup', source: 'n', target: 'end' },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 2, 'id']],
+      ['custom', ['edges', 1, 'id']],
+    ]);
+    expect(result.error.issues[0].message).toMatch(/^Duplicate node id `n` — `nodes\[2\]` reuses the id already declared by `nodes\[1\]`; every node id in a flow must be unique\. /);
+    expect(result.error.issues[1].message).toMatch(/^Duplicate edge id `dup` — `edges\[1\]` reuses the id already declared by `edges\[0\]`; every edge id in a flow must be unique\. /);
+  });
+
+  it('still refuses card control A — a node missing its required `label` — so the refusal above is not a vacuous pass', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'n', type: 'assignment' } as never,
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([['invalid_type', ['nodes', 1, 'label']]]);
+    expect(result.error.issues.some((i) => i.message.includes('Duplicate node id'))).toBe(false);
+  });
+
+  it('still refuses card control B — an unknown key on a node — with `unrecognized_keys`', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'n', type: 'assignment', label: 'Assign', bogusKey: 1 } as never,
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => i.code)).toEqual(['unrecognized_keys']);
+    expect(result.error.issues.some((i) => i.message.includes('Duplicate node id'))).toBe(false);
+  });
+
+  it('accepts the same flow once the ids are unique, keeping the nodes in authored order', () => {
+    const unique = flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'n', type: 'assignment', label: 'Assign A' },
+      { id: 'n2', type: 'assignment', label: 'Assign B' },
+      { id: 'end', type: 'end', label: 'End' },
+    ]);
+    const result = FlowSchema.safeParse(unique);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.nodes.map((n) => n.id)).toEqual(['start', 'n', 'n2', 'end']);
+    expect(defineFlow(unique).nodes.map((n) => n.id)).toEqual(['start', 'n', 'n2', 'end']);
+  });
+
+  it('defineFlow refuses the duplicate with the same anchored issue', () => {
+    let caught: unknown;
+    try {
+      defineFlow(duplicate);
+    } catch (error) {
+      caught = error;
+    }
+    const issues = (caught as { issues?: Array<{ code: string; path: PropertyKey[]; message: string }> })?.issues;
+    expect(issues).toBeDefined();
+    expect(issues!.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 2, 'id']]]);
+    expect(issues![0].message).toContain('Duplicate node id `n`');
+  });
+
+  // Scope boundary, pinned so the rule cannot silently widen: it judges the
+  // flow's OWN top-level `nodes[]`. A region body (`loop.config.body.nodes`) is
+  // `analyzeRegion`'s to judge, at `registerFlow()`, and whether a region node
+  // may reuse a top-level id — one id space or two — is an open decision
+  // (#16134) that this rule neither takes nor pre-empts. This pin records
+  // today's accept set at that boundary; the decision, when taken, moves it
+  // deliberately.
+  it('judges the top-level nodes[] only — a region node reusing a top-level id is outside this rule', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'n', type: 'loop', label: 'Loop',
+        config: {
+          collection: '{items}',
+          body: {
+            nodes: [{ id: 'start', type: 'assignment', label: 'Body step (reuses a top-level id)' }],
+          },
+        },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.nodes.map((n) => n.id)).toEqual(['start', 'n', 'end']);
+  });
+});
