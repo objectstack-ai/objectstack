@@ -184,9 +184,22 @@ export async function refuseUngrantedActivationWrite(
     // collapses the two: a factory that threw and a name nothing registered
     // both arrived as the same absent posture, and this gate then returned
     // `undefined` — no refusal — for both.
+    //
+    // ⚠️ THE SCOPE ID IS PART OF THE READ, not an optimisation. `tenancy` may be
+    // registered `ServiceLifecycle.SCOPED`, and a scoped registration resolved
+    // without a scope id rejects UNBRANDED (`Scope ID required for scoped
+    // service 'tenancy'`) — which the classified lookup correctly re-raises,
+    // and this gate would then answer as a 503 it MANUFACTURED itself on a
+    // perfectly healthy deployment, locking the platform operator out of the
+    // switch that is theirs. `context.environmentId` is the same scope the
+    // identity step and `./keys.ts` already resolve this exact name with, so
+    // all three read one deployment's posture through one scope: an outage
+    // answered here is the service's, never this call site's omission.
     let posture;
     try {
-        posture = effectiveTenancyPosture(await deps.resolveServiceOrLoud(context, 'tenancy'));
+        posture = effectiveTenancyPosture(
+            await deps.resolveServiceOrLoud(context, 'tenancy', context.environmentId),
+        );
     } catch (err) {
         throw new AuthzStoreUnavailableError('tenancy', err);
     }

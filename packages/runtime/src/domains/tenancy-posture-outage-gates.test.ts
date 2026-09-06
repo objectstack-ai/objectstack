@@ -40,6 +40,51 @@
 // check. So each pin enters at the door body (`handleKeys` / `handleActions`),
 // which is where the gate it is about actually runs.
 //
+// ## WHICH DOORS — three, because the gate body has three call sites
+//
+// `refuseUngrantedActivationWrite` is ONE gate with two callers, so the
+// install-wide activation write has two doors: `./actions.ts:156` (`POST
+// /actions/_activation/:object/:action`) and `./automation.ts:1050` (`POST
+// /automation/:name/toggle`, through `refuseUngrantedFlowActivationWrite`).
+// Both inherit the throw exit this change gives the gate, so both are pinned
+// here alongside the `/keys` mint. A pin on one door is not evidence about the
+// other: they differ in what runs in FRONT of the gate — the automation domain
+// has an anonymous floor and its own authoring-write predicate — and what runs
+// in front of a gate is exactly what a pin entering at the door body measures.
+//
+// ## THE SCOPE ID IS PART OF THE READ, not an optimisation
+//
+// `tenancy` may be registered `ServiceLifecycle.SCOPED`. Resolved WITHOUT a
+// scope id a scoped registration rejects UNBRANDED — `Scope ID required for
+// scoped service 'tenancy'` — and the classified lookup then re-raises it,
+// correctly: it is not the branded "never registered". So a gate that drops the
+// scope id it already holds answers **503 on a perfectly healthy deployment**,
+// and the caller it locks out includes the platform operator, the one authority
+// ADR-0126 §5 says the switch belongs to. That outage is manufactured by the
+// CALL SITE, and it is the opposite of what this card is about.
+//
+// The `scoped-healthy` legs below are the pins for that class. They register a
+// real scoped `tenancy` and require each door to READ the posture through the
+// request's own environment — refuse the tenant org admin (403) and ADMIT the
+// operator (200) — never to answer 503. Without them a pin file about outages
+// cannot tell "loud on a broken service" from "loud on everything".
+//
+// ## POPULATION — stated because a pin proves only what it covers
+//
+// Covers: three wirings of `tenancy` (never registered · registered through a
+// factory that throws · registered SCOPED and healthy, reporting `isolated`)
+// across three doors (`POST /keys` mint · the actions activation write · the
+// automation toggle), for the callers each door's decision turns on (an org-less
+// minter; a tenant org admin who already holds `manage_metadata`; the
+// `PLATFORM_ADMIN` operator).
+//
+// Does NOT cover: the posture-conditional refusal itself on a HEALTHY
+// non-scoped service — that is `action-activation-posture-gate.test.ts` and
+// `automation-activation-posture-gate.test.ts`, whose populations are their own
+// and whose passing is not evidence about this file — nor the `manage_metadata`
+// tier in front of the gate, nor the identity step (`http-dispatcher.ts`), which
+// has read this same fact loudly since PR #15909.
+//
 // ## Why the fixture builds a REAL kernel
 //
 // The two classes this file separates are produced by ONE place — the plugin
@@ -55,10 +100,11 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-import { ObjectKernel, isAuthzStoreUnavailableError } from '@objectstack/core';
+import { ObjectKernel, ServiceLifecycle, isAuthzStoreUnavailableError } from '@objectstack/core';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
+import { ACTIVATION_DENY_STATUS, ACTIVATION_DENY_CODE } from './activation-gate.js';
 
 /** ADR-0112 envelope for the outage answer — the brand's own two fields. */
 const OUTAGE_STATUS = 503;
@@ -67,18 +113,40 @@ const OUTAGE_CODE = 'SERVICE_UNAVAILABLE';
 /** The message a `tenancy` factory fails with. Never a classification signal. */
 const FACTORY_FAULT = 'tenancy factory: datasource unreachable';
 
-type TenancyWiring = 'never-registered' | 'throwing-factory';
+/**
+ * The environment the scoped legs resolve in — the value a request carries as
+ * `context.environmentId`, which is the scope every gate reading this name must
+ * pass down (`./keys.ts`, `./activation-gate.ts`, and the identity step).
+ */
+const SCOPE = 'platform';
+
+/** A wall-enforcing posture, so the §5 operator test is the only question left. */
+const WALLED_POSTURE = 'isolated';
+
+type TenancyWiring = 'never-registered' | 'throwing-factory' | 'scoped-healthy';
 
 /**
  * Register `tenancy` on a real kernel in the requested wiring.
  *
  * `never-registered` registers nothing, so `getServiceAsync('tenancy')` rejects
  * with the loader's BRANDED rejection; `throwing-factory` registers a real
- * singleton factory that throws, so it rejects UNBRANDED from below. Neither
- * rejection is built here — both come out of `PluginLoader.getService`.
+ * singleton factory that throws, so it rejects UNBRANDED from below;
+ * `scoped-healthy` registers a real `ServiceLifecycle.SCOPED` factory that
+ * SUCCEEDS, which resolves only when the caller passes the scope id and rejects
+ * unbranded (`Scope ID required…`) when it does not. None of the three
+ * rejections is built here — all come out of `PluginLoader.getService`, which
+ * is what makes the classification a measurement rather than a restatement.
  */
 function wireTenancy(kernel: ObjectKernel, wiring: TenancyWiring): void {
     if (wiring === 'never-registered') return;
+    if (wiring === 'scoped-healthy') {
+        kernel.registerServiceFactory(
+            'tenancy',
+            () => ({ posture: WALLED_POSTURE }),
+            ServiceLifecycle.SCOPED,
+        );
+        return;
+    }
     kernel.registerServiceFactory('tenancy', () => {
         throw new Error(FACTORY_FAULT);
     });
@@ -146,11 +214,18 @@ function bootKeys(wiring: TenancyWiring) {
     };
 }
 
-/** A signed-in caller with NO active organization — the org-less mint. */
-const orgLessCaller = (): HttpProtocolContext => ({
+/**
+ * A signed-in caller with NO active organization — the org-less mint.
+ *
+ * `environmentId` is a parameter because it is the SCOPE the mint gate resolves
+ * `tenancy` in: the outage legs below carry none (the shape a single-kernel
+ * deployment sends), the scoped-healthy leg carries the request's environment,
+ * and the difference between those two is the thing the scoped legs measure.
+ */
+const orgLessCaller = (environmentId?: string): HttpProtocolContext => ({
     request: { headers: {} },
     response: {},
-    environmentId: undefined,
+    environmentId,
     executionContext: {
         userId: 'u1',
         isSystem: false,
@@ -223,6 +298,24 @@ describe('[#15900] `POST /keys` mint — a tenancy service that FAILED to build 
         expect(rows).toHaveLength(1);
         expect(rows[0].active_organization_id).toBeUndefined();
     });
+
+    /**
+     * CONTROL for the OTHER direction: a HEALTHY service must not be answered as
+     * an outage. A scoped registration is resolvable only with the scope id the
+     * request carries, so this leg fails the moment the gate stops passing
+     * `context.environmentId` down — and it fails as a 503, which is precisely
+     * the failure a pin file about 503s must be able to see.
+     */
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and refuses the org-less mint (400), not 503', async () => {
+        const { dispatcher, rows } = bootKeys('scoped-healthy');
+
+        const res = responseOf(await dispatcher.handleKeys('POST', { name: 'agent' }, orgLessCaller(SCOPE)));
+
+        // The walled refusal, which means the posture was READ — an unread
+        // posture cannot produce it, and an outage answer is not it either.
+        expect(res.status).toBe(400);
+        expect(rows).toHaveLength(0);
+    });
 });
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -278,13 +371,36 @@ function bootActivation(wiring: TenancyWiring) {
  */
 const tenantAdmin = (): HttpProtocolContext => ({
     request: {},
-    environmentId: 'platform',
+    environmentId: SCOPE,
     executionContext: {
         userId: 'u_northwind_owner',
         positions: ['org_owner', 'org_admin'],
         permissions: ['organization_admin'],
         systemPermissions: ['manage_metadata'],
         organizationId: 'org_northwind',
+    },
+} as unknown as HttpProtocolContext);
+
+/**
+ * The PLATFORM OPERATOR — the authority ADR-0126 §5 says this install-wide row
+ * belongs to. Read as the posture RUNG (`ec.posture === 'PLATFORM_ADMIN'`, ADR-0095
+ * D2/D3 · #15981), never as a position NAME.
+ *
+ * This caller is the load-bearing one for the scoped legs: every other caller
+ * this file drives is one a refusal is a correct answer for, so a gate that
+ * answered "no" to everything would still satisfy them. The operator is the only
+ * caller whose CORRECT answer is `200`, which makes them the only caller who can
+ * catch a gate that turned a healthy deployment into an outage.
+ */
+const operator = (): HttpProtocolContext => ({
+    request: {},
+    environmentId: SCOPE,
+    executionContext: {
+        userId: 'u_operator',
+        posture: 'PLATFORM_ADMIN',
+        positions: [],
+        permissions: [],
+        systemPermissions: ['manage_metadata'],
     },
 } as unknown as HttpProtocolContext);
 
@@ -333,5 +449,130 @@ describe('[#15900] the install-wide activation write — a tenancy service that 
 
         expect(res.status).toBe(200);
         expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false });
+    });
+
+    /**
+     * A HEALTHY scoped service is not an outage: the gate must READ the walled
+     * posture through the request's own environment and answer §5 — the tenant
+     * org admin refused with `403 PERMISSION_DENIED` and no row written.
+     */
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and REFUSES the tenant org admin (403), not 503', async () => {
+        const { dispatcher, setActionActive } = bootActivation('scoped-healthy');
+
+        const res = responseOf(await flip(dispatcher, tenantAdmin()));
+
+        expect(res.status).toBe(ACTIVATION_DENY_STATUS);
+        expect(res.body?.error?.code).toBe(ACTIVATION_DENY_CODE);
+        expect(setActionActive).not.toHaveBeenCalled();
+    });
+
+    /**
+     * ⭐ The pin that catches a gate manufacturing its own outage. On a healthy
+     * deployment the operator is the sanctioned authority and their write must
+     * LAND. A gate that resolves the posture without the scope id answers 503
+     * here instead, on a service that was never unwell — a lockout of the one
+     * caller ADR-0126 §5 exists to admit, dressed as this card's own fix.
+     */
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and ADMITS the platform operator (200)', async () => {
+        const { dispatcher, setActionActive } = bootActivation('scoped-healthy');
+
+        const res = responseOf(await flip(dispatcher, operator()));
+
+        expect(res.status).toBe(200);
+        expect(setActionActive).toHaveBeenCalledWith({ name: ACTION, packageId: 'crm', active: false });
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// Gate 3 — the SECOND door onto the same install-wide write:
+// `POST /automation/:name/toggle` (`./automation.ts` →
+// `refuseUngrantedFlowActivationWrite` → the gate above)
+// ───────────────────────────────────────────────────────────────────────────
+
+const FLOW = 'vendor_lead_router';
+const FLOW_DEFINITION = { name: FLOW, label: 'Vendor Lead Router', type: 'autolaunched', nodes: [], edges: [] };
+
+/**
+ * The automation slot double, holding only what this door reaches: `getFlow`
+ * for the lookup and `toggleFlow` for the write, plus the `handlerReady: true`
+ * self-declaration the domain's #4058 serveability probe requires. Same rule as
+ * the two engine doubles above — a verb this door never calls would be coverage
+ * nobody is getting.
+ */
+function bootAutomation(wiring: TenancyWiring) {
+    const toggleFlow = vi.fn(async () => undefined);
+    const automation = {
+        handlerReady: true,
+        toggleFlow,
+        getFlow: vi.fn(async (name: string) => (name === FLOW ? FLOW_DEFINITION : undefined)),
+    };
+
+    const kernel = bareKernel();
+    kernel.registerService('automation', automation);
+    wireTenancy(kernel, wiring);
+
+    return { dispatcher: new HttpDispatcher(kernel as never), toggleFlow };
+}
+
+const toggle = (dispatcher: HttpDispatcher, ctx: HttpProtocolContext) =>
+    dispatcher.handleAutomation(`/${FLOW}/toggle`, 'POST', { enabled: false }, ctx, undefined);
+
+describe('[#15900] the automation toggle — the same install-wide gate, reached through the OTHER door', () => {
+    it('REFUSES loudly (503, outage brand) and toggles nothing when the `tenancy` factory throws', async () => {
+        const { dispatcher, toggleFlow } = bootAutomation('throwing-factory');
+
+        const err = await toggle(dispatcher, tenantAdmin()).then(
+            () => { throw new Error('the toggle door answered instead of refusing'); },
+            (e: unknown) => e,
+        );
+
+        expect(isAuthzStoreUnavailableError(err)).toBe(true);
+        expect((err as { status?: unknown }).status).toBe(OUTAGE_STATUS);
+        expect((err as { code?: unknown }).code).toBe(OUTAGE_CODE);
+        // Refused BEFORE the durable row — ADR-0126 made this switch survive a
+        // cold boot, so a refusal after the write is the #10243 leak with an
+        // audit trail.
+        expect(toggleFlow).not.toHaveBeenCalled();
+    });
+
+    it('renders that refusal as a 503 `SERVICE_UNAVAILABLE` on the door', async () => {
+        const { dispatcher } = bootAutomation('throwing-factory');
+
+        const err = await toggle(dispatcher, tenantAdmin()).catch((e: unknown) => e);
+        const rendered = (dispatcher as unknown as {
+            domainDeps: { errorFromThrown(e: unknown, fallbackStatus?: number): { status: number; body: any } };
+        }).domainDeps.errorFromThrown(err, 500);
+
+        expect(rendered.status).toBe(OUTAGE_STATUS);
+        expect(rendered.body?.error?.code).toBe(OUTAGE_CODE);
+    });
+
+    /** The control, for this door's own population: absence still fails open. */
+    it('CONTROL — a deployment that never registered `tenancy` still permits the org admin, exactly as before', async () => {
+        const { dispatcher, toggleFlow } = bootAutomation('never-registered');
+
+        const res = responseOf(await toggle(dispatcher, tenantAdmin()));
+
+        expect(res.status).toBe(200);
+        expect(toggleFlow).toHaveBeenCalled();
+    });
+
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and REFUSES the tenant org admin (403), not 503', async () => {
+        const { dispatcher, toggleFlow } = bootAutomation('scoped-healthy');
+
+        const res = responseOf(await toggle(dispatcher, tenantAdmin()));
+
+        expect(res.status).toBe(ACTIVATION_DENY_STATUS);
+        expect(res.body?.error?.code).toBe(ACTIVATION_DENY_CODE);
+        expect(toggleFlow).not.toHaveBeenCalled();
+    });
+
+    it('reads a HEALTHY SCOPED `tenancy` through the request scope and ADMITS the platform operator (200)', async () => {
+        const { dispatcher, toggleFlow } = bootAutomation('scoped-healthy');
+
+        const res = responseOf(await toggle(dispatcher, operator()));
+
+        expect(res.status).toBe(200);
+        expect(toggleFlow).toHaveBeenCalled();
     });
 });
