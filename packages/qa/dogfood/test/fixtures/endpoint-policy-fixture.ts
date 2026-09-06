@@ -22,7 +22,7 @@
 //     anonymous-without-armed-budget combination for that reason. The budget is
 //     deliberately tiny (2 requests per minute) so a test can exhaust it without
 //     sleeping.
-//   • `cacheTtl` on the GET — proves the success-only `Cache-Control` on a
+//   • `cacheTtlSeconds` on the GET — proves the success-only `Cache-Control` on a
 //     second, independent stack.
 //
 // The paths sit under `/api/v1/apps/e8policy/…` because ADR-0121 D1 confines a
@@ -59,7 +59,7 @@ export const AnonymousMeteredEndpoint: ApiEndpoint = {
   objectParams: { object: 'e8policy_note', operation: 'find' },
   authRequired: false,
   rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 2 },
-  cacheTtl: 15,
+  cacheTtlSeconds: 15,
 };
 
 /** The control: same object, same operation, session-gated, unmetered. */

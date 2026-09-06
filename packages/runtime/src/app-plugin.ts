@@ -1094,9 +1094,9 @@ export class AppPlugin implements Plugin {
                                     // branch exactly as before.
                                     return await handler(jobContext);
                                 },
-                                // #3494: thread the authored retryPolicy/timeout to the adapter
-                                (job.retryPolicy || job.timeout)
-                                    ? { retryPolicy: job.retryPolicy, timeout: job.timeout }
+                                // #3494: thread the authored retryPolicy/timeoutMs to the adapter
+                                (job.retryPolicy || job.timeoutMs)
+                                    ? { retryPolicy: job.retryPolicy, timeoutMs: job.timeoutMs }
                                     : undefined,
                             );
                             ok++;

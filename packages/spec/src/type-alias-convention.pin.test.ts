@@ -271,9 +271,11 @@ import type * as M170 from './ui/component.zod.js';
 // [#10235] The served sortability projection — new module, next free index.
 import type * as M183 from './api/sortability.zod.js';
 import type * as M184 from './shared/value-domain.zod.js';
+// [#15676] The shared epoch-millisecond instant — new module, next free index.
+import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 812 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 813 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1047,6 +1049,11 @@ export type Iso501 = Assert<Eq< z.input< typeof M114.BaseMetadataRecordSchema >,
 // shared/protection.zod.ts
 export type Iso502 = Assert<Eq< z.input< typeof M115.ProtectionSchema >, z.infer< typeof M115.ProtectionSchema > >>;
 
+// shared/epoch.zod.ts — the shared epoch-millisecond INSTANT (#15676), the
+// first of the two exemptions ruling B on #14478 declares on the schema.
+// `z.number().int()`: no default, no transform, the (RISE) case.
+export type Iso868 = Assert<Eq< z.input< typeof M185.EpochMs >, z.infer< typeof M185.EpochMs > >>;
+
 // shared/value-domain.zod.ts — the ONE standard-domain vocabulary (#14168);
 // `SpecifierValueDomainSchema` (Iso758) is an alias of it, so both pins hold
 // or fall together. A `z.enum` has no default or transform, the (RISE) case.
@@ -1672,7 +1679,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 812 isomorphic pins', () => {
+  it('still declares all 813 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2103,6 +2110,12 @@ describe('ADR-0122 type-alias convention', () => {
     // `SpecifierValueDomainSchema` became an alias of it, so its own pin
     // (`Iso758`) stays and the two hold or fall together. +1 added.
     //
+    // 825 -> 826 is #15676's `EpochMs` (shared/epoch.zod.ts) — the shared
+    // epoch-millisecond instant that ruling B on #14478 declares as the first
+    // of the duration rule's two structural exemptions. A bare
+    // `z.number().int()` with no default and no transform: the (RISE) case,
+    // one new pin (`Iso868`). +1 added.
+    //
     // 830 -> 828 is #14180's ADR-0049 retirement of the `metadata:changed`
     // event payload (kernel/cluster.zod.ts): `MetadataChangedEventPayloadSchema`
     // — a MUST-emit contract nothing ever produced or consumed, whose
@@ -2139,7 +2152,13 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso568–Iso572, Iso647–Iso649) left with their defs (whole-def removal,
     // `RETIRED_DEFS_BY_MAJOR[18]`), so the pins that named them leave with the
     // schemas; the M122 / M133 / M151 import slots stay vacant.
-    expect(pins).toHaveLength(812);
+    //
+    // 812 -> 813 is this branch's own `EpochMs` (#15676): the shared
+    // epoch-instant schema arrived as module slot M185 with one isomorphic
+    // pin (`Iso868`). The two movements are disjoint — the retirement drops
+    // pins those three modules declared, this adds one no module had — so
+    // the merged count is 825 - 13 + 1.
+    expect(pins).toHaveLength(813);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

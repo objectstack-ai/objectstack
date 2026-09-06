@@ -555,8 +555,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       onError: {
         label: "错误处理"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -942,7 +942,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "间距",
         helpText: "栅格间距（Tailwind 单位）"
       },
-      refreshInterval: {
+      refreshIntervalSeconds: {
         label: "刷新间隔",
         helpText: "自动刷新间隔（秒）"
       },

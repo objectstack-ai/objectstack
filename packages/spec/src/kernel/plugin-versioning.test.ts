@@ -350,7 +350,7 @@ describe('Plugin Versioning Schemas', () => {
           enabled: true,
           strategy: 'canary' as const,
           percentage: 10,
-          duration: 3600000,
+          durationMs: 3600000,
         },
       };
       const result = MultiVersionSupportSchema.parse(config);
@@ -452,5 +452,32 @@ describe('Plugin Versioning Schemas', () => {
       });
       expect(resolution.conflicts?.[0].resolutions?.[0].strategy).toBe('upgrade');
     });
+  });
+});
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spelling is a `retiredKey()` tombstone
+// inside the live `rollout` block, so the refusal carries the RENAME and the
+// block's unit-less `percentage` must keep parsing beside it.
+describe('MultiVersionSupport rollout duration carries its unit (#15678)', () => {
+  it('REFUSES the retired `rollout.duration` with the rename in the message', () => {
+    const result = MultiVersionSupportSchema.safeParse({
+      rollout: { strategy: 'canary' as const, duration: 3600000 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'rollout.duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`MultiVersionSupport.rollout.duration` was renamed to `durationMs`',
+    );
+  });
+
+  it('accepts `durationMs` beside the unit-less `percentage`, which keeps its name', () => {
+    const parsed = MultiVersionSupportSchema.parse({
+      rollout: { enabled: true, strategy: 'canary' as const, percentage: 10, durationMs: 3600000 },
+    });
+    expect(parsed.rollout?.durationMs).toBe(3600000);
+    expect(parsed.rollout?.percentage).toBe(10);
   });
 });

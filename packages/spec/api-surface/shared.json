@@ -13,6 +13,7 @@
     "EVALUATED_EXPRESSION_SOURCE_REQUIRED (const)",
     "EXTERNAL_ERROR_CODES (const)",
     "EXTERNAL_ERROR_HTTP_STATUS (const)",
+    "EpochMs (type)",
     "EvaluatedExpression (type)",
     "EvaluatedExpressionParsed (type)",
     "EvaluatedExpressionSchema (const)",

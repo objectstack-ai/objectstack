@@ -169,7 +169,8 @@ Result of a dependency resolution process
 | **conflicts** | `{ package: string; conflicts: object[]; resolution?: object; severity: Enum<'error' \| 'warning' \| 'info'> }[]` | optional (default: `[]`) | List of dependency conflicts detected during resolution |
 | **errors** | `{ package: string; error: string }[]` | optional (default: `[]`) | Errors encountered during dependency resolution |
 | **installOrder** | `string[]` | optional (default: `[]`) | Topologically sorted list of package IDs for installation |
-| **resolvedIn** | `integer` | optional | Time taken to resolve dependencies in milliseconds |
+| **resolvedInMs** | `integer` | optional | Time taken to resolve dependencies in milliseconds |
+| **resolvedIn** | `never` | optional | [REMOVED] `PackageDependencyResolutionResult.resolvedIn` was renamed to `resolvedInMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `resolvedInMs`; the value (milliseconds) is unchanged. |
 
 ### Nested Shape: `PackageDependencyResolutionResult.graph`
 
