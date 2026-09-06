@@ -96,11 +96,57 @@ export function discriminateDefaultValueShape(dv: unknown): DefaultValueShape {
   return 'literal';
 }
 
-/** Verdict of {@link checkLiteralDefaultValue}: `ok`, or the first contract violation. */
+/** Verdict of {@link checkLiteralDefaultValue}: `ok`, or the contract violation to act on. */
 export interface LiteralDefaultValueVerdict {
   ok: boolean;
-  /** First issue message from the value contract — the "why" a refusal carries verbatim. */
+  /**
+   * The ACTIONABLE issue message from the value contract — the "why" a refusal
+   * carries verbatim. Selected by {@link actionableValueIssueMessage}, not read
+   * positionally; the field's name, type and meaning are what they always were.
+   */
   detail?: string;
+}
+
+/**
+ * The one parse issue an author can act on, out of everything zod reported for
+ * this literal's value-shape rejection.
+ *
+ * NOT `issues[0]`. zod reports per-member issues before the object-level
+ * `unrecognized_keys` one, so on a default whose keys were RENAMED the
+ * actionable message sorts LAST and a positional read discards it. An
+ * `address` default authored as `{ street: 5, postal_code: '98101' }` reports:
+ *
+ *     [0] invalid_type          street   Invalid input: expected string, received number
+ *     [1] unrecognized_keys              ... Did you mean `postal_code` -> `postalCode`? ...
+ *
+ * The rename IS the prescription, and edit distance cannot reach it
+ * (`latitude` -> `lat`), which is exactly why `LocationValueSchema` and
+ * `AddressValueSchema` curate an `aliases` map. Reading positionally built that
+ * hint and threw it away, handing the author a missing-member type error about
+ * a member they never wrote — and which of the two they got depended on whether
+ * some unrelated member happened to also be wrong, which nobody chose and
+ * nobody can see.
+ *
+ * The preference is a NO-OP for every other class rather than merely harmless
+ * to it, which is what makes it safe as a blanket rule. Swept on THIS function
+ * over all sixteen classes `valueSchemaFor(def, 'stored')` covers, at both
+ * arities: only `location` and `address` can emit `unrecognized_keys` at all,
+ * because only they are backed by a `strictObject`. The string, numeric,
+ * boolean, calendar-date, instant, clock-time, option, reference and
+ * file-reference classes are scalars; `composite` / `record` / `repeater` /
+ * `vector` are open records and arrays; the open fallback is `z.unknown()`. For
+ * the other fourteen this cannot change a single character.
+ *
+ * The stored-value scan reached the same reading from the other side
+ * (objectql `record-validator.ts`'s `valueShapeDetail`). Two readings of one
+ * rejection, one per surface — deliberately not shared, because `packages/spec`
+ * is upstream of `objectql` and this gate answers a metadata AUTHOR while that
+ * one answers an operator running a migration.
+ */
+function actionableValueIssueMessage(
+  issues: ReadonlyArray<{ code: string; message: string }>,
+): string {
+  return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value';
 }
 
 /**
@@ -117,7 +163,7 @@ export interface LiteralDefaultValueVerdict {
 export function checkLiteralDefaultValue(def: ValueShapeFieldDef, dv: unknown): LiteralDefaultValueVerdict {
   const result = valueSchemaFor(def, 'stored').safeParse(dv);
   if (result.success) return { ok: true };
-  return { ok: false, detail: result.error.issues[0]?.message ?? 'invalid value' };
+  return { ok: false, detail: actionableValueIssueMessage(result.error.issues) };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

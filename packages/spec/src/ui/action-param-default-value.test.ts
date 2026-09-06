@@ -143,6 +143,26 @@ describe('#6970 ActionParamSchema.defaultValue — authored defaults meet the pa
     });
   }
 
+  it('#16077 carries the rename, not a member type error, on a renamed structured default', () => {
+    // The action-param gate and the field gate share ONE core
+    // (`checkLiteralDefaultValue`), so the positional issue read cost this
+    // surface the same prescription. Pinned here as well as at the core
+    // because this consumer composes `verdict.detail` into its own message:
+    // a core fix that never reached the composed text would be invisible to a
+    // core-only pin.
+    const issue = defaultValueIssue({
+      name: 'site',
+      type: 'location',
+      defaultValue: { latitude: 37.77, longitude: -122.42 },
+    })!;
+    expect(issue).not.toBeNull();
+    expect(issue.path).toEqual(['defaultValue']);
+    expect(issue.message).toContain('`latitude` \u2192 `lat`');
+    expect(issue.message).toContain('`longitude` \u2192 `lng`');
+    // The half a positional `issues[0]` read selected instead.
+    expect(issue.message).not.toContain('expected number, received undefined');
+  });
+
   it("names the author's default as the cause, not just the param", () => {
     const issue = defaultValueIssue({ name: 'start', type: 'datetime', defaultValue: '2026-08-10T15:00' })!;
     // The underlying reason is carried verbatim from the shared value contract,
