@@ -115,7 +115,7 @@ import { join } from 'node:path';
 
 import {
   bundlesAreStale,
-  declarationStampState,
+  declarationStamp,
   distIsStale,
 } from '../../../../scripts/check-regen-pending.mjs';
 
@@ -243,16 +243,20 @@ export function inspectDistFreshness(
   // of `distIsStale` because the boolean is the rule's whole contract and the
   // wording is this file's; the second digest costs ~30ms and is spent only on
   // the refusal path — the one that used to prescribe a multi-minute rebuild.
-  const stamp = state === 'stale' ? declarationStampState(pkgDir) : 'unstamped';
+  const stamp = state === 'stale' ? declarationStamp(pkgDir) : { state: 'unstamped' as const };
+  const digests =
+    'recorded' in stamp && stamp.recorded && stamp.actual
+      ? `\n   recorded ${stamp.recorded.slice(0, 16)}… · ${label}/src now hashes to ${stamp.actual.slice(0, 16)}…`
+      : '';
   const cause =
     state === 'missing'
       ? `${label}/dist holds no .d.ts declarations — the package is not built (or was built\n` +
         `   with OS_SKIP_DTS=1, which emits JS and skips exactly the artifact this reads).`
-      : stamp === 'mismatch'
+      : stamp.state === 'mismatch'
         ? `${label}/dist/**/*.d.ts describe DIFFERENT sources than the ones on disk. The last\n` +
           `   build that emitted declarations recorded a build-input digest in\n` +
           `   ${label}/dist/.build-input-hash-dts, and ${label}/src no longer hashes to it — so this\n` +
-          `   is a real content change, not a timestamp artefact.`
+          `   is a real content change, not a timestamp artefact.${digests}`
         : `${label}/dist/**/*.d.ts is OLDER than ${label}/src, and ${label}/dist/.build-input-hash-dts\n` +
           `   is absent or unreadable, so there is nothing to check that timestamp against. Either\n` +
           `   this dist predates that stamp, or the build that wrote it ran with OS_SKIP_DTS=1 and\n` +

@@ -696,24 +696,31 @@ function stamp(root, cwd, amplifiers = AMPLIFIERS) {
  * It never throws: it is called from inside a freshness predicate whose failure
  * direction is a silently wrong artifact, so an unreadable tree has to degrade
  * to `unstamped` rather than take the caller down.
+ *
+ * Both digests come back with the verdict so a refusal can SHOW its evidence
+ * instead of asserting it — the defect #14985 filed was half a wrong message,
+ * and "recorded X, sources now hash to Y" is a claim the reader can recompute.
+ * `actual` is computed only when there is a valid digest to compare it against,
+ * so the ~30ms hash stays off the path where no amplifier stamp exists at all.
  */
-export function declarationStampState(root, pkgDir) {
+export function inspectDeclarationStamp(root, pkgDir) {
+  const none = { state: 'unstamped', recorded: null, actual: null };
   const stampFile = path.join(pkgDir, 'dist', DTS_STAMP_BASENAME);
-  let stamped;
+  let recorded;
   try {
-    if (!existsSync(stampFile)) return 'unstamped';
-    stamped = readFileSync(stampFile, 'utf-8').trim();
+    if (!existsSync(stampFile)) return none;
+    recorded = readFileSync(stampFile, 'utf-8').trim();
   } catch {
-    return 'unstamped';
+    return none;
   }
-  if (!/^[0-9a-f]{64}$/.test(stamped)) return 'unstamped';
+  if (!/^[0-9a-f]{64}$/.test(recorded)) return none;
   let actual;
   try {
     actual = buildInputHash(root, pkgDir);
   } catch {
-    return 'unstamped';
+    return { ...none, recorded };
   }
-  return stamped === actual ? 'match' : 'mismatch';
+  return { state: recorded === actual ? 'match' : 'mismatch', recorded, actual };
 }
 
 /**

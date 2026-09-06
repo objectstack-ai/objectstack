@@ -71,7 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
-import { declarationStampState as declarationStampStateFor } from './check-dev-prereqs.mjs';
+import { inspectDeclarationStamp } from './check-dev-prereqs.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
@@ -136,22 +136,23 @@ function newestMtime(dir, pred, depth = 0) {
 
 /**
  * Did a declaration-emitting build produce `specDir/dist` from the sources on
- * disk right now? `match` / `mismatch` / `unstamped` — the reader's docblock in
- * `check-dev-prereqs.mjs` is the authority on what each verdict means and why
- * every way of not knowing collapses into `unstamped`.
+ * disk right now? `{ state, recorded, actual }` with state `match` / `mismatch`
+ * / `unstamped` — the reader's docblock in `check-dev-prereqs.mjs` is the
+ * authority on what each verdict means and why every way of not knowing
+ * collapses into `unstamped`.
  *
  * Re-exported through this module because `dist-freshness.ts` needs it to NAME
- * the cause in a refusal, and this file is already the one place `packages/spec`
- * gates import freshness from. Wrapped rather than re-exported raw so the repo
- * root is supplied here — a caller that had to pass it could pass the wrong one,
- * and hashing against the wrong root reads as `mismatch`, which is a refusal
- * nobody can act on.
+ * the cause in a refusal and SHOW the two digests behind it, and this file is
+ * already the one place `packages/spec` gates import freshness from. Wrapped
+ * rather than re-exported raw so the repo root is supplied here — a caller that
+ * had to pass it could pass the wrong one, and hashing against the wrong root
+ * reads as `mismatch`, which is a refusal nobody can act on.
  */
-export function declarationStampState(specDir = SPEC_DIR) {
+export function declarationStamp(specDir = SPEC_DIR) {
   try {
-    return declarationStampStateFor(REPO_ROOT, specDir);
+    return inspectDeclarationStamp(REPO_ROOT, specDir);
   } catch {
-    return 'unstamped';
+    return { state: 'unstamped', recorded: null, actual: null };
   }
 }
 
@@ -205,7 +206,7 @@ export function distIsStale(specDir = SPEC_DIR) {
   const dist = newestMtime(join(specDir, 'dist'), (n) => n.endsWith('.d.ts'));
   if (!dist) return true;
   if (newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts')) <= dist) return false;
-  return declarationStampState(specDir) !== 'match';
+  return declarationStamp(specDir).state !== 'match';
 }
 
 /**
