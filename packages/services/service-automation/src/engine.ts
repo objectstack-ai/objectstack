@@ -5580,18 +5580,88 @@ export class AutomationEngine implements IAutomationService {
                     }
                 }
                 const durationMs = Date.now() - run.startTime;
-                const logged = this.recordLog({
-                    id: runId,
-                    flowName: run.flowName,
-                    flowVersion: run.flowVersion,
-                    status: 'completed',
-                    startedAt: run.startedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs,
-                    trigger: buildRunTrigger(context),
-                    steps,
-                    output,
-                }, context);
+                // [#15944] THE RUN IS OVER AND IT SUCCEEDED. Everything from
+                // here to the return is BOOKKEEPING ABOUT that fact, and the
+                // `catch` below this `try` exists for NODE failures — so a
+                // throw out of the history write was handled as though a node
+                // had thrown: the arm journalled a repair snapshot, stamped
+                // `status: 'stranded'`, answered `success: false`, and
+                // {@link restoreConsumedSuspension} then honoured that
+                // snapshot and re-armed the pause, so the NEXT resume RE-RAN
+                // every node after it. Measured: `tail` ran twice.
+                //
+                // The guard restores the invariant `recordLog`'s own doc
+                // states two screens down — "a history write must NEVER block
+                // or break the run that produced it" — which that call was
+                // relied upon to keep and did not.
+                //
+                // Two statements inside `recordLog` reach here on the terminal
+                // path, and neither is hypothetical: `store.recordTerminal`,
+                // whose SYNCHRONOUS throw escapes because the
+                // `void write.catch(...)` beneath it only ever sees a returned
+                // promise's rejection (both shipped stores are `async` and
+                // cannot; the interface is exported, optional, and
+                // host-implementable, and a store returning a non-thenable
+                // makes `write.catch` itself a synchronous TypeError), and the
+                // run-summary line `this.logger.info(line, meta)`, on by
+                // default and calling a HOST-INJECTED logger.
+                //
+                // ⛔ NOT a widening of anything: no exit gains a status it
+                // did not have, the node-failure arm below is untouched, and
+                // the failure is REPORTED rather than swallowed — see the
+                // catch. ⛔ And ⛔ deliberately not fixed at
+                // `restoreConsumedSuspension`: that verb judged correctly on
+                // the evidence it was handed; the evidence is what was wrong,
+                // and no journal is written for a completed run at all now.
+                let logged: ExecutionLogEntry | undefined;
+                try {
+                    logged = this.recordLog({
+                        id: runId,
+                        flowName: run.flowName,
+                        flowVersion: run.flowVersion,
+                        status: 'completed',
+                        startedAt: run.startedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs,
+                        trigger: buildRunTrigger(context),
+                        steps,
+                        output,
+                    }, context);
+                } catch (bookkeeping) {
+                    // #4632 verdict: DURABILITY, so `error` — the caller is
+                    // told the truthful thing (the run completed), which is
+                    // exactly what makes the rest invisible from the outside:
+                    // the terminal history row never landed, nothing retries
+                    // it, and no envelope carries a word about it. After the
+                    // next restart the run is invisible to the Runs surfaces
+                    // and the approvals sweeps read the hole —
+                    // `inspectStrandedRequests` reads "no suspension + no
+                    // terminal row" as a STRANDED request, and
+                    // `releasePendingForTerminalRuns` reads "no terminal row"
+                    // as still-alive. Consequence and fix in the first line,
+                    // per AGENTS.md. Said ONCE per run, not once per failed
+                    // write.
+                    //
+                    // THIRD argument per `error(message, error?, meta?)`; the
+                    // `Error` slot stays empty on purpose (#5575), and the
+                    // thrown text goes to the structured slot rather than into
+                    // the message (#6499).
+                    this.logger.error(
+                        `[Automation] run '${runId}' of flow '${run.flowName}' COMPLETED successfully but its ` +
+                            `run-history bookkeeping threw, so its terminal history row never landed — nothing ` +
+                            `retries it, the caller is told the run succeeded, and after the next restart this ` +
+                            `run is invisible to the Runs surfaces while the approvals sweeps read it as ` +
+                            `stranded and never-finished. The run itself is COMPLETE and must NOT be repaired ` +
+                            `or re-run. Fix the history failure in this record's meta.`,
+                        undefined,
+                        describeThrownForLog(bookkeeping),
+                    );
+                }
+                // [#15944] Recomputed when the guard above had to abandon
+                // `recordLog`: the same pure function of the same steps that
+                // `recordLog`'s own first statement runs, so the two spellings
+                // cannot disagree. Same shape as the strand arm's below.
+                const summary = logged?.summary ?? summarizeRun(steps);
 
                 // ── Subflow up-bubble (nested pause): this run was a subflow
                 // child whose parent suspended awaiting it. Auto-resume the
@@ -5600,7 +5670,7 @@ export class AutomationEngine implements IAutomationService {
                 // continues the parent itself). Best-effort: the child's own
                 // completion stands even if the parent continuation fails.
                 if (!skipBubble) {
-                    await this.bubbleToParent(run, output, logged.summary);
+                    await this.bubbleToParent(run, output, summary);
                 }
 
                 // Surface the flow's friendly completion message so a screen-flow
@@ -5612,7 +5682,7 @@ export class AutomationEngine implements IAutomationService {
                     output,
                     durationMs,
                     successMessage: flow.successMessage,
-                    summary: logged.summary,
+                    summary,
                 };
             } catch (err: unknown) {
                 // Re-suspended at a downstream node: persist a fresh continuation.
@@ -5686,6 +5756,16 @@ export class AutomationEngine implements IAutomationService {
                 // that succeeds. A false negative on a repair instruction is
                 // worse than silence, and it is the opposite of the direction
                 // everybody checks for.
+                //
+                // [#15944] THE SAME TWO STATEMENTS HAVE A SECOND CONSEQUENCE,
+                // and it is the direction everybody DOES check for. On the
+                // COMPLETION path above, a throw out of the same `recordLog`
+                // fell into this arm on a run whose nodes ALL succeeded — a
+                // false `true`: a journal and a `stranded` stamp for a run
+                // that finished, whose "repair" re-armed it and re-ran every
+                // node after the pause. That half is guarded at its own site
+                // (see the completion path), NOT here: this arm stays the
+                // node-failure arm, and reaching it at all was the defect.
                 //
                 // ⛔ This is NOT "assume repairable when the failure is
                 // unknown" — that would invert the honest default and promise

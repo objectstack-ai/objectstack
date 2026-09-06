@@ -46,6 +46,20 @@
  *      predicate that cannot be evaluated refuses. The redemption refusal is
  *      the undifferentiated `null` documented on {@link
  *      IShareLinkService.resolveToken}.
+ *
+ *   7. **`publicSharing.enabled` is a STANDING policy too, not a mint-time
+ *      switch (#14033).** Note 2 is the mint half only. Implementations
+ *      re-read the object's CURRENT block on every `resolveToken`, and a
+ *      block that is off refuses every token on it — those minted while it
+ *      was on, and those minted under the system-context / `permissive` mint
+ *      bypass alike: redemption is an anonymous act, and how the row got
+ *      there buys it nothing. Retroactive on deploy, as note 6 was. Not a
+ *      revocation: no row moves, and re-enabling the block serves them again.
+ *      Off ⇒ nothing inside the block is evaluated (the predicate is not run,
+ *      the redaction set is not computed); on ⇒ the sibling keys keep the
+ *      redemption-time behaviour of note 6. The refusal is the same
+ *      undifferentiated `null` documented on {@link
+ *      IShareLinkService.resolveToken}.
  */
 
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
@@ -183,7 +197,8 @@ export interface ShareLinkExecutionContext {
  *
  * Implementations MUST treat `context.isSystem === true` as a bypass
  * (skip the per-object opt-in check) so platform bootstrappers can seed
- * demo links.
+ * demo links. That bypass is MINT-only: a link seeded this way is governed
+ * at redemption like any other (design note 7, #14033).
  *
  * ## The context every method takes (#6206 ruling, #6430)
  *
@@ -231,16 +246,18 @@ export interface IShareLinkService {
    * `last_used_at` as a side effect of a SUCCESSFUL resolution only.
    *
    * Returns `null` when the token does not exist, is revoked, is expired,
-   * fails the audience or password gate, names a record that no longer exists
-   * (#5190), or names a record that no longer satisfies the object's
-   * `publicSharing.eligibility` predicate (#13608).
+   * fails the audience or password gate, names an object whose
+   * `publicSharing.enabled` switch is off — the block absent or disabled,
+   * however the link was minted (#14033, design note 7) — names a record that
+   * no longer exists (#5190), or names a record that no longer satisfies the
+   * object's `publicSharing.eligibility` predicate (#13608).
    *
    * ⛔ That single `null` is the contract, not an implementation detail. The
    * caller of this method may hold nothing but a token, and distinguishing
-   * "does not exist" from "revoked" from "no longer eligible" for such a
-   * caller is an existence oracle. Implementations MUST NOT return a
-   * distinguishable answer per reason, and MUST NOT throw one either; the
-   * readable reason belongs in the server-side log.
+   * "does not exist" from "revoked" from "switched off" from "no longer
+   * eligible" for such a caller is an existence oracle. Implementations MUST
+   * NOT return a distinguishable answer per reason, and MUST NOT throw one
+   * either; the readable reason belongs in the server-side log.
    *
    * @param token  raw token from the URL / cookie
    * @param probe  contextual gates the caller has already evaluated
