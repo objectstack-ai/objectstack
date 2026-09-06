@@ -177,7 +177,9 @@ export function parseIntegerParam(
 /**
  * A CLOSED-SET parameter — a filter whose declared values are an enum on the
  * wire (`?status=failed` on `GET /api/automation/:name/runs`, whose
- * `ListRunsRequestSchema` bounds it to the eight `ExecutionStatus` members).
+ * `ListRunsRequestSchema` bounds it to `ExecutionStatus` itself — the enum,
+ * never a copy of its members, so the bound is whatever that vocabulary
+ * declares rather than a count fixed on the day this line was written).
  *
  * Written for #7359, which is the third shape in this module's family and the
  * one that fails widest. The other two are coercions that invent a value; this

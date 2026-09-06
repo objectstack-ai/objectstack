@@ -1796,16 +1796,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //
                 // [#7359] `status` is the THIRD declared parameter, and until
                 // now the only one this handler never read. `ListRunsRequestSchema`
-                // has always declared it (`z.enum([...8 ExecutionStatus members])
-                // .optional()`), but it had no slot on `IAutomationService.listRuns`
-                // and was never built into this object — so `?status=failed` was
-                // dropped here, silently, and the caller was answered 200 with
-                // EVERY run of the flow capped by `limit`. That is worse than an
-                // empty page: a monitoring caller paging for failures reads the
-                // first 20 runs of any status and concludes those are the
-                // failures. #7300 deliberately left the key ignored rather than
-                // decide between honouring and retiring it; this card takes the
-                // enforce route (ADR-0049), so the declared surface is true.
+                // has always declared it — as `ExecutionStatus.optional()`, the
+                // enum itself rather than a copy of its members, so what the
+                // wire bounds the filter to is read from that vocabulary rather
+                // than restated here — but it had no slot on
+                // `IAutomationService.listRuns` and was never built into this
+                // object, so `?status=failed` was dropped here, silently, and
+                // the caller was answered 200 with EVERY run of the flow capped
+                // by `limit`. That is worse than an empty page: a monitoring
+                // caller paging for failures reads the first 20 runs of any
+                // status and concludes those are the failures. #7300
+                // deliberately left the key ignored rather than decide between
+                // honouring and retiring it; this card takes the enforce route
+                // (ADR-0049), so the declared surface is true.
                 //
                 // The members come from the spec's own `ExecutionStatus` enum
                 // rather than a list copied into this file: the wire schema is
