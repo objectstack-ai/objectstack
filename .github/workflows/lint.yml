@@ -2872,6 +2872,30 @@ jobs:
       - name: Release-body limit guard
         run: pnpm check:release-body
 
+      # Post-publish npm verification (#15321). The last thing the `publish` job
+      # does is prove every published package is readable on npm. That check ran
+      # as one `npm view` of @objectstack/cli and failed the 17.3.0 release,
+      # which had succeeded completely: npm committed cli@17.3.0 at 10:53:25.108
+      # and the read at 10:53:32 got an absence, because the write path and the
+      # CDN-fronted read path are eventually consistent. Worse, it looked at 1
+      # package of 69, so the one failure it exists to catch — a package that
+      # genuinely did not publish — is the one it could not see, and the false
+      # red on `cli` would have masked it.
+      #
+      # scripts/release-verify-npm.mjs replaces it with bounded backoff over the
+      # whole derived publishable set. Its --self-test is the ONLY instrument on
+      # that logic: the production path runs once per release, on a runner, with
+      # npm's real timing, so nothing else can tell a working retry loop from a
+      # broken one. It drives the real code with a stub registry — the #15321
+      # cold read reproduced through the OLD parameters (one target, no retry,
+      # which is a red on a healthy package) and then absorbed by the new ones,
+      # plus the partial publish the old shape reported green.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      - name: Post-publish npm verification self-test
+        run: node scripts/release-verify-npm.mjs --self-test
+
       # #3825 Node-version drift guard: a runtime pin is 18 separate string
       # literals across .github/workflows, so a split is invisible until someone
       # greps for it. One did open — every PR gate sat on Node 20 (EOL
