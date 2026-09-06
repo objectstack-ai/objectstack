@@ -2,6 +2,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
+// The fake engines below open `update()` with `assertEngineUpdateDispatch`
+// (`pnpm check:engine-double-contract`). A double looser than the real
+// `ObjectQLEngine.update` is how a dead write path ships with its suite green;
+// one call pins these fakes to the producer's rejection surface and, unlike a
+// mirrored `if`, cannot drift when that rule changes.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 function makeQL(schemas: any[], rowsByObject: Record<string, any[]>) {
   const updates: { object: string; data: any; options: any }[] = [];
@@ -16,6 +22,7 @@ function makeQL(schemas: any[], rowsByObject: Record<string, any[]>) {
       return all;
     }),
     update: vi.fn(async (object: string, data: any, options: any) => {
+      assertEngineUpdateDispatch(data, options);
       updates.push({ object, data, options });
       const row = (rowsByObject[object] ?? []).find((r) => r.id === data.id);
       if (row) row.organization_id = data.organization_id;
@@ -95,7 +102,8 @@ describe('claimOrphanOrgRows', () => {
         { id: 'q1', organization_id: null },
         { id: 'q2', organization_id: null },
       ]),
-      update: vi.fn(async (_o: string, data: any) => {
+      update: vi.fn(async (_o: string, data: any, options?: any) => {
+        assertEngineUpdateDispatch(data, options);
         if (data.id === 'q1') throw new Error('hook rejected');
         return { id: data.id };
       }),

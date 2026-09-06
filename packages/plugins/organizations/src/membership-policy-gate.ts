@@ -299,8 +299,11 @@ export function walledMembershipPolicyFatalMessage(
             '    That binds nobody TODAY, but only as a side effect: under a wall the framework',
             '    refuses to guess a target organization (ADR-0093 D3), so the reconciler answers',
             '    `no-target-org` and writes nothing. An outcome, not a declaration — and the',
-            '    resolution underneath has already regressed once (cloud#957 / #962: self-serve',
-            '    sign-ups landed inside a stranger\'s organization). The day it degrades again, this',
+            // The tracker ids this sentence used to carry (cloud#957 / #962) are
+            // in the header instead — an operator reading a boot refusal has no
+            // tracker to resolve them against.
+            '    resolution underneath has already regressed once: self-serve sign-ups landed',
+            '    inside a stranger\'s organization. The day it degrades again, this',
             '    deployment starts auto-joining strangers without anything having claimed otherwise.',
           ];
 
@@ -353,8 +356,11 @@ export function walledMembershipPolicyFatalMessage(
     '',
     ...remedy,
     '',
+    // ⛔ No tracker id in the rendered text (`pnpm check:doc-authoring`): an
+    // operator reading a boot refusal cannot resolve `#NNNN`. The provenance
+    // lives in this file's header, which the reader who CAN resolve it reads.
     '    OS_ALLOW_DEGRADED_TENANCY does NOT apply here — it covers an ABSENT multi-org runtime',
-    '    (ADR-0093 D5), never a present one asking to be configured. (cloud#1092)',
+    '    (ADR-0093 D5), never a present one asking to be configured.',
   ].join('\n');
 }
 
@@ -400,8 +406,10 @@ export async function assertWalledMembershipPolicyDeclared(
   const auth = probeService<MembershipPolicyAuthSurface>(ctx, 'auth');
   if (!auth || typeof auth.getMembershipPolicy !== 'function') {
     ctx.logger?.info?.(
+      // Same rule as the fatal message above: no tracker id in the rendered
+      // string. This gate's provenance is cloud#1092, recorded in the header.
       '[org-scoping] membership-policy gate skipped: no `auth` service on this kernel, so nothing ' +
-        'creates memberships automatically and there is no policy to declare (cloud#1092)',
+        'creates memberships automatically and there is no policy to declare',
       { posture: requested },
     );
     return;

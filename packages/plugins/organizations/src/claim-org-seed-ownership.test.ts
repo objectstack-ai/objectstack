@@ -2,6 +2,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
+// The fake engines below open `update()` with `assertEngineUpdateDispatch`
+// (`pnpm check:engine-double-contract`). A double looser than the real
+// `ObjectQLEngine.update` is how a dead write path ships with its suite green;
+// one call pins these fakes to the producer's rejection surface and, unlike a
+// mirrored `if`, cannot drift when that rule changes.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 const ORG = 'org_1';
 const OWNER = 'usr_admin';
@@ -19,7 +25,8 @@ function makeQL(schemas: any[], rowsByObject: Record<string, any[]>) {
         return true;
       });
     }),
-    update: vi.fn(async (object: string, data: any) => {
+    update: vi.fn(async (object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
       updates.push({ object, data });
       const row = (rowsByObject[object] ?? []).find((r) => r.id === data.id);
       if (row) row.owner_id = data.owner_id;

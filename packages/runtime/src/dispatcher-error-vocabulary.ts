@@ -702,6 +702,26 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'UNregistered by #8035 because the CLI rethrows it pre-HTTP and aborts. "Host boot matching ' +
             'is not wire vocabulary." Its throw site and constant deliberately live on.',
     },
+    // [#16130] The walled-posture membership-policy gate, which arrived in this
+    // repository with `@objectstack/organizations` when ADR-0132 moved the
+    // multi-org runtime to open core. Its row is written here rather than in the
+    // ledger for the same reason as the two rows below it.
+    {
+        code: 'WALLED_MEMBERSHIP_POLICY_UNDECLARED',
+        file: 'packages/plugins/organizations/src/membership-policy-gate.ts',
+        shape: 'classconst',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Thrown from the plugin\'s own `kernel:bootstrapped` hook, which fires BEFORE ' +
+            '`kernel:listening` opens the socket — so no request is ever served by a deployment this ' +
+            'refuses, and no HTTP boundary exists on the path. `objectstack serve` prints the message ' +
+            'verbatim and exits 1; a multi-kernel host catches it per kernel. The `code` field exists ' +
+            'to let such a host discriminate this refusal from the two neighbouring boot refusals ' +
+            '(a licence failure and an absent package) STRUCTURALLY rather than by string match, ' +
+            'across module instances — which is a host-boot concern, not wire vocabulary. Same class ' +
+            'and the same #8035 reasoning as the MULTI_TENANT_UNSUPPORTED pair below.',
+    },
     {
         code: 'MEMORY_MULTI_TENANT_UNSUPPORTED',
         file: 'packages/drivers/driver-memory/src/memory-tenancy-guard.ts',

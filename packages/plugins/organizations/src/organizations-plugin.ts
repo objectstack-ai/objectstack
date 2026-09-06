@@ -59,6 +59,29 @@ export interface OrganizationsPluginOptions {
 }
 
 /**
+ * The `objectql` slot's surface THIS plugin uses, written structurally.
+ *
+ * Not `any`: `pnpm check:slot-lookup` refuses erasing a service lookup to `any`
+ * (#4251), and the baseline it ratchets never grows — so a file arriving in this
+ * repository types its lookups rather than inheriting a grandfather clause it is
+ * not on. Structural rather than the engine's full contract for the same reason
+ * `membership-policy-gate.ts` states about ITS probes: this plugin needs three
+ * members, the `catch` arms below already treat every one of them as possibly
+ * absent, and naming the whole engine interface here would claim a coupling the
+ * runtime checks do not make.
+ */
+interface OrgScopingQuerySlot {
+  registerMiddleware(mw: (opCtx: any, next: () => Promise<void>) => Promise<void>): void;
+  find(object: string, query: unknown, options?: unknown): Promise<any>;
+  getSchema?(object: string): any;
+}
+
+/** The `metadata` slot's surface this plugin uses. Structural, same reasoning. */
+interface OrgScopingMetadataSlot {
+  get?(type: string, name: string): Promise<any>;
+}
+
+/**
  * OrganizationsPlugin — the multi-organization runtime, in open core
  * (ADR-0132; cloud ADR-0081 D2 had moved it to the commercial runtime and
  * this is the round trip back). The machinery shipped here originally as
@@ -252,8 +275,8 @@ export class OrganizationsPlugin implements Plugin {
       await runMembershipPolicyGate();
     }
 
-    let ql: any;
-    let metadata: any;
+    let ql: OrgScopingQuerySlot | undefined;
+    let metadata: OrgScopingMetadataSlot | undefined;
     try {
       ql = ctx.getService('objectql');
       try {
@@ -420,7 +443,9 @@ export class OrganizationsPlugin implements Plugin {
       if (orgCount > 1 && !replayed) {
         ctx.logger.info(
           `[org-scoping] organization ${newOrgId} starts empty: no app seed datasets replayed. ` +
-            'Demo data on signup comes from the app\'s own seed definitions — never from another organization\'s rows (cloud#1345).',
+            // The invariant's tracker id (cloud#1345) stays in the comment block
+            // above and out of the log line — a log reader cannot resolve it.
+            'Demo data on signup comes from the app\'s own seed definitions — never from another organization\'s rows.',
           { organizationId: newOrgId },
         );
       }
@@ -483,9 +508,9 @@ export class OrganizationsPlugin implements Plugin {
    * the schema can't be loaded — caller skips injection.
    */
   private async getObjectFieldNames(
-    metadata: any,
+    metadata: OrgScopingMetadataSlot | undefined,
     objectName: string,
-    ql?: any,
+    ql?: OrgScopingQuerySlot,
   ): Promise<Set<string> | null> {
     if (this.fieldNamesCache.has(objectName)) {
       return this.fieldNamesCache.get(objectName) ?? null;
@@ -496,9 +521,9 @@ export class OrganizationsPlugin implements Plugin {
   }
 
   private async loadObjectFieldNames(
-    metadata: any,
+    metadata: OrgScopingMetadataSlot | undefined,
     objectName: string,
-    ql?: any,
+    ql?: OrgScopingQuerySlot,
   ): Promise<Set<string> | null> {
     try {
       let obj: any =

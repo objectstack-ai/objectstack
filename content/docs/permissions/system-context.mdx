@@ -9,8 +9,8 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **105
-distinct sites across 19 packages**, and knowing three of those behaviours gives
+because the flag is not one concept: it is a single boolean read at **106
+distinct sites across 20 packages**, and knowing three of those behaviours gives
 no hint that the other hundred-and-three exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
 and the gap was observable only by querying the resulting rows.
@@ -124,7 +124,7 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **17 of the 105 sites**.
+The largest single consumer — **17 of the 106 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
@@ -152,7 +152,7 @@ The largest single consumer — **17 of the 105 sites**.
 | 46 | Comment access hooks return early (insert + update + delete, and the read AST) | plugin-audit | Lose: comment visibility scoping | `comment-access-hooks.ts:322`, `:449`, `:488`, `:540` |
 | 47 | Knowledge search returns hits unfiltered | service-knowledge | Lose: the permission filter over search results | `service-knowledge/src/knowledge-service.ts:316` |
 
-### 5. Actions, metadata plane, provenance
+### 5. Actions, metadata plane, provenance, the organization wall
 
 | # | Behaviour when `isSystem` | Package | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|:---|
@@ -170,6 +170,7 @@ The largest single consumer — **17 of the 105 sites**.
 | 59 | Email-template / webhook provenance stamps skipped | plugin-email, plugin-webhooks | Lose: the row is not marked as an admin customization | `email-template-provenance.ts:77`, `webhook-provenance.ts:68` |
 | 60 | **Automation flow data nodes re-add the `owner_id` stamp** (the one place row 2's gap is compensated inline) | service-automation | Get: a flow-authored INSERT under system elevation still lands owned, when the run resolved a user. Fill-only — flow-authored values win | `runtime-identity.ts:279`, called from `builtin/crud-nodes.ts:319` |
 | 61 | Inbox caller refusal names `isSystem` as what was carried | service-messaging | Get: nothing — the refusal still fires. The flag only shapes the diagnostic, because privilege is not an authorization subject | `inbox-caller.ts:148` |
+| 62 | **`organization_id` is not auto-stamped on INSERT** — the organization-axis twin of the `owner_id` gap above | organizations | Get: an elevated write may name another organization deliberately, which is what the per-organization seed replay, the orphan-row claim, imports and migrations all rely on. Lose: the authoritative stamp, so an elevated insert that names no organization lands `organization_id = NULL` and the wall hides it. ⛔ This is why a forged `organization_id` is overwritten on the non-elevated path and not here: elevation is the seam the legitimate cross-organization writers use | `organizations-plugin.ts:302` |
 
 ### 6. Reads that only carry the flag onward
 
@@ -179,10 +180,10 @@ a reader tracing where elevation travels needs them.
 
 | # | Site | Package | What it does |
 |:--|:---|:---|:---|
-| 62 | `objectql/src/engine.ts:3727` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
-| 63 | `objectql/src/engine.ts:14981` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
-| 64 | `plugin-reports/src/report-service.ts:556` | plugin-reports | Threads the flag into the engine call that runs a report |
-| 65 | `body-runner.ts:279` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
+| 63 | `objectql/src/engine.ts:3727` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
+| 64 | `objectql/src/engine.ts:14981` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
+| 65 | `plugin-reports/src/report-service.ts:556` | plugin-reports | Threads the flag into the engine call that runs a report |
+| 66 | `body-runner.ts:279` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
 
 ---
 
@@ -269,8 +270,8 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 105 read sites
-  in 19 packages. Splitting it is a breaking contract change across all of them.
+- **Shipped semantics.** `isSystem` is a published contract with 106 read sites
+  in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
 - **No business pull.** No app has asked for the combinations a split would
@@ -326,15 +327,15 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 111 | ✅ |
+| — parsed as a property **read** | 112 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **105** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 101 | ✅ |
-| — carry the flag onward only (rows 62–65 above) | 4 | ✅ |
-| Packages containing at least one elevation read | **19** | ✅ |
-| Files containing at least one elevation read | 44 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **106** | ✅ |
+| — behaviour-bearing (rows 1–62 above) | 102 | ✅ |
+| — carry the flag onward only (rows 63–66 above) | 4 | ✅ |
+| Packages containing at least one elevation read | **20** | ✅ |
+| Files containing at least one elevation read | 45 | ✅ |
 
 The six rows marked — are a **dated decomposition, not a live claim**: they were
 measured on 2026-08-29 at `ca1965f2b5` and CI does not re-derive them. They count

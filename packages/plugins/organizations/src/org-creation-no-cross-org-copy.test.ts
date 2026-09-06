@@ -33,6 +33,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OrganizationsPlugin } from './organizations-plugin.js';
+// The fake engines below open `update()` with `assertEngineUpdateDispatch`
+// (`pnpm check:engine-double-contract`). A double looser than the real
+// `ObjectQLEngine.update` is how a dead write path ships with its suite green;
+// one call pins these fakes to the producer's rejection surface and, unlike a
+// mirrored `if`, cannot drift when that rule changes.
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 
 // ⛔ No entitlement grant, and none is needed: the open package has no licence
 // gate (ADR-0132 boundary 3). The closed runtime's copy of this suite granted
@@ -87,7 +93,8 @@ function makeFakeQl() {
       (store[object] ??= []).push({ ...data });
       return data;
     }),
-    update: vi.fn(async (object: string, data: any) => {
+    update: vi.fn(async (object: string, data: any, options?: any) => {
+      assertEngineUpdateDispatch(data, options);
       const row = (store[object] ?? []).find((r) => r.id === data.id);
       if (row) Object.assign(row, data);
       return row;
