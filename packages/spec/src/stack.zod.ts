@@ -1776,6 +1776,11 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
  * `packages/runtime/src/dispatcher-error-vocabulary.ts` as `door: 'none'` /
  * `verdict: 'boot-refusal'`; `check:dispatcher-error-vocabulary` holds the two
  * files equal in both directions.
+ *
+ * `issues` is HETEROGENEOUS across members, on purpose: the six semantic
+ * refusals carry one string per finding, the schema arm carries the zod issue
+ * objects — `TIssue` names which, and a reader branches on `code` before it
+ * reads `issues`, never on the element shape.
  */
 abstract class StackRefusalError<TIssue = string> extends Error {
   abstract readonly code: string;
@@ -1860,12 +1865,17 @@ class StackCrossReferenceError extends StackRefusalError {
  *   `ZodError`. So "reuse spec's existing zod-failure channel" names a
  *   channel that does not exist — the only existing channel is the message.
  * - The two zod-shaped refusals the ADR-0112 ledger DOES carry are both spelled
- *   `*_SCHEMA_INVALID` and both answer 422: `METADATA_SCHEMA_INVALID`
- *   (`SchemaValidationError` in `@objectstack/metadata-core` — "a put's spec
- *   fails Zod validation against the canonical schema", carrying the zod
- *   `issues` structurally) and `FLOW_INPUT_SCHEMA_INVALID` ("a node's config
- *   contradicts the schema the definition itself declares"). An authored stack
- *   failing its own schema is that class exactly.
+ *   `*_SCHEMA_INVALID`: `METADATA_SCHEMA_INVALID` (`SchemaValidationError` in
+ *   `@objectstack/metadata-core` — "a put's spec fails Zod validation against
+ *   the canonical schema", carrying the zod `issues` structurally; its docstring
+ *   says 422 but nothing in the tree assigns it a status) and
+ *   `FLOW_INPUT_SCHEMA_INVALID` ("a node's config contradicts the schema the
+ *   definition itself declares", answered 422 by
+ *   `packages/runtime/src/flow-dispatch-status.ts`). The zod-shaped refusal
+ *   `metadata-protocol` actually stamps at 422 is `INVALID_METADATA`
+ *   (`protocol.ts`, `runtime-authoring-gate.ts`). An authored stack failing its
+ *   own schema is that class exactly: the `issues` shape from the first, the
+ *   422 from the other two.
  * - The other two channels a zod failure travels on in this repo are both the
  *   wrong vocabulary here. `400 VALIDATION_ERROR` is the REQUEST-syntax bucket
  *   (`packages/rest` answers a malformed body with it, passing raw zod issue

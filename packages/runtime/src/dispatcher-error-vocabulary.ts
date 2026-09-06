@@ -963,7 +963,10 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'Its own arm rather than a reuse, on a reading taken before it was written: `packages/spec` ' +
             'has no zod-failure envelope to reuse (`formatZodError` / `safeParsePretty` return prose; no ' +
             '`extends Error` there wraps a `ZodError`); the ledger\'s two zod-shaped refusals are both ' +
-            'spelled `*_SCHEMA_INVALID` at 422 (`METADATA_SCHEMA_INVALID`, `FLOW_INPUT_SCHEMA_INVALID`); ' +
+            'spelled `*_SCHEMA_INVALID` — `METADATA_SCHEMA_INVALID` (metadata-core\'s `SchemaValidationError`, ' +
+            'the `issues`-carrying precedent; nothing in the tree assigns it a status) and ' +
+            '`FLOW_INPUT_SCHEMA_INVALID` (422 in `packages/runtime/src/flow-dispatch-status.ts`) — and the ' +
+            'zod-shaped refusal `metadata-protocol` actually stamps at 422 is `INVALID_METADATA`; ' +
             'and the two other channels a zod failure travels on — `400 VALIDATION_ERROR` (request ' +
             'syntax) and `VALIDATION_FAILED` + `fields[]` (record validation, which ' +
             '`validationFailureDetails` duck-types on `name === \'ValidationError\'`) — would each file an ' +
