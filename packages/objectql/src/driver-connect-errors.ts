@@ -74,28 +74,6 @@ function failureMessage(error: unknown): string {
 }
 
 /**
- * Thrown by `ObjectQL.init()` when one or more boot-registered drivers fail to
- * connect (framework#3741). Aborts kernel bootstrap: a server that cannot reach
- * its database must not report itself started.
- *
- * Two failures are collapsed into one class on purpose, because `init()` cannot
- * tell them apart and the correct response to both is the same — don't boot:
- *
- *  - the datasource is genuinely unreachable (wrong `OS_DATABASE_URL`, rotated
- *    password, closed network path), and
- *  - the driver is DELIBERATELY REFUSING to start (licence, server version,
- *    incompatible configuration, missing capability). Throwing from `connect()`
- *    is the supported way for a driver to veto boot; before this error existed,
- *    such a veto was caught and downgraded to a query-time error, which is why
- *    driver-mongodb's tenancy guard had to be hoisted into its constructor
- *    (#3724 / #3734).
- *
- * The message is self-contained — it names every failed driver and its cause —
- * because the CLI prints `error.message` alone (stack only under `DEBUG`).
- * Identified by `code` rather than `instanceof` so it survives crossing package
- * boundaries.
- */
-/**
  * [#16159] The ADR-0112 `code` {@link DriverConnectError} carries, as a
  * constant a consumer can import instead of re-spelling.
  *
@@ -138,6 +116,28 @@ function failureMessage(error: unknown): string {
  */
 export const DRIVER_CONNECT_CODE = 'ERR_DRIVER_CONNECT' as const;
 
+/**
+ * Thrown by `ObjectQL.init()` when one or more boot-registered drivers fail to
+ * connect (framework#3741). Aborts kernel bootstrap: a server that cannot reach
+ * its database must not report itself started.
+ *
+ * Two failures are collapsed into one class on purpose, because `init()` cannot
+ * tell them apart and the correct response to both is the same — don't boot:
+ *
+ *  - the datasource is genuinely unreachable (wrong `OS_DATABASE_URL`, rotated
+ *    password, closed network path), and
+ *  - the driver is DELIBERATELY REFUSING to start (licence, server version,
+ *    incompatible configuration, missing capability). Throwing from `connect()`
+ *    is the supported way for a driver to veto boot; before this error existed,
+ *    such a veto was caught and downgraded to a query-time error, which is why
+ *    driver-mongodb's tenancy guard had to be hoisted into its constructor
+ *    (#3724 / #3734).
+ *
+ * The message is self-contained — it names every failed driver and its cause —
+ * because the CLI prints `error.message` alone (stack only under `DEBUG`).
+ * Identified by `code` rather than `instanceof` so it survives crossing package
+ * boundaries.
+ */
 export class DriverConnectError extends Error {
   readonly code = DRIVER_CONNECT_CODE;
 
@@ -189,31 +189,6 @@ export interface DatasourceUnavailableInfo {
 }
 
 /**
- * Thrown by `getDriver()` when an object's `datasource` was **declared** but has
- * no live driver, and the connection layer knows why (framework#3828).
- *
- * Before this, all four of these produced the same sentence — `Datasource 'x'
- * is not registered.`:
- *
- *  1. the host's connect policy refused it (plan / egress isolation),
- *  2. it failed to connect at boot and `OS_ALLOW_DRIVER_CONNECT_FAILURE` let
- *     the server start anyway,
- *  3. the app misspelled the datasource name, and
- *  4. it is declared `active: false`.
- *
- * (3) is an authoring bug; (1) and (2) are states of the deployment. Answering
- * all of them identically sends the reader hunting for a typo that isn't there.
- * Cases the connection layer never recorded keep the original message — there is
- * genuinely nothing more to say about a name nobody declared.
- *
- * **The message never carries the underlying cause.** A connect failure's text
- * routinely contains the host, port, or DSN, and a policy's `reason` is written
- * for operators; neither is safe to hand to whoever is browsing a record. The
- * cause stays in the startup logs and the datasource-admin list, and this error
- * says which of those to read. A host that wants to tell tenants something
- * specific sets `publicReason` on its connect decision.
- */
-/**
  * [#16159] The ADR-0112 `code` {@link DatasourceUnavailableError} carries, as a
  * constant a consumer can import instead of re-spelling.
  *
@@ -239,6 +214,31 @@ export interface DatasourceUnavailableInfo {
  */
 export const DATASOURCE_UNAVAILABLE_CODE = 'ERR_DATASOURCE_UNAVAILABLE' as const;
 
+/**
+ * Thrown by `getDriver()` when an object's `datasource` was **declared** but has
+ * no live driver, and the connection layer knows why (framework#3828).
+ *
+ * Before this, all four of these produced the same sentence — `Datasource 'x'
+ * is not registered.`:
+ *
+ *  1. the host's connect policy refused it (plan / egress isolation),
+ *  2. it failed to connect at boot and `OS_ALLOW_DRIVER_CONNECT_FAILURE` let
+ *     the server start anyway,
+ *  3. the app misspelled the datasource name, and
+ *  4. it is declared `active: false`.
+ *
+ * (3) is an authoring bug; (1) and (2) are states of the deployment. Answering
+ * all of them identically sends the reader hunting for a typo that isn't there.
+ * Cases the connection layer never recorded keep the original message — there is
+ * genuinely nothing more to say about a name nobody declared.
+ *
+ * **The message never carries the underlying cause.** A connect failure's text
+ * routinely contains the host, port, or DSN, and a policy's `reason` is written
+ * for operators; neither is safe to hand to whoever is browsing a record. The
+ * cause stays in the startup logs and the datasource-admin list, and this error
+ * says which of those to read. A host that wants to tell tenants something
+ * specific sets `publicReason` on its connect decision.
+ */
 export class DatasourceUnavailableError extends Error {
   readonly code = DATASOURCE_UNAVAILABLE_CODE;
 
