@@ -567,7 +567,18 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     expect(tsInterfaceType('number')).toBe('number');
     // The driver's own answer for the headline member, read where it lives.
     expect(createColumnArm('autonumber')).toContain('table.string(name)');
-    expect(sqlColumn('autonumber')).toBe(sqlColumn('text'));
+    // #16091 — compared against `lookup`, not against `text`. Both were
+    // `VARCHAR(255)` when this line was written, which made `text` a usable
+    // stand-in for "the driver's default string column"; it is not one any
+    // more. `createColumn` gives `text` its text-family arm (an unbounded TEXT
+    // for every unkeyed column) and gives `lookup` the same bare
+    // `table.string(name)` it gives `autonumber` — asserted here, from the
+    // driver, so the comparator cannot silently become a different question again.
+    expect(createColumnArm('lookup')).toContain('table.string(name)');
+    expect(sqlColumn('autonumber')).toBe(sqlColumn('lookup'));
+    // Anti-vacuity: the comparator is a real, DIFFERENT answer from the
+    // text family's, so this equality is a measurement rather than a tautology.
+    expect(sqlColumn('autonumber')).not.toBe(sqlColumn('text'));
     expect(tsColumn('autonumber')).toBe("table.string('f_autonumber')");
   });
 

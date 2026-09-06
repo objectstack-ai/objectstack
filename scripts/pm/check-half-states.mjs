@@ -87,9 +87,9 @@
  *
  *   H1  `pm:dispatched` with no assignee — the state model DEFINES the label
  *       rather than describing a habit: 「`pm:dispatched` … 恒带 assignee」
- *       (SKILL.md line 109), and the one lawful way for that field to empty is
+ *       (SKILL.md), and the one lawful way for that field to empty is
  *       the release act, which clears it and posts a `Release:` line in the
- *       SAME write (line 465). So an empty field under this label is the label
+ *       SAME write. So an empty field under this label is the label
  *       contradicting its own definition, not a step somebody forgot — and the
  *       release half of the same rule is H47's row.
  *   H2  assignee set on a pm-tracked card, but no claim comment on the thread
@@ -1744,6 +1744,14 @@ export function branchNameTarget(ref) {
  * exists. So a body that declares ANY delivery is authoritative, and the branch
  * name is consulted only for the bodies that declare none — which is exactly
  * the population the specimen came from, and no other.
+ *
+ * ⚠️ This relation answers "is there a PR on this card", NOT "is the card
+ * finished". H8's MERGED side needs the second question and asks it of
+ * `prFullyDeliversCard` below; every other reader here — H8's open side, H31's
+ * carrier comparison, `claimDelivery`, and the pairing `check-clause2-carriers`
+ * derives — wants this wide one, because a half in flight is live work. ⛔ Do
+ * not narrow it here to serve H8: that would make the live half invisible to
+ * the rows that exist to see it.
  */
 export function prDeliversCard(pr, n) {
   const target = String(n);
@@ -1758,11 +1766,50 @@ export function prDeliversCard(pr, n) {
 }
 
 /**
+ * Does this PR deliver card `n` IN FULL — the narrower reading H8's merged side
+ * takes, and the only reader that takes it.
+ *
+ * ## Why a second reader, and not a narrower first one (#16036)
+ *
+ * The partial-dispatch rule gave `Refs #N (item k)` a meaning: a PR that lands
+ * ONE item of a card, releases the card back to `pm:queue` in the same stroke,
+ * and leaves the remaining items to be re-dispatched from the queue as a FRESH
+ * claim. That body declares no delivery, so `prDeliversCard` falls through to
+ * the branch name — and the branch is named for the card, because that is the
+ * branch the dev cut. H8 therefore read a PARTIAL landing as a full delivery and
+ * prescribed its destructive remedy ("drop `pm:dispatched` and re-grade the
+ * remainder") against a card a second dev is lawfully working. H8 reads no
+ * thread, so the fresh `Claim:` newer than the merge — the record that stands
+ * H49 down — is invisible to it, and the row kept firing from the re-claim until
+ * the remainder's own PR opened and the open side downgraded it.
+ *
+ * So the fallback keeps the recovery it was built for — a body that declares
+ * NOTHING, the #10757 specimen's own population — and declines for a body that
+ * SPOKE about this card in the one spelling the protocol reserves for a
+ * non-delivery. `Fixes`/`Part of` are untouched: those are deliveries whatever
+ * the branch is called, and a `Refs` beside either does not make them partial.
+ *
+ * The `Refs`-only test is `refsOnlyLinksFor` — H49's own predicate, CALLED
+ * rather than restated, so what H49 owns is exactly what H8 excludes and the two
+ * cannot drift into a gap or an overlap. Bound per card number, as H7 binds: a
+ * `Refs #A` on a PR whose branch is named for B narrows nothing about B.
+ */
+export function prFullyDeliversCard(pr, n) {
+  if (!prDeliversCard(pr, n)) return false;
+  return refsOnlyLinksFor([pr], n).length === 0;
+}
+
+/**
  * H8 — null when clean, else the finding sentence.
  *
- * Delivery is `prDeliversCard` (body first, branch name as the fallback its
- * docblock justifies). Only `merged_at`-set PRs count on the merged side —
- * closed-unmerged is an abandoned attempt, not a delivery.
+ * The two sides read delivery through DIFFERENT questions, deliberately since
+ * #16036. The merged side asks whether the card is FINISHED and so reads
+ * `prFullyDeliversCard` — body first, branch name as the fallback its docblock
+ * justifies, minus the `Refs`-only landing H49 owns. The open side asks whether
+ * anything is still in flight and reads `prDeliversCard` unchanged: a `Refs`
+ * half still open is live work this row must not step on, whatever it will later
+ * mean for the card's completeness. Only `merged_at`-set PRs count on the merged
+ * side — closed-unmerged is an abandoned attempt, not a delivery.
  *
  * ## The open side, and why this row DOWNGRADES rather than falls silent
  *
@@ -1795,7 +1842,7 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
   const delivering = [];
   for (const pr of mergedPrs ?? []) {
     if (!pr?.merged_at) continue;
-    if (prDeliversCard(pr, n)) delivering.push(pr);
+    if (prFullyDeliversCard(pr, n)) delivering.push(pr);
   }
   if (delivering.length === 0) return null;
   const list = delivering
@@ -3729,11 +3776,37 @@ export const H20_BRANCH_LIST_CAP = 5;
  * fewer place where the code reads as if it honoured a spelling it does not.
  * See `CLAIM_COMMENT_MARKER`'s note for the codepoint reading and the live
  * probe behind it.
+ *
+ * ## The list marker, and the silence it used to buy (#16170)
+ *
+ * A markdown BULLET before the directive — 「- Branch: `claude/issue-…`」, the
+ * natural way to write a claim whose first line is a heading-style `Claim:` and
+ * whose details hang under it in a list — is admitted, because the measured
+ * failure of refusing it was SILENT in the worst possible way. `CLAIM_COMMENT_MARKER`
+ * has no list marker either, so the two anchors failed at DIFFERENT points on the
+ * same comment: the marker matched the undecorated `Claim:` line (the comment IS
+ * a claim), while this reader returned nothing (the claim GOVERNS nothing). Live
+ * on #15511 the result was a claim complete by every other measure that steered
+ * a seat, and then a whole dispatching round, toward a rule about the `Claim:`
+ * line that was not the blocker at all.
+ *
+ * ⛔ The claim MARKER is deliberately NOT widened with it, and the asymmetry is
+ * the point rather than an oversight: when BOTH lines carry a bullet the marker
+ * misses too, the comment is not a claim to any reader here, and the sibling's
+ * "no comment on the card's thread is a claim comment" is then TRUE. The
+ * malignant shape is only the MIXED one, and admitting the marker here is what
+ * removes it. Widening `Claim:` itself is the 2026-08-11 ruling's territory
+ * (⛔ 不放宽谓词), not this reader's.
+ *
+ * ⚠️ The marker is admitted only BEFORE the optional blockquote (`- > Branch:`),
+ * which is the anchor as ruled; a bulleted line INSIDE a blockquote
+ * (`> - Branch:`) is still out, and the self-test pins that as a measured fact
+ * rather than as a contract anybody chose.
  */
 export function claimedBranches(body) {
   const out = [];
   const text = String(body ?? '');
-  for (const line of text.matchAll(/^\s*>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
+  for (const line of text.matchAll(/^\s*(?:[-*+]\s+)?>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
     for (const hit of String(line[1] ?? '').matchAll(CLAIM_BRANCH_SHAPE)) {
       if (!out.includes(hit[0])) out.push(hit[0]);
     }
@@ -9145,15 +9218,19 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
 //
 // The merged `Refs` PR is invisible to every delivery reader by construction:
 // GitHub closes nothing (no keyword), and `prDeliversCard` reads `Part of` and
-// the keywords, falling back to the BRANCH NAME only. So when the head is named
-// for the card H8 does fire; when it is not (a family branch, another card's
-// slug), the card sits `pm:dispatched`, assigned, with a complete `Claim:` and
-// no dev, and H1/H2/H3/H24 are each correctly silent. This row asks the
-// question none of them can: is the NEWEST `Refs`-linked PR on this card
-// MERGED, with no `Release:` or `Claim:` on the thread newer than that merge?
-// H8, where it fires, cannot ask it either — it reads no thread, so a remainder
+// the keywords, falling back to the BRANCH NAME only. On a head NOT named for
+// the card (a family branch, another card's slug) nothing saw it at all. On a
+// head named FOR the card H8 used to fire through that fallback — a
+// full-delivery verdict on a partial landing, prescribing the destructive
+// de-label against a lawfully re-dispatched remainder — which is why its merged
+// side now excludes the `Refs`-only shape (`prFullyDeliversCard`, #16036). So in
+// BOTH head shapes the card sits `pm:dispatched`, assigned, with a complete
+// `Claim:` and no dev, and H1/H2/H3/H8/H24 are each correctly silent. This row
+// asks the question none of them can: is the NEWEST `Refs`-linked PR on this
+// card MERGED, with no `Release:` or `Claim:` on the thread newer than that
+// merge? H8 could never have asked it — it reads no thread, so a remainder
 // lawfully re-dispatched (a fresh `Claim:` after the merge) is exactly the case
-// this row stands down on. Adjacent rows, not a redundant pair; the self-test
+// this row stands down on. Adjacent rows with no overlap left; the self-test
 // pins both halves of that adjacency.
 //
 // ## Population, and what is OUT by ruling
@@ -9496,6 +9573,12 @@ export const SWEEP_COUNT_KEYS = [
   // state's population missing from the sweep.
   'closedPages',
   'closedWindowTruncated',
+  // H22's REACH (#16217) — how far back the pages actually got, as a date. It
+  // rides the enumerated contract for the same reason the pair above does: a
+  // reading gathered in the pager and dropped on the way to the summary is a
+  // measurement nobody can act on, and this is the one number that separates
+  // "everything closed since the 4th was judged" from "the pass was short".
+  'closedReachedAt',
   'commitPages',
   'commitWindowTruncated',
   'openListingPages',
@@ -9666,6 +9749,12 @@ export function summaryLine(counts, findingCount) {
       ceiling: CLOSED_ISSUE_WINDOW_PAGE_CEILING,
       truncated: counts.closedWindowTruncated,
       drops: 'a card that closed earlier than what those pages reached',
+      // #16217 — the horizon actually REACHED, every run, both ways. This is
+      // the clause's own answer to the state that produced the card: the old
+      // sentence declared its shortfall and prescribed a remedy while saying
+      // nothing about how short it was, so nobody could tell a pass an hour
+      // short of the horizon from one that read a third of it.
+      reached: counts.closedReachedAt ?? null,
     })} It is a CLOSURE horizon: rows are selected on \`closed_at\`, while paging is bounded by ` +
     `\`updated_at\` — the stream is consumed by closed-issue ACTIVITY (~${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY}/day, ` +
     `measured ${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT}), not by closures (~11/day), which is why the ` +
@@ -11658,6 +11747,9 @@ async function sweep(options = {}) {
     // completed window, so the pair cannot be misread as a clean pass.
     closedPages: 0,
     closedWindowTruncated: false,
+    // ⛔ null, not a date: a sweep that throws before H22's pass reached
+    // nowhere, and the clause must say so rather than render today.
+    closedReachedAt: null,
     commitPages: 0,
     commitWindowTruncated: false,
     openListingPages: 0,
@@ -11871,6 +11963,49 @@ export function pageExhaustsWindow(batch, horizonMs, field = 'updated_at') {
 }
 
 /**
+ * How far back this page actually REACHED — the oldest readable ordering stamp
+ * on it, in ms, or `null` when the page carried none (#16217).
+ *
+ * ## Why this is not `pageExhaustsWindow`'s reading, in one sentence each
+ *
+ * The stop predicate above answers "may I stop?" and must be CONSERVATIVE: it
+ * reads the LAST row only and refuses to stop on an unreadable stamp, because
+ * treating one bad row as old would end the pass early. This answers a
+ * different question — "how far did I get?" — and there the honest answer is a
+ * minimum over every stamp that could be read, since an unreadable last row
+ * must not erase a reach the rest of the page proves. Same page, two readings,
+ * and collapsing them would make one of the two wrong.
+ *
+ * ⛔ It is a REPORT, never a bound: nothing pages on it. A pass that stopped
+ * because its quota ran out still reached exactly this far, and saying so as a
+ * date is what turns "TRUNCATED" from a complaint into a reading — the caller
+ * hands it to `describeWindowBound` as `reached`.
+ *
+ * @param {any[]} batch — one page of rows.
+ * @param {string|((row: any) => string|undefined)} field — the ordering stamp.
+ */
+export function oldestPageStamp(batch, field = 'updated_at') {
+  const rows = Array.isArray(batch) ? batch : [];
+  let oldest = null;
+  for (const row of rows) {
+    const raw = typeof field === 'function' ? field(row) : row?.[field];
+    const at = Date.parse(raw ?? '');
+    if (!Number.isFinite(at)) continue;
+    if (oldest === null || at < oldest) oldest = at;
+  }
+  return oldest;
+}
+
+/**
+ * That reach, as the `YYYY-MM-DD` date the summary line prints — `null` stays
+ * `null`, because a pass that read no dateable row has no reach to state and
+ * rendering one would be the invention this whole family refuses.
+ */
+export function reachedDate(ms) {
+  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
+}
+
+/**
  * The ONE disclosure sentence every bounded pass in this file owes: which of
  * the two bounds ended it.
  *
@@ -11892,9 +12027,29 @@ export function pageExhaustsWindow(batch, horizonMs, field = 'updated_at') {
  *                   a created-time horizon of 8 days would have discarded 104
  *                   of 354 open cards, the oldest of them 76.9 days old).
  *
+ * ## `reached` — the third thing a reader needs, and the one that retires a
+ * remedy sentence (#16217)
+ *
+ * `pages` says what the pass COST and `truncated` says which bound ended it.
+ * Neither says HOW FAR it got, and that is the number a seat acts on: a
+ * truncated pass whose reach is a date is a reading ("everything closed since
+ * the 4th was judged, earlier was not"), while the same pass without one is
+ * only a complaint. So a caller that can measure its reach passes it, and the
+ * clause then states it on EVERY run — a coverage number printed only when it
+ * is bad is a coverage number nobody can trend.
+ *
+ * ⚖️ Passing it also RETIRES this clause's `the ceiling needs raising` remedy,
+ * deliberately and by coupling rather than by a second flag: that sentence was
+ * the only thing a truncated pass used to say about what to do, and it was
+ * wrong as often as not — a ceiling is a quota budget, and a pass that outgrew
+ * it is usually reporting a stream that needs narrowing, not a bigger bill. A
+ * clause that names the date it reached does not need to be told what to
+ * conclude. Callers with no reach to state keep the old sentence, because for
+ * them it is still the only actionable half.
+ *
  * @param {{ name: string, kind?: 'time'|'exhaustive', horizon?: number,
  *   unit?: string, pages?: number, ceiling?: number|null, truncated?: boolean,
- *   drops?: string }} bound
+ *   drops?: string, reached?: string|null }} bound
  * @returns {string} the clause, or '' when there is nothing to disclose.
  */
 export function describeWindowBound(bound) {
@@ -11908,16 +12063,20 @@ export function describeWindowBound(bound) {
     ceiling = null,
     truncated = false,
     drops = 'a row older than what those pages reached',
+    reached = null,
   } = bound;
   const exhaustive = kind === 'exhaustive';
+  // Beside the day count, where the two numbers a reader compares — the horizon
+  // ASKED for and the one actually REACHED — sit next to each other.
+  const reach = reached ? `, reaching back to ${reached}` : '';
   const head = exhaustive
-    ? `${name} is an EXHAUSTIVE listing, read in ${pages} page(s)`
-    : `${name} is a TIME cap of ${horizon} ${unit}, read in ${pages} page(s)`;
+    ? `${name} is an EXHAUSTIVE listing${reach}, read in ${pages} page(s)`
+    : `${name} is a TIME cap of ${horizon} ${unit}${reach}, read in ${pages} page(s)`;
   if (truncated) {
     return (
       `${head} — ⛔ TRUNCATED at the ${ceiling}-page quota ceiling` +
       `${exhaustive ? '' : ' BEFORE reaching that horizon'}, so this pass is a page cap and ` +
-      `${drops} is invisible; the ceiling needs raising.`
+      `${drops} is invisible${reached ? '' : '; the ceiling needs raising'}.`
     );
   }
   // ⚠️ "boundary reached", NOT H8's "horizon reached", and the difference is
@@ -12344,21 +12503,65 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  *
  * ⚠️ Cost note: 46% of the rows this stream returns are PULL REQUESTS, filtered
  * out after paging. The horizon is therefore reached in roughly twice the pages
- * a card-only stream would need — ~6 pages for 3 days at the measured rate.
+ * a card-only stream would need. ⚖️ The `~6 pages for 3 days` this note used to
+ * quote was the pinned divisor's arithmetic and it never described this board:
+ * measured 2026-09-06 the horizon sits at ~13 pages, because the LEADING rows
+ * run at ~414 updates/day against the pinned 188.3 (the derivation is in
+ * `CLOSED_ISSUE_WINDOW_PAGE_CEILING`, and it is why the old 12 bound).
  * Constants here are deliberately NOT self-updating (H8's rule): they are
- * CHECKED against what a sweep observes, never overwritten by it.
+ * CHECKED against what a sweep observes, never overwritten by it — which is
+ * why the divisor below still reads 188.3 and this note states the disagreement
+ * instead of quietly editing it.
  */
 export const CLOSED_ISSUE_WINDOW_DAYS = 3;
 
 /**
  * The quota backstop behind H22's time cap — see `CLOSED_ISSUE_WINDOW_DAYS`.
  *
- * At the measured ~188 closed-issue updates/day the 3-day horizon needs ~6
- * pages; the ceiling is 12, i.e. it absorbs a board twice as busy before it
- * binds. If it ever DOES bind, this window is a page cap again and the summary
- * line says so out loud rather than reporting a short window as a complete one.
+ * ## The ceiling that BOUND, and why 12 was never headroom (#16217)
+ *
+ * 12 was derived as "twice the ~6 pages the pinned ~188 updates/day needs".
+ * Both halves of that were wrong on this board at once, and the sweep said so
+ * on every run for as long as anyone has looked: two live read-only sweeps on
+ * 2026-09-06 printed `TRUNCATED at the 12-page quota ceiling BEFORE reaching
+ * that horizon`. The pinned divisor is a floor rather than a rate — it was
+ * measured at depth, over a 4.2-to-5.5-day span whose older half is quiet — so
+ * a ceiling sized on it is sized on the SLOWEST part of the stream, while the
+ * pages a 3-day horizon actually costs are all taken from the fastest part.
+ *
+ * Re-measured 2026-09-06T16:5xZ over the live endpoint, one page each at
+ * depth, reading the OLDEST `updated_at` on the page:
+ *
+ *   page  1 -> 2026-09-06T08:25:42Z    page 20 -> 2026-09-01T06:54:23Z
+ *   page  6 -> 2026-09-05T05:40:44Z    page 30 -> 2026-08-28T00:54:22Z
+ *   page 12 -> 2026-09-03T17:41:14Z    page 40 -> 2026-08-24T21:44:57Z
+ *
+ * The 3-day horizon that day sat at ~2026-09-03T16:5xZ — PAST page 12's oldest
+ * row by about an hour. So the old ceiling missed the horizon by roughly one
+ * page, and the leading 1,200 rows ran at ~414 updates/day against the pinned
+ * 188.3: the divisor is a factor of ~2.2 light exactly where it is spent.
+ *
+ * ## 40, and the unit it is chosen in
+ *
+ * 4,000 rows reached 12.8 days on the read above (~312/day averaged over that
+ * depth), against a 3-day horizon: ~4.3x headroom, and headroom measured on
+ * the whole depth the cap can actually be spent on rather than on a pinned
+ * rate. 40 REST calls is also the budget this sweep gets for the pass, which
+ * is the OTHER thing a quota backstop is: ⛔ not a number to raise again the
+ * next time it binds. A pass that binds it is reporting that the board's
+ * closed-issue activity has grown past what one sweep can page — the remedy
+ * then is a narrower stream (a `closed_at`-ordered listing where the API grows
+ * one), never a bigger bill.
+ *
+ * ⚖️ HISTORY: 2 pages (#10688) -> 4 (#11118) -> 12 (#13606, when the boundary
+ * became a horizon and this became a backstop) -> 40. Only the last of those
+ * was chosen against a measurement of the depth it buys.
+ *
+ * If it ever DOES bind, this window is a page cap again and the summary line
+ * says so out loud rather than reporting a short window as a complete one —
+ * and it says how far it got, as a date, which is the reading a seat acts on.
  */
-export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 12;
+export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 40;
 
 /**
  * The rate H22's window is stated in, MEASURED — and the reason it is carried
@@ -12472,18 +12675,37 @@ export function resolveClosureFloor(env = {}) {
 
 const CLOSED_FLOOR = resolveClosureFloor(process.env);
 
-async function listRecentlyClosedIssues(stats = {}, nowMs = Date.now()) {
+/**
+ * One page of H22's closed-card stream — named for `pmLabelListingPath`'s
+ * reason, and because it is the seam the self-test drives synthetic pages
+ * through (#16217). Pinning this loop by re-typing it in the test would pin the
+ * copy rather than the call, which is the failure this file names by name.
+ */
+function closedWindowPagePath(repo, page) {
+  return `/repos/${repo}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`;
+}
+
+async function listRecentlyClosedIssues(
+  stats = {},
+  nowMs = Date.now(),
+  fetchPage = (page) => rest(closedWindowPagePath(OWNER_REPO, page)),
+) {
   const horizon = closedWindowHorizonMs(nowMs);
   const out = [];
   let reachedHorizon = false;
+  // How far back the pages actually got, as a running minimum over every
+  // readable `updated_at` — the reading the census clause prints on every run
+  // (#16217). Tracked across pages rather than taken from the last one because
+  // a final page of unreadable stamps must not erase a reach already proven.
+  let reachedMs = null;
   let page = 1;
   for (; page <= CLOSED_ISSUE_WINDOW_PAGE_CEILING; page++) {
-    const batch = await rest(
-      `/repos/${OWNER_REPO}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
-    );
+    const batch = await fetchPage(page);
     // Selection reads `closed_at`; paging (below) reads `updated_at`. They are
     // deliberately different fields — see `pageExhaustsWindow`.
     out.push(...batch.filter((i) => !i.pull_request && issueClosedWithinWindow(i, horizon)));
+    const oldest = oldestPageStamp(batch, 'updated_at');
+    if (oldest !== null && (reachedMs === null || oldest < reachedMs)) reachedMs = oldest;
     if (pageExhaustsWindow(batch, horizon, 'updated_at')) {
       reachedHorizon = true;
       break;
@@ -12491,6 +12713,10 @@ async function listRecentlyClosedIssues(stats = {}, nowMs = Date.now()) {
   }
   stats.closedPages = Math.min(page, CLOSED_ISSUE_WINDOW_PAGE_CEILING);
   stats.closedWindowTruncated = !reachedHorizon;
+  // ⛔ `null` when nothing dateable was read, never today's date: an empty board
+  // and a board whose first page is unreadable both reached NOWHERE, and a
+  // clause that dated them would be the #4690 inversion in a new costume.
+  stats.closedReachedAt = reachedDate(reachedMs);
   return out;
 }
 
@@ -13978,7 +14204,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-half-states self-test reached its verdict';
 
-function selfTest() {
+async function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
   // -- Summary-disclosure cases go through THIS, never through the raw line ---
@@ -14003,7 +14229,7 @@ function selfTest() {
     body,
     title,
   });
-  // `.claude/skills/pm-dispatch/SKILL.md` line 465, VERBATIM — one constant so
+  // `.claude/skills/pm-dispatch/SKILL.md`, VERBATIM — one constant so
   // the two rows that quote it (H24's remedy, H47's both legs) are pinned
   // against the SAME bytes. Rewriting a maintainer's line is rewriting the
   // ruling, and a quote that drifts from its source in one row while the other
@@ -14582,30 +14808,59 @@ function selfTest() {
     head: { ref },
   });
 
-  // Direction 1 — the measured specimen's shape: merged, body carries NEITHER
-  // recognised spelling (`Refs #N` is not one), branch named for the card.
+  // Direction 1 — the DELIVERY relation, unchanged: a body carrying neither
+  // recognised spelling (`Refs #N` is not one) still reaches its card through
+  // the branch name, which is what the live-work readers need.
+  const REFS_ONLY_10757 = onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries');
   t(
     'H8 branch: a `Refs #N`-only body delivers via its branch name',
-    typeof h8MergedPrStillDispatched(
-      dispatched(10757),
-      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
-    ),
+    prDeliversCard(REFS_ONLY_10757, 10757),
+    true,
+  );
+  // …and the FULL-delivery reading H8's merged side takes DECLINES it (#16036).
+  // The body spoke about this card in the one spelling the protocol reserves for
+  // a non-delivery, so the landing is partial and H49 owns it — H8 must not
+  // prescribe dropping `pm:dispatched` off a lawfully re-dispatched remainder.
+  t(
+    'H8 branch: …but a `Refs`-only landing is NOT a full delivery, so H8 is clean (#16036)',
+    h8MergedPrStillDispatched(dispatched(10757), [REFS_ONLY_10757]),
+    null,
+  );
+  t(
+    'H8 branch: …and the narrower reader says so in its own right',
+    prFullyDeliversCard(REFS_ONLY_10757, 10757),
+    false,
+  );
+  // A `Refs` naming ANOTHER card narrows nothing about this one — bound per
+  // card number, as H7 binds.
+  t(
+    'H8 branch: a `Refs` for another card leaves this card\'s fallback intact',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Refs #9999', 'claude/issue-4321-x')]),
+    'string',
+  );
+  // …and a body that DELIVERS is a delivery however it spells the reference
+  // beside it — the same binding H49 makes from the other end.
+  t(
+    'H8 branch: `Refs #N` beside a closing keyword is still a full delivery',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Refs #4321 (item ①)\n\nFixes #4321', 'claude/issue-4321-x')]),
     'string',
   );
   t(
-    'H8 branch: …and the finding names the delivering PR',
-    h8MergedPrStillDispatched(
-      dispatched(10757),
-      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
-    ).includes('#10824'),
-    true,
+    'H8 branch: …and beside `Part of #N` likewise',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Part of #4321\nRefs #4321', 'claude/issue-4321-x')]),
+    'string',
   );
-  // An empty body is the same population — nothing declared, so the branch is
-  // the only evidence there is.
+  // An empty body is the population the fallback WAS built for — nothing
+  // declared, so the branch is the only evidence there is, and H8 still fires.
   t(
     'H8 branch: an empty body delivers via its branch name',
     typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]),
     'string',
+  );
+  t(
+    'H8 branch: …and the finding names the delivering PR',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]).includes('#4400'),
+    true,
   );
 
   // Direction 2 — the RE-SCOPED branch, the false-fire this widening could
@@ -15832,12 +16087,54 @@ function selfTest() {
   t('H20 branch: no directive at all yields nothing', claimedBranches('Claim: seat.\nSession: `session_x`').length, 0);
   t('H20 branch: a missing body does not crash', claimedBranches(undefined).length, 0);
 
+  // -- #16170: the directive written as a markdown BULLET --------------------
+  // Measured live on #15511: a claim whose first line was an undecorated
+  // `Claim:` and whose branch hung under it in a list. The marker matched and
+  // this reader did not, so the comment WAS a claim that GOVERNED nothing —
+  // and nothing in the artefact looked wrong.
+  t('H20 branch: a bulleted directive is read (#16170)', claimedBranches('- Branch: `claude/issue-15511-zh-gap-helptext`').join(','), 'claude/issue-15511-zh-gap-helptext');
+  t('H20 branch: …with `*` as the marker', claimedBranches('* Branch: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …and with `+`, on the plural spelling too', claimedBranches('+ Branches: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …indented under a parent item', claimedBranches('  - Branch: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …and the marker composes with the documented blockquote', claimedBranches('- > Branch: `claude/issue-6752-x`').join(','), 'claude/issue-6752-x');
+  // ⛔ The widening is a LIST MARKER before a `Branch:` DIRECTIVE and nothing
+  // else: a bullet naming any other field, or none, stays out of scope exactly
+  // as an undecorated one does.
+  t('H20 branch: a bullet that is not a `Branch:` line yields nothing', claimedBranches('- Worktree: `claude/issue-1-a`').length, 0);
+  t('H20 branch: …nor does a bulleted prose line that merely names a branch', claimedBranches('- rebased onto claude/issue-9-other yesterday').length, 0);
+  t('H20 branch: a NUMBERED list item is not admitted', claimedBranches('1. Branch: claude/issue-1-a').length, 0);
+  t('H20 branch: a HEADING is not admitted', claimedBranches('## Branch: claude/issue-1-a').length, 0);
+  // ⚠️ A measured RESIDUAL, pinned as a fact rather than as a contract anybody
+  // chose: the ruled anchor admits the marker only BEFORE the optional
+  // blockquote, so the other order — the natural markdown for a bulleted line
+  // INSIDE a blockquote — still yields nothing.
+  t('H20 branch: a blockquoted BULLET (`> - `) is still out — the anchor is marker-then-quote', claimedBranches('> - Branch: `claude/issue-1-a`').length, 0);
+  // ⛔ And the claim MARKER is NOT widened with it (2026-08-11, 不放宽谓词). The
+  // asymmetry is the fix rather than a residue: when BOTH lines carry a bullet
+  // the marker misses too, so the comment is not a claim to any reader here and
+  // the sibling checker's "no claim comment" reading is TRUE. Only the MIXED
+  // shape was malignant, and admitting the marker here is what removes it.
+  t('H20 branch: a bulleted `Claim:` is still not a claim comment', CLAIM_COMMENT_MARKER.test('- Claim: seat.'), false);
+
   // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
   const gov = (rows) => governingClaim(rows);
+  // ⚠️ `?? []` rather than a bare `.branches` on the three-valued return, for
+  // the reason H34's row wrapper carries: a case built to go NULL under a
+  // mutation must report a NAMED failing case, not throw and abort the suite
+  // before the remaining cases run — measured while ablating the #16170 anchor,
+  // where the reverse run died on a TypeError naming neither row nor mutation.
+  const govBranches = (rows) => (gov(rows)?.branches ?? []).join(',');
   t('H20 claim: a claim comment naming a branch is found', gov(claim8878).branches.join(','), 'claude/issue-8878-dispatch-latency');
   t('H20 claim: …and carries its timestamp', gov(claim8878).createdAt, minsAgo20(74));
   t('H20 claim: a `Branch:` line in a comment that is NOT a claim is ignored', gov([claimRow(minsAgo20(90), 'Branch: `claude/issue-1-a`')]), null);
   t('H20 claim: a claim comment naming NO branch yields nothing to check', gov([claimRow(minsAgo20(90), 'Claim: seat.\nSession: `session_x`')]), null);
+  // #16170 — the MIXED shape, which is the only malignant one: an undecorated
+  // `Claim:` (so the marker matches and the comment IS a claim) with the branch
+  // written as a bullet under it. It governs now.
+  t('H20 claim: the MIXED shape governs — undecorated `Claim:`, bulleted `Branch:` (#16170)', govBranches([claimRow(minsAgo20(30), 'Claim: this card is held by session `session_x`.\n\n- Branch: `claude/issue-15511-zh-gap-helptext`\n- Worktree: `/home/user/objectstack-15511`')]), 'claude/issue-15511-zh-gap-helptext');
+  // …while a FULLY bulleted claim governs nothing, the marker having missed it
+  // — and there the sibling's "no claim comment" reading is the true one.
+  t('H20 claim: …and a fully bulleted claim still governs nothing, the marker having missed', gov([claimRow(minsAgo20(30), '- Claim: seat.\n- Branch: `claude/issue-1-a`')]), null);
   const reclaimed = [
     claimRow(minsAgo20(600), 'Claim: first seat.\nBranch: `claude/issue-8878-abandoned`'),
     claimRow(minsAgo20(74), claimBody8878),
@@ -16546,6 +16843,7 @@ function selfTest() {
   const richLine = summaryLine({
     repo: 'o/r', issues: 3, unscoped: 4, prs: 2, merged: 5,
     closed: 200, closedFloor: '2026-08-28', closedPages: 12, closedWindowTruncated: true,
+    closedReachedAt: '2026-09-03',
     mergedPages: 12, mergedWindowTruncated: true,
     commits: 300, commitBindings: 51, commitBindingMessages: 44, commitPages: 12, commitWindowTruncated: true,
     openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'],
@@ -17839,8 +18137,109 @@ function selfTest() {
   t('open summary: …and a complete pass says none of that', saidBy('openListings', win13606({ openListingPages: 11 })).includes('Ceiling-bound listing(s)'), false);
   // ⛔ No bare-number rendering of a capped pass: every truncated window must
   // carry the word, in every medium the summary feeds.
-  t('summary: a capped H22 pass never reads as a plain page count', /H22's closed-card window is a TIME cap of 3 day\(s\), read in 12 page\(s\)\./u.test(saidBy('h22Window', win13606({ closedPages: 12, closedWindowTruncated: true }))), false);
+  t('summary: a capped H22 pass never reads as a plain page count', new RegExp(`H22's closed-card window is a TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day\\(s\\), read in ${CLOSED_ISSUE_WINDOW_PAGE_CEILING} page\\(s\\)\\.`, 'u').test(saidBy('h22Window', win13606({ closedPages: CLOSED_ISSUE_WINDOW_PAGE_CEILING, closedWindowTruncated: true }))), false);
   t('summary: all three converted windows ride the enumerated contract', ['closedPages', 'closedWindowTruncated', 'commitPages', 'commitWindowTruncated', 'openListingPages', 'openListingsTruncated'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // ---- H22's REACH, and the ceiling that bound before the horizon (#16217) --
+  //
+  // The state this repairs was SELF-DECLARING and persisted anyway: two live
+  // read-only sweeps on 2026-09-06 printed `TRUNCATED at the 12-page quota
+  // ceiling BEFORE reaching that horizon`, with the remedy sentence ("the
+  // ceiling needs raising") already in the text. What no run ever printed is
+  // HOW SHORT the pass was — and that is the whole difference between a pass an
+  // hour shy of its horizon and one that read a third of it. So the repair is
+  // two-sided, and both sides are pinned here: the cap is sized against the
+  // depth it buys, and the clause reports the reach as a date on EVERY run.
+
+  // The reach reading. ⛔ Deliberately NOT the stop predicate's reading — the
+  // stop predicate is conservative on the LAST row so one bad stamp cannot end
+  // the pass early, while the reach is a minimum over everything readable so
+  // one bad last row cannot erase a reach the page already proved. Same page,
+  // two answers, and collapsing them would make one of the two wrong.
+  t('H22 reach: the oldest readable stamp on the page is the reach', oldestPageStamp(pg13606(100, 5)), Date.parse(ago13606(5)));
+  t('H22 reach: an unreadable LAST row does not erase it', oldestPageStamp([...pg13606(99, 5), { updated_at: 'nope' }]), Date.parse(ago13606(5)));
+  t('H22 reach: …while that same page does NOT stop the paging', pageExhaustsWindow([...pg13606(99, 5), { updated_at: 'nope' }], H13606), false);
+  t('H22 reach: a page with nothing dateable reached nowhere', oldestPageStamp([{ updated_at: 'nope' }, {}]), null);
+  t('H22 reach: an empty page reached nowhere', oldestPageStamp([]), null);
+  t('H22 reach: a non-array reached nowhere, and does not throw', oldestPageStamp(null), null);
+  t('H22 reach: the field is selectable, like the stop predicate\'s', oldestPageStamp([{ closed_at: ago13606(9) }], 'closed_at'), Date.parse(ago13606(9)));
+  t('H22 reach: it renders as a plain date, which is what a reader compares', reachedDate(Date.parse('2026-09-03T17:41:14Z')), '2026-09-03');
+  t('H22 reach: ⛔ nowhere renders as nothing, never as today', reachedDate(null), null);
+  t('H22 reach: …and an unusable number likewise', reachedDate(Number.NaN), null);
+
+  // ---- The three shapes, driven through the REAL pager on synthetic pages.
+  // The seam is `listRecentlyClosedIssues`'s page reader, so these cases pin
+  // the loop the sweep actually runs rather than a re-typed copy of it — the
+  // failure this file names by name in `pmLabelListingPath`.
+  const closedStream = (byPage) => async (page) => byPage[page - 1] ?? [];
+  const fullClosedPage = (daysAgo) =>
+    Array.from({ length: 100 }, (_, i) => closed13606(i, daysAgo, daysAgo));
+
+  // SHAPE 1 — the horizon reached UNDER the cap. The pass stops itself, and
+  // says so: three pages, no truncation, and a date for how far it got.
+  const reachedStats = {};
+  const reachedRows = await listRecentlyClosedIssues(
+    reachedStats,
+    NOW13606,
+    closedStream([fullClosedPage(1), fullClosedPage(2), fullClosedPage(5)]),
+  );
+  t('H22 pager: a page past the horizon ends the pass', reachedStats.closedPages, 3);
+  t('H22 pager: …and that is a boundary, not a ceiling', reachedStats.closedWindowTruncated, false);
+  t('H22 pager: …with the reach it actually got, as a date', reachedStats.closedReachedAt, reachedDate(Date.parse(ago13606(5))));
+  t('H22 pager: …and only the in-horizon closures are admitted', reachedRows.length, 200);
+  t('H22 pager: …the clause says the boundary was reached', saidBy('h22Window', win13606(reachedStats)).includes('boundary reached'), true);
+  t('H22 pager: …and states the reach beside the day count', saidBy('h22Window', win13606(reachedStats)).includes(`TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day(s), reaching back to ${reachedStats.closedReachedAt}`), true);
+
+  // SHAPE 1b — the teeth. A stream whose horizon sits on page 13 is the board
+  // measured 2026-09-06, and it is the run the old 12-page ceiling structurally
+  // could not finish: not late, TRUNCATED, four times a day.
+  const deepStats = {};
+  await listRecentlyClosedIssues(
+    deepStats,
+    NOW13606,
+    closedStream([...Array.from({ length: 12 }, (_, i) => fullClosedPage(0.2 * (i + 1))), fullClosedPage(5)]),
+  );
+  t('H22 pager: the 13th page the old 12-page ceiling could never reach ends the pass', deepStats.closedPages, 13);
+  t('H22 pager: …so the measured board now completes its horizon', deepStats.closedWindowTruncated, false);
+  t('H22 pager: …which the retired ceiling was one page short of', deepStats.closedPages > 12, true);
+
+  // SHAPE 2 — the cap biting FIRST. Every page still inside the horizon, so the
+  // pass runs out of quota; it must announce that AND say how far it got.
+  const cappedStats = {};
+  await listRecentlyClosedIssues(
+    cappedStats,
+    NOW13606,
+    closedStream(Array.from({ length: CLOSED_ISSUE_WINDOW_PAGE_CEILING + 5 }, (_, i) => fullClosedPage(i / 20))),
+  );
+  t('H22 pager: a stream that never crosses the horizon spends the whole cap', cappedStats.closedPages, CLOSED_ISSUE_WINDOW_PAGE_CEILING);
+  t('H22 pager: …and that is TRUNCATED, not a completed window', cappedStats.closedWindowTruncated, true);
+  t('H22 pager: …with the reach it got before the quota ran out', cappedStats.closedReachedAt, reachedDate(Date.parse(ago13606((CLOSED_ISSUE_WINDOW_PAGE_CEILING - 1) / 20))));
+  const cappedClause = saidBy('h22Window', win13606(cappedStats));
+  t('H22 pager: …the clause says TRUNCATED', cappedClause.includes('⛔ TRUNCATED'), true);
+  t('H22 pager: …names the ceiling that bound it', cappedClause.includes(`${CLOSED_ISSUE_WINDOW_PAGE_CEILING}-page quota ceiling`), true);
+  t('H22 pager: …states the reach anyway, which is what makes it a reading', cappedClause.includes(`reaching back to ${cappedStats.closedReachedAt}`), true);
+  // ⛔ The sentence #16217 retires: a truncated pass that names its reach needs
+  // no remedy prescribed for it, and the one it used to print was wrong as
+  // often as not — a ceiling is a budget, not a number to raise on every bind.
+  t('H22 pager: …and no longer prescribes raising the ceiling', cappedClause.includes('the ceiling needs raising'), false);
+  // …while the callers that CANNOT state a reach keep that sentence, because
+  // for them it is still the only actionable half. #16217 is one leg, not a
+  // rewording of the shared clause.
+  t('H22 pager: H23\'s truncated clause is untouched by that retirement', saidBy('h23Window', win13606({ commitPages: COMMIT_WINDOW_PAGE_CEILING, commitWindowTruncated: true })).includes('the ceiling needs raising'), true);
+  t('H22 pager: …and so is the open listings\' one', saidBy('openListings', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] })).includes('the ceiling needs raising'), true);
+
+  // SHAPE 3 — an empty board. ⛔ The one shape that must not be dated: it read
+  // nothing, so it reached nowhere, and a clause rendering today here would be
+  // #4690 in a new costume — an unread input reading as a complete one.
+  const emptyStats = {};
+  const emptyRows = await listRecentlyClosedIssues(emptyStats, NOW13606, closedStream([]));
+  t('H22 pager: an empty board yields no rows', emptyRows.length, 0);
+  t('H22 pager: …costs the one page it takes to learn that', emptyStats.closedPages, 1);
+  t('H22 pager: …is a clean pass, not a truncated one', emptyStats.closedWindowTruncated, false);
+  t('H22 pager: …and reached NOWHERE, which it states as no date at all', emptyStats.closedReachedAt, null);
+  t('H22 pager: …so the clause invents no date', saidBy('h22Window', win13606(emptyStats)).includes('reaching back to'), false);
+  t('H22 pager: …and still discloses which bound ended it', saidBy('h22Window', win13606(emptyStats)).includes('boundary reached'), true);
+  t('H22 pager: the reach rides the enumerated forwarding contract', SWEEP_COUNT_KEYS.includes('closedReachedAt'), true);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
@@ -19905,8 +20304,13 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H49 adjacency: H8 is SILENT on a `Refs` PR whose head is not named for the card', h8MergedPrStillDispatched(TAKEN49, LANDED49, []), null);
   t('H49 adjacency: …which is the carrier this row exists for', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], CLAIMED49), 'string');
   const ON_CARD_BRANCH49 = [merged49(16010, 'Refs #16003 (item ①)', '2026-09-05T20:12:00Z', { head: { ref: 'claude/issue-16003-kanban-keys' } })];
-  t('H49 adjacency: on a head NAMED for the card H8 fires through its branch fallback', typeof h8MergedPrStillDispatched(TAKEN49, ON_CARD_BRANCH49, []), 'string');
-  t('H49 adjacency: …and this row fires beside it — two readings, no double silence', typeof h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], CLAIMED49), 'string');
+  // ⚖️ #16036 flipped the first of these. H8's merged side used to fire here
+  // through its branch fallback — a full-delivery verdict on a PARTIAL landing,
+  // prescribing the destructive de-label against a lawfully re-dispatched
+  // remainder — and its `Refs`-only exclusion now leaves this row the sole
+  // reader of BOTH head shapes.
+  t('H49 adjacency: on a head NAMED for the card H8 is silent too, since #16036', h8MergedPrStillDispatched(TAKEN49, ON_CARD_BRANCH49, []), null);
+  t('H49 adjacency: …and this row fires there — one reading now, and no silence', typeof h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], CLAIMED49), 'string');
   t('H49 adjacency: …and reads the thread H8 cannot — a fresh claim stands THIS row down', h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], [cm49(CLAIM49, T49_AFTER)]), null);
   t('H49 adjacency: H1 is silent on the carrier (the card HAS an assignee)', h1DispatchedNoAssignee(TAKEN49), false);
   t('H49 adjacency: H2 is silent (the claim comment is complete)', h2AssigneeNoClaimComment(TAKEN49, [CLAIM49]), false);
@@ -20088,7 +20492,7 @@ if (isMain) {
     process.exit(2);
   }
   if (process.argv.includes('--self-test')) {
-    if (selfTest() !== SELF_TEST_VERDICT) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
       console.error(
         '\n✗ check-half-states self-test: selfTest() returned without reaching its verdict,\n'
           + 'so no success line was printed. Exiting 0 here would report a self-test\n'

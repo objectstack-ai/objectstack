@@ -1100,13 +1100,27 @@ export class ObjectQLPlugin implements Plugin {
     ) => {
       const now = stamp();
       // A "historical" import (#3493) reinstates the ORIGINAL timeline, so a
-      // client-supplied updated_at/updated_by is CLIENT-PREFERRED here —
-      // symmetric with created_at/created_by on insert — instead of being
-      // overwritten with the import instant. Opt-in and server-set only; a
-      // normal write leaves `preserveAudit` unset and still stamps now.
+      // client-supplied created_at/updated_at/updated_by is CLIENT-PREFERRED
+      // under `preserveAudit` — instead of being overwritten with the import
+      // instant. Opt-in and server-set only; a normal write leaves
+      // `preserveAudit` unset and still stamps now.
+      //
+      // [#15964] `created_at` takes the SAME SHAPE as `updated_at`, on the
+      // maintainer ruling of 2026-09-06 (decision batch #54, option A). It was
+      // `record.created_at ?? now` on EVERY insert — client-preferred with no
+      // flag at all — and since #15395 the static-`readonly` strip runs INSIDE
+      // `engine.insert`, AFTER this hook, where #14259's guard reads a key a
+      // `beforeInsert` hook ASSIGNED as the hook's write rather than a caller
+      // forgery (`rowHookWrittenKeys`). The `??` therefore LAUNDERED the
+      // caller's bytes past that strip: an ordinary authenticated POST kept a
+      // forged `created_at` on an object declaring it `readonly: true`, while
+      // `id`, `updated_at` and every other author-declared readonly datetime in
+      // the same payload were taken. Under `preserveAudit` the preservation is
+      // DECLARED, so the same keep is the ruled historical-import channel and
+      // stays — which is why the fix is this ternary and not a bare `= now`.
       const preserveAudit = session?.preserveAudit === true;
       if (isInsert) {
-        record.created_at = record.created_at ?? now;
+        record.created_at = preserveAudit ? (record.created_at ?? now) : now;
       }
       record.updated_at = preserveAudit ? (record.updated_at ?? now) : now;
       if (session?.userId) {
