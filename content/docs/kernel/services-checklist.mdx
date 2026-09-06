@@ -607,12 +607,24 @@ When a plugin registers a service, the discovery endpoint automatically updates:
   `route` → `"/api/v1/auth"` (unless the instance self-declares `stub`/`degraded` via
   `__serviceInfo`, which is reported verbatim instead)
 - `routes.auth` → `"/api/v1/auth"` appears in routes
-- `features` flags follow for the slots that have one — `search`, `files`,
-  `analytics`, `ai`, `workflow`, `notifications`, `i18n` (`websockets` does **not**
-  follow slot presence: it is `isSubscribableChannel(services.realtime)` — `handlerReady:
+- the `capabilities` entries derived from that slot flip — `files` (and
+  `chunkedUpload`, which rides the same storage surface), `analytics`, `ai`,
+  `notifications`, `i18n`, `automation`, `cron` (the `job` slot) and `export`
+  (`automation` **or** `queue`). `capabilities` is the canonical spelling: the top-level
+  `features` map was renamed to it in
+  [#4828](https://github.com/objectstack-ai/objectstack/issues/4828), and the `workflow`
+  slot was retired in v17 ([#4451](https://github.com/objectstack-ai/objectstack/issues/4451)),
+  so neither name is on the wire. The rest of the vocabulary does **not** follow slot
+  presence: `websockets` is `isSubscribableChannel(services.realtime)` — `handlerReady:
   true` **and** a connectable route — so registering a realtime service does not flip it,
-  and it reads `false` on every host the open framework ships, #14646; there is no
-  `features.auth`)
+  and it reads `false` on every host the open framework ships, #14646; `search` is stated
+  `false` because this dispatcher mounts no `/search` route, whatever fills the slot
+  ([#7602](https://github.com/objectstack-ai/objectstack/issues/7602)); `comments` is
+  measured from the object registry; and `transactionalBatch` is `false` on this face,
+  which mounts no `/batch`. There is no `capabilities.auth`: the vocabulary is closed by
+  `WellKnownCapabilitiesSchema` (`packages/spec/src/api/discovery.zod.ts`), every producer
+  answers every key, and a capability the host does not deliver reads `enabled: false`
+  rather than a missing key
 
 ---
 
