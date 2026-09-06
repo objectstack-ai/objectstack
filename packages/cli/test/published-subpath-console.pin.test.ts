@@ -52,6 +52,26 @@
  * asserted too — at run time, in the shipped types, and in the compiler. A
  * retirement nothing holds down is a retirement that reverts on the next
  * refactor that finds the barrel convenient.
+ *
+ * ## Measured to discriminate, on both halves
+ *
+ * A pin is worth what it reds on, so both halves were ablated — mutation proven
+ * on disk, `packages/cli` REBUILT, and the mutation proven live in `dist/` via
+ * `scripts/ablation-dist-preflight.mjs`, before any verdict was read.
+ *
+ *   NAME half — re-export `decideConsoleMount` from the barrel. 4 of 14 red:
+ *     the run-time keys, the shipped types, the ten-retired assertion, and the
+ *     conformance compile, the last as `TS2578: Unused '@ts-expect-error'` —
+ *     the retirement control reporting that a retired name came back.
+ *   SHAPE half — add one optional member to `ResolveConsoleOptions`, the
+ *     options bag of a KEPT public name. Every name and count is unmoved, so
+ *     13 of 14 stay green and ONLY the conformance compile reds, with 2 ×
+ *     `TS2344` on the two options-bag `Equals` assertions. This is the half a
+ *     names-only pin cannot see: the surface's leaves are identical and the
+ *     component moved.
+ *
+ * Both restored under a trap, then rebuilt and re-checked `--absent` so no
+ * later run in this worktree measures a mutated `dist/`.
  */
 
 import { spawnSync } from 'node:child_process';
