@@ -2034,6 +2034,22 @@ export class AutomationEngine implements IAutomationService {
      * nobody read, and every in-flight approval zombified by the next restart.
      */
     private async persistSuspendedRun(run: SuspendedRun): Promise<void> {
+        // [#16129] THE MAP WRITE IS FIRST, and `cacheOnlySuspensions` is written
+        // only after the save below settles => for the whole duration of that
+        // await this entry is in the map and is NOT yet qualified. A concurrent
+        // per-id `loadSuspendedRunStrict` therefore reads a store that
+        // truthfully has no row yet, finds no qualifier, and takes
+        // `evictConsumedSuspension` on a run being parked RIGHT NOW. Reachable
+        // without out-of-band knowledge of the id, because the map write is what
+        // publishes it to `listSuspendedRuns`.
+        //
+        // Bounded, measured, and pinned in
+        // `suspended-run-mid-park-eviction-window.test.ts`: the store-first
+        // strict load keeps the run resumable once the save lands, and the cost
+        // falls entirely on `listSuspendedRuns`, which merely OMITS the run --
+        // inside that listing's declared latitude. Do not widen the marking, add
+        // a lock, or move the save above this line without reading that pin's
+        // header: it also records the ONE compound case that escapes the bounds.
         this.suspendedRuns.set(run.runId, run);
         if (this.store) {
             try {
@@ -2219,6 +2235,15 @@ export class AutomationEngine implements IAutomationService {
      *    {@link persistSuspendedRun}'s documented degradation — a failed save
      *    costs cross-restart durability, not in-process resumability — into a
      *    run that vanishes from its own process.
+     *
+     * [#16129] Neither guard covers the MID-PARK WINDOW: `persistSuspendedRun`
+     * writes its map entry BEFORE it awaits the durable save, so an entry can be
+     * live here while the store legitimately has no row for it and the
+     * cache-only qualifier is not yet set. Evicting it is bounded -- the run
+     * stays resumable through the store-first strict load and only the
+     * cache-only listing under-reports -- and
+     * `suspended-run-mid-park-eviction-window.test.ts` pins both the window and
+     * the one compound case that escapes those bounds.
      *
      * A store read that THROWS must never reach here: an outage means the
      * run's existence is UNKNOWN, not "gone". Every caller below is on a path
