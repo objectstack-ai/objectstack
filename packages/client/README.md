@@ -265,7 +265,7 @@ await client.notifications.markRead(['notif-1', 'notif-2']);
 const answer = await client.ai.chat({ messages: [{ role: 'user', content: 'How many open orders this quarter?' }] });
 console.log(answer.content, answer.usage?.totalTokens);
 await client.ai.complete({ prompt: 'Summarise this account in one line:' });
-await client.ai.models();                          // plan-filtered picker list (ADR-0028)
+await client.ai.models();                          // picker list — allowlist objects or bare ids, both live
 await client.ai.conversations.list({ limit: 20 });
 await client.ai.agents.chat('build', { messages: [{ role: 'user', content: 'Draft a follow-up' }] });
 await client.ai.pendingActions.list({ status: 'pending' });   // human-in-the-loop queue
