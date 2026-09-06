@@ -174,7 +174,7 @@ describe('os i18n extract — the number printed is the number written (#16121)'
     ['no-metadata-forms', ['--no-metadata-forms']],
     ['no-objects-only', ['--no-objects-only']],
     ['neither', ['--no-objects-only', '--no-metadata-forms']],
-  ])('every printed file count is that file own leaf count (%s)', (name, flags) => {
+  ])("every printed file count is that file's own leaf count (%s)", (name, flags) => {
     const run = runExtract(`counts-${name}`, CONFIG, flags);
     const printed = printedFileCounts(run.stdout);
 
