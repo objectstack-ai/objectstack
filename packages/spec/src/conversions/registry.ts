@@ -8945,10 +8945,15 @@ const memoryPersistenceAutoSaveIntervalToMs: MetadataConversion = {
  * The neighbour is why this key was worth the rename: `sync.intervalSeconds`,
  * two keys above, already spelled ITS unit. One shape, both conventions.
  *
- * ⚠️ This converts the SPEC's turso contract. The driver package ships its own
- * parallel `turso.zod.ts` whose `timeout` is outside this card's declared
- * population; it is renamed by the card that widens that population, and until
- * then the two declarations disagree by design.
+ * ⚠️ This converts the SPEC's turso contract. `@objectstack/driver-turso` ships
+ * its own parallel `turso.zod.ts` declaring the same authored key, which was
+ * outside this gate's declared population when this entry was written. #15682
+ * widened that population to every workspace package's zod schemas and renamed
+ * the mirror in the same PR, so both declarations now spell `timeoutMs` and
+ * this ONE conversion covers the authored surface for both. The mirror
+ * registers no second entry: it would restate the same rewrite in
+ * `spec-changes.json` and the upgrade guide without converting anything the
+ * rename above has not already converted.
  */
 const tursoConfigTimeoutToTimeoutMs: MetadataConversion = {
   id: 'turso-config-timeout-to-timeout-ms',
