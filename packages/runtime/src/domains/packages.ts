@@ -492,10 +492,18 @@ function requireDuplicableSource(
  * `manifest.scope` alone (`scope !== 'project'`). That is not the rule this
  * server enforces: {@link isWritablePackage} (ADR-0070 D2) reads
  * `engine.manifests` FIRST — a package booted from an artifact through
- * `registerApp` is read-only whatever its scope says, and a scope-less module
- * carried by a multi-package artifact (ADR-0130 D4/D5) lands there too. The
- * client cannot see `engine.manifests`, so it cannot tell that module
- * (read-only) from a scope-less Studio-created base (writable); only the
+ * `registerApp` is read-only whatever its scope says, and a scope-less BOOTED
+ * package lands there too. ⛔ That scope-less row is NOT a module carried by a
+ * multi-package artifact: `defineStack` parses every `packages[]` entry through
+ * `ManifestSchema` (`spec/src/stack.zod.ts`, `ArtifactPackageEntrySchema`),
+ * whose `scope` is `.default('project')`, so no package of a compiled artifact
+ * is ever scope-less. A row reaches the registry scope-less only WITHOUT that
+ * parse: a marketplace install / offline file import
+ * (`manifestService.register(rawBody)` → `ql.registerApp` — booted, hence
+ * read-only), or a Studio-created base through `POST /api/v1/packages`
+ * (`body.manifest || body` → `installPackage`, which stores a key-by-key copy
+ * and applies no defaults — hence writable). The client cannot see
+ * `engine.manifests`, so it cannot tell those two apart; only the
  * server can, so the server says it — with the SAME predicate the authoring
  * and lifecycle gates use, which is #8146's ruling ("one answer to 'is this
  * package writable?'") applied to the read door.

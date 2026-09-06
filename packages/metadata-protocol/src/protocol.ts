@@ -7320,9 +7320,14 @@ export class ObjectStackProtocolImplementation implements
         // package switcher reads that list; it used to derive "writable"
         // client-side from `manifest.scope` alone, which is not this server's
         // rule — ADR-0070 D2 (`isWritablePackage`) reads `engine.manifests`
-        // FIRST, so a scope-less module booted from a multi-package artifact is
-        // read-only while a scope-less Studio-created base is writable, and only
-        // the server can tell the two apart. Same predicate the authoring and
+        // FIRST, so a scope-less BOOTED package — a marketplace install / offline
+        // file import, which reaches the registry through `ql.registerApp` with no
+        // `ManifestSchema` parse — is read-only while a scope-less Studio-created
+        // base (`POST /api/v1/packages`) is writable, and only the server can tell
+        // the two apart. ⛔ Neither is a module carried by a multi-package
+        // artifact: `defineStack` parses every `packages[]` entry through
+        // `ManifestSchema`, whose `scope` is `.default('project')`, so no package
+        // of a compiled artifact is ever scope-less. Same predicate the authoring and
         // lifecycle gates use (#8146: one answer), computed on a spread COPY:
         // the registry record is never mutated and the verdict is never stored.
         // The runtime dispatcher door decorates its own read of the same
