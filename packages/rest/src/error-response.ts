@@ -397,8 +397,14 @@ function armSentence(error: any): unknown {
  * `statusCode` rather than blocking it, which is what makes better-auth's
  * `APIError` (`{ statusCode: 403, status: 'FORBIDDEN' }` — the status field is a
  * STRING there) resolve to the status it meant instead of to nothing.
+ *
+ * [#15685] Exported so the `/meta/:type/:name/references` door can ask THIS
+ * question — "did the producer declare a status, in either spelling" — instead
+ * of re-deriving it beside its own refusal arm. A read, not a policy: the
+ * export moves no wire byte, and `error-response.ts` is not part of
+ * `@objectstack/rest`'s package entry, so nothing published changes either.
  */
-function declaredHttpStatus(error: any): number | undefined {
+export function declaredHttpStatus(error: any): number | undefined {
     const declared =
         (typeof error?.status === 'number' ? error.status : undefined) ??
         (typeof error?.statusCode === 'number' ? error.statusCode : undefined);

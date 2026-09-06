@@ -62,11 +62,14 @@ function idiomOf(call: ts.CallExpression): string | null {
  * `z.object(` ever walked the chain. So `strictObject(…).passthrough()` — a shape
  * that is **open at runtime**, deliberately — was recorded as `strict`.
  *
- * Two sites in the repo, both in `ui/view.zod.ts` (`GanttConfigSchema`,
- * `TreeConfigSchema`), both open on purpose so renderer-ahead config knobs reach
- * `plugin-gantt` / `plugin-tree` without waiting on a spec release. Measured, not
- * inferred: `GanttConfigSchema.parse({ …required, lockField: 'x' })` returns
- * `lockField` untouched.
+ * Two sites in the repo when this was written, both in `ui/view.zod.ts`
+ * (`GanttConfigSchema`, `TreeConfigSchema`), both open on purpose so
+ * renderer-ahead config knobs reached `plugin-gantt` / `plugin-tree` without
+ * waiting on a spec release. Measured, not inferred: `GanttConfigSchema.parse({
+ * …required, lockField: 'x' })` returned `lockField` untouched. Both were CLOSED
+ * at #15469 (maintainer ruling A, 2026-09-05): they now read `strict`, the
+ * file's passthrough set is empty, and the walk's red control moved into a
+ * mutated copy of the file in `strictness-ledger.test.ts`.
  *
  * Two things made it worth fixing rather than rounding away. It **inflated the
  * strict count**, which is the number the campaign schedules against; and, the

@@ -77,7 +77,12 @@
 //
 // `rest-server.ts` is pinned below at its STATIC reading: 80 `routeManager`
 // call sites, 17 registrars, 19 sites inside the one mintable registrar, 61
-// outside. A RUNTIME census — construct `RestServer` against a recording
+// outside. ⭐ [#15542] Those 80 are counted across TWO spellings since the
+// per-item family gained a switch-carrying helper — 72 direct
+// `this.routeManager.register(` sites plus 8 `registerPerItemRoute(` calls, the
+// helper's own forwarding call excluded so it is not counted twice. The total
+// did not move; the rule had to learn the second spelling to keep reading it.
+// A RUNTIME census — construct `RestServer` against a recording
 // `RouteManager` and a protocol implementing every optional capability, then
 // call each registrar — reads 85 / 17 / 19 / 66 instead. Both are correct and
 // the delta is fully explained: `registerApprovalsEndpoints` builds 12 routes
@@ -312,7 +317,47 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     population: 80,
     reachable: 19,
     blindSpot: 61,
-    populationRule: '`this.routeManager.register(` call sites; reachable = those inside registerMetadataEndpoints',
+    populationRule:
+      'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
+      '`registerPerItemRoute` (the shared forwarder, not a route), PLUS `registerPerItemRoute(` call sites; ' +
+      'reachable = those inside registerMetadataEndpoints',
+    // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
+    // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
+    //
+    // WHAT MOVED IN THE SOURCE. The per-item family's later members (`PUT`,
+    // `DELETE`, `/history`, `/audit`, `/diff`, `/published`, `/publish`,
+    // `/rollback`) stopped being direct `this.routeManager.register(` call
+    // sites and became `registerPerItemRoute(` calls — a local helper carrying
+    // the `endpoints.item` switch. Net -7 on the old one-spelling reading: 8
+    // sites left that spelling and the helper's own forwarding call added 1
+    // back. So the old rule read population 73 / reachable 12.
+    //
+    // ⛔ 73 / 12 WAS NOT RE-RECORDED, and the reason is this file's whole
+    // purpose. Those 8 routes are still mounted and still registered exactly
+    // where they were; only the spelling of the call changed. Writing 73 down
+    // would have ratified a population 7 short of the real one and encoded a
+    // 7-route hole in the very blind-spot count this census exists to keep
+    // honest — the failure it is named for, committed by its own record.
+    //
+    // ⚠️ REACHABILITY WAS CHECKED BEFORE THE COUNT WAS WIDENED, because if the
+    // helper HID those routes from the probe the repair would belong in
+    // `rest-server.ts` and not here. It does not. `registerPerItemRoute` reads
+    // `this.routeManager` at CALL time and every one of its 8 call sites is
+    // lexically inside `registerMetadataEndpointsInner`, which
+    // `registerMetadataEndpoints` runs with `this.routeManager` swapped to the
+    // anonymous-deny `guardedRouteManager` and restored in a `finally`. So a
+    // helper-routed registration goes through the identical wrapping the 11
+    // remaining direct sites in that registrar do, and the umbrella key
+    // `meta:rest-server.ts:registerMetadataEndpoints` covers it unchanged.
+    // Pinned at runtime rather than argued from source:
+    // `packages/rest/src/rest-meta-auth.test.ts` drives an anonymous
+    // `GET {meta}/:type/:name/history` — a helper-routed route — to 401.
+    //
+    // The decomposition, so the two halves stay legible: 72 direct route
+    // registrations + 8 helper-routed = 80 population; 11 + 8 = 19 reachable.
+    // `this.routeManager.register(` reads 73 because the helper's forwarder is
+    // one of them, and it is sliced out before counting.
+    //
     // [#13214] `enforceAuth` 61 -> 64. ⛔ RE-ANCHORED, not relaxed: the control
     // exists to prove this census is still reading the file it thinks it is, and
     // a rising `enforceAuth` is precisely what the 2026-08-30 ruling on #13214
@@ -329,7 +374,21 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // 80, `reachable` 19, `private register*Endpoints(` 17 and
     // `this.routeManager.register(` 80 are all unchanged — #13214 added no route
     // and no registrar. `blindSpot` therefore stays 61 as well.
-    controls: { 'private register*Endpoints(': 17, 'this.routeManager.register(': 80, enforceAuth: 64 },
+    // ⚠️ That last figure is the reading AS OF #13214 and is left as written:
+    // the control is 73 today for the spelling reason recorded above, and the
+    // population it feeds is still 80. Do not "correct" the paragraph — it is a
+    // dated measurement, not a live claim.
+    controls: {
+      'private register*Endpoints(': 17,
+      'this.routeManager.register(': 73,
+      // Both halves of the new rule carry their own control, so neither can go
+      // silently to zero: a helper deleted and its routes inlined back would
+      // still read population 80, and only these two controls would notice the
+      // shape moved and force this provenance to be re-read.
+      'registerPerItemRoute(': 8,
+      'const registerPerItemRoute =': 1,
+      enforceAuth: 64,
+    },
     note:
       'The single non-tripwire probe names ONE registrar of 17. The other 16 can never mint a key: ' +
       'registerCrudEndpoints, registerApprovalsEndpoints, registerDataActionEndpoints, registerReportsEndpoints, ' +
@@ -450,7 +509,18 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     reachable: 0,
     blindSpot: 0,
     populationRule: 'HTTP route mounts in this file',
-    controls: { RealtimeService: 10, 'async init(': 1 },
+    // ⚠️ `RealtimeService` read 10 until #14646 added a comment to that file
+    // recording why its occupant names no discovery channel route. The pattern
+    // is a bare `/RealtimeService/g`, so it matches inside `IRealtimeService`
+    // and PROSE about the symbol moves the symbol's count exactly as code
+    // does — the mirror image of a retirement whose count goes UP because the
+    // codebase started documenting an absence. Re-measured here rather than
+    // reworded there: this control's job is to prove the file is still present
+    // and readable (the non-zero assertion), and shrinking a comment to hold a
+    // counter still is how the documentation gets worse to keep a number.
+    // Nothing else in the row moves — the file still mounts no HTTP route, so
+    // population / reachable / blindSpot / keys stay 0.
+    controls: { RealtimeService: 11, 'async init(': 1 },
     // The designed-silence decision is the #2992 realtime-transport tripwire record.
     note: 'Tripwire only. Zero keys is the designed reading: no end-user realtime transport is wired.',
   },
@@ -549,21 +619,57 @@ export function deriveProbeFileCensus(): {
   }
 
   // ── rest-server.ts ──────────────────────────────────────────────────────
+  //
+  // [#15542 / #15854] TWO SPELLINGS, ONE POPULATION. A route registration in
+  // this file is EITHER a direct `this.routeManager.register(` call site OR a
+  // `registerPerItemRoute(` call — the local helper the per-item family's later
+  // members go through, which carries the `endpoints.item` switch and forwards
+  // to `this.routeManager.register(entry)`. Both are registrations; counting
+  // only the first spelling reads 7 short.
+  //
+  // ⛔ The helper's OWN forwarding call is NOT a registration site — it is the
+  // one shared mechanism 8 sites go through — so its body is sliced out before
+  // counting. Counting it would double-count every helper-routed route.
   {
     const src = read('packages/rest/src/rest-server.ts');
     const registrarRe = /^\s*private\s+register[A-Za-z]*Endpoints\s*\(/gm;
     const mountRe = /this\.routeManager\.register\(/g;
+    // Matches the CALL sites only. The declaration reads
+    // `const registerPerItemRoute = (` and the docblock mentions read
+    // `{@link registerPerItemRoute}` — in neither is the name followed by `(`.
+    const helperCallRe = /registerPerItemRoute\(/g;
+    const helperDeclRe = /const\s+registerPerItemRoute\s*=/;
+
+    /**
+     * Registration sites in one haystack: direct call sites, LESS the helper's
+     * own forwarding call, PLUS the helper's call sites.
+     *
+     * ⛔ Fail-loud, like the ledger marker slice above: a helper declaration
+     * that moves out of this shape slices to '' and nothing is subtracted, so
+     * the reading comes out ONE HIGH (81 / 20) and this census goes RED. It
+     * never silently shrinks — a quietly narrower rule is the failure mode the
+     * whole file is built against.
+     */
+    const sites = (hay: string): number => {
+      const at = hay.search(helperDeclRe);
+      const stop = at < 0 ? -1 : hay.indexOf('\n        };', at);
+      const forwarder = at < 0 || stop < 0 ? '' : hay.slice(at, stop);
+      return occurrences(hay, mountRe) - occurrences(forwarder, mountRe) + occurrences(hay, helperCallRe);
+    };
+
     // Slice the mintable registrar's body: from its declaration to the next one.
     const decls = [...src.matchAll(registrarRe)].map((m) => ({ at: m.index ?? 0, text: m[0] }));
     const metaIdx = decls.findIndex((d) => d.text.includes('registerMetadataEndpoints'));
     const start = decls[metaIdx]?.at ?? 0;
     const end = decls[metaIdx + 1]?.at ?? src.length;
     files.set('packages/rest/src/rest-server.ts', {
-      population: occurrences(src, mountRe),
-      reachable: occurrences(src.slice(start, end), /this\.routeManager\.register\(/g),
+      population: sites(src),
+      reachable: sites(src.slice(start, end)),
       controls: {
         'private register*Endpoints(': occurrences(src, /private\s+register[A-Za-z]*Endpoints\s*\(/g),
         'this.routeManager.register(': occurrences(src, /this\.routeManager\.register\(/g),
+        'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
+        'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
         enforceAuth: occurrences(src, /enforceAuth/g),
       },
     });

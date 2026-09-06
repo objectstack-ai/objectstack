@@ -97,7 +97,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 
   it('persists sys_job_run.status = "timeout", not "success"', async () => {
     const { handler } = slowHandler();
-    await adapter.schedule('slow', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('slow', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.trigger('slow');
 
     expect(runRows()).toHaveLength(1);
@@ -109,7 +109,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 
   it('counts the timeout as a failure on sys_job', async () => {
     const { handler } = slowHandler();
-    await adapter.schedule('slow', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('slow', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.trigger('slow');
 
     expect(jobRow().last_status).toBe('timeout');
@@ -121,7 +121,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 
   it('records the ABANDONED duration, not how long the handler kept running', async () => {
     const { handler } = slowHandler();
-    await adapter.schedule('slow', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('slow', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.trigger('slow');
 
     // The symptom row carried duration_ms ≈ the handler's full runtime, which
@@ -133,7 +133,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 
   it('a handler that resolves AFTER the guard fired cannot overwrite the timeout row', async () => {
     const { state, handler } = slowHandler();
-    await adapter.schedule('late', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('late', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.trigger('late');
 
     expect(runRows()[0].status).toBe('timeout');
@@ -156,7 +156,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
   it('a retried timeout persists attempt 2 on its second row', async () => {
     const { state, handler } = slowHandler();
     await adapter.schedule('retried', CRON, handler, {
-      timeout: TIMEOUT_MS,
+      timeoutMs: TIMEOUT_MS,
       retryPolicy: { maxRetries: 1, backoffMs: 1 },
     });
     await adapter.trigger('retried');
@@ -184,7 +184,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
   // ── additivity ───────────────────────────────────────────────────────────
 
   it('a handler that finishes inside its timeout is unchanged: success, attempt 1', async () => {
-    await adapter.schedule('quick', CRON, async () => {}, { timeout: 60_000 });
+    await adapter.schedule('quick', CRON, async () => {}, { timeoutMs: 60_000 });
     await adapter.trigger('quick');
 
     expect(runRows()[0].status).toBe('success');
@@ -196,7 +196,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 
   it('the in-memory execution and the persisted row report the SAME verdict', async () => {
     const { handler } = slowHandler();
-    await adapter.schedule('agree', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('agree', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.trigger('agree');
 
     const [exec] = await adapter.getExecutions('agree');
@@ -208,7 +208,7 @@ describe('DbJobAdapter — a timed-out run is recorded as one (#7734)', () => {
 
   it('replay of a timing-out job writes NO success row', async () => {
     const { handler } = slowHandler();
-    await adapter.schedule('rp', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('rp', CRON, handler, { timeoutMs: TIMEOUT_MS });
     await adapter.replay('rp');
 
     // One synthetic `replay` row + one wrapped row, and they must agree.
@@ -237,7 +237,7 @@ describe('the timeout policy still applies through an injected cron adapter (#77
     const adapter = new DbJobAdapter({ engine, cron });
     const { handler } = slowHandler();
 
-    await adapter.schedule('cronic', CRON, handler, { timeout: TIMEOUT_MS });
+    await adapter.schedule('cronic', CRON, handler, { timeoutMs: TIMEOUT_MS });
 
     // This case registers a REAL croner job, so the exact-count assertion below
     // holds only while that registration owns no schedule of its own. Pin both

@@ -35,6 +35,18 @@
 # build after a `packageManager` bump, when every job misses the cache at once.
 # Restoring the cache is what removes the steady-state exposure.
 #
+# The store is RESTORED at the top and SAVED explicitly at the bottom, rather
+# than handed to `actions/cache`'s post-job save. That save runs after EVERY
+# step of the job and writes back whatever those steps left in COREPACK_HOME --
+# which on 2026-09-05 included a pnpm nobody pinned: one step ran a package
+# manager from a directory carrying no `packageManager` field, so Corepack
+# resolved `latest` off the registry into the shared store and wrote its sticky
+# `lastKnownGood.json`. Later jobs restored that store; it reddened `main`'s own
+# push build and four unrelated PRs, and the signature was flaky ACROSS jobs but
+# byte-identical WITHIN one. Saving from a fixed point in the job -- right after
+# this action materialised the pin, with an assertion in between -- is what
+# makes a job structurally unable to donate an unpinned manager to the cache.
+#
 # Deliberately NOT in here: `actions/setup-node`. `scripts/check-node-version.mjs`
 # scans `.github/workflows/*.yml` ONLY, and reports how many setup-node steps it
 # audited. Moving those steps into this composite would drop them from its census
@@ -74,11 +86,23 @@ runs:
     # a store for a different pnpm version cannot satisfy this pin, and a partial
     # hit would only mask a cold start. A cache-service failure is non-fatal here
     # and degrades to a download, which the retry below then covers.
+    #
+    # `cache/restore`, not `cache` -- see the write-back paragraph in the header.
+    # The matching `cache/save` is the LAST step of this action.
+    #
+    # The `-v2-` in the key is a ONE-TIME ROTATION, not a widening: entries
+    # written by the old post-job save may already hold an unpinned manager, and
+    # the assertion below would then (correctly) fail every job that restored
+    # one. Rotating abandons those entries. It costs exactly one cold build --
+    # the same cost as a `packageManager` bump, which the retry in "Materialise
+    # pnpm" is the backstop for. It is not a restore-keys prefix and it does not
+    # widen what can satisfy the pin.
     - name: Restore the Corepack store
-      uses: actions/cache@v6
+      id: restore
+      uses: actions/cache/restore@v6
       with:
         path: ${{ runner.temp }}/corepack
-        key: ${{ runner.os }}-corepack-${{ steps.pin.outputs.key }}
+        key: ${{ runner.os }}-corepack-v2-${{ steps.pin.outputs.key }}
 
     - name: Enable Corepack
       shell: bash
@@ -109,3 +133,91 @@ runs:
     - name: Verify pnpm version
       shell: bash
       run: pnpm --version
+
+    # The store is about to be saved under the PIN's key, so it must hold the
+    # pin and nothing else. Measured with the Corepack that Node 22 ships
+    # (0.34.6): `corepack install` in this repo produces exactly
+    # <store>/v1/pnpm/<pinned version>/ and NO lastKnownGood.json, while a single
+    # `pnpm` call from a directory with no `packageManager` field adds a second
+    # version directory (the registry's `latest`) and writes that file.
+    #
+    # This step must POSITIVELY LOCATE the pin. A Corepack that changes its
+    # layout would otherwise make the scan enumerate nothing and report clean --
+    # a check that has retired itself while still reading green. So "the pin is
+    # not where this expects it" is a FAILURE here, not a pass.
+    #
+    # It also runs on a cache HIT, where nothing is saved: that is the alarm the
+    # whole incident lacked. A restored store holding an unpinned manager means
+    # the channel is armed again somewhere, and this says so by name in the job
+    # that restored it.
+    - name: Assert the Corepack store holds only the pinned package manager
+      shell: bash
+      env:
+        PM_SPEC: ${{ steps.pin.outputs.spec }}
+        STORE: ${{ runner.temp }}/corepack
+      run: |
+        set -euo pipefail
+        # `pnpm@10.31.0+sha512.<hash>` -> manager `pnpm`, version `10.31.0`.
+        manager="${PM_SPEC%%@*}"
+        rest="${PM_SPEC#*@}"
+        version="${rest%%+*}"
+
+        problems=''
+        note() { problems="${problems}${problems:+$'\n'}$1"; }
+
+        if [ "${COREPACK_HOME:-}" != "$STORE" ]; then
+          note "::error::COREPACK_HOME is '${COREPACK_HOME:-<unset>}' but the cached store is '$STORE' -- this assertion and the job's own pnpm would be reading different directories."
+        fi
+
+        found=0
+        extra=''
+        while IFS= read -r dir; do
+          [ -n "$dir" ] || continue
+          v="$(basename "$dir")"
+          m="$(basename "$(dirname "$dir")")"
+          if [ "$m" = "$manager" ] && [ "$v" = "$version" ]; then
+            found=1
+          else
+            extra="${extra}${extra:+, }${m}@${v}"
+          fi
+        done < <(find "$STORE" -mindepth 3 -maxdepth 3 -type d | sort)
+
+        if [ "$found" -ne 1 ]; then
+          note "::error::Corepack store '$STORE' does not hold the pinned ${manager}@${version} at <store>/v1/${manager}/${version}. Either the store is not where this action thinks it is, or Corepack's layout changed and this assertion is no longer measuring anything -- fix the assertion, do not delete it."
+        fi
+
+        if [ -n "$extra" ]; then
+          note "::error::Corepack store holds a package manager nobody pinned: ${extra} (the pin is ${manager}@${version}). Some step ran a package manager from a directory carrying no \"packageManager\" field, so Corepack resolved a version off the registry into this shared store."
+        fi
+
+        while IFS= read -r f; do
+          [ -n "$f" ] || continue
+          note "::error::Corepack wrote $f -- a sticky default that outlives this job inside the cached store and then applies to every invocation made outside a pinned directory."
+        done < <(find "$STORE" -maxdepth 2 -name 'lastKnownGood.json' -type f | sort)
+
+        if [ -n "$problems" ]; then
+          printf '%s\n' "$problems"
+          echo "::error::Refusing to cache this Corepack store: a store saved under the ${manager}@${version} key must hold that version and nothing else. See .github/actions/setup-pnpm/action.yml for the incident this guards."
+          exit 1
+        fi
+        echo "Corepack store holds exactly ${manager}@${version}, and no lastKnownGood.json."
+
+    # Save from HERE, not from a post-job step, so what lands in the cache is
+    # what the steps above just produced rather than whatever the rest of the
+    # job leaves behind. This step carries no `if: always()` and no status
+    # function beyond the cache-hit test, so it runs only when every step before
+    # it -- the assertion included -- succeeded: a store that failed the
+    # assertion is never written back.
+    #
+    # Only a cold restore saves; an exact hit has nothing new to write. One
+    # entry per (OS, pin): the key is content-addressed by the pin, so this
+    # cannot churn the repo's 10 GB cache pool the way a per-sha key does. When
+    # several cold jobs race, the losers log "Unable to reserve cache with
+    # key ..., another job may be creating this cache" -- a warning, not a
+    # failure, and every racer is saving byte-identical content anyway.
+    - name: Save the Corepack store
+      if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/corepack
+        key: ${{ runner.os }}-corepack-v2-${{ steps.pin.outputs.key }}

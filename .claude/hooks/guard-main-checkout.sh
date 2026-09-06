@@ -83,7 +83,10 @@ blocks instead.
 Fix the row for $tool in this hook's known_path_keys table, then re-run
 .claude/hooks/guard-main-checkout.selftest.sh.
 
-Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.
+Deliberate non-task exception: set OS_ALLOW_MAIN_EDITS=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
   exit 2
 fi
@@ -137,6 +140,9 @@ branch on the shared checkout is NOT enough; you must be in a dedicated worktree
 
 This guard checks the edited file's OWN repo, so sibling repos are covered too.
 
-Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.
+Deliberate non-task exception: set OS_ALLOW_MAIN_EDITS=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
 exit 2

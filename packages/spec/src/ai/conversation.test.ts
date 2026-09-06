@@ -427,7 +427,7 @@ describe('ConversationAnalyticsSchema', () => {
       summarizationEvents: 1,
       tokensSavedByPruning: 500,
       tokensSavedBySummarization: 2000,
-      duration: 1800,
+      durationSeconds: 1800,
       firstMessageAt: '2024-01-15T10:00:00Z',
       lastMessageAt: '2024-01-15T10:30:00Z',
     };
@@ -580,5 +580,47 @@ describe('Real-World Conversation Examples', () => {
     };
     
     expect(() => ConversationSessionSchema.parse(session)).not.toThrow();
+  });
+});
+
+// #15680 (stack card 5/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()` — a bare throw assertion passes just as happily
+// on the unrecognized-key error the rename is meant to replace.
+// `ConversationAnalytics` is runtime-emitted, so the silent-strip alternative
+// is the real hazard: this shape is not strict, and a producer still writing
+// `duration` would have lost the one measurement on the row with no error at all.
+describe('ConversationAnalytics.duration carries its unit (#15680)', () => {
+  const base = {
+    sessionId: 'session-1',
+    totalMessages: 10,
+    userMessages: 5,
+    assistantMessages: 5,
+    systemMessages: 0,
+    totalTokens: 1000,
+    averageTokensPerMessage: 100,
+    peakTokenUsage: 1000,
+  };
+
+  it('REFUSES the retired `duration` with the rename in the message', () => {
+    const result = ConversationAnalyticsSchema.safeParse({ ...base, duration: 1800 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`ConversationAnalytics.duration` was renamed to `durationSeconds`');
+  });
+
+  it('accepts `durationSeconds` at the same magnitude and still refuses a negative one', () => {
+    expect(ConversationAnalyticsSchema.parse({ ...base, durationSeconds: 1800 }).durationSeconds).toBe(1800);
+    expect(ConversationAnalyticsSchema.safeParse({ ...base, durationSeconds: -1 }).success).toBe(false);
+  });
+
+  it('leaves the twelve sibling COUNTS alone — a count has no unit to carry', () => {
+    const parsed = ConversationAnalyticsSchema.parse({ ...base, pruningEvents: 3, tokensSavedByPruning: 500 });
+    expect(parsed.totalMessages).toBe(10);
+    expect(parsed.totalTokens).toBe(1000);
+    expect(parsed.pruningEvents).toBe(3);
+    expect(parsed.tokensSavedByPruning).toBe(500);
   });
 });

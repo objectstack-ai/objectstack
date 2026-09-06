@@ -67,8 +67,10 @@ describe('Plugin.type closed set — published-surface pins (#13925)', () => {
         const declared: PluginMetadata = {
             name: 'closed-set-pin-metadata',
             version: '1.0.0',
-            // @ts-expect-error — `'ui-plugin'` (a stale describe() spelling) is
-            // not a `PluginType` (#13925).
+            // @ts-expect-error — `'ui-plugin'` is the LEGACY spelling of today's
+            // `'ui'` — once live, so callers outside this repo may still send it,
+            // and the published union must keep REFUSING it rather than grow a
+            // tolerant alias (Prime Directive #12). Not a `PluginType` (#13925).
             type: 'ui-plugin',
             async init() {},
         };

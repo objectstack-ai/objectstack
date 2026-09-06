@@ -2033,6 +2033,50 @@ jobs:
       - name: Template version-time rewriter self-test
         run: pnpm check:template-version-sync
 
+      # #15332 — the THIRD version-time rewriter, and the third self-test beside
+      # the two above. scripts/sync-release-index-currency.mjs joins the root
+      # `version` chain and stamps the release index's "current series: X.Y.Z,
+      # released YYYY-MM-DD" status field from packages/spec/CHANGELOG.md, so the
+      # sentence cannot go stale the way it did on three consecutive minors
+      # (#10232, #11649, #15332). The gate that names the staleness,
+      # check-release-section-coverage, structurally could not fire on the change
+      # that causes it: the version commit is opened by changesets/action with the
+      # default GITHUB_TOKEN and gets NO CI, and the step further down in this file
+      # runs that gate WITHOUT --strict, where a finding is advisory and the job is
+      # green by design.
+      #
+      # ⚠️ This step is NOT that gate's --strict arm, and must never become it.
+      # Promoting --strict here would also red a release page that has no section
+      # for a just-published train, i.e. every PR between a version commit and its
+      # release-notes PR — a policy question, deliberately not decided by adding a
+      # rewriter. What runs here is ONLY --self-test, whose cases are string
+      # fixtures: it never reads the live index for currency and never reads a
+      # release page at all, so no corpus state can red it. The advisory,
+      # non-strict `Release section-coverage guard` step below is untouched.
+      #
+      # Why it must run at PR time and not only in release.yml's post-version lane,
+      # where the rewriter's own corpus is — two gates in this repo say so, and both
+      # name a PR-TIME caller:
+      #   * check-self-test-wired — a script CI runs that ships a --self-test must
+      #     have that self-test run by CI.
+      #   * scripts/pm/dispatch-gates.mjs --self-test — "a deferred pair defers the
+      #     LEAD, not the load break": a family no every-PR workflow runs leaves its
+      #     import edges unwatched at PR time, so a change breaking the MODULE LOAD
+      #     of check-release-section-coverage.mjs (which this rewriter imports its
+      #     surface, scope and verdict from) would not redden the PR that made it.
+      #     Measured: with release.yml as the only caller, that self-test is
+      #     2-of-1382 RED naming this family; with this step, 1382/1382.
+      #
+      # Only the --self-test runs here, for the same reason the two steps above
+      # give: on a corpus that is already current the rewriter has nothing to do, so
+      # CI can never observe it working. The self-test is where a STALE entry is
+      # observed being stamped through the gate's own verdict, and — the control
+      # that matters just as much — where a CURRENT index is observed left
+      # byte-identical and UNWRITTEN, because this rewriter writes into curated,
+      # reader-facing prose.
+      - name: Release-index currency version-time rewriter self-test
+        run: pnpm check:release-index-currency-sync
+
       # #4851: the docs-accuracy-audit workflow's default scope is a generated list
       # (a workflow script runs in a vm with no filesystem, so it cannot enumerate
       # content/docs/ itself — the caller hands the list in). Hand-kept, that list
@@ -2325,6 +2369,32 @@ jobs:
       # PR. The checklist is a QA ledger, not a code gate; keeping it out of the
       # per-PR path means an unrelated PR is never blocked by checklist drift.
       # Run it by hand: `pnpm check:platform-checklist`. See that dir's README.
+      # Its red does have a reporting channel now, and it is NOT this file:
+      # `.github/workflows/platform-checklist-watchdog.yml` runs the gate on `main`
+      # daily and files or refreshes one issue when it is red.
+
+      # ⛔ …and the step below is NOT that wiring. What runs here is the STATIC PIN
+      # over the watchdog workflow: it asserts the file exists, fires on
+      # `schedule:` + `workflow_dispatch:`, carries NO `merge_group:` /
+      # `pull_request_target:` trigger, that any `pull_request:` trigger is
+      # `paths`-filtered to the watchdog file ALONE, that no board write is
+      # reachable from a pull_request run, and that the gate is invoked through its
+      # package script rather than an inlined copy. Two file reads, no socket.
+      #
+      # The watchdog's own `pull_request:` trigger names only itself, so it fires on
+      # no unrelated PR — that filter is what keeps the decision above intact, and
+      # pinning it is most of this step's job. It has to live HERE rather than
+      # inside the watchdog for the other half: a PR DELETING the watchdog would
+      # silence any check that lived inside it, and this job is the only place where
+      # the absence of that file is observable before it merges.
+      #
+      # Invoked as `node scripts/…` rather than a `pnpm check:*` alias: see the GATE
+      # INVOCATION IDIOM note at the top of this file. The `--self-test` leg runs
+      # first because a checker whose own cases failed has no verdict worth printing.
+      - name: Platform-checklist watchdog workflow pin
+        run: |
+          node scripts/check-platform-checklist-watchdog.mjs --self-test
+          node scripts/check-platform-checklist-watchdog.mjs
 
       # #3280/#3290 org-identifier guard: `organizationId` is the blessed
       # developer-facing name for the caller's active org in hook/action bodies;
@@ -2845,6 +2915,30 @@ jobs:
       # spec-changes.json is attached.
       - name: Release-body limit guard
         run: pnpm check:release-body
+
+      # Post-publish npm verification (#15321). The last thing the `publish` job
+      # does is prove every published package is readable on npm. That check ran
+      # as one `npm view` of @objectstack/cli and failed the 17.3.0 release,
+      # which had succeeded completely: npm committed cli@17.3.0 at 10:53:25.108
+      # and the read at 10:53:32 got an absence, because the write path and the
+      # CDN-fronted read path are eventually consistent. Worse, it looked at 1
+      # package of 69, so the one failure it exists to catch — a package that
+      # genuinely did not publish — is the one it could not see, and the false
+      # red on `cli` would have masked it.
+      #
+      # scripts/release-verify-npm.mjs replaces it with bounded backoff over the
+      # whole derived publishable set. Its --self-test is the ONLY instrument on
+      # that logic: the production path runs once per release, on a runner, with
+      # npm's real timing, so nothing else can tell a working retry loop from a
+      # broken one. It drives the real code with a stub registry — the #15321
+      # cold read reproduced through the OLD parameters (one target, no retry,
+      # which is a red on a healthy package) and then absorbed by the new ones,
+      # plus the partial publish the old shape reported green.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file.
+      - name: Post-publish npm verification self-test
+        run: node scripts/release-verify-npm.mjs --self-test
 
       # #3825 Node-version drift guard: a runtime pin is 18 separate string
       # literals across .github/workflows, so a split is invisible until someone
@@ -3936,6 +4030,24 @@ jobs:
         run: |
           node packages/lint/scripts/check-reference-carrier-shape.mjs --self-test
           node packages/lint/scripts/check-reference-carrier-shape.mjs
+
+      # #14478 (maintainer ruling 2026-09-02, "ruled B"): a duration-shaped
+      # `z.number()` key in packages/spec/src/** whose `.describe()` names a
+      # time unit must carry that unit in its NAME (`Ms` / `Seconds` /
+      # `Minutes` / `Hours` / `Days`), or the schema uses a unit-carrying
+      # VALUE (`'14d'` literals, `{ value, unit }` pairs). The founding
+      # specimen was two keys spelled `ttl` fourteen lines apart, one in
+      # seconds and one in milliseconds, each unit named only in prose — an
+      # author copying the outer number into the inner block got a 3.6-second
+      # cache and no error anywhere. No baseline, by ruling: the gate is green
+      # only at zero offenders, and a red is a rename under an ADR-0087
+      # conversion (or a describe to fix), never a ledger row. Placed LAST in
+      # this job on purpose: it is a new tree-wide ratchet, and the job aborts
+      # at the first non-zero exit — nothing behind it would be masked by its
+      # red. Reads src/ through tsx (no build); self-tests first, wired into
+      # the package script as `check:self-test-wired` requires.
+      - name: Duration-shaped spec keys carry their unit in the key name
+        run: pnpm --filter @objectstack/spec check:duration-unit-keys
 
   # Lane 1 of 4 behind the required `TypeScript Type Check` context. The
   # aggregator job at the bottom of this file explains the split, holds the

@@ -170,6 +170,59 @@ describe('planning refuses anything it cannot read a dialect from (#11733)', () 
     expect(planStaleColumnTargets(others, SQL)).toEqual({ targets: [], refusals: [] });
   });
 
+  it('a SINGLE-VALUE JSON-class column is refused, never planned — this command wraps values in an array (#15771)', () => {
+    // ⚠️ The cross-package half of #15771, pinned where the damage would land.
+    //
+    // The engine's base-type detector used to be keyed to `field.multiple`
+    // alone, so a single-value JSON-class field (`file`, `location`, `record`,
+    // …) on a stale `varchar` column produced no finding at all. Widening it
+    // put a NEW population in front of this command, and this command's repair
+    // is `json_build_array(col)` / `JSON_ARRAY(col)` — it WRAPS each stored
+    // value in a one-element array. Measured with this planner before the
+    // engine's message split: a single-value finding carrying the multi-value
+    // message was accepted as a target and planned with `json_build_array`,
+    // i.e. this command would have converted a scalar `"file_01HXYZ"` into
+    // `["\"file_01HXYZ\""]` on a customer's table.
+    //
+    // The engine therefore emits that population with a message carrying
+    // NEITHER the command's name NOR the statement, which lands it in the
+    // refusal branch above. That coupling is invisible from either side alone,
+    // so it is asserted from BOTH: the engine's side pins that the message
+    // omits the statement, and this pins what this command then does with it.
+    const single = diffManagedTable({
+      table: TABLE,
+      fields: { [COLUMN]: { type: 'file' } as any },
+      columns: STALE.postgres,
+      dialect: 'postgres',
+    });
+    // Non-vacuity: the engine really does report this shape now. If it stops,
+    // the refusal below would pass over an empty array.
+    expect(single.map((d) => d.op.type)).toEqual(['manual_column_type_change']);
+
+    const plan = planStaleColumnTargets(single, SQL);
+    expect(plan.targets).toEqual([]);
+    expect(plan.refusals).toHaveLength(1);
+    expect(plan.refusals[0]).toMatchObject({ table: TABLE, column: COLUMN, reason: 'remedy_not_recognized' });
+    expect(plan.refusals[0].detail).toContain('os migrate plan');
+
+    // ⭐ And the CONTRAST in the same run, which is what makes the refusal a
+    // discrimination rather than a command that refuses everything: an
+    // inherently-multi option type on the identical column holds an ARRAY, so
+    // it keeps the remedy and is planned.
+    const arrayValued = diffManagedTable({
+      table: TABLE,
+      fields: { [COLUMN]: { type: 'tags' } as any },
+      columns: STALE.postgres,
+      dialect: 'postgres',
+    });
+    const arrayPlan = planStaleColumnTargets(arrayValued, SQL);
+    expect(arrayPlan.refusals).toEqual([]);
+    expect(arrayPlan.targets).toHaveLength(1);
+    expect(arrayPlan.targets[0].statements).toEqual(
+      splitRemedyStatements(manualJsonConversionSql('postgres', TABLE, COLUMN)),
+    );
+  });
+
   it('--table narrows to the tables named, and drops the rest silently', () => {
     const a = engineFinding('postgres');
     const b = { ...a, table: 'crm_case', op: { ...(a.op as any), table: 'crm_case' } } as ManagedDriftEntry;

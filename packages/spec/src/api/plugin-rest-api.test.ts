@@ -64,7 +64,7 @@ describe('plugin-rest-api.zod', () => {
         tags: ['Data', 'CRUD'],
         requestSchema: 'CreateRequestSchema',
         responseSchema: 'SingleRecordResponseSchema',
-        timeout: 30000,
+        timeoutMs: 30000,
         rateLimit: 'standard',
         cacheable: false,
       });
@@ -72,7 +72,7 @@ describe('plugin-rest-api.zod', () => {
       expect(endpoint.permissions).toEqual(['data.create']);
       expect(endpoint.summary).toBe('Create a record');
       expect(endpoint.tags).toEqual(['Data', 'CRUD']);
-      expect(endpoint.timeout).toBe(30000);
+      expect(endpoint.timeoutMs).toBe(30000);
     });
 
     it('should default public to false', () => {
@@ -443,7 +443,7 @@ describe('plugin-rest-api.zod', () => {
           enableCompression: true,
           enableETag: true,
           enableCaching: true,
-          defaultCacheTtl: 600,
+          defaultCacheTtlSeconds: 600,
         },
       });
 
@@ -452,7 +452,7 @@ describe('plugin-rest-api.zod', () => {
       expect(config.validation?.mode).toBe('strict');
       expect(config.openApi?.title).toBe('My API');
       expect(config.cors?.origins).toContain('http://localhost:3000');
-      expect(config.performance?.defaultCacheTtl).toBe(600);
+      expect(config.performance?.defaultCacheTtlSeconds).toBe(600);
     });
   });
 
@@ -520,7 +520,7 @@ describe('plugin-rest-api.zod', () => {
       
       // Verify batch endpoints have longer timeouts
       DEFAULT_BATCH_ROUTES.endpoints?.forEach(endpoint => {
-        expect(endpoint.timeout).toBe(60000);
+        expect(endpoint.timeoutMs).toBe(60000);
       });
     });
 
@@ -578,7 +578,7 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_ANALYTICS_ROUTES.endpoints).toHaveLength(2);
       // Analytics query should have extended timeout
       const queryEndpoint = DEFAULT_ANALYTICS_ROUTES.endpoints?.find(e => e.handler === 'analyticsQuery');
-      expect(queryEndpoint?.timeout).toBe(120000);
+      expect(queryEndpoint?.timeoutMs).toBe(120000);
     });
 
     it('should validate DEFAULT_AUTOMATION_ROUTES', () => {
@@ -591,7 +591,7 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints).toHaveLength(2);
       expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].path).toBe('/trigger/:name');
       // Automation trigger should have extended timeout
-      expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].timeout).toBe(120000);
+      expect(DEFAULT_AUTOMATION_ROUTES.endpoints?.[0].timeoutMs).toBe(120000);
       // The actions endpoint exposes the live registry and is cacheable.
       const actionsEndpoint = DEFAULT_AUTOMATION_ROUTES.endpoints?.find(e => e.path === '/actions');
       expect(actionsEndpoint?.method).toBe('GET');
@@ -682,5 +682,80 @@ describe('plugin-rest-api.zod', () => {
         }
       });
     });
+  });
+});
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('RestApiEndpoint / RestApiPluginConfig durations carry their unit (#15677)', () => {
+  const endpoint = {
+    method: 'GET' as const, path: '/api/v1/discovery',
+    handler: 'getDiscovery', category: 'discovery' as const,
+  };
+
+  it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
+    const result = RestApiEndpointSchema.safeParse({ ...endpoint, timeout: 30000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`RestApiEndpoint\.timeout` was renamed to `timeoutMs`/);
+  });
+
+  it('REFUSES the retired `cacheTtl` spelling with the rename in the message', () => {
+    const result = RestApiEndpointSchema.safeParse({ ...endpoint, cacheTtl: 3600 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'cacheTtl');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`RestApiEndpoint\.cacheTtl` was renamed to `cacheTtlSeconds`/);
+  });
+
+  it('names the OTHER unit in each prescription — the pair is why this rename exists', () => {
+    const t = RestApiEndpointSchema.safeParse({ ...endpoint, timeout: 1 })
+      .error!.issues.find((i) => i.path.join('.') === 'timeout')!;
+    const c = RestApiEndpointSchema.safeParse({ ...endpoint, cacheTtl: 1 })
+      .error!.issues.find((i) => i.path.join('.') === 'cacheTtl')!;
+    expect(t.message).toMatch(/cache TTL two lines below is in SECONDS/);
+    expect(c.message).toMatch(/request timeout two lines above is in MILLISECONDS/);
+  });
+
+  it('accepts the suffixed endpoint keys at the same magnitudes', () => {
+    const parsed = RestApiEndpointSchema.parse({ ...endpoint, timeoutMs: 30000, cacheTtlSeconds: 3600 });
+    expect(parsed.timeoutMs).toBe(30000);
+    expect(parsed.cacheTtlSeconds).toBe(3600);
+    expect(parsed).not.toHaveProperty('timeout');
+    expect(parsed).not.toHaveProperty('cacheTtl');
+  });
+
+  it('REFUSES `performance.defaultCacheTtl` — a tombstone inside a LIVE block', () => {
+    const result = RestApiPluginConfigSchema.safeParse({
+      routes: [],
+      performance: { enableCompression: true, defaultCacheTtl: 600 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'performance.defaultCacheTtl',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`RestApiPluginConfig\.performance\.defaultCacheTtl` was renamed to `defaultCacheTtlSeconds`/,
+    );
+  });
+
+  it('parses the live siblings of that tombstone, and keeps the 300 default', () => {
+    const config = RestApiPluginConfigSchema.parse({
+      routes: [],
+      performance: { enableCompression: false, defaultCacheTtlSeconds: 600 },
+    });
+    expect(config.performance?.enableCompression).toBe(false);
+    expect(config.performance?.defaultCacheTtlSeconds).toBe(600);
+    expect(RestApiPluginConfigSchema.parse({ routes: [], performance: {} })
+      .performance?.defaultCacheTtlSeconds).toBe(300);
   });
 });

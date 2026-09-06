@@ -294,9 +294,9 @@ application-level emptiness check is needed.
 
 | Property | Type | Default | Validation Behavior |
 |:---|:---|:---|:---|
-| `reference` | `string` | — | **Required.** Self-referencing object name |
+| `reference` | `string` | — | Optional. If given, must be this object's own name — a `tree` whose `reference` names any other object is refused at parse (`fields.<field>.reference`); a link to a different object is a `lookup` |
 
-**Default constraints:** Self-referencing lookup for hierarchical structures. Stored and expanded like a `lookup`; the engine does not run a cycle check on write, so a self-reference chain that loops back on itself is not automatically rejected.
+**Default constraints:** Self-referencing lookup for hierarchical structures — `reference` is optional and, if given, must be this object. Stored and expanded like a `lookup`; the engine does not run a cycle check on write, so a self-reference chain that loops back on itself is not automatically rejected.
 
 ---
 

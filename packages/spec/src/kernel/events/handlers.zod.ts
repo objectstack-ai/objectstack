@@ -11,6 +11,7 @@ import { z } from 'zod';
  * Defines how to handle a specific event
  */
 import { lazySchema } from '../../shared/lazy-schema';
+import { retiredKey } from '../../shared/retired-key';
 export const EventHandlerSchema = lazySchema(() => z.object({
   /**
    * Handler identifier
@@ -82,7 +83,16 @@ export type EventRoute = z.input<typeof EventRouteSchema>;
  */
 export const EventPersistenceSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable event persistence'),
-  retention: z.number().int().positive().describe('Days to retain persisted events'),
+  // Renamed from `retention` (#15678, #14478 ruling B): the unit lived only in
+  // the describe prose.
+  retentionDays: z.number().int().positive().describe('Days to retain persisted events'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  retention: retiredKey(
+    '`EventPersistence.retention` was renamed to `retentionDays` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged.',
+  ),
   filter: z.unknown().optional().describe('Optional filter function to select which events to persist'),
   storage: z.enum(['database', 'file', 's3', 'custom']).default('database')
     .describe('Storage backend for persisted events'),

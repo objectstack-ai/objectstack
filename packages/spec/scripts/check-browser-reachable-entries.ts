@@ -152,6 +152,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { buildStamp } from '../../../scripts/check-regen-pending.mjs';
 import { scanSource } from '../../../scripts/js-comment-mask.mjs';
 import { inspectBundleFreshness } from './lib/dist-freshness';
 
@@ -924,6 +925,71 @@ function selfTest(): never {
     stamp(configFile, 120_000);
     check(
       'an edited-but-unbuilt tsup.config.ts reads as stale',
+      !inspectBundleFreshness(fresh, 'check', RERUN).fresh,
+      mtimes(),
+    );
+
+    // ── The acquittal: an mtime accusation that CAN be answered (#16175) ────
+    // Every case above is the mtime rule convicting, and until #16175 there was
+    // nothing it would accept as an answer. So it also refused the tree a
+    // `git merge`, `git checkout` or `git worktree add` leaves behind: those
+    // re-check-out an UNCHANGED source file — bytes identical, mtime bumped —
+    // and the build that follows is a turbo cache hit that rewrites nothing, so
+    // every dist/ mtime stays where the previous build left it. Measured on the
+    // real tree: `touch packages/spec/src/data/query.zod.ts` with `git status`
+    // empty made this gate exit 1 and prescribe a multi-minute rebuild of
+    // bundles that were already exactly current.
+    //
+    // The evidence is `dist/.build-input-hash`, which every build of the package
+    // writes AFTER its unconditional `tsup` pass. It may only ever ACQUIT, and
+    // the two cases after this one are what keep that non-vacuous.
+    const stampFile = join(fresh, 'dist', '.build-input-hash');
+    // Two steps, for the reason `dist-freshness.test.ts` gives: `buildStamp`
+    // computes `actual` only when a syntactically valid digest is recorded, so
+    // seed a placeholder, read what the sources really hash to, then write that.
+    // Asked of the rule's own reader rather than hardcoded — the input set
+    // includes turbo.json's globalDependencies and every input's repo-relative
+    // path, so a literal here would rot into a `mismatch` that reads exactly
+    // like the refusal these cases exist to tell apart. The stamp is written
+    // last, so it records the sandbox as it now stands, tsup.config.ts included
+    // (that file is in the digest's input set as well as in the mtime rule's).
+    writeFileSync(stampFile, `${'0'.repeat(64)}\n`);
+    const digest = buildStamp(fresh).actual;
+    check(
+      'the sandbox build-input digest can be computed at all (the fixture is not vacuous)',
+      typeof digest === 'string' && /^[0-9a-f]{64}$/.test(digest),
+      JSON.stringify(digest),
+    );
+    writeFileSync(stampFile, `${digest}\n`);
+    check(
+      'ACQUITS an mtime-stale tree whose build stamp matches the sources (#16175)',
+      inspectBundleFreshness(fresh, 'check', RERUN).fresh,
+      mtimes(),
+    );
+
+    // The half that makes the case above non-vacuous. If the acquittal were
+    // keyed on the stamp's mere PRESENCE rather than on the digest, this would
+    // stay green — and that is #7122's false green restored, one axis over. The
+    // stamp is written first and the source edited after, so the recorded digest
+    // is genuinely stale rather than never-valid.
+    writeFileSync(srcFile, 'export const a = 2;\n');
+    stamp(srcFile, 0);
+    check(
+      'and CONVICTS the same tree the moment a source byte actually changes',
+      !inspectBundleFreshness(fresh, 'check', RERUN).fresh,
+      mtimes(),
+    );
+
+    // Absence of the freshness input is not licence to acquit (#4690), and
+    // neither is a truncated or half-flushed write. Anything that is not 64 hex
+    // characters is `unstamped`, which leaves the mtime verdict standing. The
+    // source is restored to the bytes the digest above was taken over first, so
+    // the ONLY reason this refuses is the stamp itself.
+    writeFileSync(srcFile, 'export const a = 1;\n');
+    stamp(srcFile, 0);
+    writeFileSync(stampFile, 'not-a-digest\n');
+    check(
+      'ignores a build stamp that is not a digest at all',
       !inspectBundleFreshness(fresh, 'check', RERUN).fresh,
       mtimes(),
     );

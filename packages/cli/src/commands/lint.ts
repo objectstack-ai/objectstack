@@ -98,7 +98,31 @@ function checkLabelExists(item: any, path: string, kind: string): LintIssue | nu
   return null;
 }
 
-function checkLabelCase(label: string, path: string): LintIssue | null {
+// A label is not required to be a string. `I18nLabelSchema` (spec
+// `ui/i18n.zod`) is `z.union([z.string(), InlineLocaleMapSchema])`, and it is
+// the label primitive the whole `ui/` tree imports — so of the four carriers
+// this rule is called on, two accept the inline locale map:
+// `views[].list.label` / `views[].listViews.*.label` (`ListViewShapeSchema`)
+// and `apps[].label` (`AppSchema`). The other two are `z.string()` and reject
+// the map at the schema door (`objects[].label`, `objects[].fields.*.label`).
+//
+// Every call site reaches this function through `any`-typed config walking, so
+// the annotation below used to say `string` and be wrong: on a map,
+// `label[0]` is `undefined` and `undefined.toUpperCase()` threw. The throw
+// escaped `lintConfig` into the command's catch-all, so an author who
+// localized an app or list-view label could not lint the project at all —
+// every face exited 1 naming no rule, no path and no remedy, on input
+// `ObjectStackDefinitionSchema` parses clean.
+//
+// ⛔ The guard deliberately says NOTHING about a localized label rather than
+// resolving the map and case-checking an entry. Case is a property of a
+// literal; picking WHICH locale entry a case verdict is taken against is a
+// product decision (`resolveI18nLabel` exists, but which entry is
+// authoritative for a lint verdict is not this rule's to answer). Widening
+// the rule to localized labels is an extension, filed separately; this guard
+// is the floor, and it leaves the string branch below byte-identical.
+function checkLabelCase(label: unknown, path: string): LintIssue | null {
+  if (typeof label !== 'string') return null;
   if (label && label[0] !== label[0].toUpperCase()) {
     return {
       severity: 'warning',
@@ -111,7 +135,11 @@ function checkLabelCase(label: string, path: string): LintIssue | null {
   return null;
 }
 
-function getViewLabel(view: any, viewPath: string): { label?: string; path: string } {
+// ⚠️ `label` is `unknown`, not `string`: it is read straight off `any`-typed
+// config and `ListViewShapeSchema.label` is `I18nLabelSchema`, so the value
+// can legitimately be an inline locale map. Annotating it `string` here is
+// what let the map reach `checkLabelCase`'s indexing unchecked.
+function getViewLabel(view: any, viewPath: string): { label?: unknown; path: string } {
   if (view?.list?.label) {
     return { label: view.list.label, path: `${viewPath}.list.label` };
   }
@@ -478,6 +506,10 @@ export default class Lint extends Command {
   static override flags = {
     json: Flags.boolean({ description: 'Output as JSON' }),
     fix: Flags.boolean({ description: 'Show what would be fixed (dry-run)' }),
+    strict: Flags.boolean({
+      description:
+        'Fail the run (exit 1) on warning-severity findings too, exactly as an error does; suggestions stay advisory. Without it only errors fail',
+    }),
     score: Flags.boolean({
       description: 'Print a 0–100 metadata-quality score (the lint rubric) for this project',
     }),
@@ -509,6 +541,75 @@ export default class Lint extends Command {
     const { args, flags } = await this.parse(Lint);
     const configPath = args.config;
     const timer = createTimer();
+
+    // ── `--generator` means nothing without `--eval` — refuse, don't ignore ──
+    //
+    // [#15550] The flag's own description ends "Requires --eval." and nothing
+    // checked it. Driven on this entry before this change, from a lint-clean
+    // project, with a generator that writes a marker file at TOP-LEVEL
+    // evaluation so "was it loaded?" is answered by the filesystem rather than
+    // by reading the control flow:
+    //
+    //     os lint --generator ./gen-marker.mjs            exit 0 · All checks passed · marker ABSENT
+    //     os lint --generator ./does-not-exist.mjs        exit 0 · All checks passed
+    //     os lint --json --generator ./does-not-exist.mjs exit 0 · {"passed":true,…}
+    //
+    // ⇒ accepted by the parser, never loaded, and not named once on either
+    // face — a path that does not exist passes too. `flags.generator` is read
+    // at exactly three sites, all inside `runEval`, which `run()` reaches only
+    // when `flags.eval` is set, so outside eval mode the flag reaches no code
+    // at all.
+    //
+    // That is Prime Directive #10's declared-≠-enforced shape landing on the
+    // person least able to diagnose it: a successful-looking run whose
+    // generator was never called, saying nothing. The direction is #12 — refuse
+    // the off-contract invocation loudly at the boundary. The alternative
+    // repair, deleting "Requires --eval." from the description, was rejected
+    // for the reason that sentence exists: nothing outside eval mode reads this
+    // flag, so dropping the claim documents a no-op flag instead of removing
+    // one, and blesses the silent acceptance rather than ending it.
+    //
+    // ⛔ NOT oclif's `dependsOn: ['eval']` — and the reason is BLAST RADIUS,
+    // not an inability to answer inside this command's envelope.
+    //
+    // Bare `dependsOn` refuses in the PARSER, before the command runs, so its
+    // refusal is oclif's: exit 2, and under `--json` an EMPTY STDOUT. (The
+    // stack trace that accompanies it on `bin/run-dev.js` is a DEV-ENTRY
+    // artefact of `settings.debug`; the shipped `bin/run.js` prints oclif's
+    // pretty message with no stack. Don't generalise the dev entry's output.)
+    //
+    // ⚠️ That much CAN be brought inside the envelope: a `catch()` override on
+    // the parse was measured answering exit 1 with `{error}` on the `--json`
+    // face and an empty stderr. So "the framework spelling cannot be
+    // enveloped" is FALSE, and ⛔ nobody should re-derive this choice from it.
+    //
+    // The real objection is scope. That override re-shapes EVERY parse error on
+    // this command, not the one precondition this card is about: every unknown
+    // flag and every bad value would move from exit 2 / stderr to exit 1 /
+    // stdout, and would carry oclif's own prose plus its `--help` hint inside
+    // the JSON `error` string — a wide, uncommissioned change to the very
+    // `--json` envelope #15549/#16044 had just repaired one exit over. A guard
+    // here moves ONE invocation class and leaves every other parse error
+    // exactly as it was, while keeping the envelope this command already
+    // answers with: the human message on `error`, exit 1, both faces.
+    //
+    // ⛔ Nor the raw-argv guard `os migrate meta` uses for its stored-only
+    // flags. That one exists because oclif reads a `default: false` boolean and
+    // an `env`-backed string as "provided"; `--generator` has neither a default
+    // nor an `env`, so `!== undefined` already means the operator typed it.
+    //
+    // ⛔ Nothing is minted: no `code` is attached. This refusal has no producer
+    // error to pass one through, and ADR-0112's ledger is the authority on who
+    // may mint one — the same restraint the generator-load exit below keeps.
+    if (flags.generator !== undefined && !flags.eval) {
+      const message =
+        '--generator only applies to `os lint --eval` (the metadata-generation eval). '
+        + 'Without --eval this command lints the current project and never loads the generator. '
+        + 'Re-run as `os lint --eval --generator <module>`.';
+      if (flags.json) await emitJson({ error: message }, 0, { compact: true });
+      else printError(message);
+      process.exit(1);
+    }
 
     // ── Eval mode — score generated metadata against the convention rubric ──
     // Short-circuits the project lint: this evaluates a generation corpus, not
@@ -612,17 +713,38 @@ export default class Lint extends Command {
       // Metadata-quality score (the lint rubric expressed as 0–100).
       const score = flags.score ? scoreMetadata(normalized) : null;
 
+      // ── Verdict ──
+      // Only an `error` fails a run by default. `--strict` (#15935) makes a
+      // `warning` fail it too — so an app can rely on the warning-level rules
+      // this registry ships as its gate instead of re-implementing them
+      // locally at error level — while a `suggestion` stays advisory under
+      // both. `failing` is the ONE count the exit code is read from, computed
+      // here, above the two faces, so `--json` and the console cannot disagree
+      // about it. ⛔ The default is deliberately unchanged: promoting warnings
+      // for every app is a separate decision, not this flag's.
+      const strict = flags.strict ?? false;
+      const errors = issues.filter((i) => i.severity === 'error');
+      const warnings = issues.filter((i) => i.severity === 'warning');
+      const suggestions = issues.filter((i) => i.severity === 'suggestion');
+      const failing = errors.length + (strict ? warnings.length : 0);
+
       // ── JSON output ──
       if (flags.json) {
-        const errors = issues.filter((i) => i.severity === 'error');
-        const warnings = issues.filter((i) => i.severity === 'warning');
-        const suggestions = issues.filter((i) => i.severity === 'suggestion');
         await emitJson({
-          passed: errors.length === 0,
+          passed: failing === 0,
           total: issues.length,
           errors: errors.length,
           warnings: warnings.length,
           suggestions: suggestions.length,
+          // [#15935] The verdict, readable without re-deriving it from the
+          // counts: `strict` says whether the flag was in effect, `failing`
+          // is the count the exit code was read from — `errors`, or
+          // `errors + warnings` under `--strict` — and `passed` is
+          // `failing === 0`, the same statement the exit code makes. Both
+          // keys are unconditionally present so a gate keying off them never
+          // has to distinguish "not strict" from "this build does not say".
+          strict,
+          failing,
           ...(hiddenPlatform > 0 ? { hiddenPlatform } : {}),
           ...(score ? { score: score.score, grade: score.grade } : {}),
           issues,
@@ -635,7 +757,7 @@ export default class Lint extends Command {
           // distinguish "did not convert" from "this command does not tell me".
           conversions: conversionNotices,
           duration: timer.elapsed(),
-        }, errors.length > 0 ? 1 : 0);
+        }, failing > 0 ? 1 : 0);
         return;
       }
 
@@ -658,11 +780,6 @@ export default class Lint extends Command {
         console.log('');
         return;
       }
-
-      // Group by severity
-      const errors = issues.filter((i) => i.severity === 'error');
-      const warnings = issues.filter((i) => i.severity === 'warning');
-      const suggestions = issues.filter((i) => i.severity === 'suggestion');
 
       const printIssue = (issue: LintIssue) => {
         const color =
@@ -714,9 +831,20 @@ export default class Lint extends Command {
         printInfo('Dry-run mode: no files were modified.');
       }
 
+      // A run that fails ONLY because of `--strict` says so, naming the count
+      // and the flag: the summary line above reads identically with and
+      // without the flag, and exit 1 under a heading that says "Warnings" is
+      // otherwise a verdict with no stated reason.
+      if (strict && warnings.length > 0) {
+        console.log('');
+        printError(
+          `${warnings.length} warning(s) fail this run under --strict (a warning is advisory without the flag)`,
+        );
+      }
+
       console.log('');
 
-      if (errors.length > 0) process.exit(1);
+      if (failing > 0) process.exit(1);
 
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
@@ -776,7 +904,31 @@ export default class Lint extends Command {
         generate = fn;
       } catch (error: any) {
         const msg = `Failed to load generator "${flags.generator}": ${error?.message || error}`;
-        if (flags.json) await emitJson({ error: msg }, 0, { compact: true });
+        // [#15549] The ADR-0112 carriers, spread from the SAME helper the
+        // project-lint catch-all in `run()` uses — not a second shape invented
+        // here. Before this, the `catch` built `msg` and DISCARDED `error`, so
+        // a machine consumer that reads `code` to branch got a real code from
+        // project-lint mode and `undefined` from eval mode, on one command.
+        //
+        // ⛔ Nothing is MINTED. `errorCodeFields` passes a producer's code
+        // through and returns `{}` otherwise — ADR-0112's ledger is the
+        // authority on who may mint one — so this exit stays polymorphic in
+        // exactly the way its sibling is: the hand-thrown "must default-export
+        // a function" above carries neither key and still gets neither.
+        //
+        // The keys are REACHABLE here, which is what makes this a repair and
+        // not a formality. Measured against `bundleRequire` on this entry: a
+        // generator whose TOP-LEVEL EVALUATION throws propagates that error
+        // intact, so `code: "ENOENT"` (a file the module read at import) and a
+        // full `code` + `httpStatus` pair (an SDK refusal at import) both
+        // arrive here — and both were being dropped. esbuild's own
+        // `BuildFailure` — the unresolvable-path and syntax-error cases —
+        // carries neither key, and still correctly emits a bare `{error}`.
+        //
+        // ⛔ `conversions` is NOT added alongside them: that key on the
+        // `--eval` exits is a different card, fenced by #14015 with its own
+        // review gate. This changes the carriers only.
+        if (flags.json) await emitJson({ error: msg, ...errorCodeFields(error) }, 0, { compact: true });
         else printError(msg);
         process.exit(1);
       }

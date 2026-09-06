@@ -85,6 +85,20 @@ export interface ObjectStackHonoOptions {
  */
 interface AuthService {
   handleRequest(request: Request): Promise<Response>;
+  /**
+   * Does the auth service's OWN router serve this path? (#15928)
+   *
+   * Optional on purpose: this is a structural interface over whatever the
+   * kernel registered as the `auth` service, and an implementation predating
+   * the method must keep working. `AuthPlugin`'s `AuthManager` implements it
+   * (#15417 / PR #15918) by asking better-auth's live `auth.api` — the same
+   * seam the route ledger's conformance test and the `/admin/` dogfood sweep
+   * read. It answers on better-auth's endpoint-path spelling derived from the
+   * AUTH SERVICE's configured `basePath`, not from this adapter's `prefix`,
+   * so a deployment whose two disagree gets `false` for everything — the
+   * yielding, pre-#15928 answer, which is the safe direction.
+   */
+  ownsRoute?(request: Request): Promise<boolean>;
 }
 
 /**
@@ -339,6 +353,23 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
     if (!c.res) c.res = fallback();
   };
 
+  /**
+   * Does the auth service claim this path? (#15928)
+   *
+   * Every non-`true` answer — no such method, a throw, anything but `true` —
+   * is `false`, i.e. "yield", i.e. exactly what this mount did before #15928.
+   * A failure to decide can therefore never take the #4088 surface down with
+   * it; the only thing this predicate can do is STOP a yield.
+   */
+  const authOwnsRoute = async (authService: AuthService, request: Request): Promise<boolean> => {
+    if (typeof authService.ownsRoute !== 'function') return false;
+    try {
+      return (await authService.ownsRoute(request)) === true;
+    } catch {
+      return false;
+    }
+  };
+
   // --- Auth (needs auth service integration) ---
   app.all(`${prefix}/auth/*`, async (c, next) => {
     try {
@@ -401,7 +432,38 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         // 404 from better-auth means "not one of my endpoints" — the #4092
         // signal. `/auth/me/permissions` is the canonical example: nothing in
         // better-auth serves it, `plugin-hono-server` does.
-        if (response.status === 404) return yieldUnowned(c, next, forwarded);
+        //
+        // [#15928] …but ONLY when better-auth disclaims the path. A 404 from a
+        // path its own router SERVES is its answer, not a disclaimer, and
+        // yielding it hands a real answer to whatever matched next. Here that
+        // "whatever" is not hypothetical and needs no composition to install
+        // it: the `${prefix}/*` dispatcher catch-all below is registered by
+        // THIS function, is terminal, and answers `200 {}` for paths under
+        // `/auth/`. Measured on a real boot through this adapter (a real
+        // kernel with AuthPlugin, `prefix: '/api/v1'`):
+        //
+        //     GET /api/v1/auth/delete-user/callback?token=…&callbackURL=…
+        //       better-auth direct : 404 {"message":"Not found","code":"NOT_FOUND"}
+        //       through this mount : 200 {}
+        //
+        // That route is published and answers 404 because `user.deleteUser` is
+        // deliberately unconfigured — `auth-route-ledger.ts` carries the pair
+        // under the `disabled` disposition for exactly that reason. So the
+        // ledger's recorded answer was true of the auth service and false on
+        // this adapter's wire. Same defect, same fix shape as PR #15918 took in
+        // the plugin, adapted to the seam available here: the adapter cannot
+        // import `buildBetterAuthRouteOwnership` (it does not depend on
+        // `@objectstack/plugin-auth`, and should not), so it asks the auth
+        // SERVICE, which is the very `AuthManager` instance that owns the walk.
+        //
+        // ⛔ The mount is untouched and still claims `${prefix}/auth/*`; what
+        // narrowed is which 404 may be handed on. `/auth/me/permissions` and
+        // `/auth/me/localization` are not better-auth endpoints, so they are
+        // disclaimed and still yield — #4088's ordering-independent surface,
+        // which objectui's permission layer reads, is unchanged.
+        if (response.status === 404 && !(await authOwnsRoute(authService, c.req.raw))) {
+          return yieldUnowned(c, next, forwarded);
+        }
         return forwarded();
       }
 
