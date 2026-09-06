@@ -163,8 +163,13 @@ function makeHarness() {
             assertEngineFindOnePredicate(table, opts);
             return tableOf(table).find((r) => matches(r, opts.where)) ?? null;
         },
-        async find(table: string, opts: { where?: Record<string, unknown> }) {
-            return tableOf(table).filter((r) => matches(r, opts.where ?? {}));
+        async find(table: string, opts: { where?: Record<string, unknown>; limit?: number }) {
+            // The caller's bound is applied AFTER the filter and BY PRESENCE —
+            // a double that silently ignores `limit` answers with more rows
+            // than the caller asked for and reads as a passing query
+            // (`check:objectql-double-limit`).
+            const hits = tableOf(table).filter((r) => matches(r, opts?.where ?? {}));
+            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
         },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
