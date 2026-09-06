@@ -3899,6 +3899,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/pm/dispatch-gates.mjs', 'selfTestOnlyCallables', true],
   ['scripts/pm/dispatch-gates.mjs', 'maskSelfTests', true],
   ['scripts/pm/dispatch-gates.mjs', 'selfTestCaseLines', true],
+  ['scripts/pm/dispatch-gates.mjs', 'selfTestOnlyInvocation', true],
 ];
 
 /**
