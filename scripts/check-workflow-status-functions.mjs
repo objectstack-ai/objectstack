@@ -373,7 +373,8 @@ function selfTest() {
   try {
     // ── 1. A violating sample must go red ────────────────────────────────────
     //
-    // Verbatim shape of publish-smoke.yml:98 as #5343 found it.
+    // Verbatim shape of `.github/workflows/publish-smoke.yml` as #5343 found
+    // it, at line 98 then.
     battery('1. A violating sample must go red');
     const violating = makeRoot({
       '.github/workflows/publish-smoke.yml': `name: Publish Smoke
