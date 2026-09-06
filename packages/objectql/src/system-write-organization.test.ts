@@ -472,7 +472,17 @@ describe('#14936 the published recognizer for the org-less system-write refusal'
     ['a DIFFERENT engine refusal', Object.assign(new Error('dup'), { code: 'DUPLICATE_RECORD' })],
     ['a prefix lookalike', Object.assign(new Error('x'), { code: 'ERR_SYSTEM_WRITE_ORGANIZATION' })],
     ['a suffix lookalike', Object.assign(new Error('x'), { code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED_V2' })],
-    ['the code in the wrong case', Object.assign(new Error('x'), { code: 'err_system_write_organization_required' })],
+    // DERIVED from the constant, never spelled. A lowercase literal in a `code`
+    // position is a real `check:error-code-casing` finding (ADR-0112 D1), and the
+    // gate cannot tell a negative fixture from a real emission - it classified this
+    // very site as `(emission)`. Deriving it is not an opt-out: the gate's own
+    // output says a code value with NO literal at the position is out of reach for
+    // its patterns BY CONSTRUCTION. It also makes the fixture track the constant
+    // instead of restating it - the same argument this card makes about consumers
+    // re-spelling literals, applied to its own test.
+    ['the code in the wrong case', Object.assign(new Error('x'), {
+      code: SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE.toLowerCase(),
+    })],
   ])('refuses %s', (_label, value) => {
     expect(isSystemWriteOrganizationRequiredError(value)).toBe(false);
   });
