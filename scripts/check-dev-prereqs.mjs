@@ -285,11 +285,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '14. Every other way the freshness half can lose its subject is red too.': 4,
   '15. The hash reads the inputs it claims to. A global build input (from': 3,
   '16. Existence outranks freshness: a workspace that is not built reports': 4,
+  '17. The DECLARATIONS stamp (#14985), whose only job is to be written by a': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -993,6 +994,46 @@ function selfTest() {
     const halfRed = capture(() => report(v));
     expect('precedence/verdict-lines', halfRed.text.split('\n').filter((l) => l.startsWith('✗')).length, 1);
     expect('precedence/is-the-build-one', halfRed.text.includes('The workspace is not built'), true);
+
+    // 17. The DECLARATIONS stamp (#14985), whose only job is to be written by a
+    //     build that emitted `.d.ts` and NOT by one that skipped them. Nothing
+    //     in this file reads it — `distIsStale` does — so its whole value is
+    //     that OS_SKIP_DTS=1 leaves it alone. A stamp written unconditionally
+    //     here would restore, one file over, exactly the false green the mtime
+    //     rule was chosen over `.build-input-hash` to avoid.
+    battery('17. The DECLARATIONS stamp (#14985), whose only job is to be written by a');
+    const dts = amplifierFixture('dts');
+    const dtsSpec = path.join(dts, 'packages/spec');
+    capture(() => stamp(dts, dtsSpec, ['packages/spec']));
+    expect('dts/full-build-stamps', inspectDeclarationStamp(dts, dtsSpec).state, 'match');
+    expect('dts/reports-both-digests', inspectDeclarationStamp(dts, dtsSpec).recorded, buildInputHash(dts, dtsSpec));
+
+    write(dts, 'packages/spec/src/index.ts', 'export const token = 3;\n');
+    const moved = inspectDeclarationStamp(dts, dtsSpec);
+    expect('dts/source-edit-is-mismatch', moved.state, 'mismatch');
+    expect('dts/mismatch-shows-both', moved.recorded !== moved.actual && moved.actual !== null, true);
+
+    // The whole point: re-stamping under the flag must NOT adopt the new digest.
+    const previousFlag = process.env.OS_SKIP_DTS;
+    try {
+      process.env.OS_SKIP_DTS = '1';
+      capture(() => stamp(dts, dtsSpec, ['packages/spec']));
+    } finally {
+      if (previousFlag === undefined) delete process.env.OS_SKIP_DTS;
+      else process.env.OS_SKIP_DTS = previousFlag;
+    }
+    expect('dts/skip-dts-does-not-refresh', inspectDeclarationStamp(dts, dtsSpec).state, 'mismatch');
+    // …while the JS half, which that build really did re-emit, is refreshed.
+    expect('dts/skip-dts-still-stamps-js', inspect(dts, ['packages/spec']).freshness[0]?.state, 'fresh');
+
+    // No evidence and unreadable evidence are the same answer, and it is never
+    // an acquittal (#4690).
+    const noDts = amplifierFixture('no-dts-stamp');
+    const noDtsSpec = path.join(noDts, 'packages/spec');
+    expect('dts/absent-is-unstamped', inspectDeclarationStamp(noDts, noDtsSpec).state, 'unstamped');
+    expect('dts/absent-computes-nothing', inspectDeclarationStamp(noDts, noDtsSpec).actual, null);
+    write(noDts, 'packages/spec/dist/' + DTS_STAMP_BASENAME, 'not-a-hash\n');
+    expect('dts/garbled-is-unstamped', inspectDeclarationStamp(noDts, noDtsSpec).state, 'unstamped');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1055,7 +1096,7 @@ function selfTest() {
     console.error('');
     return 1;
   }
-  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (16 cases), plus the shared workspace enumerator.');
+  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (17 cases), plus the shared workspace enumerator.');
   selfTestReachedVerdict = true;
   return 0;
 }
