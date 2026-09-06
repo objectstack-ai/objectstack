@@ -165,8 +165,14 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     // control cannot be satisfied by one column shape for everything either.
     expect(sqlColumn('single_lookup')).toBe('VARCHAR(255)');
     expect(tsColumn('single_lookup')).toBe("table.string('single_lookup')");
-    expect(sqlColumn('single_text')).toBe('VARCHAR(255)');
-    expect(tsColumn('single_text')).toBe("table.string('single_text')");
+    // #16091 — `text` is an unbounded TEXT column now, which is what
+    // `createColumn`'s text-family arm builds for every unkeyed column. The
+    // control is unweakened by that for exactly the reason the `lookup` note
+    // above gives: what it discriminates is scalar-vs-JSON, and TEXT is scalar.
+    expect(sqlColumn('single_text')).toBe('TEXT');
+    expect(tsColumn('single_text')).toBe("table.text('single_text')");
+    // …and it still discriminates: the scalar answer is not the JSON one.
+    expect(sqlColumn('single_text')).not.toBe(sqlColumn('multi_text'));
     expect(sqlColumn('single_file')).toBe('VARCHAR(2048)');
     expect(tsInterfaceType('single_lookup')).toBe('string');
   });
@@ -285,8 +291,8 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     // this card does NOT touch is present in both outputs. Without it, "does
     // not contain" would pass on an empty string.
     expect(other).toContain('CREATE TABLE IF NOT EXISTS "probe" (');
-    expect(other).toContain('"t" VARCHAR(255)');
-    expect(otherTs).toContain("table.string('t')");
+    expect(other).toContain('"t" TEXT');
+    expect(otherTs).toContain("table.text('t')");
 
     // A RENDERED string (prefix + counter + suffix), never an integer sequence.
     expect(other).toContain('"a" VARCHAR(255)');

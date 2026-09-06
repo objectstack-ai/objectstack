@@ -396,7 +396,7 @@ describe('screen headless satisfaction (#15705)', () => {
      * The record-change trigger's shape, pinned for the MECHANISM as well as
      * the outcome: it sets `params` to the SAME object it sets as `record`
      * (`record-change-trigger.ts`), so `params` is emphatically NOT empty — it
-     * pauses because every key is identity-equal to the record's own value, not
+     * pauses because every key still holds the record's own value, not
      * because there was nothing to read.
      */
     it('CONTROL — record-change trigger shape: params IS the record, and it still pauses', async () => {

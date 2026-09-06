@@ -21,6 +21,8 @@
  * caller.
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 import type { ScreenFieldSpec, ScreenSpec } from '@objectstack/spec/contracts';
 import type { FieldErrorCode } from '@objectstack/spec/api';
 
@@ -195,23 +197,42 @@ const NOTHING_SUPPLIED: HeadlessScreenVerdict = { satisfied: false, supplied: []
  *
  *  - the record has no such key at all ⇒ the record leg cannot be the source;
  *  - the record HAS the key but `params` holds a different value ⇒ the
- *    caller's bag overwrote it. The record spread copies the record's own value
- *    by reference/primitive, so a run that supplied nothing is `Object.is`-equal
- *    here. Equality is therefore "indistinguishable", not "caller-set".
+ *    caller's bag overwrote it. The record spread copies the record's own
+ *    value, so a run that supplied nothing carries the row's value here.
+ *    Equality is therefore "indistinguishable", not "caller-set".
  *
  * The ambiguous case (same key, same value) resolves to NOT caller-supplied,
  * which costs a headless run a pause it might have been allowed to skip and
  * costs an interactive run nothing. That asymmetry is deliberate: every
  * uncertainty in this module must land on today's behaviour.
  *
- * ⚠️ **The identity leg is weaker across a durable resume.** A suspended run
- * persists its `context` as JSON (`suspended-run-store.ts`), so a run continued
- * from the store judges against a `JSON.parse`d copy: a NON-primitive column
- * value (an array, an object) is no longer `Object.is`-equal to the one in
- * `params`, and a later wizard screen colliding with such a column can read as
- * caller-supplied. Primitive columns are unaffected. Stated, not fixed here —
- * the remedy is value comparison rather than identity, which is a different
- * change and has its own card.
+ * **The record leg compares by VALUE, and had to (#15812).** Written as
+ * `Object.is` it asked about reference identity, which is real in memory — the
+ * record spread copies by reference — and is destroyed by persistence. A
+ * suspended run persists its `context` as JSON (`suspended-run-store.ts`:
+ * `JSON.stringify` on save, `parseJson` on load) and `resumeInternal` continues
+ * the run with the parsed value; `loadSuspendedRunStrict` prefers the store
+ * over the hot cache whenever one is wired, so this needs no process restart.
+ * After that round trip a NON-primitive column value (an array, an object) is
+ * equal but no longer identical, the record leg could not disprove it, and a
+ * later all-optional screen was SKIPPED on a run that had supplied nothing —
+ * measured end to end through a wired store, which is the failure #15705 exists
+ * to prevent. Primitive columns were never affected (`Object.is('x','x')` is
+ * true across a round trip), which is exactly why the hole was invisible to
+ * every in-memory unit test.
+ *
+ * `isDeepStrictEqual` compares primitives with `Object.is` itself, so this is a
+ * strict WIDENING of the old predicate: every pair the identity check called
+ * equal it still calls equal, plus the structurally-identical non-primitives.
+ * The widened set is "not caller-supplied", i.e. more pauses, so the change can
+ * only move runs toward this module's standing direction. The price is that a
+ * caller who genuinely re-sends a value identical to the row's is no longer
+ * distinguishable from the seed and gets the screen rendered — a lost skip, not
+ * a lost run, and the same trade every other leg here already makes.
+ *
+ * ⛔ The row-id leg above deliberately keeps `Object.is`: a row id is a scalar
+ * by construction (`params.recordId` is seeded as one, `record.id` is one), so
+ * serialisation cannot defeat it and there is nothing there to widen.
  */
 function callerSupplied(
   name: string,
@@ -251,7 +272,10 @@ function callerSupplied(
   if (seededRowIds.some((id) => id !== undefined && Object.is(value, id))) return false;
 
   if (!record || !Object.prototype.hasOwnProperty.call(record, name)) return true;
-  return !Object.is(value, record[name]);
+  // BY VALUE, not by identity (#15812) — see the note above. `Object.is` here
+  // read as "the caller overwrote the column" for any non-primitive value that
+  // had been through the durable store's JSON round trip.
+  return !isDeepStrictEqual(value, record[name]);
 }
 
 /**

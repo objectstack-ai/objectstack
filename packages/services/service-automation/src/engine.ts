@@ -5508,6 +5508,47 @@ export class AutomationEngine implements IAutomationService {
             // it leaves behind is `restoreConsumedSuspension`, and the state
             // itself is named on the result (`status: 'stranded'`, below).
             const stepCountAtPause = run.steps.length;
+            // [#15660] …and the variables AT THE PAUSE, for the same reason and
+            // at the same moment, because `run.steps.length` is not the only
+            // thing the failed attempt can move under the journal.
+            //
+            // `journalConsumedSuspension` promises its snapshot VERBATIM — "the
+            // state at the pause, not the state the failed attempt was working
+            // from" — and delivered that only for the TOP-LEVEL keys. The scope
+            // the downstream nodes run against is built one line below as
+            // `new Map(Object.entries(run.variables))`, which copies the keys
+            // and SHARES every value object. A node that holds state in the
+            // scope and updates it in place — `map` keeps `<nodeId>.$mapState`
+            // and is, by a re-derived census, the only executor that does —
+            // therefore writes straight through into the object the journal
+            // later hands an operator as the pause.
+            //
+            // Measured, not read (`consumed-suspension-snapshot-aliasing.test.ts`):
+            // the durable row held `started: 1` at the pause and the restore put
+            // back `started: 99`. ⛔ And the two placements the card proposed
+            // are both refuted by that same measurement:
+            //   - "deep copy at SNAPSHOT time" — `InMemorySuspendedRunStore`
+            //     already JSON round-trips on save AND load, so this run's
+            //     variables ARE a private deep copy before a single downstream
+            //     node runs. It reproduces anyway: the aliasing that carries the
+            //     mutation is minted HERE, on the resume, not at the suspend.
+            //   - "copy at RESTORE time" — the mutation lands before the node
+            //     throws, so the journal is already corrupt when it is written;
+            //     anything copied at or after that point copies the corruption.
+            // The copy has to be taken before the failed attempt runs, which is
+            // this line.
+            //
+            // Cost, measured rather than assumed (the card flagged it NOT
+            // MEASURED): 5.8 µs for a typical scope, and one suspend+resume
+            // round trip against a configured store already performs FOUR full
+            // clones of this same payload (save ×1, load ×2, recordTerminal ×1),
+            // so this is a fifth on a path whose production cost is a durable
+            // round trip. ⛔ Deliberately NOT the JSON clone the journal's own
+            // docblock ruled out: that objection was that it would run INSIDE a
+            // catch arm already handling a failure, where a circular value would
+            // throw the operator's repair away. Here it is on the happy path,
+            // where a throw is just a value we decline to copy.
+            const variablesAtPause = this.cloneVariablesAtPause(run, runId);
 
             // Consume the suspension *before* running downstream work — a run
             // resumes exactly once per pause, and a duplicate resume after a
@@ -5760,7 +5801,12 @@ export class AutomationEngine implements IAutomationService {
                 // stays `failed`, no suspension exists after this line, and the
                 // ordering above is untouched. It is the evidence a repair
                 // needs, written at the only moment it still exists.
-                const consumed = this.journalConsumedSuspension(run, stepCountAtPause, errorMessage);
+                const consumed = this.journalConsumedSuspension(
+                    run,
+                    stepCountAtPause,
+                    errorMessage,
+                    variablesAtPause,
+                );
                 // [#15555] From the line above, "this run is repairable" is a
                 // FACT: a snapshot exists and `restoreConsumedSuspension` puts
                 // it back. Everything from here to the `status: 'stranded'`
@@ -6277,34 +6323,83 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#15660] The pause's variables, decoupled from the scope the resume is
+     * about to hand the downstream nodes.
+     *
+     * Called once per resume of a suspended run, BEFORE the failed attempt can
+     * run — see the call site for why no later placement works and for the
+     * measured cost. A JSON clone specifically, not `structuredClone`: the
+     * durable row for this same pause was written through `JSON` by the store,
+     * so this keeps the hot journal and the durable row the same shape. A
+     * `Date` that survived here as a `Date` while the row held a string would
+     * make `restoreConsumedSuspension`'s two sources disagree about the pause
+     * they both claim to describe.
+     *
+     * A value JSON cannot carry (a cycle) costs the copy, never the repair: the
+     * fallback is the aliased object this method exists to replace, which is
+     * exactly the behaviour that shipped before, so the operator exit is no
+     * worse than it was. It is reported at `warn` — the exit still works, and
+     * what it puts back may name post-resume state.
+     */
+    private cloneVariablesAtPause(run: SuspendedRun, runId: string): SuspendedRun['variables'] {
+        try {
+            return JSON.parse(JSON.stringify(run.variables)) as SuspendedRun['variables'];
+        } catch (err) {
+            // #6299 family — the thrown text is not ours to shape, so it rides
+            // the structured slot and never the message.
+            this.logger.warn(
+                `[automation] run '${runId}': could not copy the paused variables before resuming, so if this ` +
+                    `resume strands the run, the suspension an operator restores may carry state this attempt ` +
+                    `wrote rather than the state at the pause. The run resumes normally either way.`,
+                describeThrownForLog(err),
+            );
+            return run.variables;
+        }
+    }
+
+    /**
      * Record the suspension a resume consumed before its downstream node threw
      * (#13909) — the one and only producer of a {@link ConsumedSuspension}.
      *
      * VERBATIM, and that word is load-bearing:
      *
-     *  - `run.variables` is the pause's OWN snapshot. The resume's signal was
-     *    folded into a separate `Map` built from it, never into this object, so
-     *    what is journalled is the state at the pause, not the state the failed
-     *    attempt was working from. It is the same object the durable paused row
-     *    was written from at suspend time.
+     *  - `variablesAtPause` is the pause's OWN snapshot, deep-copied by
+     *    {@link cloneVariablesAtPause} before the failed attempt ran. The
+     *    resume's signal was folded into a separate `Map` built from
+     *    `run.variables`, never into this object, so what is journalled is the
+     *    state at the pause, not the state the failed attempt was working from.
+     *
+     *    ⚠️ [#15660] That last sentence used to be written against
+     *    `run.variables` itself, and was true only of its TOP-LEVEL keys. The
+     *    scope the downstream nodes run against is `new Map(Object.entries(
+     *    run.variables))` — the keys are copied, every value object is SHARED —
+     *    so an executor that keeps state in the scope and updates it in place
+     *    (`map`'s `<nodeId>.$mapState`) wrote through into this snapshot, and
+     *    the operator exit handed back post-resume state stamped as the pause.
+     *    Measured end to end in `consumed-suspension-snapshot-aliasing.test.ts`.
+     *    ⛔ Do not route the copy back to this method: by the time this runs the
+     *    mutation has already landed (the node mutates, THEN throws), so a copy
+     *    taken here copies the corruption. It has to be taken before the failed
+     *    attempt runs, which is where the caller takes it.
      *  - `run.steps` is the live array `traverseNext` appended to, so it is
      *    trimmed back to `stepCountAtPause` — the failed attempt's steps are
      *    NOT part of the thing an operator puts back.
      *  - Everything else (`nodeId`, `nodeType`, `context`, `correlation`,
      *    `screen`, `startedAt`, `startTime`) is carried across untouched.
      *
-     * Shallow by design, not lazily: a JSON clone here could throw on a
-     * circular value INSIDE a catch arm that is already handling a failure, and
-     * the fields it would deep-copy are exactly the ones the durable store
-     * already round-tripped through JSON at suspend time.
+     * Still shallow HERE, and for the reason it always was: a JSON clone in
+     * this method could throw on a circular value inside a catch arm that is
+     * already handling a failure. The one field that needed copying is copied
+     * by the caller instead, on the happy path, where a throw costs nothing.
      */
     private journalConsumedSuspension(
         run: SuspendedRun,
         stepCountAtPause: number,
         error: string,
+        variablesAtPause: SuspendedRun['variables'],
     ): ConsumedSuspension {
         const consumed: ConsumedSuspension = {
-            run: { ...run, steps: run.steps.slice(0, stepCountAtPause) },
+            run: { ...run, steps: run.steps.slice(0, stepCountAtPause), variables: variablesAtPause },
             consumedAt: new Date().toISOString(),
             error,
             // [#13937] `recordLog` settles this when its write settles.

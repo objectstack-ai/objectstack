@@ -9573,6 +9573,12 @@ export const SWEEP_COUNT_KEYS = [
   // state's population missing from the sweep.
   'closedPages',
   'closedWindowTruncated',
+  // H22's REACH (#16217) — how far back the pages actually got, as a date. It
+  // rides the enumerated contract for the same reason the pair above does: a
+  // reading gathered in the pager and dropped on the way to the summary is a
+  // measurement nobody can act on, and this is the one number that separates
+  // "everything closed since the 4th was judged" from "the pass was short".
+  'closedReachedAt',
   'commitPages',
   'commitWindowTruncated',
   'openListingPages',
@@ -9743,6 +9749,12 @@ export function summaryLine(counts, findingCount) {
       ceiling: CLOSED_ISSUE_WINDOW_PAGE_CEILING,
       truncated: counts.closedWindowTruncated,
       drops: 'a card that closed earlier than what those pages reached',
+      // #16217 — the horizon actually REACHED, every run, both ways. This is
+      // the clause's own answer to the state that produced the card: the old
+      // sentence declared its shortfall and prescribed a remedy while saying
+      // nothing about how short it was, so nobody could tell a pass an hour
+      // short of the horizon from one that read a third of it.
+      reached: counts.closedReachedAt ?? null,
     })} It is a CLOSURE horizon: rows are selected on \`closed_at\`, while paging is bounded by ` +
     `\`updated_at\` — the stream is consumed by closed-issue ACTIVITY (~${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY}/day, ` +
     `measured ${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT}), not by closures (~11/day), which is why the ` +
@@ -11735,6 +11747,9 @@ async function sweep(options = {}) {
     // completed window, so the pair cannot be misread as a clean pass.
     closedPages: 0,
     closedWindowTruncated: false,
+    // ⛔ null, not a date: a sweep that throws before H22's pass reached
+    // nowhere, and the clause must say so rather than render today.
+    closedReachedAt: null,
     commitPages: 0,
     commitWindowTruncated: false,
     openListingPages: 0,
@@ -11948,6 +11963,49 @@ export function pageExhaustsWindow(batch, horizonMs, field = 'updated_at') {
 }
 
 /**
+ * How far back this page actually REACHED — the oldest readable ordering stamp
+ * on it, in ms, or `null` when the page carried none (#16217).
+ *
+ * ## Why this is not `pageExhaustsWindow`'s reading, in one sentence each
+ *
+ * The stop predicate above answers "may I stop?" and must be CONSERVATIVE: it
+ * reads the LAST row only and refuses to stop on an unreadable stamp, because
+ * treating one bad row as old would end the pass early. This answers a
+ * different question — "how far did I get?" — and there the honest answer is a
+ * minimum over every stamp that could be read, since an unreadable last row
+ * must not erase a reach the rest of the page proves. Same page, two readings,
+ * and collapsing them would make one of the two wrong.
+ *
+ * ⛔ It is a REPORT, never a bound: nothing pages on it. A pass that stopped
+ * because its quota ran out still reached exactly this far, and saying so as a
+ * date is what turns "TRUNCATED" from a complaint into a reading — the caller
+ * hands it to `describeWindowBound` as `reached`.
+ *
+ * @param {any[]} batch — one page of rows.
+ * @param {string|((row: any) => string|undefined)} field — the ordering stamp.
+ */
+export function oldestPageStamp(batch, field = 'updated_at') {
+  const rows = Array.isArray(batch) ? batch : [];
+  let oldest = null;
+  for (const row of rows) {
+    const raw = typeof field === 'function' ? field(row) : row?.[field];
+    const at = Date.parse(raw ?? '');
+    if (!Number.isFinite(at)) continue;
+    if (oldest === null || at < oldest) oldest = at;
+  }
+  return oldest;
+}
+
+/**
+ * That reach, as the `YYYY-MM-DD` date the summary line prints — `null` stays
+ * `null`, because a pass that read no dateable row has no reach to state and
+ * rendering one would be the invention this whole family refuses.
+ */
+export function reachedDate(ms) {
+  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
+}
+
+/**
  * The ONE disclosure sentence every bounded pass in this file owes: which of
  * the two bounds ended it.
  *
@@ -11969,9 +12027,29 @@ export function pageExhaustsWindow(batch, horizonMs, field = 'updated_at') {
  *                   a created-time horizon of 8 days would have discarded 104
  *                   of 354 open cards, the oldest of them 76.9 days old).
  *
+ * ## `reached` — the third thing a reader needs, and the one that retires a
+ * remedy sentence (#16217)
+ *
+ * `pages` says what the pass COST and `truncated` says which bound ended it.
+ * Neither says HOW FAR it got, and that is the number a seat acts on: a
+ * truncated pass whose reach is a date is a reading ("everything closed since
+ * the 4th was judged, earlier was not"), while the same pass without one is
+ * only a complaint. So a caller that can measure its reach passes it, and the
+ * clause then states it on EVERY run — a coverage number printed only when it
+ * is bad is a coverage number nobody can trend.
+ *
+ * ⚖️ Passing it also RETIRES this clause's `the ceiling needs raising` remedy,
+ * deliberately and by coupling rather than by a second flag: that sentence was
+ * the only thing a truncated pass used to say about what to do, and it was
+ * wrong as often as not — a ceiling is a quota budget, and a pass that outgrew
+ * it is usually reporting a stream that needs narrowing, not a bigger bill. A
+ * clause that names the date it reached does not need to be told what to
+ * conclude. Callers with no reach to state keep the old sentence, because for
+ * them it is still the only actionable half.
+ *
  * @param {{ name: string, kind?: 'time'|'exhaustive', horizon?: number,
  *   unit?: string, pages?: number, ceiling?: number|null, truncated?: boolean,
- *   drops?: string }} bound
+ *   drops?: string, reached?: string|null }} bound
  * @returns {string} the clause, or '' when there is nothing to disclose.
  */
 export function describeWindowBound(bound) {
@@ -11985,16 +12063,20 @@ export function describeWindowBound(bound) {
     ceiling = null,
     truncated = false,
     drops = 'a row older than what those pages reached',
+    reached = null,
   } = bound;
   const exhaustive = kind === 'exhaustive';
+  // Beside the day count, where the two numbers a reader compares — the horizon
+  // ASKED for and the one actually REACHED — sit next to each other.
+  const reach = reached ? `, reaching back to ${reached}` : '';
   const head = exhaustive
-    ? `${name} is an EXHAUSTIVE listing, read in ${pages} page(s)`
-    : `${name} is a TIME cap of ${horizon} ${unit}, read in ${pages} page(s)`;
+    ? `${name} is an EXHAUSTIVE listing${reach}, read in ${pages} page(s)`
+    : `${name} is a TIME cap of ${horizon} ${unit}${reach}, read in ${pages} page(s)`;
   if (truncated) {
     return (
       `${head} — ⛔ TRUNCATED at the ${ceiling}-page quota ceiling` +
       `${exhaustive ? '' : ' BEFORE reaching that horizon'}, so this pass is a page cap and ` +
-      `${drops} is invisible; the ceiling needs raising.`
+      `${drops} is invisible${reached ? '' : '; the ceiling needs raising'}.`
     );
   }
   // ⚠️ "boundary reached", NOT H8's "horizon reached", and the difference is
@@ -12421,21 +12503,65 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  *
  * ⚠️ Cost note: 46% of the rows this stream returns are PULL REQUESTS, filtered
  * out after paging. The horizon is therefore reached in roughly twice the pages
- * a card-only stream would need — ~6 pages for 3 days at the measured rate.
+ * a card-only stream would need. ⚖️ The `~6 pages for 3 days` this note used to
+ * quote was the pinned divisor's arithmetic and it never described this board:
+ * measured 2026-09-06 the horizon sits at ~13 pages, because the LEADING rows
+ * run at ~414 updates/day against the pinned 188.3 (the derivation is in
+ * `CLOSED_ISSUE_WINDOW_PAGE_CEILING`, and it is why the old 12 bound).
  * Constants here are deliberately NOT self-updating (H8's rule): they are
- * CHECKED against what a sweep observes, never overwritten by it.
+ * CHECKED against what a sweep observes, never overwritten by it — which is
+ * why the divisor below still reads 188.3 and this note states the disagreement
+ * instead of quietly editing it.
  */
 export const CLOSED_ISSUE_WINDOW_DAYS = 3;
 
 /**
  * The quota backstop behind H22's time cap — see `CLOSED_ISSUE_WINDOW_DAYS`.
  *
- * At the measured ~188 closed-issue updates/day the 3-day horizon needs ~6
- * pages; the ceiling is 12, i.e. it absorbs a board twice as busy before it
- * binds. If it ever DOES bind, this window is a page cap again and the summary
- * line says so out loud rather than reporting a short window as a complete one.
+ * ## The ceiling that BOUND, and why 12 was never headroom (#16217)
+ *
+ * 12 was derived as "twice the ~6 pages the pinned ~188 updates/day needs".
+ * Both halves of that were wrong on this board at once, and the sweep said so
+ * on every run for as long as anyone has looked: two live read-only sweeps on
+ * 2026-09-06 printed `TRUNCATED at the 12-page quota ceiling BEFORE reaching
+ * that horizon`. The pinned divisor is a floor rather than a rate — it was
+ * measured at depth, over a 4.2-to-5.5-day span whose older half is quiet — so
+ * a ceiling sized on it is sized on the SLOWEST part of the stream, while the
+ * pages a 3-day horizon actually costs are all taken from the fastest part.
+ *
+ * Re-measured 2026-09-06T16:5xZ over the live endpoint, one page each at
+ * depth, reading the OLDEST `updated_at` on the page:
+ *
+ *   page  1 -> 2026-09-06T08:25:42Z    page 20 -> 2026-09-01T06:54:23Z
+ *   page  6 -> 2026-09-05T05:40:44Z    page 30 -> 2026-08-28T00:54:22Z
+ *   page 12 -> 2026-09-03T17:41:14Z    page 40 -> 2026-08-24T21:44:57Z
+ *
+ * The 3-day horizon that day sat at ~2026-09-03T16:5xZ — PAST page 12's oldest
+ * row by about an hour. So the old ceiling missed the horizon by roughly one
+ * page, and the leading 1,200 rows ran at ~414 updates/day against the pinned
+ * 188.3: the divisor is a factor of ~2.2 light exactly where it is spent.
+ *
+ * ## 40, and the unit it is chosen in
+ *
+ * 4,000 rows reached 12.8 days on the read above (~312/day averaged over that
+ * depth), against a 3-day horizon: ~4.3x headroom, and headroom measured on
+ * the whole depth the cap can actually be spent on rather than on a pinned
+ * rate. 40 REST calls is also the budget this sweep gets for the pass, which
+ * is the OTHER thing a quota backstop is: ⛔ not a number to raise again the
+ * next time it binds. A pass that binds it is reporting that the board's
+ * closed-issue activity has grown past what one sweep can page — the remedy
+ * then is a narrower stream (a `closed_at`-ordered listing where the API grows
+ * one), never a bigger bill.
+ *
+ * ⚖️ HISTORY: 2 pages (#10688) -> 4 (#11118) -> 12 (#13606, when the boundary
+ * became a horizon and this became a backstop) -> 40. Only the last of those
+ * was chosen against a measurement of the depth it buys.
+ *
+ * If it ever DOES bind, this window is a page cap again and the summary line
+ * says so out loud rather than reporting a short window as a complete one —
+ * and it says how far it got, as a date, which is the reading a seat acts on.
  */
-export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 12;
+export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 40;
 
 /**
  * The rate H22's window is stated in, MEASURED — and the reason it is carried
@@ -12549,18 +12675,37 @@ export function resolveClosureFloor(env = {}) {
 
 const CLOSED_FLOOR = resolveClosureFloor(process.env);
 
-async function listRecentlyClosedIssues(stats = {}, nowMs = Date.now()) {
+/**
+ * One page of H22's closed-card stream — named for `pmLabelListingPath`'s
+ * reason, and because it is the seam the self-test drives synthetic pages
+ * through (#16217). Pinning this loop by re-typing it in the test would pin the
+ * copy rather than the call, which is the failure this file names by name.
+ */
+function closedWindowPagePath(repo, page) {
+  return `/repos/${repo}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`;
+}
+
+async function listRecentlyClosedIssues(
+  stats = {},
+  nowMs = Date.now(),
+  fetchPage = (page) => rest(closedWindowPagePath(OWNER_REPO, page)),
+) {
   const horizon = closedWindowHorizonMs(nowMs);
   const out = [];
   let reachedHorizon = false;
+  // How far back the pages actually got, as a running minimum over every
+  // readable `updated_at` — the reading the census clause prints on every run
+  // (#16217). Tracked across pages rather than taken from the last one because
+  // a final page of unreadable stamps must not erase a reach already proven.
+  let reachedMs = null;
   let page = 1;
   for (; page <= CLOSED_ISSUE_WINDOW_PAGE_CEILING; page++) {
-    const batch = await rest(
-      `/repos/${OWNER_REPO}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
-    );
+    const batch = await fetchPage(page);
     // Selection reads `closed_at`; paging (below) reads `updated_at`. They are
     // deliberately different fields — see `pageExhaustsWindow`.
     out.push(...batch.filter((i) => !i.pull_request && issueClosedWithinWindow(i, horizon)));
+    const oldest = oldestPageStamp(batch, 'updated_at');
+    if (oldest !== null && (reachedMs === null || oldest < reachedMs)) reachedMs = oldest;
     if (pageExhaustsWindow(batch, horizon, 'updated_at')) {
       reachedHorizon = true;
       break;
@@ -12568,6 +12713,10 @@ async function listRecentlyClosedIssues(stats = {}, nowMs = Date.now()) {
   }
   stats.closedPages = Math.min(page, CLOSED_ISSUE_WINDOW_PAGE_CEILING);
   stats.closedWindowTruncated = !reachedHorizon;
+  // ⛔ `null` when nothing dateable was read, never today's date: an empty board
+  // and a board whose first page is unreadable both reached NOWHERE, and a
+  // clause that dated them would be the #4690 inversion in a new costume.
+  stats.closedReachedAt = reachedDate(reachedMs);
   return out;
 }
 
@@ -14055,7 +14204,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-half-states self-test reached its verdict';
 
-function selfTest() {
+async function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
   // -- Summary-disclosure cases go through THIS, never through the raw line ---
@@ -16694,6 +16843,7 @@ function selfTest() {
   const richLine = summaryLine({
     repo: 'o/r', issues: 3, unscoped: 4, prs: 2, merged: 5,
     closed: 200, closedFloor: '2026-08-28', closedPages: 12, closedWindowTruncated: true,
+    closedReachedAt: '2026-09-03',
     mergedPages: 12, mergedWindowTruncated: true,
     commits: 300, commitBindings: 51, commitBindingMessages: 44, commitPages: 12, commitWindowTruncated: true,
     openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'],
@@ -17987,8 +18137,109 @@ function selfTest() {
   t('open summary: …and a complete pass says none of that', saidBy('openListings', win13606({ openListingPages: 11 })).includes('Ceiling-bound listing(s)'), false);
   // ⛔ No bare-number rendering of a capped pass: every truncated window must
   // carry the word, in every medium the summary feeds.
-  t('summary: a capped H22 pass never reads as a plain page count', /H22's closed-card window is a TIME cap of 3 day\(s\), read in 12 page\(s\)\./u.test(saidBy('h22Window', win13606({ closedPages: 12, closedWindowTruncated: true }))), false);
+  t('summary: a capped H22 pass never reads as a plain page count', new RegExp(`H22's closed-card window is a TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day\\(s\\), read in ${CLOSED_ISSUE_WINDOW_PAGE_CEILING} page\\(s\\)\\.`, 'u').test(saidBy('h22Window', win13606({ closedPages: CLOSED_ISSUE_WINDOW_PAGE_CEILING, closedWindowTruncated: true }))), false);
   t('summary: all three converted windows ride the enumerated contract', ['closedPages', 'closedWindowTruncated', 'commitPages', 'commitWindowTruncated', 'openListingPages', 'openListingsTruncated'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+
+  // ---- H22's REACH, and the ceiling that bound before the horizon (#16217) --
+  //
+  // The state this repairs was SELF-DECLARING and persisted anyway: two live
+  // read-only sweeps on 2026-09-06 printed `TRUNCATED at the 12-page quota
+  // ceiling BEFORE reaching that horizon`, with the remedy sentence ("the
+  // ceiling needs raising") already in the text. What no run ever printed is
+  // HOW SHORT the pass was — and that is the whole difference between a pass an
+  // hour shy of its horizon and one that read a third of it. So the repair is
+  // two-sided, and both sides are pinned here: the cap is sized against the
+  // depth it buys, and the clause reports the reach as a date on EVERY run.
+
+  // The reach reading. ⛔ Deliberately NOT the stop predicate's reading — the
+  // stop predicate is conservative on the LAST row so one bad stamp cannot end
+  // the pass early, while the reach is a minimum over everything readable so
+  // one bad last row cannot erase a reach the page already proved. Same page,
+  // two answers, and collapsing them would make one of the two wrong.
+  t('H22 reach: the oldest readable stamp on the page is the reach', oldestPageStamp(pg13606(100, 5)), Date.parse(ago13606(5)));
+  t('H22 reach: an unreadable LAST row does not erase it', oldestPageStamp([...pg13606(99, 5), { updated_at: 'nope' }]), Date.parse(ago13606(5)));
+  t('H22 reach: …while that same page does NOT stop the paging', pageExhaustsWindow([...pg13606(99, 5), { updated_at: 'nope' }], H13606), false);
+  t('H22 reach: a page with nothing dateable reached nowhere', oldestPageStamp([{ updated_at: 'nope' }, {}]), null);
+  t('H22 reach: an empty page reached nowhere', oldestPageStamp([]), null);
+  t('H22 reach: a non-array reached nowhere, and does not throw', oldestPageStamp(null), null);
+  t('H22 reach: the field is selectable, like the stop predicate\'s', oldestPageStamp([{ closed_at: ago13606(9) }], 'closed_at'), Date.parse(ago13606(9)));
+  t('H22 reach: it renders as a plain date, which is what a reader compares', reachedDate(Date.parse('2026-09-03T17:41:14Z')), '2026-09-03');
+  t('H22 reach: ⛔ nowhere renders as nothing, never as today', reachedDate(null), null);
+  t('H22 reach: …and an unusable number likewise', reachedDate(Number.NaN), null);
+
+  // ---- The three shapes, driven through the REAL pager on synthetic pages.
+  // The seam is `listRecentlyClosedIssues`'s page reader, so these cases pin
+  // the loop the sweep actually runs rather than a re-typed copy of it — the
+  // failure this file names by name in `pmLabelListingPath`.
+  const closedStream = (byPage) => async (page) => byPage[page - 1] ?? [];
+  const fullClosedPage = (daysAgo) =>
+    Array.from({ length: 100 }, (_, i) => closed13606(i, daysAgo, daysAgo));
+
+  // SHAPE 1 — the horizon reached UNDER the cap. The pass stops itself, and
+  // says so: three pages, no truncation, and a date for how far it got.
+  const reachedStats = {};
+  const reachedRows = await listRecentlyClosedIssues(
+    reachedStats,
+    NOW13606,
+    closedStream([fullClosedPage(1), fullClosedPage(2), fullClosedPage(5)]),
+  );
+  t('H22 pager: a page past the horizon ends the pass', reachedStats.closedPages, 3);
+  t('H22 pager: …and that is a boundary, not a ceiling', reachedStats.closedWindowTruncated, false);
+  t('H22 pager: …with the reach it actually got, as a date', reachedStats.closedReachedAt, reachedDate(Date.parse(ago13606(5))));
+  t('H22 pager: …and only the in-horizon closures are admitted', reachedRows.length, 200);
+  t('H22 pager: …the clause says the boundary was reached', saidBy('h22Window', win13606(reachedStats)).includes('boundary reached'), true);
+  t('H22 pager: …and states the reach beside the day count', saidBy('h22Window', win13606(reachedStats)).includes(`TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day(s), reaching back to ${reachedStats.closedReachedAt}`), true);
+
+  // SHAPE 1b — the teeth. A stream whose horizon sits on page 13 is the board
+  // measured 2026-09-06, and it is the run the old 12-page ceiling structurally
+  // could not finish: not late, TRUNCATED, four times a day.
+  const deepStats = {};
+  await listRecentlyClosedIssues(
+    deepStats,
+    NOW13606,
+    closedStream([...Array.from({ length: 12 }, (_, i) => fullClosedPage(0.2 * (i + 1))), fullClosedPage(5)]),
+  );
+  t('H22 pager: the 13th page the old 12-page ceiling could never reach ends the pass', deepStats.closedPages, 13);
+  t('H22 pager: …so the measured board now completes its horizon', deepStats.closedWindowTruncated, false);
+  t('H22 pager: …which the retired ceiling was one page short of', deepStats.closedPages > 12, true);
+
+  // SHAPE 2 — the cap biting FIRST. Every page still inside the horizon, so the
+  // pass runs out of quota; it must announce that AND say how far it got.
+  const cappedStats = {};
+  await listRecentlyClosedIssues(
+    cappedStats,
+    NOW13606,
+    closedStream(Array.from({ length: CLOSED_ISSUE_WINDOW_PAGE_CEILING + 5 }, (_, i) => fullClosedPage(i / 20))),
+  );
+  t('H22 pager: a stream that never crosses the horizon spends the whole cap', cappedStats.closedPages, CLOSED_ISSUE_WINDOW_PAGE_CEILING);
+  t('H22 pager: …and that is TRUNCATED, not a completed window', cappedStats.closedWindowTruncated, true);
+  t('H22 pager: …with the reach it got before the quota ran out', cappedStats.closedReachedAt, reachedDate(Date.parse(ago13606((CLOSED_ISSUE_WINDOW_PAGE_CEILING - 1) / 20))));
+  const cappedClause = saidBy('h22Window', win13606(cappedStats));
+  t('H22 pager: …the clause says TRUNCATED', cappedClause.includes('⛔ TRUNCATED'), true);
+  t('H22 pager: …names the ceiling that bound it', cappedClause.includes(`${CLOSED_ISSUE_WINDOW_PAGE_CEILING}-page quota ceiling`), true);
+  t('H22 pager: …states the reach anyway, which is what makes it a reading', cappedClause.includes(`reaching back to ${cappedStats.closedReachedAt}`), true);
+  // ⛔ The sentence #16217 retires: a truncated pass that names its reach needs
+  // no remedy prescribed for it, and the one it used to print was wrong as
+  // often as not — a ceiling is a budget, not a number to raise on every bind.
+  t('H22 pager: …and no longer prescribes raising the ceiling', cappedClause.includes('the ceiling needs raising'), false);
+  // …while the callers that CANNOT state a reach keep that sentence, because
+  // for them it is still the only actionable half. #16217 is one leg, not a
+  // rewording of the shared clause.
+  t('H22 pager: H23\'s truncated clause is untouched by that retirement', saidBy('h23Window', win13606({ commitPages: COMMIT_WINDOW_PAGE_CEILING, commitWindowTruncated: true })).includes('the ceiling needs raising'), true);
+  t('H22 pager: …and so is the open listings\' one', saidBy('openListings', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] })).includes('the ceiling needs raising'), true);
+
+  // SHAPE 3 — an empty board. ⛔ The one shape that must not be dated: it read
+  // nothing, so it reached nowhere, and a clause rendering today here would be
+  // #4690 in a new costume — an unread input reading as a complete one.
+  const emptyStats = {};
+  const emptyRows = await listRecentlyClosedIssues(emptyStats, NOW13606, closedStream([]));
+  t('H22 pager: an empty board yields no rows', emptyRows.length, 0);
+  t('H22 pager: …costs the one page it takes to learn that', emptyStats.closedPages, 1);
+  t('H22 pager: …is a clean pass, not a truncated one', emptyStats.closedWindowTruncated, false);
+  t('H22 pager: …and reached NOWHERE, which it states as no date at all', emptyStats.closedReachedAt, null);
+  t('H22 pager: …so the clause invents no date', saidBy('h22Window', win13606(emptyStats)).includes('reaching back to'), false);
+  t('H22 pager: …and still discloses which bound ended it', saidBy('h22Window', win13606(emptyStats)).includes('boundary reached'), true);
+  t('H22 pager: the reach rides the enumerated forwarding contract', SWEEP_COUNT_KEYS.includes('closedReachedAt'), true);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
@@ -20241,7 +20492,7 @@ if (isMain) {
     process.exit(2);
   }
   if (process.argv.includes('--self-test')) {
-    if (selfTest() !== SELF_TEST_VERDICT) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
       console.error(
         '\n✗ check-half-states self-test: selfTest() returned without reaching its verdict,\n'
           + 'so no success line was printed. Exiting 0 here would report a self-test\n'
