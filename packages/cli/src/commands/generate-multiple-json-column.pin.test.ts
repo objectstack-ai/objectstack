@@ -273,7 +273,9 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
   it('#14828 discharged — the five disputed SCALAR answers are the platform’s', () => {
     // A reference column holds the target's `id`: `table.string(name)`, knex's
     // varchar(255). `table.uuid` was the one HARD failure of the five — a
-    // platform id is 26 characters and Postgres refuses one in a `uuid` column.
+    // platform id is not a uuid, and its width is not a fixed number (driver-sql
+    // mints a 16-character nanoid, and stores a supplied id at whatever width
+    // the caller chose), so Postgres refuses one in a `uuid` column.
     expect(sqlColumn('single_lookup')).toBe('VARCHAR(255)');
     expect(tsColumn('single_lookup')).toBe("table.string('single_lookup')");
 

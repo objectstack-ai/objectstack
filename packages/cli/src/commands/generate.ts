@@ -992,9 +992,12 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  *   `lookup` /    VARCHAR(36) → VARCHAR(255), with the migration switch's
  *   `master_detail`             `table.uuid` corrected in the same breath. The
  *                 `uuid` half is the only HARD failure of the five: a platform
- *                 id is 26 characters (`createColumn`'s lookup arm says so and
- *                 spells one out — `01JQ8XKZ9M4N7P2R5T6V8W0Y3B`), and Postgres
- *                 refuses one in a `uuid` column with `22P02`. The width half
+ *                 id is NOT a uuid, and its width is not a fixed number at all
+ *                 (`createColumn`'s lookup arm states both): the driver mints a
+ *                 16-character nanoid when the caller supplies none, and stores
+ *                 a SUPPLIED id verbatim at whatever width the caller chose.
+ *                 Postgres refuses either in a `uuid` column with `22P02`. The
+ *                 width half
  *                 is the same rule for the whole REFERENCE_VALUE_TYPES class:
  *                 `user` and `tree` moved with them, because a reference column
  *                 holds the TARGET's `id` — which the driver itself emits as
@@ -1886,10 +1889,12 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // answer: `createColumn`'s `case 'lookup': case 'user':` is
         // `table.string(name)`, and `master_detail` reaches the same call
         // through its catch-all. `table.uuid` was the one HARD failure among
-        // this card's five rows — a platform id is 26 characters
-        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`, spelled out in that same driver arm),
-        // and Postgres refuses one in a `uuid` column with `22P02 invalid
-        // input syntax for type uuid` on the very first insert.
+        // this card's five rows — a platform id is NOT a uuid, and its width
+        // is not a fixed number at all: that same driver arm mints a
+        // 16-character nanoid when the caller supplies no id, and stores a
+        // SUPPLIED one verbatim at whatever width the caller chose. Postgres
+        // refuses either in a `uuid` column with `22P02 invalid input syntax
+        // for type uuid` on the very first insert.
         case 'lookup': case 'master_detail':
         case 'user': case 'tree':
         case 'image': case 'file': case 'avatar': case 'video': case 'audio':
