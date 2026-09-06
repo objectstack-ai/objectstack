@@ -22,7 +22,7 @@ envelope.
 |:---|:---|:---|
 | `cel`      | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
 | `cron`     | none at parse time — `croner` fires it at schedule time, on the one wired slot | job schedules |
-| `template` | `{{var}}` interpolation at evaluate time (same variable scope as CEL) | notification subjects/bodies, `titleFormat`, prompt templates |
+| `template` | placeholder interpolation at evaluate time (same variable scope as CEL); canonically `{{var}}`, but the accepted spelling belongs to the renderer, not to this schema — see `TemplateExpressionInputSchema` | notification subjects/bodies, `titleFormat`, prompt templates |
 
 No cron syntax is judged at parse time: `croner` evaluates a cron slot only
 when `CronSchedule.expression` is scheduled (`toBoundaryJobSchedule` →

@@ -20,7 +20,7 @@ import { z } from 'zod';
  * |:---|:---|:---|
  * | `cel`      | `@objectstack/formula` (cel-js + ObjectStack stdlib) | formulas, predicates, seed dynamic values |
  * | `cron`     | none at parse time — `croner` fires it at schedule time, on the one wired slot | job schedules |
- * | `template` | `{{var}}` interpolation at evaluate time (same variable scope as CEL) | notification subjects/bodies, `titleFormat`, prompt templates |
+ * | `template` | placeholder interpolation at evaluate time (same variable scope as CEL); canonically `{{var}}`, but the accepted spelling belongs to the renderer, not to this schema — see `TemplateExpressionInputSchema` | notification subjects/bodies, `titleFormat`, prompt templates |
  *
  * No cron syntax is judged at parse time: `croner` evaluates a cron slot only
  * when `CronSchedule.expression` is scheduled (`toBoundaryJobSchedule` →
@@ -283,7 +283,27 @@ export type CronExpressionInput = z.input<typeof CronExpressionInputSchema>;
  * naming the fix (`TYPED_EXPRESSION_DIALECT_ONLY.template`), as is a blank
  * string (`TYPED_EXPRESSION_SOURCE_REQUIRED.template`). Use this for
  * notification subjects/bodies, titleFormat, prompt templates — anything with
- * `{{var}}` interpolation. No template syntax is judged at parse time.
+ * placeholder interpolation.
+ *
+ * No template syntax is judged at parse time: this schema judges the dialect
+ * tag and non-emptiness and nothing else, so it declares no placeholder
+ * grammar and refuses no spelling. Which spelling actually interpolates
+ * belongs to the CONSUMING RENDERER, and the two spellings in use are not
+ * interchangeable everywhere:
+ *
+ * - `{{var}}` is the canonical form and the only one the registered `template`
+ *   engine reads (`@objectstack/formula`'s `templateEngine`); the messaging,
+ *   email and i18n renderers match it alone and leave a `{var}` in their
+ *   output verbatim.
+ * - `titleFormat` is the exception: its renderers take `{{var}}` and `{var}`
+ *   as equivalent, normalizing the double form down to the single one before
+ *   substituting (objectui's `formatTitleTemplate`, and the title renderer in
+ *   `@objectstack/metadata-protocol`). Both spellings resolve identically
+ *   there — single-brace `titleFormat` values are legal by construction, not
+ *   a grammar this schema failed to enforce.
+ *
+ * So write `{{var}}` unless the slot's renderer is known to normalize, and do
+ * not read either spelling as declared, preferred or rejected here.
  */
 export const TemplateExpressionInputSchema = z.union([
   typedExpressionStringArm('template'),

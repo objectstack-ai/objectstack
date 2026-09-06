@@ -2119,7 +2119,7 @@ const ObjectSchemaBase = strictObject(
    * cross-repo back-compat). New metadata should set `nameField`.
    */
   displayNameField: z.string().optional().describe('[DEPRECATED → nameField] Field to use as the record display name (e.g., "name", "title"). Accepted as an alias for nameField.'),
-  titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField.'),
+  titleFormat: TemplateExpressionInputSchema.optional().describe('[DEPRECATED → nameField (ADR-0079)] Render-only title template; the server cannot return or query it, and an explicit nameField now takes precedence. Migrate a single-field title to nameField, a composite to a formula field designated as nameField. Placeholders may be written {{field}} or {field} — the title renderers treat the two as equivalent, normalizing {{field}} to {field} before substituting; neither spelling is judged at parse time.'),
   /**
    * [ADR-0085] Semantic role: the object's most important fields, in priority
    * order (the first entry wins wherever only one field fits, e.g. child-record
