@@ -638,10 +638,11 @@ jobs:
               --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
           done
 
-          # `|| true`, and only over logs that exist: a leg whose guard never got
-          # far enough to open its log would otherwise make `cat` non-zero, and
-          # under `set -e` that replaces the SUITE's exit status with cat's — the
-          # step would report the wrong reason for its own red.
+          # Only over logs that EXIST, and via an explicit `if` rather than a
+          # `&&` chain: a leg whose guard never got far enough to open its log
+          # would otherwise make `cat` non-zero, and under `set -e` that replaces
+          # the SUITE's exit status with cat's — the step would report the wrong
+          # reason for its own red.
           : > "$RUNNER_TEMP/test-core.log"
           for LOG in $LOGS; do
             if [ -f "$LOG" ]; then
