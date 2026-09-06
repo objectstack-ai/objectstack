@@ -257,7 +257,26 @@ export interface ExtractOptions extends ExpectedEntryOptions {
 export interface ExtractResult {
   /** Locale → TranslationData skeleton (only the entries we emitted). */
   bundles: Record<string, TranslationData>;
-  /** Locale → number of keys emitted. */
+  /**
+   * Locale → the number of leaves in `bundles[locale]`: the whole skeleton
+   * built for that locale, every section of it.
+   *
+   * ⛔ NOT the number of keys any one emitted FILE holds. Which sections of the
+   * skeleton become committed modules is the caller's decision — `os i18n
+   * extract` makes it from `--objects-only` and `--metadata-forms` — so under
+   * the default `--objects-only` this number is far larger than the module the
+   * command writes: the registry-driven `metadataForms` baseline alone is ~773
+   * keys against a one-object stack's 2 (#16121). A caller reporting a count
+   * for a file takes it off that file's own payload
+   * ({@link translationModulePayload}), never off this field.
+   *
+   * Counted off the built tree, never off the walk that built it. The walk
+   * counter this replaces could not disagree with anything: it incremented once
+   * per entry, unconditionally, so it equalled {@link ExtractResult.totalExpected}
+   * for every locale on every config and no observation could have shown it
+   * wrong. A leaf count of the bundle CAN fail — it moves the moment `setDeep`
+   * collapses two entries onto one path.
+   */
   counts: Record<string, number>;
   /** Total expected entries before per-locale merge filtering. */
   totalExpected: number;
@@ -1402,7 +1421,7 @@ export function collectExpectedEntries(
  * missing key twice, so translating one string moved
  * `pnpm check:i18n-coverage`'s ratchet by two while its report called the
  * number "untranslated declared strings". `extractTranslations` counted them
- * twice too, in `totalExpected` and in the per-locale `counts` it prints —
+ * twice too, in `totalExpected` and in the per-locale `counts` it reports —
  * over-reporting by 101 keys on app-showcase against the 1531 leaves it
  * actually wrote, because `setDeep` had already collapsed them on the way into
  * the bundle. A de-duplication at the reporting seam would have fixed the first
@@ -1780,7 +1799,6 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
 
   for (const locale of locales) {
     const data: TranslationData = {};
-    let count = 0;
     for (const entry of entries) {
       // Guaranteed by the seed-less filter above; narrows for the branches below.
       const seed = entry.sourceValue ?? '';
@@ -1816,10 +1834,11 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
         }
       }
       setDeep(data, entry.path, value);
-      count += 1;
     }
     bundles[locale] = data;
-    counts[locale] = count;
+    // Off the tree that was just built, never off the walk that built it — see
+    // {@link ExtractResult.counts} (#16121).
+    counts[locale] = countTranslationLeaves(data);
   }
 
   const sourceHashes: Record<string, Record<string, string>> = {};
@@ -1852,6 +1871,55 @@ export function extractTranslations(config: any, opts: ExtractOptions = {}): Ext
 export function stackAuthoredSubtree(data: TranslationData): Omit<TranslationData, 'metadataForms'> {
   const { metadataForms: _registryBaseline, ...authored } = data;
   return authored;
+}
+
+/** Sub-tree selector shared by {@link renderTranslationModule} and its callers. */
+export type TranslationModuleKind = 'objects' | 'metadataForms' | 'stack';
+
+/**
+ * The sub-tree a module of the given {@link TranslationModuleKind} holds — the
+ * ONE place that decides what each emitted module contains.
+ *
+ * Exported so that a count reported for a module is taken off the SAME tree the
+ * module is rendered from. #16121 was the other arrangement: the command
+ * reported a number derived independently of the bytes it wrote, so nothing
+ * could compare the two and the printed count was wrong by two orders of
+ * magnitude with every gate green. A caller now counts
+ * `countTranslationLeaves(translationModulePayload(data, kind))` and renders
+ * `renderTranslationModule(data, { kind })` — one selector, so the number and
+ * the bytes agree by construction, for a `kind` added later as much as for
+ * these three.
+ */
+export function translationModulePayload(
+  data: TranslationData,
+  kind: TranslationModuleKind,
+):
+  | NonNullable<TranslationData['objects']>
+  | NonNullable<TranslationData['metadataForms']>
+  | Omit<TranslationData, 'metadataForms'> {
+  return kind === 'metadataForms'
+    ? (data.metadataForms ?? {})
+    : kind === 'objects'
+      ? (data.objects ?? {})
+      : stackAuthoredSubtree(data);
+}
+
+/**
+ * String leaves under a nested translation tree.
+ *
+ * The structural measure every key count in this mechanism is taken with — the
+ * extractor's per-locale {@link ExtractResult.counts}, and each number
+ * `os i18n extract` prints beside a module. One implementation so that two
+ * counts of the same tree can never be two different numbers.
+ */
+export function countTranslationLeaves(node: unknown): number {
+  if (!node || typeof node !== 'object') return 0;
+  let n = 0;
+  for (const value of Object.values(node as Record<string, unknown>)) {
+    if (typeof value === 'string') n += 1;
+    else if (value && typeof value === 'object') n += countTranslationLeaves(value);
+  }
+  return n;
 }
 
 /**
@@ -1916,7 +1984,7 @@ export function renderTranslationModule(
     header?: string[];
   },
 ): string {
-  const kind: 'objects' | 'metadataForms' | 'stack' =
+  const kind: TranslationModuleKind =
     options.kind ?? (options.objectsOnly === false ? 'stack' : 'objects');
   const defaultExport =
     kind === 'metadataForms'
@@ -1925,12 +1993,7 @@ export function renderTranslationModule(
       ? `${camelize(options.locale)}Translations`
       : `${camelize(options.locale)}Objects`;
   const exportName = options.exportName ?? defaultExport;
-  const payload =
-    kind === 'metadataForms'
-      ? (data.metadataForms ?? {})
-      : kind === 'objects'
-      ? (data.objects ?? {})
-      : stackAuthoredSubtree(data);
+  const payload = translationModulePayload(data, kind);
   const typeSig =
     kind === 'metadataForms'
       ? "NonNullable<TranslationData['metadataForms']>"
