@@ -169,6 +169,52 @@ function isUnderPrefix(path: string, prefix: string): boolean {
 }
 
 /**
+ * The fixes the refusal offers, each one CHECKED against the same predicate the
+ * refusal itself uses — because a `Fix:` line that does not fix is a false
+ * sentence in shipped code, and the first spelling of this message carried two.
+ *
+ * Two directions, and the caller picks:
+ *
+ *   A — move the app UP to the namespace the base already sits in. Offered only
+ *       when that parent is a USABLE prefix. The parent of a single-segment base
+ *       such as `/auth` is `''`, which `createHonoApp` coerces straight back to
+ *       `/api` (`options.prefix || '/api'`), and the `'/'` that reads as its
+ *       equivalent mounts every OTHER route of the app under `//` — measured
+ *       404 for everything. Suggesting either is advice that does not work, and
+ *       `'/'` is exactly what the first spelling suggested.
+ *   B — move better-auth DOWN under the prefix the caller asked for. Always
+ *       available, but only with a prefix carrying a LEADING SLASH: a base path
+ *       is normalised to start with one and `isUnderPrefix` compares the two as
+ *       written, so NO base path can sit inside a prefix spelled `api/v1`. The
+ *       first spelling suggested `new AuthPlugin({ basePath: 'api/v1/auth' })`
+ *       for exactly that prefix, and it refuses again.
+ *
+ * ⛔ This changes what the refusal SAYS, never which compositions it refuses.
+ */
+function authMountFixes(basePath: string, prefix: string): string[] {
+  const fixes: string[] = [];
+
+  const parent = basePath.split('/').slice(0, -1).join('/');
+  if (parent !== '' && isUnderPrefix(basePath, parent)) {
+    fixes.push(`pass a prefix the base path sits under (createHonoApp({ kernel, prefix: '${parent}' }))`);
+  }
+
+  const rooted = (prefix.startsWith('/') ? prefix : `/${prefix}`).replace(/\/+$/, '');
+  const candidate = `${rooted}/auth`;
+  if (isUnderPrefix(candidate, rooted)) {
+    fixes.push(
+      prefix.startsWith('/')
+        ? `configure the auth service to serve under this prefix (new AuthPlugin({ basePath: '${candidate}' }))`
+        : `spell the prefix with a leading slash and configure the auth service under it ` +
+          `(createHonoApp({ kernel, prefix: '${rooted}' }) with new AuthPlugin({ basePath: '${candidate}' })) — ` +
+          `a base path always starts with '/', so it can never sit inside a prefix that does not`,
+    );
+  }
+
+  return fixes;
+}
+
+/**
  * Where the `/auth/*` mount goes, and the boot refusal that guards it (#16025).
  *
  * ## B — the mount FOLLOWS THE AUTH SERVICE
@@ -216,9 +262,8 @@ function resolveAuthMount(kernel: ObjectKernel, prefix: string): string {
         `better-auth under basePath "${basePath}", which is not inside this app's prefix "${prefix}". ` +
         `Mounting it anyway would put auth outside the namespace this app was given, and every request to ` +
         `"${prefix}/auth/*" would be answered by the dispatcher catch-all instead — a 200 with an empty body, ` +
-        `which reads as success on a failed sign-in. Fix: either pass a prefix the base path sits under ` +
-        `(createHonoApp({ kernel, prefix: '${basePath.split('/').slice(0, -1).join('/') || '/'}' })) or configure the auth service to serve under this ` +
-        `prefix (new AuthPlugin({ basePath: '${prefix.replace(/\/+$/, '')}/auth' })).`,
+        `which reads as success on a failed sign-in. Fix — ` +
+        `${authMountFixes(basePath, prefix).join('; or ')}.`,
     );
   }
   return basePath;

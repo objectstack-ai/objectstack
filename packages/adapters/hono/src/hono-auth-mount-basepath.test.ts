@@ -219,6 +219,103 @@ describe('#16025 A: a prefix the auth base is not inside refuses at boot', () =>
     }
   });
 
+  /**
+   * ⭐ The refusal's own advice, DRIVEN — the domain the control above misses.
+   *
+   * The control above proves only that four LEADING-SLASH prefixes still build.
+   * The refusal's real domain is wider: a prefix written without a leading slash
+   * refuses here and reached better-auth on `main`, and a single-segment base
+   * has no usable parent namespace at all. Both were outside every pin, and both
+   * are where the first spelling of the message gave advice that does not work:
+   * `new AuthPlugin({ basePath: 'api/v1/auth' })` refuses again, and `prefix: '/'`
+   * mounts every other route of the app under `//`.
+   *
+   * ⭐ So this does not assert the message's WORDS. It parses the `Fix —` clauses
+   * back out and re-drives each one through `createHonoApp` at the top: whatever
+   * the refusal tells a caller to do has to produce an app. A `Fix:` line that
+   * does not fix is a false sentence in shipped code, and nothing but driving it
+   * can tell the two apart.
+   */
+  const REFUSING_COMPOSITIONS = [
+    { what: "the card's own shape — a prefix the default base is outside", basePath: '/api/v1/auth', prefix: '/custom' },
+    { what: 'a prefix written WITHOUT a leading slash — served auth on main, refuses here', basePath: '/api/v1/auth', prefix: 'api/v1' },
+    { what: "a nested mount's inner prefix, as createHonoApp sees it", basePath: '/api/v1/auth', prefix: '/v1' },
+    { what: 'a SINGLE-SEGMENT base, whose parent namespace is not a usable prefix', basePath: '/auth', prefix: '/api' },
+    { what: 'a base that only shares a prefix STRING with the namespace', basePath: '/apifoo/auth', prefix: '/api' },
+  ] as const;
+
+  /** Read the fixes back out of the refusal, as a caller would act on them. */
+  const fixesIn = (message: string): Array<{ prefix?: string; basePath?: string }> => {
+    const tail = message.split('Fix — ')[1];
+    expect(tail, 'the refusal must carry a Fix clause at all').toBeDefined();
+    return tail.replace(/\.$/, '').split('; or ').map((clause) => ({
+      prefix: /createHonoApp\(\{ kernel, prefix: '([^']*)' \}\)/.exec(clause)?.[1],
+      basePath: /new AuthPlugin\(\{ basePath: '([^']*)' \}\)/.exec(clause)?.[1],
+    }));
+  };
+
+  it.each(REFUSING_COMPOSITIONS)('⭐ $what — refuses, and every Fix it prints CONSTRUCTS', ({ basePath, prefix }) => {
+    let thrown: Error | undefined;
+    try {
+      createHonoApp({ kernel: kernelWith(authServiceAt(basePath)), prefix });
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown, 'this composition is inside the refusal domain and must refuse').toBeDefined();
+
+    const fixes = fixesIn(thrown!.message);
+    expect(fixes.length, 'a refusal with no actionable fix is the defect this case exists for').toBeGreaterThan(0);
+    for (const fix of fixes) {
+      expect(fix.prefix ?? fix.basePath, 'every Fix clause must name something to change').toBeDefined();
+      expect(
+        () => createHonoApp({
+          kernel: kernelWith(authServiceAt(fix.basePath ?? basePath)),
+          prefix: fix.prefix ?? prefix,
+        }),
+        `the refusal's own advice must build an app — ${JSON.stringify(fix)}`,
+      ).not.toThrow();
+    }
+  });
+
+  it('⛔ never suggests `prefix: \'/\'` — it mounts every other route under `//`', () => {
+    // `/auth`'s parent namespace IS the root, and `'/'` makes the dispatcher
+    // catch-all `'//*'`: 404 for everything. The first spelling suggested it.
+    let thrown: Error | undefined;
+    try {
+      createHonoApp({ kernel: kernelWith(authServiceAt('/auth')), prefix: '/api' });
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown).toBeDefined();
+    expect(thrown!.message).not.toContain("prefix: '/'");
+  });
+
+  it('⛔ never suggests a basePath that refuses AGAIN — the no-leading-slash prefix', () => {
+    let thrown: Error | undefined;
+    try {
+      createHonoApp({ kernel: kernelWith(authServiceAt('/api/v1/auth')), prefix: 'api/v1' });
+    } catch (err) {
+      thrown = err as Error;
+    }
+    expect(thrown).toBeDefined();
+    // A base path is normalised to start with `/`, so it can never sit inside a
+    // prefix that does not — this is precisely what the first spelling advised.
+    expect(thrown!.message).not.toContain("new AuthPlugin({ basePath: 'api/v1/auth' })");
+    expect(thrown!.message).toContain("prefix: '/api/v1'");
+  });
+
+  it('⭐ the over-refusal control, widened: trailing slashes and the root still build', () => {
+    // The reviewer measured these constructing on both trees; the original
+    // control covered only `undefined`, `/api`, `/api/v1`, `/api/v1/auth`.
+    const svc = authServiceAt('/api/v1/auth');
+    for (const prefix of ['', '/', '/api/', '/api/v1/'] as const) {
+      expect(
+        () => createHonoApp({ kernel: kernelWith(svc), prefix }),
+        `prefix ${JSON.stringify(prefix)}`,
+      ).not.toThrow();
+    }
+  });
+
   it('refuses a base that only SHARES A PREFIX STRING with the namespace', () => {
     // `/apifoo/auth` starts with the five characters of `/api` and is not
     // inside it — the same segment-boundary trap #16026 closed one layer down.
