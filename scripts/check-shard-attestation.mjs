@@ -66,13 +66,24 @@
  *
  * ## What is deliberately NOT changed
  *
- *   - `cancelled` still passes without counting (#3668). Cancellation is a
- *     run-lifecycle state: with cancel-in-progress on, every superseded push
- *     cancels the in-flight matrix, and #3668 measured (run 30271824408) that a
- *     real shard failure DOMINATES the aggregate over a cancelled sibling — it
- *     reads `failure`, never `cancelled`. So `cancelled` masks no regression,
- *     and demanding credentials there would paint the false red on the
- *     superseded SHA that #3668 removed.
+ *   - `cancelled` with ZERO attestations still passes without counting
+ *     (#3668). Cancellation is a run-lifecycle state: with cancel-in-progress
+ *     on, every superseded push cancels the in-flight matrix, and #3668
+ *     measured (run 30271824408) that a real shard failure DOMINATES the
+ *     aggregate over a cancelled sibling — it reads `failure`, never
+ *     `cancelled`. So a superseded matrix masks no regression, and demanding
+ *     credentials there would paint the false red on the superseded SHA that
+ *     #3668 removed.
+ *     ⛔ That argument covers a shard that RAN AND FAILED. It does not cover a
+ *     shard killed while still executing, which produces no verdict at all —
+ *     there is no `failure` to dominate (#16157, run 34007386254: `Test Core
+ *     (2/6)` cancelled at 35m by its job timeout with the test step still
+ *     `in_progress`, five siblings attested, and the required check went
+ *     green two seconds later over the shard's untested packages). So the
+ *     count splits `cancelled`: with AT LEAST ONE attestation of the leg
+ *     present, the matrix ran, the declared roster is knowable, and it is
+ *     REQUIRED — every missing shard is named and the gate is red. Only the
+ *     zero-attestation shape keeps the pass; `judge()` carries both.
  *   - `skipped` still passes ONLY when the `filter` job itself succeeded
  *     (#4928). `skipped` alone cannot separate "the path filter said no core
  *     paths changed" from "the path filter exploded and took every downstream
@@ -299,12 +310,31 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
     log.push(`  leg ${label} — aggregate result: ${leg.result}`);
 
     if (leg.result === 'cancelled') {
-      // #3668: a run-lifecycle state, not a shard verdict. Legs that finished
-      // before the cancellation may legitimately have attested, so their
-      // credentials are ALLOWED but none are REQUIRED.
+      // A run-lifecycle state, not a shard verdict — and it arrives in two
+      // shapes that the count tells apart (#16157):
+      //
+      //   - ZERO shards of the leg attested: the whole matrix was superseded
+      //     (cancel-in-progress on a newer push, #3668). No shard produced a
+      //     verdict, the SHA is dead, and demanding credentials would paint
+      //     the false red #3668 removed. Passes without counting.
+      //   - AT LEAST ONE shard attested: the matrix RAN. A sibling that still
+      //     reads `cancelled` was killed mid-suite and produced no verdict, so
+      //     no `failure` exists to dominate the aggregate (run 34007386254:
+      //     shard 2/6 cancelled by its job timeout with the test step
+      //     `in_progress`, five siblings attested). The declared roster is
+      //     knowable from the shards that did attest, so it is REQUIRED —
+      //     the leg falls through to the count below, every missing shard is
+      //     named, and the required check goes red.
       for (const id of roster) allowed.add(id);
-      log.push(`    satisfied (cancelled — run-lifecycle state, #3668; expected attestations: 0)`);
-      continue;
+      const attested = roster.filter((id) => present.has(id));
+      if (attested.length === 0) {
+        log.push(`    satisfied (cancelled — run-lifecycle state, #3668; expected attestations: 0)`);
+        continue;
+      }
+      log.push(
+        `    cancelled AFTER ${attested.length} of ${roster.length} declared shard(s) attested — not a superseded matrix; ` +
+          `the roster is REQUIRED and every missing shard is named (#16157)`,
+      );
     }
 
     if (leg.result === 'skipped') {
@@ -339,8 +369,13 @@ export function judge({ gate, legs, filterResult, present, runId, runAttempt, do
     counted += roster.length;
     if (missing.length > 0) {
       errors.push(
-        `${gate}: ${missing.length} of ${roster.length} declared shard(s) of ${leg.job} published no positive attestation ` +
-          `(${missing.join(', ')}). A shard that never ran cannot be counted as passing — see #6082.`,
+        leg.result === 'cancelled'
+          ? `${gate}: ${missing.length} of ${roster.length} declared shard(s) of ${leg.job} published no positive attestation ` +
+              `(${missing.join(', ')}) while ${roster.length - missing.length} sibling(s) did ` +
+              `(${roster.filter((id) => present.has(id)).join(', ')}). The leg was cancelled mid-run, so the missing ` +
+              `shard(s) produced no verdict at all — an untested shard is not a passing shard, see #16157.`
+          : `${gate}: ${missing.length} of ${roster.length} declared shard(s) of ${leg.job} published no positive attestation ` +
+              `(${missing.join(', ')}). A shard that never ran cannot be counted as passing — see #6082.`,
       );
     }
     if (leg.result === 'failure') {
@@ -933,7 +968,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(iii) N-1 positives + one explicit failure ⇒ red': 4,
   '(iv) filter-skipped family ⇒ green with expected-N adjusted to 0': 1,
   'the #4928 guard itself must not regress': 8,
-  '#3668 lifecycle: cancelled passes without counting': 2,
+  '#3668 lifecycle: a superseded matrix (cancelled, zero attestations) passes without counting': 3,
+  '#16157 partial cancellation: attested shards make the roster REQUIRED': 14,
   'dogfood-gate: a matrix leg and a single leg under one context': 5,
   'foreign / stale credentials': 3,
   '#11998: attempt scoping, in both directions': 26,
@@ -947,7 +983,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1043,10 +1079,89 @@ async function selfTest() {
   assert(testGate('skipped', [], 'cancelled').ok, '#3668: a cancelled filter still lets a skipped leg pass');
   assert(!testGate('skipped', [attest('test', 1, 3)]).ok, 'a credential from a leg that was reported skipped is a contradiction ⇒ red');
 
-  // ── #3668 lifecycle: cancelled passes without counting ────────────────────
-  battery('#3668 lifecycle: cancelled passes without counting');
-  assert(testGate('cancelled', []).ok, '#3668: a cancelled matrix passes with zero credentials (superseded SHA)');
-  assert(testGate('cancelled', [attest('test', 1, 3)]).ok, '#3668: a leg that attested before the cancellation is allowed, not required');
+  // ── #3668 lifecycle: a superseded matrix passes without counting ──────────
+  // The shape #3668 measured: cancel-in-progress killed the whole matrix on a
+  // superseded SHA, no shard ran, none attested. That — and only that — is the
+  // cancellation the gate passes without counting.
+  battery('#3668 lifecycle: a superseded matrix (cancelled, zero attestations) passes without counting');
+  const superseded = testGate('cancelled', []);
+  assert(superseded.ok, '#3668: a cancelled matrix passes with zero credentials (superseded SHA)');
+  assert(
+    superseded.log.some((l) => l.includes('#3668') && l.includes('expected attestations: 0')),
+    '#3668: the zero-attestation pass still says so in its own log line, verbatim',
+  );
+  assert(
+    superseded.log.some((l) => l.includes('no shard was expected to run, and none claimed to')),
+    '#3668: with nothing attested the verdict line may honestly say none claimed to',
+  );
+
+  // ── #16157 partial cancellation: attested shards make the roster REQUIRED ─
+  // THE MEASURED SEQUENCE (run 34007386254, PR #16131): `Test Core (2/6)` was
+  // cancelled at 35m01s by its job timeout with `Run this shard's tests` still
+  // `in_progress`; shards 1, 3, 4, 5 and 6 attested; the aggregate read
+  // `cancelled`; and the required `Test Core` context went green two seconds
+  // later printing `expected attestations: 0` — while the step above it had
+  // just downloaded five credentials. A killed shard produces no verdict, so
+  // #3668's "failure dominates" argument has nothing to dominate with. The
+  // ruling on #16157 (option A) overturns the pin that used to sit here
+  // ("a leg that attested before the cancellation is allowed, not required"):
+  // once ANY shard of a cancelled leg attested, the roster is REQUIRED.
+  battery('#16157 partial cancellation: attested shards make the roster REQUIRED');
+  const partialCancel = testGate('cancelled', [attest('test', 1, 3)]);
+  assert(!partialCancel.ok, '#16157: a cancelled leg with 1 of 3 attested ⇒ red (the overturned #3668 pin, inverted)');
+  assert(
+    partialCancel.errors.some((e) => e.includes('test-2-of-3') && e.includes('test-3-of-3') && e.includes('#16157')),
+    '#16157: the error names EVERY missing shard and its issue',
+  );
+  assert(
+    partialCancel.errors.some((e) => e.includes('test-1-of-3') && e.includes('sibling')),
+    '#16157: the error also names the sibling(s) that did attest — the reason the roster is knowable',
+  );
+  assert(
+    partialCancel.log.some((l) => l.includes('cancelled AFTER 1 of 3') && l.includes('REQUIRED')),
+    '#16157: the log states that the leg fell through to the count and why',
+  );
+  assert(
+    !partialCancel.log.some((l) => l.includes('expected attestations: 0')),
+    '#16157: a partially attested leg never prints the zero-expectation line that made the transcript contradict itself',
+  );
+  // The measured shape itself, on the real 6-shard roster.
+  const sixShard = (result, ids, runAttempt = '1') =>
+    judge({ gate: 'Test Core', legs: [{ job: 'test', total: 6, result }], filterResult: 'success', present: new Map(ids), runId: '99', runAttempt });
+  const fiveOfSix = [1, 3, 4, 5, 6].map((n) => attest('test', n, 6));
+  const measuredCancel = sixShard('cancelled', fiveOfSix);
+  assert(!measuredCancel.ok, '#16157 measured sequence: shard 2/6 killed mid-run, five siblings attested ⇒ red');
+  assert(
+    measuredCancel.errors.some((e) => e.includes('1 of 6 declared shard(s)') && e.includes('(test-2-of-6) while 5 sibling(s) did')),
+    '#16157 measured sequence: exactly the killed shard is named as missing, none of the five that attested',
+  );
+  // Both directions of the split: zero attested keeps #3668's pass; a full
+  // roster under a late cancellation (a post-step cancelled after every shard
+  // attested) is a pass because every shard is accounted for, not because the
+  // word `cancelled` waived the count.
+  assert(sixShard('cancelled', []).ok, '#16157 boundary: cancelled with ZERO attestations is still the #3668 pass');
+  const lateCancel = sixShard('cancelled', [1, 2, 3, 4, 5, 6].map((n) => attest('test', n, 6)));
+  assert(lateCancel.ok, '#16157: cancelled with 6 of 6 attested ⇒ green — every shard is accounted for');
+  assert(
+    lateCancel.log.some((l) => l.includes('all 6 declared shard(s) published a positive attestation')),
+    '#16157: that green is a COUNTED verdict (6/6), never "none claimed to"',
+  );
+  // Orthogonal to the dominance experiment: a real failure is still a declared
+  // negative, and it still dominates a cancelled sibling in the aggregate, so
+  // the `failure` path is untouched by the split.
+  const dominated = testGate('failure', [attest('test', 1, 3), attest('test', 2, 3)]);
+  assert(!dominated.ok && dominated.errors.some((e) => e.includes('declared negative')), '#3668 dominance: a real failure over a cancelled sibling still reads `failure` and is red on its own veto');
+  // #11998 interplay: attempt scoping is unchanged. Credentials a declared leg
+  // accounts for are counted whichever attempt of this run published them.
+  const carriedFull = sixShard('cancelled', [1, 2, 3, 4, 5, 6].map((n) => attest('test', n, 6, '99', '1')), '2');
+  assert(carriedFull.ok, '#16157 × #11998: attempt 2 cancelled, all six attempt-1 credentials carried over ⇒ green');
+  const carriedShort = sixShard('cancelled', [1, 2, 3, 4, 5].map((n) => attest('test', n, 6, '99', '1')), '2');
+  assert(!carriedShort.ok && carriedShort.errors.some((e) => e.includes('(test-6-of-6)')), '#16157 × #11998: attempt 2 cancelled with five carried-over credentials ⇒ red naming the sixth');
+  // The final verdict line never contradicts the download step above it.
+  assert(
+    !measuredCancel.log.some((l) => l.includes('none claimed to')) && !measuredCancel.log.some((l) => l.includes('satisfied')),
+    '#16157: a red partial cancellation prints no satisfied line at all',
+  );
 
   // ── dogfood-gate: a matrix leg and a single leg under one context ─────────
   battery('dogfood-gate: a matrix leg and a single leg under one context');
@@ -1497,7 +1612,7 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(
-    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins + the #11998 attempt-scoping sequence).`,
+    `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins + the #11998 attempt-scoping sequence + the #16157 partial-cancellation split).`,
   );
 
   return SELF_TEST_VERDICT;
