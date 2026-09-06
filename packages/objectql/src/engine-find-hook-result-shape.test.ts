@@ -143,6 +143,13 @@ describe('#15823 (a) — an afterFind that REPLACES the container is refused', (
     expect(error.event).toBe('afterFind');
     expect(error.object).toBe('task');
     expect(error.observed).toBe('object');
+    // The article is computed, not hard-coded: `a object` shipped once in this
+    // module's first draft and was caught by driving it.
+    expect(error.message).toContain("replaced 'ctx.result' with an object");
+    // The remedy half is addressed to the handler's author, and names both
+    // supported spellings — `[]` for no rows, a throw to refuse the read.
+    expect(error.developerMessage).toContain("assign '[]'");
+    expect(error.developerMessage).toContain('throw from the handler');
   });
 
   it('the refusal fires BEFORE maskSecretFields / stripSearchCompanionFromRead see it', async () => {

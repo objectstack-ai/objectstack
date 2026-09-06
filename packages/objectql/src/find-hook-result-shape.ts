@@ -171,9 +171,14 @@ export class FindHookResultNotArrayError extends Error {
  * record, for the same reason.
  */
 function buildMessage(object: string, event: string, observed: string): string {
+  // `undefined` / `null` name themselves; everything else takes an article, and
+  // `object` is the one that needs `an` — the shape this refusal exists for.
+  const what =
+    observed === 'undefined' || observed === 'null'
+      ? observed
+      : `${'aeiou'.includes(observed[0]) ? 'an' : 'a'} ${observed}`;
   return (
-    `Refusing the read on '${object}': its '${event}' handler replaced 'ctx.result' with ` +
-    `${observed === 'undefined' || observed === 'null' ? observed : `a ${observed}`}, and 'find()' ` +
-    `guarantees an array. Shaping the rows is supported; replacing the container is not.`
+    `Refusing the read on '${object}': its '${event}' handler replaced 'ctx.result' with ${what}, ` +
+    `and 'find()' guarantees an array. Shaping the rows is supported; replacing the container is not.`
   );
 }
