@@ -2125,6 +2125,30 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
 
 /**
  * Delete Data Request
+ *
+ * [#13852] The request contract of {@link DataProtocol.deleteData} — its
+ * declared parameter type is the `DeleteDataRequest` alias below. That
+ * protocol boundary is this schema's whole job: it is consumed statically, by
+ * the compiler, and parsed at runtime nowhere in the tree. A grep that finds
+ * "exported, documented, zero `safeParse` call sites" is reading the wrong
+ * surface — #13852 is that grep, filed once already.
+ *
+ * It deliberately carries no REST-door `requestSchema` (#3899):
+ * `DELETE /api/v1/data/:object/:id` reads no body — `object` and `id` are
+ * path-bound, `expectedVersion` rides `?expectedVersion` / `If-Match` — so a
+ * schema on that door would promise a validation nothing can violate. The
+ * catalog entry in `plugin-rest-api.zod.ts` says so in place of the key, and
+ * the pin in `plugin-rest-api.schema-refs.test.ts` ("requestSchema appears
+ * only on body-carrying methods") goes red if one is added. ⛔ Do not wire
+ * one, and do not retire this schema either — it types a shipped interface
+ * method.
+ *
+ * Drift between this schema and that door is caught at COMPILE time, not by a
+ * runtime parse: the door's request literal is typed against
+ * `DeleteDataRequest` (`ServerScopedDataRequest` in
+ * `packages/rest/src/rest-server.ts`, #15866 / PR #16071), so a field added
+ * here as REQUIRED reddens that file at build, naming the route that would
+ * otherwise have gone on not sending it.
  */
 export const DeleteDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
