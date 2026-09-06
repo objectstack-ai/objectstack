@@ -358,10 +358,15 @@ result set — a response indistinguishable from a successful query.
 **Fix:** Delete or reassign dependent records first, then retry the delete.  
 **Retry:** `no_retry`
 
-### `DUPLICATE_RECORD`
+### `UNIQUE_VIOLATION`
 **Cause:** A record with the same unique key already exists.  
 **Fix:** Update the existing record instead, or use a different unique key value.  
 **Retry:** `no_retry`
+
+The engine throws `DuplicateRecordError`, whose in-process `code` is
+`DUPLICATE_RECORD`; the REST door translates that envelope at the boundary, so
+every route answers the wire code `UNIQUE_VIOLATION` and the in-process spelling
+never crosses HTTP.
 
 ### `LOCK_CONFLICT`
 **Cause:** The record is locked by another process or user.  
@@ -799,7 +804,7 @@ async function handleApiCall() {
 | 401 | `authentication` | `UNAUTHENTICATED`, `EXPIRED_TOKEN`, `INVALID_CREDENTIALS` |
 | 403 | `authorization` | `PERMISSION_DENIED`, `FIELD_NOT_ACCESSIBLE`, `LICENSE_REQUIRED` |
 | 404 | `not_found` | `RECORD_NOT_FOUND`, `OBJECT_NOT_FOUND`, `ENDPOINT_NOT_FOUND` |
-| 409 | `conflict` | `CONCURRENT_MODIFICATION`, `DUPLICATE_RECORD`, `DELETE_RESTRICTED` |
+| 409 | `conflict` | `CONCURRENT_MODIFICATION`, `UNIQUE_VIOLATION`, `DELETE_RESTRICTED` |
 | 422 | `validation` | `MISSING_REQUIRED_FIELD` on an absent `controlled_by_parent` master reference (see [above](#missing_required_field)) — this row is an exception to the 400 row, not a second home for the code |
 | 429 | `rate_limit` | `RATE_LIMIT_EXCEEDED`, `QUOTA_EXCEEDED` |
 | 500 | `server` | `INTERNAL_ERROR`, `DATABASE_ERROR` |
