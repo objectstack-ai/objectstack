@@ -77,7 +77,7 @@ Metric aggregation configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| 'p999' \| 'rate' \| 'stddev'>` | ✅ | Aggregation type |
-| **window** | `{ size: integer; sliding: boolean; slideInterval?: integer }` | optional |  |
+| **window** | `{ durationSeconds: integer; sliding: boolean; slideInterval?: integer }` | optional |  |
 | **groupBy** | `string[]` | optional | Group by label names |
 | **filters** | `Record<string, any>` | optional | Filter criteria |
 
@@ -85,7 +85,8 @@ Metric aggregation configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **size** | `integer` | ✅ | Window size in seconds |
+| **durationSeconds** | `integer` | ✅ | Window duration in seconds |
+| **size** | `never` | optional | [REMOVED] The aggregation/SLI window key `size` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. The new name is not `sizeSeconds`: `size` means a byte or row count everywhere else in this spec, so the rename drops it rather than bolting a unit onto it. Rename `window.size` to `window.durationSeconds` on both MetricAggregationConfig and ServiceLevelIndicator; the value (seconds) is unchanged. |
 | **sliding** | `boolean` | optional (default: `false`) |  |
 | **slideInterval** | `integer` | optional |  |
 
@@ -328,7 +329,7 @@ Metric aggregation configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'sum' \| 'avg' \| 'min' \| 'max' \| 'count' \| 'p50' \| 'p75' \| 'p90' \| 'p95' \| 'p99' \| …>` | ✅ | Aggregation type |
-| **window** | `{ size: integer; sliding?: boolean; slideInterval?: integer }` | optional |  |
+| **window** | `{ durationSeconds: integer; sliding?: boolean; slideInterval?: integer }` | optional |  |
 | **groupBy** | `string[]` | optional | Group by label names |
 | **filters** | `Record<string, any>` | optional | Filter criteria |
 
@@ -344,7 +345,7 @@ Service Level Indicator
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
 | **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
-| **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
+| **window** | `{ durationSeconds: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Nested Shape: `MetricsConfig.slos[number]`
@@ -358,7 +359,7 @@ Service Level Objective
 | **description** | `string` | optional | SLO description |
 | **sli** | `string` | ✅ | SLI name |
 | **target** | `number` | ✅ | Target percentage |
-| **period** | `{ type: Enum<'rolling' \| 'calendar'>; duration?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
+| **period** | `{ type: Enum<'rolling' \| 'calendar'>; durationSeconds?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
 | **errorBudget** | `{ enabled?: boolean; alertThreshold?: number; burnRateWindows?: object[] }` | optional |  |
 | **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | optional (default: `[]`) |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
@@ -393,7 +394,7 @@ Service Level Indicator
 | **metric** | `string` | ✅ | Base metric name |
 | **type** | `Enum<'availability' \| 'latency' \| 'throughput' \| 'error_rate' \| 'saturation' \| 'custom'>` | ✅ | SLI type |
 | **successCriteria** | `{ threshold: number; operator: Enum<'lt' \| 'lte' \| 'gt' \| 'gte' \| 'eq'>; percentile?: number } \| string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | ✅ | Success criteria — structured or CEL predicate |
-| **window** | `{ size: integer; rolling?: boolean }` | ✅ | Measurement window |
+| **window** | `{ durationSeconds: integer; rolling?: boolean }` | ✅ | Measurement window |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 
 ### Nested Shape: `ServiceLevelIndicator.successCriteria[option 1]`
@@ -408,7 +409,8 @@ Service Level Indicator
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **size** | `integer` | ✅ | Window size in seconds |
+| **durationSeconds** | `integer` | ✅ | Window duration in seconds |
+| **size** | `never` | optional | [REMOVED] The aggregation/SLI window key `size` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. The new name is not `sizeSeconds`: `size` means a byte or row count everywhere else in this spec, so the rename drops it rather than bolting a unit onto it. Rename `window.size` to `window.durationSeconds` on both MetricAggregationConfig and ServiceLevelIndicator; the value (seconds) is unchanged. |
 | **rolling** | `boolean` | optional (default: `true`) |  |
 
 
@@ -427,7 +429,7 @@ Service Level Objective
 | **description** | `string` | optional | SLO description |
 | **sli** | `string` | ✅ | SLI name |
 | **target** | `number` | ✅ | Target percentage |
-| **period** | `{ type: Enum<'rolling' \| 'calendar'>; duration?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
+| **period** | `{ type: Enum<'rolling' \| 'calendar'>; durationSeconds?: integer; calendar?: Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'> }` | ✅ | Time period |
 | **errorBudget** | `{ enabled: boolean; alertThreshold: number; burnRateWindows?: object[] }` | optional |  |
 | **alerts** | `{ name: string; severity: Enum<'info' \| 'warning' \| 'critical'>; condition: object }[]` | optional (default: `[]`) |  |
 | **enabled** | `boolean` | optional (default: `true`) |  |
@@ -437,7 +439,8 @@ Service Level Objective
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'rolling' \| 'calendar'>` | ✅ | Period type |
-| **duration** | `integer` | optional | Duration in seconds |
+| **durationSeconds** | `integer` | optional | Duration in seconds |
+| **duration** | `never` | optional | [REMOVED] `ServiceLevelObjective.period.duration` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationSeconds`; the value (seconds) is unchanged. |
 | **calendar** | `Enum<'daily' \| 'weekly' \| 'monthly' \| 'quarterly' \| 'yearly'>` | optional |  |
 
 ### Nested Shape: `ServiceLevelObjective.alerts[number]`

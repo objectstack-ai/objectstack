@@ -112,7 +112,7 @@ Complete disaster recovery plan configuration
 | **rpo** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Point Objective |
 | **rto** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Time Objective |
 | **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| object; retention: object; destination: object; … }` | ✅ | Backup configuration |
-| **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckInterval?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
+| **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckIntervalSeconds?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
 | **replication** | `{ mode?: Enum<'synchronous' \| 'asynchronous' \| 'semi_synchronous'>; maxLagSeconds?: number; includeObjects?: string[]; excludeObjects?: string[] }` | optional | Data replication settings |
 | **testing** | `{ enabled?: boolean; schedule?: string \| object; notificationChannel?: string }` | optional | Automated disaster recovery testing |
 | **runbookUrl** | `string` | optional | URL to disaster recovery runbook/playbook |
@@ -150,7 +150,8 @@ Complete disaster recovery plan configuration
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | optional (default: `"active_passive"`) | Failover mode |
 | **autoFailover** | `boolean` | optional (default: `true`) | Enable automatic failover |
-| **healthCheckInterval** | `number` | optional (default: `30`) | Health check interval in seconds |
+| **healthCheckIntervalSeconds** | `number` | optional (default: `30`) | Health check interval in seconds |
+| **healthCheckInterval** | `never` | optional | [REMOVED] `FailoverConfig.healthCheckInterval` was renamed to `healthCheckIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `healthCheckIntervalSeconds`; the value (seconds) and the 30 default are unchanged. |
 | **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
 | **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
 | **dns** | `{ ttl?: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
@@ -194,7 +195,8 @@ Failover configuration
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | optional (default: `"active_passive"`) | Failover mode |
 | **autoFailover** | `boolean` | optional (default: `true`) | Enable automatic failover |
-| **healthCheckInterval** | `number` | optional (default: `30`) | Health check interval in seconds |
+| **healthCheckIntervalSeconds** | `number` | optional (default: `30`) | Health check interval in seconds |
+| **healthCheckInterval** | `never` | optional | [REMOVED] `FailoverConfig.healthCheckInterval` was renamed to `healthCheckIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `healthCheckIntervalSeconds`; the value (seconds) and the 30 default are unchanged. |
 | **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
 | **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
 | **dns** | `{ ttl: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |

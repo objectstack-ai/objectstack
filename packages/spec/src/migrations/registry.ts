@@ -5347,7 +5347,20 @@ const step18: MigrationStep = {
     'milliseconds fourteen lines apart under one name), `DriverOptions.timeout`, and the ' +
     'tenant `connectionPool.idleTimeout` / `accessControl.sessionTimeout` whose unit the ' +
     'reference pages never published (#14519) — are retiredKey tombstones with a ' +
-    'semantic entry each, naming the suffixed key.',
+    'semantic entry each, naming the suffixed key. The `data`, `ui`, `ai` and ' +
+    '`integration` remainder closes the same sweep: `dashboard.refreshInterval` → ' +
+    '`refreshIntervalSeconds`, the connector pair `health.circuitBreaker.monitoringWindow` ' +
+    '→ `monitoringWindowMs` and `triggers[].interval` → `intervalSeconds`, and the two ' +
+    'datasource config keys `memory config.persistence.autoSaveInterval` → ' +
+    '`autoSaveIntervalMs` (BOTH union arms — the `auto` arm forwards the same value to the ' +
+    'same file adapter, so splitting them would have left one value with two spellings) ' +
+    'and `turso config.timeout` → `timeoutMs` all convert, because a dashboard, a ' +
+    'connector and a datasource are stack collection members stored as rows; the two with ' +
+    'no seam — `ConversationAnalytics.duration`, computed at runtime and never authored, ' +
+    'and `NoSQLQueryOptions.timeout`, a per-call driver argument — are retiredKey ' +
+    'tombstones with a semantic entry each. That remainder is what takes ' +
+    '`check:duration-unit-keys` to zero offenders over `packages/spec/src/**`; the gate ' +
+    'goes red again by design when its declared population widens beyond that subtree.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5368,6 +5381,10 @@ const step18: MigrationStep = {
     'hook-timeout-to-timeout-ms',
     'job-timeout-to-timeout-ms',
     'api-endpoint-cache-ttl-to-cache-ttl-seconds',
+    'dashboard-refresh-interval-to-refresh-interval-seconds',
+    'connector-health-and-trigger-durations-unit-in-key',
+    'memory-persistence-auto-save-interval-to-ms',
+    'turso-config-timeout-to-timeout-ms',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by
@@ -5526,6 +5543,38 @@ const step18: MigrationStep = {
         + '`HotReloadManager` stay exported from `@objectstack/core` with their '
         + 'tests green. ⚠️ Runtime behaviour is deliberately UNCHANGED: nothing '
         + 'ever read the container, so removing it removes no behaviour.',
+    },
+    {
+      id: 'ai-conversation-analytics-duration-unit-in-key',
+      surface: 'ConversationAnalytics.duration, the emitted session length whose name carried no '
+        + 'unit (ai/conversation.zod.ts)',
+      replacement: 'durationSeconds — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because it is the only offender in ai/ and the only one on its file. '
+        + 'What makes the bare name worth a registry row rather than a quiet edit is the company '
+        + 'it kept: every other number on ConversationAnalytics is a COUNT — totalMessages, '
+        + 'totalTokens, peakTokenUsage, pruningEvents, tokensSavedByPruning — so the one field '
+        + 'that carried a unit was the one field that did not say so, sitting in a block of '
+        + 'twelve unitless integers. The two instants beside it, firstMessageAt and lastMessageAt, '
+        + 'already spelled themselves; the measurement between them did not. Tombstoned with '
+        + 'retiredKey(); the shape is not strict, so a bare deletion would strip in silence and '
+        + 'an emitter writing the old spelling would lose the value with no error anywhere. '
+        + 'Why a semantic entry and not a D2 conversion: conversation analytics are computed at '
+        + 'runtime and handed to a consumer, never authored by hand and never stored as a '
+        + 'sys_metadata row, so the conversion chain has no seam that would ever see one — the '
+        + 'same disposition every runtime-emitted measurement in this stack has taken. '
+        + '#15680, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every producer that BUILDS a ConversationAnalytics spells durationSeconds, and every '
+        + 'consumer that reads a session length reads durationSeconds. Authoring duration fails '
+        + 'to compile (input type `never`) and fails to parse with the rename prescription rather '
+        + 'than a bare unrecognized-key error. Behaviour is unchanged: durationSeconds: 1800 is '
+        + 'the same half hour duration: 1800 was, the key stays optional, and the non-negative '
+        + 'bound rides along with the renamed key so a negative session length is still refused. '
+        + 'The migration is proved correct when no source in the tree spells a bare duration on '
+        + 'this shape AND the twelve sibling counts are untouched — a sweep that suffixed any of '
+        + 'them has read a count as a duration and over-applied the rule.',
     },
     {
       id: 'analytics-authorable-unknown-keys-refused',
@@ -6100,6 +6149,33 @@ const step18: MigrationStep = {
         + 'buttons meant to open an object\'s form declare `actionType: \'form\'` with an '
         + '`<object>.<view>` target instead. Clicking each converted button opens the intended '
         + 'page or form rather than a refusal dialog.',
+    },
+    {
+      id: 'data-nosql-query-options-timeout-unit-in-key',
+      surface: 'NoSQLQueryOptions.timeout, the per-query driver deadline whose name carried no '
+        + 'unit (data/driver-nosql.zod.ts)',
+      replacement: 'timeoutMs — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because it is the only offender on its file. The neighbour is what '
+        + 'makes it a real hazard rather than a naming preference: batchSize sits directly beside '
+        + 'it, a plain row COUNT with the same z.number().int().positive() shape and the same '
+        + 'order of magnitude, so two adjacent bare integers meant milliseconds and documents '
+        + 'respectively with nothing at the call site to separate them. Tombstoned with '
+        + 'retiredKey(); the shape is not strict, so a bare deletion would strip in silence and '
+        + 'the query would run with no deadline at all while its author believed one was set — '
+        + 'the failure a driver timeout exists to prevent. Why a semantic entry and not a D2 '
+        + 'conversion: these options are a per-call driver argument, reached only through '
+        + 'AggregationPipeline.options, which no stack.zod.ts collection declares and no '
+        + 'sys_metadata row stores, so the chain has no seam. #15680, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every caller that passes NoSQL query options spells timeoutMs. Authoring timeout fails '
+        + 'to compile (input type `never`) and fails to parse with the rename prescription. '
+        + 'Behaviour is unchanged: timeoutMs: 5000 is the same five seconds timeout: 5000 was, and '
+        + 'the positive-integer bound rides along with the renamed key so a zero or negative '
+        + 'deadline is still refused. Two neighbours on this same shape deliberately do NOT move, '
+        + 'and a sweep that renamed either has over-applied the rule: batchSize is a COUNT of '
+        + 'documents, not a duration, and consistency / projection / hint are not numbers at all.',
     },
     {
       id: 'datasource-config-mongo-options-credential-refused',
@@ -8720,6 +8796,260 @@ const step18: MigrationStep = {
         + 'and no stored metadata or document needs editing.',
     },
     {
+      id: 'system-cache-durations-unit-in-key',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface: 'the two cache durations whose name carried no unit: CacheTier.ttl and '
+        + 'CacheAvalanchePrevention.circuitBreaker.resetTimeout (system/cache.zod.ts)',
+      replacement: 'ttlSeconds and resetTimeoutSeconds — rename each key; both values, the 300 '
+        + 'TTL default and the 30 reset default are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'These two are one entry because they are one file and one authoring session: a '
+        + 'cache tier and the avalanche-prevention block that protects it. Each sat beside a '
+        + 'number in a DIFFERENT unit with nothing at the authoring site to separate them — '
+        + 'CacheTier.ttl (seconds) beside maxSize (megabytes), and circuitBreaker.resetTimeout '
+        + '(seconds) beside lockout.lockTimeoutMs (milliseconds) on the very same schema. That '
+        + 'last pair is the sharpest case on this file: one shape already carried both '
+        + 'conventions, and the suffixed one was the honest half. Both are retiredKey() '
+        + 'tombstones; neither shape is strict, so a bare deletion would strip in silence and '
+        + 'the unknown-key error could not carry the rename. Why a semantic entry and not a D2 '
+        + 'conversion: stack.zod.ts declares no cache collection, and neither a cache tier nor '
+        + 'an avalanche-prevention block is a registered metadata kind stored as a sys_metadata '
+        + 'row, so the conversion chain has no seam that would see one. #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every author of a CacheTier spells ttlSeconds and every author of a '
+        + 'CacheAvalanchePrevention spells circuitBreaker.resetTimeoutSeconds. Authoring either '
+        + 'old spelling fails to compile (input type `never`) and fails to parse with the rename '
+        + 'prescription rather than a bare unrecognized-key error. Behaviour is unchanged: a tier '
+        + 'given ttlSeconds: 600 expires after ten minutes exactly as ttl: 600 did, an omitted '
+        + 'key still defaults to 300, and resetTimeoutSeconds still defaults to 30. One thing '
+        + 'this rename deliberately does NOT touch: lockout.lockTimeoutMs keeps its name and its '
+        + 'MILLISECOND unit — the two timeouts on this schema were never the same unit and must '
+        + 'not be migrated as if they were.',
+    },
+    {
+      id: 'system-collaboration-durations-unit-in-key',
+      surface: 'the two collaboration-session durations whose name carried no unit: '
+        + 'CollaborationSessionConfig.idleTimeout and CollaborationSessionConfig.snapshot.interval '
+        + '(system/collaboration.zod.ts)',
+      replacement: 'idleTimeoutMs and snapshot.intervalMs — rename each key; both values and the '
+        + '300000 idle-timeout default are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'idleTimeout is the collision that got this whole population ruled rather than merely '
+        + 'noted: it is MILLISECONDS here, while the tenant surface carried its own idleTimeout '
+        + 'in SECONDS at the same time — so the identical bare name meant five minutes on one '
+        + 'shape and three and a half days on the other, a 1000x divergence no parse could catch '
+        + 'because both readings are positive integers. The tenant half was already renamed '
+        + '(#15626); this is the half that remained. snapshot.interval rides in the same entry '
+        + 'because it is the same object graph and the same authoring session — leaving one bare '
+        + 'beside the other would have preserved exactly the ambiguity the rename removes. Both '
+        + 'are retiredKey() tombstones; the shapes are not strict, so a bare deletion would strip '
+        + 'in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts declares no '
+        + 'collaboration collection, and a session config is a runtime call argument rather than '
+        + 'a stored sys_metadata row, so the conversion chain has no seam that would see it. '
+        + '#15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every caller that opens a collaboration session spells idleTimeoutMs, and every snapshot '
+        + 'block spells intervalMs. Authoring either old spelling fails to compile (input type '
+        + '`never`) and fails to parse with the rename prescription. Behaviour is unchanged: '
+        + 'idleTimeoutMs: 600000 idles out after ten minutes exactly as idleTimeout: 600000 did, '
+        + 'an omitted key still defaults to 300000, and the positive-integer bounds ride along '
+        + 'with the renamed keys so a zero or negative interval is still refused. The migration '
+        + 'is proved correct when no source in the tree spells a bare idleTimeout on ANY shape — '
+        + 'the seconds-valued tenant twin is already gone, so a surviving bare spelling is now '
+        + 'unambiguously a missed edit rather than the other key.',
+    },
+    {
+      id: 'system-failover-health-check-interval-unit-in-key',
+      surface: 'FailoverConfig.healthCheckInterval, the disaster-recovery health-check period '
+        + 'whose name carried no unit (system/disaster-recovery.zod.ts)',
+      replacement: 'healthCheckIntervalSeconds — rename the key; the value and the 30 default '
+        + 'are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because its file has exactly one offender left — and because the key '
+        + 'directly beside it is the counter-example that shows where the line falls. '
+        + 'FailoverConfig.dns.ttl is also a bare-named duration in seconds, and it is NOT renamed: '
+        + 'it carries an externalVocabulary marker because it mirrors the DNS resource-record TTL '
+        + 'field (RFC 1035 section 4.1.3), spelled ttl by every provider API the value is '
+        + 'forwarded to (Route 53, Cloudflare). healthCheckInterval mirrors nothing outside this '
+        + 'repo, so the exemption does not reach it. Tombstoned with retiredKey(); the shape is '
+        + 'not strict, so a bare deletion would strip in silence. Why a semantic entry and not a '
+        + 'D2 conversion: stack.zod.ts declares no disasterRecovery collection and a failover '
+        + 'config is host configuration, never a stored sys_metadata row. #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every FailoverConfig author spells healthCheckIntervalSeconds; authoring '
+        + 'healthCheckInterval fails to compile (input type `never`) and fails to parse with the '
+        + 'rename prescription. Behaviour is unchanged: healthCheckIntervalSeconds: 30 probes '
+        + 'every thirty seconds exactly as before, and an omitted key still defaults to 30. The '
+        + 'migration is proved correct when dns.ttl is still spelled ttl — a sweep that renamed '
+        + 'it too has over-applied the rule and stripped a declared exemption.',
+    },
+    {
+      id: 'system-metrics-window-durations-unit-in-key',
+      surface: 'the three metrics window/period lengths whose name carried no unit: '
+        + 'MetricAggregationConfig.window.size, ServiceLevelIndicator.window.size and '
+        + 'ServiceLevelObjective.period.duration (system/metrics.zod.ts)',
+      replacement: 'window.durationSeconds, window.durationSeconds and period.durationSeconds — '
+        + 'rename each key; every value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'The three are one entry because they are one measurement expressed three times on one '
+        + 'file: how long a window or period is. The new name is deliberately NOT the mechanical '
+        + 'sizeSeconds the gate prints. size means a byte or row count everywhere else in this '
+        + 'spec — CacheTier.maxSize is megabytes, RegistryConfig.cache.maxSize is bytes, and this '
+        + 'very file spells a batch row count size — so sizeSeconds would have kept the '
+        + 'misleading half of the name and bolted a unit onto it, leaving a reader to decide '
+        + 'whether a window is measured in bytes-per-second or in time. windowSeconds was '
+        + 'rejected for a plainer reason: the parent key is already window, so it would read '
+        + 'window.windowSeconds. durationSeconds names what the number IS, and the file itself '
+        + 'supplied the precedent — ServiceLevelObjective.period already called its length a '
+        + 'duration, so after the rename all three read alike instead of one borrowing byte '
+        + 'vocabulary. All three are retiredKey() tombstones; the shapes are not strict, so a bare '
+        + 'deletion would strip in silence. Why a semantic entry and not a D2 conversion: '
+        + 'stack.zod.ts declares no metrics collection, and none of an aggregation config, an SLI '
+        + 'or an SLO is a registered metadata kind stored as a sys_metadata row. '
+        + '#15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every aggregation window and SLI window spells durationSeconds, and every SLO period '
+        + 'spells durationSeconds. Authoring window.size or period.duration fails to compile '
+        + '(input type `never`) and fails to parse with the rename prescription. Behaviour is '
+        + 'unchanged: window.durationSeconds: 300 aggregates over five minutes exactly as '
+        + 'size: 300 did, and the positive-integer bounds ride along with the renamed keys. Two '
+        + 'keys on this same file deliberately do NOT move, and a sweep that renamed either has '
+        + 'over-applied the rule: the error-budget burn-rate window '
+        + 'names its unit only in the JSDoc above it ("Window size in seconds"), a channel the '
+        + 'gate does not read: it reads `.describe()` and `.meta({ description })`, and that '
+        + 'key\'s describe ("Window size") names none. So the gate lists it among the '
+        + 'duration-shaped keys without judging it — neither an offender nor an exemption — and '
+        + 'it is outside this rename, not outside the gate population; that JSDoc-channel gap is '
+        + '#15939; '
+        + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
+        + 'to carry. Both keep their names.',
+    },
+    {
+      id: 'system-object-storage-durations-unit-in-key',
+      surface: 'the two object-storage durations whose name carried no unit: '
+        + 'AccessControlConfig.maxAge and StorageConnection.timeout '
+        + '(system/object-storage.zod.ts)',
+      replacement: 'maxAgeSeconds and timeoutMs — rename each key; both values are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'AccessControlConfig.maxAge is the one key in this stack where the two structural '
+        + 'exemptions and the rename look alike from a distance, so the reasoning is recorded '
+        + 'rather than assumed. It was CONSIDERED for an externalVocabulary marker and demoted on '
+        + 'evidence: every bucket-CORS standard the value is forwarded to spells the field WITH '
+        + 'its unit — S3 MaxAgeSeconds, GCS maxAgeSeconds, Azure MaxAgeInSeconds — so marking it '
+        + 'would have exempted a DEVIATION from the cited standard rather than a mirror of it, '
+        + 'which is the opposite of what the marker declares. Its twin shared/CorsConfig.maxAge '
+        + 'DID get the marker and keeps its bare name, because the Fetch response header that one '
+        + 'mirrors, Access-Control-Max-Age, genuinely carries no unit token. Two maxAge keys on '
+        + 'opposite sides of the same line; the asymmetry is the point and must not be '
+        + 'harmonised. StorageConnection.timeout rides along as the plain case on the same file. '
+        + 'Both are retiredKey() tombstones; the shapes are not strict, so a bare deletion would '
+        + 'strip in silence. Why a semantic entry and not a D2 conversion: stack.zod.ts declares '
+        + 'no objectStorage collection, and neither shape is a registered metadata kind stored as '
+        + 'a sys_metadata row. #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every bucket access-control block spells maxAgeSeconds and every storage connection '
+        + 'spells timeoutMs. Authoring either old spelling fails to compile (input type `never`) '
+        + 'and fails to parse with the rename prescription. Behaviour is unchanged: '
+        + 'maxAgeSeconds: 3600 caches a preflight for an hour exactly as maxAge: 3600 did, and '
+        + 'the non-negative bounds ride along with the renamed keys. The migration is proved '
+        + 'correct when shared/CorsConfig.maxAge is STILL spelled maxAge — a find-and-replace '
+        + 'that renamed both has destroyed a declared external-vocabulary mirror, and the gate '
+        + 'will not catch it because the marker exempts the key either way.',
+    },
+    {
+      id: 'system-registry-config-durations-unit-in-key',
+      surface: 'the three package-registry durations whose name carried no unit: '
+        + 'RegistryUpstream.syncInterval, RegistryUpstream.timeout and RegistryConfig.cache.ttl '
+        + '(system/registry-config.zod.ts)',
+      replacement: 'syncIntervalSeconds, timeoutMs and cache.ttlSeconds — rename each key; every '
+        + 'value, the 30000 timeout default and the 3600 TTL default are unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'The three are one entry because they are one file and, for the first two, one object: '
+        + 'RegistryUpstream declared a SECONDS interval and a MILLISECONDS timeout twenty-five '
+        + 'lines apart, both bare. That pair carries the clearest demonstration in this card of '
+        + 'why a bound is no substitute for a name — timeout is min(1000), which reads as one '
+        + 'second under the right unit and as sixteen minutes under the wrong one, and both '
+        + 'readings satisfy the validator. The cache TTL is the same defect one schema over, '
+        + 'beside a maxSize measured in bytes. All three are retiredKey() tombstones; the shapes '
+        + 'are not strict, so a bare deletion would strip in silence. Why a semantic entry and '
+        + 'not a D2 conversion: stack.zod.ts declares no registry collection, and a registry '
+        + 'config is host configuration read at startup rather than a stored sys_metadata row, so '
+        + 'the conversion chain has no seam that would see it. #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every upstream declaration spells syncIntervalSeconds and timeoutMs, and every registry '
+        + 'cache block spells ttlSeconds. Authoring any old spelling fails to compile (input type '
+        + '`never`) and fails to parse with the rename prescription. Behaviour is unchanged: '
+        + 'syncIntervalSeconds: 300 syncs every five minutes exactly as syncInterval: 300 did, an '
+        + 'omitted timeoutMs still defaults to 30000, an omitted ttlSeconds still defaults to '
+        + '3600, and the min-60 / min-1000 / min-0 bounds ride along with the renamed keys so a '
+        + 'too-small interval or timeout is still refused. The pair on RegistryUpstream is the '
+        + 'one to check by hand rather than by search-and-replace: after the migration a reader '
+        + 'can tell at the authoring site that 300 and 30000 are not the same kind of number.',
+    },
+    {
+      id: 'system-tracing-span-duration-unit-in-key',
+      surface: 'Span.duration, the emitted trace-span length whose name carried no unit '
+        + '(system/tracing.zod.ts)',
+      replacement: 'durationMs — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because it is the only offender on its file and the only one in this '
+        + 'card that is a pure runtime-emitted measurement: a span is written by an exporter and '
+        + 'read by a backend, never authored by hand. That is also why it is a rename and not an '
+        + 'externalVocabulary mirror, which is the exemption a tracing shape would most plausibly '
+        + 'claim: OpenTelemetry, whose model this schema follows, carries span length as a '
+        + 'start/end nanosecond PAIR and declares no key named duration at all, so there is no '
+        + 'external spelling for the marker to point at. The shape already spells its two '
+        + 'instants startTime and endTime, so the bare duration was the one measurement on the '
+        + 'span that did not say what it was. Tombstoned with retiredKey(); the shape is not '
+        + 'strict, so a bare deletion would strip in silence and an exporter emitting the old '
+        + 'spelling would lose the value without an error. Why a semantic entry and not a D2 '
+        + 'conversion: an emitted span is never a stack collection member and never a stored '
+        + 'sys_metadata row — the same disposition every runtime-emitted measurement in this '
+        + 'stack has taken. #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every exporter that BUILDS a Span spells durationMs, and every consumer that reads a '
+        + 'span length reads durationMs. Authoring duration fails to compile (input type `never`) '
+        + 'and fails to parse with the rename prescription rather than silently dropping the '
+        + 'measurement. Behaviour is unchanged: durationMs: 150 is the same 150 milliseconds, and '
+        + 'the non-negative bound rides along with the renamed key so a negative span length is '
+        + 'still refused. Note the sibling instants startTime and endTime are ISO-8601 strings, '
+        + 'not numbers, and are untouched by this rename.',
+    },
+    {
+      id: 'system-worker-queue-rate-limit-duration-unit-in-key',
+      surface: 'QueueConfig.rateLimit.duration, the worker rate-limit window whose name carried '
+        + 'no unit (system/worker.zod.ts)',
+      replacement: 'durationMs — rename the key; the value is unchanged',
+      reason:
+        'Maintainer ruling B on #14478 (2026-09-02, decision batch #43): the unit of a duration-shaped z.number() lives in the key NAME or in a unit-carrying value, never only in the describe prose, and no existing offender is grandfathered. '
+        + 'It stands alone because it is the only offender left on its file, and the file itself '
+        + 'is what makes it a drift rather than a convention: TaskResult.durationMs, declared '
+        + 'ninety lines earlier in the SAME source, already spelled the identical measurement '
+        + 'with its unit. One file, one unit, two spellings, and the correct one was already '
+        + 'there — so this rename removes an internal inconsistency rather than imposing an '
+        + 'external one. Tombstoned with retiredKey(); the shape is not strict, so a bare '
+        + 'deletion would strip in silence and a queue would fall back to no rate limit at all '
+        + 'without an error. Why a semantic entry and not a D2 conversion: stack.zod.ts declares '
+        + 'jobs, not queues, so a QueueConfig is worker host configuration rather than a stack '
+        + 'collection member or a stored sys_metadata row, and the conversion chain has no seam '
+        + 'that would see it. #15679, #14478, ADR-0087.',
+      acceptanceCriteria:
+        'Every queue declaration spells rateLimit.durationMs. Authoring rateLimit.duration fails '
+        + 'to compile (input type `never`) and fails to parse with the rename prescription rather '
+        + 'than silently dropping the window and leaving the queue unthrottled. Behaviour is '
+        + 'unchanged: { max: 100, durationMs: 60000 } is a hundred tasks a minute exactly as '
+        + '{ max: 100, duration: 60000 } was, and the positive-integer bound rides along with the '
+        + 'renamed key. The sibling max is a COUNT and keeps its name — it has no unit to carry.',
+    },
+    {
       id: 'tenant-timeouts-unit-in-key',
       surface: 'DatabaseLevelIsolationStrategy `connectionPool.idleTimeout` / TenantSecurityPolicy '
         + '`accessControl.sessionTimeout` (system/tenant.zod.ts)',
@@ -9408,6 +9738,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #15680 (stack card 5/6 of #14478) — maintainer ruling 2026-09-02 ("ruled B"):
+    // a duration-shaped `z.number()` key carries its unit in its NAME, and no
+    // existing offender is grandfathered. `ConversationAnalytics.duration` said
+    // "Session duration in seconds" in prose and nothing else, on a shape where
+    // every OTHER number is a count (messages, tokens, pruning events) and the two
+    // neighbouring instants already spell themselves `firstMessageAt` /
+    // `lastMessageAt`. Renamed to `durationSeconds`; the value is unchanged.
+    // Tombstoned with `retiredKey()` — the shape is not `.strict()`, so a bare
+    // deletion would strip the key in silence and the analytics row would lose the
+    // one measurement it carries, with no error anywhere. No D2 conversion:
+    // conversation analytics are computed and emitted at runtime, never authored
+    // and never a stored `sys_metadata` row, so the chain has no seam that sees
+    // one. See `ai-conversation-analytics-duration-unit-in-key`.
+    'ai/ConversationAnalytics:duration',
     // #15677 (stack card 2/6 of #14478) — maintainer ruling 2026-09-02 ("ruled B"):
     // a duration-shaped `z.number()` key carries its unit in its NAME, and no
     // existing offender is grandfathered. `ApiEndpoint.cacheTtl` said "Response
@@ -9840,6 +10184,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // construction configuration, never a stored row; the semantic entry
     // `websocket-durations-unit-in-key` carries the prescription.
     'api/WebSocketServerConfig:heartbeatInterval',
+    // #15680 (stack card 5/6 of #14478) — ruling B, and the one key in this card
+    // that the gate did NOT list. It is here because it is not a second key: the
+    // `auto` persistence arm resolves to the same Node.js file adapter as the
+    // `file` arm, and this value is forwarded to the same
+    // `FileSystemPersistenceAdapter` field, in the same milliseconds, under the
+    // same `min(100)` bound. Its describe named no unit at all, which is why the
+    // predicate skipped it — and precisely why renaming only the `file` arm would
+    // have left ONE value with TWO spellings across sibling arms of one union, with
+    // the driver reading both. That is the consumer-side dialect Prime Directive
+    // #12 forbids, so the two arms move together. Renamed to `autoSaveIntervalMs`
+    // and its describe now names the unit too. Tombstoned with `retiredKey()`;
+    // covered by `memory-persistence-auto-save-interval-to-ms`, which converts both
+    // arms in one pass.
+    'data/AutoPersistenceConfig:autoSaveInterval',
     // #14478 — maintainer ruling 2026-09-02 ("ruled B"): the unit of a
     // duration-shaped `z.number()` key lives in the key name, and no existing
     // offender is grandfathered. `DriverOptions.timeout` said "Timeout in ms" in
@@ -9852,6 +10210,20 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `driver-options-timeout-to-timeout-ms` carries the prescription. Registered
     // under 18 for the launch-window reason its neighbours state.
     'data/DriverOptions:timeout',
+    // #15680 (stack card 5/6 of #14478) — ruling B.
+    // `FilePersistenceConfig.autoSaveInterval` said "Auto-save interval in ms" in
+    // prose and nothing else. Its `min(100)` bound is what made the bare name
+    // dangerous rather than merely untidy: 100 reads as a plausible number of
+    // SECONDS, so an author who guessed the unit wrong cleared the bound, was
+    // refused nowhere, and saved a thousand times more often than intended.
+    // Renamed to `autoSaveIntervalMs`; the value and the 2000 default are
+    // unchanged. Tombstoned with `retiredKey()` — this shape IS `strictObject`, so
+    // a bare deletion is not silent, but an unknown-key rejection cannot carry the
+    // FROM → TO mapping, which is the whole payload of a rename. Covered by the D2
+    // conversion `memory-persistence-auto-save-interval-to-ms`: a memory datasource
+    // is a `datasources[]` stack collection member whose `config` is stored whole in
+    // `sys_metadata`, so the chain has a seam that sees it.
+    'data/FilePersistenceConfig:autoSaveInterval',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -9879,6 +10251,46 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // conversion `metric-filters-removed`, which strips the key from every metric
     // in `analyticsCubes[].measures`.
     'data/Metric:filters',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `NoSQLQueryOptions.timeout`
+    // said "Query timeout (ms)" in prose and nothing else, directly beside
+    // `batchSize`, a plain row COUNT: two bare numbers side by side, one carrying a
+    // unit and one not, with nothing at the call site to tell them apart. Renamed
+    // to `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()`; the
+    // shape is not `.strict()`, so a bare deletion would strip in silence and the
+    // query would run without the limit its author set. No D2 conversion: query
+    // options are a per-call driver argument reached only through
+    // `AggregationPipeline.options`, which no `stack.zod.ts` collection declares
+    // and no `sys_metadata` row stores. See `data-nosql-query-options-timeout-unit-in-key`.
+    'data/NoSQLQueryOptions:timeout',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `TursoConfig.timeout` said
+    // "Operation timeout in milliseconds" in prose and carried a `.meta({ title:
+    // 'Timeout (ms)' })` no parse reads — and sat two keys below
+    // `sync.intervalSeconds`, which already spelled ITS unit. One shape carrying
+    // both conventions, and the suffixed one was the honest half. Renamed to
+    // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()`; the
+    // shape IS `strictObject`, so the tombstone is here for the prescription an
+    // unknown-key rejection cannot carry. Covered by the D2 conversion
+    // `turso-config-timeout-to-timeout-ms`: a turso datasource is a `datasources[]`
+    // stack collection member whose `config` is stored whole in `sys_metadata`.
+    // ⚠️ This is the SPEC's turso contract (`packages/spec/src/data/driver/turso.zod.ts`).
+    // The driver package ships its own parallel `turso.zod.ts` whose `timeout` is
+    // outside this card's declared population and is renamed by the card that
+    // widens that population.
+    'data/TursoConfig:timeout',
+    // #15680 (stack card 5/6 of #14478) — ruling B.
+    // `CircuitBreakerConfig.monitoringWindow` said "Rolling window for failure
+    // count in ms" in prose and nothing else — ONE key below `resetTimeoutMs`,
+    // which already spelled its unit, on the same six-key shape. That is the
+    // sharpest case in this card: a single schema already carried both
+    // conventions, so a reader had no rule to apply, only two examples that
+    // disagreed. Renamed to `monitoringWindowMs`; the value and the 60000 default
+    // are unchanged. Tombstoned with `retiredKey()` — the shape is not `.strict()`,
+    // so a bare deletion would strip in silence and the breaker would fall back to
+    // its default window while the author believed they had widened it. Covered by
+    // the D2 conversion `connector-health-and-trigger-durations-unit-in-key`:
+    // `connectors:` is a stack collection and a published connector row lands whole
+    // in `sys_metadata`, so the chain has a seam that sees it.
+    'integration/CircuitBreakerConfig:monitoringWindow',
     // #14676 — ADR-0049 enforce-or-remove on `ConnectorSchema.errorMapping` (triage
     // ruling 2026-09-02: removal via the `spec-property-retirement` playbook; the
     // split condition — a downstream consumer in objectui or a customer stack —
@@ -9906,6 +10318,19 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #12497 / #13823 grading).
     'integration/Connector:errorMapping',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `ConnectorTrigger.interval`
+    // said "Polling interval in seconds" in prose and nothing else. A polling
+    // cadence is exactly the number a reader guesses at, and the bare name `interval`
+    // means MILLISECONDS elsewhere in this same spec — the identical spelling
+    // carrying two units a thousandfold apart is the collision that got this whole
+    // population ruled rather than merely noted. Renamed to `intervalSeconds`; the
+    // value is unchanged. Tombstoned with `retiredKey()`; the shape is not
+    // `.strict()`, so a bare deletion would strip in silence. Covered by the D2
+    // conversion `connector-health-and-trigger-durations-unit-in-key`.
+    // ⚠️ The trigger shape itself is declared-but-unread (no polling loop is driven
+    // by it). The rename does not change that; it makes the declaration honest
+    // about its unit for whoever implements the loop.
+    'integration/ConnectorTrigger:interval',
     // #14676 — the same tombstone seen through the second carrier.
     // `DeclarativeConnectorEntrySchema` is `ConnectorSchema.superRefine(...)`, so the
     // `errorMapping` tombstone on the base is inherited by the shape that
@@ -10732,6 +11157,38 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // D2 conversion `permission-allow-restore-purge-removed`, which strips the
     // key from every object grant in `permissions[].objects`.
     'security/ObjectPermission:allowRestore',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `AccessControlConfig.maxAge` said
+    // "CORS preflight cache duration in seconds" in prose and nothing else.
+    // ⚠️ This key is deliberately a RENAME and not an `externalVocabulary` marker,
+    // and the asymmetry with its twin is load-bearing: every bucket-CORS standard
+    // this value is forwarded to spells the field WITH its unit (S3 `MaxAgeSeconds`,
+    // GCS `maxAgeSeconds`, Azure `MaxAgeInSeconds`), so marking it would have
+    // exempted a DEVIATION from the cited standard rather than a mirror of it. The
+    // twin `shared/CorsConfig.maxAge` DID get the marker, because the Fetch response
+    // header it mirrors — `Access-Control-Max-Age` — genuinely carries no unit token.
+    // Two `maxAge` keys, opposite sides of the line; do not harmonise them. Renamed
+    // to `maxAgeSeconds`; the value is unchanged. Tombstoned with `retiredKey()`. No
+    // D2 conversion: not a stack collection member, not a stored row.
+    // See `system-object-storage-durations-unit-in-key`.
+    'system/AccessControlConfig:maxAge',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `circuitBreaker.resetTimeout`
+    // said "Seconds before half-open state" in prose only, while the `lockout` block
+    // three lines down on the SAME schema already spelled `lockTimeoutMs`. One shape,
+    // two conventions, and the two are not even the same unit. Renamed to
+    // `resetTimeoutSeconds`; the value and the 30 default are unchanged. Tombstoned
+    // with `retiredKey()`. No D2 conversion: not a stack collection member, not a
+    // stored row. See `system-cache-durations-unit-in-key`.
+    'system/CacheAvalanchePrevention:circuitBreaker.resetTimeout',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `CacheTier.ttl` said "Default TTL
+    // in seconds" in prose and nothing else, on a tier whose sibling `maxSize` is a
+    // size in MB: two bare numbers side by side, neither naming its unit at the
+    // authoring site. Renamed to `ttlSeconds`; the value and the 300 default are
+    // unchanged. Tombstoned with `retiredKey()` — `CacheTierSchema` is a plain
+    // `z.object()`, so a bare deletion would strip the old key in silence. No D2
+    // conversion: `stack.zod.ts` declares no `cache` collection and a cache tier is
+    // never a stored metadata row, so the conversion chain has no seam that sees it.
+    // See `system-cache-durations-unit-in-key`.
+    'system/CacheTier:ttl',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -10788,6 +11245,35 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/BatchEndpointsConfig:operations.upsertMany` are.
     // D3 semantic entry: `change-management-duration-keys-retired`.
     'system/ChangeRequest:implementation.steps.estimatedMinutes',
+    // #15679 (stack card 4/6 of #14478) — ruling B. This is the live 1000x collision
+    // that got the whole population ruled: `CollaborationSessionConfig.idleTimeout`
+    // is MILLISECONDS while the tenant surface carried its own `idleTimeout` in
+    // SECONDS, so `idleTimeout: 300000` meant five minutes here and three and a half
+    // days there, with nothing at either authoring site to tell them apart. Renamed
+    // to `idleTimeoutMs`; the value and the 300000 default are unchanged. Tombstoned
+    // with `retiredKey()`. No D2 conversion: `stack.zod.ts` declares no
+    // `collaboration` collection and a session config is a runtime call argument,
+    // not a stored metadata row. See `system-collaboration-durations-unit-in-key`.
+    'system/CollaborationSessionConfig:idleTimeout',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `snapshot.interval` said
+    // "Snapshot interval in milliseconds" in prose and nothing else. It moves in the
+    // same stroke as its parent's `idleTimeout`: both are session-lifetime durations
+    // on one config object, and leaving one bare would have kept exactly the
+    // ambiguity the rename removes. Renamed to `intervalMs`; the value is unchanged.
+    // Tombstoned with `retiredKey()`. No D2 conversion, for its parent's reason.
+    // See `system-collaboration-durations-unit-in-key`.
+    'system/CollaborationSessionConfig:snapshot.interval',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `FailoverConfig.healthCheckInterval`
+    // said "Health check interval in seconds" in prose and nothing else. Renamed to
+    // `healthCheckIntervalSeconds`; the value and the 30 default are unchanged.
+    // ⚠️ Its neighbour `FailoverConfig.dns.ttl` on this same schema keeps its bare
+    // name and is NOT part of this rename — that key carries an `externalVocabulary`
+    // marker because it mirrors the DNS resource-record TTL field (RFC 1035 §4.1.3),
+    // spelled `ttl` by every provider API it is forwarded to. This one mirrors
+    // nothing outside the repo. Tombstoned with `retiredKey()`. No D2 conversion:
+    // not a stack collection member, not a stored row.
+    // See `system-failover-health-check-interval-unit-in-key`.
+    'system/FailoverConfig:healthCheckInterval',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -10930,6 +11416,54 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // (launch-window convention) and the prescription lives at the major boundary
     // where `migrate meta` users look.
     'system/Job:timeout',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `MetricAggregationConfig.window.size`
+    // said "Window size in seconds" in prose and nothing else. Renamed to
+    // `durationSeconds`, NOT to the gate's mechanical `sizeSeconds`: `size` is
+    // byte/row-count vocabulary everywhere else in this spec (`CacheTier.maxSize` is
+    // MB, `RegistryConfig.cache.maxSize` is bytes, this file's own `batch.size` is a
+    // row count), so `sizeSeconds` would have preserved the misleading half of the
+    // name and bolted a unit onto it. `windowSeconds` was rejected too — the parent
+    // key is already `window`, so it would read `window.windowSeconds`. The value is
+    // unchanged. Tombstoned with `retiredKey()`. No D2 conversion: `stack.zod.ts`
+    // declares no `metrics` collection and an aggregation config is not a stored
+    // metadata row. See `system-metrics-window-durations-unit-in-key`.
+    'system/MetricAggregationConfig:window.size',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `QueueConfig.rateLimit.duration`
+    // said "Duration in milliseconds" in prose and nothing else — while
+    // `TaskResult.durationMs`, ninety lines earlier in the SAME file, already spelled
+    // the identical measurement correctly. The counter-example was in the file, which
+    // is what makes this one a drift rather than a convention. Renamed to
+    // `durationMs`; the value is unchanged. Tombstoned with `retiredKey()`. No D2
+    // conversion: `stack.zod.ts` declares `jobs`, not `queues`, and a queue config is
+    // worker host configuration rather than a stored metadata row.
+    // See `system-worker-queue-rate-limit-duration-unit-in-key`.
+    'system/QueueConfig:rateLimit.duration',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `RegistryConfig.cache.ttl` said
+    // "Cache TTL in seconds" in prose and nothing else, next to a `maxSize` in the
+    // same cache block measured in BYTES. Renamed to `ttlSeconds`; the value and the
+    // 3600 default are unchanged. Tombstoned with `retiredKey()`. No D2 conversion:
+    // not a stack collection member, not a stored row.
+    // See `system-registry-config-durations-unit-in-key`.
+    'system/RegistryConfig:cache.ttl',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `RegistryUpstream.syncInterval`
+    // said "Auto-sync interval in seconds" in prose and nothing else, on a block
+    // whose `timeout` two keys down was MILLISECONDS: one upstream declaration, two
+    // units, neither spelled at the authoring site. Renamed to `syncIntervalSeconds`;
+    // the value and the min-60 bound are unchanged. Tombstoned with `retiredKey()`.
+    // No D2 conversion: `stack.zod.ts` declares no `registry` collection and a
+    // registry config is host configuration, not a stored metadata row.
+    // See `system-registry-config-durations-unit-in-key`.
+    'system/RegistryUpstream:syncInterval',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `RegistryUpstream.timeout` said
+    // "Request timeout in milliseconds" in prose and nothing else, beside a
+    // seconds-valued `syncInterval` on the same block. Its `min(1000)` bound is the
+    // sharpest reading of why the rule exists: under the wrong unit that floor reads
+    // as sixteen minutes rather than one second, and no parse can catch the mistake
+    // because both readings are in range. Renamed to `timeoutMs`; the value, the
+    // 30000 default and the min-1000 bound are unchanged. Tombstoned with
+    // `retiredKey()`. No D2 conversion, for its sibling's reason.
+    // See `system-registry-config-durations-unit-in-key`.
+    'system/RegistryUpstream:timeout',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -10958,6 +11492,42 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // `api/BatchEndpointsConfig:operations.upsertMany` are.
     // D3 semantic entry: `change-management-duration-keys-retired`.
     'system/RollbackPlan:steps.estimatedMinutes',
+    // #15679 (stack card 4/6 of #14478) — ruling B. The second of the two
+    // byte-identical `window.size` declarations in `metrics.zod.ts`; it carries the
+    // same prose and takes the same new name, `durationSeconds`, for the reason
+    // recorded on its twin (`system/MetricAggregationConfig:window.size`). Registered
+    // as its own row because the authorable surface is per DEF, not per source line:
+    // an author migrating an SLI never reads the aggregation-config entry. The value
+    // is unchanged. Tombstoned with `retiredKey()`; no D2 conversion.
+    // See `system-metrics-window-durations-unit-in-key`.
+    'system/ServiceLevelIndicator:window.size',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `ServiceLevelObjective.period.duration`
+    // said "Duration in seconds" in prose and nothing else. Renamed to
+    // `durationSeconds`; the value is unchanged. This key is why the two `window.size`
+    // keys above land on `durationSeconds` rather than `sizeSeconds`: the file already
+    // spelled a window length as a `duration` one schema down, so the three
+    // measurements now read alike instead of one of them borrowing byte vocabulary.
+    // Tombstoned with `retiredKey()`. No D2 conversion: an SLO is not a stack
+    // collection member and not a stored metadata row.
+    // See `system-metrics-window-durations-unit-in-key`.
+    'system/ServiceLevelObjective:period.duration',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `Span.duration` said "Duration in
+    // milliseconds" in prose and nothing else, on a shape that already spells its two
+    // instants `startTime` / `endTime`. Renamed to `durationMs`; the value is
+    // unchanged. Not an `externalVocabulary` mirror: OpenTelemetry, which this shape
+    // follows, carries span length as a start/end nanosecond PAIR and declares no key
+    // named `duration` at all, so there is no external spelling to mirror here.
+    // Tombstoned with `retiredKey()`. No D2 conversion: a span is a runtime-emitted
+    // measurement, never authored metadata and never a stored `sys_metadata` row.
+    // See `system-tracing-span-duration-unit-in-key`.
+    'system/Span:duration',
+    // #15679 (stack card 4/6 of #14478) — ruling B. `StorageConnection.timeout` said
+    // "Connection timeout in milliseconds" in prose and nothing else. Renamed to
+    // `timeoutMs`; the value is unchanged. Tombstoned with `retiredKey()`. No D2
+    // conversion: `stack.zod.ts` declares no `objectStorage` collection and a storage
+    // connection is host configuration, not a stored metadata row.
+    // See `system-object-storage-durations-unit-in-key`.
+    'system/StorageConnection:timeout',
     // #14477 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-02, ruled A:
     // retire per family). One of the hour/minute/day-shaped deadline keys of the
     // incident-response / training / change-management families: declared on the
@@ -11063,6 +11633,25 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // parse) and the D3 semantic entry named below.
     // D3 semantic entry: `training-deadline-keys-retired`.
     'system/TrainingPlan:reminderDaysBefore',
+    // #15680 (stack card 5/6 of #14478) — ruling B. `dashboard.refreshInterval`
+    // said "Auto-refresh interval in seconds" in prose and nothing else. The three
+    // rename-hint aliases beside it — `refresh`, `autoRefresh`, `pollInterval` —
+    // measure how many spellings authors actually reach for, and not one of them
+    // named a unit either, so every door into this key left the cadence ambiguous.
+    // All three were repointed to the new spelling in the same edit. Renamed to
+    // `refreshIntervalSeconds`; the value is unchanged. Tombstoned with
+    // `retiredKey()`; the shape IS `strictObject`, so the tombstone is here for the
+    // prescription an unknown-key rejection cannot carry. Covered by the D2
+    // conversion `dashboard-refresh-interval-to-refresh-interval-seconds`:
+    // `dashboards:` is a stack collection and a dashboard is a registered metadata
+    // kind stored as a row.
+    // ⚠️ Unique in this stack: the consumer is in ANOTHER REPOSITORY. objectui's
+    // dashboard renderer reads this key and multiplies by 1000, and publishes it as
+    // a registry input, so its reader could not move in this PR the way every other
+    // reader in this card did. Sequenced as a follow-up card behind a release that
+    // actually ships the rename; until then the renderer sees an absent key and
+    // does not start its timer.
+    'ui/Dashboard:refreshInterval',
     // #9220 — ADR-0049 enforce-or-remove at ELEMENT grain. `element:filter` never
     // had a renderer or reader anywhere: objectui registers none (its
     // renderers/basic/elements.tsx header deferred the element to "owning plugins"
