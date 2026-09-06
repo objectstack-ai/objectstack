@@ -151,6 +151,22 @@ export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
  * ⚠️ It has THREE exits, not two: a refusal, `undefined` to proceed, and a
  * THROW. See the posture read below for the class that throws and why a caller
  * must not absorb it into "no gate to enforce".
+ *
+ * ⚠️ TWO DOORS, one gate body — so every exit above, the throw included,
+ * reaches BOTH of them and neither is "the" activation door:
+ *
+ *   - `./actions.ts` — `POST /actions/_activation/:object/:action`, calling
+ *     this function directly with {@link ACTION_ACTIVATION_SUBJECT};
+ *   - `./automation.ts` — `POST /automation/:name/toggle`, through its
+ *     `refuseUngrantedFlowActivationWrite` wrapper and
+ *     {@link FLOW_ACTIVATION_SUBJECT}.
+ *
+ * Both `await` the call, so the throw exit is a rejected promise the domain
+ * handler propagates and the dispatcher's error exit renders — nothing is
+ * unhandled at either door. Written down because a change to this body is a
+ * change to two routes: a claim about "the gate" that was measured at one door
+ * is a claim about half the surface, and both doors are pinned together in
+ * `./tenancy-posture-outage-gates.test.ts` for that reason.
  */
 export async function refuseUngrantedActivationWrite(
     deps: DomainHandlerDeps,

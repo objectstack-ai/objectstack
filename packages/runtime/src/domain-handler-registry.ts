@@ -154,6 +154,16 @@ export interface DomainHandlerDeps {
      * "the fact is absent" license DIFFERENT answers; where they license the
      * same answer it buys an outage in place of a working deployment.
      *
+     * ⚠️ PASS THE SCOPE YOU HOLD. `environmentId` is optional in the signature
+     * and load bearing in use: a service registered `ServiceLifecycle.SCOPED`
+     * and resolved without one rejects UNBRANDED, so this method re-raises it
+     * and the caller answers 503 — on a service that is perfectly healthy. Under
+     * `resolveService` that same omission was invisible, because the probe
+     * absorbed it; opting a call site in without the scope converts a silent
+     * fallback into a manufactured outage for every caller of that door. A
+     * rejection out of this method should describe the SERVICE, never the call
+     * site's own omission.
+     *
      * Untyped by slot on purpose, exactly like `resolveService`'s second
      * overload: its callers address `tenancy`, which has no written
      * `ServiceSlotContracts` entry, and inventing one here would be a shape
