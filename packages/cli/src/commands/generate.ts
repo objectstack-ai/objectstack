@@ -1004,7 +1004,30 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * so it cannot be mistaken for coverage.
  */
 const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
-  text: 'VARCHAR(255)',
+  // #16091 — TEXT, not VARCHAR(255). `text` heads the SAME text-family arm as
+  // the seven types below it, and that arm's column is
+  // `keyable === null ? table.text(name) : table.string(name, keyable)` with
+  // `keyable = keyed ? this.keyableTextLength(field) : null`. The branch is on
+  // KEYED, not on the declaration: neither generator emits an index, so no
+  // generated column is ever keyed and the driver's answer for an authored
+  // `text` field is an unbounded TEXT column whether or not it declares a
+  // `maxLength`. The bound is not lost — it is enforced at the write seam (the
+  // record validator's `max_length` branch over BOUNDED_STRING_FIELD_TYPES),
+  // which is the invariant `schema-drift.ts` states in as many words: "A TEXT
+  // column refuses nothing a `maxLength` allows … the bound is enforced at the
+  // write seam."
+  //
+  // Driven on live PostgreSQL 16.13, one 300-character value into three tables
+  // built from one object by the three producers:
+  //
+  //   driver   f_text  text          ACCEPTED — read back at length 300
+  //   sql gen  f_text  varchar(255)  REFUSED  — value too long for type character varying(255)
+  //   ts gen   f_text  varchar(255)  REFUSED  — same
+  //
+  // This is the hard-failure class, not the schema-diff class: a row the
+  // platform stores today cannot be stored in a table generated for the same
+  // object.
+  text: 'TEXT',
   textarea: 'TEXT',
   richtext: 'TEXT',
   html: 'TEXT',
@@ -1032,9 +1055,30 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // producers, so neither moves.
   datetime: 'TIMESTAMPTZ',
   time: 'TIME',
+  // #16091 — the STRING family (`email` / `url` / `phone` / `password`) is ONE
+  // arm in `createColumn`, and its width is the field's own
+  // {@link SqlDriver.declaredVarcharLength}: `maxLength` verbatim when it is a
+  // positive integer up to the varchar ceiling, knex's 255 when there is no
+  // usable declaration, and TEXT above the ceiling. These entries are the
+  // NO-DECLARATION outcome only — {@link declaredVarchar} supplies the other
+  // two, because a lookup table keyed on the type alone cannot express an
+  // answer that depends on the field.
+  //
+  // `VARCHAR(50)` and `VARCHAR(2048)` were widths this file invented for a
+  // shape it never read. Measured on live PostgreSQL 16.13, all three
+  // producers driven from one object:
+  //
+  //   f_phone  driver varchar(255)   sql gen varchar(50)    ts gen varchar(255)
+  //   f_url    driver varchar(255)   sql gen varchar(2048)  ts gen varchar(255)
+  //
+  // Both directions are real. The narrow one is the card's own hard failure a
+  // type over — a 60-character phone number the platform stores is refused by
+  // the generated table. The wide one fails the other way: a 300-character url
+  // was ACCEPTED by the sql format's table and REFUSED by the driver's own, so
+  // the scaffold invited a value the platform will not keep.
   email: 'VARCHAR(255)',
-  phone: 'VARCHAR(50)',
-  url: 'VARCHAR(2048)',
+  phone: 'VARCHAR(255)',
+  url: 'VARCHAR(255)',
   select: 'VARCHAR(255)',
   // #14828 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
   // the runtime stores this in a JSON column; `json: 'JSONB'` below is the
@@ -1057,7 +1101,15 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   file: 'VARCHAR(2048)',
   image: 'VARCHAR(2048)',
   password: 'VARCHAR(255)',
-  color: 'VARCHAR(7)',
+  // #16091 — `color` is not cased in `createColumn` at all: it falls to the
+  // catch-all, `JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) :
+  // table.string(name)`, which is knex's varchar(255). `VARCHAR(7)` was this
+  // file's own guess at `#RRGGBB` and the platform never agreed with it —
+  // measured on live PostgreSQL 16.13, the driver's column is varchar(255). So
+  // every longer color an author can write (`#RRGGBBAA`, an `rgba(…)` string,
+  // a design-token name) is a value the platform stores and a table generated
+  // for the same object refuses.
+  color: 'VARCHAR(255)',
   rating: 'INTEGER',
   // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
   // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
@@ -1113,6 +1165,74 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
 } satisfies Record<FieldType, string | null>;
 
 /**
+ * The STRING family, cased exactly as `SqlDriver.createColumn` cases it (#16091).
+ *
+ * The driver's arm is `case 'string': case 'email': case 'url': case 'phone':
+ * case 'password':`. `string` is absent here and that is not an omission: it is
+ * not a `FieldType` member at all — there is no `Field.string` builder,
+ * `FieldType.options` omits it, and `FieldSchema.safeParse({ type: 'string' })`
+ * fails at `[type]` (#12593) — so it cannot arrive through an authored object.
+ *
+ * ⛔ This set is NOT "the types whose values are strings". `select` / `radio` /
+ * `secret` / `color` / `tree` and the reference types all hold strings and all
+ * take the driver's catch-all, which never reads `maxLength`: their stored
+ * value is an option code, an opaque ref or another row's id, so sizing them
+ * from the author's bound would size the wrong string. `createColumn`'s own
+ * catch-all says exactly that. Membership here is read off the driver's arm and
+ * nothing else.
+ */
+const STRING_FAMILY_TYPES: ReadonlySet<string> = new Set(['email', 'url', 'phone', 'password']);
+
+/**
+ * The widest `varchar(n)` any dialect this platform speaks will declare —
+ * `SqlDriver.MAX_VARCHAR_CHARS`, whose own comment records the measurement
+ * (MySQL 8.0.46 refuses `varchar(16384)` with `ERROR 1074`; it is the LOWEST of
+ * the three dialects' ceilings and is applied to all of them deliberately).
+ *
+ * Transcribed here because `packages/cli` does not depend on the driver at
+ * runtime, and pinned rather than trusted: `generate-string-family-width.pin.test.ts`
+ * reads the constant out of `sql-driver.ts` and fails here if the two part.
+ */
+const MAX_VARCHAR_CHARS = 16383;
+
+/**
+ * The three outcomes `SqlDriver.declaredVarcharLength` has for a string-family
+ * field, kept as three named answers rather than collapsed to a number (#16091).
+ *
+ * Collapsing them is what a `?? 255` would do, and it loses the one that is not
+ * a width at all: a declaration PAST the ceiling makes the driver emit TEXT,
+ * never a clamp to the ceiling — because clamping would reinstate the very
+ * defect (a column narrower than the declaration, refusing writes the
+ * declaration allows), while TEXT refuses nothing the author declared and the
+ * bound is still enforced at the write seam.
+ *
+ *   - `default`   — no usable declaration. The answer is this file's own table
+ *                   entry, which is knex's 255; the caller reads it there
+ *                   rather than having it restated here.
+ *   - `sized`     — a declaration this dialect can express, verbatim, in BOTH
+ *                   directions. Wider than 255 is the reported defect; narrower
+ *                   is the same defect's other half.
+ *   - `unbounded` — past {@link MAX_VARCHAR_CHARS}.
+ */
+type VarcharAnswer =
+  | { kind: 'default' }
+  | { kind: 'sized'; chars: number }
+  | { kind: 'unbounded' };
+
+/**
+ * `SqlDriver.declaredVarcharLength`'s decision, for a generated migration.
+ *
+ * The coercion is the driver's too, character for character — a `maxLength` may
+ * arrive as a string from an unvalidated authoring door, and a non-integer or
+ * non-positive one is NOT a bound.
+ */
+function declaredVarchar(maxLength: unknown): VarcharAnswer {
+  const n = typeof maxLength === 'string' ? Number(maxLength) : maxLength;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return { kind: 'default' };
+  return n > MAX_VARCHAR_CHARS ? { kind: 'unbounded' } : { kind: 'sized', chars: n };
+}
+
+/**
  * The column one field takes.
  *
  * `multiple` is answered FIRST, before the type is looked up at all, because
@@ -1152,11 +1272,32 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
  * inherited key, and the unvalidated authoring door can deliver one as a
  * `type` string.
  */
-function fieldTypeToSql(fieldType: string, multiple?: boolean): string | null {
+function fieldTypeToSql(fieldType: string, multiple?: boolean, maxLength?: unknown): string | null {
   if (multiple) return FIELD_TYPE_SQL_MAP.json;
-  return Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
+  const base = Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
     ? FIELD_TYPE_SQL_MAP[fieldType]
     : 'TEXT';
+  // #16091 — the STRING family is the one place the column depends on the FIELD
+  // and not only on its type, because that is the one place `createColumn`
+  // reads a declaration: its arm is `declared === null ? table.text(name) :
+  // table.string(name, declared)` over `declaredVarcharLength(field)`. Asked
+  // AFTER the table lookup, so the no-declaration outcome is the table's own
+  // entry rather than a second spelling of 255 that could drift from it.
+  //
+  // ⛔ Deliberately not asked for the text family. `createColumn` branches that
+  // one on KEYED — `keyed ? this.keyableTextLength(field) : null` — and a
+  // generated migration emits no index, so a generated column is never keyed
+  // and the driver's answer is TEXT with or without a `maxLength`. Reading the
+  // declaration there would size a column the platform leaves unbounded, which
+  // is this card's own defect pointed the other way.
+  if (!STRING_FAMILY_TYPES.has(fieldType)) return base;
+  const declared = declaredVarchar(maxLength);
+  if (declared.kind === 'sized') return `VARCHAR(${declared.chars})`;
+  // The unbounded spelling is READ from this table's own `text` entry rather
+  // than restated, the same discipline `FIELD_TYPE_SQL_MAP.json` above already
+  // uses, so the two cannot drift about how this file spells an unbounded column.
+  if (declared.kind === 'unbounded') return FIELD_TYPE_SQL_MAP.text;
+  return base;
 }
 
 /**
@@ -1222,7 +1363,7 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
 
     const fieldLines: string[] = [];
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const sqlType = fieldTypeToSql(String(fieldDef.type || 'text'), !!fieldDef.multiple);
+      const sqlType = fieldTypeToSql(String(fieldDef.type || 'text'), !!fieldDef.multiple, fieldDef.maxLength);
       // #14828 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
       // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
       // answers false for it, so a column here is one the runtime never writes.
@@ -1358,13 +1499,50 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // `generate-field-type-vocabulary.pin.test.ts` measures.
       let colMethod: string | null;
       switch (fType) {
-        case 'text': case 'email': case 'phone': case 'url': case 'select':
-        case 'password': case 'color':
+        // #16091 — the STRING family takes an arm of its own, because it is the
+        // one family whose column depends on the FIELD and not only on its
+        // type: `createColumn`'s arm is `declared === null ? table.text(name) :
+        // table.string(name, declared)` over `declaredVarcharLength(field)`.
+        // All four used to spell a bare `table.string(name)` — knex's
+        // varchar(255) — so a `Field.email({ maxLength: 400 })` was
+        // `varchar(400)` on the platform and `varchar(255)` in the migration
+        // generated for the same object. Driven on live PostgreSQL 16.13: a
+        // 300-character value into that field was accepted by the driver's
+        // table (read back at length 300) and refused by both generated ones
+        // with `value too long for type character varying(255)`.
+        case 'email': case 'phone': case 'url': case 'password': {
+          const declared = declaredVarchar(fieldDef.maxLength);
+          colMethod =
+            declared.kind === 'sized'
+              ? `table.string('${fieldName}', ${declared.chars})`
+              : declared.kind === 'unbounded'
+                ? `table.text('${fieldName}')`
+                : `table.string('${fieldName}')`;
+          break;
+        }
+        // The catch-all family. `createColumn` cases none of these: each lands
+        // in its `table.string(name)` at knex's default width, and none of them
+        // reads `maxLength` — the stored value is an option code, an opaque
+        // `sys_secret` ref or a color code rather than the declared string, so
+        // a declared bound would size the wrong string. That is the driver's
+        // own stated reason, not an inference from its silence.
+        case 'select': case 'color':
         // #14657 — `secret` holds the opaque `sys_secret` ref, not the
         // credential (ADR-0100); `radio` is a single option code like `select`.
         case 'secret': case 'radio':
           colMethod = `table.string('${fieldName}')`;
           break;
+        // #16091 — `text` MOVED here, out of the string arm above. It heads
+        // `createColumn`'s text-family arm, whose column is
+        // `keyable === null ? table.text(name) : table.string(name, keyable)`
+        // with `keyable = keyed ? this.keyableTextLength(field) : null`. The
+        // branch is on KEYED and a generated migration emits no index, so every
+        // column this generator creates takes the unkeyed answer: `table.text`,
+        // `maxLength` declared or not. Measured on live PostgreSQL 16.13 —
+        // driver `text`, both generators `varchar(255)`, and a 300-character
+        // value accepted by the platform's table and refused by both generated
+        // ones.
+        case 'text':
         case 'textarea': case 'richtext': case 'html': case 'markdown':
         // #14657 — `driver-sql`'s own DDL switch puts these three in the text
         // family (#11794, #11875): the declared `maxLength`, when there is one,
