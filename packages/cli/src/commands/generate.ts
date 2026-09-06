@@ -997,8 +997,8 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  *                 16-character nanoid when the caller supplies none, and stores
  *                 a SUPPLIED id verbatim at whatever width the caller chose.
  *                 Postgres refuses either in a `uuid` column with `22P02`. The
- *                 width half
- *                 is the same rule for the whole REFERENCE_VALUE_TYPES class:
+ *                 width half is the same rule for the whole
+ *                 REFERENCE_VALUE_TYPES class:
  *                 `user` and `tree` moved with them, because a reference column
  *                 holds the TARGET's `id` — which the driver itself emits as
  *                 `table.string('id').primary()`, i.e. `varchar(255)` — and
