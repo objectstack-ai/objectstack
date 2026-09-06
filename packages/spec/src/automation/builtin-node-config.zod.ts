@@ -5,7 +5,9 @@
  *
  * Config contracts for the remaining flat builtins — the CRUD quartet
  * (`get_record` / `create_record` / `update_record` / `delete_record`),
- * `screen`, `map` (#4045) and, since #14149, `assignment`'s value contract.
+ * `screen`, `map` (#4045), since #14149 `assignment`'s value contract and,
+ * since #14945, the structural `end` node's outcome (`EndConfigSchema`, the
+ * one contract here the FLOW PARSE applies rather than an executor).
  * Sibling of `io-node-config.zod.ts` (notify / http) and `control-flow.zod.ts`
  * (loop / parallel / try_catch).
  *
@@ -77,7 +79,7 @@
  */
 
 import { z } from 'zod';
-import { ExpressionSchema } from '../shared/expression.zod';
+import { EvaluatedExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
@@ -475,6 +477,118 @@ export const ScreenConfigSchema = lazySchema(() => strictObject({
 export type ScreenConfig = z.input<typeof ScreenConfigSchema>;
 export type ScreenConfigParsed = z.infer<typeof ScreenConfigSchema>;
 
+// ─── end ─────────────────────────────────────────────────────────────
+
+/**
+ * `end` node config — how the run ENDS (#14945).
+ *
+ * `end` is a structural node (`FLOW_STRUCTURAL_NODE_TYPES`): the engine
+ * terminates the run on reaching it with no registered executor, so — unlike
+ * every other contract in this module — nothing `parse()`s this shape at
+ * execute time and no descriptor `configSchema` closes it at `registerFlow()`.
+ * The one door an `end` node's config passes through is the flow parse itself,
+ * which is why `FlowNodeSchema` (flow.zod.ts) applies this contract to every
+ * `type: 'end'` node it parses, at any region depth, and writes the parsed
+ * (defaulted) config back.
+ *
+ * ## `outcome` — the terminal state the run records
+ *
+ * Every terminal of a flow used to be "completed": a flow could say *do this*
+ * but not *refuse this, and say why, for which record*. The only channel that
+ * interpolated per-record text was a `screen` node's `description`, and a
+ * message-only screen is an INPUT step wearing a notice's clothes — it renders
+ * Submit, and submitting resumes the run to `end`, whose runner toasts
+ * `Flow "…" completed` at a user who was just told "this is refused" (the
+ * hotcrm lead-conversion refusal, hotcrm#1288 / hotcrm#1555, is the measured
+ * case).
+ *
+ * Maintainer ruling 2026-09-05 (option 2′): the refusal is a first-class
+ * OUTCOME of the existing terminal node, not a second terminal node type —
+ * `outcome: 'refused'` with an interpolated `message`. A refused end is a
+ * terminal state: the run records `refused` (`ExecutionStatus`, distinct from
+ * `failed` — a refusal is a successful evaluation that says no) together with
+ * the rendered message (`ExecutionLog.refusalMessage`), it is never resumed,
+ * and a runner renders the message with Close only — no Submit, no completion
+ * toast; the invoking action's `successMessage` stays suppressed. The halves
+ * land in sequence: this contract, then the engine's `end` handling (stamping
+ * the outcome, persisting the rendered message), then the runner.
+ *
+ * ## `message` — required by a refusal, refused by a completion
+ *
+ * `message` is a `{token}` template rendered at the engine's existing
+ * interpolation points, exactly as a `screen` node's `description` is —
+ * `'Refused: {record.name} is a confirmed duplicate'` yields per-record text at
+ * run time. Two refinements keep the pair honest, in both directions:
+ *
+ *  - `outcome: 'refused'` with no `message` is REFUSED — a refusal without
+ *    text is exactly the shape this contract exists to make expressible, and
+ *    an author who omits it ships a refusal nobody can explain.
+ *  - `message` with `outcome: 'completed'` (or omitted) is REFUSED — a
+ *    completion renders nothing, so the key would be a silent no-op: the kind
+ *    of key an AI author sets, sees no error for, and reports "done" over.
+ */
+export const EndConfigSchema = lazySchema(() => strictObject({
+  surface: 'this end node config',
+  history:
+    'Until this shape was declared, an `end` node had no config contract at all — any key was accepted at parse '
+    + 'and ignored at run time, so a refusal an author wrote here shipped as a plain completion.',
+  aliases: {
+    // The words a refusal arrives spelled in — `reason` / `text` from prose,
+    // `description` from the screen node an author migrates the refusal OUT
+    // of (the card's own workaround), `status` / `result` for the outcome.
+    reason: 'message',
+    text: 'message',
+    description: 'message',
+    status: 'outcome',
+    result: 'outcome',
+  },
+  guidance: {
+    title:
+      'An `end` node has no heading — a runner shows `message` alone under the flow\'s label. Put the text in '
+      + '`message`; a `title` belongs to a `screen` node.',
+  },
+}, {
+  /** Terminal state the run records: `completed` (default) or `refused`. */
+  outcome: z.enum(['completed', 'refused']).default('completed').describe(
+    'How the run ends when it reaches this node. `completed` (the default) is the ordinary terminal. '
+    + '`refused` is a first-class refusal: the run records `refused` — distinct from `failed`, a refusal is a '
+    + 'successful evaluation that says no — carries the rendered `message`, is never resumed, and a runner shows '
+    + 'the message with Close only: no Submit, no completion toast.',
+  ),
+  /** Why the run was refused. Interpolates `{token}` like a screen `description`. */
+  message: z.string().min(1).optional().describe(
+    'Why the run was refused, as a `{token}` template interpolated at run time exactly like a screen '
+    + '`description` (`{record.name}` etc.), so the text names the record. Required when `outcome` is `refused`; '
+    + 'refused when it is `completed` — a completion renders nothing, so the key would be a silent no-op.',
+  ),
+}).superRefine((config, ctx) => {
+  if (config.outcome === 'refused') {
+    if (config.message === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['message'],
+        message:
+          "`outcome: 'refused'` requires a `message` — a refusal with no text is the shape this contract exists to "
+          + 'replace (a screen pretending to be a notice). Say why, as a `{token}` template so the text names the '
+          + "record: `message: 'Refused: {record.name} is a confirmed duplicate'`.",
+      });
+    }
+    return;
+  }
+  if (config.message !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['message'],
+      message:
+        "`message` is only rendered when `outcome` is 'refused' — on a completed end nothing shows it, so the key "
+        + "would be a silent no-op. Either set `outcome: 'refused'` or delete `message`.",
+    });
+  }
+}));
+
+export type EndConfig = z.input<typeof EndConfigSchema>;
+export type EndConfigParsed = z.infer<typeof EndConfigSchema>;
+
 // ─── map ─────────────────────────────────────────────────────────────
 
 /**
@@ -540,15 +654,20 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  *
  * The envelope is the spelling `shared/expression.zod.ts` already defines and
  * `validateExpression` already reads — not a second one: `ExpressionSchema`
- * itself, `safeExtend`ed (the form Zod reserves for a refined object, keeping
- * its `source`-or-`ast` rule) with the one key narrowed, at the type level too
- * (`dialect: 'cel'`, so a `template` envelope is a compile error before it is
- * a parse error). `validateExpression('value', …)` refuses a `template` or
- * `cron` envelope in a value slot ("expected a CEL expression but got a …
- * dialect"), so the contract refuses it here, at authoring, with the same
- * verdict — and refuses the one shape that validator lets through: an envelope
- * with no `source` reads as "not authored" there (`ok: true`), so this parse
- * is the only gate that catches `{ dialect: 'cel' }` before it is stored.
+ * in its EVALUATED form (`EvaluatedExpressionSchema` — this slot's value is
+ * run by the expression engine, so `source` is required and non-blank, the
+ * one rule both spellings of that seam are refused by), `safeExtend`ed (the
+ * form Zod reserves for a refined object, keeping its rules) with the one
+ * further key narrowed, at the type level too (`dialect: 'cel'`, so a
+ * `template` envelope is a compile error before it is a parse error).
+ * `validateExpression('value', …)` refuses a `template` or `cron` envelope in
+ * a value slot ("expected a CEL expression but got a … dialect"), so the
+ * contract refuses it here, at authoring, with the same verdict — and refuses
+ * the shapes that validator lets through: an envelope with no `source`
+ * (`{ dialect: 'cel' }` and the `ast`-only envelope alike) reads as "not
+ * authored" there (`ok: true`), and a whitespace-only `source` trims to the
+ * same answer while the engine parses it untrimmed and faults. This parse is
+ * the gate that catches every one of them before it is stored.
  *
  * A bare string is deliberately NOT accepted as CEL shorthand the way
  * `ExpressionInputSchema` accepts it elsewhere: in an assignment value a plain
@@ -556,7 +675,7 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  * kept. The envelope is the only CEL spelling in this slot — which is exactly
  * what lets the two forms coexist without a mode switch.
  */
-export const AssignmentExpressionValueSchema = ExpressionSchema
+export const AssignmentExpressionValueSchema = EvaluatedExpressionSchema
   .safeExtend({
     dialect: z.literal('cel', {
       error: () =>
@@ -592,9 +711,10 @@ export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressio
  * a `dialect` is an envelope ({@link isExpressionEnvelopeShaped}) and must be a
  * valid one, everything else is what it always was. That is the preservation
  * half of the contract — every value that parsed before #14149 still parses,
- * and the only newly refused shape is a malformed envelope (`{ dialect: 'cel' }`
- * with no `source`, an empty `source`, a non-`cel` dialect), which used to be
- * stored verbatim as a literal object and then rendered by `notify` as JSON.
+ * and the only newly refused shape is a malformed envelope (no `source` —
+ * `{ dialect: 'cel' }` and an `ast`-only envelope alike — a blank `source`, a
+ * non-`cel` dialect), which used to be stored verbatim as a literal object and
+ * then rendered by `notify` as JSON.
  *
  * `.meta({ xExpression: 'value' })` is the declaration channel the expression
  * ledger reads for this slot (`FLOW_NODE_EXPRESSION_PATHS`'s `assignment`

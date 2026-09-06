@@ -1415,8 +1415,50 @@ export class MemoryAnalyticsService implements IAnalyticsService {
   private parseDateRangeString(range: string): string[] {
     // Simple parser for common date range strings
     // In production, this would use a proper date range parser
+    //
+    // [#15825] ONE calendar, and it is UTC -- the same one `toISOString()`
+    // renders every bound below on. Two INDEPENDENT defects lived here:
+    //
+    //   1. The window BOUNDARY was `new Date(y, m, d)` -- LOCAL midnight --
+    //      rendered as UTC. Wrong on every day of the year in every non-UTC
+    //      process, with no DST transition needed: measured 2026-09-05, the
+    //      `'today'` bucket ran from the previous 16:00Z at `Asia/Shanghai`,
+    //      from 07:00Z at `America/Los_Angeles` (08:00Z outside its DST).
+    //   2. The `last N ...` legs did their arithmetic on the LOCAL calendar
+    //      (`setDate` / `setMonth` / `setFullYear`) and rendered on the UTC
+    //      one. `setDate` preserves WALL-CLOCK time, so the instant moves
+    //      n x 24h only while every local day in the window is 24 hours
+    //      long; across a DST transition it moves 23h or 25h and the window
+    //      start slips an hour.
+    //
+    // ⛔ They do not fix each other: `setUTCDate` alone leaves the
+    // local-midnight boundary in place, and `Date.UTC` alone leaves the
+    // arithmetic mixed. Each is pinned by its own file, and each was ablated
+    // separately to prove it -- `memory-analytics-date-range-utc-window.test.ts`
+    // (boundary; red in any non-UTC zone, no transition instant needed) and
+    // `memory-analytics-date-range-dst.test.ts` (arithmetic; CANNOT go red at
+    // TZ=UTC, where the two spellings are indistinguishable -- which is
+    // exactly why nothing in CI ever reddened on this).
+    //
+    // UTC is the target calendar, not merely "a consistent one". The rest of
+    // the platform resolves a bare date to the UTC day: `@objectstack/core`'s
+    // `{today}` filter-token macro builds its reference day as
+    // `new Date(Date.UTC(year, month - 1, day))` and falls back to UTC parts
+    // when the context carries no timezone, and `{TODAY()}` in flow templates
+    // resolves to the UTC day (#14852, same two-calendar shape). So the same
+    // analytics question asked through this path and through a flow token no
+    // longer selects different rows in one deployment -- that agreement, not
+    // the hour count, is what this repair restores.
+    //
+    // ⚠️ Out of scope here, filed separately: `AnalyticsQuery.timezone` is
+    // declared (optional, no default) and this path does not consult it. UTC
+    // is the terminal fallback of the engine's own resolution chain
+    // (`selection.timezone ?? context.timezone ?? 'UTC'`, ADR-0053 Phase 2),
+    // so UTC-ising is correct for every query that carries no timezone;
+    // making the range tokens timezone-AWARE is a larger question, and
+    // #14852 explicitly declined the same one.
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     
     if (range === 'today') {
       return [today.toISOString(), new Date(today.getTime() + 86400000).toISOString()];
@@ -1427,13 +1469,13 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       const start = new Date(today);
       
       if (unit.startsWith('day')) {
-        start.setDate(start.getDate() - num);
+        start.setUTCDate(start.getUTCDate() - num);
       } else if (unit.startsWith('week')) {
-        start.setDate(start.getDate() - num * 7);
+        start.setUTCDate(start.getUTCDate() - num * 7);
       } else if (unit.startsWith('month')) {
-        start.setMonth(start.getMonth() - num);
+        start.setUTCMonth(start.getUTCMonth() - num);
       } else if (unit.startsWith('year')) {
-        start.setFullYear(start.getFullYear() - num);
+        start.setUTCFullYear(start.getUTCFullYear() - num);
       }
       
       return [start.toISOString(), now.toISOString()];

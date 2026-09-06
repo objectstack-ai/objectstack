@@ -75,7 +75,13 @@ reads those as field filters, so one naming no field could only match zero
 records and is rejected rather than answered with an empty page — plus every
 other read axis that names a field: `select`, `expand` (a real field that holds
 no reference gets its own message), `searchFields` (a real field outside the
-searchable set gets its own message), `groupBy`, and `aggregations[].field`.  
+searchable set gets its own message), `groupBy`, and `aggregations[].field`.
+Off the request path the same code answers `backfillSummaryNulls`'s
+`recomputeUndefinedOnEmpty` (`os migrate summary-nulls
+--recompute-undefined-on-empty object.field`) when an entry is not a roll-up
+owned by an object the run walks — a typo, a real non-summary field, or a
+roll-up on an object `--object` left out are refused alike, one message naming
+every unresolved entry and how many objects the run walked.  
 **Fix:** Check the object schema for valid field names. Use `os meta get object <name>` to inspect the object's fields. If the name was meant as a
 *parameter* rather than a field, use the real one — page size is `top` / `$top`
 / `limit`, not `pageSize` / `perPage`; the response's `error` names the

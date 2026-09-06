@@ -123,6 +123,31 @@ expect() { # expect <block|allow> <file_path> [env…] — the common case
   check "$want" "$f" "$(payload "$f")" "$@"
 }
 
+stderr_of() { # stderr_of <payload> [env…] -> the refusal text an agent actually reads
+  local payload="$1"; shift
+  ( cd "$CWD" && printf '%s' "$payload" | env CLAUDE_PROJECT_DIR="$PROJ" "$@" "$hook" 2>&1 >/dev/null )
+}
+
+says() { # says <needle> <label> <payload> [env…]
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) pass=$((pass + 1)); printf '  ok   says   %s\n' "$label" ;;
+    *) fail=$((fail + 1)); printf '  FAIL missing "%s"  %s\n' "$needle" "$label" ;;
+  esac
+}
+
+lacks() { # lacks <needle> <label> <payload> [env…]
+  # The direction only an ABSENCE assertion can hold: a remedy that stopped being true stays
+  # in the text a reader acts on long after the thing it described stopped working.
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) fail=$((fail + 1)); printf '  FAIL still says "%s"  %s\n' "$needle" "$label" ;;
+    *) pass=$((pass + 1)); printf '  ok   lacks  %s\n' "$label" ;;
+  esac
+}
+
 echo "== the core verdict: shared PRIMARY checkout is blocked =="
 expect block "$MAIN/pkg/x.ts"
 expect block "$MAIN/pkg/deep/y.ts"
@@ -131,6 +156,10 @@ expect block "$MAIN/.changeset/x.md"
 expect block "$MAIN/pkg/x.ipynb"
 
 echo "== the SAME files inside a linked worktree are allowed =="
+# The POSITIVE twin of the `worktrees`-segment section below. $WT is a REAL linked worktree
+# (`git worktree add`) whose path carries NO `worktrees` segment, so these allows can only
+# come from the structural test and never from the path's spelling. Both depths are pinned
+# below — the repo toplevel and a subdirectory — because git answers them differently.
 expect allow "$WT/pkg/x.ts"
 expect allow "$WT/pkg/deep/y.ts"
 expect allow "$WT/README.md"
@@ -189,6 +218,27 @@ check block 'OS_ALLOW_MAIN_EDITS=true'             "$(payload "$MAIN/pkg/x.ts")"
 check block 'OS_ALLOW_MAIN_EDITS=yes'              "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=yes
 check block 'OS_ALLOW_MAIN_EDITS=11'               "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=11
 check block 'OS_ALLOW_MAIN_EDITS=" 1" (padded)'    "$(payload "$MAIN/pkg/x.ts")" OS_ALLOW_MAIN_EDITS=" 1"
+
+echo "== the hatch names WHERE it works: this hook's own environment, never a prefix =="
+# The refusal used to end by telling the reader to re-run the same thing with the variable
+# as a VAR=1 command prefix — an instruction that cannot work where it is printed. A VAR=1
+# prefix sets the variable in the environment of THAT COMMAND; this hook is not that
+# command, and it reads the variable from its own environment, so the prefix changes
+# nothing and the refusal repeats (#15971). An instruction that does not work is an
+# invitation to route around the guard, so both directions are pinned: the dead remedy is
+# gone, and the sentence names the environment the hook actually reads. The `allow` rows
+# next door — the variable really in the hook's environment — are this pair's other half.
+# Both of this hook's message sites carry the sentence: the ordinary refusal and the
+# schema-drift refusal, which is why each is asserted separately here.
+CWD="$PLAIN"; PROJ="$PLAIN"
+lacks 're-run with' 'the block message no longer prints the prefix remedy' \
+  "$(payload "$MAIN/pkg/x.ts")"
+says 'hook itself runs in' 'the block message names the environment this hook reads' \
+  "$(payload "$MAIN/pkg/x.ts")"
+lacks 're-run with' 'the drift message no longer prints the prefix remedy' \
+  '{"tool_name":"Edit","tool_input":{}}'
+says 'hook itself runs in' 'the drift message names the environment this hook reads' \
+  '{"tool_name":"Edit","tool_input":{}}'
 
 echo "== a ROUTED tool whose payload lacks its own path key is drift — it blocks, never guesses =="
 # The dangerous branch is the one that turns an unreadable payload into a confident verdict.
@@ -363,25 +413,21 @@ PROJ="$PLAIN"
 check block 'NotebookEdit, new file in a new dir under $MAIN' "$(nbpay "$MAIN/brand/new/nb.ipynb")"
 check allow 'NotebookEdit, new file in a new dir under $WT'   "$(nbpay "$WT/brand/new/nb.ipynb")"
 
-# ── KNOWN HOLES ─────────────────────────────────────────────────────────────────────────
-# The cases below pin what the hook does TODAY, and what it does today is WRONG. They are
-# here so the matrix says the hole out loud rather than being silent about it, and so that
-# fixing it is a mechanical edit to this file. They are NOT statements of intended
-# behaviour. Each names the issue that must flip it.
-echo "== KNOWN HOLE #11809: any git-dir path containing /worktrees/ reads as a linked worktree =="
-# `case "$gitdir" in */worktrees/*) exit 0` is a substring match on a path, not a test for a
-# linked worktree. $ODD is a PRIMARY checkout that merely lives under a directory named
-# `worktrees`. git prints a RELATIVE git-dir (`.git`) at a repo's toplevel and an ABSOLUTE
-# one from any subdirectory, so the same unguarded checkout gets opposite verdicts by depth.
-# When #11809 is fixed both of these become `block`.
-# The deciding detail, measured rather than assumed: it is the NEAREST EXISTING ANCESTOR
-# that is handed to git, so a path whose nearest existing ancestor is the repo toplevel gets
-# the relative git-dir and blocks, while anything resolving to a subdirectory gets the
-# absolute one and slips through.
-expect block "$ODD/README.md"          # correct today, but only because git-dir was relative
-expect block "$ODD/brand/new/f.ts"     # ditto — resolves up to the toplevel
-expect allow "$ODD/pkg/x.ts"           # ⛔ WRONG — an unguarded edit into a PRIMARY checkout
-expect allow "$ODD/pkg/brand/new/f.ts" # ⛔ WRONG — same hole, reached through the ancestor walk
+echo "== a PRIMARY checkout whose own path carries a 'worktrees' segment is BLOCKED =="
+# $ODD is a PRIMARY checkout that merely lives under a directory named `worktrees`. The
+# verdict comes from the STRUCTURE — git-dir differs from git-common-dir in a linked
+# worktree, and only there — never from the spelling of the path, so all four block. The two
+# SUBDIRECTORY cases were `allow` under the `*/worktrees/*` substring test this replaced:
+# unguarded edits into a primary checkout, which is the exact failure worktree-first exists
+# to stop (#11809). The pair of DEPTHS is what makes the section discriminating, and the
+# deciding detail was measured rather than assumed: it is the NEAREST EXISTING ANCESTOR that
+# is handed to git, so a path resolving to the repo toplevel got a RELATIVE git-dir and
+# blocked by accident, while anything resolving to a subdirectory got the absolute one and
+# slipped through.
+expect block "$ODD/README.md"          # nearest existing ancestor = the repo toplevel
+expect block "$ODD/brand/new/f.ts"     # ditto — the ancestor walk climbs to the toplevel
+expect block "$ODD/pkg/x.ts"           # a SUBDIRECTORY — the depth the substring test lost
+expect block "$ODD/pkg/brand/new/f.ts" # same depth, reached through the ancestor walk
 
 echo "== BOUNDARY: the jq-less fallback is a text scan, not a JSON parser =="
 # Not filed as a defect: jq is present wherever this hook runs, and Claude Code emits plain
@@ -403,11 +449,11 @@ printf '\n'
 #
 #   cp .claude/hooks/guard-main-checkout.sh /tmp/mutant.sh
 #   # e.g. delete the linked-worktree escape, which should redden every `allow` in a worktree:
-#   perl -0pi -e 's{^\s*\*/worktrees/\*\) exit 0 ;;\n}{}m' /tmp/mutant.sh
+#   perl -0pi -e 's{^\[ "\$\(canon_dir .*\n}{}m' /tmp/mutant.sh
 #   GUARD_MAIN_CHECKOUT_HOOK=/tmp/mutant.sh .claude/hooks/guard-main-checkout.selftest.sh
 #
-# The mutations used, one per class: drop the */worktrees/* arm (core verdict) · drop the
-# nearest-existing-ancestor walk (new-file class) · replace dirname "$file" with
+# The mutations used, one per class: drop the linked-worktree escape (core verdict) · drop
+# the nearest-existing-ancestor walk (new-file class) · replace dirname "$file" with
 # CLAUDE_PROJECT_DIR (the file's-own-repo class) · drop the OS_ALLOW_MAIN_EDITS line (escape
 # hatch) · turn the no-path else branch into exit 0 (the fails-closed class) · rename the key
 # in the grep fallback (the jq-less class) · change the final exit 2 to exit 0 (every block) ·

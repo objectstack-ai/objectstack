@@ -162,7 +162,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.reference": {
         label: "Reference",
-        helpText: "Target object name"
+        helpText: "Target object name. For a tree field it is optional and, if given, must be this object (a tree is a hierarchy within its own object — link a different object with a lookup)"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",

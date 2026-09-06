@@ -53,7 +53,7 @@ Cache avalanche/stampede prevention configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **jitterTtl** | `{ enabled: boolean; maxJitterSeconds: number }` | optional | TTL jitter to prevent simultaneous expiration |
-| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeoutSeconds: number }` | optional | Circuit breaker for backend protection |
+| **circuitBreaker** | `{ enabled: boolean; failureThreshold: number; resetTimeout: number }` | optional | Circuit breaker for backend protection |
 | **lockout** | `{ enabled: boolean; lockTimeoutMs: number }` | optional | Lock-based stampede prevention |
 
 ### Nested Shape: `CacheAvalanchePrevention.jitterTtl`
@@ -69,8 +69,7 @@ Cache avalanche/stampede prevention configuration
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable circuit breaker for backend protection |
 | **failureThreshold** | `number` | optional (default: `5`) | Failures before circuit opens |
-| **resetTimeoutSeconds** | `number` | optional (default: `30`) | Seconds before half-open state |
-| **resetTimeout** | `never` | optional | [REMOVED] `CacheAvalanchePrevention.circuitBreaker.resetTimeout` was renamed to `resetTimeoutSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the sibling `lockout` block on this same schema already spells `lockTimeoutMs`. Rename the key to `resetTimeoutSeconds`; the value (seconds) and the 30 default are unchanged. Note the two are NOT the same unit: this one is seconds, `lockTimeoutMs` is milliseconds. |
+| **resetTimeout** | `number` | optional (default: `30`) | Seconds before half-open state |
 
 ### Nested Shape: `CacheAvalanchePrevention.lockout`
 
@@ -91,7 +90,7 @@ Top-level application cache configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable application-level caching |
-| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttlSeconds: number; … }[]` | ✅ | Ordered cache tier hierarchy |
+| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttl: number; … }[]` | ✅ | Ordered cache tier hierarchy |
 | **invalidation** | `{ trigger: Enum<'create' \| 'update' \| 'delete' \| 'manual'>; scope: Enum<'key' \| 'pattern' \| 'tag' \| 'all'>; pattern?: string; tags?: string[] }[]` | ✅ | Cache invalidation rules |
 | **prefetch** | `boolean` | optional (default: `false`) | Enable cache prefetching |
 | **compression** | `boolean` | optional (default: `false`) | Enable data compression in cache |
@@ -106,8 +105,7 @@ Configuration for a single cache tier in the hierarchy
 | **name** | `string` | ✅ | Unique cache tier name |
 | **type** | `Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>` | ✅ | Cache backend type |
 | **maxSize** | `number` | optional | Max size in MB |
-| **ttlSeconds** | `number` | optional (default: `300`) | Default TTL in seconds |
-| **ttl** | `never` | optional | [REMOVED] `CacheTier.ttl` was renamed to `ttlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the sibling `maxSize` on this same tier is a size in MB. Rename the key to `ttlSeconds`; the value (seconds) and the 300 default are unchanged. |
+| **ttl** | `number` | optional (default: `300`) | Default TTL in seconds |
 | **strategy** | `Enum<'lru' \| 'lfu' \| 'fifo' \| 'ttl'>` | optional (default: `"lru"`) | Eviction strategy |
 | **warmup** | `boolean` | optional (default: `false`) | Pre-populate cache on startup |
 
@@ -180,8 +178,7 @@ Configuration for a single cache tier in the hierarchy
 | **name** | `string` | ✅ | Unique cache tier name |
 | **type** | `Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>` | ✅ | Cache backend type |
 | **maxSize** | `number` | optional | Max size in MB |
-| **ttlSeconds** | `number` | optional (default: `300`) | Default TTL in seconds |
-| **ttl** | `never` | optional | [REMOVED] `CacheTier.ttl` was renamed to `ttlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the sibling `maxSize` on this same tier is a size in MB. Rename the key to `ttlSeconds`; the value (seconds) and the 300 default are unchanged. |
+| **ttl** | `number` | optional (default: `300`) | Default TTL in seconds |
 | **strategy** | `Enum<'lru' \| 'lfu' \| 'fifo' \| 'ttl'>` | optional (default: `"lru"`) | Eviction strategy |
 | **warmup** | `boolean` | optional (default: `false`) | Pre-populate cache on startup |
 
@@ -198,7 +195,7 @@ Cache warmup strategy
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 
@@ -214,7 +211,7 @@ Distributed cache configuration with consistency and avalanche prevention
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable application-level caching |
-| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttlSeconds?: number; … }[]` | ✅ | Ordered cache tier hierarchy |
+| **tiers** | `{ name: string; type: Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>; maxSize?: number; ttl?: number; … }[]` | ✅ | Ordered cache tier hierarchy |
 | **invalidation** | `{ trigger: Enum<'create' \| 'update' \| 'delete' \| 'manual'>; scope: Enum<'key' \| 'pattern' \| 'tag' \| 'all'>; pattern?: string; tags?: string[] }[]` | ✅ | Cache invalidation rules |
 | **prefetch** | `boolean` | optional (default: `false`) | Enable cache prefetching |
 | **compression** | `boolean` | optional (default: `false`) | Enable data compression in cache |
@@ -232,8 +229,7 @@ Configuration for a single cache tier in the hierarchy
 | **name** | `string` | ✅ | Unique cache tier name |
 | **type** | `Enum<'memory' \| 'redis' \| 'memcached' \| 'cdn'>` | ✅ | Cache backend type |
 | **maxSize** | `number` | optional | Max size in MB |
-| **ttlSeconds** | `number` | optional (default: `300`) | Default TTL in seconds |
-| **ttl** | `never` | optional | [REMOVED] `CacheTier.ttl` was renamed to `ttlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the sibling `maxSize` on this same tier is a size in MB. Rename the key to `ttlSeconds`; the value (seconds) and the 300 default are unchanged. |
+| **ttl** | `number` | optional (default: `300`) | Default TTL in seconds |
 | **strategy** | `Enum<'lru' \| 'lfu' \| 'fifo' \| 'ttl'>` | optional (default: `"lru"`) | Eviction strategy |
 | **warmup** | `boolean` | optional (default: `false`) | Pre-populate cache on startup |
 
@@ -253,7 +249,7 @@ Rule defining when and how cached entries are invalidated
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **jitterTtl** | `{ enabled?: boolean; maxJitterSeconds?: number }` | optional | TTL jitter to prevent simultaneous expiration |
-| **circuitBreaker** | `{ enabled?: boolean; failureThreshold?: number; resetTimeoutSeconds?: number }` | optional | Circuit breaker for backend protection |
+| **circuitBreaker** | `{ enabled?: boolean; failureThreshold?: number; resetTimeout?: number }` | optional | Circuit breaker for backend protection |
 | **lockout** | `{ enabled?: boolean; lockTimeoutMs?: number }` | optional | Lock-based stampede prevention |
 
 ### Nested Shape: `DistributedCacheConfig.warmup`
@@ -262,7 +258,7 @@ Rule defining when and how cached entries are invalidated
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable cache warmup |
 | **strategy** | `Enum<'eager' \| 'lazy' \| 'scheduled'>` | optional (default: `"lazy"`) | Warmup strategy: eager (at startup), lazy (on first access), scheduled (cron) |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for scheduled warmup |
 | **patterns** | `string[]` | optional | Key patterns to warm up (e.g., "user:*", "config:*") |
 | **concurrency** | `number` | optional (default: `10`) | Maximum concurrent warmup operations |
 

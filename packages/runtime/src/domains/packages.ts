@@ -306,6 +306,15 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * authoring one ("switch to a writable package in the package selector") names
  * a remedy that makes no sense for a delete.
  *
+ * [#14451] The remedy it names is ADR-0005 org overlay, and it used to name
+ * `POST /packages/:id/duplicate` instead. That sentence sent a caller holding a
+ * read-only package at a route which — for exactly the packages this refusal
+ * fires on — cannot help: duplicate clones a base's `sys_metadata` rows, a code
+ * package owns none, and until {@link requireDuplicableSource} the trip ended
+ * in a 200 reporting `copiedCount: 0` (the #14451 measurement). A refusal that
+ * prescribes a dead end is worse than one that prescribes nothing, so the two
+ * doors now agree: overlay is how a code package is customised.
+ *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
  * self-invocation has no business uninstalling a code package over HTTP, and
@@ -333,11 +342,115 @@ function requireWritablePackage(
         response: deps.error(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
-            + `the deployment, not over this API — ${action} a package you own, or duplicate this one `
-            + `into a writable base (POST /packages/${encodeURIComponent(id)}/duplicate) and change that.`,
+            + `the deployment, not over this API — ${action} a package you own, or customise what `
+            + `this one provides in place, with an ADR-0005 org overlay.`,
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
+                packageId: id,
+                docs: 'docs/adr/0070-package-first-authoring.md',
+            },
+        ),
+    };
+}
+
+/**
+ * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
+ *
+ * ## The measurement
+ *
+ * `POST /api/v1/packages/com.example.todo/duplicate` against a RUNNING code
+ * package (`examples/app-todo`, one object + four flows + views + dashboards +
+ * reports) answered **HTTP 200**:
+ *
+ *     {"success":true,"data":{"success":false,"copiedCount":0,"failedCount":0,
+ *      "targetPackageId":"com.acme.dupbase","copied":[],"failed":[]}}
+ *
+ * …and left a real, empty package record behind: `com.acme.dupbase` appeared in
+ * `GET /packages` (scope-less, so `writable: true`), its detail door answered
+ * 200, and its manifest embedded a copy of the SOURCE bundle
+ * (`manifest.manifest.id === 'com.example.todo'`). Reproduced independently
+ * twice, on two separate `os dev` processes.
+ *
+ * ## Why `copiedCount: 0` is BY CONSTRUCTION, not a copy that failed
+ *
+ * {@link ObjectStackProtocolImplementation.duplicatePackage} clones the rows
+ * `sys_metadata` holds for the source (`{ package_id: source, state: 'active' }`).
+ * A code package's metadata is CODE — it is registered from an artifact at boot
+ * and has no `sys_metadata` rows at all — so the scan is not a copy that came
+ * back empty, it is a copy that could never have found anything. The scan
+ * cannot fail either, which is what made the old answer unfalsifiable: a
+ * `copied: []` that means "this gesture does not apply here" was byte-identical
+ * to one meaning "the base really is empty".
+ *
+ * That is the #11063 ruling, one route over and pointed at a WRITE:
+ * `packages/rest/src/package-routes.ts` states it verbatim — **"a read that
+ * could not happen must not be reported as a read that found nothing."**
+ *
+ * ## Why the refusal, rather than teaching duplicate to clone code items
+ *
+ * ADR-0070 D4 is DECLARED AND NOT BUILT — the ADR's own status line says
+ * "D4–D6 remaining", and D4's text names its object precisely: *"Duplicate:
+ * clone a **base** into a new writable package (the Airtable 'duplicate base'
+ * gesture)."* A base is a writable DB package (D-TL;DR 2). So this route is not
+ * a broken implementation of D4; it is a route shipped AHEAD of it, and the
+ * "duplicate base" prose around it describes an aspiration rather than a
+ * contract the code is failing to meet.
+ *
+ * Making it clone a code package's items would extend D4 from bases to code
+ * packages — a NEW decision, and one the ADR itself still lists as open
+ * ("should customising a code item also fork it into a writable base?
+ * *Leaning: keep overlay for surgical tweaks*"). ADR-0005 overlay is the built,
+ * shipped answer for customising what a code package provides, so the honest
+ * behaviour of an unbuilt gesture is to say so.
+ *
+ * ## Shape
+ *
+ * Same PREDICATE as every other writability verdict in this file
+ * ({@link isWritablePackage}, ADR-0070 D2 — #8146's "one answer to 'is this
+ * package writable?'"), a DIFFERENT code. `WRITABLE_PACKAGE_REQUIRED` would be
+ * a lie by implicature here: nothing is being written to the source, and its
+ * remedy ("use a writable package") reads as *make the source writable*, which
+ * is neither possible nor the point. `DUPLICATE_SOURCE_NOT_A_BASE` names the
+ * one thing the caller can act on — pick a base, or overlay instead.
+ *
+ * ⛔ Deliberately NOT a check on emptiness. A WRITABLE base holding no active
+ * rows still duplicates to `copiedCount: 0`, and that answer stays exactly as
+ * it is: that read HAPPENED and found nothing, which is the legitimate arm of
+ * the same ruling. The axis is whether the gesture applies, not whether it
+ * found anything.
+ *
+ * Runs BEFORE the protocol call, which is what makes it observable: the shell
+ * package is minted INSIDE `duplicatePackage` (its `installPackage` call
+ * precedes the copy loop), so a refusal that ran afterwards would still leave
+ * the empty `com.acme.dupbase` the report is about. Same "refuse before you
+ * mutate" ordering as {@link requireWritablePackage}, for the same reason.
+ *
+ * An id that resolves to nothing is treated as writable, exactly as
+ * {@link requireWritablePackage} treats it — an unknown source falls through to
+ * the protocol rather than being re-labelled 422, so this gate never becomes an
+ * existence oracle.
+ *
+ * Returns a refusal result to short-circuit on, or `null` to proceed.
+ */
+function requireDuplicableSource(
+    deps: DomainHandlerDeps,
+    engine: unknown,
+    id: string,
+): HttpDispatcherResult | null {
+    if (isWritablePackage(engine, id)) return null;
+    return {
+        handled: true,
+        response: deps.error(
+            `[duplicate_source_not_a_base] Cannot duplicate package '${id}': it is read-only `
+            + `(provided by code or an installed app), and duplicate clones a writable base's `
+            + `stored metadata rows. A code package's metadata is delivered as code, so there are `
+            + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
+            + `Duplicate a base you own, or customise what this package provides in place, with an `
+            + `ADR-0005 org overlay.`,
+            422,
+            {
+                code: 'DUPLICATE_SOURCE_NOT_A_BASE',
                 packageId: id,
                 docs: 'docs/adr/0070-package-first-authoring.md',
             },
@@ -1021,9 +1134,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
         }
 
-        // POST /packages/:id/duplicate → clone this base into a NEW writable
-        // package, re-namespacing objects + rewriting references (ADR-0070 D4
-        // "duplicate base"). Body { targetPackageId, targetName?, targetNamespace? }.
+        // POST /packages/:id/duplicate → clone a writable BASE into a NEW
+        // writable package, re-namespacing objects + rewriting references.
+        // Body { targetPackageId, targetName?, targetNamespace? }.
+        //
+        // [#14451] The source must BE a base — {@link requireDuplicableSource},
+        // which carries the measurement and the reasoning. ADR-0070 D4 is
+        // declared-and-not-built ("D4–D6 remaining"), and its object is a *base*
+        // ("clone a base into a new writable package"): what this route clones
+        // is the source's `sys_metadata` rows, which a code package does not
+        // have. ⛔ Do not read the sentence above as "any package can be
+        // duplicated into an editable copy" — that is the aspiration the card
+        // measured against, and the route does not implement it.
         if (parts.length === 2 && parts[1] === 'duplicate' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
@@ -1035,6 +1157,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (!targetPackageId) {
                 return { handled: true, response: deps.error('Body { targetPackageId } is required', 400) };
             }
+            // [#14451] Refuse BEFORE the protocol call: `duplicatePackage` mints
+            // the target package record (`installPackage`) ahead of its copy
+            // loop, so a refusal any later still leaves the empty shell behind.
+            const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
                 const result = await protocol.duplicatePackage({
@@ -1345,36 +1471,49 @@ _context: HttpProtocolContext,
     const datasets: any[] = [];
     const readErrors: string[] = [];
     for (const name of names) {
-        // Read the just-published seed body. Try the active org first, then
-        // fall back to an env-wide read — a workspace seed is often stored
-        // org-wide (organization_id IS NULL), and resolving the wrong scope
-        // here is what silently produced "0 rows loaded".
-        const attempts = organizationId
-            ? [{ type: 'seed', name, organizationId }, { type: 'seed', name }]
-            : [{ type: 'seed', name }];
+        // Read the just-published seed body. THE REGISTRY DECIDES THE SCOPE,
+        // not this call site: `seed` declares `allowOrgOverride: false`, and
+        // since #14908 `getMetaItem` opens by resolving
+        // `organizationIdForMetaRead(request.type, request.organizationId)`
+        // and spends THAT binding — never the raw argument — on every read
+        // beneath it. The predicate answers `undefined` for every type the
+        // registry declares non-overridable, so this read is env-wide by
+        // construction: `organization_id IS NULL`, the partition a workspace
+        // seed is stored in and the only one cold boot hydrates.
+        //
+        // [#15068] This used to be a two-attempt org-then-env ladder, written
+        // when resolving the wrong scope here is what silently produced "0
+        // rows loaded". The gate is that fix now, and it made the org-first
+        // rung a byte-identical repeat: both attempts resolved the same
+        // partition and served the same answer, so the only thing the second
+        // one could still do was report an identical failed read twice on a
+        // client-facing `seedApplied.errors[]`.
+        //
+        // ⛔ Do NOT restore an org-first attempt. An org-scoped `seed` row is
+        // the unhydratable phantom `reportUnhydratableOrgScopedRows` exists to
+        // warn about — reading it back would serve a body that vanishes at the
+        // next restart. Dropping the organization is the REPAIR, exactly as on
+        // the `app` flip above.
         let item: any;
-        for (const args of attempts) {
-            try {
-                item = await protocol.getMetaItem(args);
-                if (item) break;
-            } catch (e) {
-                // [#8443] The SAME rule as the catch at the door, applied to
-                // the sibling key of the same field: `readErrors` becomes
-                // `seedApplied.errors[]` on that 200 response, so it is a
-                // client-facing payload too. Measured before the change: with
-                // `sys_metadata` unreachable this read fails FIRST — before the
-                // loader is ever constructed — and answered `"errors": ["read
-                // project_seed: SQLITE_ERROR: no such table: sys_metadata"]`,
-                // so fixing only the door's catch would have left the commonest
-                // outage shape disclosing exactly as before. A DECLARED 4xx
-                // refusal (`[item_locked]`, `[writable_package_required]`, …)
-                // still reaches the author verbatim — that is the point of the
-                // positive list.
-                (deps.logger ?? console).warn(
-                    `[applyPublishedSeeds] seed body read failed for "${name}": ${(e as Error)?.message ?? String(e)}`,
-                );
-                readErrors.push(`read ${name}: ${clientFacingFailureText(e, 'the reason is in the server log')}`);
-            }
+        try {
+            item = await protocol.getMetaItem({ type: 'seed', name });
+        } catch (e) {
+            // [#8443] The SAME rule as the catch at the door, applied to the
+            // sibling key of the same field: `readErrors` becomes
+            // `seedApplied.errors[]` on that 200 response, so it is a
+            // client-facing payload too. Measured before the change: with
+            // `sys_metadata` unreachable this read fails FIRST — before the
+            // loader is ever constructed — and answered `"errors": ["read
+            // project_seed: SQLITE_ERROR: no such table: sys_metadata"]`, so
+            // fixing only the door's catch would have left the commonest
+            // outage shape disclosing exactly as before. A DECLARED 4xx
+            // refusal (`[item_locked]`, `[writable_package_required]`, …)
+            // still reaches the author verbatim — that is the point of the
+            // positive list.
+            (deps.logger ?? console).warn(
+                `[applyPublishedSeeds] seed body read failed for "${name}": ${(e as Error)?.message ?? String(e)}`,
+            );
+            readErrors.push(`read ${name}: ${clientFacingFailureText(e, 'the reason is in the server log')}`);
         }
         // protocol.getMetaItem returns a WRAPPER: `{ type, name, item, lock,
         // editable, … }` — the seed body (object/records) lives under

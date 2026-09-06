@@ -9,7 +9,7 @@
  * (`criteria_json` JSON filter + `recipient_type`/`recipient_id`). ADR-0057 D6
  * makes the RUNTIME shape canonical and translates the authorable fields.
  * Every currently-authorable recipient (`user` / `team` / `position` /
- * `unit_and_subordinates` / `business_unit`) maps 1:1 and ENFORCES — the
+ * `unit_and_subordinates` / `business_unit` / `field`) maps 1:1 and ENFORCES — the
  * retired `group`/`guest` recipients and `owner`-type rules no longer parse
  * at the spec (ADR-0078; `group` was renamed → `team`). What the runtime
  * still cannot enforce is SKIPPED (logged) rather than seeded as a match-all
@@ -108,6 +108,10 @@ function mapRecipientType(t: unknown): SharingRuleRecipientType | null {
     // ADR-0057 D5: business-unit subtree recipient.
     case 'business_unit': return 'business_unit' as SharingRuleRecipientType;
     case 'unit_and_subordinates': return 'unit_and_subordinates' as SharingRuleRecipientType;
+    // [#15072] The RECORD-RELATIVE recipient (#14103, maintainer ruling B):
+    // `value` is a field NAME, held to the `FieldSchema.name` grammar at parse,
+    // and `SharingRuleService` reads that column on each matched record.
+    case 'field': return 'field';
     // Defensive only: the authoring enum matches the cases above 1:1, but a
     // stale pre-built package could still register a retired shape — skip,
     // never seed match-all.

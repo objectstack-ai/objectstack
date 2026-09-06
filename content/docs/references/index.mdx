@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1590 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1573 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -21,19 +21,19 @@ counts are sums of the rows they head. Regenerate with
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
 | [API Protocol](/docs/references/api) | 31 | 436 | REST contracts, endpoints, routing, realtime, batch, discovery. |
-| [Automation Protocol](/docs/references/automation) | 13 | 72 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
+| [Automation Protocol](/docs/references/automation) | 13 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 166 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
 | [Integration Protocol](/docs/references/integration) | 1 | 24 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
 | [Kernel Protocol](/docs/references/kernel) | 30 | 162 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
-| [Security Protocol](/docs/references/security) | 5 | 29 | Permission sets, row-level security, sharing rules, tenancy posture. |
-| [Shared Protocol](/docs/references/shared) | 9 | 27 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
+| [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
+| [Shared Protocol](/docs/references/shared) | 8 | 27 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
-| [System Protocol](/docs/references/system) | 36 | 291 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
+| [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **201** | **1590** | 14 protocol modules |
+| **Total** | **197** | **1573** | 14 protocol modules |
 
 ---
 
@@ -103,7 +103,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 
 ## Automation Protocol
 
-**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 72 schemas**
+**Source:** `packages/spec/src/automation/` · **Import:** `@objectstack/spec/automation` · **13 pages, 73 schemas**
 
 Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records.
 
@@ -111,7 +111,7 @@ Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execu
 | :--- | :--- |
 | [`approval.zod.ts`](/docs/references/automation/approval) | `ApprovalDecision`, `ApprovalEscalation`, `ApprovalNodeApprover`, `ApprovalNodeConfig`, `ApproverType`, `DecisionOutputDef` |
 | [`bpmn-interop.zod.ts`](/docs/references/automation/bpmn-interop) | `BpmnDiagnostic`, `BpmnElementMapping`, `BpmnExportOptions`, `BpmnImportOptions`, `BpmnInteropResult`, `BpmnUnmappedStrategy`, `BpmnVersion` |
-| [`builtin-node-config.zod.ts`](/docs/references/automation/builtin-node-config) | `AssignmentConfig`, `AssignmentExpressionValue`, `AssignmentValue`, `CreateRecordConfig`, `DeleteRecordConfig`, `GetRecordConfig`, `MapConfig`, `ScreenConfig`, `ScreenFieldConfig`, `UpdateRecordConfig` |
+| [`builtin-node-config.zod.ts`](/docs/references/automation/builtin-node-config) | `AssignmentConfig`, `AssignmentExpressionValue`, `AssignmentValue`, `CreateRecordConfig`, `DeleteRecordConfig`, `EndConfig`, `GetRecordConfig`, `MapConfig`, `ScreenConfig`, `ScreenFieldConfig`, `UpdateRecordConfig` |
 | [`control-flow.zod.ts`](/docs/references/automation/control-flow) | `FlowRegion`, `LoopConfig`, `ParallelBranch`, `ParallelConfig`, `RetryPolicy`, `TryCatchConfig`, `TryCatchErrorValue` |
 | [`execution.zod.ts`](/docs/references/automation/execution) | `Checkpoint`, `ConcurrencyPolicy`, `ExecutionError`, `ExecutionErrorSeverity`, `ExecutionLog`, `ExecutionStatus`, `ExecutionStepLog`, `ExecutionStepMetrics`, `ExecutionStepSkipReason`, `FlowRunGateSummary`, `FlowRunNodeSummary`, `FlowRunSummary`, `ScheduleState` |
 | [`flow.zod.ts`](/docs/references/automation/flow) | `Flow`, `FlowEdge`, `FlowNode`, `FlowNodeAction`, `FlowVariable`, `FlowVersionHistory` |
@@ -270,14 +270,14 @@ Declarative test suites — scenarios, steps, actions and assertions.
 
 ## Security Protocol
 
-**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 29 schemas**
+**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 30 schemas**
 
 Permission sets, row-level security, sharing rules, tenancy posture.
 
 | File | Schemas |
 | :--- | :--- |
 | [`explain.zod.ts`](/docs/references/security/explain) | `AccessMatrix`, `AccessMatrixEntry`, `AuthzPosture`, `ExplainDecision`, `ExplainLayer`, `ExplainMatchedRule`, `ExplainOperation`, `ExplainRecordAttribution`, `ExplainRequest` |
-| [`misc`](/docs/references/security/misc) *(no single source file)* | `CapabilityDeclaration`, `OrgScopingEntitlement`, `PlatformGlobalObjects`, `TenancyPosture` |
+| [`misc`](/docs/references/security/misc) *(no single source file)* | `CapabilityDeclaration`, `OrgScopingEntitlement`, `PlatformGlobalObjects`, `TenancyPosture`, `TenantLayer0Verdict` |
 | [`permission.zod.ts`](/docs/references/security/permission) | `AdminScope`, `EffectiveObjectPermission`, `FieldPermission`, `ObjectAccessScope`, `ObjectPermission`, `PermissionSet` |
 | [`rls.zod.ts`](/docs/references/security/rls) | `RLSEvaluationResult`, `RLSOperation`, `RLSUserContext`, `RowLevelSecurityPolicy` |
 | [`sharing.zod.ts`](/docs/references/security/sharing) | `CriteriaSharingRule`, `OWDModel`, `ShareRecipientType`, `SharingLevel`, `SharingRule`, `SharingRuleType` |
@@ -286,15 +286,14 @@ Permission sets, row-level security, sharing rules, tenancy posture.
 
 ## Shared Protocol
 
-**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **9 pages, 27 schemas**
+**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **8 pages, 27 schemas**
 
 Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.
 
 | File | Schemas |
 | :--- | :--- |
 | [`enums.zod.ts`](/docs/references/shared/enums) | `IsolationLevelEnum`, `MutationEventEnum`, `SortDirectionEnum`, `SortItem` |
-| [`epoch.zod.ts`](/docs/references/shared/epoch) | `EpochMs` |
-| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
+| [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `EvaluatedExpression`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
 | [`http.zod.ts`](/docs/references/shared/http) | `CorsConfig`, `HttpMethod`, `HttpMethodSubset`, `HttpRequest`, `RateLimitConfig`, `StaticMount` |
 | [`identifiers.zod.ts`](/docs/references/shared/identifiers) | `MetadataItemName`, `SnakeCaseIdentifier`, `SystemIdentifier` |
 | [`mapping.zod.ts`](/docs/references/shared/mapping) | `FieldMapping` |
@@ -320,7 +319,7 @@ Studio designer metadata — the authoring surfaces for the protocols above.
 
 ## System Protocol
 
-**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **36 pages, 291 schemas**
+**Source:** `packages/spec/src/system/` · **Import:** `@objectstack/spec/system` · **33 pages, 272 schemas**
 
 The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance.
 
@@ -330,7 +329,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`auth-config.zod.ts`](/docs/references/system/auth-config) | `AdvancedAuthConfig`, `AudienceConfig`, `AuthConfig`, `AuthPluginConfig`, `AuthProviderConfig`, `EmailAndPasswordConfig`, `EmailVerificationConfig`, `MutualTLSConfig`, `OidcProviderConfig`, `OidcProvidersConfig`, `SocialProviderConfig` |
 | [`book.zod.ts`](/docs/references/system/book) | `Book`, `BookAudience`, `BookGroup`, `BookInclude`, `BookNode`, `ResolvedBook`, `ResolvedEntry`, `ResolvedGroup` |
 | [`cache.zod.ts`](/docs/references/system/cache) | `CacheAvalanchePrevention`, `CacheConfig`, `CacheConsistency`, `CacheInvalidation`, `CacheStrategy`, `CacheTier`, `CacheWarmup`, `DistributedCacheConfig` |
-| [`change-management.zod.ts`](/docs/references/system/change-management) | `ChangeImpact`, `ChangePriority`, `ChangeRequest`, `ChangeStatus`, `ChangeType`, `RollbackPlan` |
 | [`collaboration.zod.ts`](/docs/references/system/collaboration) | `AwarenessEvent`, `AwarenessSession`, `AwarenessUpdate`, `AwarenessUserState`, `CRDTMergeResult`, `CRDTState`, `CRDTType`, `CollaborationMode`, `CollaborationSession`, `CollaborationSessionConfig`, `CollaborativeCursor`, `CounterOperation`, `CursorColorPreset`, `CursorSelection`, `CursorStyle`, `CursorUpdate`, `GCounter`, `LWWRegister`, `ORSet`, `ORSetElement`, `OTComponent`, `OTOperation`, `OTOperationType`, `OTTransformResult`, `PNCounter`, `TextCRDTOperation`, `TextCRDTState`, `UserActivityStatus`, `VectorClock` |
 | [`core-services.zod.ts`](/docs/references/system/core-services) | `CoreServiceName`, `KernelServiceMap`, `KernelServiceStatus`, `ServiceConfig`, `ServiceCriticality` |
 | [`deploy-bundle.zod.ts`](/docs/references/system/deploy-bundle) | `DeployBundle`, `DeployDiff`, `DeployManifest`, `DeployStatusEnum`, `DeployValidationIssue`, `DeployValidationResult`, `MigrationPlan`, `MigrationStatement`, `SchemaChange` |
@@ -341,7 +339,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`encryption.zod.ts`](/docs/references/system/encryption) | `EncryptionAlgorithm`, `EncryptionConfig`, `FieldEncryption`, `KeyManagementProvider`, `KeyRotationPolicy` |
 | [`environment-artifact.zod.ts`](/docs/references/system/environment-artifact) | `Sha256Digest` |
 | [`http-server.zod.ts`](/docs/references/system/http-server) | `MiddlewareConfig`, `MiddlewareType`, `RouteHandlerMetadata` |
-| [`incident-response.zod.ts`](/docs/references/system/incident-response) | `Incident`, `IncidentCategory`, `IncidentNotificationMatrix`, `IncidentNotificationRule`, `IncidentResponsePhase`, `IncidentResponsePolicy`, `IncidentSeverity`, `IncidentStatus` |
 | [`job.zod.ts`](/docs/references/system/job) | `CronSchedule`, `IntervalSchedule`, `Job`, `JobExecution`, `JobExecutionStatus`, `OnceSchedule`, `RetryPolicy`, `Schedule` |
 | [`license.zod.ts`](/docs/references/system/license) | `Feature`, `License`, `LicenseMetricType`, `Plan` |
 | [`logging.zod.ts`](/docs/references/system/logging) | `ConsoleDestinationConfig`, `ExtendedLogLevel`, `ExternalServiceDestinationConfig`, `FileDestinationConfig`, `HttpDestinationConfig`, `LogDestination`, `LogDestinationType`, `LogEnrichmentConfig`, `LogEntry`, `LogFormat`, `LogLevel`, `LoggerConfig`, `LoggingConfig`, `StructuredLogEntry` |
@@ -359,7 +356,6 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 | [`supplier-security.zod.ts`](/docs/references/system/supplier-security) | `SupplierAssessmentStatus`, `SupplierRiskLevel`, `SupplierSecurityAssessment`, `SupplierSecurityPolicy`, `SupplierSecurityRequirement` |
 | [`tenant.zod.ts`](/docs/references/system/tenant) | `DatabaseLevelIsolationStrategy`, `DatabaseProvider`, `QuotaEnforcementResult`, `RowLevelIsolationStrategy`, `SchemaLevelIsolationStrategy`, `Tenant`, `TenantConnectionConfig`, `TenantIsolationConfig`, `TenantIsolationLevel`, `TenantQuota`, `TenantSecurityPolicy`, `TenantUsage` |
 | [`tracing.zod.ts`](/docs/references/system/tracing) | `OpenTelemetryCompatibility`, `OtelExporterType`, `SamplingDecision`, `SamplingStrategyType`, `Span`, `SpanAttributeValue`, `SpanAttributes`, `SpanEvent`, `SpanKind`, `SpanLink`, `SpanStatus`, `TraceContext`, `TraceContextPropagation`, `TraceFlags`, `TracePropagationFormat`, `TraceSamplingConfig`, `TraceState`, `TracingConfig` |
-| [`training.zod.ts`](/docs/references/system/training) | `TrainingCategory`, `TrainingCompletionStatus`, `TrainingCourse`, `TrainingPlan`, `TrainingRecord` |
 | [`translation.zod.ts`](/docs/references/system/translation) | `ActionResultDialogTranslation`, `CoverageBreakdownEntry`, `FieldTranslation`, `Locale`, `ObjectTranslationData`, `TranslationBundle`, `TranslationConfig`, `TranslationCoverageResult`, `TranslationData`, `TranslationDiffItem`, `TranslationDiffStatus`, `TranslationItem` |
 | [`worker.zod.ts`](/docs/references/system/worker) | `BatchProgress`, `QueueConfig`, `Task`, `TaskExecutionResult`, `TaskPriority`, `TaskRetryPolicy`, `TaskStatus`, `WorkerStats` |
 

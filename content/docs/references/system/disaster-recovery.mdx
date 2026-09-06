@@ -30,7 +30,7 @@ Backup configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
 | **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -112,7 +112,7 @@ Complete disaster recovery plan configuration
 | **rpo** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Point Objective |
 | **rto** | `{ value: number; unit?: Enum<'seconds' \| 'minutes' \| 'hours'> }` | ✅ | Recovery Time Objective |
 | **backup** | `{ strategy?: Enum<'full' \| 'incremental' \| 'differential'>; schedule?: string \| object; retention: object; destination: object; … }` | ✅ | Backup configuration |
-| **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckIntervalSeconds?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
+| **failover** | `{ mode?: Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>; autoFailover?: boolean; healthCheckInterval?: number; failureThreshold?: number; … }` | optional | Multi-region failover configuration |
 | **replication** | `{ mode?: Enum<'synchronous' \| 'asynchronous' \| 'semi_synchronous'>; maxLagSeconds?: number; includeObjects?: string[]; excludeObjects?: string[] }` | optional | Data replication settings |
 | **testing** | `{ enabled?: boolean; schedule?: string \| object; notificationChannel?: string }` | optional | Automated disaster recovery testing |
 | **runbookUrl** | `string` | optional | URL to disaster recovery runbook/playbook |
@@ -137,7 +137,7 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **strategy** | `Enum<'full' \| 'incremental' \| 'differential'>` | optional (default: `"incremental"`) | Backup strategy |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for backup schedule — cron`0 2 * * *` |
 | **retention** | `{ days: number; minCopies?: number; maxCopies?: number }` | ✅ | Backup retention policy |
 | **destination** | `{ type: Enum<'s3' \| 'gcs' \| 'azure_blob' \| 'local'>; bucket?: string; path?: string; region?: string }` | ✅ | Backup storage destination |
 | **encryption** | `{ enabled?: boolean; algorithm?: Enum<'AES-256-GCM' \| 'AES-256-CBC' \| 'ChaCha20-Poly1305'>; keyId?: string }` | optional | Backup encryption settings |
@@ -150,8 +150,7 @@ Complete disaster recovery plan configuration
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | optional (default: `"active_passive"`) | Failover mode |
 | **autoFailover** | `boolean` | optional (default: `true`) | Enable automatic failover |
-| **healthCheckIntervalSeconds** | `number` | optional (default: `30`) | Health check interval in seconds |
-| **healthCheckInterval** | `never` | optional | [REMOVED] `FailoverConfig.healthCheckInterval` was renamed to `healthCheckIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `healthCheckIntervalSeconds`; the value (seconds) and the 30 default are unchanged. |
+| **healthCheckInterval** | `number` | optional (default: `30`) | Health check interval in seconds |
 | **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
 | **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
 | **dns** | `{ ttl?: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
@@ -170,7 +169,7 @@ Complete disaster recovery plan configuration
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `false`) | Enable automated DR testing |
-| **schedule** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron expression for DR test schedule |
+| **schedule** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron expression for DR test schedule |
 | **notificationChannel** | `string` | optional | Notification channel for DR test results |
 
 ### Nested Shape: `DisasterRecoveryPlan.contacts[number]`
@@ -195,8 +194,7 @@ Failover configuration
 | :--- | :--- | :--- | :--- |
 | **mode** | `Enum<'active_passive' \| 'active_active' \| 'pilot_light' \| 'warm_standby'>` | optional (default: `"active_passive"`) | Failover mode |
 | **autoFailover** | `boolean` | optional (default: `true`) | Enable automatic failover |
-| **healthCheckIntervalSeconds** | `number` | optional (default: `30`) | Health check interval in seconds |
-| **healthCheckInterval** | `never` | optional | [REMOVED] `FailoverConfig.healthCheckInterval` was renamed to `healthCheckIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `healthCheckIntervalSeconds`; the value (seconds) and the 30 default are unchanged. |
+| **healthCheckInterval** | `number` | optional (default: `30`) | Health check interval in seconds |
 | **failureThreshold** | `number` | optional (default: `3`) | Consecutive failures before failover |
 | **regions** | `{ name: string; role: Enum<'primary' \| 'secondary' \| 'witness'>; endpoint?: string; priority?: number }[]` | ✅ | Multi-region configuration (minimum 2 regions) |
 | **dns** | `{ ttl: number; provider?: Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'> }` | optional | DNS failover settings |
@@ -214,7 +212,7 @@ Failover configuration
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **ttl** | `number` | optional (default: `60`) | DNS TTL in seconds for failover (unit per DNS resource-record TTL (RFC 1035 §4.1.3)) |
+| **ttl** | `number` | optional (default: `60`) | DNS TTL in seconds for failover |
 | **provider** | `Enum<'route53' \| 'cloudflare' \| 'azure_dns' \| 'custom'>` | optional | DNS provider for automatic failover |
 
 

@@ -65,7 +65,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **onRecordChange** | `boolean` | optional (default: `true`) |  |
-| **cron** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
+| **cron** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
 
 
 ---
@@ -130,7 +130,7 @@ const result = FileKnowledgeSourceSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **onRecordChange** | `boolean` | optional (default: `true`) |  |
-| **cron** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
+| **cron** | `string \| { dialect: 'cron'; source?: string; ast?: any; meta?: object }` | optional | Cron-dialect expression for a periodic full reindex. A bare string is shorthand for `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an expression envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is the `cron` dialect engine's verdict when the expression is evaluated, not checked here. `service-knowledge` does not schedule it: the value is surfaced so an automation flow / external scheduler can trigger `reindexSource`. |
 
 
 ---

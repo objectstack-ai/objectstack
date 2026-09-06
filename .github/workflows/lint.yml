@@ -2284,7 +2284,7 @@ jobs:
       # commands and the gate reds (3/2) — which is exactly what it did here.
       # Both existing collectors in this file carry self-tests ONLY, for the
       # same reason. Keep the sweep out of the collector block.
-      - name: ADR symbol-anchor gate self-tests
+      - name: Symbol-anchor gate self-tests
         run: |
           failed=""
           run_self_test() {
@@ -2299,15 +2299,24 @@ jobs:
           }
           run_self_test node scripts/symbol-anchors.mjs --self-test
           run_self_test node scripts/check-adr-symbol-anchors.mjs --self-test
+          run_self_test node scripts/check-scripts-symbol-anchors.mjs --self-test
           if [ -n "$failed" ]; then
             echo ""
-            echo "ADR symbol-anchor self-tests — the following FAILED:"
+            echo "Symbol-anchor self-tests — the following FAILED:"
             printf "%s" "$failed"
             exit 1
           fi
 
       - name: ADR symbol anchors resolve (no line numbers survive)
         run: node scripts/check-adr-symbol-anchors.mjs
+
+      # The SECOND corpus (#15765), and it is a `defineCorpus` registration over
+      # `scripts/**` comment prose — ⛔ not a second resolver. Its own sweep is a
+      # separate step for the same `check-step-collectors` reason stated above:
+      # a production sweep inside the collector block re-invokes the stub the
+      # harness plants and the count comes out 4/3.
+      - name: scripts/** symbol anchors resolve (no line citations on tracked targets survive)
+        run: node scripts/check-scripts-symbol-anchors.mjs
 
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
@@ -5032,6 +5041,19 @@ jobs:
       - name: Build the ledgered packages' dependencies
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
+
       # ⚠️ `NODE_OPTIONS` here is HALF of the heap ceiling this gate runs tsc
       # under, and the two halves ship together or not at all (#14569, ruled
       # 2026-09-03). The other half is `CI_TSC_HEAP_CEILING_MB` in
@@ -5206,6 +5228,19 @@ jobs:
       # above, so in practice it is cache hits plus the remainder (~13s in CI).
       - name: Build the nested packages the consumer gates resolve through
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
+
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
 
       - name: Type check example apps
         run: pnpm --filter './examples/*' run typecheck

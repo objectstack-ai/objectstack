@@ -71,14 +71,13 @@ import type {
 } from '@objectstack/spec/api';
 import type { MetadataCacheRequest, MetadataCacheResponse, ServiceInfo, ApiRoutes, WellKnownCapabilities, CapabilityDescriptor } from '@objectstack/spec/api';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
-import { readServiceSelfInfo, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, CHANNEL_SURFACE_SLOTS, ErrorCode, standardErrorCodeForHttpStatus, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
     SEARCHABLE_TEXTUAL_TYPES, SEARCHABLE_ENUM_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS,
     isVirtualSearchField,
     classifyDottedFilterHead,
-    RUNTIME_OWNED_FIELD_TYPES,
     RPC_QUERY_ALIAS_SLOTS, foldQueryAliasSlots,
     type QueryAliasConflict, type QueryAliasSlot,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
@@ -1737,199 +1736,15 @@ const CLONE_STRIP_FIELDS: readonly string[] = [
 ];
 
 /**
- * [#3043] Drop caller-supplied writes to statically `readonly: true` fields from
- * an INSERT payload, at the external DATA-WRITE INGRESS.
- *
- * #2948/#3003 made static `readonly` server-enforced on UPDATE (the engine strips
- * a non-system caller's write). INSERT was left exempt — but for approval/status
- * columns that exemption is the SHORTER attack: instead of the #3003
- * draft-then-PATCH move, a non-system caller can POST a record already
- * `approval_status: 'approved'` in one step. This closes it symmetrically, but at
- * the INGRESS rather than in the engine: every EXTERNAL programmatic create — the
- * REST CRUD route, the GraphQL/MCP dispatcher (`bridge.create` → `callData` →
- * here), and bulk import — lands in the DataProtocol, while TRUSTED internal
- * writers (better-auth's adapter, the metadata repository, the seed loader) call
- * `engine.insert` DIRECTLY and never pass through here. Keeping the strip at the
- * ingress therefore protects every agent/caller path at once WITHOUT stripping
- * the internal writers that legitimately seed read-only columns on create
- * (identity provisioning, provenance stamps, event-log cursors) — the blast
- * radius an engine-level insert strip would have.
- *
- * Silent by contract (like the UPDATE / `readonlyWhen` strips): the forged key is
- * dropped, the create still succeeds, and the engine re-derives the field's
- * `defaultValue` (a forged `approval_status` becomes `draft`, the enforced
- * initial state, not NULL). `isSystem` writes are exempt. `readonlyWhen` stays
- * INSERT-exempt (a conditional lock needs a prior record, which a create lacks).
- * Handles a single record or a batch array.
- *
- * SCOPE — author-defined business objects only. PLATFORM objects (`managedBy`
- * set, or the reserved `sys_` namespace) carry their OWN field-write governance
- * that a silent strip must not pre-empt: e.g. ADR-0086 REJECTS (403) a forged
- * `managed_by:'package'` / `package_id` on `sys_permission_set`, and #3004
- * rejects a forged `owner_id` anchor — several of those columns are `readonly`,
- * so stripping them here would silently swallow the payload the guard is meant to
- * reject. The #3043 threat is app approval/status/verdict fields (the issue's
- * `sporadic_application` / `assessment`), never `sys_`; this is the same
- * platform-vs-authored boundary `applySystemFields` uses for ownership.
- *
- * SCOPE, second boundary — RUNTIME-OWNED field types
- * ({@link RUNTIME_OWNED_FIELD_TYPES}: today `autonumber`) are left to the
- * ENGINE's own insert strip (`stripRuntimeOwnedFields`, #5503), which runs on
- * every insert path including the direct `engine.insert` callers this ingress
- * never sees. Skipping them here removes no protection and prevents this seam
- * from PRE-EMPTING an exemption it does not implement: the engine strip honours
- * `preserveAudit` (#3493 — a historical import reinstating legacy record
- * numbers) while this one knows only `isSystem`. Before #5628 the distinction
- * was academic, because an `autonumber` field carried no `readonly` flag for the
- * loop below to notice; now that `Field.autonumber` injects one, stripping here
- * would silently delete the value a historical import is entitled to keep,
- * BEFORE the engine could apply the whitelist. Author-declared `readonly` on
- * every other type is untouched — the #3043 strip is exactly as wide as it was.
- *
- * SCOPE, third boundary — `preserveAudit` IS NOT READ HERE, DELIBERATELY (#6640).
- * The historical-import exemption (#3493) is an **UPDATE-path rule only**; see
- * {@link warnPreserveAuditIgnoredOnInsert} for the ruling, the reason, and the
- * loud signal a non-system INSERT gets for asking.
- */
-function stripReadonlyForInsert(schema: any, data: any, context: any): any {
-    if (context?.isSystem) return data;
-    if (!schema || schema.managedBy || String(schema.name ?? '').startsWith('sys_')) return data;
-    const fields = schema?.fields;
-    if (!fields || data == null) return data;
-    // [#6640] The UNION of names actually removed, across every row of a batch —
-    // the same aggregation `mergeDroppedFieldEvents` applies, and for the same
-    // reason: the strip is schema-uniform, so one signal per ingress call is
-    // faithful where one per row would be noise.
-    const stripped = new Set<string>();
-    const stripRow = (row: any): any => {
-        if (row == null || typeof row !== 'object') return row;
-        let out = row;
-        for (const name of Object.keys(fields)) {
-            if (!fields[name]?.readonly) continue;
-            // [#5628] The engine's runtime-owned strip owns these, with the
-            // wider exemption set. See the note above.
-            if (RUNTIME_OWNED_FIELD_TYPES.has(String(fields[name]?.type ?? ''))) continue;
-            if (!(name in out)) continue;
-            if (out === row) out = { ...row };
-            delete out[name];
-            stripped.add(name);
-        }
-        return out;
-    };
-    const result = Array.isArray(data) ? data.map(stripRow) : stripRow(data);
-    if (context?.preserveAudit && stripped.size > 0) {
-        warnPreserveAuditIgnoredOnInsert(String(schema.name ?? ''), Array.from(stripped));
-    }
-    return result;
-}
-
-/**
- * [#6640] THE loud half of the `preserveAudit` ruling — a non-system INSERT that
- * asks for the historical-import exemption is TOLD it does not exist here.
- *
- * ## The contradiction this closes
- *
- * `FieldSchema.readonly`'s `.describe()` promised the `preserveAudit` exemption
- * (#3493) on BOTH write paths, and `docs/protocol/objectql/security.mdx` agreed.
- * Only UPDATE ever implemented it: `stripReadonlyFields` (objectql's
- * rule-validator) consults `isPreservableUnderAudit`, while this INSERT ingress
- * has never read `preserveAudit` at all — `isSystem` is its only exemption. REST
- * import's `treatAsHistorical` (`rest/src/import-runner.ts`) puts
- * `preserveAudit: true` on the write context and creates through `createData`,
- * i.e. through exactly this seam. So ONE historical import PRESERVED an
- * author-declared `readonly` business column (`closed_at`, `resolved_by`) on the
- * rows it updated and SILENTLY DROPPED it on the rows it created.
- *
- * ## Which half the ruling kept (maintainer, 2026-08-08 — option 2)
- *
- * The **enforcement** is the truth and the **contract** was narrowed to it: the
- * exemption is UPDATE-only, and this entry keeps honouring `isSystem` alone.
- * Honouring `preserveAudit` here instead would have handed a NON-system caller —
- * `treatAsHistorical` arrives on an ordinary REST import request — the ability to
- * seed the approval/status columns #3043 exists to protect, in one POST. That is
- * the #3043 threat model reversed, for a capability with no measured consumer:
- * replaying archival readonly facts on INSERT is available today, from a system
- * context, which is what the in-repo importer can run as.
- *
- * ## Why it is a WARNING and not a throw — measured, not assumed
- *
- * The ruling made loudness binding and left the SHAPE to whichever one can be
- * both loud and non-breaking. A throw cannot: `runImport`'s per-row writer
- * collects a write error into `toFailedResult(rowNo, res.error)` rather than
- * aborting the run, so refusing here would not stop a historical import — it
- * would convert every row it CREATES into a failed row, while the rows it
- * updates still succeed. And the trigger is not exotic: the audit family itself
- * (`created_at` / `created_by` / `updated_at` / `updated_by`) is `readonly: true`
- * in the registry's `AUDIT_FIELD_DEFS`, so an ordinary export→historical-import
- * round-trip carries readonly columns on every row. Measured on this branch, a
- * throwing variant took the historical import of 2 new rows from
- * `{created: 2, errors: 0}` to `{created: 0, errors: 2}`. Breaking the shipped
- * `treatAsHistorical` flow for new rows is precisely the condition under which
- * the ruling names the loud WARNING — strip still applied — as the
- * containment-correct landing.
- *
- * The silence this replaces was specific: the drop itself already surfaces
- * through `droppedFields` (#3431), but a caller who EXPLICITLY asked for the
- * exemption could not tell "your fields were stripped by the ordinary #3043
- * rule" from "the exemption you requested does not exist on this path". This
- * says the second one, by name. It fires ONLY when `preserveAudit` was requested
- * AND something was actually removed — a request that loses nothing has nothing
- * to report, and the ordinary non-`preserveAudit` strip is left exactly as quiet
- * as #3043 designed it.
- *
- * Family precedent #5714/#5931: a declared key silently ignored on one branch
- * joins the loud set by default. Those two could reject outright because they
- * judge AUTHORING input, before anything runs; this one sits on a live write
- * path, which is what moves it from throw to warn.
- */
-function warnPreserveAuditIgnoredOnInsert(object: string, fields: readonly string[]): void {
-    console.warn(
-        `[Protocol] preserveAudit is UPDATE-only and was IGNORED on this INSERT` +
-        `${object ? ` (object '${object}')` : ''}: the historical-import exemption (#3493) applies when a ` +
-        `record is UPDATED, never when it is created, so the readonly field(s) ${fields.join(', ')} were ` +
-        `STRIPPED from this create rather than preserved. To replay archival readonly facts on INSERT, ` +
-        `write from a system context (\`context.isSystem\`) — a non-system create may not seed a readonly ` +
-        `column (#3043/#6640).`,
-    );
-}
-
-/**
- * [#3431] Recover a `DroppedFieldsEvent` from a before/after write-payload diff.
- *
- * The UPDATE strips (static `readonly` / `readonlyWhen`) run INSIDE the engine,
- * which reports them via the `onFieldsDropped` listener (wired in `updateData`).
- * The CREATE `readonly` strip, however, runs at THIS protocol ingress
- * (`stripReadonlyForInsert`, #3043) — BEFORE the engine — so the engine listener
- * never sees it. Diffing the caller-supplied keys against the stripped payload
- * recovers exactly which supplied fields the ingress strip removed, so the create
- * path can surface them symmetrically with update.
- *
- * Returns `null` when nothing was dropped (same reference, non-object, array, or
- * no key delta) so callers can `if (ev) dropped.push(ev)` without emitting empty
- * events. Mirrors the engine's own before/after key-set diff (`reportDroppedFields`
- * in objectql/engine.ts) so both channels agree on what "dropped" means.
- */
-function diffDroppedFields(
-    object: string,
-    before: unknown,
-    after: unknown,
-    reason: DroppedFieldsEvent['reason'],
-): DroppedFieldsEvent | null {
-    if (before === after || before == null || typeof before !== 'object' || Array.isArray(before)) return null;
-    const afterObj = (after ?? {}) as Record<string, unknown>;
-    const fields = Object.keys(before as Record<string, unknown>).filter((k) => !(k in afterObj));
-    return fields.length > 0 ? { object, fields, reason } : null;
-}
-
-/**
  * [#3455] Collapse a batch's per-row `DroppedFieldsEvent`s into one event per
  * `(object, reason)` with the UNION of dropped field names.
  *
  * Used by the bulk-create surface (`createManyData`), whose `{ object, records,
  * count }` response has no per-row slot to hang a `droppedFields` on. The
- * insert-ingress strip (#3043) is static-`readonly` only — schema-uniform, so
- * every row drops the same set — which makes an aggregated view faithful rather
- * than lossy. Returns `[]` when nothing was dropped so callers can spread
+ * create-side static-`readonly` strip is schema-uniform — every row drops the
+ * same set — which makes an aggregated view faithful rather than lossy. (Since
+ * #14147 that strip is the ENGINE's, which reports one event per CALL for it,
+ * so the aggregation is over the runtime-owned per-row events.) Returns `[]` when nothing was dropped so callers can spread
  * `...(x.length ? { droppedFields: x } : {})` and keep the omit-when-empty shape.
  * The per-row `insertMany`/`batch` paths keep row precision instead (they have a
  * per-row result to carry it).
@@ -3613,6 +3428,19 @@ const SERVICE_CONFIG: Record<string, {
     // kernel-internal slots above, the capability this slot advertises is
     // realtime push to clients — without a surface that IS reduced, so an
     // unmarked bus reports degraded. Message matches the dispatcher builder.
+    //
+    // [#14646] And it is the one CHANNEL SLOT (`CHANNEL_SURFACE_SLOTS`,
+    // `@objectstack/spec/api` — the one place that membership is declared, read
+    // by BOTH discovery producers, which is why it is not a field of this
+    // table). The row used to yield `enabled: true` ("the slot is filled")
+    // beside the message below ("no surface is mounted") — both true at once,
+    // which is how `enabled` came to carry two meanings and a console client
+    // came to subscribe to nothing. `enabled` is now `isSubscribableChannel`
+    // and the route is the one the occupant names, so the stock in-process bus
+    // advertises no channel while a host that really mounts one still does
+    // (maintainer ruling A, 2026-09-04 — realtime stays out of open core).
+    // `noHttpSurface` stays: it supplies the status and the sentence for the
+    // unmounted case, which is every host the open framework ships.
     realtime:     { noHttpSurface: { statusWhenUnmarked: 'degraded', message: 'In-process event bus only — no HTTP/WS realtime surface is mounted' } },
     notification: { route: '/api/v1/notifications' },
     ai:           { route: '/api/v1/ai' },
@@ -5754,6 +5582,43 @@ export class ObjectStackProtocolImplementation implements
                 // Registered — but honor a stub/dev/fallback self-description
                 // instead of blindly reporting 'available' (ADR-0076 D12).
                 const self = readServiceSelfInfo(registeredServices.get(serviceName));
+                // [#14646] Channel slots answer a different question than every
+                // other row here. `enabled` elsewhere means "the slot is
+                // filled"; for a slot whose advertised capability IS a
+                // subscribable channel that reading is what let `/discovery`
+                // report `enabled: true` beside "no HTTP/WS realtime surface is
+                // mounted" — both true, one field, two meanings. Here `enabled`
+                // is the shared predicate itself, evaluated on the very entry a
+                // consumer reads, so the field and the definition are one
+                // computation. The route comes from the occupant because no
+                // builder in the open framework mounts a realtime transport.
+                if (CHANNEL_SURFACE_SLOTS.has(serviceName)) {
+                    const channelRoute = readChannelRoute(registeredServices.get(serviceName));
+                    const handlerReady = channelRoute !== undefined;
+                    services[serviceName] = {
+                        enabled: isSubscribableChannel({ handlerReady, route: channelRoute }),
+                        // A mounted channel makes an unmarked occupant plainly
+                        // `available`; without one the slot keeps the reduced
+                        // status its row declares (`degraded` for realtime — the
+                        // capability it advertises IS the missing surface).
+                        status: self?.status
+                            ?? (handlerReady
+                                ? ('available' as const)
+                                : (config.noHttpSurface?.statusWhenUnmarked ?? ('available' as const))),
+                        route: channelRoute,
+                        provider: CORE_SERVICE_PROVIDER[serviceName] ?? undefined,
+                        handlerReady,
+                        // The "no surface" sentence is only true while there is
+                        // no surface; a mounted channel drops it and keeps only
+                        // whatever the occupant says about itself.
+                        ...(self?.message
+                            ? { message: self.message }
+                            : !handlerReady && config.noHttpSurface
+                                ? { message: config.noHttpSurface.message }
+                                : {}),
+                    };
+                    continue;
+                }
                 // No HTTP surface at all: the handler can never be ready, and
                 // the entry's own `noHttpSurface` declaration says whether that
                 // also degrades the slot (realtime) or not (cache/queue/job —
@@ -5838,8 +5703,13 @@ export class ObjectStackProtocolImplementation implements
 
         // Add routes for available plugin services. Services without an HTTP
         // surface (config.route undefined) advertise no route (D12, #2462).
-        for (const [serviceName, config] of Object.entries(SERVICE_CONFIG)) {
-            const route = advertisedRoute(serviceName, config.route);
+        for (const serviceName of Object.keys(SERVICE_CONFIG)) {
+            // [#14646] Read the route off the entry that was just built rather
+            // than re-deriving it from the table. Byte-identical for every
+            // table-routed slot, and it is the only spelling that stays correct
+            // for a channel slot, whose route comes from the occupant — two
+            // derivations of one fact is how `routes` and `services` drift.
+            const route = services[serviceName]?.route;
             if (registeredServices.has(serviceName) && route) {
                 const routeKey = serviceToRouteKey[serviceName];
                 if (routeKey) {
@@ -5949,13 +5819,17 @@ export class ObjectStackProtocolImplementation implements
             // already reads, so none of them is a "cannot deliver ⇒ false"
             // placeholder — they are measured, per key:
 
-            // No host mounts a WS/SSE surface: service-realtime is an in-process
-            // pub/sub bus, which is precisely why SERVICE_CONFIG.realtime
-            // declares `noHttpSurface` and no `routes.realtime` is ever
-            // advertised (ADR-0076 D12, #2462). A literal `false` is the honest
-            // answer here, not a stand-in for one — and it matches the runtime
-            // dispatcher's answer for the same reason, in the same words.
-            websockets: false,
+            // [#14646] Derived, not stated. This flag and `services.realtime`
+            // answer the same question — "is there a channel to subscribe to?"
+            // — so it is the same predicate applied to the same entry
+            // (`isSubscribableChannel`), and a host that mounts a transport
+            // flips both in one step. It was a literal `false` beside an entry
+            // saying `enabled: true`: two constants that happened to be right
+            // are not agreement, they are two places to forget. False on every
+            // host the open framework ships, because `service-realtime` is an
+            // in-process pub/sub bus that names no channel route (ADR-0076 D12,
+            // #2462; maintainer ruling A, 2026-09-04).
+            websockets: isSubscribableChannel(services['realtime']),
             // Storage: the `storage` slot (#9683), gated on serveability rather
             // than presence — a self-declared stub mounts nothing, and this
             // builder already withholds `routes.storage` from it.
@@ -7550,7 +7424,7 @@ export class ObjectStackProtocolImplementation implements
         //    hydration walks past.
         //
         // ⇒ What is left to move is the runtime callers that hand this method a
-        // RAW active organization. FOUR, across two files — the population is
+        // RAW active organization. THREE, all in one file — the population is
         // stated with the method that establishes it, because the first
         // enumeration of it named only the first file and was wrong: grep every
         // `getMetaItem(` / `getMetaItemCached(` invocation in the repo, then
@@ -7560,12 +7434,14 @@ export class ObjectStackProtocolImplementation implements
         //    be right about scope, by construction.
         //  • `runtime/src/domains/meta.ts:768` — `singularType` off the URL, so
         //    it moves only for the non-overridable half of what it serves.
-        //  • `runtime/src/domains/packages.ts:1239` (`applyPublishedSeeds`,
-        //    organization from `deps.resolveActiveOrganizationId`) — `type:
-        //    'seed'`, also non-overridable, so its org-first attempt now reads
-        //    the env-wide partition directly. It hand-rolls the same fallback
-        //    as a second attempt, so what it used to reach on the second try it
-        //    now gets on the first.
+        // A FOURTH used to sit here: `applyPublishedSeeds` in
+        // `runtime/src/domains/packages.ts`, `type: 'seed'`, equally
+        // non-overridable. It hand-rolled an org-then-env ladder that this gate
+        // had turned into a byte-identical repeat — both rungs asking the
+        // engine the same predicates and serving the same answer. #15068
+        // measured that (ablation: neutering the second rung reddened nothing
+        // on a pinned publish-then-read path) and collapsed it to a single read
+        // naming no organization at all, so it now belongs to the bucket below.
         // Every other invocation either names no organization at all or is a
         // REST door that already computed `organizationIdForMetaRead` — the
         // idempotence legs above are what make those two cases no-ops.
@@ -7992,12 +7868,106 @@ export class ObjectStackProtocolImplementation implements
         deletable: boolean;
         resettable: boolean;
     }> {
-        const orgId = request.organizationId;
-
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The
         // three-layer diagnostic must answer for ONE namespace, or `code` and
         // `overlay` can be read from two.
         request = canonicalizeMetaRequestType(request);
+
+        // ── [#14907] The registry read gate, resolved AFTER the fold ─────────
+        //
+        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
+        // read doors have applied since #9454, twin of the write side's
+        // `organizationIdForMetaWrite` (#6190 / #7018) and the same gate
+        // `getMetaItems` (#14683) and `getMetaItem` (#14770) now carry. Until
+        // this line `getMetaItemLayered` — the third `/meta` read verb —
+        // applied NO gate of its own: whatever organization arrived was spent
+        // on whatever type arrived.
+        //
+        // ⛔ THE BINDING MOVED, and that reorder IS the fix. It used to sit
+        // ABOVE the fold, so dropping the sibling verbs' one-liner in place
+        // would have gated on the RAW type. #10340 measured what that costs:
+        // `declaresOrgOverride` tolerates the MANIFEST plurals but not the
+        // URL-only ones (`translations` / `email_templates` have no manifest
+        // key), so a raw segment splits one item across two partitions. Both
+        // REST callers below hand this method an unfolded `/meta/:type`
+        // segment, so gating before the fold would have been wrong on exactly
+        // the types the gate exists to admit.
+        //
+        // ⭐ THE HARM IS A FALSE POSITIVE CUSTOMIZATION CLAIM — which is why
+        // this verb was graded on its own rather than inheriting either twin's.
+        // On the plural verb a phantom can only ADD a row; on the singular verb
+        // it REPLACES the served document. Here the affected value is the
+        // `overlay` layer of a three-layer diagnostic whose entire purpose is
+        // to answer "what did this tenant customize", so a pre-#6190 phantom
+        // org-scoped row of an `allowOrgOverride: false` type is rendered by
+        // the Studio "Code default vs Overlay vs Effective" diff tab as
+        // evidence of a customization that does not exist. It compounds at the
+        // two doors that return the `overlay` layer AS the response: there the
+        // phantom is not merely displayed, it is served.
+        //
+        // ── The idempotence proof, discharged over THIS door's callers ──────
+        //
+        // Let `f(t, o) = organizationIdForMetaRead(t, o)`. `f` answers `o` when
+        // the registry declares `t` per-org overridable and `undefined`
+        // otherwise, so `f(t, undefined) === undefined` and
+        // `f(t, f(t, o)) === f(t, o)` for every `t` and `o`. #14683's and
+        // #14770's proofs do NOT carry: the #14683 ruling discharges this per
+        // door over that door's OWN caller population, and this verb's is a
+        // different set. Enumerated by grepping every `getMetaItemLayered(`
+        // invocation in the repo and tracing each `organizationId` argument to
+        // its source — no caller is denied a partition it can legitimately
+        // read:
+        //
+        //  • `rest-server.ts`'s `/meta/:type/:name/layers` door (and the
+        //    deprecated `?layers=` flag, which delegates to the same helper)
+        //    computes `organizationIdForMetaRead(canonicalMetaUrlType(
+        //    req.params.type), ctx?.tenantId)` and then passes `type:
+        //    req.params.type`, the RAW segment. The fold above IS
+        //    `canonicalMetaUrlType`, so `request.type` here is the identical
+        //    STRING the door gated on — the algebraic no-op.
+        //  • Four of the five `plugin-security` invocations name no
+        //    organization at all (`packaged-permission-set-lock-gate.ts`'s
+        //    authoring gate, and three of `permission-set-projection.ts`'s
+        //    reads), so `f(t, undefined) === undefined` leaves them reading
+        //    exactly what they read today. `permission-set-overlay-discard.ts`
+        //    only feature-detects this method and delegates to
+        //    `projectPermissionMutation`; it is not a call site.
+        //
+        // ⇒ THREE callers move, and each one is the defect. ⚠️ Only the first
+        // was named by the enumeration this repair was dispatched with, which
+        // asserted that the runtime dispatcher was the ONLY reachable site,
+        // that BOTH REST doors already gated, and that every `plugin-security`
+        // site passed no organization. The last two were measured false here —
+        // in the direction that adds callers to this gate, never one that
+        // removes them:
+        //
+        //  • `runtime/src/domains/meta.ts` — `resolveActiveOrganizationId`
+        //    straight into the request, on a `type` taken off the URL, so it is
+        //    not confined to the overridable five. Its `if (layered?.overlay !=
+        //    null)` branch returns the overlay layer AS the response.
+        //  • `rest-server.ts`'s `/meta/:type/:name/published` door — the REST
+        //    twin of that dispatcher branch, and the door recorded as already
+        //    gating. It passes `publishedCtx.tenantId` RAW and then
+        //    `res.json(layered.overlay)`. Its own comment argues the raw tenant
+        //    "is right for a READ" because the overlay lookup is
+        //    org-first-then-env, so "nothing that resolves today stops
+        //    resolving" — precisely the argument {@link
+        //    organizationIdForMetaRead} was written to refute: failing open in
+        //    that direction is what RESURRECTS the phantoms, which is why
+        //    #6190 stopped minting them and why boot hydration walks past the
+        //    survivors.
+        //  • `permission-set-projection.ts`'s post-mutation read forwards
+        //    `evt.organizationId` — a raw active organization on
+        //    `type: 'permission'`, which is `allowOrgOverride: false`. Moving
+        //    it makes the projection read the partition boot hydration
+        //    actually serves: the same correction, one caller further out.
+        //
+        // ⚠️ ONE resolution for BOTH overlay arms, deliberately — the
+        // org-scoped read and the env-wide fallback below both spend this
+        // binding, and gating only the first would leave `overlayScope: 'org'`
+        // reachable for a type with no per-org read channel.
+        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
+
         // ── code layer: MetadataService.get + registry, BYPASSING overlay ──
         let code: unknown | null = null;
         let codeDegraded: { degraded: boolean; errors: string[] } | undefined;
@@ -10571,26 +10541,25 @@ export class ObjectStackProtocolImplementation implements
 
     async createData(request: { object: string, data: any, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        // [#3043] Ingress-level static-`readonly` strip — a non-system caller
-        // cannot seed a read-only column (e.g. `approval_status`) on create.
-        const data = stripReadonlyForInsert(
-            this.engine.registry?.getObject(request.object),
-            request.data,
-            request.context,
-        );
-        // [#3431] The #3043 ingress strip above is SILENT by contract; surface it
-        // so a REST/API caller learns which supplied fields were dropped, symmetric
-        // with `updateData`. The strip lives at THIS ingress (not the engine, which
-        // is INSERT-readonly-exempt, #3413), so recover it by diffing the supplied
-        // payload against the stripped one. The engine's `onFieldsDropped` is ALSO
-        // wired below so a FUTURE insert-side engine strip surfaces automatically
-        // through the same list instead of going silent.
+        // [#14147] The static-`readonly` create strip is the ENGINE's now
+        // (`engine.insert` → `stripReadonlyFields`, `isSystem`-gated, exactly as
+        // on update), so this ingress hands the caller's payload over WHOLE and
+        // reports the drop through the listener #3431 already wired here. The
+        // ingress copy it replaces (`stripReadonlyForInsert`, #3043) is deleted
+        // rather than kept as a second implementation — maintainer ruling,
+        // 2026-09-03, superseding the 2026-07-24 "INSERT (all callers) exempt"
+        // row. Two consequences worth stating, because they are what the
+        // before/after diff used to fake:
+        //  - the event now carries the ENGINE's verdict rather than this seam's
+        //    reconstruction of it, so `droppedFields` says the same thing here,
+        //    on `data.insert`, and in a `create_record` flow node;
+        //  - and it is the engine's guards that decide, which are wider than a
+        //    payload diff can be: a `beforeInsert` hook's own stamp is not a
+        //    caller forgery (#5591/#14259), and the ingress ran before the hooks.
         const dropped: DroppedFieldsEvent[] = [];
-        const ingressDropped = diffDroppedFields(request.object, request.data, data, 'readonly');
-        if (ingressDropped) dropped.push(ingressDropped);
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
-        const result = await this.engine.insert(request.object, data, opts);
+        const result = await this.engine.insert(request.object, request.data, opts);
         // [#7823] The 201 body is a GENERIC-DATA-PATH surface: strip
         // `internal: true` fields here, at the ingress, per the A-prime ruling
         // (2026-08-13). The engine deliberately no longer strips its own write
@@ -10666,13 +10635,14 @@ export class ObjectStackProtocolImplementation implements
             Object.assign(data, request.overrides);
         }
 
-        // [#3043] A clone is a create: a non-system caller must not carry over (or
-        // override in) a read-only column — copying the source's `approval_status`
-        // or forging one via `overrides` would mint an approved record. Strip them
-        // so the insert re-derives their `defaultValue`, symmetric with createData.
-        const insertData = stripReadonlyForInsert(schema, data, ctx);
-
-        const result = await this.engine.insert(request.object, insertData, ctxOpt as any);
+        // [#3043/#14147] A clone is a create: a non-system caller must not carry
+        // over (or override in) a read-only column — copying the source's
+        // `approval_status` or forging one via `overrides` would mint an approved
+        // record. That strip is `engine.insert`'s since #14147, so the payload
+        // goes over whole and the insert re-derives the field's `defaultValue`,
+        // symmetric with createData. `overrides` are applied ABOVE this line, so
+        // a readonly key smuggled through them is still judged by the strip.
+        const result = await this.engine.insert(request.object, data, ctxOpt as any);
         // [#7823] Same ingress strip as `createData` — a clone's 201 body is
         // the same generic-data-path surface. (The SOURCE row was read through
         // the engine's find path, which already omits internal fields, so the
@@ -11618,12 +11588,15 @@ export class ObjectStackProtocolImplementation implements
         this.assertObjectRegistered(object); // [#3770]
         const { operation, records, options } = batchReq;
 
-        // [#3043] The batch endpoint is an external ingress: strip forged
-        // read-only columns on create. [#3455] It DOES resolve an execution
-        // context (threaded by REST); thread it to every engine call so RLS/FLS
-        // and `readonlyWhen` run under the caller, and pass it to the strip so a
-        // system caller is correctly exempt (the pre-#3455 code hard-coded the
-        // strip context to `undefined`, treating every batch create as non-system).
+        // [#3043 → #14147] The batch endpoint is an external ingress, and it
+        // used to strip forged read-only columns on create HERE; that strip is
+        // `engine.insert`'s since the 2026-09-03 ruling, reported back per row
+        // through `onFieldsDropped`. [#3455] It DOES resolve an execution
+        // context (threaded by REST); thread it to every engine call so RLS/FLS,
+        // `readonlyWhen` AND the create-side readonly strip run under the
+        // caller, so a system caller is correctly exempt (the pre-#3455 code
+        // hard-coded the strip context to `undefined`, treating every batch
+        // create as non-system).
         const batchSchema = this.engine.registry?.getObject(object);
 
         // ADR-0119 D4 — `atomic` is REAL or REFUSED, never silent best-effort.
@@ -11779,10 +11752,14 @@ export class ObjectStackProtocolImplementation implements
         let failed = 0;
 
         // Spread form for options objects that already carry `where`/`onFieldsDropped`
-        // (`{}` spread is a safe no-op); arg form for `insert`, whose whole options
-        // arg is `undefined` when there is no context — exact parity with createData.
+        // (`{}` spread is a safe no-op). [#14147] EVERY `engine.insert` in this
+        // loop — `create`, and both arms of `upsert` that create — builds an
+        // options object: the readonly strip they report moved into
+        // `engine.insert` and reaches this seam only through `onFieldsDropped`,
+        // so the arg form (`undefined` when there is no context) is gone from
+        // here. A create-shaped arm that passed no listener reported a silent
+        // drop — the upsert arms did exactly that until the patch round.
         const ctxOpt = context !== undefined ? { context } : {};
-        const insertCtx = context !== undefined ? { context } : undefined;
 
         // [#4793] `index` is the row's position in the REQUEST array — the
         // correlation a caller needs for failure rows that carry no id.
@@ -11790,14 +11767,19 @@ export class ObjectStackProtocolImplementation implements
             try {
                 switch (operation) {
                     case 'create': {
-                        // [#3455] Diff the supplied row against the stripped one so a
-                        // batch-create caller sees the same `droppedFields` a
-                        // single-write create surfaces (#3431).
-                        const stripped = stripReadonlyForInsert(batchSchema, record.data || record, context);
-                        const ev = diffDroppedFields(object, record.data || record, stripped, 'readonly');
-                        const created = await this.engine.insert(object, stripped, insertCtx as any);
+                        // [#3455/#14147] A batch-create caller sees the same
+                        // `droppedFields` a single-write create surfaces (#3431) —
+                        // read off the ENGINE's listener now that the readonly
+                        // create strip lives there, instead of reconstructed from a
+                        // before/after payload diff at this seam.
+                        const rowDropped: DroppedFieldsEvent[] = [];
+                        const created = await this.engine.insert(object, record.data || record, {
+                            ...ctxOpt,
+                            onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
+                        } as any);
                         omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                        results.push({ id: created.id, success: true, data: created, index, ...(ev ? { droppedFields: [ev] } : {}) });
+                        const ev = mergeDroppedFieldEvents(rowDropped);
+                        results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
                         succeeded++;
                         break;
                     }
@@ -11847,14 +11829,28 @@ export class ObjectStackProtocolImplementation implements
                                 omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                                 results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                             } else {
-                                const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, insertCtx as any);
+                                // [#14147] The upsert's CREATE arm is a create face
+                                // too: same listener, same per-row `droppedFields`,
+                                // as `case 'create'` above and the update arm just up.
+                                const rowDropped: DroppedFieldsEvent[] = [];
+                                const created = await this.engine.insert(object, { id: record.id, ...(record.data || {}) }, {
+                                    ...ctxOpt,
+                                    onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
+                                } as any);
                                 omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                                results.push({ id: created.id, success: true, data: created, index });
+                                const ev = mergeDroppedFieldEvents(rowDropped);
+                                results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
                             }
                         } else {
-                            const created = await this.engine.insert(object, record.data || record, insertCtx as any);
+                            // [#14147] Same: an id-less upsert row IS a create.
+                            const rowDropped: DroppedFieldsEvent[] = [];
+                            const created = await this.engine.insert(object, record.data || record, {
+                                ...ctxOpt,
+                                onFieldsDropped: (e: DroppedFieldsEvent) => { rowDropped.push(e); },
+                            } as any);
                             omitInternalFieldsFromWriteResponse(batchSchema, created); // [#7823]
-                            results.push({ id: created.id, success: true, data: created, index });
+                            const ev = mergeDroppedFieldEvents(rowDropped);
+                            results.push({ id: created.id, success: true, data: created, index, ...(ev.length > 0 ? { droppedFields: ev } : {}) });
                         }
                         succeeded++;
                         break;
@@ -12049,36 +12045,17 @@ export class ObjectStackProtocolImplementation implements
 
     async createManyData(request: { object: string, records: any[], context?: any }): Promise<any> {
         this.assertObjectRegistered(request.object); // [#3770]
-        // [#3043] Ingress-level static-`readonly` strip (per row) — mirrors
-        // createData for the bulk-create / import surface.
-        const rows = stripReadonlyForInsert(
-            this.engine.registry?.getObject(request.object),
-            request.records,
-            request.context,
-        );
-        // [#3455] Surface the #3043 ingress strip, symmetric with single-write
-        // createData. Diff each supplied row against its stripped form, then
-        // AGGREGATE — the `{ records, count }` response has no per-row slot, so
-        // a union is the only representable view here. (It used to be lossless
-        // as well, the ingress strip being static-`readonly` and therefore
-        // schema-uniform; the engine strip #5503 adds is per-row, so the union
-        // now genuinely aggregates. `insertManyData`, which HAS a per-row slot,
-        // keeps row precision for both sources.)
+        // [#3455/#5503/#14147] Both create-side strips are the engine's now —
+        // runtime-owned `autonumber` (#5503) and, since #14147, static
+        // author-declared `readonly` — so ONE listener carries both, and this
+        // seam no longer diffs payloads to recover a strip it performed itself.
+        // AGGREGATED: the `{ records, count }` response has no per-row slot, so
+        // a union is the only representable view here. (`insertManyData`, which
+        // HAS a per-row slot, recovers row precision from the same union.)
         const dropped: DroppedFieldsEvent[] = [];
-        if (Array.isArray(request.records)) {
-            for (let i = 0; i < request.records.length; i++) {
-                const ev = diffDroppedFields(request.object, request.records[i], Array.isArray(rows) ? rows[i] : rows, 'readonly');
-                if (ev) dropped.push(ev);
-            }
-        }
-        // [#5503] The engine gained an INSERT-side strip of its own (runtime-owned
-        // `autonumber` values a non-system caller supplied). Forward the listener
-        // here as `createData` already does, so a bulk create / import learns
-        // which record numbers were refused instead of only the server log seeing
-        // it. Merging AFTER the write is what lets both sources land in one list.
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
         if (request.context !== undefined) opts.context = request.context;
-        const records = await this.engine.insert(request.object, rows, opts);
+        const records = await this.engine.insert(request.object, request.records, opts);
         // [#7823] Bulk create is the same generic-data-path surface as the
         // single-record 201 — one strip over the returned rows, at the
         // ingress. (Today's `internal`-flagged objects grant no `bulk`
@@ -12108,37 +12085,23 @@ export class ObjectStackProtocolImplementation implements
         if (typeof engineInsertMany !== 'function') {
             throw new Error('insertManyData requires an engine with insertMany (framework#3172)');
         }
-        // Same ingress strip as createManyData (#3043).
-        const rows = stripReadonlyForInsert(
-            this.engine.registry?.getObject(request.object),
-            request.records,
-            request.context,
-        );
-        // [#3455] Per-row #3043 ingress-strip observability. Unlike createManyData,
-        // this partial-success path HAS a per-row slot (`outcomes[i]`), so keep
-        // row precision: `stripReadonlyForInsert` maps 1:1 in order, so the i-th
-        // supplied row diffs against the i-th stripped row and rides the i-th
-        // outcome. Computed BEFORE the insert so a per-row engine failure never
-        // hides which fields the ingress had already dropped.
-        const rowsArr = Array.isArray(rows) ? rows : [rows];
-        const perRowDropped: Array<DroppedFieldsEvent | null> = Array.isArray(request.records)
-            ? request.records.map((rec, i) => diffDroppedFields(request.object, rec, rowsArr[i], 'readonly'))
-            : [];
-        // [#5503] The ENGINE now strips too (runtime-owned `autonumber` values a
-        // non-system caller supplied), and its `onFieldsDropped` event is the
-        // UNION over the batch — the listener signature carries no row index. Row
-        // precision is recoverable without one: the engine strip only removes
-        // keys the ROW ITSELF supplied, so a dropped name belongs to exactly the
-        // rows whose supplied payload carried it. Without this the import
-        // surface (which prefers this partial-success path over createManyData)
-        // would drop record numbers with nothing but a server log to show for it.
+        // [#5503/#14147] Every create-side strip is the ENGINE's — runtime-owned
+        // `autonumber` (#5503) and static author-declared `readonly` (#14147) —
+        // and its `onFieldsDropped` event is the UNION over the batch, the
+        // listener signature carrying no row index. This partial-success path HAS
+        // a per-row slot (`outcomes[i]`), and row precision is recoverable
+        // without an index: the strip only removes keys the ROW ITSELF supplied,
+        // so a dropped name belongs to exactly the rows whose supplied payload
+        // carried it. Without this the import surface (which prefers this path
+        // over createManyData) would drop columns with nothing but a server log
+        // to show for it.
         const engineDropped = new Set<string>();
         const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { for (const f of e.fields) engineDropped.add(f); } };
         if (request.context !== undefined) opts.context = request.context;
         const outcomes: Array<{ ok: boolean; record?: any; error?: unknown; droppedFields?: DroppedFieldsEvent[] }> = await engineInsertMany.call(
             this.engine,
             request.object,
-            rows,
+            request.records,
             opts,
         );
         // [#7823] Per-outcome ingress strip — the partial-success face hands
@@ -12156,7 +12119,6 @@ export class ObjectStackProtocolImplementation implements
                 const supplied = (request.records?.[i] ?? {}) as Record<string, unknown>;
                 const mine = [...engineDropped].filter((f) => f in supplied);
                 const events: DroppedFieldsEvent[] = [];
-                if (perRowDropped[i]) events.push(perRowDropped[i]!);
                 if (mine.length > 0) events.push({ object: request.object, fields: mine, reason: 'readonly' });
                 const merged = mergeDroppedFieldEvents(events);
                 if (merged.length > 0) outcomes[i].droppedFields = merged;

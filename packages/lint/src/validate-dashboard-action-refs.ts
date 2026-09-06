@@ -81,6 +81,8 @@
  * `validate-capability-references` rules.
  */
 
+import { recordsOf } from './object-graph.js';
+
 export const DASHBOARD_ACTION_TARGET_UNDEFINED = 'dashboard-action-target-undefined';
 export const DASHBOARD_ACTION_ROUTE_UNRESOLVED = 'dashboard-action-route-unresolved';
 
@@ -102,17 +104,6 @@ export interface DashboardActionRefFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array of records, injecting
- *  `name` from the map key — mirrors the helper in the sibling authoring lints so
- *  the rule works on both the parsed (array) and normalized (map) stack shapes. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -169,7 +160,7 @@ function collectKnownTargets(stack: AnyRec): KnownTargets {
   const views = new Set<string>();
 
   const collectNames = (v: unknown, into: Set<string>, name: (rec: AnyRec) => string | undefined) => {
-    for (const item of asArray(v)) {
+    for (const item of recordsOf(v)) {
       if (!item || typeof item !== 'object') continue;
       const n = name(item);
       if (n) into.add(n);
@@ -177,7 +168,7 @@ function collectKnownTargets(stack: AnyRec): KnownTargets {
   };
 
   collectNames(stack.actions, actions, (a) => strName(a.name));
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     if (!obj || typeof obj !== 'object') continue;
     const n = strName(obj.name);
     if (n) objects.add(n);
@@ -258,7 +249,7 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
   const findings: DashboardActionRefFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const dashboards = asArray(stack.dashboards);
+  const dashboards = recordsOf(stack.dashboards);
   if (dashboards.length === 0) return findings;
 
   const known = collectKnownTargets(stack);
@@ -331,7 +322,7 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
     const dashPath = `dashboards[${di}]`;
 
     // Header actions.
-    const headerActions = asArray((dash.header as AnyRec | undefined)?.actions);
+    const headerActions = recordsOf((dash.header as AnyRec | undefined)?.actions);
     for (let ai = 0; ai < headerActions.length; ai++) {
       const action = headerActions[ai] as HeaderAction | null;
       if (!action || typeof action !== 'object') continue;

@@ -1152,8 +1152,21 @@ export class AppPlugin implements Plugin {
         }
         
         // 2. Legacy: `manifest.data` (backward compatibility)
+        //
+        // [#15262] The reference guard is what makes the two-location read
+        // safe, and it is the same guard the sibling `translations` collector
+        // in `loadTranslations()` has always carried. On a FLAT bundle —
+        // manifest fields written directly on the bundle, no `manifest:` key,
+        // a shape `AppPlugin` supports by design (see the constructor's
+        // `bundle?.manifest || bundle`) — this base resolves to the bundle
+        // itself, so without the check step 2 re-reads the very array step 1
+        // just contributed and every dataset lands twice. `mergeSeedDatasets`
+        // is a plain `push` with no de-duplication, so both copies reach the
+        // shared registry, the inline loader and every later per-org replay:
+        // for a `mode: 'insert'` dataset that is the row applied twice per
+        // boot, not merely doubled work.
         const manifest = this.bundle.manifest || this.bundle;
-        if (manifest && Array.isArray(manifest.data)) {
+        if (manifest && Array.isArray(manifest.data) && manifest.data !== this.collections.data) {
             seedDatasets.push(...manifest.data);
         }
 

@@ -25,7 +25,7 @@ import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlo
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
 // authoring accepted. See `resolveTriggerBinding`.
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { predicateSlotRefusal, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
+import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#15137] The `value`-role half of the ledger. Both halves of "is this envelope
 // well-formed?" are IMPORTED, never re-spelled here: the shape rule is
 // `AssignmentValueSchema` (spec, #14149 — it refuses a non-`cel` dialect and the
@@ -2162,6 +2162,72 @@ export class AutomationEngine implements IAutomationService {
             }
         }
         await this.releaseSuspension(run, reason);
+    }
+
+    /**
+     * [#15832] Drop a map entry for a run this process has a store-authoritative
+     * per-id "no row" answer for — a run parked HERE and consumed by another
+     * replica.
+     *
+     * ## Why this exists at all, and why not on the `'lost'` branch
+     *
+     * {@link forgetSuspendedRun} is the one eviction site, and it runs in
+     * whichever process CONSUMES the suspension. Put two replicas over one
+     * store and the parking process is routinely not that one: A parks a run
+     * and B resumes it, so A's entry is never removed by anything. The card
+     * that found this located the leak on `resumeInternal`'s `'lost'` branch,
+     * which returns before that choke point — but the NO-RACE shape leaks
+     * identically (A parks, only B ever resumes, A never attempts a claim and
+     * there is no `'lost'` at all), so an eviction hung on `'lost'` alone would
+     * leave the ordinary multi-replica deployment untouched.
+     *
+     * The retained snapshot is not only memory. Two readers hand it back:
+     * {@link listSuspendedRuns} — synchronous, cache-only, and the one listing
+     * on the `AutomationService` spec contract — and
+     * {@link listSuspendedRunsDurable}, which deliberately appends map entries
+     * the durable list lacks. After the other replica COMPLETES the run both
+     * report a phantom: a finished run listed as suspended, whose
+     * {@link getSuspendedScreen} answers `null`, so a consumer that lists and
+     * then opens gets an entry it cannot act on.
+     *
+     * ## What this does NOT do
+     *
+     * ⛔ It does not touch the cache-only listing's contract. The spec says
+     * `listSuspendedRuns()` lists "the currently suspended (paused) runs
+     * awaiting a resume"; this engine's own docblock adds only that it may
+     * OMIT runs (those parked in a previous process lifetime) because it reads
+     * the cache alone. Removing an entry therefore moves nothing: under-
+     * reporting is already inside that declared latitude, and over-reporting
+     * was never inside the promise. Nothing here makes either listing
+     * store-backed.
+     *
+     * ⛔ It does not notify the paused node's executor
+     * ({@link NodeExecutor.onSuspensionReleased}). That notification belongs to
+     * {@link forgetSuspendedRun} because it is the choke point every
+     * CONSUMPTION passes through, and an eviction is not a consumption — this
+     * process consumed nothing, the replica that did fired its own. Firing one
+     * here would tear down a pause twice, once per replica.
+     *
+     * ## The two guards, and why each is load-bearing
+     *
+     *  - **no store** — the map IS the authority (`loadSuspendedRunStrict`
+     *    returns from it directly), so there is no second reader to be wrong
+     *    about and nothing may be dropped.
+     *  - **{@link cacheOnlySuspensions}** — a run whose durable save failed was
+     *    never handed to the store, so the store's "no row" is SILENCE about it
+     *    rather than an answer (#13617). Evicting on that would convert
+     *    {@link persistSuspendedRun}'s documented degradation — a failed save
+     *    costs cross-restart durability, not in-process resumability — into a
+     *    run that vanishes from its own process.
+     *
+     * A store read that THROWS must never reach here: an outage means the
+     * run's existence is UNKNOWN, not "gone". Every caller below is on a path
+     * where the store answered.
+     */
+    private evictConsumedSuspension(runId: string): void {
+        if (!this.store) return;
+        if (this.cacheOnlySuspensions.has(runId)) return;
+        this.suspendedRuns.delete(runId);
     }
 
     /**
@@ -4996,6 +5062,13 @@ export class AutomationEngine implements IAutomationService {
         // deliberately keeps such a run resumable in-process (it reports the
         // lost durability at `error`).
         if (this.cacheOnlySuspensions.has(runId)) return this.suspendedRuns.get(runId) ?? null;
+        // [#15832] The store ANSWERED, and the answer is "no row". Any entry
+        // this process still holds for that run is a run it parked and another
+        // replica consumed — the phantom the two listings hand back. This is
+        // the definitive per-id evidence the paragraph above already rests on,
+        // so the same reading that refuses to serve it here stops publishing it
+        // there. A store read that threw never reaches this line.
+        this.evictConsumedSuspension(runId);
         return null;
     }
 
@@ -5374,6 +5447,14 @@ export class AutomationEngine implements IAutomationService {
                 // already maps it to 409. A distinct code would be vocabulary
                 // nothing reads — add one the day a caller needs the
                 // difference.
+                // [#15832] The store's compare-and-set ANSWERED: no row is parked
+                // where this replica read it. Whatever snapshot this process
+                // still holds for the run is stale by construction — it names a
+                // node the run has left — so it stops being published by the two
+                // listings. ⛔ NOT `forgetSuspendedRun`: nothing was consumed
+                // here, and firing that choke point would tear the pause down a
+                // second time in this process on top of the winner's own.
+                this.evictConsumedSuspension(runId);
                 return {
                     success: false,
                     code: 'RESUME_IN_PROGRESS',
@@ -5515,23 +5596,90 @@ export class AutomationEngine implements IAutomationService {
                 // ordering above is untouched. It is the evidence a repair
                 // needs, written at the only moment it still exists.
                 const consumed = this.journalConsumedSuspension(run, stepCountAtPause, errorMessage);
-                const logged = this.recordLog({
-                    id: runId,
-                    flowName: run.flowName,
-                    flowVersion: run.flowVersion,
-                    status: 'failed',
-                    startedAt: run.startedAt,
-                    completedAt: new Date().toISOString(),
-                    durationMs,
-                    trigger: buildRunTrigger(context),
-                    steps,
-                    error: errorMessage,
-                }, context, consumed.run);
-                // Subflow chain: a child failing terminally fails every
-                // ancestor awaiting it — they can never be resumed otherwise.
-                // The delegation path handles its own level (skipBubble).
-                if (!skipBubble) {
-                    await this.failAncestors(run.context, errorMessage);
+                // [#15555] From the line above, "this run is repairable" is a
+                // FACT: a snapshot exists and `restoreConsumedSuspension` puts
+                // it back. Everything from here to the `status: 'stranded'`
+                // stamp below is BOOKKEEPING ABOUT that fact — and none of it
+                // may be allowed to delete the fact by throwing.
+                //
+                // It could, and the direction is the dangerous one. The stamp
+                // is the ONLY thing that tells a consumer the run is
+                // repairable (`plugin-approvals` derives its operator-facing
+                // `repairable` from it verbatim: `status === 'stranded'`), and
+                // two statements in here throw out of the whole arm. Both live
+                // in `recordLog`'s terminal path: the run-summary line
+                // (`logger.info`, on by default) and `store.recordTerminal`,
+                // whose SYNCHRONOUS throw escapes — the `void write.catch(...)`
+                // beneath that call only ever sees a returned promise's
+                // rejection. Then `failAncestors` awaits a walk that can throw.
+                // A throw anywhere in that window replaced a truthful
+                // `repairable: true` with `false`, which does not merely lose
+                // information: it tells an operator NOT to attempt a repair
+                // that succeeds. A false negative on a repair instruction is
+                // worse than silence, and it is the opposite of the direction
+                // everybody checks for.
+                //
+                // ⛔ This is NOT "assume repairable when the failure is
+                // unknown" — that would invert the honest default and promise
+                // a repair for a lost run. The guard opens AFTER the journal,
+                // so only a run that demonstrably HAS a snapshot can reach the
+                // stamp: a throw from `journalConsumedSuspension` itself still
+                // propagates, and every exit above the consumption point is
+                // untouched and still carries no status at all.
+                //
+                // ⛔ And the journal is NOT moved down to sit beside the stamp
+                // instead. `recordLog` is what carries the snapshot into the
+                // durable row, so journalling after it would leave a
+                // `recordLog` failure with NO snapshot anywhere — converting
+                // this false negative into a TRUE one by destroying the repair
+                // rather than by reporting it.
+                let logged: ExecutionLogEntry | undefined;
+                try {
+                    logged = this.recordLog({
+                        id: runId,
+                        flowName: run.flowName,
+                        flowVersion: run.flowVersion,
+                        status: 'failed',
+                        startedAt: run.startedAt,
+                        completedAt: new Date().toISOString(),
+                        durationMs,
+                        trigger: buildRunTrigger(context),
+                        steps,
+                        error: errorMessage,
+                    }, context, consumed.run);
+                    // Subflow chain: a child failing terminally fails every
+                    // ancestor awaiting it — they can never be resumed otherwise.
+                    // The delegation path handles its own level (skipBubble).
+                    if (!skipBubble) {
+                        await this.failAncestors(run.context, errorMessage);
+                    }
+                } catch (bookkeeping) {
+                    // #4632 verdict: DURABILITY, so `error` — the caller is
+                    // told a truthful, actionable thing (the run stranded, and
+                    // it is repairable), which is exactly what makes the rest
+                    // invisible from the outside: the terminal history row
+                    // never landed and/or the ancestor cascade stopped
+                    // part-way, nothing retries either, and no envelope
+                    // carries a word about it. Consequence and fix in the
+                    // first line, per AGENTS.md. Said ONCE per stranded run,
+                    // not once per failed write.
+                    //
+                    // THIRD argument per `error(message, error?, meta?)`; the
+                    // `Error` slot stays empty on purpose (#5575), and the
+                    // thrown text goes to the structured slot rather than into
+                    // the message (#6499).
+                    this.logger.error(
+                        `[Automation] run '${runId}' of flow '${run.flowName}' is STRANDED and its ` +
+                            `post-strand bookkeeping threw, so its terminal history row never landed ` +
+                            `and/or its subflow ancestors were not failed — nothing retries either, and ` +
+                            `the run reads healthy to the Runs surfaces and the approvals sweeps. The ` +
+                            `strand itself IS reported and repairable right now: restore it with ` +
+                            `restoreConsumedSuspension('${runId}') before this process restarts, which ` +
+                            `drops the in-memory journal this repair rides on. Fix the failure in this ` +
+                            `record's meta.`,
+                        undefined,
+                        describeThrownForLog(bookkeeping),
+                    );
                 }
                 // Surface the flow's friendly error message (the raw error stays
                 // in `error` for logs/diagnostics).
@@ -5569,7 +5717,11 @@ export class AutomationEngine implements IAutomationService {
                     // worse) condition, which this stamp must not claim.
                     status: 'stranded',
                     errorMessage: flow.errorMessage,
-                    summary: logged.summary,
+                    // [#15555] Recomputed when the guard above had to abandon
+                    // `recordLog`: the same pure function of the same steps
+                    // that `recordLog`'s own first statement runs, so the two
+                    // spellings cannot disagree.
+                    summary: logged?.summary ?? summarizeRun(steps),
                 };
             }
         } finally {
@@ -5740,16 +5892,79 @@ export class AutomationEngine implements IAutomationService {
                 // `forgetSuspendedRun`'s catch above for the full mechanism
                 // (#6299).
                 //
-                // #4632 verdict: FUNCTIONAL — stays `warn`: no false success
-                // is recorded anywhere — the parent either failed terminally
-                // (recorded in run history) or stays visibly parked and
-                // resumable — and the child's own completion, which is what
-                // its resumer was told, is genuine.
-                this.logger.warn(
-                    `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
-                        `failed — the parent's failure envelope is in this record's meta.`,
-                    { error: parentRes.error ?? 'unknown error' },
-                );
+                // [#15556] The #4632 verdict is taken PER OUTCOME here, graded
+                // by the engine's own discriminator and never by this seam's
+                // guess at what went wrong upstream.
+                //
+                // The old verdict was FUNCTIONAL for the whole arm, on this
+                // enumeration: "the parent either failed terminally (recorded
+                // in run history) or stays visibly parked and resumable". A
+                // reproduction of the composition the enumeration never
+                // covered — a parent parked at a `subflow` node whose child
+                // hosts an approval, resumed by the approvals decision door —
+                // measured a THIRD outcome: `resumeInternal` answers
+                // `{ success: false, status: 'stranded' }` (and no `code`),
+                // because the parent consumed its suspension and then threw
+                // downstream. That exit journals a repair snapshot and records
+                // the parent `failed`, so the parent is neither parked nor
+                // merely failed: nothing in the engine will ever move it again
+                // and only {@link restoreConsumedSuspension} can re-arm it.
+                //
+                // That is AGENTS.md's DURABILITY class verbatim — persisted
+                // state and runtime state disagree and nothing looks broken
+                // from the outside: the approval row is durably terminal, the
+                // child's own resume genuinely succeeded, and the decision
+                // door therefore answered its caller success. ⛔ And the rule's
+                // third legal answer (a failure handed to the CALLER is not a
+                // degradation) does NOT apply: measured, no caller is told.
+                //
+                // ⛔ Deliberately NOT the whole arm. `RESUME_IN_PROGRESS` (a
+                // replica is already advancing the parent) and
+                // `STORE_UNAVAILABLE` (the parent's suspension was not
+                // consumed, so it stays parked and the identical resume works
+                // once the store recovers) are exactly the functional cases
+                // the old verdict was right about, and escalating those is how
+                // `error` becomes unreadable. `status === 'stranded'` is the
+                // ONE exit that journalled a snapshot, so it is the one an
+                // operator can and must act on.
+                //
+                // ⚠️ This is the LOG half only. What the child's resumer — and
+                // through it the approvals decision door — is TOLD is
+                // unchanged and still reads as full success; making that
+                // truthful moves a public contract (`AutomationResult`,
+                // `ApprovalDecisionResult`) and is #15556's open decision, the
+                // sibling one level up of the #13807 ruling (2026-09-04,
+                // decision batch #37). ⛔ Not decided here.
+                if (parentRes.status === 'stranded') {
+                    // THIRD argument per the `Logger` contract
+                    // (`error(message, error?, meta?)`); the `Error` slot stays
+                    // empty on purpose (#5575). The message owes the two things
+                    // AGENTS.md's durability rule asks of an `error`: the
+                    // CONSEQUENCE, concretely, and the FIX.
+                    this.logger.error(
+                        `[automation] subflow run '${run.runId}' completed, but its parent run ` +
+                            `'${parentRunId}' is STRANDED — the parent consumed its suspension and then failed ` +
+                            `downstream, so no resume, timer or restart will move it again, while this child's ` +
+                            `resumer (an approvals decision door, a wait timer) was told the resume SUCCEEDED and ` +
+                            `nothing else reports the parent. Repair it with ` +
+                            `restoreConsumedSuspension('${parentRunId}') and re-issue the continuation. The ` +
+                            `parent's failure envelope is in this record's meta.`,
+                        undefined,
+                        { error: parentRes.error ?? 'unknown error', parentRunId, status: parentRes.status },
+                    );
+                } else {
+                    // #4632 verdict: FUNCTIONAL — stays `warn`, unchanged: on
+                    // every other exit nothing claimed-persisted fails to land
+                    // — the parent either failed terminally (recorded in run
+                    // history) or stays visibly parked and resumable — and the
+                    // child's own completion, which is what its resumer was
+                    // told, is genuine.
+                    this.logger.warn(
+                        `[automation] subflow run '${run.runId}' completed but resuming parent '${parentRunId}' ` +
+                            `failed — the parent's failure envelope is in this record's meta.`,
+                        { error: parentRes.error ?? 'unknown error' },
+                    );
+                }
             }
         } catch (err) {
             // #6499 — thrown text to the structured slot; see
@@ -6402,11 +6617,16 @@ export class AutomationEngine implements IAutomationService {
      */
     async listSuspendedRunsDurable(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
         const byId = new Map<string, { runId: string; flowName: string; nodeId: string; correlation?: string }>();
+        // [#15832] Did the ENUMERATION answer? The reconcile below is allowed
+        // only when it did — see the merge comment for why a failed listing is
+        // silence rather than evidence.
+        let enumerated = false;
         if (this.store) {
             try {
                 for (const r of await this.store.list()) {
                     byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
                 }
+                enumerated = true;
             } catch (err) {
                 // #6299 — driver text to the structured slot, message one line,
                 // same as the two seams above. The SLOT differs: the `Logger`
@@ -6471,8 +6691,35 @@ export class AutomationEngine implements IAutomationService {
         // only {@link cacheOnlySuspensions} answer out of the map. Applying that
         // qualifier here would let a truncated or failed enumeration silently
         // drop live runs from an operability listing.
-        for (const r of this.suspendedRuns.values()) {
+        //
+        // [#15832] What that reasoning leaves open is a run this process parked
+        // and ANOTHER replica has since consumed: absent from the durable list
+        // because it is finished, appended here, and published as suspended by
+        // a listing that also backs the cache-only one. The paragraph above is
+        // right that list-absence is not evidence — so this asks for the
+        // evidence instead. `store.load` is the same definitive per-id read
+        // {@link loadSuspendedRunStrict} rests on, and it is bought only for the
+        // entries that look suspicious: a healthy process, whose map entries all
+        // appear in the durable list, buys none. A read that THROWS leaves the
+        // entry standing (unknown is not gone), and a store that could not be
+        // enumerated at all is not probed row by row — an outage would answer
+        // for every live run in the process.
+        for (const r of [...this.suspendedRuns.values()]) {
             if (byId.has(r.runId)) continue;
+            if (enumerated && !this.cacheOnlySuspensions.has(r.runId)) {
+                let stored: SuspendedRun | null;
+                try {
+                    stored = await this.store!.load(r.runId);
+                } catch {
+                    // Unknown, not gone — keep the entry and publish it, exactly
+                    // as this method did before the reconcile existed.
+                    stored = r;
+                }
+                if (stored === null) {
+                    this.evictConsumedSuspension(r.runId);
+                    continue;
+                }
+            }
             byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
         }
         return [...byId.values()];
@@ -7108,6 +7355,40 @@ export class AutomationEngine implements IAutomationService {
             }
         };
 
+        /**
+         * [#15662] The STRUCTURAL condition surfaces — `config.condition` on any
+         * node and `edge.condition` — refused on SHAPE before anything tries to
+         * read a source out of them.
+         *
+         * ⚠️ Not `predicateSlotRefusal`, the ledger arm's rule, and the
+         * difference is measured rather than assumed: `FlowEdgeSchema.condition`
+         * is `ExpressionInputSchema`, whose string arm transforms into
+         * `{ dialect: 'cel', source }`, so after `FlowSchema.parse` EVERY
+         * authored edge condition is an envelope — the ledger rule here would
+         * refuse every conditional edge in every flow. An envelope written at a
+         * node's `config.condition` is likewise passed through verbatim by the
+         * open `z.record` and evaluated correctly (#4336). Both are legitimate;
+         * `structuralConditionRefusal` admits them.
+         *
+         * What it refuses is the value that is neither text nor an expression.
+         * `evaluateCondition` reads `expression?.source ?? ''` and the
+         * empty-source arm answers `false` — "an unauthored branch must not
+         * open", applied to a value that was authored — so `42` / `true` /
+         * `['a']` registered clean and ran silently, on the same key the start
+         * node's trigger gate is read from. Same severity as a malformed
+         * predicate (this throws): the reject set of registration and the reject
+         * set of evaluation must be one set.
+         */
+        const checkStructuralCondition = (where: string, raw: unknown): void => {
+            if (raw == null) return;
+            const shapeRefusal = structuralConditionRefusal(raw);
+            if (shapeRefusal) {
+                failures.push(`  • ${where}: ${shapeRefusal.message}\n      source: \`${shapeRefusal.source}\``);
+                return;
+            }
+            check(where, raw);
+        };
+
         // #4347 — every graph in the flow, not just the top-level arrays. An
         // ADR-0031 container keeps a whole sub-graph in its `config`, so
         // iterating `flow.nodes`/`flow.edges` checked PART of the flow while
@@ -7120,7 +7401,7 @@ export class AutomationEngine implements IAutomationService {
             for (const node of graph.nodes) {
                 const cfg = (node.config ?? {}) as Record<string, unknown>;
                 // start-node trigger gate + decision/branch predicates live in config.condition
-                check(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
+                checkStructuralCondition(`${at}node '${node.id}' (${node.type}) condition`, cfg.condition);
 
                 // Descriptor-declared expression slots (#4027). The ledger names them
                 // per node type and carries the dialect each one takes, so a declared
@@ -7177,7 +7458,7 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
             for (const edge of graph.edges) {
-                check(`${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
+                checkStructuralCondition(`${at}edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition as unknown);
             }
         }
 

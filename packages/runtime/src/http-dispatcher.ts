@@ -2,13 +2,19 @@
 
 import {
     ObjectKernel, getEnv, evaluateAuthGate, isAuthGateAllowlisted,
+    // [#13906 decision 1 A] The identity step's net re-raises ONLY the loud
+    // authz-store outage (the `.catch` shape `@objectstack/core` prescribes for
+    // every seam between `resolveAuthzContext` and a door), and the tenancy
+    // read is classified by the REGISTRY's own "never registered" brand.
+    rethrowAuthzStoreUnavailable, isServiceNotRegisteredError,
 } from '@objectstack/core';
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
-import { readServiceSelfInfo, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import { readServiceSelfInfo, readChannelRoute, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
+import type { ServiceInfo } from '@objectstack/spec/api';
 import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -535,7 +541,20 @@ export class HttpDispatcher {
         // ctx.userId/roles/permissions/tenantId via opCtx.context.
         try {
             context.executionContext = await this.timedResolveExecutionContext({
-                getService: (n: string) => this.resolveService(this.requestKernel(context), n, context.environmentId),
+                // [#13906 decision 1 A] `resolveService` is a capability PROBE:
+                // its fallback chain absorbs every rejection at every step and
+                // answers `undefined`, which is the right shape for "is this
+                // optional service installed" and the wrong shape for the ONE
+                // authorization INPUT the resolver reads through this facade.
+                // For `tenancy` the resolver must see the registry's CLASSIFIED
+                // rejection — branded "never registered" (absorbed, the
+                // supported no-tenancy composition) versus unbranded
+                // "registered and failed to build" (re-raised, so the door
+                // answers 503 instead of admitting on a posture it could not
+                // read). Every other name keeps the probe.
+                getService: (n: string) => n === 'tenancy'
+                    ? this.resolveServiceOrLoud(this.requestKernel(context), n, context.environmentId)
+                    : this.resolveService(this.requestKernel(context), n, context.environmentId),
                 // Resolve ObjectQL from the per-request kernel DIRECTLY. The scoped
                 // `resolveService('objectql', envId)` factory can return a different
                 // instance that doesn't see THIS env's rows (the gotcha
@@ -560,11 +579,30 @@ export class HttpDispatcher {
                 // OAuth 2.1 access tokens are honoured ONLY on the MCP
                 // surface (#2698): their coarse tool-family scopes are
                 // enforced at MCP tool dispatch, which other routes don't do.
-                // Matches the plain and `/projects/:id`-scoped route forms
-                // (the scoped prefix is stripped only by the caller, later).
-                acceptOAuthAccessToken: /^(?:\/projects\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
+                // Matches the plain and `/environments/:environmentId`-scoped
+                // route forms (the scoped prefix is stripped only by the caller,
+                // later, which is why this tests the still-scoped path).
+                //
+                // Third reading of the one scoped-URL convention, and it carried
+                // the same pre-ADR-0006 `/projects/` residue as the strip in
+                // `dispatch()`. On its own that was unobservable — a scoped
+                // `/mcp` URL never reached the MCP domain at all — so repairing
+                // the strip is exactly what makes this line reachable, and the two
+                // have to move together: left behind, scoped MCP callers would
+                // reach the domain with their OAuth 2.1 access tokens refused.
+                acceptOAuthAccessToken: /^(?:\/environments\/[^/]+)?\/mcp(?:[/?]|$)/.test(cleanPath),
             });
-        } catch {
+        } catch (err) {
+            // [#13906 decision 1 A / #13279] The ONE fault that must stay loud:
+            // an authorization input that exists and could not be read (a
+            // failed permission-store read, a `tenancy` service that is
+            // registered and failed to build). Swallowing it here answered an
+            // outage as an anonymous request — a 401 byte-identical to a caller
+            // with no credential, which is the "changed disguise" the shared
+            // `rethrowAuthzStoreUnavailable` exists to end. It re-raises that
+            // class by brand and returns `undefined` for everything else, so
+            // every other fault still degrades exactly as before:
+            rethrowAuthzStoreUnavailable(err);
             // anonymous request — leave executionContext undefined
         }
     }
@@ -1131,11 +1169,6 @@ export class HttpDispatcher {
     }
 
     /**
-     * Parse a project UUID out of a scoped URL path such as
-     * `/api/v1/environments/abc-123/data/task` or `/projects/abc-123/meta`.
-     * Returns `undefined` when the path does not match the scoped pattern.
-     */
-    /**
      * Parse an environment UUID out of a scoped URL path such as
      * `/api/v1/environments/abc-123/data/task` or `/environments/abc-123/meta`.
      * Returns `undefined` when the path does not match the scoped pattern.
@@ -1453,6 +1486,13 @@ export class HttpDispatcher {
         // advertising on mere service presence would still over-promise when a
         // wrong-shaped service is registered. Same predicate ⇒ same answer.
         const hasMcp          = typeof mcpSvc?.handleHttpRequest === 'function';
+        // [#14646] The realtime slot's route is the one its OCCUPANT names
+        // (`IRealtimeService.getChannelRoute`), because this dispatcher has no
+        // `/realtime` branch to mirror and never will under the 2026-09-04
+        // ruling — so unlike every predicate above there is no domain guard to
+        // read. `undefined` on every host the open framework ships:
+        // `service-realtime` is an in-process pub/sub bus and names no channel.
+        const realtimeChannelRoute = realtimeSvc ? readChannelRoute(realtimeSvc) : undefined;
 
         // Routes are only exposed when a plugin provides the service
         const routes = {
@@ -1469,12 +1509,18 @@ export class HttpDispatcher {
                 // `workflow` removed (#4451, v17): the slot retired — nothing
                 // ever registered it and this dispatcher never had a /workflow
                 // branch, so the advertisement could never come true.
-                // Never advertised (ADR-0076 D12, #2462): service-realtime is an
-                // in-process pub/sub bus — the dispatcher has no /realtime branch
-                // and no plugin mounts one, so an advertised route would 404.
-                // Re-add only when a real HTTP/WS surface exists (and then it must
-                // pass through the shouldDenyAnonymous gate, #2567).
-                realtime:      undefined,
+                // Advertised only when the occupant names a mounted channel
+                // (ADR-0076 D12, #2462): service-realtime is an in-process
+                // event bus — this dispatcher has no /realtime branch and no
+                // plugin in the open framework mounts one, so an advertised
+                // route would 404. [#14646] The hardcoded `undefined` this
+                // replaces was right for every host that ships and unfalsifiable
+                // for every other: it made "discovery never advertises realtime"
+                // indistinguishable from "discovery advertises the realtime that
+                // is mounted", which is the difference the fix has to keep. A
+                // host that really mounts one must still pass the
+                // shouldDenyAnonymous gate (#2567).
+                realtime:      realtimeChannelRoute,
                 notifications: hasNotification ? `${prefix}/notifications` : undefined,
                 ai:            hasAi ? `${prefix}/ai` : undefined,
                 i18n:          hasI18n ? `${prefix}/i18n` : undefined,
@@ -1555,6 +1601,45 @@ export class HttpDispatcher {
 
         // Self-description of the registered realtime service, if any (D12).
         const realtimeSelf = realtimeSvc ? readServiceSelfInfo(realtimeSvc) : undefined;
+
+        // [#14646] The realtime entry, built here rather than inline below
+        // because `capabilities.websockets` is the SAME question and must be
+        // the same answer — it is derived from this object further down.
+        //
+        // `realtime` is the one CHANNEL SLOT (`CHANNEL_SURFACE_SLOTS`,
+        // `@objectstack/spec/api`): `enabled` is `isSubscribableChannel`
+        // evaluated on the entry a consumer reads — `handlerReady: true` AND a
+        // connectable route — not "the slot is filled". Under the old reading
+        // this document said `enabled: true` beside "no HTTP/WS realtime
+        // surface is mounted", both true, and a console client keying on
+        // `enabled` subscribed to nothing and silently lost its bell.
+        // Annotated `ServiceInfo` rather than left to inference: the two arms
+        // below are structurally different objects (only one carries `route`),
+        // and an inferred union of them is not the declared wire shape — a
+        // consumer reading `services.realtime.route` off this document would be
+        // told the key does not exist.
+        const realtimeEntry: ServiceInfo = realtimeSvc
+            ? (() => {
+                const handlerReady = realtimeChannelRoute !== undefined;
+                return {
+                    enabled: isSubscribableChannel({ handlerReady, route: realtimeChannelRoute }),
+                    // A mounted channel makes an unmarked occupant plainly
+                    // `available`; without one the honest report is `degraded`
+                    // — for THIS slot the advertised capability IS the missing
+                    // surface (contrast the kernel-internal slots, #4318).
+                    status: realtimeSelf?.status
+                        ?? (handlerReady ? ('available' as const) : ('degraded' as const)),
+                    handlerReady,
+                    route: realtimeChannelRoute,
+                    // The "no surface" sentence is only true while there is no
+                    // surface.
+                    message: realtimeSelf?.message
+                        ?? (handlerReady
+                            ? undefined
+                            : 'In-process event bus only — no HTTP/WS realtime surface is mounted'),
+                };
+            })()
+            : svcUnavailable('realtime');
 
         // Self-description of whatever fills the `metadata` slot (D12, #4089).
         const metadataSelf = metadataSvc ? readServiceSelfInfo(metadataSvc) : undefined;
@@ -1700,10 +1785,15 @@ export class HttpDispatcher {
                 // mounted; then the guard applies and the question answers
                 // itself (#7602 option 2).
                 search: { enabled: false },
-                // No WS/HTTP realtime surface is mounted anywhere — a mere
-                // in-process realtime service must not advertise websockets
-                // (ADR-0076 D12, #2462).
-                websockets: { enabled: false },
+                // [#14646] Derived, not stated. This flag and `services.realtime`
+                // answer one question — "is there a channel to subscribe to?"
+                // — so it is the shared predicate applied to that very entry,
+                // and a host that mounts a transport flips both in one step. A
+                // literal `false` beside an entry that said `enabled: true` is
+                // not agreement, it is two places to forget. False on every host
+                // the open framework ships: a mere in-process realtime service
+                // must not advertise websockets (ADR-0076 D12, #2462).
+                websockets: { enabled: isSubscribableChannel(realtimeEntry) },
                 files: { enabled: hasFiles },
                 analytics: { enabled: hasAnalytics },
                 ai: { enabled: hasAi },
@@ -1845,16 +1935,11 @@ export class HttpDispatcher {
                 // it could only ever report `unavailable`.
                 // Honest entry (ADR-0076 D12, #2462): the registered realtime
                 // service is an in-process event bus with NO mounted HTTP/WS
-                // surface — report it degraded with handlerReady:false (or as
+                // surface — reported degraded with handlerReady:false (or as
                 // the stub it declares itself to be), never as an available
-                // HTTP capability with a route that would 404.
-                realtime:       realtimeSvc ? {
-                                    enabled: true,
-                                    status: realtimeSelf?.status ?? ('degraded' as const),
-                                    handlerReady: false,
-                                    message: realtimeSelf?.message
-                                        ?? 'In-process event bus only — no HTTP/WS realtime surface is mounted',
-                                } : svcUnavailable('realtime'),
+                // HTTP capability with a route that would 404. [#14646] Built
+                // above, because `capabilities.websockets` is derived from it.
+                realtime:       realtimeEntry,
                 // Presence-gated for the same reason `analytics` is (#4058).
                 notification:   notificationRegistered ? svcAvailable(routes.notifications, undefined, notificationSvc) : svcUnavailable('notification'),
                 ai:             aiRegistered ? svcAvailable(routes.ai, undefined, aiSvc) : svcUnavailable('ai'),
@@ -2121,6 +2206,52 @@ export class HttpDispatcher {
     }
 
     /**
+     * [#13906 decision 1 A] Resolve a service whose ABSENCE is a supported
+     * composition but whose FAILURE is an outage — today only the `tenancy`
+     * read the identity step feeds `resolveExecutionContext`.
+     *
+     * `resolveService` above is a capability probe: every step of its chain
+     * absorbs every rejection and falls through, so a factory that threw and a
+     * name nothing registered both come back as `undefined`. That collapse is
+     * the defect #13906 repaired one seam over (`rest-server.ts`), and the
+     * classification here is the same one, taken from the REGISTRY rather than
+     * from message text (#13905):
+     *
+     *  - branded "never registered" → `undefined`, quiet;
+     *  - every other rejection (a factory that threw, a scoped registration
+     *    resolved without a scope id, a circular service dependency) →
+     *    re-raised unbranded, for the resolver to answer as
+     *    `AuthzStoreUnavailableError` (503).
+     *
+     * The chain order is `resolveService`'s (scoped lookup on the host kernel
+     * first, then the request's own kernel), so WHICH registry answers is
+     * unchanged; only what a rejection MEANS is. A host with no async accessor
+     * (`KernelBase`-shaped, e.g. `LiteKernel`) supports no service factories,
+     * so "not registered" is the only fault it can report — it keeps the quiet
+     * probe, which is the same classification rather than a second collapse.
+     */
+    private async resolveServiceOrLoud(kernel: any, name: string, scopeId?: string): Promise<any> {
+        const classified = async (read: () => Promise<any>): Promise<{ found: boolean; value?: any }> => {
+            try {
+                const svc = await read();
+                return svc != null ? { found: true, value: svc } : { found: false };
+            } catch (err) {
+                if (isServiceNotRegisteredError(err)) return { found: false };
+                throw err;
+            }
+        };
+        if (scopeId && typeof this.defaultKernel.getServiceAsync === 'function') {
+            const scoped = await classified(() => this.defaultKernel.getServiceAsync(name, scopeId));
+            if (scoped.found) return scoped.value;
+        }
+        if (typeof kernel?.getServiceAsync === 'function') {
+            const own = await classified(() => kernel.getServiceAsync(name));
+            return own.found ? own.value : undefined;
+        }
+        return this.resolveService(kernel, name, scopeId);
+    }
+
+    /**
      * Get the ObjectQL service which provides access to SchemaRegistry.
      * Tries multiple access patterns since kernel structure varies.
      */
@@ -2195,7 +2326,35 @@ export class HttpDispatcher {
         // Strip the `/environments/:environmentId` prefix so the protocol dispatchers
         // below (meta, data, ui, automation, …) see the same shape whether
         // the caller used host-based routing, `X-Environment-Id`, or a scoped URL.
-        const scopedMatch = cleanPath.match(/^\/projects\/[^/]+(\/.*)?$/);
+        //
+        // The prefix spelled here MUST stay equal to the one
+        // `extractEnvironmentIdFromPath` parses — they are one convention read
+        // twice per request, and they had drifted apart. This line matched the
+        // pre-ADR-0006 `/projects/` spelling while the hint parser already read
+        // `/environments/`, and the consequence was a live routing defect rather
+        // than stale prose:
+        //
+        //   • An environment-scoped URL reached this line UNSTRIPPED, so
+        //     `DomainHandlerRegistry` (prefix/segment matching from the head of
+        //     the path) matched no domain at all — measured through the real
+        //     `@objectstack/hono` catch-all: `GET /api/v1/environments/<id>/data/task`
+        //     → 404 ROUTE_NOT_FOUND, against the unscoped `GET /api/v1/data/task`
+        //     → the `/data` domain. That catch-all is the ONLY entry that hands
+        //     `dispatch()` a still-scoped path; every scoped mount in
+        //     `dispatcher-plugin.ts` passes a pre-stripped subpath, which is why
+        //     the defect was invisible to the standalone server.
+        //   • The legacy spelling was not "still supported" in exchange. Nothing
+        //     parses `/projects/<id>`, so stripping it discarded the only place
+        //     the environment was named: `/projects/<id>/data/task` was served
+        //     with `urlEnvironmentId` undefined — from the host default, not the
+        //     environment its own URL named.
+        //
+        // One spelling, deliberately, and not a two-prefix alternation: ADR-0006
+        // D2 retired `project` on the API surface with no aliases, and the
+        // published migration checklist (`content/docs/api/environment-routing.mdx`)
+        // tells callers to replace `/api/v1/projects/:projectId/...` with
+        // `/api/v1/environments/:environmentId/...`.
+        const scopedMatch = cleanPath.match(/^\/environments\/[^/]+(\/.*)?$/);
         if (scopedMatch) {
             cleanPath = scopedMatch[1] ?? '';
         }

@@ -328,11 +328,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_at: {
         label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin). System-managed."
+        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
       },
       active_organization_id: {
         label: "Active Organization"
@@ -533,6 +533,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       require_mfa: {
         label: "Require Multi-Factor Auth",
         help: "When true, every member of this organization must enroll an authenticator app to access data."
+      },
+      timezone: {
+        label: "Timezone",
+        help: "IANA time zone (e.g. UTC, Asia/Shanghai) date boundaries are computed in for this organization — the root default every business unit without a zone of its own inherits. Unset means UTC."
       },
       parent_organization_id: {
         label: "Parent Organization",
@@ -856,6 +860,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "Parent Business Unit",
         help: "Self-reference for the org tree. Null = root of tenant."
+      },
+      timezone: {
+        label: "Timezone",
+        help: "IANA time zone (e.g. Asia/Shanghai) date boundaries are computed in for this unit. Leave unset to inherit the parent unit's zone, then the organization's, then UTC."
       },
       organization_id: {
         label: "Organization",

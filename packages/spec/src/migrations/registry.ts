@@ -5339,6 +5339,23 @@ const step18: MigrationStep = {
     'fourteen are retiredKey tombstones (the schemas are not strict; a bare deletion ' +
     'would be a silent strip) with no D2 conversion, for the additionalTypes reason: ' +
     'none of these schemas is a stack collection member, so the chain has no seam. ' +
+    'It then retires those three compliance-shaped families WHOLE (#15513, ADR-0049 ' +
+    'enforce-or-remove; maintainer ruling 2026-09-05, ruled A, not roadmapped): the nineteen ' +
+    'defs of `system/incident-response.zod.ts`, `system/training.zod.ts` and ' +
+    '`system/change-management.zod.ts` — roughly a hundred declared keys, exported from ' +
+    '`@objectstack/spec/system`, mounted by no stack key, registered as no metadata type, ' +
+    'absent from the liveness ledgers, read by nothing repo-wide (examples, skills and ' +
+    'objectui at the pinned sha included) — leave via RETIRED_DEFS_BY_MAJOR with one D3 ' +
+    'semantic entry per family; the fourteen deadline-key tombstones leave with their ' +
+    'defs\' source and their RETIRED_KEYS_BY_MAJOR[18] entries stay as history. Boolean ' +
+    'capability claims such as `notifyRegulators`, `requirePostIncidentReview`, ' +
+    '`trackCompletion` and `approval.required` were the sharpest declared-≠-enforced shape ' +
+    'left: an author writing `notifyRegulators: true` held a compliance promise the platform ' +
+    'never kept. And it resolves the branch the #14477 ruling held open — no roadmapped ' +
+    'e-signature consumer — so `ESignatureConfig.expirationDays` / `reminderDays` ' +
+    '(`data/document.zod.ts`, defaults 30 / 7 days, read by nothing) are retiredKey ' +
+    'tombstones with no D2 conversion (`document` is no stack collection member), ' +
+    'registered in RETIRED_KEYS_BY_MAJOR[18] with one D3 semantic entry. ' +
     'Finally, it moves the unit of every duration-shaped `z.number()` key whose unit lived ' +
     'only in its description into the key name (#14478, maintainer ruling 2026-09-02, ' +
     'no grandfathered baseline): `hook.timeout` and `job.timeout` become `timeoutMs` ' +
@@ -5891,6 +5908,61 @@ const step18: MigrationStep = {
         + '(`invalid_type` at the nested path of the key, e.g. `rollbackPlan.steps.0.estimatedMinutes`). '
         + '⚠️ Runtime behaviour is deliberately UNCHANGED and must be verified as such: nothing '
         + 'ever read the keys, so removing them removes no behaviour.',
+    },
+    {
+      id: 'change-management-family-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the change-management family, retired whole: the six defs system/ChangeImpact, '
+        + 'system/ChangePriority, system/ChangeRequest, system/ChangeStatus, system/ChangeType '
+        + 'and system/RollbackPlan, and every name system/change-management.zod.ts exported from '
+        + '@objectstack/spec/system (the six *Schema consts, their z.input aliases and the '
+        + 'ChangeRequestParsed alias)',
+      replacement:
+        'nothing to re-declare — no change-management engine exists on the platform, so there is '
+        + 'no working configuration to migrate to. Nothing routed a change request for approval, '
+        + 'walked its implementation steps, honoured a rollback plan or gated on '
+        + '`securityImpact.requiresSecurityApproval` / `approval.required`; a change record the '
+        + 'organisation keeps is ordinary object data, declared as an object with its own fields, '
+        + 'and an approval that must actually gate something is a flow (ADR-0018) with an approval '
+        + 'node. Metadata change tracking on the platform is `sys_metadata` history and the '
+        + 'package model (ADR-0126), unrelated to this vocabulary. If ITIL change management '
+        + 'becomes a product capability it re-declares fresh, through the enforce route of '
+        + 'ADR-0049 — the engine first, the vocabulary second',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #15513 (ruled A: retire the '
+        + 'three compliance-shaped families whole via RETIRED_DEFS_BY_MAJOR, the '
+        + 'integration/ErrorMappingConfig precedent; not roadmapped). Six defs and roughly fifty '
+        + 'declared keys sat on the exported surface and in the generated reference docs, and were '
+        + 'read by NOTHING: the schemas were exported from `@objectstack/spec/system`, mounted by '
+        + 'no `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06 liveness '
+        + 'ledgers, and the reader census over every package outside `packages/spec` (tests and '
+        + 'changelogs excluded), over `examples/**` and `skills/**`, and over objectui at the '
+        + 'pinned sha returned zero hits for every exported name, with a lit control. '
+        + '`ChangeRequest.approval.required` and `ChangeRequest.securityImpact.requiresSecurityApproval` '
+        + 'read as gates the platform enforced, and neither ever did — the worst form of the '
+        + 'declared-but-unenforced shape, on a security-adjacent surface. Tagging the family '
+        + '`[EXPERIMENTAL — not enforced]` was the fallback the ruling did not take (a human-only '
+        + 'signal). The #14477 duration-key tombstones (three nested sites, '
+        + '`RETIRED_KEYS_BY_MAJOR[18]`, D3 `change-management-duration-keys-retired`) leave with '
+        + 'their defs\' source; their registry entries stay as history. Why D3 semantic and not a '
+        + 'D2 conversion: the chain walks a normalized STACK and `applyConversionsToStoredItem` '
+        + 'maps a metadata type onto one of its collections; none of these schemas is either, so '
+        + 'a conversion would be a transform with no seam that ever runs (the '
+        + '`kernel/MetadataPluginConfig:additionalTypes` precedent), and with no carrier key there '
+        + 'is no shape on which a tombstone could sit.',
+      acceptanceCriteria:
+        'No code imports ChangeImpactSchema, ChangePrioritySchema, ChangeRequestSchema, '
+        + 'ChangeStatusSchema, ChangeTypeSchema or RollbackPlanSchema — or any of their type '
+        + 'aliases — from @objectstack/spec or @objectstack/spec/system: every such import is '
+        + 'TS2305 after upgrade, and no working replacement exists to point at because the '
+        + 'vocabulary described nothing real. `kernel/MetadataChangeType` (M92 of the type-alias '
+        + 'pin, a different declaration with a live consumer) is unaffected. The six defs are '
+        + 'absent from `json-schema.manifest/system.json`, the api-surface / declaration-map / '
+        + 'export-origins shards and the generated reference docs. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: nothing ever parsed or read these '
+        + 'shapes, so removing them removes no behaviour.',
     },
     {
       id: 'cli-command-contribution-retired',
@@ -6643,11 +6715,21 @@ const step18: MigrationStep = {
         + 'the filter a list view stores and renders was refused by the KPI element beside it, '
         + 'and the objectui parity gate had to carry a reasoned exemption to look away. The '
         + 'convergence was sequenced consumer-first (ruling recorded 2026-08-25, Option A): '
-        + 'objectui#6828 made `ObjectStackAdapter.aggregate()` lower a rule array through the '
-        + 'same `translateFilterArray` its `find()` path runs before the analytics wire, and the '
-        + 'objectui pin carrying it was re-measured before this entry moved — authored array → '
-        + 'adapter lowering → filter AST → accepted by `lowerAnalyticsWhere`, which still refuses '
-        + 'a RAW rule-object array by design. The ruled migration check ran with the change: the '
+        + 'objectui#6828 made `ObjectStackAdapter.aggregate()` run the same `translateFilterArray` '
+        + 'its `find()` path runs, and the objectui pin carrying it was re-measured before this '
+        + 'entry moved — but that measurement named the wrong hop, and #15828 corrects it here. '
+        + '`translateFilterArray` yields AST tuples, which are still a `FilterArray` — input-only '
+        + 'sugar — so the real path is: authored array → `translateFilterArray` → lowered by '
+        + '`parseFilterAST` (`@objectstack/spec/data`, the single sink the `FilterArray` docblock '
+        + 'names, #5158 ruling C) in the adapter, BEFORE the wire → a `FilterCondition` on the '
+        + 'body. The hop that decides it is the runtime route `POST /analytics/query`, which '
+        + 'parses `where` with `AnalyticsQueryRequestSchema` — a `FilterCondition` and nothing '
+        + 'else — so an un-lowered array is refused there before any service code runs. '
+        + '`lowerAnalyticsWhere` (`service-analytics`), where that earlier measurement stopped, '
+        + 'is the IN-PROCESS door (#5334) for callers reaching `analyticsService.query` '
+        + "directly, not the wire's; it too still refuses a RAW rule-object array by design. "
+        + 'objectui#7752 lands the adapter-side lowering. '
+        + 'The ruled migration check ran with the change: the '
         + 'sweep of first-party corpora (examples/, skills/, create-objectstack, content/docs/, '
         + 'packages/apps/, spec fixtures) found ONE `element:number` author writing a record-form '
         + '`filter` — a spec test fixture, rewritten to the array form in the same change — and '
@@ -6848,6 +6930,44 @@ const step18: MigrationStep = {
         + 'z.number().int(), so a fractional epoch that used to parse is now '
         + 'refused at those two sites — a tightening, and Date.now() has always '
         + 'satisfied it.',
+    },
+    {
+      id: 'esignature-config-deadline-keys-retired',
+      surface:
+        'e-signature deadline keys: `ESignatureConfig.expirationDays` / `reminderDays` '
+        + '(`document.eSignature.expirationDays` / `document.eSignature.reminderDays`)',
+      replacement:
+        'nothing to re-declare — delete the keys. No e-signature engine exists on the platform: '
+        + 'no signature request is sent, expired or reminded by any layer, so there is no live '
+        + 'mechanism to declare an expiry window or a reminder interval to. `ESignatureConfig` '
+        + 'itself stays (`provider` / `enabled` / `signers`), unchanged',
+      reason:
+        'ADR-0049 enforce-or-remove; the 2026-09-02 ruling on #14477 held this pair on one '
+        + 'condition — "no roadmap ⇒ they retire with the other three families" — and the '
+        + 'maintainer answered it on 2026-09-05 (decision batch #40, no roadmapped e-signature '
+        + 'consumer), so the ruling\'s own branch resolves to retirement. Two day-shaped keys sat '
+        + 'on the published authorable surface (`authorable-surface/data.json`) and in the '
+        + 'generated reference docs — an author could write `expirationDays: 30` and reasonably '
+        + 'expect a signature request to lapse after thirty days — and were read by NOTHING: the '
+        + 'reader census over every package outside `packages/spec` (tests and changelogs '
+        + 'excluded), over `examples/**` and `skills/**`, and over objectui at the pinned sha '
+        + 'returned zero hits for `expirationDays`, `reminderDays`, `eSignature` and the '
+        + '`ESignatureConfig` names, with a lit control inside `packages/spec`. Both carried '
+        + 'defaults (30 days, 7 days) that were materialized into every parsed configuration '
+        + 'without ever being consulted. `cloud` and real customer configurations are UNMEASURED. '
+        + 'Why D3 semantic and not a D2 conversion: `DocumentSchema` is not a stack collection '
+        + 'member and `document` is no metadata type, so the chain has no seam that would ever '
+        + 'see one (the `kernel/MetadataPluginConfig:additionalTypes` precedent); the '
+        + 'prescription reaches authors through the `retiredKey()` tombstones (`tsc` + the parse) '
+        + 'and this entry.',
+      acceptanceCriteria:
+        'No `ESignatureConfig` literal — standalone or nested as `Document.eSignature` — carries '
+        + '`expirationDays` or `reminderDays`. TypeScript authors get the refusal at compile time '
+        + '(each key is typed `never`); a value reaching the parse is refused with the '
+        + 'prescription (`invalid_type` at the path of the key, on the base schema and through '
+        + 'the `DocumentSchema.eSignature` carrier). Parsed configurations no longer carry the '
+        + 'two former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
+        + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
     },
     {
       id: 'event-name-schema-retired',
@@ -7404,6 +7524,62 @@ const step18: MigrationStep = {
         + 'prescription (`invalid_type` at the path of the key). Parsed documents no longer carry '
         + 'the three former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
         + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
+    },
+    {
+      id: 'incident-response-family-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the incident-response family, retired whole: the eight defs system/Incident, '
+        + 'system/IncidentCategory, system/IncidentNotificationMatrix, '
+        + 'system/IncidentNotificationRule, system/IncidentResponsePhase, '
+        + 'system/IncidentResponsePolicy, system/IncidentSeverity and system/IncidentStatus, '
+        + 'and every name system/incident-response.zod.ts exported from @objectstack/spec/system '
+        + '(the eight *Schema consts, their z.input aliases and the three *Parsed aliases)',
+      replacement:
+        'nothing to re-declare — no incident-response engine exists on the platform, so there is '
+        + 'no working configuration to migrate to. Nothing classified, tracked, escalated or '
+        + 'notified an incident and nothing notified a regulator; a compliance record the '
+        + 'organisation keeps is ordinary object data, declared as an object with its own '
+        + 'fields and enforced by the object engine (validation, permissions, the '
+        + 'object-level `lifecycle` block under ADR-0057). If incident response becomes a product '
+        + 'capability it re-declares fresh, through the enforce route of ADR-0049 — the engine '
+        + 'first, the vocabulary second',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #15513 (ruled A: retire the '
+        + 'three compliance-shaped families whole via RETIRED_DEFS_BY_MAJOR, the '
+        + 'integration/ErrorMappingConfig precedent; not roadmapped). Eight defs and roughly '
+        + 'forty declared keys sat on the exported surface and in the generated reference docs, '
+        + 'and were read by NOTHING: the schemas were exported from `@objectstack/spec/system`, '
+        + 'mounted by no `stack.zod.ts` key, registered as no metadata type, absent from the '
+        + '2026-06 liveness ledgers, and the reader census over every package outside '
+        + '`packages/spec` (tests and changelogs excluded), over `examples/**` and `skills/**`, '
+        + 'and over objectui at the pinned sha returned zero hits for every exported name, with '
+        + 'a lit control. Several keys were boolean capability claims of exactly the shape '
+        + 'ADR-0049 names — `IncidentNotificationRule.notifyRegulators`, '
+        + '`IncidentResponsePolicy.requirePostIncidentReview` — so an author (very often an AI, '
+        + 'ADR-0033) could write `notifyRegulators: true`, parse clean, and hold a compliance '
+        + 'promise the platform never kept, with no error and no feedback. Tagging the family '
+        + '`[EXPERIMENTAL — not enforced]` was the fallback the ruling did not take: it is a '
+        + 'human-only signal, and an AI generating from the schema still writes the key and '
+        + 'believes it. The #14477 deadline-key tombstones (six sites, `RETIRED_KEYS_BY_MAJOR[18]`, '
+        + 'D3 `incident-response-deadline-keys-retired`) leave with their defs\' source; their '
+        + 'registry entries stay as history. Why D3 semantic and not a D2 conversion: the chain '
+        + 'walks a normalized STACK and `applyConversionsToStoredItem` maps a metadata type onto '
+        + 'one of its collections; none of these schemas is either, so a conversion would be a '
+        + 'transform with no seam that ever runs (the `kernel/MetadataPluginConfig:additionalTypes` '
+        + 'precedent), and with no carrier key there is no shape on which a tombstone could sit.',
+      acceptanceCriteria:
+        'No code imports IncidentSchema, IncidentCategorySchema, IncidentNotificationMatrixSchema, '
+        + 'IncidentNotificationRuleSchema, IncidentResponsePhaseSchema, '
+        + 'IncidentResponsePolicySchema, IncidentSeveritySchema or IncidentStatusSchema — or any '
+        + 'of their type aliases — from @objectstack/spec or @objectstack/spec/system: every such '
+        + 'import is TS2305 after upgrade, and no working replacement exists to point at because '
+        + 'the vocabulary described nothing real. The eight defs are absent from '
+        + '`json-schema.manifest/system.json`, the api-surface / declaration-map / export-origins '
+        + 'shards and the generated reference docs. ⚠️ Runtime behaviour is deliberately UNCHANGED '
+        + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
+        + 'them removes no behaviour.',
     },
     {
       id: 'kernel-context-preview-mode-retired',
@@ -8326,6 +8502,69 @@ const step18: MigrationStep = {
         + 'the source manifest and republishing.',
     },
     {
+      id: 'plugin-security-scanner-retired',
+      surface:
+        '`@objectstack/core` runtime exports: `PluginSecurityScanner`, and the two types '
+        + 'declared only to feed it, `ScanTarget` and `SecurityIssue`',
+      replacement:
+        'nothing to re-declare — delete the import and every call. Plugin security scanning is '
+        + 'not a platform capability and there is no replacement export. A caller that branched '
+        + 'on `result.status === "passed"` takes that branch unconditionally, because it is the '
+        + 'only branch the scanner ever produced. What the platform does still enforce, and what '
+        + 'to reach for instead: artifact integrity and signatures '
+        + '(`verifyPluginArtifactIntegrity`, the plugin signature verifier) answer "is this the '
+        + 'artifact the publisher signed?" and never "is this artifact safe?"; plugin permissions '
+        + 'and the sandbox resource limits are unchanged. For dependency vulnerabilities use the '
+        + 'tools built for it against your own project — `npm audit` / `pnpm audit`, Dependabot, '
+        + 'the GitHub Advisory Database, OSV — and treat an unaudited third-party plugin as '
+        + 'untrusted code.',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #14919 (director summon #14, '
+        + 'decision batch #42, ruled A: retire in three surfaces). The class shipped on '
+        + '`@objectstack/core`\'s public barrel as a SECURITY control and could not fail. `scan()` '
+        + 'composed five private scanners: four of them (`scanCode`, `scanMalware`, `scanLicenses`, '
+        + '`scanConfiguration`) allocated an empty issue array, logged and returned it with no code '
+        + 'in between, so none could report a finding for any input; the fifth, `scanDependencies`, '
+        + 'ran a real loop but matched only against an in-memory vulnerability database whose sole '
+        + 'writer, the public `addVulnerability`, had zero callers in objectstack, in objectui at '
+        + 'the pinned sha, or in the one demonstration that constructed the scanner, and '
+        + '`updateVulnerabilityDatabase()` logged twice and fetched nothing. The database was '
+        + 'therefore empty on every code path that has ever executed: no issue was ever produced, '
+        + 'the score stayed 100, and the verdict was `status: "passed"` for every plugin the '
+        + 'scanner was ever handed — a malicious one as readily as a benign one. Repair was refused '
+        + 'by name: a real vulnerability scanner is a feature with a design surface, not a defect '
+        + 'fix. Why this entry exists at all, and why D3 semantic rather than a D2 conversion: '
+        + '`PluginSecurityScanner` has no spec schema and never had one — it is a runtime TS class, '
+        + 'so there is no authorable key to tombstone with `retiredKey()`, no stored `sys_metadata` '
+        + 'row that could carry it (a scanner was constructed per call and every result lived in a '
+        + 'per-instance Map discarded with the object), and hence no seam `applyConversionsToStored'
+        + 'Item` would ever reach. The enforced channel is tsc, at the consumer\'s own import site; '
+        + 'for anyone it does not reach, this ledger entry and the generated upgrade guide are the '
+        + 'only channel there is. That is the `contracts.IDataDriver.findStream` (#4484) and '
+        + '`actor-user-roles-to-positions` (#6011) disposition — a TS/API contract, no stored '
+        + 'source, no tombstone, tsc at the call site — applied to a surface one layer further out '
+        + 'than either: those are declared in `packages/spec`, this one only in `packages/core`. '
+        + '⚠️ The out-of-repo consumer population is NOT MEASURED. Zero constructors were found in '
+        + 'objectstack, in objectui at the pinned sha, and in the deleted example, but no download, '
+        + 'dependent or source telemetry was consulted for consumers of the published package, so '
+        + 'this is breaking for an unmeasured population rather than a removal proven to break '
+        + 'nobody.',
+      acceptanceCriteria:
+        'No source imports `PluginSecurityScanner`, `ScanTarget` or `SecurityIssue` from '
+        + '`@objectstack/core` (or from `@objectstack/core/security`, a subpath the package has '
+        + 'never declared in its `exports` and which therefore resolved for nobody). A TypeScript '
+        + 'consumer gets the refusal at compile time at the import site — the export is absent from '
+        + 'the built `dist/index.d.ts`, not merely undocumented. ⚠️ Runtime behaviour is '
+        + 'deliberately UNCHANGED and must be verified as such: every scan this class ever '
+        + 'performed returned zero issues and `status: "passed"`, so deleting a call removes no '
+        + 'check that was running. A caller that treated a passing scan as evidence of safety was '
+        + 'never getting any, and its remediation is to audit dependencies with a real tool, not to '
+        + 'find a replacement symbol — there is none. Verified in-repo by export-list assertions on '
+        + 'both barrels (`packages/core/src/security/security-scanner-retirement.pin.test.ts`), not '
+        + 'by a grep: the name legitimately survives in the tombstone comments that explain the '
+        + 'retirement.',
+    },
+    {
       id: 'record-chatter-position-vocabulary-converged',
       surface:
         '`record:chatter` / `record:discussion` component props (one shared schema object): '
@@ -8607,6 +8846,71 @@ const step18: MigrationStep = {
         + 'carried inert and ignored). Template resolution still keys on `(name, locale)`, and '
         + '`organizationId` still stamps `sys_email.organization_id` without acquiring any overlay '
         + 'semantics.',
+    },
+    {
+      id: 'session-payload-positions-security-axis',
+      surface: 'GET /api/v1/auth/get-session -> user.positions[] (and the client CEL root `current_user.positions` bound from it)',
+      replacement:
+        'the SAME key, carrying the SECURITY positions — the set `/auth/me/permissions` reports '
+        + 'and `resolveUserAuthzGrants` resolves. A reader that wanted the better-auth role '
+        + 'scalar reads `user.role`, which is unchanged and still published',
+      reason:
+        'A MEANING change, not a rename: no key moved, so nothing in this entry can be found by '
+        + 'grepping for a removed spelling — which is exactly why it needs a ledger row. '
+        + '`customSession` built `user.positions` from the better-auth `sys_user.role` scalar '
+        + 'split on commas, PLUS the active membership mapped to `org_*`, PLUS `platform_admin`, '
+        + 'and read NOTHING from `sys_user_position` (ADR-0057 D4), the source of truth for '
+        + 'custom positions. The Console binds that array straight through as the CEL root '
+        + '`current_user` (objectui `expressionUser.ts`: `positions: user.positions ?? []`), so '
+        + 'an `action.visible` / `visibleWhen` / nav `visible` narrowed by a business position '
+        + 'answered FALSE for EVERYONE, including the user who genuinely held it. '
+        + '⭐ The failure was silent and in the invisible direction: the root was bound and the '
+        + 'key was present, so `has(current_user.positions)` was true and CEL raised nothing — '
+        + 'the predicate simply returned FALSE. A predicate that FAULTS fails OPEN in the shell '
+        + 'and would have shown the button; a successful FALSE shows nothing and reports '
+        + 'nothing. The documented example `\'org_admin\' in current_user.positions` kept working '
+        + 'throughout, because `org_admin` is the one name that sits on BOTH axes — which is why '
+        + 'no example, test or doc could reveal the split. '
+        + 'This was a DECLARED contract being violated rather than an ambiguous name: '
+        + '`EvalUserSchema` already specified `positions` as "built-in identity names + position '
+        + 'names", exposed to "every predicate surface (server formula, server RLS, client UI '
+        + 'gates) ... with an identical shape" so a predicate "evaluates identically wherever it '
+        + 'is written". `/auth/me/permissions` and every server-side evaluator '
+        + '(`ExecutionContext.positions`) already resolved the security axis; the session '
+        + 'payload was the one producer that did not, because it derived the value itself '
+        + 'instead of asking the authority `resolve-authz-context.ts` reserves that job for. '
+        + '⚠️ NO renamed auth-role array accompanies this, and that is a measured disposition '
+        + 'rather than an omission: everything the old union contributed beyond the security '
+        + 'axis was the `sys_user.role` scalar\'s own tokens, and that scalar is ALREADY '
+        + 'published unchanged as `user.role` — the single exception ADR-0090 D3\'s "role" word '
+        + 'ban carves out for third-party schema. Minting a `roles` array would revive the exact '
+        + 'banned identifier `check:role-word` ratchets against, to publish information the '
+        + 'payload already carries. Maintainer ruling 2026-09-05 (#15136, director decision '
+        + 'batch #39 item 2, verbatim 「同意」): option A, one name, one meaning. ADR-0068 D1/D2, '
+        + 'ADR-0090 D3/D5, ADR-0057 D4.',
+      acceptanceCriteria:
+        'No predicate and no client reader treats `current_user.positions` / '
+        + '`session.user.positions` as the better-auth role scalar. Audit every authored '
+        + '`visible` / `visibleWhen` / RLS predicate that names `current_user.positions` and '
+        + 'classify each comparand: a real `sys_position` name, a built-in identity name '
+        + '(`platform_admin` / `org_owner` / `org_admin` / `org_member`), or `everyone` needs NO '
+        + 'change and starts working where it silently answered FALSE before; a comparand that '
+        + 'was only ever a `sys_user.role` token (`user`, and `admin` — note `admin` is NOT a '
+        + 'built-in identity name; a membership `admin` is projected as `org_admin`) either '
+        + 'moves to `user.role`, or — the supported route — becomes a real position assigned '
+        + 'through `sys_user_position`, the governed ADR-0090 D12 channel. '
+        + '⚠️ Verify against a REAL session rather than a fixture, and assert the axis by a name '
+        + 'that exists on ONE side only: `org_admin` sits on both and cannot discriminate, which '
+        + 'is precisely how this defect survived its own documented example. Sign in as a user '
+        + 'holding a custom position, read `GET /api/v1/auth/get-session`, and assert that '
+        + 'position is in `user.positions` and that the payload agrees set-for-set with `GET '
+        + '/api/v1/auth/me/permissions`. '
+        + 'Assert the absence of a role-scalar token by VALUE rather than by the predicate\'s '
+        + 'verdict: a gate that reads `false` cannot tell "the name is gone" from "the name was '
+        + 'never there", and both of those from a faulting predicate, which fails OPEN in the '
+        + 'shell and renders anyway. A deployment that stored business role names in '
+        + '`sys_user.role` instead of assigning positions is the one that must act; a name in '
+        + '`sys_member.role` is still projected, so membership-derived names are unaffected.',
     },
     {
       id: 'session-user-language-retired',
@@ -9107,6 +9411,57 @@ const step18: MigrationStep = {
         + 'prescription (`invalid_type` at the path of the key). Parsed plans no longer carry the '
         + 'three former defaults. ⚠️ Runtime behaviour is deliberately UNCHANGED and must be '
         + 'verified as such: nothing ever read the keys, so removing them removes no behaviour.',
+    },
+    {
+      id: 'training-family-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'the training family, retired whole: the five defs system/TrainingCategory, '
+        + 'system/TrainingCompletionStatus, system/TrainingCourse, system/TrainingPlan and '
+        + 'system/TrainingRecord, and every name system/training.zod.ts exported from '
+        + '@objectstack/spec/system (the five *Schema consts, their z.input aliases and the two '
+        + '*Parsed aliases)',
+      replacement:
+        'nothing to re-declare — no training-management engine exists on the platform, so there '
+        + 'is no working configuration to migrate to. Nothing assigned a course, tracked a '
+        + 'completion, sent a reminder or expired a certification; a training record the '
+        + 'organisation keeps is ordinary object data, declared as an object with its own fields '
+        + 'and enforced by the object engine. If training management becomes a product capability '
+        + 'it re-declares fresh, through the enforce route of ADR-0049 — the engine first, the '
+        + 'vocabulary second',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-05 on #15513 (ruled A: retire the '
+        + 'three compliance-shaped families whole via RETIRED_DEFS_BY_MAJOR, the '
+        + 'integration/ErrorMappingConfig precedent; not roadmapped). Five defs and roughly '
+        + 'twenty-five declared keys sat on the exported surface and in the generated reference '
+        + 'docs, and were read by NOTHING: the schemas were exported from '
+        + '`@objectstack/spec/system`, mounted by no `stack.zod.ts` key, registered as no metadata '
+        + 'type, absent from the 2026-06 liveness ledgers, and the reader census over every '
+        + 'package outside `packages/spec` (tests and changelogs excluded), over `examples/**` and '
+        + '`skills/**`, and over objectui at the pinned sha returned zero hits for every exported '
+        + 'name, with a lit control. `TrainingCourse.mandatory`, `TrainingPlan.trackCompletion` '
+        + 'and `TrainingPlan.sendReminders` were boolean capability claims of exactly the shape '
+        + 'ADR-0049 names: an author could write them, parse clean, and get no behaviour and no '
+        + 'diagnostic. Tagging the family `[EXPERIMENTAL — not enforced]` was the fallback the '
+        + 'ruling did not take (a human-only signal). The #14477 deadline-key tombstones (five '
+        + 'sites, `RETIRED_KEYS_BY_MAJOR[18]`, D3 `training-deadline-keys-retired`) leave with '
+        + 'their defs\' source; their registry entries stay as history. Why D3 semantic and not a '
+        + 'D2 conversion: the chain walks a normalized STACK and `applyConversionsToStoredItem` '
+        + 'maps a metadata type onto one of its collections; none of these schemas is either, so '
+        + 'a conversion would be a transform with no seam that ever runs (the '
+        + '`kernel/MetadataPluginConfig:additionalTypes` precedent), and with no carrier key there '
+        + 'is no shape on which a tombstone could sit.',
+      acceptanceCriteria:
+        'No code imports TrainingCategorySchema, TrainingCompletionStatusSchema, '
+        + 'TrainingCourseSchema, TrainingPlanSchema or TrainingRecordSchema — or any of their type '
+        + 'aliases — from @objectstack/spec or @objectstack/spec/system: every such import is '
+        + 'TS2305 after upgrade, and no working replacement exists to point at because the '
+        + 'vocabulary described nothing real. The five defs are absent from '
+        + '`json-schema.manifest/system.json`, the api-surface / declaration-map / export-origins '
+        + 'shards and the generated reference docs. ⚠️ Runtime behaviour is deliberately UNCHANGED '
+        + 'and must be verified as such: nothing ever parsed or read these shapes, so removing '
+        + 'them removes no behaviour.',
     },
     {
       id: 'ui-cloud-connection-widgets-unknown-keys-refused',
@@ -10224,6 +10579,57 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // is a `datasources[]` stack collection member whose `config` is stored whole in
     // `sys_metadata`, so the chain has a seam that sees it.
     'data/FilePersistenceConfig:autoSaveInterval',
+    // #14477 — ADR-0049 enforce-or-remove. The 2026-09-02 ruling (ruled A: retire
+    // per family) held the `ESignatureConfig` pair on one condition — a roadmapped
+    // e-signature consumer would have earned an `[EXPERIMENTAL — not enforced]` tag
+    // instead — and the maintainer answered it on 2026-09-05 (decision batch #40:
+    // no roadmap), so the ruling's own branch resolves to retirement. A day-shaped
+    // deadline key on the published authorable surface (`data/ESignatureConfig`),
+    // read by NOTHING: no e-signature engine exists on the platform, no layer ever
+    // sent, expired or reminded a signature request, and the reader census over
+    // every package outside `packages/spec` (tests and changelogs excluded), over
+    // `examples/**` and `skills/**`, and over objectui at the pinned sha returned
+    // zero hits, with a lit control inside `packages/spec`. Its default of 30 days
+    // was materialized into every parsed configuration without ever being
+    // consulted.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: `DocumentSchema` is not
+    // a stack collection member and `document` is no metadata type, so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone (`tsc` + the parse) and
+    // the D3 semantic entry named below.
+    // D3 semantic entry: `esignature-config-deadline-keys-retired`.
+    'data/ESignatureConfig:expirationDays',
+    // #14477 — ADR-0049 enforce-or-remove. The 2026-09-02 ruling (ruled A: retire
+    // per family) held the `ESignatureConfig` pair on one condition — a roadmapped
+    // e-signature consumer would have earned an `[EXPERIMENTAL — not enforced]` tag
+    // instead — and the maintainer answered it on 2026-09-05 (decision batch #40:
+    // no roadmap), so the ruling's own branch resolves to retirement. A day-shaped
+    // interval key on the published authorable surface (`data/ESignatureConfig`),
+    // read by NOTHING: no e-signature engine exists on the platform, no layer ever
+    // sent a reminder email, and the reader census over every package outside
+    // `packages/spec` (tests and changelogs excluded), over `examples/**` and
+    // `skills/**`, and over objectui at the pinned sha returned zero hits, with a
+    // lit control inside `packages/spec`. Its default of 7 days was materialized
+    // into every parsed configuration without ever being consulted.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, for the reason
+    // `kernel/MetadataPluginConfig:additionalTypes` gives: `DocumentSchema` is not
+    // a stack collection member and `document` is no metadata type, so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone (`tsc` + the parse) and
+    // the D3 semantic entry named below.
+    // D3 semantic entry: `esignature-config-deadline-keys-retired`.
+    'data/ESignatureConfig:reminderDays',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -12915,6 +13321,474 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // plus the D3 semantic entry `branded-identifier-schemas-retired` are the
     // declaration.
     'shared/ViewName',
+    // #15513 — `system/ChangeImpact` — the impact assessment (`level` /
+    // `affectedSystems` / `downtime` …, plus the #14477-retired nested
+    // `downtime.durationMinutes`) — leaves whole with the change-management family
+    // under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-05 on #15513,
+    // ruled A: retire the three compliance-shaped families whole; not roadmapped).
+    // It was exported from `@objectstack/spec/system`
+    // (`system/change-management.zod.ts`), mounted by no `stack.zod.ts` key,
+    // registered as no metadata type, absent from the 2026-06 liveness ledgers, and
+    // read by NOTHING: the reader census over every package outside `packages/spec`
+    // (tests and changelogs excluded), over `examples/**` and `skills/**`, and over
+    // objectui at the pinned sha returned zero hits for every one of the family's
+    // exported names, with a lit control on the same pattern. No change-management
+    // engine exists on the platform: nothing routed a change request for approval,
+    // walked its implementation steps, honoured a rollback plan or gated on
+    // `securityImpact.requiresSecurityApproval` / `approval.required` — both of
+    // which read as gates the platform enforced, and neither ever did. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `change-management-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/ChangeImpact',
+    // #15513 — `system/ChangePriority` — the 4-value priority enum — leaves whole
+    // with the change-management family under ADR-0049 enforce-or-remove (maintainer
+    // ruling 2026-09-05 on #15513, ruled A: retire the three compliance-shaped
+    // families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/change-management.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No change-management engine exists on the platform: nothing routed a
+    // change request for approval, walked its implementation steps, honoured a
+    // rollback plan or gated on `securityImpact.requiresSecurityApproval` /
+    // `approval.required` — both of which read as gates the platform enforced, and
+    // neither ever did. An exported value schema with no consumer reads as a
+    // capability (#3950); the generated reference docs advertised a compliance
+    // subsystem that does not exist. No carrier key, so no `retiredKey()` tombstone
+    // and no D2 conversion (none of these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `change-management-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/ChangePriority',
+    // #15513 — `system/ChangeRequest` — the change request itself (`id` / `title` /
+    // `type` / `priority` / `status` / `impact` / `approval` / `implementation` /
+    // `rollbackPlan` / `securityImpact` …, plus the #14477-retired nested
+    // `implementation.steps[].estimatedMinutes`) — leaves whole with the
+    // change-management family under ADR-0049 enforce-or-remove (maintainer ruling
+    // 2026-09-05 on #15513, ruled A: retire the three compliance-shaped families
+    // whole; not roadmapped). It was exported from `@objectstack/spec/system`
+    // (`system/change-management.zod.ts`), mounted by no `stack.zod.ts` key,
+    // registered as no metadata type, absent from the 2026-06 liveness ledgers, and
+    // read by NOTHING: the reader census over every package outside `packages/spec`
+    // (tests and changelogs excluded), over `examples/**` and `skills/**`, and over
+    // objectui at the pinned sha returned zero hits for every one of the family's
+    // exported names, with a lit control on the same pattern. No change-management
+    // engine exists on the platform: nothing routed a change request for approval,
+    // walked its implementation steps, honoured a rollback plan or gated on
+    // `securityImpact.requiresSecurityApproval` / `approval.required` — both of
+    // which read as gates the platform enforced, and neither ever did. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `change-management-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/ChangeRequest',
+    // #15513 — `system/ChangeStatus` — the 10-value change status enum — leaves
+    // whole with the change-management family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/change-management.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No change-management engine exists on the platform: nothing routed a
+    // change request for approval, walked its implementation steps, honoured a
+    // rollback plan or gated on `securityImpact.requiresSecurityApproval` /
+    // `approval.required` — both of which read as gates the platform enforced, and
+    // neither ever did. An exported value schema with no consumer reads as a
+    // capability (#3950); the generated reference docs advertised a compliance
+    // subsystem that does not exist. No carrier key, so no `retiredKey()` tombstone
+    // and no D2 conversion (none of these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `change-management-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/ChangeStatus',
+    // #15513 — `system/ChangeType` — the 4-value ITIL change type enum — leaves
+    // whole with the change-management family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/change-management.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No change-management engine exists on the platform: nothing routed a
+    // change request for approval, walked its implementation steps, honoured a
+    // rollback plan or gated on `securityImpact.requiresSecurityApproval` /
+    // `approval.required` — both of which read as gates the platform enforced, and
+    // neither ever did. An exported value schema with no consumer reads as a
+    // capability (#3950); the generated reference docs advertised a compliance
+    // subsystem that does not exist. No carrier key, so no `retiredKey()` tombstone
+    // and no D2 conversion (none of these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `change-management-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/ChangeType',
+    // #15513 — `system/Incident` — the incident record itself (id / title / severity
+    // / category / status / reportedBy / affectedSystems / dataClassification /
+    // responsePhases / lessonsLearned …) — leaves whole with the incident-response
+    // family under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-05 on
+    // #15513, ruled A: retire the three compliance-shaped families whole; not
+    // roadmapped). It was exported from `@objectstack/spec/system`
+    // (`system/incident-response.zod.ts`), mounted by no `stack.zod.ts` key,
+    // registered as no metadata type, absent from the 2026-06 liveness ledgers, and
+    // read by NOTHING: the reader census over every package outside `packages/spec`
+    // (tests and changelogs excluded), over `examples/**` and `skills/**`, and over
+    // objectui at the pinned sha returned zero hits for every one of the family's
+    // exported names, with a lit control on the same pattern. No incident-response
+    // engine exists on the platform: nothing classified, tracked, escalated or
+    // notified an incident, and nothing notified a regulator — an author writing
+    // `notifyRegulators: true` held a compliance promise the platform never kept,
+    // with no error and no feedback. An exported value schema with no consumer reads
+    // as a capability (#3950); the generated reference docs advertised a compliance
+    // subsystem that does not exist. No carrier key, so no `retiredKey()` tombstone
+    // and no D2 conversion (none of these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/Incident',
+    // #15513 — `system/IncidentCategory` — the 10-value incident category enum —
+    // leaves whole with the incident-response family under ADR-0049
+    // enforce-or-remove (maintainer ruling 2026-09-05 on #15513, ruled A: retire the
+    // three compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/incident-response.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No incident-response engine exists on the platform: nothing
+    // classified, tracked, escalated or notified an incident, and nothing notified a
+    // regulator — an author writing `notifyRegulators: true` held a compliance
+    // promise the platform never kept, with no error and no feedback. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentCategory',
+    // #15513 — `system/IncidentNotificationMatrix` — the notification-rule matrix
+    // (`rules[]`, plus the #14477-retired `escalationTimeoutMinutes`) — leaves whole
+    // with the incident-response family under ADR-0049 enforce-or-remove (maintainer
+    // ruling 2026-09-05 on #15513, ruled A: retire the three compliance-shaped
+    // families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/incident-response.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No incident-response engine exists on the platform: nothing
+    // classified, tracked, escalated or notified an incident, and nothing notified a
+    // regulator — an author writing `notifyRegulators: true` held a compliance
+    // promise the platform never kept, with no error and no feedback. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentNotificationMatrix',
+    // #15513 — `system/IncidentNotificationRule` — one severity → channels /
+    // recipients / `notifyRegulators` rule (plus the #14477-retired `withinMinutes`
+    // / `regulatorDeadlineHours`) — leaves whole with the incident-response family
+    // under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-05 on #15513,
+    // ruled A: retire the three compliance-shaped families whole; not roadmapped).
+    // It was exported from `@objectstack/spec/system`
+    // (`system/incident-response.zod.ts`), mounted by no `stack.zod.ts` key,
+    // registered as no metadata type, absent from the 2026-06 liveness ledgers, and
+    // read by NOTHING: the reader census over every package outside `packages/spec`
+    // (tests and changelogs excluded), over `examples/**` and `skills/**`, and over
+    // objectui at the pinned sha returned zero hits for every one of the family's
+    // exported names, with a lit control on the same pattern. No incident-response
+    // engine exists on the platform: nothing classified, tracked, escalated or
+    // notified an incident, and nothing notified a regulator — an author writing
+    // `notifyRegulators: true` held a compliance promise the platform never kept,
+    // with no error and no feedback. An exported value schema with no consumer reads
+    // as a capability (#3950); the generated reference docs advertised a compliance
+    // subsystem that does not exist. No carrier key, so no `retiredKey()` tombstone
+    // and no D2 conversion (none of these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentNotificationRule',
+    // #15513 — `system/IncidentResponsePhase` — one response phase (`phase` /
+    // `description` / `assignedTo`, plus the #14477-retired `targetHours`) — leaves
+    // whole with the incident-response family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/incident-response.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No incident-response engine exists on the platform: nothing
+    // classified, tracked, escalated or notified an incident, and nothing notified a
+    // regulator — an author writing `notifyRegulators: true` held a compliance
+    // promise the platform never kept, with no error and no feedback. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentResponsePhase',
+    // #15513 — `system/IncidentResponsePolicy` — the policy document
+    // (`notificationMatrix` / `defaultResponseTeam` / `requirePostIncidentReview` …,
+    // plus the #14477-retired `triageDeadlineHours` / `retentionDays`) — leaves
+    // whole with the incident-response family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/incident-response.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No incident-response engine exists on the platform: nothing
+    // classified, tracked, escalated or notified an incident, and nothing notified a
+    // regulator — an author writing `notifyRegulators: true` held a compliance
+    // promise the platform never kept, with no error and no feedback. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentResponsePolicy',
+    // #15513 — `system/IncidentSeverity` — the 4-value severity enum — leaves whole
+    // with the incident-response family under ADR-0049 enforce-or-remove (maintainer
+    // ruling 2026-09-05 on #15513, ruled A: retire the three compliance-shaped
+    // families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/incident-response.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No incident-response engine exists on the platform: nothing
+    // classified, tracked, escalated or notified an incident, and nothing notified a
+    // regulator — an author writing `notifyRegulators: true` held a compliance
+    // promise the platform never kept, with no error and no feedback. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentSeverity',
+    // #15513 — `system/IncidentStatus` — the 7-value incident status enum — leaves
+    // whole with the incident-response family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/incident-response.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No incident-response engine exists on the platform: nothing
+    // classified, tracked, escalated or notified an incident, and nothing notified a
+    // regulator — an author writing `notifyRegulators: true` held a compliance
+    // promise the platform never kept, with no error and no feedback. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `incident-response-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/IncidentStatus',
+    // #15513 — `system/RollbackPlan` — the rollback plan (`description` / `steps[]`
+    // / `testProcedure` …, plus the #14477-retired nested
+    // `steps[].estimatedMinutes`) — leaves whole with the change-management family
+    // under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-05 on #15513,
+    // ruled A: retire the three compliance-shaped families whole; not roadmapped).
+    // It was exported from `@objectstack/spec/system`
+    // (`system/change-management.zod.ts`), mounted by no `stack.zod.ts` key,
+    // registered as no metadata type, absent from the 2026-06 liveness ledgers, and
+    // read by NOTHING: the reader census over every package outside `packages/spec`
+    // (tests and changelogs excluded), over `examples/**` and `skills/**`, and over
+    // objectui at the pinned sha returned zero hits for every one of the family's
+    // exported names, with a lit control on the same pattern. No change-management
+    // engine exists on the platform: nothing routed a change request for approval,
+    // walked its implementation steps, honoured a rollback plan or gated on
+    // `securityImpact.requiresSecurityApproval` / `approval.required` — both of
+    // which read as gates the platform enforced, and neither ever did. An exported
+    // value schema with no consumer reads as a capability (#3950); the generated
+    // reference docs advertised a compliance subsystem that does not exist. No
+    // carrier key, so no `retiredKey()` tombstone and no D2 conversion (none of
+    // these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `change-management-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/RollbackPlan',
+    // #15513 — `system/TrainingCategory` — the 8-value training category enum —
+    // leaves whole with the training family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/training.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No training-management engine exists on the platform: nothing
+    // assigned a course, tracked a completion, sent a reminder or expired a
+    // certification — `mandatory: true`, `trackCompletion: true` and `sendReminders:
+    // true` were declarations nothing ever read. An exported value schema with no
+    // consumer reads as a capability (#3950); the generated reference docs
+    // advertised a compliance subsystem that does not exist. No carrier key, so no
+    // `retiredKey()` tombstone and no D2 conversion (none of these schemas is a
+    // stack collection member — the `kernel/MetadataPluginConfig:additionalTypes`
+    // reasoning): RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `training-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/TrainingCategory',
+    // #15513 — `system/TrainingCompletionStatus` — the 5-value completion status
+    // enum — leaves whole with the training family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/training.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No training-management engine exists on the platform: nothing
+    // assigned a course, tracked a completion, sent a reminder or expired a
+    // certification — `mandatory: true`, `trackCompletion: true` and `sendReminders:
+    // true` were declarations nothing ever read. An exported value schema with no
+    // consumer reads as a capability (#3950); the generated reference docs
+    // advertised a compliance subsystem that does not exist. No carrier key, so no
+    // `retiredKey()` tombstone and no D2 conversion (none of these schemas is a
+    // stack collection member — the `kernel/MetadataPluginConfig:additionalTypes`
+    // reasoning): RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `training-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/TrainingCompletionStatus',
+    // #15513 — `system/TrainingCourse` — a course (`id` / `title` / `category` /
+    // `mandatory` / `targetRoles` / `passingScore` …, plus the #14477-retired
+    // `durationMinutes` / `validityDays`) — leaves whole with the training family
+    // under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-05 on #15513,
+    // ruled A: retire the three compliance-shaped families whole; not roadmapped).
+    // It was exported from `@objectstack/spec/system` (`system/training.zod.ts`),
+    // mounted by no `stack.zod.ts` key, registered as no metadata type, absent from
+    // the 2026-06 liveness ledgers, and read by NOTHING: the reader census over
+    // every package outside `packages/spec` (tests and changelogs excluded), over
+    // `examples/**` and `skills/**`, and over objectui at the pinned sha returned
+    // zero hits for every one of the family's exported names, with a lit control on
+    // the same pattern. No training-management engine exists on the platform:
+    // nothing assigned a course, tracked a completion, sent a reminder or expired a
+    // certification — `mandatory: true`, `trackCompletion: true` and `sendReminders:
+    // true` were declarations nothing ever read. An exported value schema with no
+    // consumer reads as a capability (#3950); the generated reference docs
+    // advertised a compliance subsystem that does not exist. No carrier key, so no
+    // `retiredKey()` tombstone and no D2 conversion (none of these schemas is a
+    // stack collection member — the `kernel/MetadataPluginConfig:additionalTypes`
+    // reasoning): RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `training-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/TrainingCourse',
+    // #15513 — `system/TrainingPlan` — the organisational plan (`courses[]` /
+    // `trackCompletion` / `sendReminders` …, plus the #14477-retired
+    // `recertificationIntervalDays` / `gracePeriodDays` / `reminderDaysBefore`) —
+    // leaves whole with the training family under ADR-0049 enforce-or-remove
+    // (maintainer ruling 2026-09-05 on #15513, ruled A: retire the three
+    // compliance-shaped families whole; not roadmapped). It was exported from
+    // `@objectstack/spec/system` (`system/training.zod.ts`), mounted by no
+    // `stack.zod.ts` key, registered as no metadata type, absent from the 2026-06
+    // liveness ledgers, and read by NOTHING: the reader census over every package
+    // outside `packages/spec` (tests and changelogs excluded), over `examples/**`
+    // and `skills/**`, and over objectui at the pinned sha returned zero hits for
+    // every one of the family's exported names, with a lit control on the same
+    // pattern. No training-management engine exists on the platform: nothing
+    // assigned a course, tracked a completion, sent a reminder or expired a
+    // certification — `mandatory: true`, `trackCompletion: true` and `sendReminders:
+    // true` were declarations nothing ever read. An exported value schema with no
+    // consumer reads as a capability (#3950); the generated reference docs
+    // advertised a compliance subsystem that does not exist. No carrier key, so no
+    // `retiredKey()` tombstone and no D2 conversion (none of these schemas is a
+    // stack collection member — the `kernel/MetadataPluginConfig:additionalTypes`
+    // reasoning): RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry
+    // `training-family-retired` ARE the declaration. The family's #14477
+    // `RETIRED_KEYS_BY_MAJOR[18]` deadline-key entries stay as history — gate (b2)
+    // of build-schemas.ts accepts an entry naming a key the build no longer emits.
+    'system/TrainingPlan',
+    // #15513 — `system/TrainingRecord` — one completion record (`courseId` /
+    // `userId` / `status` / `score` / `completedAt` …) — leaves whole with the
+    // training family under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-05
+    // on #15513, ruled A: retire the three compliance-shaped families whole; not
+    // roadmapped). It was exported from `@objectstack/spec/system`
+    // (`system/training.zod.ts`), mounted by no `stack.zod.ts` key, registered as no
+    // metadata type, absent from the 2026-06 liveness ledgers, and read by NOTHING:
+    // the reader census over every package outside `packages/spec` (tests and
+    // changelogs excluded), over `examples/**` and `skills/**`, and over objectui at
+    // the pinned sha returned zero hits for every one of the family's exported
+    // names, with a lit control on the same pattern. No training-management engine
+    // exists on the platform: nothing assigned a course, tracked a completion, sent
+    // a reminder or expired a certification — `mandatory: true`, `trackCompletion:
+    // true` and `sendReminders: true` were declarations nothing ever read. An
+    // exported value schema with no consumer reads as a capability (#3950); the
+    // generated reference docs advertised a compliance subsystem that does not
+    // exist. No carrier key, so no `retiredKey()` tombstone and no D2 conversion
+    // (none of these schemas is a stack collection member — the
+    // `kernel/MetadataPluginConfig:additionalTypes` reasoning):
+    // RETIRED_DEFS_BY_MAJOR plus the D3 semantic entry `training-family-retired` ARE
+    // the declaration. The family's #14477 `RETIRED_KEYS_BY_MAJOR[18]` deadline-key
+    // entries stay as history — gate (b2) of build-schemas.ts accepts an entry
+    // naming a key the build no longer emits.
+    'system/TrainingRecord',
     // #10485 — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See

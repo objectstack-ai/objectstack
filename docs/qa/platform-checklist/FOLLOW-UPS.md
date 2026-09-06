@@ -183,19 +183,23 @@ governance hole.
 
 | surface | evidence | the deadness, precisely |
 |---|---|---|
-| `PluginSecurityScanner` (`packages/core/src/security/security-scanner.ts`) | zero constructors outside `packages/core/examples/`; not in plugin-loader, service-package, rest, or any CLI path | Exported dead code on the PUBLIC barrel (`packages/core/src/index.ts` re-exports `./security/index.js`). 3 of 5 scan methods are empty stubs; `scanDependencies` has a real loop whose only data source (`addVulnerability`, ``) has zero callers; `updateVulnerabilityDatabase` (``) is a log-only no-op. |
-| `KernelSecurityScanResult` / `KernelSecurityVulnerability` / `PluginSecurityManifest.scanResults` (`packages/spec/src/kernel/plugin-security-advanced.zod.ts,476,625`) | no `.parse`/`.safeParse` site anywhere; only consumer is the dead scanner (type-only import) | 22 rows published to `packages/spec/authorable-surface/kernel.json` with zero authors and zero parsers. The whole `plugin-security-advanced` module has no runtime consumer. |
+| `KernelSecurityScanResult` / `KernelSecurityVulnerability` / `PluginSecurityManifest.scanResults` (`packages/spec/src/kernel/plugin-security-advanced.zod.ts,476,625`) | no `.parse`/`.safeParse` site anywhere; **zero** consumers of any kind since #14919 retired the dead scanner that was the last type-only importer | 22 rows published to `packages/spec/authorable-surface/kernel.json` with zero authors and zero parsers. The whole `plugin-security-advanced` module has no runtime consumer. |
 | `PluginQualityMetrics.securityScan` (`packages/spec/src/kernel/plugin-registry.zod.ts`) | spec self-test only | Nothing reads or writes it at runtime. |
 | Marketplace/incident scan vocab (`marketplace.zod.ts` 'scanning' status, `marketplace-admin.zod.ts,193`, `incident-response.zod.ts` 'malware') | declared-only enum members, no producer in this repo | Cloud/EE surface. Same shape as the `'failed'`/`'expired'` upload statuses #7667 had to close: declared, published, no writer. |
 | MetadataPlugin FS scan + `metadata-fs` boot scan (`packages/metadata/src/plugin.ts,270` — `watch ?? false`; `packages/runtime/src/standalone-stack.ts` hard-off; `metadata-fs` unwired from any `os dev`/`os serve` lane) | unit-pinned in-package only | No reachable fixture from any shipped boot; if a future lane wires `metadata-fs`, the boot-scan/watcher dot-entry divergence is the risk to test first. |
 
-Compounding the first row: `packages/core/PHASE2_IMPLEMENTATION.md` advertises
-the scanner as a working feature, tells readers to import from `@objectstack/core/security`
-(a subpath `packages/core/package.json` does not export), and its sample fields
-(`scanResult.passed`/`.score`/`.summary.critical`) do not exist on the actual schema —
-the example (`examples/phase2-integration.ts`) sits outside every tsconfig and is never
-typechecked. Enforce or remove; if removed, the spec-property-retirement playbook applies
-to the authorable-surface rows.
+The scanner row above was **CLOSED by removal** in #14919 (maintainer ruling,
+director summon #14, decision batch #42): the class, its barrel export, its
+`packages/core/examples/` demonstration and the `PHASE2_IMPLEMENTATION.md` section that
+advertised it are gone, and that section now states plainly that plugin security scanning
+is not a platform capability. Repair was refused by name. Do not re-derive it.
+
+**What SURVIVES that removal, in the same document.** `PHASE2_IMPLEMENTATION.md` sections
+4 and 5 still tell readers to `import … from '@objectstack/core/security'` — a subpath
+`packages/core/package.json` declares in no `exports` entry, so it resolves for no
+consumer of the published package. Deliberately left: the two repairs (declare the
+subpath, or repoint both sections at the root barrel) differ in whether they widen the
+published contract, which is not a lane's call. Filed separately.
 
 ### 7b. Docs drift (PD#10 class — file as docs fixes, not checklist items)
 
@@ -565,7 +569,7 @@ card filed against it*. Recorded, not acted on — the channel question is #1173
 |---|---|---|---|---|
 | E1 | **`metadata.endpoints.items` gates four routes, three of which its declared meaning does not cover** — its `describe()` says "GET /meta/:type — List items of type", and it also gates `GET {prefix}/diagnostics`, `GET {prefix}/_drafts` and the **`POST {prefix}/_migrate-stored` write door**. An operator switching off a listing read silently disarms a migration door and the cross-type spec-validation sweep. `endpoints.item` is milder but the same shape: it also takes `{prefix}/book/:name/tree`. | `packages/rest/src/rest-server.ts#registerMetadataEndpointsInner` (four `endpoints.items` gates, four `endpoints.item` gates) vs `packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema` (one route named per switch) | api-backend.rest-metadata-config-contract (a clause requires the run to ENUMERATE each switch's real radius) | design/docs — filed as #15542 |
 | E2 | **No shipped boot path authors `RestServerConfig` at all.** `os serve` constructs the REST plugin with a fixed config (only `enableProjectScoping` / `projectResolution` are threaded) and the dev plugin calls `createRestApiPlugin()` with none, so `crud` / `metadata` / `batch` / `routes` are reachable only from embedder code (`createRestApiPlugin({ api })`, `createHonoServerPlugin({ restConfig })`). A deployment cannot set `batch.maxBatchSize`, move `crud.dataPrefix`, or opt out of ADR-0106 D8 masking without embedding. | `packages/cli/src/commands/serve.ts` (the fixed construction) · `packages/plugins/plugin-dev/src/dev-plugin.ts` (no config) | the three config items' `knownGaps` — every non-default clause is scored `oracle: test` in a harness, and the run record must say so instead of claiming a reconfigured deployment | capability gap — filed as #15543 |
-| E3 | **The MOUNT half of every sub-config switch is unpinned.** `packages/rest/src/rest-sub-config-parse-not-cast.test.ts` pins what a switch normalizes to, and `rest-batch-size-cap.test.ts` pins the cap's effect; nothing asserts that a `false` switch removes its route from the table `getRoutes()` returns. The declared-not-enforced direction — a switch that normalizes correctly and gates nothing — is exactly what no current test would catch. | the two test files above; the gates live in `registerCrudEndpoints` / `registerBatchEndpoints` / `registerMetadataEndpointsInner` | the three config items (the mount clauses, each with the gap named in `knownGaps`) | test gap — filed as #15544 |
+| E3 | **The MOUNT half of every sub-config switch is unpinned.** `packages/rest/src/rest-sub-config-parse-not-cast.test.ts` pins what a switch normalizes to, and `rest-batch-size-cap.test.ts` pins the cap's effect; nothing asserts that a `false` switch removes its route from the table `getRoutes()` returns. The declared-not-enforced direction — a switch that normalizes correctly and gates nothing — is exactly what no current test would catch. ⚠️ The card said **nine** switches; re-measured on `cc5b3dd0c27` the mount-gating population is **nineteen** — the twelve sub-config switches the card enumerates (its own list adds to twelve, not nine) plus the seven `api.enable*` gates in `registerRoutes`, which are the same seam and were equally unpinned. | the two test files above; the gates live in `registerCrudEndpoints` / `registerBatchEndpoints` / `registerMetadataEndpointsInner` / `registerRoutes` | the three config items (the mount clauses, each with the gap named in `knownGaps`) | test gap — filed as #15544, **closed by `packages/rest/src/rest-config-mount-table.pin.test.ts`**: all nineteen gates pinned as a set difference against the all-true baseline, each with its presence twin. ⚠️ The three config items' `knownGaps` still say the harness is the only observation — stale in the good direction, refresh pending (`areas/api-backend.json` was held by another branch when this landed). |
 
 ### 10c. Checked and CLEAN (so the next sweep does not re-derive)
 

@@ -8,6 +8,7 @@ import {
   printSuccess,
   printWarning,
   printError,
+  printErrorToStderr,
   printInfo,
   printStep,
   createTimer,
@@ -177,11 +178,32 @@ export default class Diff extends Command {
     const beforePath: string | undefined = args.before || flags.before;
     const afterPath: string | undefined = args.after || flags.after;
 
+    // This refusal goes to STDERR, and it is the one write in this file that
+    // has to (#15697).
+    //
+    // It sits ABOVE the first `if (!flags.json)` below, so it is reached with
+    // the face still undecided and fires in BOTH — the text face and the
+    // machine face alike. Measured on the published entry `bin/run.js` with
+    // `NO_COLOR=1` and the streams captured separately, it used to answer
+    // `os diff --json` with **exit 1, 141 bytes of prose on stdout and an empty
+    // stderr**: `JSON.parse(stdout)` threw, on the one stream `--json` reserves
+    // for the machine (`utils/json-stdout.ts`). Both faces measured identically,
+    // because there is no branch here to tell them apart.
+    //
+    // ⚠️ Every other diagnostic in this file stays on stdout deliberately: they
+    // sit INSIDE a `!flags.json` branch, i.e. the command has already decided it
+    // is rendering its text face, which is exactly the case `printError` is for
+    // (see the note on {@link printErrorToStderr}).
+    //
+    // ⛔ Moving the bytes is the whole change. The exit code stays 1, the
+    // wording stays identical, and no payload is invented: what `--json` should
+    // emit on a refusal is an open envelope question (#15549) touching this
+    // command family at once, and settling it is above this fix's authority.
     if (!beforePath || !afterPath) {
-      printError('Two config file paths are required.');
-      console.log('');
-      console.log(chalk.dim('  Usage: objectstack diff <before> <after>'));
-      console.log(chalk.dim('     or: objectstack diff --before path1 --after path2'));
+      printErrorToStderr('Two config file paths are required.');
+      console.error('');
+      console.error(chalk.dim('  Usage: objectstack diff <before> <after>'));
+      console.error(chalk.dim('     or: objectstack diff --before path1 --after path2'));
       process.exit(1);
     }
 

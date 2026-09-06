@@ -127,6 +127,38 @@ export interface IRealtimeService {
     handleUpgrade?(request: Request): Promise<Response>;
 
     /**
+     * The path clients connect to for this service's **mounted** channel, or
+     * `undefined`/absent when nothing is mounted.
+     *
+     * [#14646] This is the producer half of the one definition of a
+     * subscribable channel (`isSubscribableChannel`, `@objectstack/spec/api`):
+     * discovery advertises `services.realtime` — `route`, `handlerReady`,
+     * `enabled` — and `capabilities.websockets` from this one answer, because
+     * no open-core producer mounts a realtime transport and therefore neither
+     * discovery builder can supply the route out of its own route table. Only
+     * an implementation that really serves a transport knows where a host put
+     * it.
+     *
+     * Deliberately about the *channel*, not about a handshake: SSE mounts a
+     * plain GET and never upgrades, so gating on {@link handleUpgrade} would
+     * have refused a legitimate transport.
+     *
+     * ⛔ Return a route ONLY when requests to it are actually served. A route
+     * named here is advertised verbatim, so naming an unserved one re-creates
+     * the `declared ≠ enforced` gap ADR-0076 D12 exists to close — the same
+     * defect, one layer up, that made discovery advertise a realtime service
+     * with no surface in the first place.
+     *
+     * Not implemented by `@objectstack/service-realtime`: it is an in-process
+     * pub/sub bus with no wire surface (maintainer ruling A, 2026-09-04 —
+     * realtime stays out of open core), so on a stock boot discovery reports
+     * `enabled: false` and there is nothing to subscribe to.
+     *
+     * @returns the mounted channel path (e.g. `/api/v1/realtime`), or `undefined`
+     */
+    getChannelRoute?(): string | undefined;
+
+    /**
      * Subscribe to metadata events (convenience method)
      * @param filter - Subscription filter
      * @param handler - Event handler function

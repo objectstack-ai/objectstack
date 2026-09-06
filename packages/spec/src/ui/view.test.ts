@@ -264,18 +264,26 @@ describe('GanttConfigSchema', () => {
     expect(GanttConfigSchema.parse(config)).toMatchObject({ parentField: 'parent_id', typeField: 'row_type' });
   });
 
-  it('should passthrough unknown renderer fields ahead of this schema', () => {
+  it('declares the members plugin-gantt used to read through `.passthrough()` — and refuses an undeclared one (#15469)', () => {
     const config = {
       startDateField: 'start_date',
       endDateField: 'end_date',
       titleField: 'name',
-      // Newer renderer knobs not yet declared here (e.g. objectui plugin-gantt).
+      // Formerly renderer-ahead knobs, now declared (objectui `GanttConfigExtensionFields`).
       lockField: 'is_locked',
       defaultCollapsedDepth: 2,
     };
 
     expect(() => GanttConfigSchema.parse(config)).not.toThrow();
     expect(GanttConfigSchema.parse(config)).toMatchObject({ lockField: 'is_locked', defaultCollapsedDepth: 2 });
+    // The window is closed: a key no renderer reads is refused BY NAME, on the
+    // named surface — the same error calendar / timeline / map already give.
+    const r = GanttConfigSchema.safeParse({ ...config, someRendererAheadKnob: true });
+    expect(r.success).toBe(false);
+    const issues = JSON.stringify(r.error?.issues);
+    expect(issues).toContain('unrecognized_keys');
+    expect(issues).toContain('someRendererAheadKnob');
+    expect(issues).toContain('this gantt configuration');
   });
 
   // #9463 — `viewMode`, the spec half of objectui#5074's ruled both-branches
@@ -311,8 +319,8 @@ describe('GanttConfigSchema', () => {
     it('refuses an out-of-vocabulary granularity, naming the members', () => {
       // 'hour' is a real granularity on the TIMELINE block's `scale` but not
       // in the gantt renderer's VIEW_MODES — exactly the near-miss an author
-      // would try. Declared-key values are judged even inside this
-      // deliberately-passthrough parent.
+      // would try. Declared-key values are judged by their own schema (and
+      // since #15469 the parent refuses undeclared keys as well).
       const r = GanttConfigSchema.safeParse({ ...base, viewMode: 'hour' });
       expect(r.success).toBe(false);
       const issues = JSON.stringify(r.error?.issues);

@@ -1062,6 +1062,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.readonly-insert.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.record-not-found.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2127,6 +2132,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/business-unit-member-org-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/business-unit-member-org-screen.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/decision-strand-envelope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2163,6 +2178,26 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/record-reader-visibility.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/restored-approval-continuation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/restored-approval-continuation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/subflow-hosted-approval-strand.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/subflow-hosted-approval-strand.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2552,6 +2587,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/engine-find-bare-array.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/explain-engine.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2818,6 +2863,16 @@
     },
     {
       "file": "packages/plugins/plugin-sharing/src/federated-phantom-owner-scoping.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/field-recipient.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3138,6 +3193,21 @@
     },
     {
       "file": "packages/runtime/src/domains/meta-save-destructive-remedy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/domains/packages-seed-apply-org-scope.test.ts",
       "verb": "update",
       "pinned": 1
     },

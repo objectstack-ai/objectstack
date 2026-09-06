@@ -219,6 +219,145 @@ export const SCAFFOLD_ALLOWED_PEER_VERSIONS: Record<string, string> = {
  */
 export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 
+// ─── Shared emission policy ──────────────────────────────────────────
+//
+// The third-party ranges and the `tsconfig.json` an emitted project carries,
+// declared ONCE for both scaffolders in this package.
+//
+// ## Why these are constants and not literals in each template
+//
+// Restating them is the defect. Measured on the tree, the TypeScript range a
+// scaffolded project installs was written in SIX places across three
+// scaffolders and had split into THREE values:
+//
+//   os init             `^5.3.0`   (three write points in this file)
+//   os create           `^5.8.0`   (two write points in create.ts)
+//   create-objectstack  `^6.0.0`   (its bundled template's package.json)
+//
+// The split is not recent and nobody caused it deliberately. Read off `git
+// log -G` over the three files, as of 2026-09-05:
+//
+//   338e68d2564  2026-02-07  `^5.3.0` and `^5.8.0` written in the SAME commit
+//                            — 210 days apart and counting
+//   dbb54e12f0c  2026-05-25  the bundled template lands, also at `^5.3.0`
+//                            — so this is still a TWO-value tree
+//   eaff01425b7  2026-07-14  that template's line moves `^5.3.0` → `^6.0.0`
+//                            — the third value, 53 days old
+//
+// ⚠️ And the move that made the third value recorded no reasoning about
+// TypeScript at all. #2907's commit message documents the `@objectstack/*`
+// version sync and nothing else, and in that same one-file diff the five
+// `@objectstack/*` ranges move `^6.0.0` → `^14.0.0` while the `typescript`
+// line moves ONTO the `^6.0.0` those lines are vacating. Whatever the intent
+// was, no statement of it exists — which is the point: an unrecorded value is
+// what a restatement decays into, and it decayed on the value that decides
+// whether a new project type-checks at all.
+//
+// The control for that reading is in this same file: `SCAFFOLD_PNPM_RANGE`
+// and `renderPnpmWorkspaceYaml()` are IMPORTED by the other scaffolder rather
+// than restated, and they have not drifted across any of the five emissions.
+// Same files, same authors, same window — the restated values split, the
+// imported ones did not. That is the whole argument for this block.
+//
+// ## The surviving values, and why they are these
+//
+// `^5.3.0` over `^5.8.0`: **`TypeScript 5.3+` is already a recorded decision**
+// on two live doc pages — `content/docs/getting-started/index.mdx` ("ObjectStack
+// works with TypeScript 5.3+, but the project itself is built and tested
+// against TypeScript 6.x") and `content/docs/deployment/troubleshooting.mdx`
+// ("TypeScript 5.3.0 or later for full type inference support"). `^5.8.0`
+// matches no statement anywhere. It is also the value three of the five
+// emissions already carried, and it is measured rather than assumed: TypeScript
+// 5.3.3 type-checks every shape these two commands emit with results identical
+// to 6.0.3 (measured against this repo's own `@objectstack/spec` build, on the
+// `skipLibCheck` configuration the scaffold actually emits).
+//
+// `^4.0.0` over `^4.0.18`: no recorded decision exists for either, both were
+// written in the same 2026-02-07 commit, and `^4.0.18` claims a PATCH-level
+// floor nothing justifies while being strictly the narrower of the two.
+//
+// ⚠️ Neither choice changes what a scaffolded project INSTALLS. Measured
+// against the registry: `^5.3.0` and `^5.8.0` both resolve to typescript
+// 5.9.3, and `^4.0.0` and `^4.0.18` both resolve to vitest 4.1.11. What
+// changes is the floor each project DECLARES — and a floor is a support
+// promise, so the one that survives is the one the docs already make.
+//
+// ⛔ `create-objectstack`'s `^6.0.0` is deliberately NOT unified here. That
+// package cannot import from `@objectstack/cli`: the dependency edge already
+// runs the other way (`create-objectstack` is a `workspace:*` dependency of
+// this package, and this file imports its `created-summary` renderer), so a
+// reverse import is a cycle — and it publishes as a two-dependency `npx`
+// package that must not pull the CLI's ~50-package closure. Its emission is
+// also a committed template file copied byte-for-byte, with no renderer to
+// route through a constant. Unifying it would move a scaffolded project from
+// TypeScript 6.0.3 to 5.9.3, which is a user-visible change and a support
+// decision, not a refactor.
+
+/** The TypeScript range every scaffolded project declares. */
+export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';
+
+/** The vitest range a scaffolded project declares when its template tests. */
+export const SCAFFOLD_VITEST_RANGE = '^4.0.0';
+
+/** The `@types/node` range a scaffolded project declares. */
+export const SCAFFOLD_TYPES_NODE_RANGE = '^22.0.0';
+
+/** The `tsx` range a scaffolded project declares when its scripts need it. */
+export const SCAFFOLD_TSX_RANGE = '^4.21.0';
+
+/** The zod range a scaffolded project declares when it authors schemas. */
+export const SCAFFOLD_ZOD_RANGE = '^4.3.6';
+
+/**
+ * The compiler options every STANDALONE scaffold carries in full, because it
+ * extends nothing.
+ *
+ * `bundler` is what resolves the `exports` subpaths (`@objectstack/spec/data`,
+ * `/contracts`, `/kernel`) the templates import; two scaffolders that disagree
+ * about `moduleResolution` is a support question nobody can answer. The
+ * `--in-repo` placement of `os create` does NOT use these — it inherits its
+ * module semantics from the repo config it extends.
+ */
+export const SCAFFOLD_TSCONFIG_COMPILER_OPTIONS = {
+  target: 'ES2022',
+  module: 'ESNext',
+  moduleResolution: 'bundler',
+  strict: true,
+  esModuleInterop: true,
+  skipLibCheck: true,
+} as const;
+
+/**
+ * Render the `tsconfig.json` a standalone scaffold receives.
+ *
+ * `rootDir` and `include` are the only things the emitted shapes differ on:
+ * `os create plugin` compiles `src/` alone, while `os init`'s three templates
+ * and `os create example` also compile the `objectstack.config.ts` at the
+ * project root. Measured before this renderer existed, four of the five
+ * emitted `tsconfig.json` files were already byte-identical and the fifth
+ * differed only in those two keys — so nothing here is a new decision.
+ */
+export function renderScaffoldTsconfig(
+  options: { rootDir: string; include: string[] },
+): Record<string, unknown> {
+  return {
+    compilerOptions: {
+      ...SCAFFOLD_TSCONFIG_COMPILER_OPTIONS,
+      outDir: 'dist',
+      rootDir: options.rootDir,
+      declaration: true,
+    },
+    include: options.include,
+    exclude: ['dist', 'node_modules'],
+  };
+}
+
+/** `include` for a scaffold whose root `objectstack.config.ts` is compiled too. */
+export const SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG = ['*.ts', 'src/**/*'];
+
+/** `include` for a scaffold that compiles `src/` alone. */
+export const SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY = ['src/**/*'];
+
 /**
  * Render the `package.json` written into a freshly scaffolded project.
  *
@@ -381,7 +520,7 @@ export const TEMPLATES: Record<string, {
     get devDependencies() {
       return {
         '@objectstack/cli': pkgVersion(),
-        'typescript': '^5.3.0',
+        'typescript': SCAFFOLD_TYPESCRIPT_RANGE,
       };
     },
     scripts: {
@@ -471,8 +610,8 @@ export default ${toCamelCase(namespace)}Item;
     get devDependencies() {
       return {
         '@objectstack/cli': pkgVersion(),
-        'typescript': '^5.3.0',
-        'vitest': '^4.0.18',
+        'typescript': SCAFFOLD_TYPESCRIPT_RANGE,
+        'vitest': SCAFFOLD_VITEST_RANGE,
       };
     },
     scripts: {
@@ -545,7 +684,7 @@ export default ${toCamelCase(namespace)}Item;
     get devDependencies() {
       return {
         '@objectstack/cli': pkgVersion(),
-        'typescript': '^5.3.0',
+        'typescript': SCAFFOLD_TYPESCRIPT_RANGE,
       };
     },
     scripts: {
@@ -677,12 +816,33 @@ export function detectPackageManager(env: NodeJS.ProcessEnv = process.env): 'npm
 }
 
 /**
+ * npm's hard ceiling on a package name, the scope included.
+ *
+ * Exported because `os create` does NOT validate the same string this file
+ * does: it composes its argument into a scoped name
+ * (`@objectstack/plugin-<name>`) and has to measure the COMPOSED string
+ * against this limit. Restating the number over there is exactly how the two
+ * scaffolders came to disagree in the first place.
+ */
+export const NPM_PACKAGE_NAME_MAX_LENGTH = 214;
+
+/**
  * Validate that `name` is a usable npm package name AND a safe directory
  * segment. Mirrors the subset of rules used by `npm init`/`create-vite`.
+ *
+ * Exported for `os create`, which took none of this and therefore accepted
+ * names npm refuses — `os create plugin "My App"` wrote `./plugin-My App/`
+ * carrying `name: "@objectstack/plugin-My App"`, while `os init "My App"`
+ * refused the same input before touching the disk. The rule set is shared
+ * rather than copied so a rule added here reaches both scaffolders; the one
+ * check `create` needs and `init` cannot (the length of the composed scoped
+ * name) lives next to the composition, in `create.ts`.
  */
-function validateProjectName(name: string): string | null {
+export function validateProjectName(name: string): string | null {
   if (!name) return 'Project name is required';
-  if (name.length > 214) return 'Project name must be ≤ 214 characters';
+  if (name.length > NPM_PACKAGE_NAME_MAX_LENGTH) {
+    return `Project name must be ≤ ${NPM_PACKAGE_NAME_MAX_LENGTH} characters`;
+  }
   if (/[A-Z]/.test(name)) return 'Project name must be lowercase';
   if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) {
     return 'Project name must start with a lowercase letter or digit and contain only [a-z0-9._-]';
@@ -835,21 +995,12 @@ export default class Init extends Command {
       // 3. Create tsconfig.json if missing
       const tsconfigPath = path.join(targetDir, 'tsconfig.json');
       if (!fs.existsSync(tsconfigPath)) {
-        const tsconfig = {
-          compilerOptions: {
-            target: 'ES2022',
-            module: 'ESNext',
-            moduleResolution: 'bundler',
-            strict: true,
-            esModuleInterop: true,
-            skipLibCheck: true,
-            outDir: 'dist',
-            rootDir: '.',
-            declaration: true,
-          },
-          include: ['*.ts', 'src/**/*'],
-          exclude: ['dist', 'node_modules'],
-        };
+        // The shared emission policy, not a second copy of it — every option
+        // below used to be restated here and again in `create.ts`.
+        const tsconfig = renderScaffoldTsconfig({
+          rootDir: '.',
+          include: SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
+        });
         fs.writeFileSync(tsconfigPath, JSON.stringify(tsconfig, null, 2) + '\n');
       }
 

@@ -138,7 +138,12 @@ import {
 // namespace exemption — the ONE reading both narrowed gates consult.
 import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
 import { resolveTenancyPosture } from '@objectstack/types';
-import { normalizeTenancyPosture, type TenancyPosture } from '@objectstack/spec/security';
+import {
+  normalizeTenancyPosture,
+  TenantLayer0VerdictSchema,
+  type TenancyPosture,
+  type TenantLayer0Verdict,
+} from '@objectstack/spec/security';
 
 /**
  * Per-row outcome of {@link ObjectQL.insertMany} (framework#3172). One entry
@@ -193,7 +198,7 @@ import { deriveViewContainerObject } from '@objectstack/metadata/view-container'
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
-import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -1873,6 +1878,29 @@ export interface OperationContext {
   options?: any;
   context?: ExecutionContext;
   result?: any;
+  /**
+   * [#15813 / ADR-0131 D8] What the Layer 0 tenant wall DECIDED for this
+   * operation — recorded by the enforcement layer (`@objectstack/plugin-security`)
+   * at the moment it composes the wall onto the operation's predicate, and
+   * read by the bulk data-event producer ({@link ObjectQL.publishBulkDataEvent})
+   * to stamp `BulkDataEvent.organizationId`.
+   *
+   * The seam ruled on #15706: the wall is computed ONCE, where every input is
+   * visible (the posture in force, the caller's organization scope, the
+   * object's tenancy clauses AND the deployment's #12699 carve-out, which no
+   * schema carries), and its decision travels here as a value. A reader
+   * answers from this member ALONE and re-derives nothing — a re-derivation
+   * is a mirror of the wall, and a mirror structurally sees only the clauses
+   * it was taught (the #15706 mislabel).
+   *
+   * Three states, all honest: ABSENT — no wall was composed on this
+   * operation (a system context, no enforcement layer mounted, a by-id write
+   * with no predicate); `{ kind: 'none' }` — the wall ran and contributed no
+   * predicate; a named verdict (`organization` / `organizations` / `deny`).
+   * The shape is `TenantLayer0VerdictSchema` (`@objectstack/spec/security`);
+   * a value that does not parse reads as absent, never as an organization.
+   */
+  tenantLayer0Verdict?: TenantLayer0Verdict;
 }
 
 /**
@@ -2239,16 +2267,102 @@ function eventOrganizationId(objectSchema: unknown, row: unknown): string | unde
   if (!tenantField) return undefined;
   const body = eventRecordBody(row);
   if (!body) return undefined;
-  const value = body[tenantField];
-  // The write path's own "actually supplied" predicate, so producer and
-  // consumer cannot disagree about what counts as an organization.
+  return eventOrganizationValue(body[tenantField]);
+}
+
+/**
+ * The ONE coercion an organization value goes through before it becomes an
+ * event's `organizationId` — shared by the per-record producer
+ * ({@link eventOrganizationId}, which reads the row's column) and the bulk
+ * producer ({@link bulkEventOrganizationId}, which reads the wall's RECORDED
+ * verdict off the operation context, #15813), so the two cannot disagree
+ * about what counts as an organization (#15225: one ladder, two readers —
+ * never two ladders).
+ *
+ * First the write path's own "actually supplied" predicate
+ * ({@link carriesOrganization}), so producer and consumer cannot disagree
+ * about what counts as an organization. Then the same coercion ladder
+ * `eventRecordId` uses for the other id on these events. Deliberately NOT a
+ * bare `String(value)`: `String(false)` is a perfectly valid `min(1)` string,
+ * and inventing an organization out of a malformed value is the "never
+ * fabricated" clause's exact failure mode. `undefined` means "omit the key".
+ */
+function eventOrganizationValue(value: unknown): string | undefined {
   if (!carriesOrganization(value)) return undefined;
-  // Then the same coercion ladder `eventRecordId` uses for the other id on
-  // this event. Deliberately NOT a bare `String(value)`: `String(false)` is a
-  // perfectly valid `min(1)` string, and inventing an organization out of a
-  // malformed column is the "never fabricated" clause's exact failure mode.
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return undefined;
+}
+
+/**
+ * `BulkDataEvent.organizationId` — the ONE organization the tenant wall named
+ * for a predicate write, or `undefined` when the producer cannot assert one
+ * (#15225, the bulk half of the cross-tenant fan-out leak whose single-record
+ * half is {@link eventOrganizationId}).
+ *
+ * ⚠️ NOT the per-record helper's question. That one reads a ROW's column;
+ * a predicate write has no row in hand — `updateMany`/`deleteMany` resolve a
+ * count — so "which organization" is answered from the WALL the write was
+ * composed under, and `absent` means something different on this event:
+ * "the producer did not assert one organization for the batch" (a statement
+ * about producer knowledge), never "belongs to no organization" (a statement
+ * about a row). `packages/spec/src/api/events.zod.ts` records the divergence
+ * on the member itself.
+ *
+ * **What is read: the wall's RECORDED verdict, and nothing else** (#15813,
+ * the seam ruled on #15706 — option (i), ADR-0131 D8 「一道谓词，算一次」).
+ * The security layer AND-composes its Layer 0 tenant wall (ADR-0095 D1,
+ * `tenant-layer.ts`) onto the caller's predicate before the driver, and at
+ * that moment records what it decided on the operation context
+ * ({@link OperationContext.tenantLayer0Verdict}). Under `isolated` the wall
+ * is `organization_id = <one organization>`, under `group` it is
+ * `organization_id IN <membership set>` (ADR-0105 D2), and Layer 1 cannot
+ * widen it — so when the recorded verdict names exactly one organization,
+ * every affected row belongs to it, and this producer says so.
+ *
+ * **What is deliberately NOT read.** The first edition of this producer
+ * re-derived the wall here — from the enforced posture, the execution
+ * context's `tenantId` / `accessible_org_ids` / `posture` rung, and the
+ * object schema's tenancy clauses. It could not see the third clause
+ * plugin-security folds into `tenancyDisabled` — the deployment-declared
+ * `platformGlobalObjects` carve-out (#12699), which no schema carries — and
+ * stamped the caller's organization onto a batch Layer 0 had never
+ * constrained: a WRONG key, the #13566 leak shape. The ruling's acceptance
+ * criterion, verbatim: the verdict recorded must be what the wall decided,
+ * not a re-statement of its inputs; if the recorded value can be derived by
+ * the reader from anything else on the context, the mirror has not been
+ * deleted — it has been moved. So this function reads the verdict ALONE:
+ *
+ *  - `organization` ⇒ that organization;
+ *  - `organizations` naming exactly one (the set is deduplicated at the
+ *    source and the schema refuses duplicates) ⇒ that organization; two or
+ *    more ⇒ absent (⛔ never `tenantId` standing in for a multi-membership
+ *    sweep — the option-C mislabel PR #14635's open question 1 rejected);
+ *  - `none` (the wall ran and contributed nothing: `single` posture, a
+ *    non-tenant or deployment-exempted object, an exempt `PLATFORM_ADMIN`)
+ *    and `deny` (the fail-closed sentinel) ⇒ absent;
+ *  - NO recorded verdict (a system context exits the middleware first; no
+ *    enforcement layer is mounted; the plugin recorded nothing) ⇒ absent —
+ *    nothing composed a wall, so there is nothing to vouch for;
+ *  - a value that does not parse as a verdict ⇒ absent. Junk never reads as
+ *    an organization: an absent key under-delivers (a tenant-scoped consumer
+ *    declines to fan out), a wrong key delivers a cross-organization batch
+ *    inside the wrong wall.
+ *
+ * The organization value then goes through the ONE coercion ladder the
+ * per-record producer uses ({@link eventOrganizationValue}) — one ladder, two
+ * readers, never two ladders — and the caller OMITS the key on `undefined`:
+ * omission is the schema's one spelling for absence (`''` is refused, an
+ * explicit `undefined` survives `parse` as a present key).
+ */
+function bulkEventOrganizationId(recordedVerdict: unknown): string | undefined {
+  const parsed = TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+  if (!parsed.success) return undefined;
+  const verdict = parsed.data;
+  if (verdict.kind === 'organization') return eventOrganizationValue(verdict.organizationId);
+  if (verdict.kind === 'organizations' && verdict.organizationIds.length === 1) {
+    return eventOrganizationValue(verdict.organizationIds[0]);
+  }
   return undefined;
 }
 
@@ -5860,6 +5974,15 @@ export class ObjectQL implements IObjectQLEngine {
    * internals to whatever external URL a webhook points at. See
    * `BulkDataEventSchema`'s TSDoc for the full reasoning.
    *
+   * [#15225 / #15813] `organizationId` — the ONE organization the tenant
+   * wall named for this batch, read off the Layer 0 verdict the enforcement
+   * layer RECORDED on the operation context ({@link OperationContext.tenantLayer0Verdict})
+   * — ⛔ no second query on the publish path, and ⛔ no re-derivation of the
+   * wall from posture, context or schema (the #15706 mirror) — and OMITTED
+   * whenever the producer cannot assert one. See {@link bulkEventOrganizationId}
+   * for what is read, what is deliberately not, and for why `absent` here
+   * means "not asserted", not the per-record "belongs to no organization".
+   *
    * Same two disciplines as the per-record twin: validate before publish, and
    * never throw — a realtime transport problem must not roll back a committed
    * write.
@@ -5867,7 +5990,7 @@ export class ObjectQL implements IObjectQLEngine {
   private async publishBulkDataEvent(
     action: 'updated' | 'deleted',
     object: string,
-    input: { matched: unknown; context?: ExecutionContext },
+    input: { matched: unknown; context?: ExecutionContext; tenantLayer0Verdict?: unknown },
   ): Promise<void> {
     if (!this.realtimeService) return;
 
@@ -5896,10 +6019,17 @@ export class ObjectQL implements IObjectQLEngine {
     try {
       const timestamp = new Date().toISOString();
       const userId = eventUserId(input.context);
+      // [#15225 / #15813] The organization the WALL named for the whole batch
+      // — read off the verdict the wall RECORDED on the operation, never off
+      // a row (there is none), never the context, never the posture (the
+      // mirror #15706 deleted). Omitted, never `''`/`undefined`, because
+      // absence has exactly one spelling in the schema.
+      const organizationId = bulkEventOrganizationId(input.tenantLayer0Verdict);
       const event: BulkDataEvent = BulkDataEventSchema.parse({
         id: generateEventUuid(),
         type: `data.records.${action}`,
         object,
+        ...(organizationId !== undefined ? { organizationId } : {}),
         matched,
         ...(userId !== undefined ? { userId } : {}),
         timestamp,
@@ -6014,7 +6144,9 @@ export class ObjectQL implements IObjectQLEngine {
    *   written by hooks and middleware, not by the request, and re-validating
    *   them here would turn a platform stamp into a caller-facing rejection.
    * - **Non-system writes only**, like every other write-path guard in this
-   *   engine (`stripReadonlyFields`, `stripReadonlyForInsert`). Seed replay,
+   *   engine (`stripReadonlyFields` — which since #14147 runs on the create
+   *   path as well as the update one — and `stripRuntimeOwnedFields`). Seed
+   *   replay,
    *   package install and boot-time provisioning legitimately write rows in an
    *   order that resolves only once the batch completes; failing them closed
    *   would turn an ordering detail into a boot failure. This leaves a real
@@ -6058,8 +6190,9 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // This check answers for exactly one thing: "the reference the CALLER
       // named". `stripReadonlyFields` removes a non-system caller's value from
-      // a readonly field before the write, and the create ingress does the same
-      // (`stripReadonlyForInsert`, #3043). So a value still sitting in one at
+      // a readonly field before the write — on BOTH write paths since #14147
+      // moved the create-side strip into this engine and deleted the boundary
+      // copy it used to live in. So a value still sitting in one at
       // this point was minted by the PLATFORM — outside this check's own stated
       // scope, whatever it happens to hold. That argument stands on its own and
       // depends on no particular field: deleting the `continue` would start
@@ -9611,21 +9744,28 @@ export class ObjectQL implements IObjectQLEngine {
    * (no number-range gaps from a rejected batch).
    */
   // [#3407 / #5126] BOTH members of `WriteObservabilityOptions` are live here,
-  // for exactly ONE strip: the runtime-owned (`autonumber`) strip added by
-  // #5503, wired at its strip site below. Each arrived carrying the same
+  // for TWO strips that share one report site (`insertDropped`, below): the
+  // runtime-owned (`autonumber`) strip added by #5503, and — since the
+  // maintainer ruling of 2026-09-03 (option C, #14147) — the AUTHOR-declared
+  // static-`readonly` strip, the same `stripReadonlyFields` the update path
+  // runs, under the same `isSystem` gate. Each member arrived carrying the same
   // standing condition — #3407's "if insert ever gains a silent strip, wire the
   // listener at that strip site", #5126's "it is inert here only because insert
   // strips nothing; if insert ever gains a strip, both members wire up together
-  // at that site". #5503 is that strip, so both are discharged together:
-  // quiet-and-observable by default (`onFieldsDropped`), refused outright under
-  // `strictReadonlyWrites` — the same one-per-call choice update offers.
+  // at that site". #5503 was the first such strip and #14147 the second; both
+  // discharge through the one site: quiet-and-observable by default
+  // (`onFieldsDropped`), refused outright under `strictReadonlyWrites` — the
+  // same one-per-call choice update offers.
   //
-  // INSERT remains deliberately exempt from the AUTHOR-declared
-  // readonly/readonlyWhen strips (a create may legitimately seed read-only
-  // columns; the #3043 ingress strip covers external callers instead), and the
-  // FLS write gate throws rather than stripping. So neither member reports on
-  // those here — only on what this path actually strips. Any FURTHER strip added
-  // here must wire both members at its own site too.
+  // What INSERT still does NOT strip: `readonlyWhen` (a conditional lock has no
+  // prior record to evaluate on a create — the update-path note below says
+  // "INSERT stays exempt" for exactly that strip), and the FLS write gate throws
+  // rather than stripping. So neither member reports on those here — only on
+  // what this path actually strips. The 2026-07-24 row "INSERT (all callers)
+  // exempt" this note used to rest on is SUPERSEDED, and the metadata-protocol
+  // ingress copy it pointed external callers at is deleted: there is one
+  // create-side enforcement point, and it is this one. Any FURTHER strip added
+  // here must feed `insertDropped` (or wire both members at its own site) too.
   /**
    * Validate-only (#6037, #4633 ruling D) — run the write path's own verdict
    * over candidate rows and report it, WITHOUT persisting anything.
@@ -10179,7 +10319,7 @@ export class ObjectQL implements IObjectQLEngine {
         // hook that RE-ISSUES the record number lost its write to any caller
         // that had also submitted the key, while the same hook's write survived
         // on a caller that had not. The update path's twin (#5591).
-        const autonumberDropped: string[] = [];
+        const insertDropped: string[] = [];
         if (!opCtx.context?.isSystem) {
           const preserveAudit = opCtx.context?.preserveAudit === true;
           for (let i = 0; i < rows.length; i++) {
@@ -10207,10 +10347,95 @@ export class ObjectQL implements IObjectQLEngine {
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
-              if (!(k in stripped) && !autonumberDropped.includes(k)) autonumberDropped.push(k);
+              if (!(k in stripped) && !insertDropped.includes(k)) insertDropped.push(k);
             }
             rows[i] = stripped;
             rowHookContexts[i].input.data = stripped;
+          }
+          // [#14147] STATIC author-declared `readonly`, enforced HERE — one
+          // semantics, one enforcement point, per the maintainer ruling of
+          // 2026-09-03 (option C) which SUPERSEDED the 2026-07-24 row "INSERT
+          // (all callers) exempt". Until it landed, a non-system caller
+          // reaching `engine.insert` DIRECTLY wrote a read-only column with no
+          // refusal, no WARN and no `onFieldsDropped` event, while the very
+          // same payload through the DataProtocol was stripped — and
+          // `create_record`'s listener (`@objectstack/service-automation`) was
+          // wired for a readonly drop it could never receive. The boundary copy
+          // that produced that asymmetry (`stripReadonlyForInsert`,
+          // metadata-protocol) is DELETED in the same change rather than kept
+          // as a second implementation.
+          //
+          // The strip is {@link stripReadonlyFields} — the SAME function
+          // `update` runs, under the SAME `isSystem` gate (the branch above),
+          // reporting through the SAME channels: `readonlyStripWarning` at
+          // `warn`, `onFieldsDropped` under reason `readonly`, and
+          // `strictReadonlyWrites` refusing before any driver dispatch. Its
+          // guards therefore come across too, and they are wider than the
+          // deleted ingress copy's: a hook stamp is not caller-supplied
+          // (`suppliedPerRow`), and a key a `beforeInsert` hook ASSIGNED is the
+          // hook's write, not a forgery (`rowHookWrittenKeys`, #14259). The
+          // ingress copy ran BEFORE the hooks and could judge neither.
+          //
+          // ⛔ `preserveAudit` is deliberately NOT forwarded — see
+          // {@link preserveAuditIgnoredOnInsertWarning}: the 2026-08-08 ruling
+          // narrowed that exemption to the UPDATE path and left `isSystem` as
+          // the create side's only one. Ruling C moved WHERE this strip runs;
+          // it did not widen WHAT exempts it.
+          //
+          // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
+          // (runtime-owned types belong to the pass above, platform objects to
+          // their own 403 guards); `null` — no such field on this object — is
+          // the cheap exit every ordinary insert takes.
+          const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
+          if (readonlySubject) {
+            const preserveAuditIgnored: string[] = [];
+            for (let i = 0; i < rows.length; i++) {
+              if (rowErrors[i] !== undefined) continue;
+              const stripped = stripReadonlyFields(
+                readonlySubject as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+                {
+                  strictReadonlyWrites: options?.strictReadonlyWrites === true,
+                  hookWrittenKeys: rowHookWrittenKeys[i],
+                  verb: 'insert',
+                },
+              ) as Record<string, unknown>;
+              if (stripped === rows[i]) continue;
+              const takenFromRow: string[] = [];
+              for (const k of Object.keys(rows[i])) {
+                if (k in stripped) continue;
+                takenFromRow.push(k);
+                if (!insertDropped.includes(k)) insertDropped.push(k);
+                if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
+              }
+              // The field's `defaultValue` is RE-DERIVED for every key this
+              // pass took, which is #3043's stated contract and a guarantee in
+              // its own right: a forged `approval_status` becomes `draft` — the
+              // enforced initial state — never NULL, so a stripped forgery
+              // cannot leave a row in a state the object's own rules
+              // (`requiredWhen`, the state machine) were written to exclude.
+              // The deleted ingress copy got this for free by running BEFORE
+              // `applyFieldDefaults`; a strip that runs after the hooks has to
+              // ask. Asked over the STRIPPED row, so a `defaultValue`
+              // expression reads the payload it will really be stored beside,
+              // and copied back key by key: `applyFieldDefaults` also fills
+              // every OTHER absent field, and a hook that deliberately wrote
+              // `null` must keep its null (the first defaults pass, ahead of
+              // the hooks, is the one that owns those keys).
+              if (takenFromRow.length > 0) {
+                const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+                for (const k of takenFromRow) {
+                  if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+                }
+              }
+              rows[i] = stripped;
+              rowHookContexts[i].input.data = stripped;
+            }
+            // One line per CALL, not per row, and only when the exemption was
+            // ASKED FOR and something was actually removed — the union is
+            // faithful because the strip is schema-uniform.
+            if (preserveAuditIgnored.length > 0) {
+              this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
+            }
           }
         }
         // [#3407 / #5126] This is the strip site both standing notes on
@@ -10226,14 +10451,14 @@ export class ObjectQL implements IObjectQLEngine {
         // an implicitly read-only field is dropped for exactly the reason a
         // declared one is, and inventing a parallel reason code would fork the
         // vocabulary (`packages/spec`) for a distinction no consumer acts on.
-        if (autonumberDropped.length > 0) {
-          const drop: DroppedFieldsEvent = { object, fields: autonumberDropped, reason: 'readonly' };
+        if (insertDropped.length > 0) {
+          const drop: DroppedFieldsEvent = { object, fields: insertDropped, reason: 'readonly' };
           if (options?.strictReadonlyWrites === true) {
             // Before the driver write and before validation — nothing is
             // written, and "you sent a runtime-owned field" should not depend on
             // whether some other field also failed a business rule (#5126's
             // ordering on the update path, mirrored).
-            throw new ReadonlyFieldRejectedError(object, autonumberDropped, [drop], 'insert');
+            throw new ReadonlyFieldRejectedError(object, insertDropped, [drop], 'insert');
           }
           if (typeof options?.onFieldsDropped === 'function') {
             // Under strict the listener deliberately does NOT fire (above):
@@ -11769,6 +11994,9 @@ export class ObjectQL implements IObjectQLEngine {
                await this.publishBulkDataEvent('updated', object, {
                  matched: result,
                  context: opCtx.context,
+                 // [#15813] The wall's recorded verdict rides the SAME operation
+                 // context the middleware wrote it on.
+                 tenantLayer0Verdict: opCtx.tenantLayer0Verdict,
                });
              } else {
                const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;
@@ -13227,6 +13455,8 @@ export class ObjectQL implements IObjectQLEngine {
               await this.publishBulkDataEvent('deleted', object, {
                 matched: result,
                 context: opCtx.context,
+                // [#15813] Same seam as the update branch.
+                tenantLayer0Verdict: opCtx.tenantLayer0Verdict,
               });
             } else {
               const resultId = (typeof result === 'object' && result && 'id' in result) ? (result as any).id : undefined;

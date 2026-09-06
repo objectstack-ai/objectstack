@@ -1549,6 +1549,45 @@ const UNKNOWN_KEY_GUIDANCE: Record<string, string> = {
     'got a table and was instantiable. Remove the key.',
 };
 
+/**
+ * [#14892 — maintainer ruling 2026-09-05, option A] A `tree` field's
+ * `reference`, when present, must name the object that declares it.
+ *
+ * A hierarchy is parent/child WITHIN one object, and that is what every reader
+ * of the type assumes: the tree renderer's parent-pointer auto-detection takes
+ * the first `type: 'tree'` field as this object's own parent column, and
+ * `deleteBehavior` materialises on `tree` beside `lookup` because a
+ * self-referential hierarchy is a relation whose cascade is exactly the
+ * intended semantics. `reference` stays OPTIONAL on a `tree` — under this rule
+ * it is a redundant self-annotation — so absence is accepted; a value naming
+ * any OTHER object is refused here, where the declaring object's name is known
+ * (`FieldSchema` never sees it), rather than parsing green and rendering as a
+ * parent pointer into a table it does not point at. A link to a different
+ * object is a `lookup`. Applied at both doors that carry a field map —
+ * `ObjectSchema` (own name = `name`) and `ObjectExtensionSchema` (own name =
+ * `extend`) — so an extension cannot merge the shape the object refuses.
+ * Pinned in `tree-reference-self-only.test.ts`; the kernel predicate that
+ * reads the same rule is `hasDetectableParentField`
+ * (`kernel/functional-completeness.ts`).
+ */
+function refuseForeignTreeReference(ownName: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (typeof ownName !== 'string' || fields === null || typeof fields !== 'object') return;
+  for (const [fieldName, def] of Object.entries(fields as Record<string, unknown>)) {
+    if (def === null || typeof def !== 'object') continue;
+    const { type, reference } = def as { type?: unknown; reference?: unknown };
+    if (type !== 'tree' || reference === undefined || reference === ownName) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', fieldName, 'reference'],
+      message:
+        `tree field \`${fieldName}\` on object \`${ownName}\` references \`${String(reference)}\`, `
+        + 'but a `tree` field\'s `reference` must name the declaring object itself — a hierarchy is '
+        + 'parent/child within one object. Drop `reference` (it is optional on a `tree`), set it to '
+        + `'${ownName}', or declare a \`lookup\` if a link to a different object was meant.`,
+    });
+  }
+}
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -2204,6 +2243,8 @@ const ObjectSchemaBase = strictObject(
    * provided, the plugin allows `link_only` audience + `view` permission
    * (the safest combination — caller still needs the URL to access).
    *
+   * @see {@link isPublicSharingEnabled} — the ONE reading of `enabled`,
+   *      exported below beside this declaration.
    * @see packages/plugins/plugin-sharing/src/share-link-service.ts
    */
   publicSharing: strictObject({
@@ -2321,7 +2362,44 @@ const ObjectSchemaBase = strictObject(
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
+}).superRefine((object, ctx) => {
+  // [#14892] A `tree` field's `reference`, when present, must be this object's
+  // own name — judged here because only the object knows its name. `.superRefine`
+  // keeps this a `ZodObject` (zod 4 attaches checks in place), so `.shape` and
+  // `create()`'s unknown-key walk are untouched; see the helper's docblock.
+  refuseForeignTreeReference(object.name, object.fields, ctx);
 });
+
+/**
+ * [#14935] Is `publicSharing` switched ON for this object schema?
+ *
+ * The ONE reading of the standing switch declared in the `publicSharing` block
+ * above, exported here beside the declaration so that every surface gating on
+ * it asks the same question. Two packages read it today — the share-link
+ * service and the route probe above it (`@objectstack/plugin-sharing`), and the
+ * `/share-links` dispatcher domain (`@objectstack/runtime`) — and the second
+ * carried a documented copy of this expression, because the plugin is only a
+ * DEV dependency of the runtime. That copy was never structurally forced: both
+ * packages already depend on THIS one, so the shared home existed all along.
+ * One policy read spelled twice, held equal by a comment and by two pins, is a
+ * contract defect even while the two spellings agree.
+ *
+ * Fail-CLOSED, and the three unreadable cases are ONE answer, `false`: an absent
+ * `publicSharing` block, an absent schema, and an engine that cannot answer
+ * `getSchema` at all. `enabled` defaults to off, so a surface that cannot read
+ * the policy must refuse rather than answer from the share-link row — a
+ * distinguishable "sharing is off for this object" is an existence oracle for a
+ * caller holding nothing but a token. Only the boolean `true` enables: the
+ * strict comparison is deliberate, so a truthy `'true'` or `1` that never went
+ * through this schema does not publish records.
+ *
+ * The same shape as {@link isTenancyDisabled} — an object posture the spec owns
+ * precisely because more than one package must not re-derive it independently.
+ */
+export function isPublicSharingEnabled(schema: unknown): boolean {
+  return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
+    ?.publicSharing?.enabled === true;
+}
 
 /**
  * Converts a snake_case name to a human-readable Title Case label.
@@ -3082,6 +3160,10 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   
   /** Merge priority. Higher number applied later (wins on conflict). Default: 200 */
   priority: z.number().int().min(0).max(999).default(200).describe('Merge priority (higher = applied later)'),
+}).superRefine((extension, ctx) => {
+  // [#14892] The same rule as on `ObjectSchema`: the fields merge into
+  // `extend`, so that is the object a `tree` field's `reference` must name.
+  refuseForeignTreeReference(extension.extend, extension.fields, ctx);
 }));
 
 export type ObjectExtension = z.input<typeof ObjectExtensionSchema>;

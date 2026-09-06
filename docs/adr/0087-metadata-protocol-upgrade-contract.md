@@ -57,7 +57,7 @@ concrete gaps, then the assumption that reshapes the solution:
    loader, installer, or CLI command reads it. Under ADR-0078, an authorable field the
    runtime ignores is a bug class of its own: enforce it or remove it.
 
-2. **Change information is human-readable only.** `packages/spec/api-surface.json`
+2. **Change information is human-readable only.** `packages/spec/api-surface/`
    records the full export surface and its diff gates every PR — then the diff is
    thrown away. Releases ship a prose CHANGELOG and (for 11) a hand-written upgrade
    guide. Nothing machine-consumable maps version N → N+1.
@@ -585,6 +585,7 @@ gate's log and its `--list` output.
 <!-- adr-0087: not-required (no-migration-prescription) <why> -->
 <!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->
 <!-- adr-0087: not-required (type-surface-only <path>#<Symbol>[, ...]) <why> -->
+<!-- adr-0087: not-required (type-surface-only <path>#<a>.<b>.<member>[, ...]) <why> -->
 ```
 
 **The vocabulary is closed, and every exemption is re-verified on every run** — an
@@ -676,6 +677,7 @@ The vocabulary above gained a sixth answer:
 
 ```text
 <!-- adr-0087: not-required (type-surface-only <path>#<Symbol>[, ...]) <why> -->
+<!-- adr-0087: not-required (type-surface-only <path>#<a>.<b>.<member>[, ...]) <why> -->
 ```
 
 ### The dead end it closes
@@ -747,6 +749,23 @@ checks all four by name (`published`, `no-spec-diff`, `no-metadata-surface-diff`
    each `<path>#<Symbol>` the author names, the gate reads its declared type at
    *both* revs and requires `any` / `unknown` / no annotation at base, and a
    concrete type at HEAD.
+
+   ⭐ **The reference is a bare symbol OR a dotted member path.** `<path>#<Symbol>`
+   resolves a bare name to the **first same-named definition in the file**, and on a
+   real SDK module that is not a symbol identity: `packages/client/src/index.ts`
+   declares `get` 14 times and `delete` 10 times, so the members PR #15445 and PR
+   #15451 actually narrowed had **no addressable spelling at all** — the category
+   was closed to them by the grammar rather than by any judgement about the claim,
+   and the gate answered a true sentence about a member the diff never touched
+   (#15627). A reference may therefore also be written `<path>#<a>.<b>.<member>`:
+   the object-literal nesting the member sits in, walked **structurally** from the
+   top of the file over a comment- and literal-masked projection, with the member's
+   definition taken from inside the resolved body. Bare references keep their exact
+   previous meaning. ⛔ A line number is never the disambiguator — this file's line
+   numbers were measured to rot within one day. A dotted path that resolves to
+   **zero** candidates, or to **more than one**, is reported by name and refused,
+   never guessed at: a reference that silently landed on the wrong same-named member
+   would be writable but wrong, which is worse than the refusal it replaces.
 
 ### ⭐ Predicate 4 is what makes this a narrowing rather than a hole
 

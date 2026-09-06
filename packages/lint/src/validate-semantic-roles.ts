@@ -29,6 +29,7 @@
  */
 
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
+import { recordsOf } from './object-graph.js';
 
 export const FIELD_GROUP_UNDECLARED = 'field-group-undeclared';
 export const FIELD_GROUP_EMPTY = 'field-group-empty';
@@ -55,15 +56,6 @@ export interface SemanticRoleFinding {
 
 type AnyRec = Record<string, unknown>;
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 /**
  * Validate every object's semantic-role pointers. Returns the list of
  * findings (empty = clean). Advisory only — the caller must never fail the
@@ -72,7 +64,7 @@ function asArray(v: unknown): AnyRec[] {
 export function validateSemanticRoles(stack: AnyRec): SemanticRoleFinding[] {
   const findings: SemanticRoleFinding[] = [];
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
     if (!obj || typeof obj !== 'object') continue; // tolerate junk entries

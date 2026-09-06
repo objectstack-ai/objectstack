@@ -47,6 +47,13 @@ export interface II18nService {
 
     /**
      * Get the current default locale
+     *
+     * [#15711] Also the language the deployment's metadata labels are
+     * authored in: the serving layer threads it into the document
+     * translators' `ResolveOptions.defaultLocale` (`@objectstack/spec/system`),
+     * so a request for the default locale answers with the authored label
+     * instead of walking the declared fallback chain — the authored label IS
+     * the default locale's text. Absent, no request is treated as the default.
      * @returns BCP-47 locale code
      */
     getDefaultLocale?(): string;
@@ -56,6 +63,37 @@ export interface II18nService {
      * @param locale - BCP-47 locale code
      */
     setDefaultLocale?(locale: string): void;
+
+    /**
+     * The locale `t()` consults after the requested one — the deployment's
+     * DECLARED fallback (`i18n.fallbackLocale`, else `defaultLocale`, the
+     * collapse both boot paths perform before constructing the service:
+     * `os serve` and the dev plugin hand `I18nServicePlugin`
+     * `fallbackLocale || defaultLocale || 'en'`).
+     *
+     * [#14882] Declared so the serving layer can thread it into the
+     * metadata-document translators (`@objectstack/spec/system`'s
+     * `ResolveOptions.fallbackChain`). Those resolvers walk
+     * `requested locale → fallback chain → authored label`, and without this
+     * accessor no caller could tell them what the deployment declared, so the
+     * chain fell to the resolver's literal `['en']`: a `zh-CN` workspace that
+     * shipped a courtesy `en` bundle served ENGLISH bundle text to a `zh-CN`
+     * request, ahead of its own authored Chinese labels, because `en` was
+     * consulted before the authored label was ever reached.
+     *
+     * Contract for the value: it is the locale this service's own `t()` falls
+     * back to, so a label resolved from a bundle by the document translators
+     * and a message resolved by `t()` agree on which locale is consulted
+     * second. `undefined` means NOTHING was declared — a provider that has no
+     * fallback of its own omits the method or answers `undefined`, and the
+     * serving layer then leaves the resolver's own default in place rather
+     * than inventing a chain. [#15711] That default is `[]` (requested
+     * locale, then the authored label), and a request for
+     * {@link getDefaultLocale} never walks this chain at all.
+     *
+     * @returns BCP-47 locale code, or `undefined` when no fallback is declared
+     */
+    getFallbackLocale?(): string | undefined;
 
     /**
      * Narrow what `getLocales()` reports to the locales the APP declared

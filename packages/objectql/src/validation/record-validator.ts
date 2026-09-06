@@ -487,6 +487,47 @@ export function coerceBooleanFields<T extends Record<string, unknown>>(
   return (copy ?? row) as T;
 }
 
+/**
+ * The one parse issue an author can act on, out of everything zod reported for
+ * a value-shape rejection.
+ *
+ * NOT `issues[0]`. zod reports per-member issues before the object-level
+ * `unrecognized_keys` one, so on a value whose keys were RENAMED the actionable
+ * message sorts LAST. A `location` stored as `{latitude, longitude}` — the
+ * exact legacy shape `scan-value-shapes` names in its own header as one the
+ * scan exists to find — reports:
+ *
+ *     [0] invalid_type       lat   Invalid input: expected number, received undefined
+ *     [1] invalid_type       lng   Invalid input: expected number, received undefined
+ *     [2] unrecognized_keys        ... Did you mean `latitude` -> `lat`, `longitude` -> `lng`? ...
+ *
+ * The rename IS the prescription, and edit distance cannot reach it
+ * (`latitude` -> `lat`), which is exactly why `LocationValueSchema` curates an
+ * `aliases` map. Reading positionally builds that hint and then discards it,
+ * leaving an operator running `os migrate value-shapes` to derive the rename
+ * themselves while the identically-shaped `address` case is handed it.
+ *
+ * The preference is a NO-OP for every other class rather than merely harmless
+ * to it, which is what makes it safe as a blanket rule: of the sixteen types
+ * these readers cover, only `location` and `address` are backed by a
+ * `strictObject`, so only they can emit `unrecognized_keys` at all. The
+ * reference and file-reference classes are strings, `composite` / `record` /
+ * `repeater` / `vector` are open records and arrays, `json` is `z.unknown()`,
+ * and the one deliberately loose object shape (`FileValueSchema`) never refuses
+ * a key. For the other fourteen this cannot change a single character; both
+ * classes it does reach curate the alias map that makes the undeclared key the
+ * more actionable half of the rejection.
+ *
+ * Shared by both readers for the reason `valueShapeViolation` is exported
+ * rather than re-derived one layer up: two readings of the same rejection
+ * drifting by one clause is how one path prescribes the rename and the other
+ * hands out `expected number, received undefined`.
+ */
+function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message: string }> }): string {
+  const { issues } = error;
+  return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
+}
+
 function validateOne(
   name: string,
   def: FieldDef,
@@ -792,7 +833,7 @@ function validateOne(
   if (REFERENCE_VALUE_TYPES.has(t) || FILE_REFERENCE_TYPES.has(t) || STRUCTURED_JSON_TYPES.has(t)) {
     const parsed = shapeSchemaFor(def).safeParse(value);
     if (!parsed.success) {
-      const detail = parsed.error.issues[0]?.message ?? 'invalid value shape';
+      const detail = valueShapeDetail(parsed.error);
       const isMedia = FILE_REFERENCE_TYPES.has(t);
       if (isMedia ? mediaStrictEffective(mediaStrict) : valueShapeStrictEffective(valueStrict)) {
         return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
@@ -931,7 +972,9 @@ export function mediaPostureSetByEnv(): boolean {
  * not recognise, which is precisely the borrowed-evidence failure the ADR's
  * addendum forbids one layer up.
  *
- * Returns the first parse issue's message, or `null` when the value conforms.
+ * Returns the actionable parse issue's message (see `valueShapeDetail` — the
+ * undeclared-key one when present, which is the half carrying the rename),
+ * or `null` when the value conforms.
  * A value that is missing (per `isMissing`) is never a violation: absence is
  * the `required` check's business, not the shape contract's.
  */
@@ -943,7 +986,7 @@ export function valueShapeViolation(def: FieldDef, value: unknown): string | nul
   }
   const parsed = shapeSchemaFor(def).safeParse(value);
   if (parsed.success) return null;
-  return parsed.error.issues[0]?.message ?? 'invalid value shape';
+  return valueShapeDetail(parsed.error);
 }
 
 /**
@@ -1009,7 +1052,11 @@ export interface AdmittedValueShapeViolation {
   field: string;
   /** The declared field type, so a report can group by what went wrong. */
   type: string;
-  /** The first parse issue — the prescription an author acts on. */
+  /**
+   * The prescription an author acts on — `valueShapeDetail`'s reading of the
+   * rejection, the same string the warn-first log line and the
+   * `os migrate value-shapes` finding carry. Not positional.
+   */
   detail: string;
 }
 
