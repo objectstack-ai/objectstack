@@ -325,7 +325,7 @@ describe('#14921 CONTROL — the refusal reads the REGISTERED extension set', ()
 class OutageLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
     name: 'outage',
-    protocol: 'test:',
+    protocol: 'memory:',
     capabilities: { read: true, write: false, watch: false, list: true },
     supportedFormats: ['json'],
     supportsWatch: false,
