@@ -176,6 +176,27 @@ describe('scanValueShapes (ADR-0104 D1 / #3438)', () => {
     ).not.toThrow();
   });
 
+  it('#15490: an undeclared key outranks a same-value member error — on address too, not just location', async () => {
+    // The sweep this fix owes measured every class the two readers cover, and
+    // found only `location` and `address` able to emit `unrecognized_keys` at
+    // all (the rest are strings, open records, arrays, or `z.unknown()`). It
+    // also refuted the reason `address` was believed immune: every member being
+    // OPTIONAL rules out a MISSING-member `invalid_type`, but says nothing about
+    // a WRONG-TYPED declared one — which still sorts ahead of the object-level
+    // issue. So the defect reaches this class too; the contrast case that made
+    // it look location-only just happened to carry no type error.
+    const engine = makeEngine({
+      contact: [{ id: 'c1', addr: { street: 5, postal_code: '98101' } }],
+    });
+    const report = await scanValueShapes(engine, silent);
+
+    expect(report.blocking).toBe(1);
+    const addr = report.findings.find((f) => f.field === 'addr')!;
+    // Positionally this rejection reads `[invalid_type(street), unrecognized_keys]`.
+    expect(addr.detail).toContain('`postal_code` \u2192 `postalCode`');
+    expect(addr.detail).not.toContain('expected string, received number');
+  });
+
   it('the scan counts exactly what strict mode rejects — one predicate, not two', async () => {
     // The anti-drift property: every value the scan flags must also be a write
     // rejection under the strict gate, and every value it passes must write.
@@ -185,6 +206,25 @@ describe('scanValueShapes (ADR-0104 D1 / #3438)', () => {
     const engine = makeEngine({ contact: [{ id: 'c1', ...flagged }] });
     const report = await scanValueShapes(engine, silent);
     expect(report.blocking).toBe(1);
+
+    // #15490: the fixture above was already the renamed pair, but the pin
+    // asserted only the COUNT — so the operator-facing prescription was free to
+    // be the wrong half of the rejection and every gate stayed green. zod sorts
+    // the two missing-member `invalid_type` issues (`lat`, `lng`) ahead of the
+    // object-level `unrecognized_keys` one, so a positional `issues[0]` read
+    // reported `expected number, received undefined` and threw away the rename
+    // the schema curates an `aliases` map to produce. Assert the PRESCRIPTION,
+    // not just that something was flagged: `detail` is documented as "the
+    // prescription an author acts on".
+    const geo = report.findings.find((f) => f.field === 'geo')!;
+    expect(geo.detail).toContain('`latitude` \u2192 `lat`');
+    expect(geo.detail).toContain('`longitude` \u2192 `lng`');
+    expect(geo.detail).toContain('this location value');
+    // The half that was being shown instead — naming it keeps the pin able to
+    // see a regression back to the positional read.
+    expect(geo.detail).not.toContain('expected number, received undefined');
+    // Customer-facing refusal text carries no internal issue id.
+    expect(geo.detail).not.toMatch(/#\d+/);
 
     expect(() =>
       validateRecord(OBJECTS.contact, { ...flagged }, 'update', { valueShapeStrict: true }),

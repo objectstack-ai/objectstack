@@ -111,6 +111,22 @@ import type {
     HistoryMetaItemRequest,
     SaveMetaItemRequest,
     DeleteMetaItemRequest,
+    GetUiViewRequest,
+} from '@objectstack/spec/api';
+// [#15866] The same discipline for the DATA doors. Every literal these routes
+// assemble is now compiled against the declared request type through
+// `ServerScopedDataRequest` below, so a member the contract does not declare is
+// a compile error at the call site instead of a payload no schema has seen.
+import type {
+    FindDataRequest,
+    GetDataRequest,
+    CreateDataRequest,
+    UpdateDataRequest,
+    DeleteDataRequest,
+    BatchDataRequest,
+    CreateManyDataRequest,
+    UpdateManyDataRequest,
+    DeleteManyDataRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
 // refusal emitter types its `code` parameter as the vocabulary rather than as
@@ -207,6 +223,76 @@ export type RestProtocol = DataProtocol & MetadataProtocol;
  * literals is now a compile error instead of a cast-and-hope.
  */
 type TransportScopedMetaRequest<R> = R & { environmentId?: string };
+
+/**
+ * [#15866] The DATA doors' sibling of {@link TransportScopedMetaRequest}, and
+ * the reason it is a SECOND alias rather than a widening of the first: the data
+ * routes layer on TWO server-side members, and only one of them is the meta
+ * doors' transport key.
+ *
+ *   - `environmentId` — identical to the meta case and covered by the same
+ *     ruling (2026-08-18, #9741): `resolveProtocol(environmentId)` picks the
+ *     target kernel BEFORE the call, `@objectstack/metadata-protocol`'s data
+ *     methods never read it off the request, and `protocol.zod.ts` records the
+ *     exclusion schema-side. The doors still spread it (long-standing wire
+ *     shape), so it is declared here rather than smuggled past the compiler.
+ *   - `context` — the SERVER-DERIVED execution context from
+ *     {@link RestServer.resolveExecCtx}. The implementation genuinely reads it
+ *     (`findData`/`getData`/`createData`/`updateData`/`deleteData` all declare
+ *     `context?: any` and forward it so the RBAC/RLS middleware can enforce),
+ *     so unlike `environmentId` it IS consumed — but it still must not join the
+ *     request schema, because that schema is the catalog's published
+ *     `requestSchema` and a CALLER-supplied `context` is a privilege escalation:
+ *     `metadata-protocol.findData` deletes any inbound `context` unconditionally
+ *     for exactly that reason (`if (opCtx.context?.isSystem) return next()`
+ *     skips the whole RLS/FLS/CRUD chain). Declared-here is what keeps it
+ *     server-only AND compiled.
+ *
+ * ⛔ Never add a third member here to make a literal fit. A key a caller may
+ * send belongs in the spec schema; a key the door invents belongs in neither.
+ * What this buys is the guard #15866 was filed for: a field ADDED to
+ * `DeleteDataRequestSchema` / `UpdateDataRequestSchema` (and their siblings)
+ * as REQUIRED now reddens this file at build, naming the door that would
+ * otherwise have gone on not sending it.
+ *
+ * ⚠️ Scope of the restored check, stated so it is not overread: these handlers
+ * declare `req: any`, so every key sourced from `req` is `any` on the way in.
+ * What the compiler regains here is the KEY SET — an undeclared member (TS2353)
+ * and a missing required member (TS2739/TS2741) — not the value types of keys
+ * read off the request bag.
+ */
+type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
+
+/**
+ * [#15866] The ONE thing restoring the data doors' compile-time check could not
+ * type honestly, isolated behind a name so what stays erased is countable and
+ * greppable instead of diffuse — and so the next person meets the reason rather
+ * than a bare cast.
+ *
+ * `FindDataRequest.query` declares the AST (`QuerySchema`). But
+ * `@objectstack/metadata-protocol`'s `findData` ingress accepts TWO dialects
+ * through that one slot: the AST, and the WIRE dialect its normalizer folds —
+ * the bare transport spellings and the OData `$` forms (`$top`→`top`→`limit`,
+ * `$orderby`→`orderBy`, `filter`/`filters`/`$filter`→`where`, …). That second
+ * set is deliberately undeclared: the normalizer's own table calls them "the
+ * wire-only spellings no schema declares", and its sibling hint table is
+ * documented as never accepting input precisely so a second de-facto contract
+ * does not grow (Prime Directive #12).
+ *
+ * Three server-built literals in this file speak that wire dialect (the
+ * import-job listing, the export chunk loop, the public picker). ⛔ The two
+ * repairs this card forbids are exactly the two that would make them compile:
+ * widening `QuerySchema` to admit `$`-forms, and dropping back to a runtime
+ * `safeParse`. So the honest move is neither — it is to keep the erasure, make
+ * it one slot wide instead of one call wide, and hand the gap back: the
+ * declared-vs-shipped mismatch on this slot is a CONTRACT question, filed
+ * separately, not something this door may settle by itself.
+ *
+ * ⚠️ What is NOT erased at those three sites, and was before: the method name,
+ * the arity, and every other member of the request literal.
+ */
+const wireDialectQuery = (query: Record<string, unknown>): FindDataRequest['query'] =>
+    query as FindDataRequest['query'];
 import {
     buildFieldMetaMap,
     referenceFieldNames,
@@ -7996,9 +8082,9 @@ export class RestServer {
                     if (this.enforceEnvironmentOwnership(req, res, environmentId, context)) return;
                     const p = await this.resolveProtocol(environmentId, req);
                     if (p.getUiView) {
-                        const view = await p.getUiView({
+                        const viewRequest: TransportScopedMetaRequest<GetUiViewRequest> = {
                             object: req.params.object,
-                            type: req.params.type as any,
+                            type: req.params.type,
                             // [#13214] `routeEnvironmentId`, NOT the resolved id.
                             // The gate above changed WHO may reach the producer;
                             // it deliberately did not change WHAT the producer is
@@ -8008,7 +8094,8 @@ export class RestServer {
                             // the unscoped mount would be an unrelated behaviour
                             // change riding on a security fix.
                             ...(routeEnvironmentId ? { environmentId: routeEnvironmentId } : {}),
-                        } as any);
+                        };
+                        const view = await p.getUiView(viewRequest);
                         res.json(view);
                     } else {
                         res.status(501).json({ error: 'UI View resolution not supported by protocol implementation', code: 'NOT_IMPLEMENTED' });
@@ -8079,12 +8166,13 @@ export class RestServer {
                         // the envelope this route's other filter refusals already
                         // use; see the helper for why.
                         assertFilterParamSuppliedOnce(req.query);
-                        const result = await p.findData({
+                        const listRequest: ServerScopedDataRequest<FindDataRequest> = {
                             object: req.params.object,
                             query: req.query,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.findData(listRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8136,14 +8224,15 @@ export class RestServer {
                         // — the silent-drop defect wearing a different status.
                         if (refuseUnknownQueryParams(req, res, DATA_RECORD_READ_PARAMS)) return;
                         const { select, expand } = req.query || {};
-                        const result = await p.getData({
+                        const getRequest: ServerScopedDataRequest<GetDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
                             ...(select != null ? { select } : {}),
                             ...(expand != null ? { expand } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.getData(getRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8189,12 +8278,13 @@ export class RestServer {
                             });
                             return;
                         }
-                        const result = await p.createData({
+                        const createRequest: ServerScopedDataRequest<CreateDataRequest> = {
                             object: req.params.object,
                             data: req.body ?? {},
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.createData(createRequest);
                         // [#3431] Advertise fields the engine's create-side static-
                         // `readonly` strip dropped (`engine.insert`, relayed by
                         // `createData` as `droppedFields`) via the response header
@@ -8256,12 +8346,13 @@ export class RestServer {
                             });
                             return;
                         }
-                        const result = await p.findData({
+                        const queryRequest: ServerScopedDataRequest<FindDataRequest> = {
                             object: req.params.object,
                             query,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.findData(queryRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8328,14 +8419,15 @@ export class RestServer {
                             });
                             return;
                         }
-                        const result = await p.updateData({
+                        const updateRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
                             data: data ?? {},
                             ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.updateData(updateRequest);
                         // [#3431] Advertise any LEGALLY-stripped write fields via
                         // the response header before serialising (the body also
                         // carries `droppedFields`). Status stays 200.
@@ -8380,13 +8472,14 @@ export class RestServer {
                             : undefined;
                         const expectedVersion = queryVersion ?? ifMatchHeader;
                         if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
-                        const result = await p.deleteData({
+                        const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
                             object: req.params.object,
                             id: req.params.id,
                             ...(expectedVersion ? { expectedVersion: String(expectedVersion) } : {}),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.deleteData(deleteRequest);
                         res.json(result);
                     } catch (error: any) {
                         const mapped = mapDataError(error, req.params?.object);
@@ -8636,7 +8729,8 @@ export class RestServer {
                         // ['get','list']. Persist system-elevated so the engine-owned
                         // write guard admits it; attribution is preserved because
                         // `created_by` is stamped explicitly on the row above.
-                        await (p as any).createData({ object: IMPORT_JOB_OBJECT, data: jobRow, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) });
+                        const jobCreateRequest: ServerScopedDataRequest<CreateDataRequest> = { object: IMPORT_JOB_OBJECT, data: jobRow, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) };
+                        await p.createData(jobCreateRequest);
                     } catch (err: any) {
                         logError('[REST] Failed to persist import job:', err);
                         res.status(500).json({ code: 'IMPORT_JOB_CREATE_FAILED', error: 'Could not create import job' });
@@ -8650,7 +8744,9 @@ export class RestServer {
                     // handling and persists terminal state to the job row.
                     const patch = async (data: Record<string, any>) => {
                         try {
-                            await (p as any).updateData({ object: IMPORT_JOB_OBJECT, id: jobId, data, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) }); // [ADR-0103] engine-owned
+                            // [ADR-0103] engine-owned
+                            const jobPatchRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: IMPORT_JOB_OBJECT, id: jobId, data, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) };
+                            await p.updateData(jobPatchRequest);
                         } catch (err) {
                             logError('[REST] import job progress write failed:', err);
                         }
@@ -8757,7 +8853,9 @@ export class RestServer {
                         // Signal the in-process worker and mark the durable row.
                         this.cancelledImportJobs.add(jobId);
                         try {
-                            await (p as any).updateData({ object: IMPORT_JOB_OBJECT, id: jobId, data: { status: 'cancelled', completed_at: new Date().toISOString() }, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) }); // [ADR-0103] engine-owned
+                            // [ADR-0103] engine-owned
+                            const jobCancelRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: IMPORT_JOB_OBJECT, id: jobId, data: { status: 'cancelled', completed_at: new Date().toISOString() }, context: { ...(context as any), isSystem: true }, ...(environmentId ? { environmentId } : {}) };
+                            await p.updateData(jobCancelRequest);
                         } catch { /* worker will still stop via the in-memory flag */ }
                     }
                     res.json({ success: true });
@@ -8820,24 +8918,27 @@ export class RestServer {
                     // Delete created records first (they didn't exist before).
                     for (const id of log.created) {
                         try {
-                            await (p as any).deleteData({ object: objectName, id, context: writeCtx, ...(environmentId ? { environmentId } : {}) });
+                            const undoDeleteRequest: ServerScopedDataRequest<DeleteDataRequest> = { object: objectName, id, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
+                            await p.deleteData(undoDeleteRequest);
                             deleted++;
                         } catch { failed++; }
                     }
                     // Restore the touched fields on updated records.
                     for (const u of log.updated) {
                         try {
-                            await (p as any).updateData({ object: objectName, id: u.id, data: u.before, context: writeCtx, ...(environmentId ? { environmentId } : {}) });
+                            const undoRestoreRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: objectName, id: u.id, data: u.before, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
+                            await p.updateData(undoRestoreRequest);
                             restored++;
                         } catch { failed++; }
                     }
 
-                    await (p as any).updateData({
+                    const undoStampRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                         object: IMPORT_JOB_OBJECT, id: jobId,
                         data: { reverted_at: new Date().toISOString() },
                         context: { ...(context as any), isSystem: true }, // [ADR-0103] engine-owned
                         ...(environmentId ? { environmentId } : {}),
-                    });
+                    };
+                    await p.updateData(undoStampRequest);
                     res.json({ success: true, jobId, object: objectName, deleted, restored, failed });
                 } catch (error: any) {
                     handleRouteError(res, error, '');
@@ -8917,12 +9018,13 @@ export class RestServer {
                     if (typeof q.status === 'string' && q.status) filter.status = q.status;
                     const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
                     const offset = Math.max(0, Number(q.offset) || 0);
-                    const r = await (p as any).findData({
+                    const jobsListRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: IMPORT_JOB_OBJECT,
-                        query: { $filter: filter, $orderby: { created_at: 'desc' }, $top: limit, $skip: offset },
+                        query: wireDialectQuery({ $filter: filter, $orderby: { created_at: 'desc' }, $top: limit, $skip: offset }),
                         ...(environmentId ? { environmentId } : {}),
                         ...(context ? { context } : {}),
-                    });
+                    };
+                    const r: any = await p.findData(jobsListRequest);
                     const rows = Array.isArray(r?.records) ? r.records
                         : Array.isArray(r?.data) ? r.data
                             : Array.isArray(r?.rows) ? r.rows
@@ -9220,9 +9322,9 @@ export class RestServer {
 
                     while (exported < limit) {
                         const take = Math.min(chunkSize, limit - exported);
-                        const findArgs: any = {
+                        const findArgs: ServerScopedDataRequest<FindDataRequest> = {
                             object: objectName,
-                            query: {
+                            query: wireDialectQuery({
                                 ...(filter ? { $filter: filter } : {}),
                                 ...(search ? { $search: search } : {}),
                                 ...(search && searchFields ? { $searchFields: searchFields } : {}),
@@ -9230,11 +9332,11 @@ export class RestServer {
                                 ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
                                 $top: take,
                                 $skip: skip,
-                            },
+                            }),
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
-                        const result: any = await (p as any).findData(findArgs);
+                        const result: any = await p.findData(findArgs);
                         // `findData` returns `{ object, records, total, hasMore }`;
                         // accept the legacy `data` / `rows` aliases and a bare array
                         // so test doubles and alternate protocols keep working.
@@ -9907,12 +10009,13 @@ export class RestServer {
                     };
 
                     const p = await this.resolveProtocol(environmentId, req);
-                    const result = await p.createData({
+                    const formCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
                         object: match.object,
                         data: filteredData,
                         ...(environmentId ? { environmentId } : {}),
                         context,
-                    } as any);
+                    };
+                    const result = await p.createData(formCreateRequest);
                     res.status(201).json(result);
                 } catch (error: any) {
                     const mapped = mapDataError(error);
@@ -10087,9 +10190,11 @@ export class RestServer {
                         anonymous: true,
                     };
 
-                    const result: any = await (p as any).findData({
+                    const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: referenceTo,
-                        query: {
+                        // [#15866] `filters` is a WIRE-only spelling the normalizer folds to
+                        // `where`, and no schema declares it — see {@link wireDialectQuery}.
+                        query: wireDialectQuery({
                             limit: maxResults,
                             offset: 0,
                             filters,
@@ -10104,10 +10209,11 @@ export class RestServer {
                             // UNAUTHENTICATED surface. A pre-schema stored row
                             // still carrying `sort` is IGNORED, not an error.
                             sort: [{ field: displayFields[0], order: 'asc' }],
-                        },
+                        }),
                         ...(environmentId ? { environmentId } : {}),
                         context,
-                    } as any);
+                    };
+                    const result: any = await p.findData(pickerRequest);
 
                     // Project the response server-side too — never trust
                     // that the driver respected `select`.
@@ -12592,7 +12698,10 @@ export class RestServer {
                                 // open transaction, so the engine's strip decides exactly
                                 // as it does on the single route and the insert still
                                 // joins this transaction.
-                                const created: any = await p.createData({ object: op.object, data, context: trxCtx } as any);
+                                const batchCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
+                                    object: op.object, data, context: trxCtx,
+                                };
+                                const created: any = await p.createData(batchCreateRequest);
                                 for (const e of (created?.droppedFields ?? []) as DroppedFieldsEvent[]) {
                                     dropped.push({ ...e, index });
                                 }
@@ -12681,12 +12790,13 @@ export class RestServer {
                         // [#3939] Cap AFTER the shape check, so a caller gets the
                         // more specific answer first.
                         if (this.enforceBatchSize(res, parsedBatch.data.records.length, maxBatch, req.params?.object)) return;
-                        const result = await p.batchData!({
+                        const batchRequest: ServerScopedDataRequest<BatchDataRequest> = {
                             object: req.params.object,
                             request: req.body,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.batchData!(batchRequest);
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
@@ -12733,12 +12843,13 @@ export class RestServer {
                         }
                         // [#3939] Cap AFTER the shape check.
                         if (this.enforceBatchSize(res, parsedCreateMany.data.records.length, maxBatch, req.params?.object)) return;
-                        const result = await p.createManyData!({
+                        const createManyRequest: ServerScopedDataRequest<CreateManyDataRequest> = {
                             object: req.params.object,
                             records: req.body || [],
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.createManyData!(createManyRequest);
                         res.status(201).json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
@@ -12776,7 +12887,7 @@ export class RestServer {
                         // resolves (e.g. an anonymous public-book read, #3963).
                         const { UpdateManyDataRequestSchema } = await import('@objectstack/spec/api');
                         const updateManyInput = { ...(req.body ?? {}), object: req.params.object };
-                        const parsedUpdate = (UpdateManyDataRequestSchema as any).safeParse(updateManyInput);
+                        const parsedUpdate = UpdateManyDataRequestSchema.safeParse(updateManyInput);
                         if (!parsedUpdate.success) {
                             res.status(400).json({
                                 error: 'Invalid updateMany request',
@@ -12789,11 +12900,12 @@ export class RestServer {
                         // [#3939] Cap AFTER the shape check, so a caller gets the
                         // more specific answer first.
                         if (this.enforceBatchSize(res, parsedUpdate.data.records.length, maxBatch, req.params?.object)) return;
-                        const result = await p.updateManyData!({
+                        const updateManyRequest: ServerScopedDataRequest<UpdateManyDataRequest> = {
                             ...parsedUpdate.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.updateManyData!(updateManyRequest);
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
@@ -12837,7 +12949,7 @@ export class RestServer {
                         // whose exposure policy was never checked.
                         const { DeleteManyDataRequestSchema } = await import('@objectstack/spec/api');
                         const deleteManyInput = { ...(req.body ?? {}), object: req.params.object };
-                        const parsed = (DeleteManyDataRequestSchema as any).safeParse(deleteManyInput);
+                        const parsed = DeleteManyDataRequestSchema.safeParse(deleteManyInput);
                         if (!parsed.success) {
                             res.status(400).json({
                                 error: 'Invalid deleteMany request',
@@ -12851,11 +12963,12 @@ export class RestServer {
                         // route deletes per id, so the list length IS the engine
                         // round-trip count.
                         if (this.enforceBatchSize(res, parsed.data.ids.length, maxBatch, req.params?.object)) return;
-                        const result = await p.deleteManyData!({
+                        const deleteManyRequest: ServerScopedDataRequest<DeleteManyDataRequest> = {
                             ...parsed.data,
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
-                        } as any);
+                        };
+                        const result = await p.deleteManyData!(deleteManyRequest);
                         res.json(result);
                     } catch (error: any) {
                         handleRouteError(res, error, req.params?.object);
