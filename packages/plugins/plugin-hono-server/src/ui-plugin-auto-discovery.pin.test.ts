@@ -21,10 +21,25 @@
  *
  * WHAT MAKES IT END-TO-END. The fixture plugin is registered through the real
  * `ObjectKernel.use()` and the real `HonoServerPlugin.init()`/`start()` run
- * against the context the kernel hands its plugins, so the pin measures the
- * whole path a real UI plugin takes: loader validation, the verbatim store into
- * `kernel.plugins`, the read back out, and the routes handed to `rawApp.get`.
- * Nothing here stubs the kernel, the plugin, or the branch under test.
+ * against the context the kernel hands its plugins. Nothing here stubs the
+ * kernel, the plugin, or the branch under test.
+ *
+ * WHAT EACH GROUP ACTUALLY OBSERVES — stated because the difference is the whole
+ * point of this file. A, B and D observe ROUTE REGISTRATION: they replace
+ * `rawApp.get` with a recorder, so no handler is ever installed and nothing is
+ * served. That is enough to pin WHICH routes exist and, for D, that none does —
+ * and it is blind to everything downstream of the route string. E closes that:
+ * it leaves `rawApp.get` alone, so the real handlers install on the real Hono
+ * app, and drives `rawApp.request(...)` to pin what actually comes BACK. E is
+ * what makes `staticPath` load-bearing (the bytes served come from that
+ * directory) and `rewrite: true` load-bearing (the prefix really is stripped
+ * before the file is looked up) — two properties every registration-only
+ * assertion in this file passes through untouched.
+ *
+ * STILL UNPINNED, deliberately, and named here so the next reader does not
+ * over-trust this file: the `default`/`isDefault` redirect that mounts `/` at
+ * the plugin's base route. The fixture does not set it, and pinning it is a
+ * wider change than this card carries.
  *
  * WHY THE NEGATIVE CONTROL IS NOT OPTIONAL. A harness that mounts everything
  * would produce pin B's four route registrations whether or not the branch
@@ -37,6 +52,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ObjectKernel } from '@objectstack/core';
+import { CORE_PLUGIN_TYPES } from '@objectstack/spec/kernel';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from './hono-plugin';
 
@@ -49,9 +65,15 @@ import { HonoServerPlugin } from './hono-plugin';
  */
 let STATIC_ROOT: string;
 
+/** Served verbatim by pin E, so its exact bytes are part of the assertion. */
+const INDEX_HTML = '<!doctype html>';
+const ASSET_CSS = '.os-pin{color:#123456}';
+
 beforeAll(() => {
     STATIC_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'os-hono-ui-pin-'));
-    fs.writeFileSync(path.join(STATIC_ROOT, 'index.html'), '<!doctype html>');
+    fs.writeFileSync(path.join(STATIC_ROOT, 'index.html'), INDEX_HTML);
+    fs.mkdirSync(path.join(STATIC_ROOT, 'assets'));
+    fs.writeFileSync(path.join(STATIC_ROOT, 'assets', 'app.css'), ASSET_CSS);
 });
 
 afterAll(() => {
@@ -93,7 +115,25 @@ interface Observation {
  * Register `fixture` on a real kernel, run the real Hono plugin's `init()` and
  * `start()`, and report what the auto-discovery block did.
  */
-async function observe(fixture: UiPluginFixture): Promise<Observation> {
+interface Booted {
+    kernel: ObjectKernel;
+    honoPlugin: HonoServerPlugin;
+    ctx: PluginContext;
+    rawApp: RawApp;
+}
+
+/** The subset of the raw Hono app these pins touch. */
+interface RawApp {
+    get: (...args: unknown[]) => unknown;
+    request: (input: string) => Promise<Response>;
+}
+
+/**
+ * Register `fixture` on a real kernel and run the real plugin's `init()`, stopping
+ * short of `start()` so each pin can decide whether to watch registration or let
+ * it happen for real.
+ */
+async function boot(fixture: UiPluginFixture): Promise<Booted> {
     const kernel = new ObjectKernel({
         logger: { level: 'silent' },
         // No process signal handlers: this kernel is never bootstrapped or shut
@@ -112,13 +152,24 @@ async function observe(fixture: UiPluginFixture): Promise<Observation> {
 
     await honoPlugin.init(ctx);
 
-    // Observe AFTER init(): init() installs middleware and registers hooks, and
-    // this pin is about the routes `start()` mounts. `getRawApp()` returns the
-    // adapter's single stable Hono instance, so the spy set here is the one
-    // `start()` will call.
+    // `getRawApp()` returns the adapter's single stable Hono instance, so what is
+    // taken here is the object `start()` will register on.
     const rawApp = (
-        honoPlugin as unknown as { server: { getRawApp(): { get: (...args: unknown[]) => unknown } } }
+        honoPlugin as unknown as { server: { getRawApp(): RawApp } }
     ).server.getRawApp();
+
+    return { kernel, honoPlugin, ctx, rawApp };
+}
+
+/**
+ * Run `start()` with `rawApp.get` replaced by a recorder, and report the route
+ * strings the auto-discovery block handed it.
+ *
+ * ⚠️ Nothing is installed and nothing is served under this helper — that is the
+ * point of pin E, which does not use it.
+ */
+async function observe(fixture: UiPluginFixture): Promise<Observation> {
+    const { kernel, honoPlugin, ctx, rawApp } = await boot(fixture);
 
     const routes: string[] = [];
     const spy = vi.spyOn(rawApp, 'get').mockImplementation(((route: string) => {
@@ -136,6 +187,16 @@ async function observe(fixture: UiPluginFixture): Promise<Observation> {
         .plugins.get(fixture.name);
 
     return { routes, stored };
+}
+
+/**
+ * Run `start()` for real — `rawApp.get` untouched, so the static and SPA handlers
+ * actually install — and hand back the app to issue requests against.
+ */
+async function serve(fixture: UiPluginFixture): Promise<RawApp> {
+    const { honoPlugin, ctx, rawApp } = await boot(fixture);
+    await honoPlugin.start(ctx);
+    return rawApp;
 }
 
 describe('UI plugin auto-discovery (#16050)', () => {
@@ -208,12 +269,19 @@ describe('UI plugin auto-discovery (#16050)', () => {
     it.todo('C — the legacy `ui-plugin` arm behaves as #15638 rules that it should');
 
     describe('D — the negative control: the harness can produce an empty result', () => {
-        it('a non-UI type mounts nothing', async () => {
+        // Every declared plugin type EXCEPT `ui`, read off the spec's own closed set
+        // rather than listed here — so a type added to `CORE_PLUGIN_TYPES` tomorrow
+        // is covered without anyone remembering to come back. Enumerating the whole
+        // complement is what makes the guard's SPECIFICITY pinned: a single `driver`
+        // control would sit green while the guard was widened to `type !== 'driver'`.
+        const NON_UI_TYPES = ['standard', ...CORE_PLUGIN_TYPES].filter((t) => t !== 'ui');
+
+        it.each(NON_UI_TYPES)('a `%s` plugin mounts nothing', async (type) => {
             const { routes, stored } = await observe(
                 makeFixture({
-                    name: '@os-fixture/driver',
-                    type: 'driver',
-                    slug: 'driver-fixture',
+                    name: `@os-fixture/${type}`,
+                    type: type as UiPluginFixture['type'],
+                    slug: 'not-ui-fixture',
                 }),
             );
 
@@ -239,6 +307,52 @@ describe('UI plugin auto-discovery (#16050)', () => {
             // change that keeps the type check but drops the assets check cannot
             // sit green.
             expect(routes).toEqual([]);
+        });
+    });
+
+    /**
+     * E — served, not merely registered.
+     *
+     * A, B and D replace `rawApp.get`, so they observe route STRINGS and nothing
+     * downstream of them: which directory is mounted, and whether the route prefix
+     * is stripped before the file is looked up, are both invisible to every one of
+     * them. Measured, not assumed — with `root` swapped to `process.cwd()` and with
+     * `rewrite` flipped to `false`, all of A, B and D stay green.
+     *
+     * So this group installs the real handlers and asks the real Hono app for a
+     * response. It is what makes the file's `staticPath` and `rewrite` claims
+     * load-bearing rather than decorative.
+     */
+    describe('E — the mounted routes actually serve from staticPath', () => {
+        it('serves the SPA index for the base route', async () => {
+            const rawApp = await serve(
+                makeFixture({ name: '@os-fixture/console', slug: 'console-fixture' }),
+            );
+
+            const res = await rawApp.request('/console-fixture/');
+
+            // The bytes come out of the fixture's own temp directory, so a mount
+            // pointed anywhere else cannot answer this.
+            expect(res.status).toBe(200);
+            expect(await res.text()).toContain(INDEX_HTML);
+        });
+
+        it('strips the route prefix before looking the asset up', async () => {
+            const rawApp = await serve(
+                makeFixture({ name: '@os-fixture/console', slug: 'console-fixture' }),
+            );
+
+            const res = await rawApp.request('/console-fixture/assets/app.css');
+            const body = await res.text();
+
+            // `rewrite: true` turns /console-fixture/assets/app.css into
+            // /assets/app.css before the lookup. Without the strip the file is
+            // missed and the SPA fallback answers with index.html INSTEAD — a 200
+            // either way, which is exactly why the assertion is on the body and
+            // names the wrong answer explicitly rather than checking the status.
+            expect(res.status).toBe(200);
+            expect(body.trim()).toBe(ASSET_CSS);
+            expect(body).not.toContain(INDEX_HTML);
         });
     });
 });
