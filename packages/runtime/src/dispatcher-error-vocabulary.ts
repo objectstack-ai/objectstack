@@ -958,7 +958,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            '#15963 — the AUTHORING gate\'s SCHEMA refusal: `ObjectStackDefinitionSchema.safeParse` failed ' +
+            'ADR-0112 — the AUTHORING gate\'s SCHEMA refusal: `ObjectStackDefinitionSchema.safeParse` failed ' +
             'inside `defineStack`, thrown as `StackSchemaInvalidError` with the zod issues on `issues`. ' +
             'Its own arm rather than a reuse, on a reading taken before it was written: `packages/spec` ' +
             'has no zod-failure envelope to reuse (`formatZodError` / `safeParsePretty` return prose; no ' +
@@ -985,8 +985,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            '#15963 — `defineStack`\'s capability refusal, raised through `validateKnownCapabilities` when ' +
-            '`requires` names a token no runtime provides (framework#3265/#3308); one `issues` entry per ' +
+            'ADR-0112 — `defineStack`\'s capability refusal, raised through `validateKnownCapabilities` when ' +
+            '`requires` names a token no runtime provides; one `issues` entry per ' +
             'distinct unknown token, thrown as `StackCapabilityUnknownError`. Reachability is the ' +
             'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
             '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
@@ -1001,7 +1001,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            '#15963 — `defineStack`\'s namespace-prefix refusal, raised through `validateNamespacePrefix` ' +
+            'ADR-0112 — `defineStack`\'s namespace-prefix refusal, raised through `validateNamespacePrefix` ' +
             'when an object\'s name lacks the `manifest.namespace` prefix; one `issues` entry per object, ' +
             'the writing-style hint kept in the message only, thrown as `StackNamespacePrefixInvalidError`. ' +
             'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
@@ -1017,7 +1017,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            '#15963 — `defineStack`\'s single-app refusal, raised through `validateSingleApp` when an `app` ' +
+            'ADR-0112 — `defineStack`\'s single-app refusal, raised through `validateSingleApp` when an `app` ' +
             'package declares more than one app (the banned "suite contains apps" shape, ADR-0019 D3); ' +
             'thrown as `StackSingleAppViolationError`. Reachability is the STACK_SCHEMA_INVALID reading on ' +
             'the same tree: 33 non-test `defineStack` occurrences under `packages/runtime/src` + ' +
@@ -1033,7 +1033,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            '#15963 — `defineStack`\'s hierarchy-scope capability refusal, raised through ' +
+            'ADR-0112 — `defineStack`\'s hierarchy-scope capability refusal, raised through ' +
             '`validateHierarchyScopeCapability` when a permission grant uses a HIERARCHY scope while ' +
             '`requires` omits `hierarchy-security` (ADR-0057 — the declared-capability class that fails ' +
             'CLOSED); one `issues` entry per grant, thrown as `StackHierarchyScopeCapabilityRequiredError`. ' +
@@ -1050,9 +1050,9 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            '#15963 — `defineStack`\'s trigger capability refusal, raised through ' +
+            'ADR-0112 — `defineStack`\'s trigger capability refusal, raised through ' +
             '`validateTriggerCapability` when an auto-launched flow is declared while `requires` omits ' +
-            '`triggers` (#14153 — the declared-capability class that fails SILENT); one `issues` entry per ' +
+            '`triggers` (the declared-capability class that fails SILENT); one `issues` entry per ' +
             'flow, thrown as `StackTriggerCapabilityRequiredError`. Reachability is the ' +
             'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
             '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
