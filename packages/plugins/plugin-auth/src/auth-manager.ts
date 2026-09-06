@@ -1249,7 +1249,7 @@ export class AuthManager {
       // bare host) so the reset-password / verify-email / magic-link URLs
       // better-auth derives from baseURL are always clickable links.
       baseURL: this.getCanonicalOrigin(),
-      basePath: this.config.basePath || '/api/v1/auth',
+      basePath: this.getBasePath(),
 
       // Database adapter configuration
       database: this.createDatabaseConfig(),
@@ -5446,6 +5446,40 @@ export class AuthManager {
   }
 
   /**
+   * [#16025] The path prefix better-auth matches its routes under — the SAME
+   * string this manager hands better-auth as its `basePath`, normalised once.
+   *
+   * ## Why this is public, and why it is the ONLY definition
+   *
+   * An HTTP adapter that mounts this service has to know where its routes
+   * live, and until this method existed it could not ask: `config` is private
+   * and nothing else exposed the value. `@objectstack/hono`'s `createHonoApp`
+   * therefore mounted the auth surface under its OWN `prefix` option, whose
+   * default (`/api`) does not compose with this one (`/api/v1/auth`), so on
+   * the documented embed better-auth was never reached at all — measured, on a
+   * real boot:
+   *
+   *     POST /api/auth/sign-in/email  (valid shape, wrong password)  ->  200 {}
+   *     POST /api/v1/auth/delete-user                                ->  401 {"message":"Unauthorized","code":"UNAUTHORIZED"}
+   *
+   * ⛔ The value must not be re-derived by any caller, here or in an adapter.
+   * Two readers already existed inside this file — the `basePath` handed to
+   * better-auth and `betterAuthEndpointPath`'s own normalising copy — and they
+   * normalised DIFFERENTLY: a configured `'api/v1/auth'` reached better-auth
+   * without its leading slash while the ownership walk tested against
+   * `'/api/v1/auth'`. Both now read this method, so "where better-auth serves"
+   * has one answer by construction rather than by three sites agreeing.
+   *
+   * Normalisation is exactly what `betterAuthEndpointPath` always applied: a
+   * leading slash is added when absent, trailing slashes are stripped. A
+   * configured `'/'` still normalises to `''`, unchanged from before.
+   */
+  getBasePath(): string {
+    const configured = this.config.basePath || '/api/v1/auth';
+    return (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
+  }
+
+  /**
    * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
    * router owns, whatever it then answers?
    *
@@ -5499,8 +5533,7 @@ export class AuthManager {
     } catch {
       return undefined;
     }
-    const configured = this.config.basePath || '/api/v1/auth';
-    const base = (configured.startsWith('/') ? configured : `/${configured}`).replace(/\/+$/, '');
+    const base = this.getBasePath();
     if (!pathname.startsWith(base)) return undefined;
     const endpoint = pathname.slice(base.length).replace(/\/+$/, '');
     return endpoint.startsWith('/') ? endpoint : undefined;
