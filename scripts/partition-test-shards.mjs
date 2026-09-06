@@ -321,15 +321,22 @@ export function assertSlicesSpread(bins) {
   return bins;
 }
 
-// What THIS shard was predicted to spend on a package it just ran. A shard runs
+// What a run was predicted to spend on a package it just ran. A shard runs
 // exactly one slice of a file-sharded package -- the slices are placed in
 // distinct bins, asserted in main() -- so the prediction to compare a measured
 // window against is the dataset's whole-package entry divided by the slice
 // count. Charging a slice the whole package's entry would read as a ~n x
 // under-run and, worse, dilute a real overshoot elsewhere on the same shard
 // into a ratio that stays under the bound.
-export function predictedSecondsFor(name, timings) {
-  return timings.packages[name] / sliceCountFor(name);
+//
+// `sliceCount` is passed in by `--check-drift` from what the SUMMARY says the
+// run actually was, not from FILE_SHARDED_PACKAGES. The two agree on a Test Core
+// shard, and only the observed one is right anywhere else: a developer running
+// the suite locally runs the CLI whole, and charging that whole run a half-sized
+// prediction would report a 2x drift that is purely this function's arithmetic.
+// The config remains the default for callers with no run in hand.
+export function predictedSecondsFor(name, timings, sliceCount = sliceCountFor(name)) {
+  return timings.packages[name] / sliceCount;
 }
 
 // Where a `packages.items[].path` actually points.
@@ -514,7 +521,7 @@ export function balanceOf(bins, items = null) {
 // a second reader -- the generator's ~0s-for-a-replayed-suite hazard is the
 // same hazard here, pointing the other way (a cached shard would read as
 // enormously FASTER than predicted and quietly vouch for a rotted dataset).
-export function driftReport(measured, timings, factor = MAX_MEASURED_OVER_PREDICTED) {
+export function driftReport(measured, timings, factor = MAX_MEASURED_OVER_PREDICTED, observedSlices = null) {
   const rows = [];
   const unpredicted = [];
   let predictedTotal = 0;
@@ -526,7 +533,12 @@ export function driftReport(measured, timings, factor = MAX_MEASURED_OVER_PREDIC
     }
     // Through predictedSecondsFor, never the raw dataset entry: a shard that
     // ran one SLICE of a file-sharded package was predicted one slice's cost.
-    const predicted = predictedSecondsFor(name, timings);
+    // When the caller observed the run's own slice spec, that wins over the
+    // configured one -- `observedSlices` present but silent about a package
+    // means the summaries show it running WHOLE, which is a fact about the run.
+    const predicted = observedSlices
+      ? predictedSecondsFor(name, timings, observedSlices.get(name)?.count ?? 1)
+      : predictedSecondsFor(name, timings);
     predictedTotal += predicted;
     measuredTotal += seconds;
     rows.push({ name, predicted, measured: seconds, overshoot: seconds - predicted });
@@ -638,7 +650,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // the measured count for the same reason.
   'the balancing pins (#10472)': 21,
   'predicted-vs-measured drift (#16173)': 9,
-  'file-level slice items (#16173)': 18,
+  'file-level slice items (#16173)': 20,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1301,6 +1313,30 @@ function selfTest() {
   });
 
   check(() => {
+    // The run wins over the config. An OBSERVED whole run of a configured-sliced
+    // package is predicted the WHOLE entry, so the same 1000s reading is a
+    // comfortable under-run rather than the 1.67x above. Without this, anyone
+    // running the suite locally (where the CLI runs whole) would get a drift red
+    // that is purely predictedSecondsFor's arithmetic.
+    const r = driftReport(measuredMap({ '@objectstack/cli': 1000 }), sliceTimings, undefined, new Map());
+    if (r.drifted) {
+      throw new Error(`drift: an observed WHOLE run was charged a slice-sized prediction (${r.ratio.toFixed(2)}x)`);
+    }
+    if (Math.abs(r.predictedTotal - 1200) > 1e-9) {
+      throw new Error(`drift: an observed whole run was predicted ${r.predictedTotal}s, not the whole 1200s`);
+    }
+  });
+  check(() => {
+    // ...and an observed slice count that differs from the configured one is
+    // honoured, because the summary is the record of what actually ran.
+    const observed = new Map([['@objectstack/cli', { index: 1, count: 3 }]]);
+    const r = driftReport(measuredMap({ '@objectstack/cli': 400 }), sliceTimings, undefined, observed);
+    if (Math.abs(r.predictedTotal - 400) > 1e-9) {
+      throw new Error(`drift: an observed 1/3 slice was predicted ${r.predictedTotal}s, not 400s`);
+    }
+  });
+
+  check(() => {
     // The REAL weighing path, on the REAL package: main() must hand partition()
     // slices, not one CLI-shaped lump. Pin 6 above proves weighItems reads
     // durations; this proves it splits the one package that has to be split.
@@ -1408,14 +1444,21 @@ function checkDrift(argv) {
   // asking whether a shard fits inside a wall, and the leg that answers that is
   // the slow one.
   const merged = new Map();
+  // What the summaries say each package was RUN as. A shard that carries a
+  // file-level slice writes two summaries -- one per turbo invocation -- and
+  // only the slice leg's tasks carry `--shard=k/n`, so this is per package and
+  // comes from the run rather than from FILE_SHARDED_PACKAGES. A package absent
+  // here ran whole; that is a reading, not a default.
+  const observedSlices = new Map();
   for (const input of inputs) {
-    const { samples } = samplesFromSummary(JSON.parse(readFileSync(input, 'utf8')), input);
+    const { samples, slices } = samplesFromSummary(JSON.parse(readFileSync(input, 'utf8')), input);
     for (const [name, seconds] of samples) {
       merged.set(name, Math.max(merged.get(name) ?? 0, seconds));
     }
+    for (const [name, slice] of slices ?? []) observedSlices.set(name, slice);
   }
   const timings = loadTimings();
-  const report = driftReport(merged, timings);
+  const report = driftReport(merged, timings, MAX_MEASURED_OVER_PREDICTED, observedSlices);
   const skipped =
     report.unpredicted.length === 0
       ? ''
