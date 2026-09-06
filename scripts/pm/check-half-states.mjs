@@ -87,9 +87,9 @@
  *
  *   H1  `pm:dispatched` with no assignee — the state model DEFINES the label
  *       rather than describing a habit: 「`pm:dispatched` … 恒带 assignee」
- *       (SKILL.md line 109), and the one lawful way for that field to empty is
+ *       (SKILL.md), and the one lawful way for that field to empty is
  *       the release act, which clears it and posts a `Release:` line in the
- *       SAME write (line 465). So an empty field under this label is the label
+ *       SAME write. So an empty field under this label is the label
  *       contradicting its own definition, not a step somebody forgot — and the
  *       release half of the same rule is H47's row.
  *   H2  assignee set on a pm-tracked card, but no claim comment on the thread
@@ -1744,6 +1744,14 @@ export function branchNameTarget(ref) {
  * exists. So a body that declares ANY delivery is authoritative, and the branch
  * name is consulted only for the bodies that declare none — which is exactly
  * the population the specimen came from, and no other.
+ *
+ * ⚠️ This relation answers "is there a PR on this card", NOT "is the card
+ * finished". H8's MERGED side needs the second question and asks it of
+ * `prFullyDeliversCard` below; every other reader here — H8's open side, H31's
+ * carrier comparison, `claimDelivery`, and the pairing `check-clause2-carriers`
+ * derives — wants this wide one, because a half in flight is live work. ⛔ Do
+ * not narrow it here to serve H8: that would make the live half invisible to
+ * the rows that exist to see it.
  */
 export function prDeliversCard(pr, n) {
   const target = String(n);
@@ -1758,11 +1766,50 @@ export function prDeliversCard(pr, n) {
 }
 
 /**
+ * Does this PR deliver card `n` IN FULL — the narrower reading H8's merged side
+ * takes, and the only reader that takes it.
+ *
+ * ## Why a second reader, and not a narrower first one (#16036)
+ *
+ * The partial-dispatch rule gave `Refs #N (item k)` a meaning: a PR that lands
+ * ONE item of a card, releases the card back to `pm:queue` in the same stroke,
+ * and leaves the remaining items to be re-dispatched from the queue as a FRESH
+ * claim. That body declares no delivery, so `prDeliversCard` falls through to
+ * the branch name — and the branch is named for the card, because that is the
+ * branch the dev cut. H8 therefore read a PARTIAL landing as a full delivery and
+ * prescribed its destructive remedy ("drop `pm:dispatched` and re-grade the
+ * remainder") against a card a second dev is lawfully working. H8 reads no
+ * thread, so the fresh `Claim:` newer than the merge — the record that stands
+ * H49 down — is invisible to it, and the row kept firing from the re-claim until
+ * the remainder's own PR opened and the open side downgraded it.
+ *
+ * So the fallback keeps the recovery it was built for — a body that declares
+ * NOTHING, the #10757 specimen's own population — and declines for a body that
+ * SPOKE about this card in the one spelling the protocol reserves for a
+ * non-delivery. `Fixes`/`Part of` are untouched: those are deliveries whatever
+ * the branch is called, and a `Refs` beside either does not make them partial.
+ *
+ * The `Refs`-only test is `refsOnlyLinksFor` — H49's own predicate, CALLED
+ * rather than restated, so what H49 owns is exactly what H8 excludes and the two
+ * cannot drift into a gap or an overlap. Bound per card number, as H7 binds: a
+ * `Refs #A` on a PR whose branch is named for B narrows nothing about B.
+ */
+export function prFullyDeliversCard(pr, n) {
+  if (!prDeliversCard(pr, n)) return false;
+  return refsOnlyLinksFor([pr], n).length === 0;
+}
+
+/**
  * H8 — null when clean, else the finding sentence.
  *
- * Delivery is `prDeliversCard` (body first, branch name as the fallback its
- * docblock justifies). Only `merged_at`-set PRs count on the merged side —
- * closed-unmerged is an abandoned attempt, not a delivery.
+ * The two sides read delivery through DIFFERENT questions, deliberately since
+ * #16036. The merged side asks whether the card is FINISHED and so reads
+ * `prFullyDeliversCard` — body first, branch name as the fallback its docblock
+ * justifies, minus the `Refs`-only landing H49 owns. The open side asks whether
+ * anything is still in flight and reads `prDeliversCard` unchanged: a `Refs`
+ * half still open is live work this row must not step on, whatever it will later
+ * mean for the card's completeness. Only `merged_at`-set PRs count on the merged
+ * side — closed-unmerged is an abandoned attempt, not a delivery.
  *
  * ## The open side, and why this row DOWNGRADES rather than falls silent
  *
@@ -1795,7 +1842,7 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
   const delivering = [];
   for (const pr of mergedPrs ?? []) {
     if (!pr?.merged_at) continue;
-    if (prDeliversCard(pr, n)) delivering.push(pr);
+    if (prFullyDeliversCard(pr, n)) delivering.push(pr);
   }
   if (delivering.length === 0) return null;
   const list = delivering
@@ -3729,11 +3776,37 @@ export const H20_BRANCH_LIST_CAP = 5;
  * fewer place where the code reads as if it honoured a spelling it does not.
  * See `CLAIM_COMMENT_MARKER`'s note for the codepoint reading and the live
  * probe behind it.
+ *
+ * ## The list marker, and the silence it used to buy (#16170)
+ *
+ * A markdown BULLET before the directive — 「- Branch: `claude/issue-…`」, the
+ * natural way to write a claim whose first line is a heading-style `Claim:` and
+ * whose details hang under it in a list — is admitted, because the measured
+ * failure of refusing it was SILENT in the worst possible way. `CLAIM_COMMENT_MARKER`
+ * has no list marker either, so the two anchors failed at DIFFERENT points on the
+ * same comment: the marker matched the undecorated `Claim:` line (the comment IS
+ * a claim), while this reader returned nothing (the claim GOVERNS nothing). Live
+ * on #15511 the result was a claim complete by every other measure that steered
+ * a seat, and then a whole dispatching round, toward a rule about the `Claim:`
+ * line that was not the blocker at all.
+ *
+ * ⛔ The claim MARKER is deliberately NOT widened with it, and the asymmetry is
+ * the point rather than an oversight: when BOTH lines carry a bullet the marker
+ * misses too, the comment is not a claim to any reader here, and the sibling's
+ * "no comment on the card's thread is a claim comment" is then TRUE. The
+ * malignant shape is only the MIXED one, and admitting the marker here is what
+ * removes it. Widening `Claim:` itself is the 2026-08-11 ruling's territory
+ * (⛔ 不放宽谓词), not this reader's.
+ *
+ * ⚠️ The marker is admitted only BEFORE the optional blockquote (`- > Branch:`),
+ * which is the anchor as ruled; a bulleted line INSIDE a blockquote
+ * (`> - Branch:`) is still out, and the self-test pins that as a measured fact
+ * rather than as a contract anybody chose.
  */
 export function claimedBranches(body) {
   const out = [];
   const text = String(body ?? '');
-  for (const line of text.matchAll(/^\s*>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
+  for (const line of text.matchAll(/^\s*(?:[-*+]\s+)?>?\s*Branch(?:es)?\s*:\s*(.*)$/gim)) {
     for (const hit of String(line[1] ?? '').matchAll(CLAIM_BRANCH_SHAPE)) {
       if (!out.includes(hit[0])) out.push(hit[0]);
     }
@@ -9145,15 +9218,19 @@ export function h48GovernedVerdictWithoutBrief(pr, governed, commentRows) {
 //
 // The merged `Refs` PR is invisible to every delivery reader by construction:
 // GitHub closes nothing (no keyword), and `prDeliversCard` reads `Part of` and
-// the keywords, falling back to the BRANCH NAME only. So when the head is named
-// for the card H8 does fire; when it is not (a family branch, another card's
-// slug), the card sits `pm:dispatched`, assigned, with a complete `Claim:` and
-// no dev, and H1/H2/H3/H24 are each correctly silent. This row asks the
-// question none of them can: is the NEWEST `Refs`-linked PR on this card
-// MERGED, with no `Release:` or `Claim:` on the thread newer than that merge?
-// H8, where it fires, cannot ask it either — it reads no thread, so a remainder
+// the keywords, falling back to the BRANCH NAME only. On a head NOT named for
+// the card (a family branch, another card's slug) nothing saw it at all. On a
+// head named FOR the card H8 used to fire through that fallback — a
+// full-delivery verdict on a partial landing, prescribing the destructive
+// de-label against a lawfully re-dispatched remainder — which is why its merged
+// side now excludes the `Refs`-only shape (`prFullyDeliversCard`, #16036). So in
+// BOTH head shapes the card sits `pm:dispatched`, assigned, with a complete
+// `Claim:` and no dev, and H1/H2/H3/H8/H24 are each correctly silent. This row
+// asks the question none of them can: is the NEWEST `Refs`-linked PR on this
+// card MERGED, with no `Release:` or `Claim:` on the thread newer than that
+// merge? H8 could never have asked it — it reads no thread, so a remainder
 // lawfully re-dispatched (a fresh `Claim:` after the merge) is exactly the case
-// this row stands down on. Adjacent rows, not a redundant pair; the self-test
+// this row stands down on. Adjacent rows with no overlap left; the self-test
 // pins both halves of that adjacency.
 //
 // ## Population, and what is OUT by ruling
@@ -14003,7 +14080,7 @@ function selfTest() {
     body,
     title,
   });
-  // `.claude/skills/pm-dispatch/SKILL.md` line 465, VERBATIM — one constant so
+  // `.claude/skills/pm-dispatch/SKILL.md`, VERBATIM — one constant so
   // the two rows that quote it (H24's remedy, H47's both legs) are pinned
   // against the SAME bytes. Rewriting a maintainer's line is rewriting the
   // ruling, and a quote that drifts from its source in one row while the other
@@ -14582,30 +14659,59 @@ function selfTest() {
     head: { ref },
   });
 
-  // Direction 1 — the measured specimen's shape: merged, body carries NEITHER
-  // recognised spelling (`Refs #N` is not one), branch named for the card.
+  // Direction 1 — the DELIVERY relation, unchanged: a body carrying neither
+  // recognised spelling (`Refs #N` is not one) still reaches its card through
+  // the branch name, which is what the live-work readers need.
+  const REFS_ONLY_10757 = onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries');
   t(
     'H8 branch: a `Refs #N`-only body delivers via its branch name',
-    typeof h8MergedPrStillDispatched(
-      dispatched(10757),
-      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
-    ),
+    prDeliversCard(REFS_ONLY_10757, 10757),
+    true,
+  );
+  // …and the FULL-delivery reading H8's merged side takes DECLINES it (#16036).
+  // The body spoke about this card in the one spelling the protocol reserves for
+  // a non-delivery, so the landing is partial and H49 owns it — H8 must not
+  // prescribe dropping `pm:dispatched` off a lawfully re-dispatched remainder.
+  t(
+    'H8 branch: …but a `Refs`-only landing is NOT a full delivery, so H8 is clean (#16036)',
+    h8MergedPrStillDispatched(dispatched(10757), [REFS_ONLY_10757]),
+    null,
+  );
+  t(
+    'H8 branch: …and the narrower reader says so in its own right',
+    prFullyDeliversCard(REFS_ONLY_10757, 10757),
+    false,
+  );
+  // A `Refs` naming ANOTHER card narrows nothing about this one — bound per
+  // card number, as H7 binds.
+  t(
+    'H8 branch: a `Refs` for another card leaves this card\'s fallback intact',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Refs #9999', 'claude/issue-4321-x')]),
+    'string',
+  );
+  // …and a body that DELIVERS is a delivery however it spells the reference
+  // beside it — the same binding H49 makes from the other end.
+  t(
+    'H8 branch: `Refs #N` beside a closing keyword is still a full delivery',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Refs #4321 (item ①)\n\nFixes #4321', 'claude/issue-4321-x')]),
     'string',
   );
   t(
-    'H8 branch: …and the finding names the delivering PR',
-    h8MergedPrStillDispatched(
-      dispatched(10757),
-      [onBranch(10824, 'Refs #10757', 'claude/issue-10757-dedupe-per-request-queries')],
-    ).includes('#10824'),
-    true,
+    'H8 branch: …and beside `Part of #N` likewise',
+    typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, 'Part of #4321\nRefs #4321', 'claude/issue-4321-x')]),
+    'string',
   );
-  // An empty body is the same population — nothing declared, so the branch is
-  // the only evidence there is.
+  // An empty body is the population the fallback WAS built for — nothing
+  // declared, so the branch is the only evidence there is, and H8 still fires.
   t(
     'H8 branch: an empty body delivers via its branch name',
     typeof h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]),
     'string',
+  );
+  t(
+    'H8 branch: …and the finding names the delivering PR',
+    h8MergedPrStillDispatched(dispatched(4321), [onBranch(4400, '', 'claude/issue-4321-x')]).includes('#4400'),
+    true,
   );
 
   // Direction 2 — the RE-SCOPED branch, the false-fire this widening could
@@ -15832,12 +15938,54 @@ function selfTest() {
   t('H20 branch: no directive at all yields nothing', claimedBranches('Claim: seat.\nSession: `session_x`').length, 0);
   t('H20 branch: a missing body does not crash', claimedBranches(undefined).length, 0);
 
+  // -- #16170: the directive written as a markdown BULLET --------------------
+  // Measured live on #15511: a claim whose first line was an undecorated
+  // `Claim:` and whose branch hung under it in a list. The marker matched and
+  // this reader did not, so the comment WAS a claim that GOVERNED nothing —
+  // and nothing in the artefact looked wrong.
+  t('H20 branch: a bulleted directive is read (#16170)', claimedBranches('- Branch: `claude/issue-15511-zh-gap-helptext`').join(','), 'claude/issue-15511-zh-gap-helptext');
+  t('H20 branch: …with `*` as the marker', claimedBranches('* Branch: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …and with `+`, on the plural spelling too', claimedBranches('+ Branches: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …indented under a parent item', claimedBranches('  - Branch: claude/issue-1-a').join(','), 'claude/issue-1-a');
+  t('H20 branch: …and the marker composes with the documented blockquote', claimedBranches('- > Branch: `claude/issue-6752-x`').join(','), 'claude/issue-6752-x');
+  // ⛔ The widening is a LIST MARKER before a `Branch:` DIRECTIVE and nothing
+  // else: a bullet naming any other field, or none, stays out of scope exactly
+  // as an undecorated one does.
+  t('H20 branch: a bullet that is not a `Branch:` line yields nothing', claimedBranches('- Worktree: `claude/issue-1-a`').length, 0);
+  t('H20 branch: …nor does a bulleted prose line that merely names a branch', claimedBranches('- rebased onto claude/issue-9-other yesterday').length, 0);
+  t('H20 branch: a NUMBERED list item is not admitted', claimedBranches('1. Branch: claude/issue-1-a').length, 0);
+  t('H20 branch: a HEADING is not admitted', claimedBranches('## Branch: claude/issue-1-a').length, 0);
+  // ⚠️ A measured RESIDUAL, pinned as a fact rather than as a contract anybody
+  // chose: the ruled anchor admits the marker only BEFORE the optional
+  // blockquote, so the other order — the natural markdown for a bulleted line
+  // INSIDE a blockquote — still yields nothing.
+  t('H20 branch: a blockquoted BULLET (`> - `) is still out — the anchor is marker-then-quote', claimedBranches('> - Branch: `claude/issue-1-a`').length, 0);
+  // ⛔ And the claim MARKER is NOT widened with it (2026-08-11, 不放宽谓词). The
+  // asymmetry is the fix rather than a residue: when BOTH lines carry a bullet
+  // the marker misses too, so the comment is not a claim to any reader here and
+  // the sibling checker's "no claim comment" reading is TRUE. Only the MIXED
+  // shape was malignant, and admitting the marker here is what removes it.
+  t('H20 branch: a bulleted `Claim:` is still not a claim comment', CLAIM_COMMENT_MARKER.test('- Claim: seat.'), false);
+
   // The governing claim — the MOST RECENT one, H19's double-check ① reasoning.
   const gov = (rows) => governingClaim(rows);
+  // ⚠️ `?? []` rather than a bare `.branches` on the three-valued return, for
+  // the reason H34's row wrapper carries: a case built to go NULL under a
+  // mutation must report a NAMED failing case, not throw and abort the suite
+  // before the remaining cases run — measured while ablating the #16170 anchor,
+  // where the reverse run died on a TypeError naming neither row nor mutation.
+  const govBranches = (rows) => (gov(rows)?.branches ?? []).join(',');
   t('H20 claim: a claim comment naming a branch is found', gov(claim8878).branches.join(','), 'claude/issue-8878-dispatch-latency');
   t('H20 claim: …and carries its timestamp', gov(claim8878).createdAt, minsAgo20(74));
   t('H20 claim: a `Branch:` line in a comment that is NOT a claim is ignored', gov([claimRow(minsAgo20(90), 'Branch: `claude/issue-1-a`')]), null);
   t('H20 claim: a claim comment naming NO branch yields nothing to check', gov([claimRow(minsAgo20(90), 'Claim: seat.\nSession: `session_x`')]), null);
+  // #16170 — the MIXED shape, which is the only malignant one: an undecorated
+  // `Claim:` (so the marker matches and the comment IS a claim) with the branch
+  // written as a bullet under it. It governs now.
+  t('H20 claim: the MIXED shape governs — undecorated `Claim:`, bulleted `Branch:` (#16170)', govBranches([claimRow(minsAgo20(30), 'Claim: this card is held by session `session_x`.\n\n- Branch: `claude/issue-15511-zh-gap-helptext`\n- Worktree: `/home/user/objectstack-15511`')]), 'claude/issue-15511-zh-gap-helptext');
+  // …while a FULLY bulleted claim governs nothing, the marker having missed it
+  // — and there the sibling's "no claim comment" reading is the true one.
+  t('H20 claim: …and a fully bulleted claim still governs nothing, the marker having missed', gov([claimRow(minsAgo20(30), '- Claim: seat.\n- Branch: `claude/issue-1-a`')]), null);
   const reclaimed = [
     claimRow(minsAgo20(600), 'Claim: first seat.\nBranch: `claude/issue-8878-abandoned`'),
     claimRow(minsAgo20(74), claimBody8878),
@@ -19905,8 +20053,13 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H49 adjacency: H8 is SILENT on a `Refs` PR whose head is not named for the card', h8MergedPrStillDispatched(TAKEN49, LANDED49, []), null);
   t('H49 adjacency: …which is the carrier this row exists for', typeof h49PartialLandingUnreleased(TAKEN49, LANDED49, [], CLAIMED49), 'string');
   const ON_CARD_BRANCH49 = [merged49(16010, 'Refs #16003 (item ①)', '2026-09-05T20:12:00Z', { head: { ref: 'claude/issue-16003-kanban-keys' } })];
-  t('H49 adjacency: on a head NAMED for the card H8 fires through its branch fallback', typeof h8MergedPrStillDispatched(TAKEN49, ON_CARD_BRANCH49, []), 'string');
-  t('H49 adjacency: …and this row fires beside it — two readings, no double silence', typeof h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], CLAIMED49), 'string');
+  // ⚖️ #16036 flipped the first of these. H8's merged side used to fire here
+  // through its branch fallback — a full-delivery verdict on a PARTIAL landing,
+  // prescribing the destructive de-label against a lawfully re-dispatched
+  // remainder — and its `Refs`-only exclusion now leaves this row the sole
+  // reader of BOTH head shapes.
+  t('H49 adjacency: on a head NAMED for the card H8 is silent too, since #16036', h8MergedPrStillDispatched(TAKEN49, ON_CARD_BRANCH49, []), null);
+  t('H49 adjacency: …and this row fires there — one reading now, and no silence', typeof h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], CLAIMED49), 'string');
   t('H49 adjacency: …and reads the thread H8 cannot — a fresh claim stands THIS row down', h49PartialLandingUnreleased(TAKEN49, ON_CARD_BRANCH49, [], [cm49(CLAIM49, T49_AFTER)]), null);
   t('H49 adjacency: H1 is silent on the carrier (the card HAS an assignee)', h1DispatchedNoAssignee(TAKEN49), false);
   t('H49 adjacency: H2 is silent (the claim comment is complete)', h2AssigneeNoClaimComment(TAKEN49, [CLAIM49]), false);
