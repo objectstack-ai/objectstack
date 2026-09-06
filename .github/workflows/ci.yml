@@ -539,7 +539,7 @@ jobs:
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
             --shard ${{ matrix.shard }}/6 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
-          echo "Packages on this shard:"
+          echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
@@ -587,11 +587,61 @@ jobs:
           # vitest's own "use the default" signal. Needs turbo.json's
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
-          FILTERS=$(sed 's/^/--filter=/' "$RUNNER_TEMP/shard-packages.txt" | tr '\n' ' ')
           mkdir -p "$RUNNER_TEMP/stall-reports"
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
-            --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+
+          # Split the shard's ITEMS into the whole packages, which share one
+          # turbo run as they always have, and the file-level slices, which
+          # cannot: `--shard=k/n` is passed through to vitest by turbo as a
+          # RUN-level argument, so it would reach every package in the run —
+          # and on any package with fewer test files than n that is a hard
+          # vitest failure (or, with --passWithNoTests, silently no tests at
+          # all). A slice therefore gets its own invocation, filtered to the one
+          # package the partitioner sliced.
+          FILTERS=""
+          SLICES=""
+          while read -r PKG SLICE; do
+            [ -n "$PKG" ] || continue
+            if [ -n "$SLICE" ]; then
+              SLICES="$SLICES $PKG=$SLICE"
+            else
+              FILTERS="$FILTERS --filter=$PKG"
+            fi
+          done < "$RUNNER_TEMP/shard-packages.txt"
+
+          # Each leg tees to its OWN log — run-with-stall-guard opens the log
+          # with 'w', so a second leg pointed at one path would truncate the
+          # first leg's output and the completeness guard below would grade half
+          # a shard. They are concatenated afterwards, and that concatenation
+          # happens even when a leg failed, because a red suite is exactly when
+          # the completeness guard earns its keep.
+          #
+          # ⛔ A failing leg STOPS the remaining ones, the same way turbo stops
+          # scheduling on the first failure inside one run. Carrying on would add
+          # a second full suite to a job that is already red and already inside a
+          # 30-minute wall — turning an informative red into a killed job with no
+          # attestation at all, which is the #16173 failure mode itself.
+          STATUS=0
+          LOGS=""
+          for LEG in __whole__ $SLICES; do
+            if [ "$LEG" = __whole__ ]; then
+              [ -n "$FILTERS" ] || continue
+              LOG="$RUNNER_TEMP/test-core-packages.log"
+              set -- pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+            else
+              PKG="${LEG%%=*}"
+              SLICE="${LEG#*=}"
+              LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+            fi
+            LOGS="$LOGS $LOG"
+            node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
+              --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
+          done
+
+          if [ -n "$LOGS" ]; then
+            cat $LOGS > "$RUNNER_TEMP/test-core.log"
+          fi
+          exit $STATUS
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
