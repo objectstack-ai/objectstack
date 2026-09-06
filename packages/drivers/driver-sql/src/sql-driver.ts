@@ -2864,10 +2864,32 @@ function mysqlAsciiLowerBinary(expr: string): string {
  * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
  *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
  *   would change every other query's meaning. Of the operand-level tricks,
- *   `CAST(col AS BLOB) LIKE ?` was measured to return NOTHING at all (SQLite's
- *   LIKE is false for a BLOB operand), so the operator has to change. `GLOB` is
- *   case-exact by definition and carries its own escape mechanism
- *   ({@link escapeGlobComparand}). `lower()` in front of it is still the
+ *   `CAST(col AS BLOB) LIKE ?` is disqualified by something worse than
+ *   failing: it means TWO DIFFERENT THINGS on the two SQLite builds this repo
+ *   ships. Whether `LIKE` is false for a BLOB operand is not a property of
+ *   SQLite the language — it is set when SQLite is COMPILED, by
+ *   `SQLITE_LIKE_DOESNT_MATCH_BLOBS`. Measured over the shared
+ *   `FILTER_TEXT_ROWS` fixture, `{name: {$contains: 'acme'}}` compiled to that
+ *   construct:
+ *
+ *   | build | `SQLITE_LIKE_DOESNT_MATCH_BLOBS` | rows |
+ *   |---|---|---|
+ *   | better-sqlite3 13.0.3 (SQLite 3.53.4) | compiled in | `[]` |
+ *   | sql.js 1.14.1 (SQLite 3.49.1) | absent | `['1','2']` — `ACME Corp` AND `acme corp` |
+ *
+ *   So one build silently answers nothing and the other silently answers
+ *   exactly the ASCII over-fold this whole function exists to end, and which
+ *   one a caller gets is decided by a flag upstream of us. That divergence is
+ *   the rejection on its own: a construct whose meaning depends on how the
+ *   driver's SQLite was BUILT cannot carry a read scope (#3948) whatever value
+ *   it happens to return in any one container — the `[]` above is a build's
+ *   answer, not SQLite's. The CAST itself is not the part that differs:
+ *   `typeof CAST(name AS BLOB)` is `'blob'` on BOTH builds, so what diverges is
+ *   purely `LIKE`'s rule for a blob operand, which is the compile-time half. So
+ *   the operator has to change. `GLOB` is case-exact by definition, answers
+ *   `['2']` on BOTH builds above, and carries its own
+ *   escape mechanism ({@link escapeGlobComparand}). `lower()` in front of it is
+ *   still the
  *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
  *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
  *   answers row 3 — the Q1 = A boundary, executed rather than argued.
