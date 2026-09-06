@@ -350,8 +350,10 @@
 //               about what that costs in practice.
 //
 //               What drifts is not only the NUMBER but the note's COMPOSITION:
-//               service-automation's note named `engine.test.ts:2547/2577` as
-//               the whole debt while three TS2341 in a different file, from an
+//               service-automation's note named its
+//               `packages/services/service-automation/src/engine.test.ts`
+//               (lines 2547/2577 as measured) as the whole debt while three
+//               TS2341 in a different file, from an
 //               unrelated PR, had joined it. So when this invariant makes you
 //               raise a count, rewrite the note to match what the pile is now
 //               made of -- and when the delta cannot be attributed, say so in
