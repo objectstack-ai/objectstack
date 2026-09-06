@@ -240,10 +240,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             path: `${nodePath}.config.fields.${fieldName}`,
             message: isCreate
               ? // The create-side strip is the 2026-09-03 ruling (#14147): the
-                // same `stripReadonlyFields`, now run by `engine.insert` too.
+                // same `stripReadonlyFields`, now run by `engine.insert` too. The
+                // id stays in this comment, out of the string an author reads
+                // and cannot resolve (`check:doc-authoring`).
                 `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +
                 `runAs:'${runAs}' the engine silently strips readonly fields from the INSERT payload too ` +
-                `(#14147 — the same strip the UPDATE path runs), so the row is created WITHOUT this column ` +
+                `(the same strip the UPDATE path runs), so the row is created WITHOUT this column ` +
                 `(it falls back to the field's defaultValue) — while the create_record step still reports ` +
                 `success, with only a run-time warning naming the dropped field.`
               : `writes field '${fieldName}', which object '${objectName}' declares readonly:true. Under ` +

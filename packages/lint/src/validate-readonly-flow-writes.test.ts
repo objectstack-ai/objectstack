@@ -361,7 +361,9 @@ describe('validateReadonlyFlowWrites', () => {
       // — the row is created without the column — not the update sentence.
       expect(findings[0].message).toContain('INSERT');
       expect(findings[0].message).toContain('created WITHOUT this column');
-      expect(findings[0].message).toContain('#14147');
+      // No tracker id in the string an author reads (`check:doc-authoring`);
+      // the ruling's id lives in the rule's comment.
+      expect(findings[0].message).not.toMatch(/#\d{4,}/);
       expect(findings[0].message).not.toContain('UPDATE payload (#2948)');
       // The remedy names the create verb, the system channel and the own-object
       // beforeInsert stamp.
