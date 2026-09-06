@@ -1,5 +1,5 @@
 ---
-"@objectstack/cli": patch
+"@objectstack/cli": minor
 ---
 
 `os generate migration` now emits the character column `driver-sql` actually creates, in both the TypeScript and the SQL format.
