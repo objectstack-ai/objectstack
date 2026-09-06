@@ -245,12 +245,27 @@ export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
 // datasource cannot give a real transaction. Exported so a caller that fails
 // closed can narrow on the class; `code` is the boundary-crossing identity.
-export { TransactionUnsupportedError } from './transaction-errors.js';
+// [#16159] `TRANSACTION_UNSUPPORTED_CODE` joins the class it names: the line
+// above already tells a caller that `code` is the boundary-crossing identity,
+// and offered nothing to import — so following it meant re-spelling the wire
+// string in the consumer's own package. The class stays exported exactly as it
+// was; this adds an affordance and removes nothing.
+export { TransactionUnsupportedError, TRANSACTION_UNSUPPORTED_CODE } from './transaction-errors.js';
 // [#5351/#5696] Thrown when a BUSINESS write inside an open transaction()
 // resolves to a driver that transaction does not cover. Append-only system
 // ledgers (lifecycle.class audit/telemetry/event) are carved out and never
 // raise it. Narrow on the class in-process; `code` crosses package boundaries.
-export { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
+// [#16159] `CROSS_DATASOURCE_TRANSACTION_WRITE_CODE` joins its class for the same
+// reason (#14936: this package declares BOTH realms in its own `exports`, so a
+// consumer holding the other realm's copy of the class gets `instanceof` ===
+// false, silently). ⭐ Neither class in `transaction-errors.js` is published from
+// the lean `./core` entry, so batteries-only constants introduce no asymmetry
+// here — class and constant are reachable from exactly one entry point, the same
+// one. #16260 owns that question for the classes that ARE on `./core`.
+export {
+  CrossDatasourceTransactionWriteError,
+  CROSS_DATASOURCE_TRANSACTION_WRITE_CODE,
+} from './transaction-errors.js';
 
 // [#4550] The delete-dispatch contract, exported so a TEST DOUBLE that stands
 // in for the engine can import the producer's own decision rather than
