@@ -8625,10 +8625,30 @@ export class ObjectStackProtocolImplementation implements
             });
             const events = (Array.isArray(rows) ? rows : []).map((r: any) => ({
                 id: r.id,
+                // [#14078] The `Date` arm is TOTAL. Ruled B by the maintainer
+                // (2026-09-02): every copy of this shared canonical-ISO
+                // spelling guards on `Number.isNaN(value.getTime())`, all five
+                // arms in ONE change, because a guard on some arms and not
+                // others re-opens the drift the single spelling closed.
+                // Reachability is MEASURED (#14409, `3ecb7dc1a`): mysql2 3.23.1
+                // hands back a constant literally named `INVALID_DATE` for a
+                // zero `DATETIME`, and postgres-date 1.0.7 builds
+                // `new Date(NaN)` for every year in 275760..294276, which
+                // Postgres itself stores. Unguarded, `toISOString()` raises
+                // `RangeError: Invalid time value` and
+                // `GET /api/v1/meta/:type/:name/audit` answers 500 — Studio's
+                // 审计日志 tab blank, on a row the error does not name.
+                // The terminal value here is the VISIBLE TEXT `"Invalid Date"`:
+                // the guard fails, the value falls into the `String(...)` arm
+                // already below (which renders exactly that), and
+                // `AuditMetaItemResponseSchema.events[].occurredAt` is a
+                // REQUIRED plain `z.string()` an operator reads — the ruling's
+                // "required and an operator reads it". ⛔ Not `''`: a silent
+                // blank hides the producer's bug.
                 occurredAt:
                     typeof r.occurred_at === 'string'
                         ? r.occurred_at
-                        : r.occurred_at instanceof Date
+                        : r.occurred_at instanceof Date && !Number.isNaN(r.occurred_at.getTime())
                             ? r.occurred_at.toISOString()
                             : String(r.occurred_at ?? ''),
                 actor: String(r.actor ?? 'system'),
