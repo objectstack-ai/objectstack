@@ -30,9 +30,11 @@
  *
  * The bar is deliberately about *provability*, not severity of consequence. A
  * shape with a legitimate reading stays a warning even when it is usually a
- * mistake — {@link FLOW_DECISION_UNCONDITIONAL_BRANCH} is normally a guard that
- * does not guard, but a decision with one guarded and one unconditional out-edge
- * is a legal "maybe notify, always continue" fan-out, and
+ * mistake — {@link FLOW_DECISION_UNCONDITIONAL_BRANCH} covers a guard that does
+ * not guard AND a decision that declares no branching at all, yet a decision
+ * with one guarded and one unconditional out-edge is a legal "maybe notify,
+ * always continue" fan-out, an all-unconditional one is that same fan-out under
+ * a mis-chosen node type rather than a route that is broken, and
  * {@link FLOW_MULTIPLE_DEFAULT_EDGES} can genuinely mean "when nothing matched,
  * do both". Failing a customer's build on a shape we cannot prove wrong is a
  * worse trade than letting the warning be ignored.
@@ -720,10 +722,21 @@ function scanErrorLabelledEdges(
  *      shipped defect: app-crm's convert-lead guard computed `'No — proceed'`
  *      against out-edges labelled `'Yes'` / `'No'`, matched nothing, and ran
  *      both branches.
- *  (2) `flow-decision-unconditional-branch` — an out-edge of a decision that has
- *      no `condition`, no `isDefault`, and no label the decision can select. It
- *      is traversed on EVERY pass, in parallel with whichever branch did match,
- *      so the guard next to it does not guard.
+ *  (2) `flow-decision-unconditional-branch` — an out-edge nothing can gate: no
+ *      `condition`, no `isDefault`, and no label the decision can select. It is
+ *      traversed on EVERY pass, in parallel with whichever branch did match, so
+ *      the guard next to it does not guard. #16093 gave the same id a second
+ *      message for the strictly worse shape it could not previously see: NO
+ *      out-edge gated and no `conditions[]` declared either. The rule was framed
+ *      as "an unconditional edge undercuts a guarded one", so zero guarded edges
+ *      read as nothing to undercut and the node was skipped — but a decision
+ *      with no guard anywhere does not have less wrong with it, it selects no
+ *      branch at all: every successor runs on every pass and the gateway is
+ *      decoration. It is also the harder shape to notice in review, because the
+ *      node still says `type: 'decision'`. A decision routing by
+ *      `config.conditions[]` labels alone has declared its branching on the node
+ *      and is not this shape; (1) already owns it when a declared label goes
+ *      unclaimed.
  *  (3) `flow-default-edge-with-condition` — `isDefault` means "when nothing else
  *      matched"; a condition on the same edge contradicts it (BPMN forbids a
  *      conditional default flow). The condition wins and the marker is inert.
@@ -737,8 +750,10 @@ function scanErrorLabelledEdges(
  * (1) and (3) GATE — neither has a reading under which the author's metadata
  * routes what it says, on any run, so a warning would just be a slower way of
  * finding out. (2) and (4) stay advisory: an unconditional sibling is a legal
- * "maybe notify, always continue" fan-out, and two defaults can mean "when
- * nothing matched, do both". See the severity policy at the top of this file.
+ * "maybe notify, always continue" fan-out, an all-unconditional decision is that
+ * same fan-out written on the wrong node type — the successors it names do run,
+ * every one of them, every pass — and two defaults can mean "when nothing
+ * matched, do both". See the severity policy at the top of this file.
  *
  * The engine also warns when it hits (1) live — a stored flow authored before
  * this rule existed still reaches run time.
@@ -874,7 +889,38 @@ function scanBranchRouting(
     // (2) an out-edge nothing can gate: no condition, not the default, and not
     //     selectable by a label the decision declares.
     const gated = outs.filter((e) => e.condition || e.isDefault === true);
-    if (gated.length === 0) continue; // no branching declared at all — nothing to undercut
+    const declaresConditions = Array.isArray(cfg.conditions) && (cfg.conditions as unknown[]).length > 0;
+
+    if (gated.length === 0) {
+      // (2a) #16093 — the decision gates on NOTHING. The old framing read this
+      //      as "no branching declared at all, nothing to undercut" and skipped
+      //      it; that reads zero guarded edges as an absence when it is the
+      //      defect. A decision routing by `config.conditions[]` labels alone
+      //      is NOT inert — its branching is declared on the node — and (1)
+      //      above already reports it when no out-edge claims a declared label,
+      //      so it is excluded here rather than reported twice.
+      if (!declaresConditions) {
+        findings.push({
+          where: `${at} · decision '${nid}'`,
+          message:
+            `gates on NOTHING — none of its out-edge(s) ` +
+            `(${outs.map((e) => `'${String(e.target)}'`).join(', ')}) carries a \`condition\` or ` +
+            `\`isDefault\`, and the decision declares no \`config.conditions[]\`. With no branch to ` +
+            `select, EVERY out-edge is traversed on EVERY pass, in parallel — the node is typed ` +
+            `\`decision\` but routes exactly as a non-decision step would, so the gateway is decoration.`,
+          hint:
+            `Declare the branching one way and one way only: a \`condition\` per branch plus ` +
+            `\`isDefault: true\` on the fallback, or \`config.conditions[]\` whose \`label\` matches an ` +
+            `out-edge's. If the unconditional fan-out is what you meant, drop \`type: 'decision'\` and ` +
+            `use the node it already behaves as. (#4414)`,
+          rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
+        });
+      }
+      // Either way no out-edge is gated, so the mixed-branch check below — an
+      // unconditional edge undercutting a guarded sibling — has no sibling to
+      // read and would only report the same node a second time.
+      continue;
+    }
     const ungated = outs.filter(
       (e) => !e.condition && e.isDefault !== true && !declaredLabels.has(edgeLabelOf(e)),
     );
