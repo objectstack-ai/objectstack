@@ -768,7 +768,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + 'any HTTP boundary exists: `ObjectKernel.use()` re-wraps it into a fresh `Error` that the host '
             + 'rethrows and the process aborts on, so no door can answer with it and no door can demote it. '
             + 'Same class as the migration-journal runner refusals and the service-resolution discriminator '
-            + 'above, ruled by the same #8035 reasoning: a composition fact raised pre-HTTP is not wire '
+            + 'above, ruled by the same reasoning those rows cite: a composition fact raised pre-HTTP is not wire '
             + 'vocabulary. The code is repeated at the head of the message because that re-wrap keeps only '
             + '`message`. If a transport ever ANSWERS with this fact, the verdict becomes '
             + 'pending-registration and the code belongs in the ledger batch.',
