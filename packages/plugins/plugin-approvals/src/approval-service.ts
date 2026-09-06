@@ -3146,7 +3146,7 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * Withdraw a pending request (submitter only). Finalises the row as
+   * Withdraw an undecided request. Finalises the row as
    * `recalled`, releases the record lock (keyed on pending status), mirrors
    * the status field when configured, and resumes the owning flow run down
    * the `reject` branch with `output.decision = 'recall'` — leaving the run
