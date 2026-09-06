@@ -48,6 +48,10 @@ export const REFERENCE_PLACEHOLDER = 'zoo_reference_id_resolved_at_runtime';
  * account has to exist first and the project has to be given its real id. That
  * dependency is itself a small proof of #4441 — seeding these in the wrong
  * order now fails loudly instead of writing a project that points at nothing.
+ * `f_tree` is a SELF-reference (#14892: a `tree` field's `reference`, when
+ * given, must name the declaring object), so its target is another zoo row,
+ * which in turn needs the zoo's own required `f_master_detail` — the project
+ * seeded one entry earlier. Last for that reason.
  */
 export const REFERENCE_TARGETS: ReadonlyArray<{
   field: string;
@@ -72,8 +76,8 @@ export const REFERENCE_TARGETS: ReadonlyArray<{
   },
   {
     field: 'f_tree',
-    object: 'showcase_category',
-    body: () => ({ name: 'zoo-ref-category' }),
+    object: 'showcase_field_zoo',
+    body: (seeded) => ({ name: 'zoo-ref-parent', f_master_detail: seeded.f_master_detail }),
   },
 ];
 

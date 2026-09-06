@@ -42,9 +42,9 @@ const result = KernelSecurityPolicySchema.parse(data);
 | **csp** | `{ directives?: Record<string, string[]>; reportOnly: boolean }` | optional |  |
 | **cors** | `{ allowedOrigins: string[]; allowedMethods: string[]; allowedHeaders: string[]; allowCredentials: boolean; … }` | optional |  |
 | **rateLimit** | `{ enabled: boolean; maxRequests: integer; windowMs: integer; strategy: Enum<'fixed' \| 'sliding' \| 'token-bucket'> }` | optional |  |
-| **authentication** | `{ required: boolean; methods: Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]; tokenExpiration?: integer }` | optional |  |
+| **authentication** | `{ required: boolean; methods: Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]; tokenExpirationSeconds?: integer }` | optional |  |
 | **encryption** | `{ dataAtRest: boolean; dataInTransit: boolean; algorithm?: string; minKeyLength?: integer }` | optional |  |
-| **auditLog** | `{ enabled: boolean; events?: string[]; retention?: integer }` | optional |  |
+| **auditLog** | `{ enabled: boolean; events?: string[]; retentionDays?: integer }` | optional |  |
 
 ### Nested Shape: `KernelSecurityPolicy.rateLimit`
 
@@ -61,7 +61,8 @@ const result = KernelSecurityPolicySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **required** | `boolean` | optional (default: `true`) |  |
 | **methods** | `Enum<'jwt' \| 'oauth2' \| 'api-key' \| 'session' \| 'certificate'>[]` | ✅ |  |
-| **tokenExpiration** | `integer` | optional | Token expiration in seconds |
+| **tokenExpirationSeconds** | `integer` | optional | Token expiration in seconds |
+| **tokenExpiration** | `never` | optional | [REMOVED] `KernelSecurityPolicy.authentication.tokenExpiration` was renamed to `tokenExpirationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the sibling rate-limit window on this same policy is already `windowMs`. Rename the key to `tokenExpirationSeconds`; the value (seconds) is unchanged. |
 
 ### Nested Shape: `KernelSecurityPolicy.encryption`
 
@@ -78,7 +79,8 @@ const result = KernelSecurityPolicySchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) |  |
 | **events** | `string[]` | optional | Events to log |
-| **retention** | `integer` | optional | Log retention in days |
+| **retentionDays** | `integer` | optional | Log retention in days |
+| **retention** | `never` | optional | [REMOVED] `KernelSecurityPolicy.auditLog.retention` was renamed to `retentionDays` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retentionDays`; the value (days) is unchanged. |
 
 
 ---
@@ -270,7 +272,7 @@ Scope of permission application
 | **codeSigning** | `{ signed: boolean; signature?: string; certificate?: string; algorithm?: string; … }` | optional |  |
 | **certifications** | `{ name: string; issuer: string; issuedDate: string; expiryDate?: string; … }[]` | optional |  |
 | **securityContact** | `{ email?: string; url?: string; pgpKey?: string }` | optional |  |
-| **vulnerabilityDisclosure** | `{ policyUrl?: string; responseTime?: integer; bugBounty?: boolean }` | optional |  |
+| **vulnerabilityDisclosure** | `{ policyUrl?: string; responseTimeHours?: integer; bugBounty?: boolean }` | optional |  |
 
 ### Nested Shape: `PluginSecurityManifest.sandbox`
 
@@ -281,7 +283,7 @@ Scope of permission application
 | **runtime** | `{ engine?: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
 | **filesystem** | `{ mode?: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
 | **network** | `{ mode?: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |
-| **process** | `{ allowSpawn?: boolean; allowedCommands?: string[]; timeout?: integer }` | optional |  |
+| **process** | `{ allowSpawn?: boolean; allowedCommands?: string[]; timeoutMs?: integer }` | optional |  |
 | **memory** | `{ maxHeap?: integer; maxStack?: integer }` | optional |  |
 | **cpu** | `{ maxCpuPercent?: number; maxThreads?: integer }` | optional |  |
 | **environment** | `{ mode?: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
@@ -301,7 +303,8 @@ Scope of permission application
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **policyUrl** | `string` | optional |  |
-| **responseTime** | `integer` | optional | Expected response time in hours |
+| **responseTimeHours** | `integer` | optional | Expected response time in hours |
+| **responseTime** | `never` | optional | [REMOVED] `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` was renamed to `responseTimeHours` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. This one is HOURS, while the same bare name on `PluginHealthReport.metrics` was milliseconds — which is the confusion the rule exists to remove. Rename the key to `responseTimeHours`; the value (hours) is unchanged. |
 | **bugBounty** | `boolean` | optional (default: `false`) |  |
 
 
@@ -380,7 +383,7 @@ Type of resource being accessed
 | **runtime** | `{ engine: Enum<'v8-isolate' \| 'wasm' \| 'container' \| 'process'>; engineConfig?: object; resourceLimits?: object }` | optional | Execution environment and isolation settings |
 | **filesystem** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedPaths?: string[]; deniedPaths?: string[]; maxFileSize?: integer }` | optional |  |
 | **network** | `{ mode: Enum<'none' \| 'local' \| 'restricted' \| 'full'>; allowedHosts?: string[]; deniedHosts?: string[]; allowedPorts?: number[]; … }` | optional |  |
-| **process** | `{ allowSpawn: boolean; allowedCommands?: string[]; timeout?: integer }` | optional |  |
+| **process** | `{ allowSpawn: boolean; allowedCommands?: string[]; timeoutMs?: integer }` | optional |  |
 | **memory** | `{ maxHeap?: integer; maxStack?: integer }` | optional |  |
 | **cpu** | `{ maxCpuPercent?: number; maxThreads?: integer }` | optional |  |
 | **environment** | `{ mode: Enum<'none' \| 'readonly' \| 'restricted' \| 'full'>; allowedVars?: string[]; deniedVars?: string[] }` | optional |  |
@@ -418,7 +421,8 @@ Type of resource being accessed
 | :--- | :--- | :--- | :--- |
 | **allowSpawn** | `boolean` | optional (default: `false`) | Allow spawning child processes |
 | **allowedCommands** | `string[]` | optional | Whitelisted commands |
-| **timeout** | `integer` | optional | Process timeout in ms |
+| **timeoutMs** | `integer` | optional | Process timeout in ms |
+| **timeout** | `never` | optional | [REMOVED] `SandboxConfig.process.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged. |
 
 ### Nested Shape: `SandboxConfig.memory`
 

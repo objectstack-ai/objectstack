@@ -543,7 +543,7 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
   it('a member typed as a STRING on the record never takes a NUMERIC column', () => {
     // ⚠️ Deliberately "not numeric" rather than "is a character column".
     // `date` / `datetime` / `time` are strings on the record and take DATE /
-    // TIMESTAMP / TIME columns, which is correct — a rule demanding a varchar
+    // TIMESTAMPTZ / TIME columns, which is correct — a rule demanding a varchar
     // would report those three as defects. What `autonumber` did is the
     // narrower thing: a rendered string in a column that only accepts numbers.
     const NUMERIC_COLUMN = /^(SERIAL|BIGSERIAL|SMALLSERIAL|INTEGER|INT|BIGINT|SMALLINT|DECIMAL|NUMERIC|REAL|FLOAT|DOUBLE)\b/i;
@@ -569,6 +569,52 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     expect(createColumnArm('autonumber')).toContain('table.string(name)');
     expect(sqlColumn('autonumber')).toBe(sqlColumn('text'));
     expect(tsColumn('autonumber')).toBe("table.string('f_autonumber')");
+  });
+
+  // ── Rule 5: the TEMPORAL class takes the driver's own column types (#15521) ──
+  //
+  // The whole class, driven against a live PostgreSQL 16.13 — every producer
+  // run for real and its columns read back out of `information_schema.columns`
+  // — and exactly one member diverged:
+  //
+  //   date      DATE                         driver DATE          ts DATE          agree
+  //   datetime  timestamp WITHOUT time zone  driver timestamptz   ts timestamptz   DIVERGED
+  //   time      time without time zone       driver time          ts time          agree
+  //
+  // `datetime` was the only bare `TIMESTAMP` in this map, and bare `TIMESTAMP`
+  // is `timestamp WITHOUT time zone`: the column stores the wall clock of
+  // whatever session wrote the row and keeps nothing to recover the offset
+  // from. `createColumn`'s own arm calls the zone-aware column a decision
+  // rather than a default ("Postgres deliberately keeps `table.timestamp` →
+  // `timestamptz`"), and this file's typescript generator already emitted
+  // `table.timestamp` for it — so the SQL map was one producer of three
+  // disagreeing with the other two, which is what #15521 corrected.
+  //
+  // Asserted against the driver's arm rather than against the literal, for the
+  // reason Rule 3 already gives: a transcribed `TIMESTAMPTZ` would re-create the
+  // defect one layer up the day the driver's arm moves.
+
+  it('the temporal members take the column type the driver builds for them', () => {
+    // The driver's non-MySQL arms, read where they live. `table.timestamp` is
+    // `timestamptz` on Postgres; `table.date` and `table.time` are their plain
+    // selves, which is why only `datetime` had a time zone to lose.
+    expect(createColumnArm('datetime')).toContain('table.timestamp(name)');
+    expect(createColumnArm('date')).toContain('table.date(name)');
+    expect(createColumnArm('time')).toContain('table.time(name)');
+
+    expect(sqlColumn('datetime')).toBe('TIMESTAMPTZ');
+    expect(sqlColumn('date')).toBe('DATE');
+    expect(sqlColumn('time')).toBe('TIME');
+
+    // The third producer agrees by construction — the same knex builders.
+    expect(tsColumn('datetime')).toBe("table.timestamp('f_datetime')");
+    expect(tsColumn('date')).toBe("table.date('f_date')");
+    expect(tsColumn('time')).toBe("table.time('f_time')");
+
+    // Anti-vacuity: the reader really discriminates, and the pre-#15521
+    // spelling really is a different answer rather than a formatting variant.
+    expect(sqlColumn('datetime')).not.toBe('TIMESTAMP');
+    expect(sqlColumn('this_is_not_a_field_type')).toBeNull();
   });
 
   // ── Recorded divergence, NOT coverage: FILE_REFERENCE_TYPES (#15041) ─────

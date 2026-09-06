@@ -19,7 +19,7 @@ import { findCrossFieldComparand, isFieldReference } from '../comparand-shape.js
 import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { nonTextColumnResolver, textOperatorPolarity } from '../non-text-column.js';
 import { invalidMemberError } from '../dataset-refusal.js';
-import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
+import { type LikeShape } from '../like-pattern.js';
 import { textMatchPredicateSql, sqlDialectFor } from '../text-match-sql.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
 import {
@@ -82,22 +82,26 @@ const SCALAR_SQL_OPS: Record<string, string> = {
  * than the query it claims to reproduce whenever the comparand carried a `_` or
  * `%` — the #3601 / #3602 / #3650 failure this render block exists to prevent.
  */
-const LIKE_SQL_OPS: Record<string, { sql: string; shape: LikeShape; fold?: boolean; negate?: boolean }> = {
-  // [#15684] `sql` is the keyword for the FOLDING row only. The four
-  // case-EXACT rows take their construct from the DIALECT — `text-match-sql.ts`
-  // emits `GLOB` on SQLite and `LIKE` over `CAST(… AS BINARY)` on MySQL, since
-  // a plain `LIKE` is case-exact on Postgres alone. `negate` is what survives
-  // that move: which POLARITY the row is, spelled once, so the construct table
-  // and not this one decides how the negation is written.
-  contains: { sql: 'LIKE', shape: 'contains' },
-  notContains: { sql: 'NOT LIKE', shape: 'contains', negate: true },
-  startsWith: { sql: 'LIKE', shape: 'starts' },
-  endsWith: { sql: 'LIKE', shape: 'ends' },
-  // [#6520] `$icontains`: the same escaped pattern and bound `ESCAPE` as its
-  // four case-EXACT neighbours, with `fold` adding the ASCII-only case fold to
-  // both sides of the comparison. The flag is on this row alone — the family
-  // above it is case-sensitive by ruling (#4706 Q2 = A).
-  icontains: { sql: 'LIKE', shape: 'contains', fold: true },
+const LIKE_SQL_OPS: Record<string, { shape: LikeShape; fold?: boolean; negate?: boolean }> = {
+  // [#15684 / #15780] This table carries NO keyword, deliberately. Every row's
+  // construct comes from the DIALECT (`text-match-sql.ts`): `GLOB` on SQLite,
+  // `LIKE` over `CAST(… AS BINARY)` on MySQL, plain `LIKE` on Postgres, since a
+  // plain `LIKE` is case-exact on Postgres alone. #15684 kept a `sql` field
+  // here for the FOLDING row, which was the last row still emitting a keyword
+  // written locally — together with the `translate()` fold that could not parse
+  // on SQLite. #15780 moved that row onto the table too, so the field had no
+  // reader left, and a dead field named `sql` sitting beside a compiler is an
+  // invitation to read it as the emitted keyword.
+  //
+  // What survives here is only what the construct table cannot derive from the
+  // operator name: which POLARITY the row is (`negate`) and whether it FOLDS
+  // (`fold`), each spelled once. `fold` is on `icontains` ALONE — the four
+  // above it are case-SENSITIVE by ruling (#4706 Q2 = A).
+  contains: { shape: 'contains' },
+  notContains: { shape: 'contains', negate: true },
+  startsWith: { shape: 'starts' },
+  endsWith: { shape: 'ends' },
+  icontains: { shape: 'contains', fold: true },
 };
 
 /** One cross-object grouping dimension planned for FK-expand (#3654). */
@@ -1246,24 +1250,23 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       // folding only the comparand compares a folded needle against a raw column
       // and returns just the rows that were already lower-case — a wrong row set
       // that looks like a working predicate.
-      if (like.fold) {
-        params.push(likePattern(like.shape, values[0]));
-        const patternRef = `$${params.length}`;
-        params.push(LIKE_ESCAPE_CHAR);
-        return `${asciiLowerSqlExpr(col)} ${like.sql} ${asciiLowerSqlExpr(patternRef)} ESCAPE $${params.length}`;
-      }
-      // [#15684] The case-EXACT four print what the DIALECT will run. Asked of
-      // the same hook `NativeSQLStrategy` asks, on the same target, so the echo
-      // and the executed statement stay one description — the whole reason this
-      // render block exists (#5333). A caller that handed no target and no
-      // context cannot be asked (the four-argument shape the operator-coverage
-      // suite drives), and keeps the `LIKE` it always got.
+      // [#15684 / #15780] Both text families print what the DIALECT will run —
+      // the case-EXACT four because `LIKE` is case-exact on Postgres alone, and
+      // `$icontains` because its fold was `translate()`, which SQLite does not
+      // have at all. Asked of the same hook `NativeSQLStrategy` asks, on the
+      // same target, so the echo and the executed statement stay one
+      // description — the whole reason this render block exists (#5333). An
+      // echo that printed a parseable statement while the engine refused the
+      // real one is that failure in its loudest form. A caller that handed no
+      // target and no context cannot be asked (the four-argument shape the
+      // operator-coverage suite drives), and keeps the `LIKE` it always got.
       return textMatchPredicateSql({
         dialect: target && ctx ? sqlDialectFor(ctx, target.object) : 'unknown',
         column: col,
         shape: like.shape,
         value: values[0],
         negate: like.negate === true,
+        fold: like.fold === true,
         bind: (v) => { params.push(v); return `$${params.length}`; },
       });
     }

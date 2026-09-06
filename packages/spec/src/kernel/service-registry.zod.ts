@@ -26,6 +26,7 @@ import { ServiceClusterAnnotationsSchema } from './cluster.zod';
  * Different service scoping strategies
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { EpochMs } from '../shared/epoch.zod';
 export const ServiceScopeType = z.enum([
   'singleton',    // Single instance shared across the application
   'transient',    // New instance created each time
@@ -66,7 +67,9 @@ export const ServiceMetadataSchema = lazySchema(() => z.object({
   /**
    * Registration timestamp (Unix milliseconds)
    */
-  registeredAt: z.number().int().optional()
+  // Typed `EpochMs` (#15676, #14478 ruling B) — an epoch instant, already
+  // correctly named `*At`, so the declaration is the whole change here.
+  registeredAt: EpochMs.optional()
     .describe('Unix timestamp in milliseconds when service was registered'),
   
   /**
@@ -263,7 +266,9 @@ export const ScopeInfoSchema = lazySchema(() => z.object({
   /**
    * Creation timestamp (Unix milliseconds)
    */
-  createdAt: z.number().int().describe('Unix timestamp in milliseconds when scope was created'),
+  // Typed `EpochMs` (#15676, #14478 ruling B) — an epoch instant; no rename,
+  // the name already carries the `*At` instant convention.
+  createdAt: EpochMs.describe('Unix timestamp in milliseconds when scope was created'),
   
   /**
    * Number of services in this scope

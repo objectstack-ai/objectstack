@@ -5,6 +5,8 @@ import { PresenceStatus } from './realtime-shared.zod';
 
 // Re-export shared PresenceStatus for backward compatibility
 import { lazySchema } from '../shared/lazy-schema';
+import { EpochMs } from '../shared/epoch.zod';
+import { retiredKey } from '../shared/retired-key';
 export { PresenceStatus } from './realtime-shared.zod';
 
 /**
@@ -418,10 +420,34 @@ export const WebSocketConfigSchema = lazySchema(() => z.object({
   url: z.string().url().describe('WebSocket server URL'),
   protocols: z.array(z.string()).optional().describe('WebSocket sub-protocols'),
   reconnect: z.boolean().optional().default(true).describe('Enable automatic reconnection'),
-  reconnectInterval: z.number().int().positive().optional().default(1000).describe('Reconnection interval in milliseconds'),
+  // Renamed from `reconnectInterval` / `pingInterval` / `timeout` (#15677,
+  // #14478 ruling B): three durations on one shape whose unit lived only in
+  // the describe prose, beside a `maxReconnectAttempts` that is a COUNT — the
+  // adjacency the rule exists to disambiguate.
+  reconnectIntervalMs: z.number().int().positive().optional().default(1000).describe('Reconnection interval in milliseconds'),
   maxReconnectAttempts: z.number().int().positive().optional().default(5).describe('Maximum reconnection attempts'),
-  pingInterval: z.number().int().positive().optional().default(30000).describe('Ping interval in milliseconds'),
-  timeout: z.number().int().positive().optional().default(5000).describe('Message timeout in milliseconds'),
+  pingIntervalMs: z.number().int().positive().optional().default(30000).describe('Ping interval in milliseconds'),
+  timeoutMs: z.number().int().positive().optional().default(5000).describe('Message timeout in milliseconds'),
+
+  /** Tombstones for the three renames above (#15677, ruling B on #14478). */
+  reconnectInterval: retiredKey(
+    '`WebSocketConfig.reconnectInterval` was renamed to `reconnectIntervalMs` in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to `reconnectIntervalMs`; '
+    + 'the value (milliseconds) is unchanged.',
+  ),
+  pingInterval: retiredKey(
+    '`WebSocketConfig.pingInterval` was renamed to `pingIntervalMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `pingIntervalMs`; the value (milliseconds) is '
+    + 'unchanged.',
+  ),
+  timeout: retiredKey(
+    '`WebSocketConfig.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `timeoutMs`; the value (milliseconds) is '
+    + 'unchanged.',
+  ),
   headers: z.record(z.string(), z.string()).optional().describe('Custom headers for WebSocket handshake'),
 }));
 
@@ -445,7 +471,7 @@ export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
  *   type: 'subscribe',
  *   channel: 'record.account.123',
  *   payload: { events: ['created', 'updated'] },
- *   timestamp: Date.now()
+ *   occurredAt: Date.now()
  * }
  * ```
  * 
@@ -455,7 +481,7 @@ export type WebSocketConfigParsed = z.infer<typeof WebSocketConfigSchema>;
  *   type: 'data-change',
  *   channel: 'record.account.123',
  *   payload: { id: '123', action: 'updated', data: {...} },
- *   timestamp: Date.now()
+ *   occurredAt: Date.now()
  * }
  * ```
  */
@@ -470,7 +496,19 @@ export const WebSocketEventSchema = lazySchema(() => z.object({
   ]).describe('Event type'),
   channel: z.string().describe('Channel identifier (e.g., "record.account.123", "user.456")'),
   payload: z.unknown().describe('Event payload data'),
-  timestamp: z.number().describe('Unix timestamp in milliseconds'),
+  // Renamed from `timestamp` and typed `EpochMs` (#15676, #14478 ruling B): an
+  // epoch INSTANT, not a duration. `*At` is this package's measured convention
+  // for an instant and `EpochMs` is where the millisecond unit is declared, so
+  // the unit no longer lives only in the describe prose.
+  occurredAt: EpochMs.describe('Unix timestamp in milliseconds when the event occurred'),
+
+  /** Tombstone for the rename above (#15676, ruling B on #14478). */
+  timestamp: retiredKey(
+    '`WebSocketEvent.timestamp` was renamed to `occurredAt` in @objectstack/spec 17 — the '
+    + 'event INSTANT now carries the shared `EpochMs` schema, which declares the '
+    + 'epoch-millisecond unit the bare key name left to the describe prose. Rename the key '
+    + 'to `occurredAt`; the value is unchanged (`Date.now()`).',
+  ),
 }));
 
 export type WebSocketEvent = z.input<typeof WebSocketEventSchema>;
@@ -490,7 +528,7 @@ export type WebSocketEvent = z.input<typeof WebSocketEventSchema>;
  *   userId: 'user123',
  *   userName: 'John Doe',
  *   status: 'online',
- *   lastSeen: Date.now(),
+ *   lastSeenAt: Date.now(),
  *   metadata: { currentPage: '/dashboard' }
  * }
  * ```
@@ -499,7 +537,19 @@ export const SimplePresenceStateSchema = lazySchema(() => z.object({
   userId: z.string().describe('User identifier'),
   userName: z.string().describe('User display name'),
   status: z.enum(['online', 'away', 'offline']).describe('User presence status'),
-  lastSeen: z.number().describe('Unix timestamp of last activity in milliseconds'),
+  // Renamed from `lastSeen` and typed `EpochMs` (#15676, #14478 ruling B) — an
+  // epoch instant, joining the `lastAccessedAt` / `lastUsedAt` family.
+  lastSeenAt: EpochMs.describe('Unix timestamp of last activity in milliseconds'),
+
+  /** Tombstone for the rename above (#15676, ruling B on #14478). */
+  lastSeen: retiredKey(
+    '`SimplePresenceState.lastSeen` was renamed to `lastSeenAt` in @objectstack/spec 17 — '
+    + 'the last-activity INSTANT now carries the shared `EpochMs` schema, which declares '
+    + 'the epoch-millisecond unit. Rename the key to `lastSeenAt`; the value is unchanged '
+    + '(`Date.now()`). Note the neighbouring `PresenceState.lastSeen` '
+    + '(api/realtime-shared.zod.ts) is a different key with a different type — an '
+    + 'ISO-8601 datetime STRING — and is untouched.',
+  ),
   metadata: z.record(z.string(), z.unknown()).optional().describe('Additional presence metadata (e.g., current page, custom status)'),
 }));
 
@@ -549,7 +599,7 @@ export type SimpleCursorPosition = z.input<typeof SimpleCursorPositionSchema>;
  * {
  *   enabled: true,
  *   path: '/ws',
- *   heartbeatInterval: 30000,
+ *   heartbeatIntervalMs: 30000,
  *   reconnectAttempts: 5,
  *   presence: true,
  *   cursorSharing: true
@@ -559,10 +609,20 @@ export type SimpleCursorPosition = z.input<typeof SimpleCursorPositionSchema>;
 export const WebSocketServerConfigSchema = lazySchema(() => z.object({
   enabled: z.boolean().default(false).describe('Enable WebSocket server'),
   path: z.string().default('/ws').describe('WebSocket endpoint path'),
-  heartbeatInterval: z.number().default(30000).describe('Heartbeat interval in milliseconds'),
+  // Renamed from `heartbeatInterval` (#15677, #14478 ruling B): its unit lived
+  // only in the describe prose, beside a `reconnectAttempts` that is a COUNT.
+  heartbeatIntervalMs: z.number().default(30000).describe('Heartbeat interval in milliseconds'),
   reconnectAttempts: z.number().default(5).describe('Maximum reconnection attempts for clients'),
   presence: z.boolean().default(false).describe('Enable presence tracking'),
   cursorSharing: z.boolean().default(false).describe('Enable collaborative cursor sharing'),
+
+  /** Tombstone for the rename above (#15677, ruling B on #14478). */
+  heartbeatInterval: retiredKey(
+    '`WebSocketServerConfig.heartbeatInterval` was renamed to `heartbeatIntervalMs` in '
+    + '@objectstack/spec 17 — the unit of a duration-shaped number lives in '
+    + 'the key name, not only in the describe prose. Rename the key to `heartbeatIntervalMs`; '
+    + 'the value (milliseconds) is unchanged.',
+  ),
 }));
 
 export type WebSocketServerConfig = z.input<typeof WebSocketServerConfigSchema>;

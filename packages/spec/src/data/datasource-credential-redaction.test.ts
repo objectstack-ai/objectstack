@@ -91,6 +91,45 @@ describe('derivation pin: the moved module derives EXACTLY what the service-data
     expect(redactableConfigKeys(undefined)).toEqual(fallback);
   });
 
+  // #15680 (#14478 ruling B): a `retiredKey()` tombstone is ALSO a `z.never()`,
+  // and it is not a credential. Until the duration renames landed, no driver
+  // contract carried one, so "never ⇒ credential" held by accident of population
+  // rather than by construction — and the first tombstone to arrive
+  // (`TursoConfig.timeout` → `timeoutMs`) made the derivation answer that a
+  // millisecond budget was a secret, which redacts a duration off the read path
+  // and drags a non-credential name into the fallback list every unknown driver
+  // is scrubbed by. Excluded by the `[REMOVED] ` prefix `retiredKey()` itself
+  // stamps, so nothing here is a maintained list.
+  it('a retiredKey() tombstone is NOT derived as a refused credential', () => {
+    const tursoShape: any = (getDriverConfigSchema('turso') as any).shape;
+    const shape = typeof tursoShape === 'function' ? tursoShape() : tursoShape;
+    // The tombstone really is in the shape and really is a `z.never()` — without
+    // this leg the assertion below would pass just as well on a key that had
+    // been deleted outright, which is the silent strip the tombstone prevents.
+    expect(Object.keys(shape)).toContain('timeout');
+    expect(String(shape.timeout.description)).toMatch(/^\[REMOVED\] /);
+    expect(refusedCredentialKeys('turso')).not.toContain('timeout');
+    expect(redactableConfigKeys('turso')).not.toContain('timeout');
+    // The credential beside it is untouched — the narrowing must not cost a
+    // single real refusal, which is the only direction that could leak.
+    expect(refusedCredentialKeys('turso')).toContain('authToken');
+  });
+
+  it('the exclusion is negative, so an UNMARKED z.never() is still a credential', () => {
+    // Fail-safe direction. A future credential slot whose author forgets
+    // `refusedInlineCredentialKey`'s marker must still be scrubbed; only a key
+    // that has explicitly declared itself retired may drop out. Constructed,
+    // because no builtin driver ships a bare `z.never()` today.
+    const unmarked = z.object({ apiSecret: z.never().optional(), url: z.string() });
+    expect(refusedCredentialPathsOfSchema(unmarked)).toEqual([['apiSecret']]);
+
+    const tombstoned = z.object({
+      legacyKey: z.never().optional().describe('[REMOVED] `legacyKey` was renamed to `legacyKeyMs`.'),
+      url: z.string(),
+    });
+    expect(refusedCredentialPathsOfSchema(tombstoned)).toEqual([]);
+  });
+
   it('every z.never() key across every builtin driver is covered by the unknown-driver fallback', () => {
     // Guards the one hand-written canonical list: if a driver refuses a NEW
     // credential key, the fallback used for contract-less drivers must learn

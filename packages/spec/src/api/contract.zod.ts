@@ -10,6 +10,7 @@ import { StandardErrorCode } from './errors.zod';
 // ==========================================
 
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const ApiErrorSchema = lazySchema(() => z.object({
   /**
    * Machine-readable semantic code (ADR-0112): a `StandardErrorCode` member or
@@ -400,7 +401,16 @@ export const DataLoaderConfigSchema = lazySchema(() => z.object({
     .describe('Scheduling strategy for collecting batch keys'),
   cacheEnabled: z.boolean().default(true).describe('Enable per-request result caching'),
   cacheKeyFn: z.string().optional().describe('Name or identifier of the cache key function'),
-  cacheTtl: z.number().min(0).optional().describe('Cache time-to-live in seconds (0 = no expiration)'),
+  // Renamed from `cacheTtl` (#15677, #14478 ruling B): the unit lived only in
+  // the describe prose, on a surface whose neighbouring TTLs are milliseconds.
+  cacheTtlSeconds: z.number().min(0).optional().describe('Cache time-to-live in seconds (0 = no expiration)'),
+
+  /** Tombstone for the rename above (#15677, ruling B on #14478). */
+  cacheTtl: retiredKey(
+    '`DataLoaderConfig.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged.',
+  ),
   coalesceRequests: z.boolean().default(true).describe('Deduplicate identical requests within a batch window'),
   maxConcurrency: z.number().int().optional().describe('Maximum parallel batch requests'),
 }));

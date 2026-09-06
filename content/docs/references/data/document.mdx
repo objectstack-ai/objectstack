@@ -36,7 +36,7 @@ const result = DocumentSchema.parse(data);
 | **tags** | `string[]` | optional | Document tags |
 | **versioning** | `{ enabled: boolean; versions: object[]; majorVersion: number; minorVersion: number }` | optional | Version control |
 | **template** | `{ id: string; name: string; description?: string; fileUrl: string; … }` | optional | Document template |
-| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: object[]; expirationDays: number; … }` | optional | E-signature config |
+| **eSignature** | `{ provider: Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>; enabled: boolean; signers: object[] }` | optional | E-signature config |
 | **access** | `{ isPublic: boolean; sharedWith?: string[]; expiresAt?: number }` | optional | Access control |
 | **metadata** | `Record<string, any>` | optional | Custom metadata |
 
@@ -67,8 +67,8 @@ const result = DocumentSchema.parse(data);
 | **provider** | `Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>` | ✅ | E-signature provider |
 | **enabled** | `boolean` | optional (default: `false`) | E-signature enabled |
 | **signers** | `{ email: string; name: string; role: string; order: number }[]` | ✅ | Document signers |
-| **expirationDays** | `number` | optional (default: `30`) | Expiration days |
-| **reminderDays** | `number` | optional (default: `7`) | Reminder interval days |
+| **expirationDays** | `never` | optional | [REMOVED] `ESignatureConfig.expirationDays` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no e-signature engine exists on the platform, so no signature request was ever sent, expired or lapsed, and its default of 30 days was materialized into every parsed configuration without ever being consulted. Delete the key. There is no replacement, because no e-signature provider integration exists to keep an expiry window. |
+| **reminderDays** | `never` | optional | [REMOVED] `ESignatureConfig.reminderDays` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no e-signature engine exists on the platform, so no reminder email was ever sent, and its default of 7 days was materialized into every parsed configuration without ever being consulted. Delete the key. There is no replacement, because no e-signature provider integration exists to send reminders. |
 
 ### Nested Shape: `Document.access`
 
@@ -132,8 +132,8 @@ const result = DocumentSchema.parse(data);
 | **provider** | `Enum<'docusign' \| 'adobe-sign' \| 'hellosign' \| 'custom'>` | ✅ | E-signature provider |
 | **enabled** | `boolean` | optional (default: `false`) | E-signature enabled |
 | **signers** | `{ email: string; name: string; role: string; order: number }[]` | ✅ | Document signers |
-| **expirationDays** | `number` | optional (default: `30`) | Expiration days |
-| **reminderDays** | `number` | optional (default: `7`) | Reminder interval days |
+| **expirationDays** | `never` | optional | [REMOVED] `ESignatureConfig.expirationDays` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no e-signature engine exists on the platform, so no signature request was ever sent, expired or lapsed, and its default of 30 days was materialized into every parsed configuration without ever being consulted. Delete the key. There is no replacement, because no e-signature provider integration exists to keep an expiry window. |
+| **reminderDays** | `never` | optional | [REMOVED] `ESignatureConfig.reminderDays` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no e-signature engine exists on the platform, so no reminder email was ever sent, and its default of 7 days was materialized into every parsed configuration without ever being consulted. Delete the key. There is no replacement, because no e-signature provider integration exists to send reminders. |
 
 ### Nested Shape: `ESignatureConfig.signers[number]`
 

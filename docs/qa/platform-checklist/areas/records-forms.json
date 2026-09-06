@@ -3196,7 +3196,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency scale 2 currencyConfig{precision 2} min 0; f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project; f_tree→showcase_category; f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
+          "showcase_field_zoo (examples/app-showcase/src/data/objects/field-zoo.object.ts): name text maxLength 200; f_number min 0 max 1000; f_currency scale 2 currencyConfig{precision 2} min 0; f_percent min 0 max 100; f_select {low,medium,high}; f_multiselect {red,green,blue}; f_lookup→showcase_account; f_master_detail→showcase_project; f_tree→showcase_field_zoo (self-reference); f_autonumber (default counter, NO autonumberFormat); f_formula = f_number*f_percent/100",
           "showcase_invoice (invoice.object.ts): status select {draft,sent,paid,void} required; account lookup with lookupFilters status!=churned; total summary(sum showcase_invoice_line.amount) — the summary carrier the zoo lacks"
         ],
         "knownGaps": [

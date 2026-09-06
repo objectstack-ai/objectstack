@@ -14,6 +14,7 @@ import { z } from 'zod';
  * Defines how registries synchronize with upstreams
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const RegistrySyncPolicySchema = lazySchema(() => z.enum([
   'manual',    // Manual synchronization only
   'auto',      // Automatic synchronization
@@ -24,6 +25,26 @@ export const RegistrySyncPolicySchema = lazySchema(() => z.enum([
  * Registry Upstream Configuration
  * Configuration for upstream registry connection
  */
+const UPSTREAM_SYNC_INTERVAL_RETIRED =
+  '`RegistryUpstream.syncInterval` was renamed to `syncIntervalSeconds` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose, and the `timeout` beside it on this same block is '
+  + 'milliseconds. Rename the key to `syncIntervalSeconds`; the value (seconds) and the '
+  + 'min-60 bound are unchanged.';
+
+const UPSTREAM_TIMEOUT_RETIRED =
+  '`RegistryUpstream.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the '
+  + 'unit of a duration-shaped number lives in the key name, not only in the describe prose, '
+  + 'and `syncIntervalSeconds` on this same block is seconds. Rename the key to '
+  + '`timeoutMs`; the value (milliseconds), the 30000 default and the min-1000 bound are '
+  + 'unchanged.';
+
+const REGISTRY_CACHE_TTL_RETIRED =
+  '`RegistryConfig.cache.ttl` was renamed to `ttlSeconds` in @objectstack/spec 17 — the '
+  + 'unit of a duration-shaped number lives in the key name, not only in the describe prose, '
+  + 'and the sibling `maxSize` in this same cache block is bytes. Rename the key to '
+  + '`ttlSeconds`; the value (seconds) and the 3600 default are unchanged.';
+
 export const RegistryUpstreamSchema = lazySchema(() => z.object({
   /**
    * Upstream registry URL
@@ -39,8 +60,14 @@ export const RegistryUpstreamSchema = lazySchema(() => z.object({
   /**
    * Sync interval in seconds (for auto sync)
    */
-  syncInterval: z.number().int().min(60).optional()
+  // Renamed from `syncInterval` (#15679, #14478 ruling B): the unit lived only in
+  // the describe prose, and the `timeout` two keys down was MILLISECONDS — one
+  // upstream block, two units, neither spelled at the authoring site.
+  syncIntervalSeconds: z.number().int().min(60).optional()
     .describe('Auto-sync interval in seconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  syncInterval: retiredKey(UPSTREAM_SYNC_INTERVAL_RETIRED),
   
   /**
    * Authentication credentials
@@ -66,8 +93,14 @@ export const RegistryUpstreamSchema = lazySchema(() => z.object({
   /**
    * Timeout settings
    */
-  timeout: z.number().int().min(1000).default(30000)
+  // Renamed from `timeout` (#15679, #14478 ruling B): the unit lived only in the
+  // describe prose. Milliseconds here, while `syncIntervalSeconds` above is
+  // seconds — the min(1000) bound reads as sixteen minutes under the wrong one.
+  timeoutMs: z.number().int().min(1000).default(30000)
     .describe('Request timeout in milliseconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  timeout: retiredKey(UPSTREAM_TIMEOUT_RETIRED),
   
   /**
    * Retry configuration
@@ -161,8 +194,13 @@ export const RegistryConfigSchema = lazySchema(() => z.object({
    */
   cache: z.object({
     enabled: z.boolean().default(true),
-    ttl: z.number().int().min(0).default(3600)
+    // Renamed from `ttl` (#15679, #14478 ruling B): the unit lived only in the
+    // describe prose, and the sibling `maxSize` in this same cache block is BYTES.
+    ttlSeconds: z.number().int().min(0).default(3600)
       .describe('Cache TTL in seconds'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    ttl: retiredKey(REGISTRY_CACHE_TTL_RETIRED),
     maxSize: z.number().int().optional()
       .describe('Maximum cache size in bytes'),
   }).optional(),

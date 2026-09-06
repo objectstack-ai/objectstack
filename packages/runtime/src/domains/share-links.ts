@@ -36,32 +36,25 @@
  */
 
 import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
+// [#14637 -> #14935] The standing `publicSharing.enabled` switch, read through
+// the ONE predicate the package that DECLARES the key exports. This file used
+// to carry a documented MIRROR of `isPublicSharingEnabled` from
+// `plugin-sharing/src/share-link-service.ts`, copied rather than imported
+// because `@objectstack/plugin-sharing` is a **dev** dependency here and
+// importing it would invert the dependency direction. That reasoning held only
+// for that home: `@objectstack/spec` is a runtime dependency of this package
+// AND of the plugin, so moving the predicate beside the schema removes the copy
+// without adding an edge. Behaviour is unchanged, fail-closed included — an
+// absent block, an absent schema, and an engine that cannot answer `getSchema`
+// remain one answer, `false` — and the pins that held the two spellings equal
+// (`share-links-enforcement-context.test.ts` here,
+// `share-link-eligibility.test.ts` on the other side) are unchanged too: they
+// assert the same observable answer on both surfaces, which is what proves the
+// de-duplication did not move the behaviour.
+import { isPublicSharingEnabled } from '@objectstack/spec/data';
 
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
-
-/**
- * [#14637] Is `publicSharing` switched ON for this object schema?
- *
- * A deliberate MIRROR of `isPublicSharingEnabled` in
- * `plugin-sharing/src/share-link-service.ts`, which is the canonical
- * definition and the one `resolveToken`'s own gate reads. It is copied rather
- * than imported because `@objectstack/plugin-sharing` is a **dev** dependency
- * of this package: importing it here would invert the dependency direction to
- * make one boolean read shared. The two spellings are held equal by the pins
- * in `share-links-enforcement-context.test.ts` on this side and
- * `share-link-eligibility.test.ts` on the other, which assert the SAME
- * observable answer on both surfaces rather than trusting the copy.
- *
- * An absent block, an absent schema, and an engine that cannot answer
- * `getSchema` at all are one answer: `false`. `enabled` defaults to off, so a
- * surface that cannot read the policy must refuse rather than answer from the
- * token row.
- */
-function isPublicSharingEnabled(schema: unknown): boolean {
-    return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
-        ?.publicSharing?.enabled === true;
-}
 
 export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
     return {

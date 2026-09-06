@@ -639,6 +639,36 @@ const CALL_SITE_FILE_RE = /(?:^|\/)(?:[\w.-]*route[\w.-]*|[\w.-]*-server)\.ts$/;
 const LEDGER_FILE_RE = /(?:^|\/)[\w.-]*route-ledger\.ts$/;
 
 /**
+ * The ADR-0087 CONVERSION CHAIN — replay data, never a route surface (#15677).
+ *
+ * Every conversion carries a `fixture: { before, after }` pair: literal stack documents the
+ * chain replays in `migrations.test.ts`. When the converted collection is a ROUTABLE
+ * metadata kind those documents are faithful copies of that kind — an `apis:` member is an
+ * `ApiEndpoint`, which really does declare a `method:` beside a `path:`, because that is
+ * what the kind IS. So the fixture reads to kind (b) exactly like the contract declaration
+ * it is a copy of, while serving nothing: the tail is a document's content, not a route
+ * this repo answers on.
+ *
+ * ⛔ THIS EXCLUSION IS NOW DECLARED, AND IT WAS NOT BEFORE. Ruling A (2026-09-04, batch
+ * #31) named `conversions/registry.ts` as the guard's target and excluded it with a proxy
+ * — `requireMethodSignal`, "is there an HTTP verb next to the path" — which held only
+ * because no conversion fixture had yet carried one. #15677's `apis:` conversion is the
+ * first that does, and the live pin below reds rather than silently minting a phantom
+ * route source, which is precisely what that pin exists for. The proxy was never wrong
+ * about the INTENT; it was a content test standing in for a structural fact, and the
+ * fixture that defeats it is a correct fixture. Naming the directory states the fact
+ * directly, so the next conversion over a routable kind costs nothing.
+ *
+ * Deliberately NOT the other available fix — restricting kind (b) to
+ * `packages/spec/src/api/**`. That is the invariant the live pin "every contract
+ * declaration admitted is a packages/spec API declaration" ASSERTS, and enforcing it in
+ * the walk would make that pin true by construction: a check that cannot fail, over the
+ * one population this route is most likely to widen by accident. The pin is worth more
+ * than the tidier rule.
+ */
+const CONVERSION_REPLAY_FILE_RE = /(?:^|\/)packages\/spec\/src\/conversions\//;
+
+/**
  * THE selection rule of the `sdk` bridge, defined once: a registrar tail selects a ledger
  * row when the row's wire path ends with it (the `GET ` prefix is stripped first, which
  * a suffix test does not need but a reader does). PHASE 2 bridges with this exact test.
@@ -2157,9 +2187,13 @@ function scanRouteSurface() {
   // be present in the raw text for any tail to exist.
   //
   // ⛔ A LEDGER IS NOT A ROUTE SOURCE and a call site is not counted twice — both are
-  // skipped here, so `routeSources` partitions cleanly by kind.
+  // skipped here, so `routeSources` partitions cleanly by kind. ⛔ NEITHER IS REPLAY DATA:
+  // a conversion fixture copies a routable metadata kind verbatim, verb and all, so it is
+  // excluded structurally rather than left to the method-signal proxy (#15677 — see
+  // `CONVERSION_REPLAY_FILE_RE`).
   for (const rel of sourceFiles) {
     if (LEDGER_FILE_RE.test(rel) || CALL_SITE_FILE_RE.test(rel)) continue;
+    if (CONVERSION_REPLAY_FILE_RE.test(rel)) continue;
     let text;
     try { text = readFileSync(join(repoRoot, rel), 'utf8'); } catch { continue; }
     if (!text.includes('path')) continue;
@@ -5614,6 +5648,16 @@ function selfTest() {
     const liveKind = (k) => live.routeSources.filter((r) => r.kind === k).map((r) => r.file);
 
     // (1) The guard's target, on the real file rather than a reduced fixture.
+    //
+    // ⭐ WHICH guard, updated #15677. This case was written when the exclusion rode on
+    // `requireMethodSignal` alone — a CONTENT proxy for a STRUCTURAL fact, sound only
+    // while no conversion fixture carried an HTTP verb. #15677's `apis:` conversion is
+    // the first that does (an `ApiEndpoint` fixture declares `method:` beside `path:`,
+    // because that is what the kind is), and this pin RED — doing exactly its job, ahead
+    // of a phantom route source reaching the census. The fixture is correct and stays;
+    // the exclusion moved to `CONVERSION_REPLAY_FILE_RE`, which states the fact instead
+    // of testing a symptom. So this pin now reads: the file is out because replay data is
+    // declared not to be a route surface, not because its contents happen to lack a verb.
     check('scanRouteSurface', 'the connector-action input is NOT admitted as a route source',
       'packages/spec/src/conversions/registry.ts', false,
       live.routeSources.some((r) => r.file === 'packages/spec/src/conversions/registry.ts'));
@@ -5624,6 +5668,22 @@ function selfTest() {
     // that would admit it, and the guard is the only thing that does not.
     check('scanRouteSurface', 'counterfactual: unguarded, that real file WOULD be admitted — the guard is what excludes it',
       'registry.ts tails, unguarded', true, registryText === null || parseRouteSource(registryText).size > 0);
+    // ⭐ AND THE NEW GUARD IS THE LOAD-BEARING ONE, pinned rather than assumed (#15677).
+    // The counterfactual above survives on the OLD proxy too, so on its own it would keep
+    // passing if the directory guard were deleted. This case is the one that would not:
+    // the real file's tails survive `requireMethodSignal`, so the method proxy no longer
+    // excludes it and `CONVERSION_REPLAY_FILE_RE` is the only thing that does. The day
+    // someone deletes that guard as "redundant", this reds.
+    check('scanRouteSurface', 'and the METHOD proxy alone no longer excludes it — the directory guard is load-bearing',
+      'registry.ts tails, method-guarded', true,
+      registryText === null || parseRouteSource(registryText, { requireMethodSignal: true }).size > 0);
+    check('CONVERSION_REPLAY_FILE_RE', 'which is what the directory guard matches',
+      'packages/spec/src/conversions/registry.ts', true,
+      CONVERSION_REPLAY_FILE_RE.test('packages/spec/src/conversions/registry.ts'));
+    // …and it is NARROW: a sibling spec directory is untouched by it.
+    check('CONVERSION_REPLAY_FILE_RE', 'and it does not reach the api declarations kind (b) exists to admit',
+      'packages/spec/src/api/storage.zod.ts', false,
+      CONVERSION_REPLAY_FILE_RE.test('packages/spec/src/api/storage.zod.ts'));
 
     // (2) THE CONTRACT KIND ADMITS SOMETHING — the anti-vacuity floor, and the case that
     // names kind (b) when it stops running. ⚠️ Without it the `every()` below passes on an

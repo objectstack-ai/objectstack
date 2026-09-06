@@ -44,6 +44,33 @@ expect() { # expect <block|allow> <command> [env…]
   fi
 }
 
+stderr_of() { # stderr_of <command> [env…] -> the refusal text an agent actually reads
+  local cmd="$1"; shift
+  local payload
+  payload="$(jq -nc --arg c "$cmd" '{tool_name:"Bash",tool_input:{command:$c}}')"
+  printf '%s' "$payload" | env "$@" "$hook" 2>&1 >/dev/null
+}
+
+says() { # says <needle> <label> <command> [env…]
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) pass=$((pass + 1)); printf '  ok   says   %s\n' "$label" ;;
+    *) fail=$((fail + 1)); printf '  FAIL missing "%s"  %s\n' "$needle" "$label" ;;
+  esac
+}
+
+lacks() { # lacks <needle> <label> <command> [env…]
+  # The direction only an ABSENCE assertion can hold: a remedy that stopped being true stays
+  # in the text a reader acts on long after the thing it described stopped working.
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) fail=$((fail + 1)); printf '  FAIL still says "%s"  %s\n' "$needle" "$label" ;;
+    *) pass=$((pass + 1)); printf '  ok   lacks  %s\n' "$label" ;;
+  esac
+}
+
 echo "== mutating forms must be blocked =="
 expect block 'git stash'
 expect block 'git stash push -- packages/spec/src/kernel/metadata-plugin.zod.ts'
@@ -133,6 +160,18 @@ expect block "echo 'a \\' ; git stash pop"
 
 echo "== escape hatch =="
 expect allow 'git stash pop' OS_ALLOW_STASH=1
+
+echo "== the hatch names WHERE it works: this hook's own environment, never a prefix =="
+# The refusal used to end by telling the reader to re-run the same thing with the variable
+# as a VAR=1 command prefix — an instruction that cannot work where it is printed. A VAR=1
+# prefix sets the variable in the environment of THAT COMMAND; this hook is not that
+# command, and it reads the variable from its own environment, so the prefix changes
+# nothing and the refusal repeats (#15971). An instruction that does not work is an
+# invitation to route around the guard, so both directions are pinned: the dead remedy is
+# gone, and the sentence names the environment the hook actually reads. The `allow` rows
+# next door — the variable really in the hook's environment — are this pair's other half.
+lacks 're-run with' 'the refusal no longer prints the prefix remedy' 'git stash pop'
+says 'hook itself runs in' 'the refusal names the environment this hook reads' 'git stash pop'
 
 echo "== payload with no command fails open =="
 if printf '%s' '{"tool_name":"Bash","tool_input":{}}' | "$hook" >/dev/null 2>&1; then

@@ -183,7 +183,11 @@ export function resolveActionHandlerKeys(action: any, fallbackKey?: string): str
  *    it. A caller that skips that step is asserting a dispatch outcome from
  *    two of the router's three sources.
  *  - `unboundDeclarations` — a declared `script` action with no `body` and no
- *    handler under any candidate key: a button wired to nothing.
+ *    handler under any candidate key: a button wired to nothing. [#15444] The
+ *    declarative `operation: 'update'` action is excluded: it is bound to
+ *    nothing by construction and correct, because the platform action route
+ *    performs its write. `operation` is read before `type` here for the same
+ *    reason the runtime doors read it first.
  */
 export function reconcileActionRegistrations(
     registered: Array<{ objectName: string; actionName: string; package?: string }>,
@@ -219,6 +223,26 @@ export function reconcileActionRegistrations(
     const registeredKeys = new Set(registered.map((r) => `${r.objectName}:${r.actionName}`));
     const unboundDeclarations: Array<{ objectName: string; actionName: string }> = [];
     for (const { action, objectName, storeKey } of declarations) {
+        // [#15444] `operation` before `type` — the precedence the runtime doors
+        // read (`isDeclarativeUpdateAction`, #15079; ruling #14092). The
+        // declarative single-record field write carries NO handler BY
+        // CONSTRUCTION: `ActionSchema` refuses `target` and `body` beside
+        // `operation: 'update'`, because the platform action route is where the
+        // write is performed. So it is the one declared `script` action that is
+        // bound to nothing and entirely correct, and the `type`-keyed test below
+        // would give the right answer to the wrong question — naming it in the
+        // ADR-0110 D5 surface an operator reads to find REAL dead buttons, with
+        // a prescription ("add a `body`, or register a handler under the
+        // declared `target`") that parse REFUSES. A false population that grows
+        // with every declarative update action an app author writes is how a
+        // diagnostic stops being read.
+        //
+        // A bare equality on the declared key, with no `type` clause, is the
+        // ruled spelling: an action carrying `operation: 'update'` IS the
+        // declarative write, whatever `type` says. Data at rest that never went
+        // through `ActionSchema` (a Studio row, a `strict: false` bundle) is
+        // exactly the population where the two keys can contradict.
+        if (action?.operation === 'update') continue;
         if ((action?.type ?? 'script') !== 'script') continue; // only script needs a handler
         if (action?.body) continue;                            // its handler is synthesized
         // A row with neither an own `name` nor a store key cannot be addressed

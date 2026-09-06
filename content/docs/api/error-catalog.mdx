@@ -44,7 +44,7 @@ ObjectStack uses a structured error system with **9 error categories** and **50 
 | `no_retry` | Do not retry the request | Validation errors, permission denied |
 | `retry_immediate` | Retry immediately | Transient network errors |
 | `retry_backoff` | Retry with exponential backoff | Rate limits, server errors |
-| `retry_after` | Wait the specified `retryAfter` seconds | Rate limit with explicit cooldown |
+| `retry_after` | Wait the `retryAfterSeconds` the envelope carries | Rate limit with explicit cooldown |
 
 ---
 
@@ -393,12 +393,12 @@ an environment scope (no `X-Environment-Id` header and no hostname mapping).
 
 ### `RATE_LIMIT_EXCEEDED`
 **Cause:** Too many requests in the current time window.  
-**Fix:** Reduce request frequency. Check the `retryAfter` field for the wait time.  
+**Fix:** Reduce request frequency. Check the `retryAfterSeconds` field for the wait.  
 **Retry:** `retry_after`
 
 ### `QUOTA_EXCEEDED`
 **Cause:** The API usage quota for the current period has been exhausted.  
-**Fix:** Wait for the quota to reset (check `retryAfter`), or upgrade the plan.  
+**Fix:** Wait for the quota to reset (check `retryAfterSeconds`), or upgrade the plan.  
 **Retry:** `retry_after`
 
 ### `CONCURRENT_LIMIT_EXCEEDED`
@@ -654,7 +654,7 @@ interface EnhancedApiError {
   httpStatus?: number;           // HTTP status code
   retryable: boolean;            // Whether retry may succeed
   retryStrategy?: RetryStrategy; // Recommended retry approach
-  retryAfter?: number;           // Seconds to wait (for rate limits)
+  retryAfterSeconds?: number;    // Wait before retrying (for rate limits)
   details?: unknown;             // Additional error context
   fields?: FieldError[];         // One entry per offending value
   timestamp?: string;            // ISO 8601 timestamp
@@ -720,7 +720,7 @@ reading a field no server sent — move to `error.fields`.
 <Callout type="warn">
 The `@objectstack/client` SDK's built-in fetch error handling attaches
 `code`, `category`, `httpStatus`, `retryable`, `details`, and — for validation
-failures — `fields`. It does **not** attach `retryAfter` or `requestId`
+failures — `fields`. It does **not** attach `retryAfterSeconds` or `requestId`
 directly; if your server populates those on the response body, read them from
 `apiError.details` until the client surfaces them at the top level.
 
@@ -772,7 +772,7 @@ async function handleApiCall() {
 
       case 'rate_limit':
         // Wait and retry
-        const waitTime = apiError.retryAfter ?? 60;
+        const waitTime = apiError.retryAfterSeconds ?? 60;
         await sleep(waitTime * 1000);
         return handleApiCall();
 
