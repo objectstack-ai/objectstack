@@ -293,9 +293,11 @@ function resolveRecomputeScope(
         `${unresolved.join(', ')}. Each entry is spelled object.field and must name a summary field owned by one ` +
         `of the ${candidates.length} object(s) this run walks (an object left out by \`objects\` is not walked). ` +
         'Refused before any row was read; nothing was written.',
-    ) as Error & { code: string; status: number; field: string; fields: string[] };
+    ) as Error & { code: string; status: number; httpStatus: number; field: string; fields: string[] };
     err.code = 'INVALID_FIELD';
     err.status = 400;
+    // …and `httpStatus`, the same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors.
+    err.httpStatus = 400;
     err.field = unresolved[0];
     err.fields = unresolved;
     throw err;

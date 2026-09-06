@@ -364,6 +364,8 @@ export const SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE =
 export class SystemWriteOrganizationRequiredError extends Error {
   readonly code = SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE;
   readonly status = 500;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 500;
 
   constructor(
     public readonly object: string,

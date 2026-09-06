@@ -76,9 +76,11 @@ function isFilterNode(value: unknown): value is Record<string, unknown> {
  * (`filter-refusal.ts`), which carries the cross-driver rationale.
  */
 export function invalidFilterError(message: string): Error {
-  const err = new Error(message) as Error & { code?: string; status?: number };
+  const err = new Error(message) as Error & { code?: string; status?: number; httpStatus?: number };
   err.code = StandardErrorCode.enum.INVALID_FILTER;
   err.status = 400;
+  // …and `httpStatus`, the same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors.
+  err.httpStatus = 400;
   return err;
 }
 
@@ -239,11 +241,12 @@ export function assertFilterIsMaterializable(
       // vocabulary across the doors.
       + ` Denormalise the value onto '${object}' (a stored field, written when the source`
       + ' changes) and filter that.',
-    ) as Error & { code?: string; status?: number; field?: string; fields?: string[]; object?: string };
+    ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
     // Same identity argument as the virtual verdict below: the question is
     // about the NAME (its head's type), so `INVALID_FIELD`/400 — never a new
     // code, per the #8371 ruling's own words.
     dottedErr.status = 400;
+    dottedErr.httpStatus = 400;
     dottedErr.code = StandardErrorCode.enum.INVALID_FIELD;
     dottedErr.field = first;
     dottedErr.fields = judgedDotted;
@@ -273,7 +276,7 @@ export function assertFilterIsMaterializable(
     // refused here must not be sent two different ways.
     + ` Denormalise the value onto '${object}' (a stored field, written when the source`
     + ' changes) and filter that.',
-  ) as Error & { code?: string; status?: number; field?: string; fields?: string[]; object?: string };
+  ) as Error & { code?: string; status?: number; httpStatus?: number; field?: string; fields?: string[]; object?: string };
   // `INVALID_FIELD`, not `INVALID_FILTER`, and not a new code: this verdict is
   // about the NAME's type, which is the question the ingress door answers with
   // `INVALID_FIELD` on its neighbouring `unknown` verdict and the SEARCH axis
@@ -283,6 +286,7 @@ export function assertFilterIsMaterializable(
   // one condition keeps ONE wire code however the caller reached it, so a host
   // surfacing engine errors over HTTP answers the same envelope on both doors.
   err.status = 400;
+  err.httpStatus = 400;
   err.code = StandardErrorCode.enum.INVALID_FIELD;
   err.field = first;
   err.fields = virtual;
