@@ -11,6 +11,7 @@
     "start": "objectstack start",
     "build": "objectstack build",
     "validate": "objectstack validate",
+    "lint": "objectstack lint",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
