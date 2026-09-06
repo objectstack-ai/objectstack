@@ -30,11 +30,11 @@
  * every export that module gained was public the moment it landed — the defect
  * #16046 then repaired by giving that subpath a barrel of its own, in the shape
  * of this one. The card asks for four names, and that is what this file
- * re-exports — by name, no star. An
- * export `extract-hook-body.ts` grows tomorrow is NOT public until someone
- * edits this list, and `test/published-subpath-hook-body.pin.test.ts` holds
- * the packed `.d.ts` to exactly these four so the widening is a deliberate,
- * reviewed, `minor`-bumped act rather than a side effect of a refactor.
+ * re-exports — by name, no star. An export `extract-hook-body.ts` grows
+ * tomorrow is NOT public until someone edits this list, and
+ * `test/published-subpath-hook-body.pin.test.ts` holds the packed `.d.ts` to
+ * exactly these four so the widening is a deliberate, reviewed,
+ * `minor`-bumped act rather than a side effect of a refactor.
  *
  * ⛔ Do not add to this list to make something convenient reachable. A new
  * name here is a new public contract on a published package.

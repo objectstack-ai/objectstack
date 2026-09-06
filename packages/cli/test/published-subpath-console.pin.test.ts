@@ -10,8 +10,17 @@
  * 17.3.0 gave this package an `exports` map (#13123) and ratified `./console`
  * for cloud's `objectos-runtime` (#13662). The subpath pointed straight at
  * `dist/utils/console.js` — an INTERNAL module — and it had **no surface pin at
- * all**, neither names nor shapes. The only assertion anywhere in the tree was
- * that `./console` *is a declared subpath*.
+ * all**, neither names nor shapes.
+ *
+ * Two assertion families did exist — re-measured at `0ea5f9d9f79`, because an
+ * earlier draft of this header claimed there was exactly one and that was
+ * wrong. `published-subpath-hook-body.pin.test.ts` held `./console` among the
+ * declared `exports` KEYS, and
+ * `packages/qa/downstream-contract/test/consumer-specifier-ledger.test.ts` held
+ * `@objectstack/cli/console` to RESOLVING from the packed tarball under both
+ * conditions with the file behind it shipped. Both answer *is the door open*.
+ * Neither can answer *what is behind it* — which is the question this file
+ * adds, and the reason the correction changes nothing about the defect.
  *
  * So all 13 of that module's top-level exports were public API, and every export
  * it gained afterwards was published the moment it landed: an accidental
@@ -389,29 +398,71 @@ function pnpmPack(destination: string): { filename: string; files: string[] } {
   return { filename: report.filename, files: report.files.map((f) => f.path) };
 }
 
-/** The names a `.d.ts` exports, read off its AST — no resolution, no program. */
-function declaredExports(dtsPath: string): { names: string[]; starReExports: number } {
+/**
+ * The names a `.d.ts` exports, read off its AST — no resolution, no program.
+ *
+ * ⛔ An export form this walk does not recognise is REPORTED in `unrecognized`,
+ * never skipped, and every caller asserts that list is empty. The difference is
+ * not theoretical: the silent-skip version of this function saw **2 of 4**
+ * exports on a probe `.d.ts` carrying a function, an `export declare enum`, an
+ * `export declare namespace` and an `export default` — the enum and the
+ * namespace were invisible to it. A 14th export of either form could then have
+ * landed in neither `PUBLIC_SURFACE` nor `RETIRED_FROM_THIS_SUBPATH` with the
+ * census below still green: this file's own defect, reproduced inside the
+ * instrument meant to catch it. Reporting the kind rather than enumerating more
+ * of them closes the CLASS — a form nobody has thought of yet reds too.
+ */
+function declaredExports(dtsPath: string): { names: string[]; starReExports: number; unrecognized: string[] } {
   const sf = ts.createSourceFile(dtsPath, readFileSync(dtsPath, 'utf8'), ts.ScriptTarget.Latest, true);
   const names: string[] = [];
+  const unrecognized: string[] = [];
   let starReExports = 0;
   for (const stmt of sf.statements) {
     if (ts.isExportDeclaration(stmt)) {
       if (!stmt.exportClause) starReExports += 1;
       else if (ts.isNamedExports(stmt.exportClause)) for (const el of stmt.exportClause.elements) names.push(el.name.text);
+      else unrecognized.push(ts.SyntaxKind[stmt.exportClause.kind]);
+      continue;
+    }
+    // `export default …` and `export = …` are neither a named declaration nor
+    // an export declaration; both put something on the public surface.
+    if (ts.isExportAssignment(stmt)) {
+      unrecognized.push(ts.SyntaxKind[stmt.kind]);
       continue;
     }
     const exported = ts.canHaveModifiers(stmt) && ts.getModifiers(stmt)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
     if (!exported) continue;
     if (
-      (ts.isFunctionDeclaration(stmt) || ts.isClassDeclaration(stmt) || ts.isInterfaceDeclaration(stmt) || ts.isTypeAliasDeclaration(stmt)) &&
-      stmt.name
+      (ts.isFunctionDeclaration(stmt) ||
+        ts.isClassDeclaration(stmt) ||
+        ts.isInterfaceDeclaration(stmt) ||
+        ts.isTypeAliasDeclaration(stmt) ||
+        ts.isEnumDeclaration(stmt) ||
+        ts.isModuleDeclaration(stmt)) &&
+      stmt.name &&
+      ts.isIdentifier(stmt.name)
     ) {
       names.push(stmt.name.text);
     } else if (ts.isVariableStatement(stmt)) {
-      for (const d of stmt.declarationList.declarations) if (ts.isIdentifier(d.name)) names.push(d.name.text);
+      for (const d of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(d.name)) names.push(d.name.text);
+        else unrecognized.push(ts.SyntaxKind[d.name.kind]);
+      }
+    } else {
+      unrecognized.push(ts.SyntaxKind[stmt.kind]);
     }
   }
-  return { names: names.sort(), starReExports };
+  return { names: names.sort(), starReExports, unrecognized };
+}
+
+/** Every export of `path` was named — the census over it means what it says. */
+function expectEveryExportNamed(what: string, read: { unrecognized: string[] }): void {
+  expect(
+    read.unrecognized,
+    `${what} carries an export form this file cannot name, so any census over it UNDERCOUNTS and the ` +
+      'surface it reports is smaller than the one that ships. Teach `declaredExports` the form — do not ' +
+      'delete this assertion.',
+  ).toEqual([]);
 }
 
 let scratch: string;
@@ -555,7 +606,9 @@ describe('the public surface is exactly three names', () => {
   });
 
   it('in the shipped types: the same three, and no star re-export that would make it a barrel over the module', () => {
-    const { names, starReExports } = declaredExports(join(installedRoot, 'dist', 'console.d.ts'));
+    const read = declaredExports(join(installedRoot, 'dist', 'console.d.ts'));
+    expectEveryExportNamed('the packed barrel `.d.ts`', read);
+    const { names, starReExports } = read;
     expect(
       starReExports,
       'a star re-export ratifies whatever utils/console.ts grows next — which is the whole of #16046',
@@ -568,7 +621,9 @@ describe('the public surface is exactly three names', () => {
     const stillRuntime = RETIRED_RUNTIME_NAMES.filter((n) => runtimeKeys.has(n));
     expect(stillRuntime, 'retired names reachable at run time through the published subpath').toEqual([]);
 
-    const declared = new Set(declaredExports(join(installedRoot, 'dist', 'console.d.ts')).names);
+    const typed = declaredExports(join(installedRoot, 'dist', 'console.d.ts'));
+    expectEveryExportNamed('the packed barrel `.d.ts`', typed);
+    const declared = new Set(typed.names);
     const stillTyped = RETIRED_FROM_THIS_SUBPATH.filter((n) => declared.has(n));
     expect(stillTyped, 'retired names reachable at type level through the published subpath').toEqual([]);
   });
@@ -579,6 +634,10 @@ describe('the public surface is exactly three names', () => {
     // neither list and fails this — instead of silently being neither published
     // nor recorded as retired.
     const internal = declaredExports(join(installedRoot, 'dist', 'utils', 'console.d.ts'));
+    // ⛔ First: the census is only a partition if every export was NAMEABLE. An
+    // export form this walk cannot name is missing from both lists, and the
+    // equality below would still hold — green, over a surface read short.
+    expectEveryExportNamed('the packed internal module `.d.ts`', internal);
     expect(internal.starReExports).toBe(0);
     expect(internal.names).toEqual([...PUBLIC_SURFACE, ...RETIRED_FROM_THIS_SUBPATH].sort());
   });

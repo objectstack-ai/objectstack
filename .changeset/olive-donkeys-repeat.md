@@ -6,7 +6,7 @@ feat(cli): point `@objectstack/cli/console` at a public barrel with a name-and-s
 
 **BREAKING**: `@objectstack/cli/console` publishes three names instead of thirteen. Ten names it used to resolve no longer resolve through that subpath.
 
-The subpath pointed straight at `dist/utils/console.js` — an internal module — and carried no surface pin of any kind, neither names nor shapes. The only assertion anywhere in the tree was that `./console` *is a declared subpath*. So all thirteen of that module's top-level exports were public API, and every export it gained afterwards became a permanent public contract the moment it landed, silently.
+The subpath pointed straight at `dist/utils/console.js` — an internal module — and carried no surface pin of any kind, neither names nor shapes. Two assertions did exist and neither is one: `./console` was held among the declared `exports` keys, and the specifier was held to resolving from the packed tarball. Both answer *is the door open*; neither can answer *what is behind it*. So all thirteen of that module's top-level exports were public API, and every export it gained afterwards became a permanent public contract the moment it landed, silently.
 
 The subpath stays open and now points at a dedicated barrel, `dist/console.js`, which re-exports by name (no star) exactly the three helpers the one ledgered out-of-repo consumer uses to mount the Console SPA:
 

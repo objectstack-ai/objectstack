@@ -7,8 +7,10 @@
  *
  * Until this file landed, `./console` pointed its subpath straight at
  * `dist/utils/console.js` — an INTERNAL module with 13 top-level exports and no
- * surface pin of any kind, neither names nor shapes. The only assertion that
- * existed anywhere in the tree was that `./console` *is a declared subpath*. So
+ * surface pin of any kind, neither names nor shapes. Two assertions did exist
+ * (re-measured at `0ea5f9d9f79`): `./console` is among the declared `exports`
+ * KEYS, and the specifier RESOLVES from the packed tarball. Both answer *is the
+ * door open*; neither can answer *what is behind it*. So
  * every export that module gained was published the moment it landed: an
  * accidental `export *` widening, or a symbol added for an internal reason,
  * became public API silently, with nothing that would notice.
@@ -54,12 +56,21 @@
  *      can reach the refusal." The sole ledgered consumer IS a cloud
  *      deployment, so the source says the external caller cannot reach the
  *      behaviour this function exists to produce.
- *   4. `objectui`, the one sibling checkout reachable from the implementing
- *      container, imports `@objectstack/cli/console` zero times.
+ *   4. GitHub code search over `org:objectstack-ai` (2026-09-06) returns, for
+ *      `@objectstack/cli/console` and for the two names themselves, hits in
+ *      THIS repository only — zero in `objectui`. That zero counts only
+ *      because it carries a control: `repo:objectstack-ai/objectui console`
+ *      answers 1,640 hits from the same index in the same session, so objectui
+ *      is genuinely indexed and its zero is a measurement rather than a silence.
  *
- * ⚠️ The `cloud` checkout was NOT reachable from that container, so the reading
- * that matters most is second-hand — the ledger's and the ruling's, not one
- * this author took. If a consumer of either name ever surfaces, the remedy is
+ * ⚠️ `cloud` is NOT MEASURED, which is a different thing from zero. The same
+ * control run against it — `repo:objectstack-ai/cloud objectstack` — answers 0
+ * hits with `incomplete_results: true`: the index does not cover that
+ * repository from this seat, and no checkout of it is reachable either. An
+ * unreachable repository never reads as "no consumers". So for `cloud` the
+ * evidence is second-hand BY CONSTRUCTION — the consumer-specifier ledger,
+ * which names exactly the three, and the #16046 ruling that reads it the same
+ * way. If a consumer of either name ever surfaces, the remedy is
  * the one #13123's body prescribes and #13662 applied: re-open the name here
  * deliberately, with a changeset, and ledger the consumer. ⛔ Not a deep
  * `dist/` import, and not a local reimplementation.
