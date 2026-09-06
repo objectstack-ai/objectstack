@@ -158,7 +158,7 @@ The Permission Manager enforces fine-grained access control for plugins.
 **Usage:**
 
 ```typescript
-import { PluginPermissionManager } from '@objectstack/core/security';
+import { PluginPermissionManager } from '@objectstack/core';
 
 const permManager = new PluginPermissionManager(logger);
 
@@ -216,7 +216,7 @@ The Sandbox Runtime provides isolated execution environments with resource limit
 **Usage:**
 
 ```typescript
-import { PluginSandboxRuntime } from '@objectstack/core/security';
+import { PluginSandboxRuntime } from '@objectstack/core';
 
 const sandbox = new PluginSandboxRuntime(logger);
 
