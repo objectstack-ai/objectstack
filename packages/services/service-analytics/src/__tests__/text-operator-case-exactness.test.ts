@@ -50,18 +50,60 @@
  * — on the same engine, and requires the same row sets from both. A third
  * hand-copy of the table anywhere is the thing to refuse.
  *
- * ## What is deliberately NOT changed
+ * ## What #15684 deliberately did not change, and what #15780 then did
  *
- * `$icontains` (#6520) keeps its own construct on every dialect: it folds BOTH
- * sides through `asciiLowerSqlExpr`, and the assertions below pin that the
- * emitted text is untouched by the dialect. That fold is `translate()`, which
- * SQLite does not have (measured: `no such function: translate` on sql.js
- * 1.14.1) — so those statements are pinned as TEXT and are NOT executed here.
- * That is a separate defect, filed as #15780, and this suite's `$icontains`
- * assertions are the control that must stay unchanged while it is open.
- * Escaping (#5567) is likewise unchanged for every `LIKE` arm; the GLOB arm
- * brings its OWN escaped character class (`*`, `?`, `[`), which is why the
- * second fixture below exists.
+ * As written, this suite pinned `$icontains` (#6520) as a CONTROL: it kept its
+ * own construct on every dialect, folding both sides through
+ * `asciiLowerSqlExpr`, and the assertion below pinned that its emitted text was
+ * untouched by the dialect. The property that control protected is the one that
+ * still matters: **the two text families must not collapse onto one path**, or
+ * `$contains` gets back the fold #4706 Q2 = A took away from it. The pin was
+ * "the fold arm still emits `translate()` on every dialect" only because, while
+ * #15684's scope was the case-exact four, dialect-invariance was a cheap
+ * PROXY for family-separation — the two happened to coincide.
+ *
+ * They stopped coinciding. That same `translate()` is a PostgreSQL/Oracle
+ * function SQLite does not have (measured: `no such function: translate` on
+ * sql.js 1.14.1), so `$icontains` did not merely go unpinned on SQLite — it
+ * failed to PARSE there. That was #15780, and closing it moved `$icontains`
+ * onto this same per-dialect table with a `fold` flag, which makes its emitted
+ * text dialect-DEPENDENT by design. The old assertion could then only be read
+ * two ways: as a defect it must go red for, or as a statement of the property,
+ * which it no longer is.
+ *
+ * ⛔ It was therefore neither deleted nor loosened — it was re-aimed at the
+ * property itself, pinned DIRECTLY (`$icontains and the case-EXACT family stay
+ * two constructs…` below): on each dialect, `$icontains` and `$contains` must
+ * compile to DIFFERENT text, and `$contains` must carry no fold.
+ *
+ * ⛔ That re-aiming is NOT a strict tightening. An earlier revision of this
+ * header claimed it was ("more tightly than the proxy ever did"); #15780's
+ * contract review measured that claim false, so it is retracted here. What is
+ * true has two halves:
+ *
+ *   - **TIGHTER on family separation.** The re-aimed pin discriminates against
+ *     the collapse in BOTH directions, where dialect-invariance only caught
+ *     one. Named measured set: the four collapse mutations that review drove —
+ *     the fold leaking onto `$contains`, `$contains`' bare construct handed to
+ *     `$icontains`, and the two read-scope directions (drop the fold there /
+ *     hand it to `$contains` there). This file went red on all four.
+ *   - **LOOSER on both-sides folding.** `FOLD_PER_DIALECT` below inspects the
+ *     COLUMN side only. So the mutation that folds the column but leaves the
+ *     comparand UNFOLDED on the `postgres` / `unknown` arm slips PAST this file
+ *     — measured green there, exit 0 and 14 passed — where the pre-#15780
+ *     `LIKE translate($1,` pin would have caught it.
+ *
+ * That second case is held instead by `icontains-dialect-sql.test.ts`, which
+ * pins the `postgres` / `unknown` arm's emitted SQL and bound params VERBATIM,
+ * and which does go red on that same mutation. ⇒ Across the two files the
+ * ratchet is NOT net-weakened; within THIS file alone it is not a strict
+ * tightening. ⛔ Neither claim may be restated as "strictly tighter". The row
+ * sets that make any of this more than a text comparison are executed in that
+ * same suite, which owns the `$icontains` half of the family from here on.
+ *
+ * Escaping (#5567) is unchanged for every `LIKE` arm; the GLOB arm brings its
+ * OWN escaped character class (`*`, `?`, `[`), which is why the second fixture
+ * below exists.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -234,22 +276,37 @@ describe('[#15684] the compiled TEXT, per dialect', () => {
       .toEqual({ sql: 'CAST("t"."name" AS BINARY) LIKE CAST(? AS BINARY) ESCAPE ?', params: ['%acme%', '\\'] });
   });
 
-  it('$icontains is untouched by the dialect — the fold arm still emits translate() on both sides', async () => {
-    // The control that must stay green. #6520's construct is case-INSENSITIVE
-    // by ruling, so it never wants the case-exact table; if a future edit routes
-    // it through `text-match-sql.ts`, the `$contains` family gets back the fold
-    // #4706 Q2 = A took away from it and this line reds first.
+  it('$icontains and the case-EXACT family stay two constructs on EVERY dialect', async () => {
+    // [#15684 → #15780] The control, re-aimed. This assertion used to read "the
+    // fold arm still emits translate() on every dialect", which was a PROXY for
+    // the property below and stopped being one when #15780 gave `$icontains` a
+    // per-dialect fold of its own. See this file's header for the full reading.
+    //
+    // The property is family SEPARATION: `$icontains` folds (#4706 Q1 = A) and
+    // `$contains` must not (#4706 Q2 = A). A collapse in EITHER direction reds
+    // here — the fold leaking onto `$contains`, or `$contains`' bare construct
+    // being handed to `$icontains`.
     for (const dialect of [undefined, 'sqlite', 'postgres', 'mysql'] as const) {
-      const out = await nativeSql({ name: { $icontains: 'acme' } }, dialect);
-      expect(out.sql, String(dialect)).toContain(
-        "WHERE translate(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz') LIKE translate($1,",
-      );
-      expect(out.sql, String(dialect)).toContain('ESCAPE $2');
-      expect(out.params, String(dialect)).toEqual(['%acme%', '\\']);
+      const icontains = await nativeSql({ name: { $icontains: 'acme' } }, dialect);
+      const contains = await nativeSql({ name: { $contains: 'acme' } }, dialect);
+      expect(icontains.sql, String(dialect)).not.toBe(contains.sql);
+      // `$contains` carries NO fold, in any of the three spellings a fold has.
+      expect(contains.sql, String(dialect)).not.toMatch(/translate\(|lower\(|REPLACE\(/);
+      // …and `$icontains` carries exactly one of them, per dialect.
+      const FOLD_PER_DIALECT: Record<string, RegExp> = {
+        undefined: /translate\(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
+        postgres: /translate\(name, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'/,
+        sqlite: /lower\(name\) GLOB lower\(\$1\)/,
+        mysql: /REPLACE\(CAST\(name AS BINARY\), 'A', 'a'\)/,
+      };
+      expect(icontains.sql, String(dialect)).toMatch(FOLD_PER_DIALECT[String(dialect)]);
     }
-    expect(
-      compileScopedFilterToSql({ name: { $icontains: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' }).params,
-    ).toEqual(['%acme%', '\\']);
+    // The read scope, the compiler where the collapse would be an ADR-0021
+    // over-reach rather than a wrong chart, holds the same separation.
+    const filterOf = (op: '$contains' | '$icontains') =>
+      compileScopedFilterToSql({ name: { [op]: 'acme' } } as FilterCondition, 't', { dialect: 'sqlite' });
+    expect(filterOf('$icontains').sql).not.toBe(filterOf('$contains').sql);
+    expect(filterOf('$contains').sql).not.toMatch(/lower\(/);
   });
 });
 

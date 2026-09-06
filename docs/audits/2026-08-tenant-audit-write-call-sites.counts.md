@@ -29,17 +29,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 221 |
-| Object name statically decidable | 147 |
+| Write call sites | 222 |
+| Object name statically decidable | 148 |
 | Object name chosen at run time | 74 |
-| Against a tenancy-enabled object | 147 |
+| Against a tenancy-enabled object | 148 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 137 |
+| Threading a tenant context | 138 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 103 |
+| Threading a decidably elevated context | 104 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 101 |
 
@@ -52,11 +52,11 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-05 at `8a7446de8`.
+Measured on 2026-09-05 at `63a1a410e`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 547 |
+| tracked non-test sources scanned | 548 |
 | engine-shaped types recognised | 58 |
 | declared objects in the registry | 298 |
 | same-named calls subtracted as non-engine | 134 |
@@ -70,7 +70,7 @@ Measured on 2026-09-05 at `8a7446de8`.
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_request` | enabled | elevated | 9 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_request` | enabled | elevated | 10 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
