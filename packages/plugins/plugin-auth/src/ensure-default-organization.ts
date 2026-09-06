@@ -1,15 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * ensureDefaultOrganization — default-org bootstrap helper (ADR-0081 D1).
+ * ensureDefaultOrganization — default-org bootstrap helper (cloud ADR-0081 D1).
  *
  * The platform admin needs at least one `sys_organization` so their sessions
  * can carry an `activeOrganizationId`. Without it:
  *   - multi-org: the default `tenant_isolation` RLS policy filters everything
  *     to zero rows and the admin sees an empty console;
  *   - single-org: better-auth `organization/invite-member` has no active org
- *     to resolve, so there is NO way to add a user at all — the gap ADR-0081
- *     closes.
+ *     to resolve, so there is NO way to add a user at all — the gap
+ *     cloud ADR-0081 D1 closes.
  *
  * This helper HOME is plugin-auth (the open member-management basics). The
  * enterprise organizations package reuses it for the multi-org bootstrap and
@@ -350,7 +350,7 @@ export async function ensureDefaultOrganization(
         '[default-org] the Default Organization row was NOT created — the platform admin has no '
           + 'organization, so under multi-org the default tenant_isolation RLS policy filters their '
           + 'console to zero rows, and under single-org better-auth has no active org to resolve, so '
-          + 'there is no way to add a user at all (ADR-0081 D1). NOTHING ELSE FAILS AND THE BOOT GOES '
+          + 'there is no way to add a user at all (cloud ADR-0081 D1). NOTHING ELSE FAILS AND THE BOOT GOES '
           + 'ON LOOKING HEALTHY: this line is the only notice. Remedy: make the sys_organization '
           + 'insert land — check the write permission and driver connectivity, and whether a legacy '
           + 'unique index on `slug` is refusing `default`; the bootstrap re-runs on every '

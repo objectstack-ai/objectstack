@@ -342,11 +342,15 @@ org lifecycle management, grouping/registry UI, scoped invitations UX,
 cross-org approval templates, master-data distribution management, per-org
 seed/config replay, org analytics, and the D13 promotion tooling.
 
-> **Citation note (2026-08-16) — hygiene, not a decision.** Code and tests
-> carried this entitlement as **"ADR-0081 D2"**, a label inherited from a
-> decision record that predates this repo's ADR series — the same pre-repo
-> record whose "ADR-0081 D1" label [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md)
-> D9 names. That number now collides with this repo's
+> **Citation note (2026-08-16; record identified 2026-09-04) — hygiene, not a
+> decision.** Code and tests carried this entitlement as **"ADR-0081 D2"**, a
+> label inherited from **cloud ADR-0081** — *Organization Management — Open
+> Basics, Enterprise `@objectstack/organizations`*, Accepted 2026-07-09 in the
+> `objectstack-ai/cloud` repo's ADR series, which is the record the *Builds on*
+> line above already cites by that name, and the same one whose "ADR-0081 D1"
+> label [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md)
+> D9 names; its **D2** is the multi-org entitlement decision. Written without
+> that qualifier the number collides with this repo's
 > [ADR-0081](./0081-trusted-react-page-tier.md), the trusted `kind:'react'`
 > page tier, whose Decision section is numbered 1–4 and has no D-numbered
 > decisions at all — so a reader following the citation landed in a document
