@@ -1,0 +1,60 @@
+# Continuous integration for this ObjectStack app.
+#
+# ObjectStack metadata fails SILENTLY at runtime, not at edit time: a mistyped
+# permission grant or a bare field name in an action predicate raises nothing,
+# it just behaves wrongly for whoever hits it first. `objectstack validate` is
+# where that class surfaces — and running it is something a human, or an AI
+# agent authoring metadata in this project, has to remember. This workflow is
+# what makes it unskippable. AGENTS.md carries the authoring conventions it
+# enforces.
+#
+# One job, one file: a starting point, not a CI framework. Grow it with the
+# project — add a step when you add a script, a second job when you deploy.
+
+name: CI
+
+on: [push, pull_request]
+
+# Read-only. Nothing here writes to the repository or publishes anything.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm BEFORE setup-node, deliberately. `cache: pnpm` below makes
+      # setup-node shell out to pnpm to locate the store, so pnpm has to be on
+      # PATH by then. Reversed, this does not degrade — the job dies in the
+      # setup step with "Unable to locate executable file: pnpm".
+      #
+      # `version` is explicit because this project declares no `packageManager`
+      # field — pinning one would make the project pnpm-only, and a
+      # corepack-driven npm or yarn then refuses to run in it — so
+      # pnpm/action-setup has nothing to resolve from. Keep this in step with
+      # the `engines.pnpm` floor in package.json.
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      # `--frozen-lockfile` installs exactly what the lockfile records and fails
+      # when the two disagree, so `pnpm-lock.yaml` has to be committed.
+      # Scaffolding wrote it for you unless you passed `--skip-install`; in that
+      # case run `pnpm install` once and commit the result.
+      - run: pnpm install --frozen-lockfile
+
+      # The gate this file exists for: schema, CEL predicates and widget
+      # bindings. The same checks `pnpm build` runs, without producing an
+      # artifact.
+      - run: pnpm validate
+
+      - run: pnpm typecheck
