@@ -925,7 +925,7 @@ export const OBJECT_LITERAL_CODE_HELPER_BLINDNESS = Object.freeze({
  * for the D6 field-addressed validation catalog in `domains/automation.ts`, and
  * [#14626]'s two newly reached positions in that same file owe NO further rows:
  * they are the identical catalog ternary with the identical values, so they
- * derive the site keys the `:1125` instance already derives.
+ * derive the site keys the instance at line 1125 of that file already derives.
  *
  * ## [#14742] What moved this census, separated from what merely drifted
  *
@@ -1196,7 +1196,8 @@ export const INLINE_LITERAL_EXPRESSION_CENSUS = Object.freeze({
     }),
     // [#14626] The two the card predicted, recovered by the template-literal
     // mode. Same file, same genre, same two values — so they derive the site
-    // keys `:1125` already derives and owe NO further verdict rows. That is the
+    // keys the instance at line 1125 of that file already derives, and owe NO
+    // further verdict rows. That is the
     // measurement, not a convenience: `rowsOwed: 0` here is what says the
     // recovered positions surfaced nothing unregistered.
     Object.freeze({

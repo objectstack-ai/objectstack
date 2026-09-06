@@ -21,13 +21,14 @@
  * Both label writers this file replaces did exactly that, read out of their
  * pinned sources rather than inferred from their docs:
  *
- *   * codelytv/pr-size-labeler@v1.10.4 -- src/github.sh:68-91
- *     (`github::add_label_to_pr`): GETs the PR, greps its OWN size family out
+ *   * codelytv/pr-size-labeler@v1.10.4 -- `src/github.sh` in THAT repo, lines
+ *     68-91 as pinned (`github::add_label_to_pr`): GETs the PR, greps its OWN size family out
  *     of the result, appends the new size label, then
  *     `curl -X PUT .../issues/$pr_number/labels` with the whole set. No
  *     mitigation of any kind: the window is the entire round trip.
- *   * actions/labeler@v7.0.0 -- src/labeler.ts:56,111-133 plus
- *     src/api/set-labels.ts: snapshots `preexistingLabels` at run start, unions
+ *   * actions/labeler@v7.0.0 -- `src/labeler.ts` in THAT repo, lines 56 and
+ *     111-133 as pinned, plus its
+ *     `src/api/set-labels.ts`: snapshots `preexistingLabels` at run start, unions
  *     in the config matches, re-reads the live label list once and carries
  *     forward whatever appeared in between, then calls
  *     `client.rest.issues.setLabels` -- which IS the PUT. The re-read NARROWS
@@ -67,12 +68,14 @@
  *
  * ## What is deliberately preserved from the retired actions
  *
- *   * The size buckets compare with `<`, NOT `<=` -- `labeler.sh:50-60` uses
+ *   * The size buckets compare with `<`, NOT `<=` -- codelytv's `src/labeler.sh`,
+ *     lines 50-60 as pinned, uses
  *     `[ "$total" -lt "$max" ]`. A 10-line PR is `size/s`, not `size/xs`. The
  *     thresholds arrive in the same env names the action's inputs used, so the
  *     workflow diff is auditable value-for-value.
  *   * `files_to_ignore` is a space-separated list matched against the WHOLE
- *     path, the way `[[ $filename == $pattern ]]` did in github.sh:36.
+ *     path, the way `[[ $filename == $pattern ]]` did in codelytv's
+ *     `src/github.sh`, line 36 as pinned.
  *   * Path labels are never removed, matching `sync-labels: false`. The path
  *     half issues POST only -- it has no DELETE at all.
  *   * The size family IS owned by this writer, so a stale `size/*` is removed
@@ -80,7 +83,8 @@
  *     thing by grepping the family out of its PUT payload; the difference is
  *     that its version also carried -- and could drop -- every bystander label.
  *
- * One behaviour deliberately DIVERGES: github.sh:23 reads
+ * One behaviour deliberately DIVERGES: codelytv's `src/github.sh`, line 23 as
+ * pinned, reads
  * `pulls/{n}/files?per_page=100` and never paginates ("NOTE: this code is not
  * resilient to changes w/ > 100 files"), so a 400-file PR was sized off its
  * first 100 files. This paginates. A PR over 100 files may therefore get a
@@ -196,7 +200,8 @@ export function matchGlob(pattern, filePath) {
 }
 
 // ---------------------------------------------------------------------------
-// Size bucketing -- codelytv/pr-size-labeler src/labeler.sh:50-60, verbatim.
+// Size bucketing -- codelytv/pr-size-labeler `src/labeler.sh`, lines 50-60 as
+// pinned, verbatim.
 // ---------------------------------------------------------------------------
 
 /**
@@ -216,7 +221,8 @@ export function sizeLabelFor(total, buckets) {
   return fallthrough.label;
 }
 
-/** Total modifications, mirroring github.sh:5-52 with pagination added. */
+/** Total modifications, mirroring codelytv's `src/github.sh` lines 5-52 as
+ *  pinned, with pagination added. */
 export function totalModifications(files, filesToIgnore) {
   let total = 0;
   for (const file of files) {
@@ -719,7 +725,8 @@ function selfTest() {
   const staleRead = [];
   const liveSet = ['skip-changeset'];
 
-  // Transcribed from github.sh:68-91 -- take the read, drop its OWN family,
+  // Transcribed from codelytv's `src/github.sh`, lines 68-91 as pinned -- take
+  // the read, drop its OWN family,
   // append the new size label, PUT the whole thing.
   const retiredPlan = [
     {

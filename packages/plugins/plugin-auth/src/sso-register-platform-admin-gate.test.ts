@@ -46,12 +46,33 @@
  *
  * ## Fixture note
  *
- * The RBAC objects (`sys_permission_set`, `sys_user_permission_set`) live in
- * `@objectstack/plugin-security`. They are declared locally here — the
- * `last-admin-guard.test.ts` precedent — with only the columns the judge reads,
- * so a fixture does not add a dependency edge to plugin-auth. Everything else is
- * real: a real ObjectQL engine over real better-sqlite3, the real `AuthManager`
- * with the real `sso()` plugin, real sign-up and real session cookies.
+ * The RBAC objects (`sys_permission_set`, `sys_user_permission_set`,
+ * `sys_position`, `sys_user_position`) live in `@objectstack/plugin-security`.
+ * They are declared locally here — the `last-admin-guard.test.ts` precedent —
+ * with only the columns the judge reads, so a fixture does not add a dependency
+ * edge to plugin-auth. Everything else is real: a real ObjectQL engine over real
+ * better-sqlite3, the real `AuthManager` with the real `sso()` plugin, real
+ * sign-up and real session cookies.
+ *
+ * ## ⚠️ Why the POSITION pair is registered, when no assertion mentions it
+ *
+ * [#14846] `resolveAuthzContext` reads `sys_user_position` on every resolution,
+ * and `sys_position` whenever the principal holds any position — which is
+ * always, because every authenticated member implicitly holds the ADR-0090 D5
+ * `everyone` anchor. Until those two objects were registered here the tables did
+ * not exist, so both reads were REFUSED by the driver and `tryFind`'s
+ * loud-failure arm logged a `[sql-driver] DATABASE_ERROR … no such table` line
+ * while the resolver carried on treating the refusal as "this principal holds no
+ * positions". Measured on this file alone: `Tests 4 passed (4)` sitting on top of
+ * EIGHT refused reads, four per table, and not one assertion able to notice.
+ *
+ * That is a latent false green on a security-adjacent resolver, not untidy log
+ * output: a future change that made platform-admin standing genuinely depend on
+ * a position row would have been measured against an engine that can never
+ * return one, and this file would have stayed green. It is the same shape
+ * #14756 exists to remove — a harness whose registered object set is narrower
+ * than the code path it drives — kept invisible because the errors are logged
+ * rather than thrown.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -98,6 +119,39 @@ const sysUserPermissionSet = {
   },
 };
 
+/**
+ * [#14846] The ADR-0057 D4 position pair, in the same shape and for the same
+ * reason as the permission-set pair above — these are read by the resolver this
+ * file drives, so the harness has to be able to answer them.
+ *
+ * `active` is the ADR-0049 predicate the resolver applies to `sys_position`
+ * (`isRowActive`, §6a). `organization_id` is what the driver's
+ * `applyTenantScope` filters the organization-scoped `sys_position` read on, and
+ * what §4 tests to decide whether a `sys_user_position` row is global or belongs
+ * to another tenant.
+ */
+const sysPosition = {
+  name: 'sys_position',
+  label: 'Position',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    name: { name: 'name', type: 'text' as const },
+    active: { name: 'active', type: 'boolean' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+  },
+};
+
+const sysUserPosition = {
+  name: 'sys_user_position',
+  label: 'User Position',
+  fields: {
+    id: { name: 'id', type: 'text' as const, primaryKey: true },
+    user_id: { name: 'user_id', type: 'text' as const },
+    position: { name: 'position', type: 'text' as const },
+    organization_id: { name: 'organization_id', type: 'text' as const },
+  },
+};
+
 const engines: ObjectQL[] = [];
 afterEach(async () => {
   while (engines.length) {
@@ -127,6 +181,8 @@ async function bootEngine(): Promise<ObjectQL> {
   }
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-auth');
   engine.registry.registerObject(sysUserPermissionSet as never, '@objectstack/plugin-auth');
+  engine.registry.registerObject(sysPosition as never, '@objectstack/plugin-auth');
+  engine.registry.registerObject(sysUserPosition as never, '@objectstack/plugin-auth');
   await engine.syncSchemas();
   return engine;
 }

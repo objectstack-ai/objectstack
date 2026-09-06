@@ -80,6 +80,39 @@
     },
     {
       "permissionSet": "showcase_contributor",
+      "object": "showcase_expense_line",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "controlled_by_parent"
+    },
+    {
+      "permissionSet": "showcase_contributor",
+      "object": "showcase_expense_report",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_contributor",
+      "object": "showcase_field_zoo",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_contributor",
       "object": "showcase_invoice",
       "create": true,
       "read": true,
@@ -277,6 +310,61 @@
     },
     {
       "permissionSet": "showcase_member_default",
+      "object": "showcase_business_unit",
+      "create": false,
+      "read": true,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_member_default",
+      "object": "showcase_cascade",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_member_default",
+      "object": "showcase_category",
+      "create": false,
+      "read": true,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_member_default",
+      "object": "showcase_expense_report",
+      "create": false,
+      "read": true,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_member_default",
+      "object": "showcase_field_zoo",
+      "create": false,
+      "read": true,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_member_default",
       "object": "showcase_inquiry",
       "create": true,
       "read": true,
@@ -285,6 +373,17 @@
       "viewAllRecords": false,
       "modifyAllRecords": false,
       "sharingModel": "private"
+    },
+    {
+      "permissionSet": "showcase_member_default",
+      "object": "showcase_preference",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
     },
     {
       "permissionSet": "showcase_member_default",
@@ -331,6 +430,17 @@
       "sharingModel": "public_read_write"
     },
     {
+      "permissionSet": "showcase_member_default",
+      "object": "showcase_team",
+      "create": false,
+      "read": true,
+      "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
       "permissionSet": "showcase_ops",
       "object": "showcase_announcement",
       "create": true,
@@ -340,6 +450,28 @@
       "viewAllRecords": false,
       "modifyAllRecords": true,
       "sharingModel": "public_read"
+    },
+    {
+      "permissionSet": "showcase_ops",
+      "object": "showcase_business_unit",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_ops",
+      "object": "showcase_category",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
     },
     {
       "permissionSet": "showcase_ops",
@@ -360,6 +492,28 @@
       "create": false,
       "read": true,
       "edit": false,
+      "delete": false,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_ops",
+      "object": "showcase_project_membership",
+      "create": true,
+      "read": true,
+      "edit": true,
+      "delete": true,
+      "viewAllRecords": false,
+      "modifyAllRecords": false,
+      "sharingModel": "public_read_write"
+    },
+    {
+      "permissionSet": "showcase_ops",
+      "object": "showcase_team",
+      "create": true,
+      "read": true,
+      "edit": true,
       "delete": false,
       "viewAllRecords": false,
       "modifyAllRecords": false,

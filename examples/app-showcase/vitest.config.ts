@@ -33,9 +33,17 @@ export default defineConfig({
     // exist to measure. `pnpm check:test-source-alias` is the gate, and its
     // registry is shrink-only: the alias is the sanctioned remedy, never a new
     // registry entry.
+    //
+    // `test/nav-and-detail-grants.test.ts` (#14453) runs the SHIPPED
+    // `validateNavAccess` / `validateSecurityPosture` rules against this app's
+    // own stack, so the same reasoning applies with the sign that matters most
+    // here: both rules are ADVISORY, so a `dist` merely BEHIND this checkout
+    // raises nothing — it answers with the OLD rule and the pin passes. Aliased
+    // to `src/`, that pin is a verdict about the rule in this tree.
     alias: [
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../packages/formula/src/index.ts') },
       { find: /^@objectstack\/plugin-email$/, replacement: path.resolve(__dirname, '../../packages/plugins/plugin-email/src/index.ts') },
+      { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../packages/lint/src/index.ts') },
     ],
   },
   test: {
