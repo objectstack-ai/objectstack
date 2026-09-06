@@ -2,8 +2,26 @@
 
 import { Plugin, PluginContext } from './types.js';
 import type { Logger } from '@objectstack/spec/contracts';
+import { PluginSchema } from '@objectstack/spec/kernel';
 import { parseSignature } from './security/plugin-artifact-signature.js';
 import { serviceNotRegisteredError } from './service-not-registered.js';
+
+/**
+ * The code carried by a refusal raised because the plugin object does not
+ * satisfy `PluginSchema` — the protocol's own declaration of what a plugin
+ * object may be (`@objectstack/spec`, `kernel/plugin.zod.ts`).
+ *
+ * ⚠️ Spelled the ADR-0112 way and deliberately NOT wire vocabulary, exactly
+ * like {@link SERVICE_NOT_REGISTERED_CODE} one module over: this refusal is
+ * raised while the kernel is still assembling itself, before any HTTP boundary
+ * exists, and `dispatcher-error-vocabulary.ts` classifies it `door: 'none'` /
+ * `boot-refusal` for that reason. It is stamped on `err.code` for an in-process
+ * catcher AND repeated at the head of the message, because the message is what
+ * survives: `ObjectKernel.use()` re-wraps a failed load into a fresh `Error`
+ * carrying only `result.error?.message`, so a code that lived only on the
+ * property would not reach the caller that actually sees the boot fail.
+ */
+const PLUGIN_CONTRACT_VIOLATION_CODE = 'PLUGIN_CONTRACT_VIOLATION';
 
 /**
  * Service Lifecycle Types
@@ -151,6 +169,9 @@ export class PluginLoader {
             
             // Validate plugin structure
             this.validatePluginStructure(metadata);
+            
+            // Validate against the DECLARED contract (#16049)
+            this.validatePluginContract(metadata);
             
             // Check version compatibility
             const versionCheck = this.checkVersionCompatibility(metadata);
@@ -387,6 +408,82 @@ export class PluginLoader {
         if (!this.isValidSemanticVersion(plugin.version)) {
             throw new Error(`Invalid semantic version: ${plugin.version}`);
         }
+    }
+
+    /**
+     * Refuse a plugin object the DECLARED plugin contract refuses (#16049,
+     * maintainer ruling 2026-09-06: "the protocol is the baseline; the runtime
+     * aligns to it").
+     *
+     * ## What this closes
+     *
+     * `PluginSchema` had **zero runtime callers**. The boot path ran
+     * {@link validatePluginStructure} — `name`, `init`, semver — and nothing
+     * else, so every constraint the protocol declared beyond those three was a
+     * declaration with nothing behind it: `defineStack` accepted a value that
+     * `PluginSchema.safeParse` refused, and the plugin was stored verbatim and
+     * mounted routes. A wrong `type` surfaced (if at all) at route mount; it
+     * now surfaces here, named, at `kernel.use()`.
+     *
+     * ## ⛔ safeParse for VALIDATION ONLY — the parse output is discarded
+     *
+     * The returned object is a COPY, and {@link toPluginMetadata} exists
+     * precisely because a copy "destroys the prototype chain for Class-based
+     * plugins". Substituting the parse output for the plugin would break every
+     * class-based plugin in the ecosystem while leaving this file's own tests
+     * green, so the result is read for `success` and for nothing else.
+     * `plugin-contract-enforcement.test.ts` pins a class-based plugin's
+     * prototype surviving `use()`, which is what makes that a measurement
+     * rather than a promise.
+     *
+     * ## Why `version` is excluded, and why that is not a weakening
+     *
+     * MEASURED on this tree, not assumed. `PluginSchema.version` is
+     * `/^\d+\.\d+\.\d+$/`, which refuses the prerelease and build-metadata
+     * forms SemVer 2.0.0 defines — while {@link isValidSemanticVersion}, the
+     * check this loader has always run, implements the full grammar and accepts
+     * them. Two declarations in this repository disagree about what a version
+     * is, and `plugin-loader.test.ts` pins the wider one deliberately: "should
+     * accept versions with pre-release tags" (`1.0.0-alpha.1`) and "should
+     * accept versions with build metadata" (`1.0.0+20230101`). Two in-repo
+     * class-based plugin fixtures ship `version = '0.0.0-fixture'` and boot
+     * through the real kernel.
+     *
+     * So enforcing the schema's `version` here would not enforce the protocol —
+     * it would RETIRE a pinned capability, silently, under a card that ruled on
+     * `type`. The ruling's own changeset note enumerates what this refuses:
+     * an unknown `type`, an invalid `slug`, an invalid `homepage`. Version is
+     * not in it, and the version check that already runs is the wider, correct
+     * one. Reconciling the two spellings belongs in `packages/spec` beside
+     * #16334; until then this exclusion is declared here rather than performed
+     * by leaving the disagreement unmeasured.
+     */
+    private validatePluginContract(plugin: PluginMetadata): void {
+        const result = PluginSchema.safeParse(plugin);
+        if (result.success) {
+            return;
+        }
+
+        const issues = result.error.issues.filter((issue) => issue.path[0] !== 'version');
+        if (issues.length === 0) {
+            return;
+        }
+
+        // The FIRST issue only: a boot refusal is read by a human reading one
+        // log line, and the first violated key is the one to fix.
+        const first = issues[0];
+        const at = first.path.length > 0 ? first.path.join('.') : '(root)';
+        const id = (plugin as { id?: unknown }).id;
+        const named = typeof id === 'string' && id.length > 0
+            ? `'${plugin.name}' (id: ${id})`
+            : `'${plugin.name}'`;
+
+        const error = new Error(
+            `${PLUGIN_CONTRACT_VIOLATION_CODE}: plugin ${named} is refused by the declared plugin `
+            + `contract at '${at}': ${first.message}`,
+        ) as Error & { code?: string };
+        error.code = PLUGIN_CONTRACT_VIOLATION_CODE;
+        throw error;
     }
 
     private checkVersionCompatibility(plugin: PluginMetadata): VersionCompatibility {
