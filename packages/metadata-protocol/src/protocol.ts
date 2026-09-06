@@ -6797,8 +6797,8 @@ export class ObjectStackProtocolImplementation implements
         // caller that already gates therefore sees no change, provided it gated
         // on the same type this line gates on. Every such caller does:
         //
-        //  • `packages/rest`'s `GET /meta/:type` list door — the only door
-        //    that both gates and reaches this method — computes
+        //  • `packages/rest`'s `GET /meta/:type` list door — one of TWO doors
+        //    that both gate and reach this method — computes
         //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
         //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
         //    segment. The first statement of this method folds that segment
@@ -6806,14 +6806,44 @@ export class ObjectStackProtocolImplementation implements
         //    `canonicalMetaUrlType` — so `request.type` here is the identical
         //    STRING the door gated on, and the second application is the
         //    algebraic no-op above.
+        //  • `GET /meta/diagnostics?type=` — the SECOND such door, and the one
+        //    a caller-side grep cannot see. It gates the same way
+        //    (`organizationIdForMetaRead(canonicalMetaUrlType(diagnosticsType),
+        //    ctx?.tenantId)`) and then passes its own RAW segment on — but it
+        //    reaches this method TRANSITIVELY, through
+        //    {@link getMetaDiagnostics}, whose `?type=` arm sets `targetTypes =
+        //    [request.type]` and loops `getMetaItems({ type: t,
+        //    organizationId, … })` over it. So the door's segment still arrives
+        //    here as `request.type` and is still folded by the same first
+        //    statement: the identical STRING, the same algebraic no-op, one hop
+        //    further out. ⚠️ That hop is UNDECLARED — `getMetaDiagnostics` is
+        //    not a member of `MetadataProtocol`, neither required nor optional,
+        //    so the door reaches it through a `(p as any)` cast behind a 501
+        //    feature-detect. Real at runtime, invisible to the type system, and
+        //    therefore something a caller census must be TOLD rather than left
+        //    to derive.
         //  • the search sweep's page read below gates on `'page'` and passes
         //    `'page'`; `page` is non-overridable, so both readings are
         //    `undefined` whatever the session holds.
         //  • the four remaining `organizationIdForMetaRead` call sites in
         //    `rest-server.ts` (`/layers`, the by-name read, `/history`,
         //    `/diff`) reach `getMetaItemLayered` / `getMetaItem` /
-        //    `historyMetaItem` / `diffMetaItem` — never this method — so this
-        //    line cannot move them at all.
+        //    `historyMetaItem` / `diffMetaItem` — never this method, at any
+        //    depth — so this line cannot move them at all. Two doors named
+        //    above plus these four IS that file's whole set of SIX; the
+        //    enumeration that named one door and "four remaining" described
+        //    five, and the door it dropped was the one that reaches here.
+        //
+        // ⭐ Read this list from the CALLEE side, which is how it is now built.
+        // A grep for doors that invoke `getMetaItems` answers only its own
+        // question: it cannot see a door that arrives through something else,
+        // and that is exactly how the diagnostics door went unlisted. The
+        // closed form is the other direction — `this.getMetaItems(` has THREE
+        // callers in this file: {@link getMetaDiagnostics},
+        // {@link searchAll} and {@link findReferencesToMeta}. The third gates
+        // nothing, deliberately: its door spends the organization on the
+        // reference SOURCES while `req.params.type` is the TARGET, so it hands
+        // the tenant over RAW and is not a caller this paragraph is about.
         //
         // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
         // tolerates the MANIFEST plurals and not the URL-only ones
