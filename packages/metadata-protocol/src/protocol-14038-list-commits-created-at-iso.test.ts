@@ -35,13 +35,15 @@
  * did NOT adopt `canonicalIsoInstant` (`sys-metadata-repository.ts` /
  * `database-loader.ts`), because #14078 measured an Invalid `Date` reachable
  * on BOTH live dialects (a MySQL zero datetime; any Postgres year in
- * 275760..294276) where that spelling's `value.toISOString()` raises
- * `RangeError`, and #13973 is `pm:blocked` on that ruling. This card follows
- * #14037's precedent: `isoFromValidDate` in `protocol.ts` converts the ONE
- * measured shape (a valid `Date`) and returns every other shape — including
- * an Invalid `Date` — UNCHANGED. §D below is the pin that this card does not
- * decide #14078: it goes red the moment anyone swaps the contested spelling
- * into this site.
+ * 275760..294276) where that spelling's `value.toISOString()` raised
+ * `RangeError`. #14078 has since ruled (option B, 2026-09-02) and that arm is
+ * now total, answering `undefined` for the shape. This card's route is
+ * unchanged: `isoFromValidDate` in `protocol.ts` converts the ONE measured
+ * shape (a valid `Date`) and returns every other shape — including an Invalid
+ * `Date` — UNCHANGED, which is what `listCommits` promises its callers. §D
+ * below stays the pin on that promise: it goes red the moment anyone swaps
+ * the other spelling into this site, now the separately-tracked consolidation
+ * decision #16422.
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
@@ -160,12 +162,13 @@ describe('[#14038] listCommits emits the ISO-8601 string createdAt is declared a
          * Postgres year in 275760..294276), and whether the shared
          * canonical-ISO spelling (`canonicalIsoInstant`) should throw on it
          * (option A) or fall back to a rendering (option B) is a maintainer
-         * call across four packages. Until it is ruled, this site hands that
-         * one shape through exactly as it does today — no new throw, no
+         * call across four packages; it was ruled B on 2026-09-02 for the
+         * five arms that THREW, and this site was not one of them. It hands
+         * that one shape through exactly as it does today — no new throw, no
          * invented rendering. This case is what makes that a PIN rather than
          * a claim: it goes red the moment `canonicalIsoInstant` (or any
          * spelling that reaches `.toISOString()` unconditionally) is swapped
-         * into `listCommits`.
+         * into `listCommits`. The consolidation is #16422.
          */
         it('hands the value through unchanged instead of raising RangeError', async () => {
             const invalid = new Date(NaN);

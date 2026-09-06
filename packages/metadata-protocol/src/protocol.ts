@@ -1698,16 +1698,17 @@ function compareAuditInstants(a: unknown, b: unknown): number {
  *
  * ⚠️ Deliberately NOT the `canonicalIsoInstant` spelling next door in
  * `sys-metadata-repository.ts` / `database-loader.ts` (#14037's sibling
- * sites): that spelling reaches `value.toISOString()` for ANY `Date`, which
- * raises `RangeError: Invalid time value` on an Invalid `Date` — measured
- * reachable on BOTH live dialects (a MySQL zero datetime; any Postgres year
- * in 275760..294276) and the open subject of #14078, which #13973 is
- * blocked on. Whether the shared spelling should throw there (option A) or
- * fall back to a rendering (option B) is a maintainer call across four
- * packages, so this repair imports NEITHER answer into a new call site: an
- * Invalid `Date` is returned unchanged, exactly as the raw assignment
- * passed it through today. When #14078 rules, this helper collapses into
- * the shared spelling.
+ * sites). That difference used to be exactly one input shape — the Invalid
+ * `Date` on which that spelling raised `RangeError: Invalid time value`,
+ * measured reachable on BOTH live dialects (a MySQL zero datetime; any
+ * Postgres year in 275760..294276). #14078 has since RULED it (option B,
+ * 2026-09-02): that arm is now total and answers `undefined` for the shape.
+ *
+ * ⛔ They are still not ONE spelling, and this copy has the strongest reason
+ * of the three not to be collapsed — see the paragraph below on what
+ * `listCommits` promises its callers for a non-`Date` value. The
+ * consolidation is tracked as **#16422**; #14078 ruled only the five arms
+ * that THREW.
  *
  * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
  * consumer to accept an off-spec shape; it converts the one measured
@@ -1721,7 +1722,9 @@ function compareAuditInstants(a: unknown, b: unknown): number {
  * `listCommits` are promised the RAW value back untouched when it is not a
  * valid `Date` — an absent/opaque column must still reach `sort`'s fallback
  * branch and any in-process reader exactly as before. Consolidating the
- * family's near-identical copies is #14078's call, not this card's.
+ * family's near-identical copies was expected to be #14078's call; that
+ * ruling covered only the five arms that threw, so the consolidation is
+ * tracked separately as #16422.
  */
 function isoFromValidDate(value: unknown): unknown {
     if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();

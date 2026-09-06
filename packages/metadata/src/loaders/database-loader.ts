@@ -116,17 +116,24 @@ function canonicalIsoInstant(value: unknown): string | undefined {
  * `Date` fails outright. The cast is an assertion about a driver row, never a
  * measurement of one, which is why tsc reports nothing.
  *
- * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above, and the difference is
- * exactly one input shape. That spelling reaches `value.toISOString()` for ANY
- * `Date`, which raises `RangeError: Invalid time value` on an Invalid `Date`
- * — measured reachable on BOTH live dialects (a MySQL zero datetime; any
- * Postgres year in 275760..294276) and the open subject of #14078, which
- * #13973 is blocked on. Whether the shared spelling should throw there
- * (option A) or fall back to a rendering (option B) is a maintainer call over
- * four packages, so this repair imports NEITHER answer into five new call
- * sites: an Invalid `Date` is returned unchanged, exactly as these casts pass
- * it through today. When #14078 rules, this helper collapses into the shared
- * spelling.
+ * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above. That difference used
+ * to be exactly one input shape — the Invalid `Date` on which that spelling
+ * raised `RangeError: Invalid time value`, measured reachable on BOTH live
+ * dialects (a MySQL zero datetime; any Postgres year in 275760..294276).
+ * #14078 has since RULED it (option B, 2026-09-02): that arm is now total and
+ * answers `undefined` for the shape, so the two agree on it.
+ *
+ * ⛔ They are still not ONE spelling, which is why #14078 did not collapse
+ * this helper into it. `canonicalIsoInstant` returns `string | undefined` and
+ * rewrites the whole domain (nullish -> `undefined`; anything neither `Date`
+ * nor string -> `String(value)`), while this one returns `unknown` and hands
+ * every non-valid-`Date` shape back UNTOUCHED. The consolidation is its own
+ * decision — **#16422** — because it moves six call sites for `null`, for a
+ * `number` and for an opaque column, one of which (`MetadataHistoryRecord
+ * .recordedAt`, a REQUIRED `z.string().datetime()` fed twice from here) has no
+ * terminal value either half of the #14078 ruling supplies. §D of
+ * `database-loader-14037-adapter-boundary-iso.test.ts` pins the behaviour this
+ * paragraph describes.
  *
  * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
  * consumer to accept an off-spec shape; it converts one measured producer

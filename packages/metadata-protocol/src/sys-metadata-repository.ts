@@ -170,17 +170,24 @@ function canonicalIsoInstant(value: unknown): string | undefined {
  * — `MetadataManager.applyRepoEvent`, which forwards it to
  * `MetadataWatchEvent.timestamp` — is declared `z.string().datetime()`.
  *
- * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above, and the difference is
- * exactly one input shape. That spelling reaches `value.toISOString()` for ANY
- * `Date`, which raises `RangeError: Invalid time value` on an Invalid `Date`
- * — measured reachable on BOTH live dialects (a MySQL zero datetime; any
- * Postgres year in 275760..294276) and the open subject of #14078, which
- * #13973 is blocked on. Whether the shared spelling should throw there
- * (option A) or fall back to a rendering (option B) is a maintainer call over
- * four packages, so this repair imports NEITHER answer into a new call site:
- * an Invalid `Date` is returned unchanged, exactly as this cast passes it
- * through today. When #14078 rules, this helper collapses into the shared
- * spelling.
+ * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above. That difference used
+ * to be exactly one input shape — the Invalid `Date` on which that spelling
+ * raised `RangeError: Invalid time value`, measured reachable on BOTH live
+ * dialects (a MySQL zero datetime; any Postgres year in 275760..294276).
+ * #14078 has since RULED it (option B, 2026-09-02): that arm is now total and
+ * answers `undefined` for the shape, so the two agree on it.
+ *
+ * ⛔ They are still not ONE spelling, which is why #14078 did not collapse
+ * this helper into it. `canonicalIsoInstant` returns `string | undefined` and
+ * rewrites the whole domain (nullish -> `undefined`; anything neither `Date`
+ * nor string -> `String(value)`), while this one returns `unknown` and hands
+ * every non-valid-`Date` shape back UNTOUCHED. The consolidation is its own
+ * decision — **#16422** — because it moves six call sites for `null`, for a
+ * `number` and for an opaque column, one of which (`MetadataHistoryRecord
+ * .recordedAt`, a REQUIRED `z.string().datetime()`) has no terminal value
+ * either half of the #14078 ruling supplies. §C of
+ * `sys-metadata-repository-14037-event-ts-canonicalisation.test.ts` pins the
+ * behaviour this paragraph describes.
  *
  * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
  * consumer to accept an off-spec shape; it converts one measured producer
