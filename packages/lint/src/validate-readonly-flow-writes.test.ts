@@ -465,6 +465,31 @@ describe('validateReadonlyFlowWrites', () => {
       expect(findings[0].where).toBe('flow "fan_out" › loop "Each" › body › node "C"');
     });
 
+    // The engine's create-side strip does not judge a PLATFORM object at all
+    // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
+    // own 403 write guard governs it), so a create finding there would
+    // describe a strip that never runs. The UPDATE path applies no such
+    // exclusion, which the update controls pin.
+    it.each([
+      ['a sys_ object', { name: 'sys_audit_entry', fields: { verdict: { type: 'text', readonly: true } } }],
+      ['a managedBy object', { name: 'audit_entry', managedBy: 'engine-owned', fields: { verdict: { type: 'text', readonly: true } } }],
+    ])('does NOT flag a create_record into %s — outside the create-side strip; the same update_record is still flagged', (_label, platformObject) => {
+      const create = {
+        name: 'seed_audit',
+        runAs: 'user',
+        nodes: [{ id: 'c', type: 'create_record', label: 'C', config: { objectName: platformObject.name, fields: { verdict: 'ok' } } }],
+        edges: [],
+      };
+      expect(validateReadonlyFlowWrites({ objects: [platformObject], flows: [create] })).toEqual([]);
+      const update = {
+        ...create,
+        nodes: [{ id: 'u', type: 'update_record', label: 'U', config: { objectName: platformObject.name, filter: { id: '{id}' }, fields: { verdict: 'ok' } } }],
+      };
+      const control = validateReadonlyFlowWrites({ objects: [platformObject], flows: [update] });
+      expect(control).toHaveLength(1);
+      expect(control[0].rule).toBe(FLOW_UPDATE_READONLY_FIELD);
+    });
+
     it('skips a templated objectName and a non-literal fields map on create, as on update', () => {
       expect(validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [createFlow({ approval_status: 'x' }, { runAs: 'user' }, { objectName: '{target}' })] })).toEqual([]);
       expect(validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [createFlow('{payload}' as unknown as Record<string, unknown>, { runAs: 'user' })] })).toEqual([]);

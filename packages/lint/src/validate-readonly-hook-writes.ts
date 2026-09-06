@@ -158,7 +158,7 @@ import {
   extractHookBodyWriteSet,
   type BodyWritePatternExclusion,
 } from './validate-hook-body-writes.js';
-import { buildReadonlyIndex } from './validate-readonly-flow-writes.js';
+import { buildReadonlyIndex, buildInsertStripExemptObjects } from './validate-readonly-flow-writes.js';
 import { recordsOf } from './object-graph.js';
 
 export type ReadonlyHookWriteSeverity = 'error' | 'warning';
@@ -284,6 +284,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
 
   // Built lazily: a stack whose hooks are all L1/handler-based never pays it.
   let roIndex: ReturnType<typeof buildReadonlyIndex> | null = null;
+  let insertStripExempt: Set<string> | null = null;
 
   hooks.forEach((hook, hookIndex) => {
     const body = hook.body;
@@ -320,6 +321,7 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
     if (writes.length === 0) return;
 
     roIndex ??= buildReadonlyIndex(recordsOf(stack.objects));
+    insertStripExempt ??= buildInsertStripExemptObjects(recordsOf(stack.objects));
 
     const hookName = typeof hook.name === 'string' && hook.name ? hook.name : `#${hookIndex}`;
     const where = `hook "${hookName}" > body`;
@@ -351,6 +353,9 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
       // The static branch judges every subject method; the conditional one
       // only those with a prior record to lock on.
       const isCreate = !CONDITIONAL_SUBJECT_METHODS.has(method);
+      // A platform object is outside the create-side strip entirely (see
+      // `buildInsertStripExemptObjects`); an update of it is still judged.
+      if (isCreate && insertStripExempt.has(objectName)) continue;
 
       if (meta.readonly) {
         reported.add(dedupeKey);

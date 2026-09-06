@@ -150,6 +150,30 @@ export function buildReadonlyIndex(objects: AnyRec[]): Map<string, Map<string, F
 }
 
 /**
+ * Objects the engine's CREATE-side static strip does not judge at all — the
+ * two object-level exclusions of `staticReadonlyInsertSubject`
+ * (packages/objectql/src/validation/rule-validator.ts): a platform object
+ * (`managedBy` set, or the reserved `sys_` namespace) carries its own
+ * field-write governance (ADR-0086, a 403 guard) that a silent strip must not
+ * pre-empt, so `engine.insert` runs no readonly strip on it. A create finding
+ * on such an object would describe a strip that never happens.
+ *
+ * ⚠️ Create-verb ONLY. The UPDATE path applies neither exclusion (stated at
+ * that function: "This asymmetry is the create side's"), so the update branch
+ * of both rules keeps judging these objects. Shared with
+ * `validate-readonly-hook-writes.ts` for the same reason the index above is.
+ */
+export function buildInsertStripExemptObjects(objects: AnyRec[]): Set<string> {
+  const exempt = new Set<string>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    if (obj.managedBy || name.startsWith('sys_')) exempt.add(name);
+  }
+  return exempt;
+}
+
+/**
  * The target object of an `update_record` / `create_record` node, when
  * statically knowable. Both node configs anchor the object on the same key
  * (`CreateRecordConfigSchema` / `UpdateRecordConfigSchema` in
@@ -177,7 +201,9 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
   const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
-  const roIndex = buildReadonlyIndex(recordsOf(stack.objects));
+  const objects = recordsOf(stack.objects);
+  const roIndex = buildReadonlyIndex(objects);
+  const insertStripExempt = buildInsertStripExemptObjects(objects);
 
   flows.forEach((flow, flowIndex) => {
     // `runAs` defaults to 'user' (schema default). Only an explicit 'system'
@@ -207,6 +233,9 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
       if (!objectName) return; // templated / dynamic object — not statically knowable
       const fieldMap = roIndex.get(objectName);
       if (!fieldMap) return; // object defined by another package — cannot judge its fields
+      // A platform object is outside the create-side strip entirely (see
+      // `buildInsertStripExemptObjects`); the update branch is not.
+      if (isCreate && insertStripExempt.has(objectName)) return;
 
       const fields = config.fields;
       // A non-literal write map (templated string, spread, array) is not

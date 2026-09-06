@@ -341,6 +341,24 @@ describe('validateReadonlyHookWrites - GREEN: what a create is NOT judged on', (
   // `.create()` therefore throws `TypeError: not a function` on its first run —
   // a loud failure, not the silent no-op this rule reports — so a finding would
   // be false in exactly the way the sudo() hint used to be (#14010).
+  // The engine's create-side strip does not judge a PLATFORM object at all
+  // (`staticReadonlyInsertSubject`: `managedBy` set, or a `sys_` name — its
+  // own 403 write guard governs it); the UPDATE path applies no such
+  // exclusion. Pinned in both directions per object shape.
+  it.each([
+    ['a sys_ object', { name: 'sys_activity', fields: { verdict: { type: 'text', readonly: true } } }],
+    ['a managedBy object', { name: 'activity', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+  ])('never flags insert() into %s — outside the create-side strip; the same update() is still flagged', (_label, platformObject) => {
+    const hook = (source: string) => ({
+      objects: [platformObject],
+      hooks: [{ name: 'log', object: 'crm_case', events: ['afterInsert'], body: { language: 'js', source } }],
+    });
+    expect(validateReadonlyHookWrites(hook(`await ctx.api.object('${platformObject.name}').insert({ verdict: 'ok' });`))).toEqual([]);
+    const control = validateReadonlyHookWrites(hook(`await ctx.api.object('${platformObject.name}').update({ id: x, verdict: 'ok' });`));
+    expect(control).toHaveLength(1);
+    expect(control[0].rule).toBe(HOOK_API_UPDATE_READONLY_FIELD);
+  });
+
   it('never flags create() — the sandbox has no such leaf, so the call throws rather than silently dropping', () => {
     expect(
       validateReadonlyHookWrites(
