@@ -27,6 +27,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+import { EmailTemplateDefinitionSchema } from '@objectstack/spec/system';
 import { EmailServicePlugin } from './email-plugin.js';
 
 const TABLE = 'sys_email_template';
@@ -415,14 +416,12 @@ describe('#16152 read-decoration strip uses the shared list, not a blanket `_` s
     _lockDocsUrl: 'https://example.invalid/locks',
   } as const;
 
-  it('the schema declares the ADR-0010 envelope and rejects the read decorations', async () => {
+  it('the schema declares the ADR-0010 envelope and rejects the read decorations', () => {
     // The premise the deleted docblock got backwards, asserted directly
     // against the schema rather than inferred from it. `email-template.zod.ts`
     // spreads `MetadataProtectionFields` into its `strictObject`, so every
     // envelope key is authorable surface here; `_diagnostics` / `_draft` are
     // not declared anywhere in that shape, which is why they must be stripped.
-    const { EmailTemplateDefinitionSchema } = await import('@objectstack/spec/system');
-
     const withEnvelope = EmailTemplateDefinitionSchema.safeParse({ ...template(), ...ENVELOPE });
     expect(withEnvelope.success).toBe(true);
     // Guarding a KEY's reachability: no `unrecognized_keys` on any envelope key.
