@@ -62,15 +62,22 @@ is programmatic embedders only. That is precisely why this lands now — once a 
 starts authoring the config, the same change becomes a behaviour change on live
 operators.
 
-**ADR-0087 disposition: no D2 conversion entry and no D3 semantic migration.** No
+**ADR-0087 disposition: a D3 semantic migration, no D2 conversion.** No
 authored key changes shape or spelling — `items: false` still parses to `items: false`,
 `maintenance` is additive with `.default(true)`, and nothing is retired (`endpoints.schema`
 stays the #14691 tombstone it already was). There is nothing for the conversion layer to
-convert and nothing for `migrate meta` to replay: a `RestServerConfig` is plugin TS
-configuration, never a stack collection member and never a `sys_metadata` row (the
-`RestServerConfig.openApi31` precedent, #4579), so no rehydration seam sees it. What
-changes is a mounted route table at construction time, which is what the **BREAKING**
-paragraph above is for and what the mount-table pin enforces.
+convert: a `RestServerConfig` is plugin TS configuration, never a stack collection member
+and never a `sys_metadata` row (the `RestServerConfig.openApi31` precedent, #4579), so no
+rehydration seam sees it. What changes is a mounted route table at construction time.
+
+Nor is it compiler-carried: every key is an optional boolean, so `{ items: false }`
+still compiles and still parses and simply mounts a different table. The two channels
+that would otherwise reach a consumer are both blind, which is precisely the residue
+D3 exists for — the prescription is registered as
+`metadata-endpoints-switch-radius-repartitioned` so `objectstack migrate meta` hands
+it to an upgrading embedder instead of leaving it as prose in a changelog.
+
+<!-- adr-0087: registered metadata-endpoints-switch-radius-repartitioned -->
 
 `@objectstack/rest` is versioned alongside rather than as a passive consumer: it is where
 the gates live, so the route-table change is observable there and not only in the
