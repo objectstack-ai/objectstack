@@ -115,6 +115,12 @@ import { indexObjectGraph, recordsOf, resolveFieldPath, type ObjectGraph } from 
  *   (`validate-flow-node-writes`), a templated `{…}` value skipped;
  * - `dataSource.object`, then `properties.object` / `properties.objectName`
  *   — page components (`validate-page-field-bindings`);
+ * - `publicPicker.object`, else the enclosing form field's `reference`
+ *   resolved on the view's object, else NOTHING — a form field's public-lookup
+ *   picker (`FormFieldPublicPickerSchema`) queries the REFERENCED object, so
+ *   its `filter` must never fall through to the parent form object (#16106
+ *   review finding B1: that fall-through was a false refusal wherever the two
+ *   objects share a field name with differing types);
  * - and, under `objects`, the object itself — its list views, tabs and
  *   `relatedListFilter` (the filter runs over the CHILD rows, i.e. the object
  *   that owns the field).
@@ -304,31 +310,49 @@ function pathSegments(path: string): (string | number)[] | null {
   return out;
 }
 
+/** One record on the way to a filter, with the property NAME it was reached under. */
+interface Ancestor {
+  /** The nearest enclosing property name — `sections[0]` is reached under `sections`. */
+  key: string;
+  node: AnyRec;
+}
+
 /**
  * The records on the way from the stack collection item down to (but not
  * including) the filter subtree at `path`, outermost first — read back through
  * the SAME `recordsOf` coercion `walkAuthoredFilters` applied to the
  * collection, so a map-form collection's injected `name` is visible here too.
  */
-function ancestorsOf(stack: AnyRec, path: string): { collection: string; chain: AnyRec[] } | null {
+function ancestorsOf(stack: AnyRec, path: string): { collection: string; chain: Ancestor[] } | null {
   const segments = pathSegments(path);
   if (!segments || segments.length < 3) return null;
   const [collection, index, ...rest] = segments;
   if (typeof collection !== 'string' || typeof index !== 'number') return null;
   const item = recordsOf(stack[collection])[index];
   if (!item) return null;
-  const chain: AnyRec[] = [item];
+  const chain: Ancestor[] = [{ key: collection, node: item }];
   let node: unknown = item;
+  let key = collection;
   // The last segment is the filter key itself; everything before it is an ancestor.
   for (const segment of rest.slice(0, -1)) {
+    if (typeof segment === 'string') key = segment;
     node = Array.isArray(node)
       ? node[segment as number]
       : isPlainObject(node) ? node[segment as string] : undefined;
-    if (isPlainObject(node)) chain.push(node);
+    if (isPlainObject(node)) chain.push({ key, node });
     else if (!Array.isArray(node)) break;
   }
   return { collection, chain };
 }
+
+/**
+ * The key under which a form field carries its public-lookup picker
+ * (`FormFieldPublicPickerSchema`, `ui/view.zod.ts`). Its `filter` is a static
+ * pre-filter the public-lookup route runs on the REFERENCED object —
+ * `picker.object` when written, else the field definition's `reference` —
+ * never on the form's own object.
+ */
+const PUBLIC_PICKER_KEY = 'publicPicker';
 
 /**
  * Bind one authored filter to the object its conditions address — the NEAREST
@@ -342,13 +366,43 @@ function boundObjectOf(
   stack: AnyRec,
   path: string,
   datasets: ReadonlyMap<string, AnyRec>,
+  graph: ObjectGraph,
 ): string | undefined {
   const located = ancestorsOf(stack, path);
   if (!located) return undefined;
-  const { collection, chain } = located;
+  return bindAncestors(located.collection, located.chain, located.chain.length - 1, datasets, graph);
+}
 
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const r = chain[i];
+/** The reader loop behind {@link boundObjectOf}, from ancestor `from` outward. */
+function bindAncestors(
+  collection: string,
+  chain: readonly Ancestor[],
+  from: number,
+  datasets: ReadonlyMap<string, AnyRec>,
+  graph: ObjectGraph,
+): string | undefined {
+  for (let i = from; i >= 0; i--) {
+    const { key, node: r } = chain[i];
+
+    // [#16106 B1] A form field's `publicPicker` is a CLAIMING reader: the
+    // picker queries the referenced object, so the position binds to
+    // `picker.object`, else to the `reference` of the enclosing form field
+    // resolved on the view's own object — and to NOTHING otherwise. Falling
+    // through to the view's `data.object` (the parent form object) bound the
+    // filter to the wrong object and produced a FALSE refusal wherever the
+    // parent and the referenced object share a field name with differing
+    // types (a `date` on the parent, a `select` whose option value is a
+    // preset name on the referenced object).
+    if (key === PUBLIC_PICKER_KEY) {
+      const override = literalObjectName(r.object);
+      if (override) return override;
+      const formField = strName(chain[i - 1]?.node.field);
+      if (!formField) return undefined;
+      const formObject = bindAncestors(collection, chain, i - 2, datasets, graph);
+      if (!formObject) return undefined;
+      const verdict = resolveFieldPath(graph, formObject, formField);
+      return verdict?.kind === 'ok' ? strName(verdict.meta?.reference) : undefined;
+    }
 
     const direct = literalObjectName(r.object) ?? literalObjectName(r.objectName);
     if (direct) return direct;
@@ -385,7 +439,7 @@ function boundObjectOf(
   // Under `objects`, the collection item IS the object every filter on it
   // addresses — read last, so a nearer declaration (a summary field's child
   // object) wins.
-  if (collection === 'objects') return strName(chain[0].name);
+  if (collection === 'objects') return strName(chain[0].node.name);
   return undefined;
 }
 
@@ -622,7 +676,7 @@ export function validatePresetComparands(
   }
 
   walkAuthoredFilters(stack, PRESET_COMPARAND_SURFACES, ({ value, path, where }) => {
-    const isTemporal = temporalFieldOracle(graph, boundObjectOf(stack, path, datasets));
+    const isTemporal = temporalFieldOracle(graph, boundObjectOf(stack, path, datasets, graph));
     judgeFilterValue(value, path, where, out, 0, isTemporal);
   });
 

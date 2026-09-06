@@ -424,6 +424,67 @@ describe('validatePresetComparands — arm 2, the FIELD-TYPED equality / members
     })).toEqual([]);
   });
 
+  // [#16106 review finding B1] A form field's `publicPicker.filter` is a static
+  // pre-filter the public-lookup route runs on the REFERENCED object
+  // (`picker.object`, else the field's `reference`). Binding it to the view's
+  // own object produced a FALSE refusal — the one failure direction this arm
+  // may never have — whenever the parent and the referenced object share a
+  // field name with differing types.
+  const pickerObjects = [
+    {
+      name: 'crm_opportunity',
+      fields: {
+        close_date: { type: 'date' },
+        account: { type: 'lookup', reference: 'crm_account' },
+        contact: { type: 'lookup', reference: 'crm_contact' },
+        owner_note: { type: 'text' },
+      },
+    },
+    // Same field NAME as the parent, a select column whose option value collides with a preset.
+    { name: 'crm_account', fields: { close_date: { type: 'select', options: [{ label: 'This Quarter', value: 'this_quarter' }] } } },
+    // Same field name, genuinely a date.
+    { name: 'crm_contact', fields: { close_date: { type: 'date' } } },
+  ];
+  const pickerForm = (fields: unknown[]) => ({
+    objects: pickerObjects,
+    views: [{
+      name: 'lead_form', type: 'form',
+      data: { provider: 'object', object: 'crm_opportunity' },
+      sections: [{ fields }],
+    }],
+  });
+  const pickerRule = { field: 'close_date', operator: 'equals', value: 'this_quarter' };
+
+  it('[B1] stays QUIET on a publicPicker filter over a referenced select column that shares its name with a parent date column', () => {
+    // The measured false refusal: parent `close_date` is a date, the picker queries `crm_account`.
+    expect(validatePresetComparands(pickerForm([
+      { field: 'account', publicPicker: { filter: [pickerRule] } },
+    ]))).toEqual([]);
+    // The `object` override names the referenced object outright.
+    expect(validatePresetComparands(pickerForm([
+      { field: 'account', publicPicker: { object: 'crm_account', filter: [pickerRule] } },
+    ]))).toEqual([]);
+    // Unresolvable pickers stay UNJUDGED, never the parent: a field the form
+    // object does not declare, and a field that is not a relationship (no
+    // `reference` to follow — on the parent it would have read as a date).
+    expect(validatePresetComparands(pickerForm([
+      { field: 'no_such_field', publicPicker: { filter: [pickerRule] } },
+      { field: 'close_date', publicPicker: { filter: [pickerRule] } },
+      { field: 'owner_note', publicPicker: { filter: [pickerRule] } },
+    ]))).toEqual([]);
+  });
+
+  it('[B1] POSITIVE CONTROL: the same picker filter is still refused when the REFERENCED object declares the field as a date', () => {
+    // Resolved through the field's `reference`.
+    expect(validatePresetComparands(pickerForm([
+      { field: 'contact', publicPicker: { filter: [pickerRule] } },
+    ])).map((f) => f.path)).toEqual(['views[0].sections[0].fields[0].publicPicker.filter[0].value']);
+    // Resolved through the `object` override (pointing a select-typed parent lookup at the date object).
+    expect(validatePresetComparands(pickerForm([
+      { field: 'account', publicPicker: { object: 'crm_contact', filter: [pickerRule] } },
+    ])).map((f) => f.path)).toEqual(['views[0].sections[0].fields[0].publicPicker.filter[0].value']);
+  });
+
   it('keeps arm 1 field-agnostic: an ordering preset still fires with NO objects in the stack, and on a text column', () => {
     const findings = validatePresetComparands({
       objects: crmObjects,
