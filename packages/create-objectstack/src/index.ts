@@ -39,11 +39,12 @@
  * `--skip-install` there is no resolved version, so the template keeps `latest`
  * and its comment keeps telling the reader to pin by hand — true in that path.
  *
- * Finally we (best-effort) install the ObjectStack skills bundle via
- * `npx skills add objectstack-ai/objectstack/skills --all`.
- * The `/skills` subpath scopes discovery to the curated, customer-published
- * catalog — repo-internal skills (e.g. under `.claude/skills/`) must never
- * reach scaffolded projects.
+ * Finally we (best-effort) install the ObjectStack skills bundle, for ONE
+ * agent runtime (`skills-install.ts` carries the command and the measurement
+ * behind that choice: `--all` writes the same bundle to three destinations and
+ * the project then commits all three). The `/skills` subpath scopes discovery
+ * to the curated, customer-published catalog — repo-internal skills (e.g.
+ * under `.claude/skills/` in THIS repo) must never reach scaffolded projects.
  *
  * Only THEN is the "Created files" summary printed, and it is a walk of the
  * finished project directory rather than a list accumulated during the copy
@@ -72,6 +73,13 @@ import {
 import { lookupTemplate, templateNames } from './template-registry.js';
 import { readResolvedCliVersion, pinRuntimeImage } from './runtime-image.js';
 import { summarizeTree, describeEntry } from './created-summary.js';
+import {
+  DEFAULT_SKILLS_AGENT,
+  DEFAULT_SKILLS_DIR,
+  EXAMPLE_OTHER_AGENT,
+  SKILLS_INSTALL_COMMAND,
+  skillsInstallHint,
+} from './skills-install.js';
 import { renderVersionBanner } from './banner.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -521,24 +529,26 @@ const program = new Command()
       }
 
       // Which top-level paths belong to the skills install is measured, not
-      // assumed: `skills add --all` fans the catalog out to every agent
-      // runtime IT knows about (77 at the version measured), so the
-      // destination set moves with that package's releases. Diffing the
-      // directory across the call keeps the ⚠ marks correct without this file
-      // carrying a list it cannot keep current.
+      // assumed. Naming one agent makes the destination set small and
+      // knowable (`skills-install.ts`), but it is still THEIR path to choose,
+      // and it moves with that package's releases — so the ⚠ marks come from
+      // diffing the directory across the call rather than from a list this
+      // file would have to keep current.
       const beforeSkills = topLevelNames(targetDir);
+      let skillsInstalled = false;
       if (!options.skipInstall && !options.skipSkills) {
         printStep('Installing AI skills for your coding agent...');
         try {
-          execSync('npx -y skills add objectstack-ai/objectstack/skills --all', {
+          execSync(SKILLS_INSTALL_COMMAND, {
             stdio: 'inherit',
             cwd: targetDir,
           });
+          skillsInstalled = true;
           console.log('');
         } catch {
           printWarning(
             'Skills installation skipped. Run manually:\n' +
-              '    npx skills add objectstack-ai/objectstack/skills',
+              `    ${skillsInstallHint(DEFAULT_SKILLS_AGENT)}`,
           );
           console.log('');
         }
@@ -569,10 +579,29 @@ const program = new Command()
       console.log(chalk.dim(`    ${devLabel.padEnd(labelWidth)}# Start development server`));
       console.log(chalk.dim(`    ${validateLabel.padEnd(labelWidth)}# Verify metadata: schema + predicates + bindings`));
       console.log(chalk.dim(`    ${' '.repeat(labelWidth)}# (run after every metadata edit — see AGENTS.md)`));
-      if (options.skipInstall || options.skipSkills) {
-        console.log('');
+      // The skills block is printed on EVERY path, not only the skipped one.
+      // The install now targets a single agent runtime, so a run that
+      // succeeded still leaves every other runtime uninstalled — and a
+      // capability that is absent has to say so, with the remedy, rather than
+      // leave the reader to discover the gap. The command printed here is the
+      // one this scaffolder ran, with a different agent name.
+      console.log('');
+      if (skillsInstalled) {
+        console.log(chalk.bold('  AI Skills:'));
+        console.log(
+          chalk.dim(
+            `    Installed for ${DEFAULT_SKILLS_AGENT} → ${DEFAULT_SKILLS_DIR} — commit it with your project.`,
+          ),
+        );
+        console.log(chalk.dim('    Using a different agent? Add it one runtime at a time:'));
+        console.log(chalk.dim(`      ${skillsInstallHint(EXAMPLE_OTHER_AGENT)}`));
+        console.log(chalk.dim('      (`npx skills add --help` lists every agent name)'));
+      } else {
         console.log(chalk.bold('  AI Skills (recommended):'));
-        console.log(chalk.dim('    npx skills add objectstack-ai/objectstack/skills'));
+        console.log(chalk.dim(`    ${skillsInstallHint(DEFAULT_SKILLS_AGENT)}`));
+        console.log(
+          chalk.dim(`    Replace \`${DEFAULT_SKILLS_AGENT}\` with your own agent runtime if it differs.`),
+        );
       }
       console.log('');
     } catch (error) {

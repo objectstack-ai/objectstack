@@ -323,7 +323,10 @@
  *   bound root, only whether the identifier has a root at all, and a rootless
  *   identifier resolves under neither binding. `has(record.x)`,
  *   `record.x != null` and every other guard idiom stay green here, whichever
- *   way #4953 is eventually settled.
+ *   way #4953 is eventually settled. The exclusion a `has()` argument earns is
+ *   keyed to that ARGUMENT's occurrence, never to its name: the same identifier
+ *   written bare elsewhere in the predicate is reported exactly as it would be
+ *   with no guard beside it (#16118).
  * - **A predicate the canonical front end will not parse.** `parseCelToAst`
  *   returns `null` there, so the declaredness check has no AST to reason about
  *   and this rule gives no BARE-IDENTIFIER verdict on it. That is a division of
@@ -753,10 +756,91 @@ function namespaceRoots(node: unknown, out: Set<string>): void {
 }
 
 /**
+ * The literal that stands in for a masked `has(…)` call. Padded to the call's
+ * own width so the rewrite is length-preserving — the source handed to the
+ * checker keeps every other token at its original offset, and the spans stay
+ * valid whatever order they are applied in.
+ */
+const HAS_MASK = 'true';
+
+/**
+ * Half-open `[start, end)` source spans of every `has(…)` call in `ast`.
+ * Returns `false` — meaning "do not rewrite anything" — if any span is missing
+ * or does not line up with the source, so an AST shape this has not measured
+ * costs coverage rather than producing a wrong span.
+ *
+ * A `has()` call is not descended into: the whole call, its ARGUMENT included,
+ * is what gets masked, which is precisely the exclusion a `has()` argument
+ * earns (it is a select target, not a bare value).
+ */
+function hasCallSpans(node: unknown, source: string, out: Array<[number, number]>): boolean {
+  if (Array.isArray(node)) {
+    for (const child of node) if (!hasCallSpans(child, source, out)) return false;
+    return true;
+  }
+  if (!isNode(node)) return true;
+  const args = node.args;
+  if (node.op === 'call' && Array.isArray(args) && args[0] === 'has') {
+    const { start, end } = node as { start?: unknown; end?: unknown };
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
+    const from = start as number;
+    const to = end as number;
+    if (from < 0 || to > source.length || to - from < HAS_MASK.length) return false;
+    if (!source.slice(from, to).startsWith('has')) return false;
+    out.push([from, to]);
+    return true;
+  }
+  return hasCallSpans(args, source, out);
+}
+
+/**
+ * `source` with every `has(…)` call replaced by a `true` literal of the same
+ * width, or `source` unchanged when it carries none (or carries one this cannot
+ * locate exactly).
+ *
+ * This is what keeps the `has()` exclusion keyed to the OCCURRENCE rather than
+ * to the NAME (#16118). Two facts make the rewrite necessary:
+ *
+ *  - A `has()` argument is a legitimate select target, so the occurrence that
+ *    IS the argument must earn no bare-identifier verdict — including the
+ *    `has(x)` spelling, where the argument is not a select at all.
+ *  - `firstUndeclaredReference` reads the FIRST error cel-js's checker reports
+ *    and acts only on `Unknown variable: X`. A bare `has(x)` fails that check
+ *    with `has() invalid argument` instead, and a first error of a different
+ *    class masked every undeclared reference BEHIND it in the same predicate —
+ *    the same name and any other. `has(x) && x == 'q'` and
+ *    `has(x) && y == 'q'` both published clean.
+ *
+ * Masking the call before the checker sees it removes both at once: the
+ * argument occurrence is gone, and every other occurrence is judged exactly as
+ * it would be with no guard written at all.
+ *
+ * The direction is safe by construction: the rewrite only DELETES source, so
+ * every name the checker can now report is an identifier written outside a
+ * `has()` call in the original. It cannot invent one. The rest of the predicate
+ * reaches the checker byte-identical, so the shapes the checker owns —
+ * comprehension-macro variables above all — keep the verdict they have without
+ * a guard.
+ */
+function maskHasCalls(source: string, ast: unknown): string {
+  const spans: Array<[number, number]> = [];
+  if (!hasCallSpans(ast, source, spans) || spans.length === 0) return source;
+  let masked = source;
+  for (const [from, to] of spans) {
+    masked = masked.slice(0, from) + HAS_MASK.padEnd(to - from, ' ') + masked.slice(to);
+  }
+  return masked;
+}
+
+/**
  * The first identifier in `source` that no binding root can resolve, or `null`
  * when every reference is rooted. See the module note for why this is two
  * oracles (the canonical AST for namespace roots, the shared strict-environment
  * checker for the verdict) and for the shapes it deliberately leaves alone.
+ *
+ * The source reaching the checker is {@link maskHasCalls}'s rewrite, not the
+ * author's bytes: a `has(…)` argument is excluded per OCCURRENCE, and every
+ * other occurrence of the same name is judged as if no guard were written.
  *
  * `literalRhs` is set for a METADATA-EDITING form, where the console's
  * evaluator hands the right of `==` / `!=` to its literal parser and never
@@ -777,7 +861,7 @@ function firstBareIdentifier(source: string, literalRhs: boolean): string | null
   const rooted = new Set<string>();
   namespaceRoots(ast, rooted);
   const literalSlot = literalRhs ? bareRhsOnlyIdentifiers(ast) : [];
-  return firstUndeclaredReference(source, [
+  return firstUndeclaredReference(maskHasCalls(source, ast), [
     ...VIEW_PAGE_EXTRA_ROOTS,
     ...rooted,
     ...literalSlot,
