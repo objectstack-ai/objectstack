@@ -32,6 +32,16 @@ import { ExpressionEngine } from '@objectstack/formula';
 // keep a copy. `declared-fields.ts`'s doc comment is the canonical statement of
 // the rule; this seam defers to it instead of restating it.
 import { materializeDeclaredFields } from '@objectstack/objectql/core';
+// [#14935] The ONE reading of `publicSharing.enabled`, imported from the
+// package that DECLARES the key rather than spelled out again here. This file
+// exported its own copy (#14637) and `@objectstack/runtime` kept a documented
+// mirror of it, because `@objectstack/plugin-sharing` is only a DEV dependency
+// of that package — but both packages already depend on `@objectstack/spec`,
+// so the shared home the copy was justified by existed all along. The
+// definition is unchanged, fail-closed included: an absent block, an absent
+// schema and an engine that cannot answer `getSchema` are one answer, `false`
+// — the same definition `getPolicy` below has always used.
+import { isPublicSharingEnabled } from '@objectstack/spec/data';
 import type { SharingEngine } from './sharing-service.js';
 import {
   deleteRowsForDeletedRecords,
@@ -83,26 +93,6 @@ function generateToken(length: number = TOKEN_LENGTH): string {
     out += TOKEN_ALPHABET[bytes[i] % TOKEN_ALPHABET.length];
   }
   return out;
-}
-
-/**
- * [#14637] Is `publicSharing` switched ON for this object schema?
- *
- * The ONE reading of the standing switch, exported so the HTTP probe that sits
- * ABOVE `resolveToken` asks the same question the gate INSIDE it asks. It was
- * a private expression here while the route layer answered from the token row
- * with no knowledge of the object's block, which re-opened the existence
- * oracle this service's redemption gate closes (maintainer ruling 2026-09-03,
- * decision batch #17 item 1, verbatim 「同意」 — option A).
- *
- * An absent block, an absent schema, and an engine that cannot answer
- * `getSchema` at all are one answer: `false`. `enabled` defaults to off, so a
- * caller that cannot read the policy must refuse rather than answer from the
- * row — the same definition {@link getPolicy} has always used.
- */
-export function isPublicSharingEnabled(schema: unknown): boolean {
-  return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
-    ?.publicSharing?.enabled === true;
 }
 
 /** Internal helper — extract publicSharing policy from an object schema. */
