@@ -33,8 +33,12 @@ export const entry: SemanticMigration = {
     + 'collection member or a stored sys_metadata row and the conversion chain has no seam '
     + 'that would see one. That is what ruling B prescribes for a key that is not authorable '
     + 'metadata. One key deliberately left alone: RuntimeConfig.resourceLimits.timeout on this '
-    + 'same file names no unit anywhere, so it is outside the gate\'s population and outside '
-    + 'this rename. #15678, #14478, ADR-0087.',
+    + 'same file names its unit only in the JSDoc above it ("Execution timeout in '
+    + 'milliseconds"), a channel the gate does not read: it reads `.describe()` and '
+    + '`.meta({ description })`, and that key\'s describe ("Maximum execution time") names '
+    + 'none. So the gate lists it among the duration-shaped keys without judging it — neither '
+    + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap is '
+    + '#15939. #15678, #14478, ADR-0087.',
   acceptanceCriteria:
     'Every SandboxConfigSchema.parse(…), KernelSecurityPolicySchema.parse(…) and '
     + 'PluginSecurityManifestSchema.parse(…) site, and every literal handed to a plugin '

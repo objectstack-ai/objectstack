@@ -7631,8 +7631,12 @@ const step18: MigrationStep = {
         + 'collection member or a stored sys_metadata row and the conversion chain has no seam '
         + 'that would see one. That is what ruling B prescribes for a key that is not authorable '
         + 'metadata. One key deliberately left alone: RuntimeConfig.resourceLimits.timeout on this '
-        + 'same file names no unit anywhere, so it is outside the gate\'s population and outside '
-        + 'this rename. #15678, #14478, ADR-0087.',
+        + 'same file names its unit only in the JSDoc above it ("Execution timeout in '
+        + 'milliseconds"), a channel the gate does not read: it reads `.describe()` and '
+        + '`.meta({ description })`, and that key\'s describe ("Maximum execution time") names '
+        + 'none. So the gate lists it among the duration-shaped keys without judging it — neither '
+        + 'an offender nor an exemption — and it is outside this rename; that JSDoc-channel gap is '
+        + '#15939. #15678, #14478, ADR-0087.',
       acceptanceCriteria:
         'Every SandboxConfigSchema.parse(…), KernelSecurityPolicySchema.parse(…) and '
         + 'PluginSecurityManifestSchema.parse(…) site, and every literal handed to a plugin '
@@ -8915,8 +8919,13 @@ const step18: MigrationStep = {
         + 'unchanged: window.durationSeconds: 300 aggregates over five minutes exactly as '
         + 'size: 300 did, and the positive-integer bounds ride along with the renamed keys. Two '
         + 'keys on this same file deliberately do NOT move, and a sweep that renamed either has '
-        + 'over-applied the rule: the error-budget burn-rate window, whose describe reads only '
-        + '"Window size" and names no unit anywhere, is outside the gate population entirely; '
+        + 'over-applied the rule: the error-budget burn-rate window '
+        + 'names its unit only in the JSDoc above it ("Window size in seconds"), a channel the '
+        + 'gate does not read: it reads `.describe()` and `.meta({ description })`, and that '
+        + 'key\'s describe ("Window size") names none. So the gate lists it among the '
+        + 'duration-shaped keys without judging it — neither an offender nor an exemption — and '
+        + 'it is outside this rename, not outside the gate population; that JSDoc-channel gap is '
+        + '#15939; '
         + 'and the exporter batch size is a COUNT of records, not a duration, so it has no unit '
         + 'to carry. Both keep their names.',
     },
