@@ -290,7 +290,7 @@ describe('MetadataEndpointsConfigSchema', () => {
     }
   });
 
-  it('should accept endpoints config — the three switches that gate real mounts', () => {
+  it('should accept endpoints config — the four switches that gate real mounts', () => {
     const config = MetadataEndpointsConfigSchema.parse({
       endpoints: {
         types: true,
@@ -301,6 +301,10 @@ describe('MetadataEndpointsConfigSchema', () => {
 
     expect(config.endpoints?.item).toBe(false);
     expect(config.endpoints).not.toHaveProperty('schema');
+    // [#15542] The whole-store family's own switch defaults on, so an author
+    // who wrote the three pre-existing keys keeps `/diagnostics`, `/_drafts`
+    // and the `POST /_migrate-stored` door — they used to ride `items`.
+    expect(config.endpoints?.maintenance).toBe(true);
   });
 
   it('[#14691] REJECTS `endpoints.schema` — it gated a route that does not exist', () => {

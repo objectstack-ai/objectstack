@@ -283,8 +283,9 @@ export type CrudEndpointsConfigParsed = z.infer<typeof CrudEndpointsConfigSchema
  *   "enableCache": true,
  *   "endpoints": {
  *     "types": true,
- *     "objects": true,
- *     "fields": true
+ *     "items": true,
+ *     "item": true,
+ *     "maintenance": true
  *   }
  * }
  */
@@ -340,11 +341,53 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
 
   /**
    * Enable specific metadata endpoints
+   *
+   * **Every switch here gates exactly the face its name states, reads and
+   * writes alike, and its `describe()` enumerates every mount it takes.** The
+   * radius IS the contract, not a summary of it: a reader who turns a switch
+   * off is entitled to know what leaves with it.
+   *
+   * That was not true before #15542 / #15854, and both directions of the
+   * mismatch were live at once. `items` said "list items of type" and also
+   * gated the whole-store family — the cross-type diagnostics sweep, the draft
+   * list, and the `POST /meta/_migrate-stored` **write door** — so closing a
+   * listing read silently disarmed a migration door. `item` said "get specific
+   * item" and gated four reads while leaving its own `PUT` and `DELETE` and
+   * the whole history family answering to `api.enableMetadata` alone, so
+   * closing the per-item surface left its writes mounted. The whole-store
+   * family now has its own key, `maintenance`, and `item` covers the per-item
+   * writes its name has always promised.
+   *
+   * ⚠️ The `/meta` paths named below are the DEFAULT prefix; every one of them
+   * moves with `prefix` above, and the environment-scoped base mounts a second
+   * copy of the same table.
+   *
+   * `api.enableMetadata` stays the master switch above all four: `false`
+   * removes the entire metadata surface whatever these say.
+   *
+   * ⛔ Each key's mount radius is pinned route by route in
+   * `packages/rest/src/rest-config-mount-table.pin.test.ts` (the #15544
+   * shape — it asserts the route is ABSENT from the mounted table, not what
+   * the switch normalizes to). A gate that grows or loses a route reddens
+   * there. Move a radius and move that table in the same PR; ⛔ never relax it
+   * to match a drifted gate.
    */
   endpoints: z.object({
-    types: z.boolean().default(true).describe('GET /meta - List all metadata types'),
-    items: z.boolean().default(true).describe('GET /meta/:type - List items of type'),
-    item: z.boolean().default(true).describe('GET /meta/:type/:name - Get specific item'),
+    types: z.boolean().default(true)
+      .describe('Mount the metadata type list — `GET /meta` and `GET /meta/types` (one handler, two paths)'),
+    items: z.boolean().default(true)
+      .describe('Mount the per-type item list — `GET /meta/:type`, and nothing else'),
+    item: z.boolean().default(true)
+      .describe(
+        'Mount the whole per-item face — `GET`, `PUT` and `DELETE /meta/:type/:name`, its '
+        + '`/references` and `/layers` reads, the history family (`/history`, `/audit`, `/diff`, '
+        + '`/published`, `/publish`, `/rollback`) and `GET /meta/book/:name/tree`',
+      ),
+    maintenance: z.boolean().default(true)
+      .describe(
+        'Mount the whole-store maintenance operations — `GET /meta/diagnostics`, '
+        + '`GET /meta/_drafts` and the `POST /meta/_migrate-stored` write door',
+      ),
     /**
      * [REMOVED in #14691] Gated a route that does not exist: the REST server
      * mounts no `GET /meta/:type/:name/schema`, so `false` removed nothing and
@@ -354,7 +397,8 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
       '`metadata.endpoints.schema` was removed in @objectstack/spec 17 (ADR-0049 '
       + 'enforce-or-remove) — it gated a route that does not exist: the REST server mounts no '
       + '`GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete '
-      + 'the key; `endpoints.types` / `items` / `item` are the switches that gate real mounts.',
+      + 'the key; `endpoints.types` / `items` / `item` / `maintenance` are the switches that gate real '
+      + 'mounts.',
     ),
   }).optional().describe('Enable/disable specific endpoints'),
 }));
