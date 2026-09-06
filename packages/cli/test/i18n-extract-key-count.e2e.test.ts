@@ -114,7 +114,7 @@ function plain(text: string): string {
   return text.replace(/\u001b\[[0-9;]*m/g, '');
 }
 
-function runExtract(name: string, config: string, flags: string[]): { stdout: string; dir: string; files: string[] } {
+function runExtract(name: string, config: string, flags: readonly string[]): { stdout: string; dir: string; files: string[] } {
   const dir = join(outRoot, name);
   const stdout = execFileSync(TSX, [CLI, 'i18n', 'extract', config, '--locales=zh-CN', ...flags, `--out=${dir}`], {
     encoding: 'utf8',
@@ -237,7 +237,7 @@ describe('os i18n extract — the number printed is the number written (#16121)'
    * state is driven and not only the wide one.
    */
   it('--json counts describe the payload printed beside them, in both sub-tree modes', () => {
-    const runJson = (flags: string[]) => {
+    const runJson = (flags: readonly string[]) => {
       const stdout = execFileSync(TSX, [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', '--json', ...flags], {
         encoding: 'utf8',
         env: childEnv(),
@@ -254,10 +254,10 @@ describe('os i18n extract — the number printed is the number written (#16121)'
 
     const narrow = runJson([]);
     const whole = runJson(['--no-objects-only']);
+    const suppressed = runJson(['--no-metadata-forms']);
 
-    for (const payload of [narrow, whole]) {
+    for (const payload of [narrow, whole, suppressed]) {
       expect(payload.counts['zh-CN']).toBe(countJsonLeaves(payload.bundles['zh-CN']));
-      expect(payload.metadataFormsCounts['zh-CN']).toBe(countJsonLeaves(payload.metadataForms['zh-CN']));
       // The skeleton total is still reported — under its own name.
       expect(payload.totalExpected).toBeGreaterThan(payload.counts['zh-CN']);
     }
@@ -266,6 +266,43 @@ describe('os i18n extract — the number printed is the number written (#16121)'
     // above an axis rather than a coincidence: the app label is in one payload
     // and not the other.
     expect(whole.counts['zh-CN'] - narrow.counts['zh-CN']).toBe(1);
+
+    // ⚠️ `metadataFormsCounts` is NOT the same relationship, and driving the
+    // flag ON only is what let that claim stand unmeasured through a review.
+    // It reports the baseline as BUILT, whether or not the run emits it: with
+    // the flag off the payload carries a positive count beside an empty
+    // `metadataForms` map. So the two counts in this payload mean two different
+    // things — deliberately, and pinned here so a change to either is seen.
+    expect(narrow.metadataFormsCounts['zh-CN']).toBe(countJsonLeaves(narrow.metadataForms['zh-CN']));
+    expect(suppressed.metadataFormsCounts['zh-CN']).toBeGreaterThan(100);
+    expect(suppressed.metadataForms['zh-CN']).toBeUndefined();
+    expect(countJsonLeaves(suppressed.metadataForms['zh-CN'])).toBe(0);
+    expect(suppressed.metadataFormsCounts['zh-CN']).toBe(narrow.metadataFormsCounts['zh-CN']);
+  });
+
+  /**
+   * The commonest path in this repository is `--no-metadata-forms` — 8 of the 9
+   * extract configs pass it — and there the run emits ONE module. The first cut
+   * of this repair printed a bare `2 of 776 key(s) emitted` for it: correct, and
+   * a regression on what the old (double-counting) line at least told the
+   * operator, which is how big the baseline they switched off is.
+   *
+   * Falsifier: dropping the suppressed candidate from the summary leaves the
+   * breakdown empty here, and adding it into the total instead of labelling it
+   * makes the first expectation read 775.
+   */
+  it('names a flag-suppressed module and its size, without adding it in', () => {
+    const run = runExtract('suppressed-baseline', CONFIG, ['--no-metadata-forms']);
+
+    expect(run.files).toEqual(['zh-CN.objects.generated.ts']);
+    const row = summaryRow(run.stdout);
+    // The emitted total is the one file's leaves — the baseline is NOT in it.
+    expect(row.emitted).toBe(leavesOnDisk(run.dir, 'zh-CN.objects.generated.ts'));
+    // ...and it is named, with its size, and with the words that keep it out.
+    expect(row.breakdown).toMatch(/metadataForms \d+ not emitted/);
+    const suppressed = Number(row.breakdown.match(/metadataForms (\d+) not emitted/)![1]);
+    expect(suppressed).toBeGreaterThan(100);
+    expect(row.emitted + suppressed).toBeLessThanOrEqual(row.skeleton);
   });
 
   /**
@@ -287,6 +324,7 @@ describe('os i18n extract — the number printed is the number written (#16121)'
     // The keys ARE there — they are simply outside the sub-tree the flags
     // selected, and the line says so instead of claiming them as written.
     expect(row.skeleton).toBeGreaterThan(100);
+    expect(row.breakdown).toMatch(/metadataForms \d+ not emitted/);
 
     // The same stack under `--no-objects-only` does have a module, so the empty
     // result above is the sub-tree selection and not an inert fixture.
