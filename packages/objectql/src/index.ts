@@ -132,7 +132,18 @@ export type { AdmittedValueShapeViolationTally } from './engine.js';
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
 // `sys_secret` references can name the shape it reads instead of re-declaring it.
 export type { DatasourceDef } from './engine.js';
-export { SummaryRecomputeError } from './summary-errors.js';
+// [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
+// docblock tells a caller to identify it by `code` rather than `instanceof`
+// (the two-realm split #14936 measured: this package declares BOTH realms in
+// its own `exports`, so a consumer holding the other realm's copy of the class
+// gets `instanceof` === false, silently) — and until now offered nothing to
+// import. Two first-party packages already re-spell this code to implement the
+// documented "the records WERE written, treat it as a warning" recovery
+// (`packages/rest/src/import-runner.ts`,
+// `packages/metadata-protocol/src/seed-loader.ts`); they can now import it
+// instead. The class stays exported exactly as it was — this adds an
+// affordance, it removes nothing.
+export { SummaryRecomputeError, SUMMARY_RECOMPUTE_CODE } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
 // payload would have had read-only fields stripped. Exported so an in-process
