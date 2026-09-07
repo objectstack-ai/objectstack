@@ -914,6 +914,19 @@ async function respondToFlowTrigger(
 }
 
 /**
+ * The two `AutomationResult.status` members a `success: false` result can
+ * carry — the enum `ResumeFailureDetailsSchema.status` publishes, spelled
+ * once here and `satisfies`-bound to it (a member the spec drops reds this
+ * line; a member the spec adds is caught by the spec's own subset pin).
+ */
+const TERMINAL_FAILURE_STATUSES = ['failed', 'stranded'] as const satisfies readonly NonNullable<ResumeFailureDetails['status']>[];
+
+/** The guard {@link resumeFailureDetails} relays `status` through — a narrowing, never a default. */
+function isTerminalFailureStatus(status: AutomationResult['status']): status is (typeof TERMINAL_FAILURE_STATUSES)[number] {
+    return status !== undefined && (TERMINAL_FAILURE_STATUSES as readonly string[]).includes(status);
+}
+
+/**
  * [#15221] The machine-readable verdict the resume door's `400 FLOW_FAILED`
  * arm carries in `error.details`, beside the run's two artefacts — the
  * #16472 family ruling (maintainer 2026-09-07, option A), applied to this
@@ -923,8 +936,10 @@ async function respondToFlowTrigger(
  *
  * The structure is `ResumeFailureDetailsSchema` (`@objectstack/spec/api`),
  * declared once for every carrier the ruling names; this door is the
- * PRODUCER of one of them, so the two members it owns are bound to that
- * declaration at compile time (`satisfies`) and the third is relayed.
+ * PRODUCER of one of them, so the whole object is bound to that declaration
+ * at compile time (the return type IS `ResumeFailureDetails`): the two
+ * members the door owns are computed, and `status` is relayed through a
+ * guard on the two terminal-failure members the published enum names.
  *
  * What each member says, and why it is shaped the way it is:
  *
@@ -935,13 +950,21 @@ async function respondToFlowTrigger(
  *    terminal exit (the contract sets it on `'paused'` only), and this door
  *    knows the id from the request rather than sniffing it out of the
  *    engine's message.
- *  - `status` — the engine's own verdict, forwarded VERBATIM when it stamped
- *    one and never synthesised. Measured on the engine: the stranded exit
- *    stamps `'stranded'`; the other exit that reaches this arm — a subflow
- *    child that failed terminally — stamps nothing, so that arm carries no
+ *  - `status` — the engine's own verdict, forwarded when it stamped one and
+ *    never synthesised. Measured on the engine: the stranded exit stamps
+ *    `'stranded'`; the other exit that reaches this arm — a subflow child
+ *    that failed terminally — stamps nothing, so that arm carries no
  *    `status` today rather than a `'failed'` this door made up. Reading the
  *    producer's verdict is the whole rule (PD #12; `flow-dispatch-status.ts`
- *    says it for the trigger table).
+ *    says it for the trigger table). It is relayed through a GUARD on the
+ *    two terminal-failure members (`'failed' | 'stranded'`) — exactly the
+ *    members `ResumeFailureDetailsSchema.status` publishes — so the binding
+ *    is true by construction and not by accident of what is reachable: a
+ *    `success: false` result stamped with a `success: true` verdict
+ *    (`'completed'` / `'paused'` / `'refused'`, unreachable per the contract)
+ *    is neither forwarded under a schema that refuses it nor turned into
+ *    anything else. `TERMINAL_FAILURE_STATUSES` is `satisfies`-bound to the
+ *    schema's enum, so a member the spec drops reds this file.
  *  - `repairable` — `status === 'stranded'`, and ALWAYS present on this arm.
  *    Present-and-false on the plain terminal exit is a deliberate contract,
  *    not an implementation detail: an ABSENT member would be
@@ -962,17 +985,16 @@ async function respondToFlowTrigger(
  * ⛔ Not on the trigger door and not on `/actions`: neither ever resumes, so
  * "repairable" has no referent there; their `400 FLOW_FAILED` details stay
  * `{ errorMessage?, summary? }`, and an absent `repairable` there means "not
- * a resume", never "not repairable". Pinned in
- * `automation-resume-stranded-details.test.ts`, both halves.
+ * a resume", never "not repairable". Pinned as exact `details` equality at
+ * both doors: the trigger door in `automation-resume-stranded-details.test.ts`,
+ * `/actions` in `actions-flow-dispatch-status.test.ts` (#9585's artefacts pin).
  */
-function resumeFailureDetails(runId: string, result: AutomationResult): Record<string, unknown> {
-    const verdict = {
-        runId,
-        repairable: result.status === 'stranded',
-    } satisfies Omit<ResumeFailureDetails, 'status'>;
+function resumeFailureDetails(runId: string, result: AutomationResult): ResumeFailureDetails {
+    const status = isTerminalFailureStatus(result.status) ? result.status : undefined;
     return {
-        ...verdict,
-        ...(result.status !== undefined ? { status: result.status } : {}),
+        runId,
+        repairable: status === 'stranded',
+        ...(status !== undefined ? { status } : {}),
     };
 }
 
