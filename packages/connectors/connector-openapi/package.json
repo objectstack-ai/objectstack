@@ -37,6 +37,11 @@
         "integration",
         "api"
     ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/objectstack-ai/objectstack.git",
+        "directory": "packages/connectors/connector-openapi"
+    },
     "files": [
         "dist",
         "README.md",
