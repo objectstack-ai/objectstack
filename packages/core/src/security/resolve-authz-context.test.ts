@@ -7,6 +7,21 @@ import { hashApiKey } from './api-key.js';
 import type { AuthzPosture } from '@objectstack/spec/security';
 
 /**
+ * [#14273 A1] The refusal REASON is observable on exactly ONE surface: the
+ * server-side `warnApiKeyRefusal` line (#15256 / 2A). `ResolvedAuthzContext.
+ * authRefusal` was the envelope's copy of it and, from #8287 on, had zero
+ * readers outside test assertions — so the field is gone, and the pins that
+ * kept the two reasons DISTINGUISHABLE read the line the operator reads.
+ * ⛔ Not the wire: a caller still gets the generic anonymous 401.
+ */
+const apiKeyRefusalLines = (spy: ReturnType<typeof vi.spyOn>) =>
+  spy.mock.calls
+    .map((c: unknown[]) => c.map(String).join(' '))
+    .filter((l: string) => l.includes('API key refused'));
+const apiKeyRefusalReasons = (spy: ReturnType<typeof vi.spyOn>) =>
+  apiKeyRefusalLines(spy).map((l: string) => /API key refused \(([a-z_]+)\)/.exec(l)?.[1]);
+
+/**
  * Contract test for the SINGLE authorization resolver. Every authorization
  * source MUST be honored here — this is the regression net that would have
  * caught the REST-vs-dispatcher drift (the REST copy had silently dropped
@@ -1162,12 +1177,16 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     sys_user_permission_set: [],
   });
 
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { warnSpy.mockRestore(); });
+
   it('adopts the key organization as the request tenant when membership holds', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
     const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBe('u1');
     expect(ctx.tenantId).toBe('org_a');
-    expect(ctx.authRefusal).toBeUndefined();
+    expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
   });
 
   /**
@@ -1186,7 +1205,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     expect(ctx.userId).toBeUndefined();
     expect(ctx.tenantId).toBeUndefined();
     expect(ctx.permissions).toEqual([]);
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
   });
 
   it('refuses when the membership row exists but its ADR-0091 window has lapsed', async () => {
@@ -1195,14 +1214,14 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     ]));
     const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
   });
 
   it('the same key under `group` is refused too — the wall is membership-derived there as well', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
     const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'group' });
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
   });
 
   /**
@@ -1214,7 +1233,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     const ql = makeQl(tables([]));
     const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'single' });
     expect(ctx.userId).toBe('u1');
-    expect(ctx.authRefusal).toBeUndefined();
+    expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
   });
 
   /**
@@ -1238,7 +1257,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
       tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_required');
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_required']);
   });
 
   /**
@@ -1247,6 +1266,35 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    * how that stays true: a later refactor that re-reads `sys_member` for this
    * check turns a free assertion into a per-request cost, silently.
    */
+  /**
+   * [#14273 A1] The envelope carries NO refusal field. Pinned by own-property
+   * on BOTH refusal paths, so a writer that re-adds the member under any name
+   * or type reddens here — a typed read cannot pin an absence the compiler
+   * already refuses. The reason lives on the warn line (above) and nowhere on
+   * the context; the wire never carried it and still does not.
+   */
+  it('[#14273] a post-grant refusal answers an envelope with no `authRefusal` — the reason is server-side only', async () => {
+    const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    expect(ctx.userId).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(ctx, 'authRefusal')).toBe(false);
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
+  });
+
+  it('[#14273] an admission refusal answers an envelope with no `authRefusal` either', async () => {
+    const ql = makeQl({
+      sys_api_key: [{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }],
+      sys_user: [{ id: 'u1' }],
+      sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'owner' }],
+      sys_user_position: [],
+      sys_user_permission_set: [],
+    });
+    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    expect(ctx.userId).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(ctx, 'authRefusal')).toBe(false);
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_required']);
+  });
+
   it('costs zero additional queries (sys_member is read once)', async () => {
     let memberReads = 0;
     const inner = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
@@ -1663,7 +1711,7 @@ describe('[#15409] a session organization claim that no membership backs', () =>
     // switch to it instead of being signed out of everything.
     expect(ctx.accessible_org_ids).toEqual(['org_beta']);
     // ⛔ And it is NOT the API-key refusal: no principal was refused.
-    expect(ctx.authRefusal).toBeUndefined();
+    expect(apiKeyRefusalLines(warnSpy)).toHaveLength(0);
   });
 
   /**
@@ -1778,7 +1826,7 @@ describe('[#15409] a session organization claim that no membership backs', () =>
       ql, headers: { 'x-api-key': raw }, tenancyPosture: 'isolated',
     });
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(apiKeyRefusalReasons(warnSpy)).toEqual(['organization_membership_ended']);
     // ⛔ Not degraded into the session's drop: the key is REFUSED, not trimmed.
     expect(dropLines()).toHaveLength(0);
   });

@@ -18,7 +18,7 @@ an evaluation cannot.
   cause. There is no Zod enum behind the column — it is free `text` — so the field's own
   description is the published vocabulary, and that is where the value is declared. The
   string deliberately matches the one the API-key arm of the same ruling family already
-  mints for this event (`authRefusal.reason` in `resolve-authz-context.ts`), so one grep
+  mints for this event (`ApiKeyRefusalReason` in `resolve-authz-context.ts`), so one grep
   finds every place the platform acts on a membership ending.
 - **The trigger acts on the ORGANIZATION'S CLAIM, never on the user** (maintainer ruling,
   decision batch #49 item 4, option B). A user who still holds another membership is

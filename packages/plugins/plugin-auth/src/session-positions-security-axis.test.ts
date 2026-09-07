@@ -269,7 +269,7 @@ describe('the payload agrees with the ONE authorization authority, set for set',
 
   // [#15136 review — the standing guard's carve-out, measured rather than asserted
   // in prose] With NO active organization the resolver projects EVERY membership
-  // (`resolve-authz-context.ts:815`), so membership-derived names are ADDED to a
+  // (`resolve-authz-context.ts:788`), so membership-derived names are ADDED to a
   // payload that previously carried none of them. That is a behaviour change in
   // its own right and the changeset now names it; this pins the shape it names.
   it('projects membership names even with no active organization on the session', async () => {
@@ -297,7 +297,7 @@ describe('the payload agrees with the ONE authorization authority, set for set',
     expect(activeOrg, `expected no active org, got ${activeOrg}`).toBeFalsy();
 
     // The resolver projects EVERY membership when no tenant scopes it
-    // (`resolve-authz-context.ts:815`), so these names are ADDED to a payload
+    // (`resolve-authz-context.ts:788`), so these names are ADDED to a payload
     // that carried none of them before this card. That is the behaviour change
     // the changeset's carve-out names.
     const positions = (envelope as any)?.user?.positions ?? [];
