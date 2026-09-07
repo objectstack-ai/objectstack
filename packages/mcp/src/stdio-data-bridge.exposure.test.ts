@@ -35,10 +35,21 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
+import {
+  API_PRIMITIVES,
+  DATA_ACTION_TO_API_OPERATION,
+  effectiveOperationsArray,
+  isApiOperationAllowed,
+  resolveEffectiveApiMethods,
+} from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
-import { createStdioDataBridge, GATED_ACTIONS, type McpExposureError } from './stdio-data-bridge.js';
+import {
+  createStdioDataBridge,
+  enforceApiExposure,
+  GATED_ACTIONS,
+  type McpExposureError,
+} from './stdio-data-bridge.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // ---------------------------------------------------------------------------
@@ -366,4 +377,84 @@ describe('#8083 the gate runs before the existence probe', () => {
       expect(engine.find).not.toHaveBeenCalled();
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// #15416 — the refusal must not name an operation its own set contains
+// ---------------------------------------------------------------------------
+
+/**
+ * #15416 was filed from the REST door, where `deleteMany` (`bulk ∧ delete`) was
+ * refused with `API operation 'bulk' is not allowed` beside an `allowed` array
+ * containing `bulk` — the message named the conjunct that PASSED. The template
+ * it used lives in exactly two places, and this file guards the second one.
+ *
+ * ⭐ Measured, not assumed: stdio CANNOT currently reach that class, and the
+ * reason is structural rather than lucky. `enforceApiExposure` passes no
+ * `OperationCheckOptions` — no `bulkChild`, no `writeMode` — and without them
+ * `isApiOperationAllowed` reduces to membership in the very set that becomes
+ * `allowedOperations`. Message and set are then two reads of one set and cannot
+ * disagree. {@link GATED_ACTIONS} also contains neither `bulk` nor `import`,
+ * the only two operations the spec judges as a conjunction.
+ *
+ * So the REST repair was NOT copied here: there is nothing on this surface for
+ * it to repair. What is added instead is the pin that keeps that true — adding
+ * `bulk` or a writeMode-refined `import` to the gated set, or threading options
+ * into the check, reddens the sweep below instead of quietly re-opening #15416
+ * from the stdio door.
+ */
+describe('#15416 the stdio refusal never names an operation it also allows', () => {
+  /** Every subset of the six primitives — the whole declaration space. */
+  const EVERY_WHITELIST: string[][] = Array.from(
+    { length: 1 << API_PRIMITIVES.length },
+    (_, mask) => API_PRIMITIVES.filter((_p, i) => mask & (1 << i)),
+  );
+
+  function metadataFor(apiMethods: string[]): IMetadataService {
+    return { getObject: async () => ({ name: 'task', enable: { apiMethods } }) } as unknown as IMetadataService;
+  }
+
+  it('holds for every gated action across every whitelist', async () => {
+    let refusals = 0;
+    for (const apiMethods of EVERY_WHITELIST) {
+      for (const action of Object.values(GATED_ACTIONS)) {
+        let err: McpExposureError | undefined;
+        try {
+          await enforceApiExposure(metadataFor(apiMethods), 'task', action, {} as ExecutionContext);
+        } catch (e) {
+          err = e as McpExposureError;
+        }
+        if (!err) continue;
+        expect(err.status).toBe(405);
+        refusals += 1;
+        const named = /^API operation '([^']*)' is not allowed on object '([^']*)'$/.exec(err.message)?.[1];
+        expect(named, `unparseable refusal for ${action} on [${apiMethods}]`).toBeTruthy();
+        expect(
+          err.allowedOperations,
+          `[${apiMethods}] refused ${action} by naming "${named}", which it also lists as allowed`,
+        ).not.toContain(named);
+      }
+    }
+    // Vacuously-green guard: a matrix that admitted everything would satisfy
+    // the assertion above without measuring anything.
+    expect(refusals).toBeGreaterThan(100);
+  });
+
+  it('gates only single-conjunct operations, which is WHY the class is unreachable', () => {
+    // The structural statement of the paragraph above: with no options passed,
+    // the gate verdict IS membership in the serialized set. `bulk ∧ child` and
+    // the writeMode-refined `import` are the two shapes that break that
+    // identity, and neither is in the gated set.
+    for (const apiMethods of EVERY_WHITELIST) {
+      const eff = resolveEffectiveApiMethods({ apiMethods });
+      const serialized = effectiveOperationsArray(eff) as string[];
+      for (const action of Object.values(GATED_ACTIONS)) {
+        const operation = DATA_ACTION_TO_API_OPERATION[action] ?? action;
+        expect(
+          isApiOperationAllowed(eff, operation),
+          `[${apiMethods}] ${action} → ${operation}: verdict diverged from the serialized set`,
+        ).toBe(serialized.includes(operation));
+      }
+    }
+  });
 });
