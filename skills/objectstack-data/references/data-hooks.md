@@ -452,6 +452,10 @@ The body runs in an isolated QuickJS VM, **not** Node:
   the hook. A `body` must be **self-contained**: inline the helper, or keep that
   hook as a bundled `handler`.
 
+> **A deadline stamped from an hours table is calendar hours** — nights, weekends and
+> holidays count. Name it `*_CALENDAR_HOURS` (`SLA_CALENDAR_HOURS`, or its camelCase)
+> and add elapsed milliseconds (`hours * 3_600_000`); never label it "business hours".
+
 ### ⚠️ Gotcha 1 — `ctx.result` is a *partial* record on afterUpdate
 
 On `afterUpdate`, both `ctx.result` and `ctx.input` carry only the fields this

@@ -139,7 +139,17 @@ function buildFieldIndex(objects: AnyRec[]): Map<string, string[]> {
     if (!name) continue;
     const fields = obj.fields;
     let names: string[] = [];
-    if (Array.isArray(fields)) names = fields.map(f => (f as AnyRec).name).filter((n): n is string => typeof n === 'string');
+    // The LIST shape is read through `recordsOf` (#15742). `Array.isArray`
+    // proves the list, never its members: an empty item in a YAML `fields:`
+    // list deserialises to `null`, and the cast this replaced dereferenced it
+    // before the `.filter` two calls later could drop it. The two sibling
+    // readers below already guard (`buildFieldTypeIndex` reads `(f)?.name`,
+    // `fieldEntries` filters before mapping) and both drop such a member in
+    // SILENCE — it carries no author-written name, so there is nothing to
+    // report about it — which is what `recordsOf` does for the array shape too.
+    // The MAP shape keeps `Object.keys`: there the author's KEY is the field
+    // name, which is exactly what this "did you mean?" index needs.
+    if (Array.isArray(fields)) names = recordsOf(fields).map(f => f.name).filter((n): n is string => typeof n === 'string');
     else if (fields && typeof fields === 'object') names = Object.keys(fields as AnyRec);
     // Injected columns come second, de-duplicated by insertion order: a DECLARED
     // `owner_id` is the author's field (the registry lets it win), so the
