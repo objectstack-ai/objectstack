@@ -203,7 +203,10 @@ describe('#15358 — inspectConsumedSuspension: the read-only half of the exit',
         const started = await engine.execute('no_pause_flow', ctx);
         expect(started.success).toBe(false);
         expect(started.status).toBe('failed');
-        const runId = started.runId as string;
+        // A failed `execute` does not carry its run id on the result; the run
+        // log does (same derivation as the restore verb's own never-suspended pin).
+        const runId = (started.runId ?? (await engine.listRuns('no_pause_flow'))[0]?.id) as string;
+        expect(runId).toBeTruthy();
 
         const verdict = await engine.inspectConsumedSuspension(runId);
         expect(verdict).toEqual({ repairable: false, runId, reason: 'NO_CONSUMED_SUSPENSION' });
