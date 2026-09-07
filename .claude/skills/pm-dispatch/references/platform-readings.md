@@ -144,6 +144,7 @@
 - `assignees` 实测为陈旧空值而权威读非空;`labels`/`state` 由此存疑、未实测,⛔ 不写成已测。
 - ⇒ ⛔ 认领承载字段(`assignees`、`pm:*` 标签、`state`)永不从本档读。
 - ⛔ 本档的缺席不是读数:要么 `hasNextPage: false`,要么第二通道。
+- 两数组各比 `edges` 长度与 `totalCount`:短即最新几项缺席,认领检查走分页 `get_comments`。
 - 自己刚写的按原写入通道回读;失效方向是空转与重发。
 - 成因:本档经 CDN 缓存,专对最新内容失效且绕不掉,cache-busting 查询串与 no-cache 头都无效。
 - 内容可滞后数分钟到数十分钟;它没有位置性对照 —— 更早内容全在,只有最新几条缺席。
@@ -250,6 +251,7 @@
 - 分步文件在 `{Job name}/{step number}_{step name}.txt`。
 - completeness check 绿只断言没有 worker 静默死,不等于测试通过。
 - 并发输出的相邻不等于因果:先查 `turbo.json` 依赖边,⛔ 不只看 tail。
+- turbo 一败多包同印 `ELIFECYCLE Command failed`:权威读数是 `Failed:` 行与该包自己的 `##[error]`。
 - 公开发出的诊断被推翻时,更正发在同样公开的位置,据它开的 PR 撤回 draft、解绑 `Fixes`。
 - 判正文被截断必须双读取:`.body` 原文,加 `Accept: application/vnd.github.full+json` 的 `.body_html`。
 - 两者同一处断掉才算 issue 端截断。
@@ -288,6 +290,7 @@
 - 第四形:裸 REST `POST /pulls` 建 PR 时,在已带 session-URL 页脚的正文后再追加一条同形页脚。
 - 该追加带前置横线、恰 90 字节,送出体是存储体的严格前缀。
 - ⇒ 追加形态随通道与动作(建 / 改)变,⛔ 不由任一条推其余;写后必回读。
+- 平台在尾部 `---` 前后正反两向归一空行:比对正文只按首个差异偏移,⛔ 不按长度。
 - 评论创建两通道都追加 58 字节 ⇒ 严格解析 `os-dev-report` 必须停在最后一个右花括号。
 - 并行 spec PR 同动 pin 计数断言:被踢不是事故,按 os-regen 序再解一轮。
 - 解冲突两侧收据都保留、按合并顺序堆叠;新计数从合并后源码重数,⛔ 不从收据做算术。
