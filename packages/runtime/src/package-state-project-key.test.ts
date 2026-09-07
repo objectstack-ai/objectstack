@@ -49,11 +49,21 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+    existsSync,
+    mkdirSync,
+    mkdtempSync,
+    readFileSync,
+    readdirSync,
+    realpathSync,
+    rmSync,
+    writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-import { loadDisabledPackageIds, setPackageDisabled } from './package-state-store.js';
+import { loadDisabledPackageIds, packageStateFileName, setPackageDisabled } from './package-state-store.js';
 
 const ENVIRONMENT_ID = 'env_local';
 
@@ -162,5 +172,132 @@ describe('package state is keyed per project (#15969)', () => {
             expect(loadDisabledPackageIds('env_staging')).toEqual(new Set(['com.acme.reporting']));
             expect(loadDisabledPackageIds('env_production')).toEqual(new Set());
         });
+    });
+});
+
+/**
+ * The naming convention, recomputed here rather than asked of the store.
+ *
+ * ⛔ This is the point of the block: `#15733` / PR #15968 settled a spelling for
+ * "one project root, folded into a filename component" — a sanitised basename,
+ * a `-`, and 12 hex of the sha256 of the RESOLVED root — and joined it to the
+ * environment id with a `.`. Asking `packageStateFileName` what it produces
+ * would pin nothing; an independent second computation is what makes a drift
+ * away from that convention go red.
+ */
+function expectedProjectKey(root: string): string {
+    const digest = createHash('sha256').update(root).digest('hex').slice(0, 12);
+    const slug = basename(root).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+    return slug.length > 0 ? `${slug}-${digest}` : digest;
+}
+
+/** The name every project shared before this card. */
+function legacyFile(environmentId: string): string {
+    return join(home, 'package-state', `${environmentId}.json`);
+}
+
+function writeLegacy(environmentId: string, disabled: string[]): string {
+    mkdirSync(join(home, 'package-state'), { recursive: true });
+    const file = legacyFile(environmentId);
+    writeFileSync(file, `${JSON.stringify({ disabled }, null, 2)}\n`, 'utf8');
+    return file;
+}
+
+describe('the file name follows PR #15968\'s convention (#15969)', () => {
+    it('is <environment>.<slug>-<digest>.json', () => {
+        const name = packageStateFileName(ENVIRONMENT_ID, projectA);
+
+        expect(name).toBe(`${ENVIRONMENT_ID}.${expectedProjectKey(projectA)}.json`);
+        // The shape, spelled out: a `.` between the two identities, and the
+        // project half is a slug, a `-`, and 12 lowercase hex.
+        expect(name).toMatch(/^env_local\.[a-z0-9-]*[a-z0-9]-[0-9a-f]{12}\.json$/);
+        expect(name.startsWith(`${ENVIRONMENT_ID}.`)).toBe(true);
+    });
+
+    it('separates two projects and two environments independently', () => {
+        expect(packageStateFileName(ENVIRONMENT_ID, projectA))
+            .not.toBe(packageStateFileName(ENVIRONMENT_ID, projectB));
+        expect(packageStateFileName(ENVIRONMENT_ID, projectA))
+            .not.toBe(packageStateFileName('env_staging', projectA));
+    });
+
+    it('resolves the root, so two spellings of one project key one file', () => {
+        expect(packageStateFileName(ENVIRONMENT_ID, `${projectA}/`))
+            .toBe(packageStateFileName(ENVIRONMENT_ID, projectA));
+        expect(packageStateFileName(ENVIRONMENT_ID, join(projectB, '..', 'alpha')))
+            .toBe(packageStateFileName(ENVIRONMENT_ID, projectA));
+    });
+
+    it('still keys a root whose basename sanitises away to nothing', () => {
+        const odd = join(sandbox, '+++');
+        mkdirSync(odd, { recursive: true });
+        const name = packageStateFileName(ENVIRONMENT_ID, odd);
+
+        expect(name).toMatch(/^env_local\.[0-9a-f]{12}\.json$/);
+        expect(name).not.toBe(packageStateFileName(ENVIRONMENT_ID, projectA));
+    });
+
+    it('keeps the environment id sanitised, so it cannot escape the directory', () => {
+        expect(packageStateFileName('../../etc/evil', projectA))
+            .toBe(`.._.._etc_evil.${expectedProjectKey(projectA)}.json`);
+    });
+
+    it('names the file the store actually writes', () => {
+        inProject(projectA, () => setPackageDisabled(ENVIRONMENT_ID, 'com.acme.reporting', true));
+
+        expect(stateFiles()).toEqual([packageStateFileName(ENVIRONMENT_ID, projectA)]);
+    });
+});
+
+describe('legacy <environment>.json migration is READ-ONCE (#15969)', () => {
+    it('reads the legacy file while this project has no file of its own', () => {
+        writeLegacy(ENVIRONMENT_ID, ['com.acme.reporting']);
+
+        expect(inProject(projectA, () => loadDisabledPackageIds(ENVIRONMENT_ID)))
+            .toEqual(new Set(['com.acme.reporting']));
+    });
+
+    it('writes the new key and LEAVES THE LEGACY FILE IN PLACE', () => {
+        const legacy = writeLegacy(ENVIRONMENT_ID, ['com.acme.reporting']);
+        const before = readFileSync(legacy, 'utf8');
+
+        inProject(projectA, () => setPackageDisabled(ENVIRONMENT_ID, 'com.acme.billing', true));
+
+        // The legacy content came across, under the new name...
+        const own = join(home, 'package-state', packageStateFileName(ENVIRONMENT_ID, projectA));
+        expect(JSON.parse(readFileSync(own, 'utf8'))).toEqual({
+            disabled: ['com.acme.billing', 'com.acme.reporting'],
+        });
+        // ...and the legacy file is untouched, byte for byte. ⛔ A release that
+        // deletes it strands an operator who rolls back.
+        expect(existsSync(legacy)).toBe(true);
+        expect(readFileSync(legacy, 'utf8')).toBe(before);
+    });
+
+    it('stops consulting the legacy file once this project has written one', () => {
+        const legacy = writeLegacy(ENVIRONMENT_ID, ['com.acme.reporting']);
+
+        inProject(projectA, () => setPackageDisabled(ENVIRONMENT_ID, 'com.acme.reporting', false));
+        // The legacy file still says disabled; this project's own file does not.
+        expect(JSON.parse(readFileSync(legacy, 'utf8'))).toEqual({ disabled: ['com.acme.reporting'] });
+        expect(inProject(projectA, () => loadDisabledPackageIds(ENVIRONMENT_ID))).toEqual(new Set());
+    });
+
+    it('does not let one project\'s migration clobber another\'s legacy state', () => {
+        writeLegacy(ENVIRONMENT_ID, ['com.acme.reporting']);
+
+        inProject(projectA, () => setPackageDisabled(ENVIRONMENT_ID, 'com.acme.reporting', false));
+
+        // B has not migrated yet, so B still reads the legacy record — unchanged.
+        expect(inProject(projectB, () => loadDisabledPackageIds(ENVIRONMENT_ID)))
+            .toEqual(new Set(['com.acme.reporting']));
+    });
+
+    it('is per environment: a legacy file for another environment is not read', () => {
+        writeLegacy('env_staging', ['com.acme.reporting']);
+
+        expect(inProject(projectA, () => loadDisabledPackageIds(ENVIRONMENT_ID))).toEqual(new Set());
+        expect(inProject(projectA, () => loadDisabledPackageIds('env_staging')))
+            .toEqual(new Set(['com.acme.reporting']));
     });
 });
