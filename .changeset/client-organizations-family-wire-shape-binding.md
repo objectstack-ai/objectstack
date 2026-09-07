@@ -46,7 +46,7 @@ Everything below compiled before only because `any` is assignable to, and indexa
 ```ts
 const org = await client.organizations.setActive(id);
 org.id;                          // now TS18047 — `setActive` (and `get`) answer `null` for an empty id with no active organization
-JSON.parse(org!.metadata);       // fine — on the READ routes `metadata` is the stored JSON text
+if (org?.metadata) JSON.parse(org.metadata);   // fine — on the READ routes `metadata` is the stored JSON text, `null`/absent when unset
 (await client.organizations.get(id))!.metadata.plan;   // now TS2339 — it is a string here, not an object
 
 const echo = await client.organizations.update(id, { metadata: { plan: 'pro' } });
@@ -81,7 +81,7 @@ A caller that read `id`, `name`, `slug`, `role`, `email`, `members`, `total` or 
 - `updateMemberRole`'s stub declares `{ member }`; the handler answers the membership row bare, without `user`.
 - `metadata` is one column with two wire forms: `create` and `update` decode it, every read route answers the stored JSON text (`setActive`, `get`, `delete`, `list`).
 - `removeMember` joins `user` on only when the member was addressed by email; the by-id path strips it.
-- Inside `get(...).teams` the vendor's `memberCount` is NOT stripped (it is on `teams.create` / `teams.update`), and the default team minted at organization creation carries no `updatedAt` on a store that does not materialise unset columns.
+- Inside `get(...).teams` the vendor's `memberCount` is NOT stripped (it is on `teams.create` / `teams.update`). `teams.update` writes no timestamp of its own — `updatedAt` there comes from better-auth's team schema (`onUpdate` default, applied on every update) with the platform's `sys_team.updated_at` stamping behind it, measured on a real SQL driver; the default team minted at organization creation is written without `updatedAt` by the vendor and carries the platform's stamp, so `get(...).teams[].updatedAt` is declared optional as the safe direction.
 
 ## Not a behaviour change
 

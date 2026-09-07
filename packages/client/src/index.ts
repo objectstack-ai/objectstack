@@ -1263,10 +1263,18 @@ export interface OrganizationCreateResult extends OrganizationEchoWire {
 }
 
 /**
- * The team row as better-auth serves it from `teams.create` / `teams.update`
- * (both set `updatedAt` explicitly). The vendor's `memberCount` column is
- * stripped on these routes — but NOT inside `get`, see
- * {@link OrganizationFullTeamWire}.
+ * The team row as better-auth serves it from `teams.create` / `teams.update`.
+ * `updatedAt` is on the wire from both, for two different reasons: the
+ * `create-team` handler writes `updatedAt: new Date()` itself, while the
+ * `update-team` handler writes NO timestamp of its own (its update is
+ * `{ name, ...additionalFields }`) — the value comes from better-auth's team
+ * schema, which declares `updatedAt` with an `onUpdate` default the adapter
+ * applies on every update of the model, with the platform's own audit stamping
+ * of `sys_team.updated_at` behind it. Measured: `update-team` on the default
+ * team (which the vendor creates without `updatedAt`) answered a fresh
+ * `updatedAt` on a real SQL driver and on an engine with no platform stamping
+ * in the loop at all. The vendor's `memberCount` column is stripped on these
+ * routes — but NOT inside `get`, see {@link OrganizationFullTeamWire}.
  */
 export interface OrganizationTeamWire {
     id: string;
@@ -1279,11 +1287,15 @@ export interface OrganizationTeamWire {
 }
 
 /**
- * The team rows inside `get(...).teams`. Two measured differences from
+ * The team rows inside `get(...).teams`. Two differences from
  * {@link OrganizationTeamWire}: the full-organization join does not strip the
- * vendor's `memberCount`, and the default team minted at organization
- * creation is written without `updatedAt`, so on a store that does not
- * materialise an unset column the key is absent (present on SQL).
+ * vendor's `memberCount` (measured), and the default team minted at
+ * organization creation is written without `updatedAt` by the vendor, so on
+ * this row the value is the platform's own `sys_team.updated_at` stamp rather
+ * than better-auth's (measured at rest on a real SQL driver before any
+ * update). `updatedAt` is optional here as the safe direction for a store
+ * without that stamping; the only place it was observed absent was a
+ * hand-rolled test fake, never a real driver.
  */
 export interface OrganizationFullTeamWire extends Omit<OrganizationTeamWire, 'updatedAt'> {
     /** ISO-8601 when present. */
