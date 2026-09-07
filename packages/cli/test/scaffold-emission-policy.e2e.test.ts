@@ -30,8 +30,10 @@
  * transcribed `'^5.3.0'` would go green on a tree where one scaffolder had been
  * edited and the other had not, which is the exact state it exists to catch.
  *
- *   1. Across all five emissions, each third-party dependency name resolves to
- *      exactly ONE range. This is the property; the value it settles on is not.
+ *   1. Across every emission the two commands still ship (four since #16483
+ *      retired `os create example`), each third-party dependency name resolves
+ *      to exactly ONE range. This is the property; the value it settles on is
+ *      not, and neither is the count — both are derived from the live maps.
  *   2. That one range IS the exported constant, so a template that grows a
  *      literal instead of importing turns this red.
  *   3. The surviving TypeScript range is the floor the DOCS state. `^5.3.0`
@@ -78,7 +80,6 @@ import {
   renderScaffoldTsconfig,
   SCAFFOLD_PNPM_RANGE,
   SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
-  SCAFFOLD_TSX_RANGE,
   SCAFFOLD_TYPES_NODE_RANGE,
   SCAFFOLD_TYPESCRIPT_RANGE,
   SCAFFOLD_VITEST_RANGE,
@@ -123,9 +124,13 @@ function thirdPartyOnly(deps: Record<string, unknown> | undefined): Array<[strin
 
 /**
  * Every `package.json` the two commands emit for the shape a reader of the docs
- * actually gets — `os init`'s three templates and `os create`'s two, in its
+ * actually gets — `os init`'s three templates and `os create`'s one, in its
  * DEFAULT placement. `--in-repo` is excluded on purpose: it emits `workspace:*`
  * and is documented as platform-work-only.
+ *
+ * `os create` contributed two until #16483 retired `example`, which is why the
+ * harvest is four emissions now. Both halves are DERIVED from the live maps, so
+ * the count moves with the roster rather than being maintained here.
  */
 function emittedManifests(): Array<{ id: string; manifest: Record<string, unknown> }> {
   const out: Array<{ id: string; manifest: Record<string, unknown> }> = [];
@@ -162,13 +167,13 @@ function declaredRanges(): Map<string, Map<string, string[]>> {
   return byName;
 }
 
-describe('scaffold emission policy — one definition, five emissions', () => {
-  it('harvests a non-empty policy from all five emissions (control)', () => {
+describe('scaffold emission policy — one definition, four emissions', () => {
+  it('harvests a non-empty policy from all four emissions (control)', () => {
     // Without this, every assertion below passes over an empty harvest — the
     // vacuity that would make the whole file certify the defect it exists for.
+    // `os create example` was here until #16483 retired it.
     const manifests = emittedManifests();
     expect(manifests.map((m) => m.id).sort()).toEqual([
-      'os create example',
       'os create plugin',
       'os init -t app',
       'os init -t empty',
@@ -198,11 +203,15 @@ describe('scaffold emission policy — one definition, five emissions', () => {
 
   it('emits the exported constant rather than a literal, for every policy range', () => {
     const ranges = declaredRanges();
+    // ⚠️ `tsx` left this table with #16483: the retired `os create example`
+    // template was the only emission that declared it, so `SCAFFOLD_TSX_RANGE`
+    // now reaches no scaffold at all. Asserting it here anyway would compare an
+    // empty harvest against the constant and go red on a correct tree; a row is
+    // owed by a range some emission really declares, and by nothing else.
     const expected: Array<[string, string]> = [
       ['typescript', SCAFFOLD_TYPESCRIPT_RANGE],
       ['vitest', SCAFFOLD_VITEST_RANGE],
       ['@types/node', SCAFFOLD_TYPES_NODE_RANGE],
-      ['tsx', SCAFFOLD_TSX_RANGE],
       ['zod', SCAFFOLD_ZOD_RANGE],
     ];
     for (const [name, constant] of expected) {
