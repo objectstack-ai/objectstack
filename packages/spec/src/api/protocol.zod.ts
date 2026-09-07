@@ -233,11 +233,13 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — so it decides which tenant\'s customization rows '
-    + 'are merged into the list. Absent = environment-wide read: only env-level '
-    + 'overlays apply and no org partition is consulted.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — so it decides which '
+    + 'tenant\'s customization rows are merged into the list. Supplying a value '
+    + 'does not by itself guarantee an org partition is consulted; where none '
+    + 'applies, and whenever it is absent, the read is environment-wide and '
+    + 'only env-level overlays apply.',
   ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
