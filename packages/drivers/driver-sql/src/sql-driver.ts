@@ -264,8 +264,9 @@ const NUMERIC_SCALAR_TYPES = new Set<string>([
 /**
  * The builtin audit-timestamp columns every managed object carries. They are
  * stamped to a single canonical instant format on SQLite (see
- * `stampInsertTimestamps`/`update`) and read-repaired by
- * `repairNaiveUtcAuditTimestamp`.
+ * `stampInsertTimestamps`/`update`) and presented on read — on EVERY dialect —
+ * as that same canonical instant text by {@link presentAuditTimestampOutput}
+ * ([ADR-0053 D-F1], #13973).
  */
 const AUDIT_TIMESTAMP_COLUMNS = ['created_at', 'updated_at'] as const;
 
@@ -300,6 +301,52 @@ function repairNaiveUtcAuditTimestamp(value: unknown): unknown {
   if (!m) return value;
   const d = new Date(`${m[1]}T${m[2]}Z`);
   return Number.isNaN(d.getTime()) ? value : d.toISOString();
+}
+
+/**
+ * Fold a client library's `Date` — what node-pg materialises a `timestamptz`
+ * as and what mysql2 materialises a `DATETIME(3)` as — into the canonical
+ * instant text, `YYYY-MM-DDTHH:MM:SS.sssZ`.
+ *
+ * Total in the sense #14078 ruled for the shared consumer spelling: the ONE
+ * `Date` shape `toISOString()` refuses — an Invalid `Date`, whose time value
+ * is `NaN` — is handed back UNCHANGED rather than thrown on. Both live
+ * dialects are measured to produce it from rows that are already on disk (a
+ * MySQL zero `DATETIME`; a Postgres year past 275760, inside the server's
+ * range and outside JS's — `sql-driver-14078-invalid-date-materialisation.test.ts`),
+ * and it has no canonical text to fold to. It is neither nulled (that erases a
+ * stored value silently) nor spelled as the text `Invalid Date` (that would
+ * change the wire, where `JSON.stringify` already serialises it as `null`); it
+ * leaves as the client's `Date`, which is exactly the shape the ruled-B
+ * consumer arms (`canonicalIsoInstant` and kin) already absorb.
+ * [ADR-0053 D-F3].
+ */
+function isoFromValidDate(value: Date): unknown {
+  return Number.isNaN(value.getTime()) ? value : value.toISOString();
+}
+
+/**
+ * What a record read door hands out for a builtin audit timestamp, on every
+ * dialect ([ADR-0053 D-F1], #13973): the canonical instant text.
+ *
+ * Two arms, one per shape the dialects actually produce. A `Date` — the
+ * client-level materialisation on Postgres (`timestamptz`) and MySQL
+ * (`DATETIME(3)`), which the driver deliberately does NOT alter at the client
+ * parser ([ADR-0053 D-F2]; see {@link SqlDriver.withPostgresCalendarDayAsText})
+ * — is folded by {@link isoFromValidDate}. A string — SQLite's TEXT, canonical
+ * post-ADR-0074 or a legacy zone-naive `CURRENT_TIMESTAMP` — takes ADR-0074's
+ * {@link repairNaiveUtcAuditTimestamp}, which is idempotent on the canonical
+ * form. Every other shape passes through untouched, exactly as before.
+ *
+ * Before #13973 the string arm ran inside `if (this.isSqlite)` and the `Date`
+ * arm did not exist, so the two live dialects handed the client's `Date`
+ * through the read door — the divergence the #13973 census measured eight
+ * consumers to be wrong under (#13382 in production, #13993–#13999 by reading),
+ * every one in the direction "expected the text, received a `Date`".
+ */
+function presentAuditTimestampOutput(value: unknown): unknown {
+  if (value instanceof Date) return isoFromValidDate(value);
+  return repairNaiveUtcAuditTimestamp(value);
 }
 
 /**
@@ -339,8 +386,15 @@ const isNowDefaultValue = isNowDefaultToken;
  * ADR-0074's `repairNaiveUtcAuditTimestamp` for the string shapes (the single
  * source of the zone-naive→UTC rules) and adds the INTEGER epoch-ms / `Date`
  * folding, mirroring the read-repair the `Field.date`/numeric-scalar paths do.
- * SQLite-only: Postgres/MySQL store a real zone-aware TIMESTAMP and never carry
- * this ambiguity.
+ *
+ * Runs on EVERY dialect since #13973 ([ADR-0053 D-F1]): the name records the
+ * storage forms it was written to fold (SQLite's INTEGER epoch and naive TEXT),
+ * not where it runs. Postgres and MySQL store a real `timestamptz` /
+ * `DATETIME(3)` and never carry the mixed-storage ambiguity, but their client
+ * libraries hand the column back as a JS `Date`, and that `Date` used to leave
+ * the read door as-is — the SQLite-gated fold was the whole of the dialect
+ * divergence the #13973 census measured. The `Date` arm below is the one those
+ * two dialects take, and the client parser stays untouched ([ADR-0053 D-F2]).
  */
 function normalizeSqliteDatetimeOutput(value: unknown): unknown {
   if (value == null) return value;
@@ -350,11 +404,10 @@ function normalizeSqliteDatetimeOutput(value: unknown): unknown {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? value : d.toISOString();
   }
-  // A JS `Date` is never returned by better-sqlite3 here, but normalize one
-  // defensively so any caller-shaped row also reads back canonical.
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? value : value.toISOString();
-  }
+  // The client-level materialisation on Postgres and MySQL (never what
+  // better-sqlite3 returns): fold it to the canonical text, an Invalid `Date`
+  // passing through — see `isoFromValidDate` for why that is the total arm.
+  if (value instanceof Date) return isoFromValidDate(value);
   if (typeof value !== 'string') return value;
   const s = value.trim();
   if (s === '') return value;
@@ -5246,9 +5299,20 @@ export class SqlDriver implements IDataDriver {
    * optional peer dependency and is never imported here — `setTypeParser` /
    * `getTypeParser` are read off the `pg.Client` knex hands the hook.
    *
-   * `timestamptz` / `timestamp` are deliberately untouched: those are
-   * instants, a `Date` is the right materialisation for them, and
-   * `Field.datetime` depends on it.
+   * `timestamptz` / `timestamp` are deliberately untouched here: those are
+   * instants, and a `Date` is the right materialisation for them at the
+   * CLIENT layer, where the wire text is parsed. It is not, however, what the
+   * driver hands out of its read doors: [ADR-0053 D-F1/D-F2] (#13973) fold that
+   * `Date` to the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text in `formatOutput`
+   * / `presentReadValue`, so every dialect presents the instant the way
+   * SQLite always has. This comment used to add that "`Field.datetime`
+   * depends on" the `Date` materialisation; #13973 checked that on the tree
+   * and it did not hold — nothing on the read path consumed the `Date` (the
+   * SQLite-gated `formatOutput` never touched a datetime column on Postgres),
+   * and every in-repo reader of the value already accepted the text form.
+   * Canonicalising at the driver's own read boundary rather than at this
+   * parser is the ruled shape: one clock stays in play here for `date`, the
+   * instant types keep their stock parser, and no host `pg` client is touched.
    *
    * A host's existing `pool.afterCreate` is chained rather than replaced,
    * exactly as in {@link withUtcSession}.
@@ -12761,6 +12825,15 @@ export class SqlDriver implements IDataDriver {
    * row, asked one field at a time so the paths that return raw builder output
    * can ask it too. `null` means the stored form already IS the presented form.
    *
+   * The temporal kinds run on every dialect. For `datetime` that is [ADR-0053
+   * D-F1] (#13973): the fold was SQLite-only before, so `aggregate()` and
+   * `distinct()` handed Postgres' and MySQL's `Date` through here exactly as
+   * `find()` did. The builtin audit columns take the `datetime` rule too —
+   * they are not in `datetimeFields` (builtin, not declared), and before
+   * #13973 this function had NO arm for them on ANY dialect, so
+   * `max(updated_at)` and `distinct('created_at')` diverged from `find()`
+   * even on SQLite, where they missed ADR-0074's legacy-row repair.
+   *
    * The boolean rule runs on SQLite AND MySQL — the two dialects that store a
    * declared boolean as a number (INTEGER 0/1, `tinyint(1)`) — because
    * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
@@ -12776,6 +12849,7 @@ export class SqlDriver implements IDataDriver {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
+    if ((AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(field)) return 'datetime';
     if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
       return 'boolean';
     }
@@ -12789,10 +12863,11 @@ export class SqlDriver implements IDataDriver {
    * row, for the read paths that return raw builder output instead
    * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
    *
-   * The dialect gating mirrors `formatOutput`: the `Field.datetime` repair and
-   * the numeric coercion are SQLite-only, the boolean coercion runs on SQLite
-   * and MySQL (#11782 — the two dialects whose stored boolean is a number),
-   * and the `Field.date` → `YYYY-MM-DD` collapse runs everywhere.
+   * The dialect gating mirrors `formatOutput`: the three temporal folds run
+   * everywhere (`datetime` since #13973, [ADR-0053 D-F1] — SQLite-only before,
+   * which handed the two live dialects' `Date` through), the numeric coercion
+   * is SQLite-only, and the boolean coercion runs on SQLite and MySQL (#11782
+   * — the two dialects whose stored boolean is a number).
    * {@link readPresentationKind} does the dialect gating for the scalar kinds,
    * so by the time one arrives here the dialect is settled.
    */
@@ -12807,7 +12882,11 @@ export class SqlDriver implements IDataDriver {
         // exactly what `find()` presents (#3994, the F6 gap of the #3849 fix).
         return this.toTimeOnly(value);
       case 'datetime':
-        return this.isSqlite ? normalizeSqliteDatetimeOutput(value) : value;
+        // Every dialect ([ADR-0053 D-F1]): the same fold `formatOutput` applies
+        // to a `find()` row, so `min`/`max`/`distinct` over an instant — a
+        // declared `Field.datetime` or a builtin audit column — present the
+        // canonical text and never the client's `Date`.
+        return normalizeSqliteDatetimeOutput(value);
       case 'boolean':
         return Boolean(value);
       case 'number': {
@@ -16629,32 +16708,46 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      // Builtin audit timestamps: repair any legacy/raw row stored as a
-      // zone-naive, space-separated string (CURRENT_TIMESTAMP or the pre-fix
-      // UPDATE stamp) to canonical ISO-8601 with `Z`, so reads are unambiguous
-      // and uniform regardless of when/how the row was written. Idempotent on
-      // already-canonical values; mirrors the legacy-row read-repair the
-      // `Field.date`/numeric paths already do. See `repairNaiveUtcAuditTimestamp`.
-      for (const col of AUDIT_TIMESTAMP_COLUMNS) {
-        if (data[col] !== undefined) data[col] = repairNaiveUtcAuditTimestamp(data[col]);
-      }
+    }
 
-      // Present every `Field.datetime` value as one canonical instant —
-      // ISO-8601 with an explicit `Z` — regardless of its on-disk storage form.
-      // A SQLite `datetime` column mixes forms: an explicit value bound as a JS
-      // `Date` is stored as INTEGER epoch ms, while a `defaultValue: 'NOW()'`
-      // slot is TEXT (canonical ISO-`Z` post-fix, or a legacy timezone-naive
-      // `CURRENT_TIMESTAMP` string). Without this, reads leak the raw integer or
-      // a zone-naive string that `Date.parse` mis-reads as LOCAL time. Folds all
-      // shapes to UTC ISO-`Z` and transparently repairs legacy rows with no data
-      // migration — mirroring the `Field.date`/numeric read-repairs above and
-      // the audit-column repair just above. See `normalizeSqliteDatetimeOutput`.
-      const datetimeFields = this.datetimeFields[object];
-      if (datetimeFields && datetimeFields.size > 0) {
-        for (const field of datetimeFields) {
-          if (data[field] !== undefined) {
-            data[field] = normalizeSqliteDatetimeOutput(data[field]);
-          }
+    // [ADR-0053 D-F1] (#13973) — the two instant classes present as ONE shape
+    // on EVERY dialect: the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text. Both
+    // loops below sat inside the `if (this.isSqlite)` arm above until #13973,
+    // and that gate WAS the divergence the card's census measured: on
+    // Postgres and MySQL the client library's `Date` left this door as-is,
+    // while SQLite handed out text — one value, two runtime types, through the
+    // same `any`-shaped record, invisible to the type system. Eight consumers
+    // were wrong under it (#13382 in production, #13993–#13999 by reading),
+    // all in the direction "expected the text, received a `Date`", none the
+    // reverse. The client parsers are NOT touched ([ADR-0053 D-F2]); the
+    // driver canonicalises at its own read boundary, here and in
+    // `presentReadValue` for the `aggregate()`/`distinct()` doors.
+
+    // Builtin audit timestamps. On SQLite: repair any legacy/raw row stored as
+    // a zone-naive, space-separated string (CURRENT_TIMESTAMP or the pre-fix
+    // UPDATE stamp) to canonical ISO-8601 with `Z`, idempotent on
+    // already-canonical values (ADR-0074). On Postgres/MySQL: fold the
+    // client's `Date`. See `presentAuditTimestampOutput`.
+    for (const col of AUDIT_TIMESTAMP_COLUMNS) {
+      if (data[col] !== undefined) data[col] = presentAuditTimestampOutput(data[col]);
+    }
+
+    // Present every `Field.datetime` value as one canonical instant —
+    // ISO-8601 with an explicit `Z` — regardless of its on-disk storage form.
+    // A SQLite `datetime` column mixes forms: an explicit value bound as a JS
+    // `Date` is stored as INTEGER epoch ms, while a `defaultValue: 'NOW()'`
+    // slot is TEXT (canonical ISO-`Z` post-fix, or a legacy timezone-naive
+    // `CURRENT_TIMESTAMP` string). Without this, reads leak the raw integer or
+    // a zone-naive string that `Date.parse` mis-reads as LOCAL time. Folds all
+    // shapes to UTC ISO-`Z` and transparently repairs legacy rows with no data
+    // migration — mirroring the `Field.date`/numeric read-repairs above and
+    // the audit-column repair just above. A Postgres/MySQL `Date` takes the
+    // same fold. See `normalizeSqliteDatetimeOutput`.
+    const datetimeFields = this.datetimeFields[object];
+    if (datetimeFields && datetimeFields.size > 0) {
+      for (const field of datetimeFields) {
+        if (data[field] !== undefined) {
+          data[field] = normalizeSqliteDatetimeOutput(data[field]);
         }
       }
     }
