@@ -1796,10 +1796,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 //
                 // [#7359] `status` is the THIRD declared parameter, and until
                 // now the only one this handler never read. `ListRunsRequestSchema`
-                // has always declared it — as `ExecutionStatus.optional()`, the
-                // enum itself rather than a copy of its members, so what the
-                // wire bounds the filter to is read from that vocabulary rather
-                // than restated here — but it had no slot on
+                // declares it as `ExecutionStatus.optional()` — the enum itself
+                // rather than a copy of its members — so what the wire bounds
+                // the filter to is read from that vocabulary rather than
+                // restated here. It has NOT always been spelled that way: from
+                // the schema's introduction until #7359 that line was an inline
+                // `z.enum([...]).optional()` copy of eight members, and #7359
+                // replaced the copy with the enum in the same change that made
+                // this boundary read the parameter. But `status` had no slot on
                 // `IAutomationService.listRuns` and was never built into this
                 // object, so `?status=failed` was dropped here, silently, and
                 // the caller was answered 200 with EVERY run of the flow capped
