@@ -306,14 +306,18 @@ function firstSourceRedirectedDependency() {
   if (!scope.startsWith('@')) return '';
   for (const dep of Object.keys(manifest?.dependencies ?? {})) {
     if (!dep.startsWith(`${scope}/`)) continue;
-    let resolved;
+    let pathname;
     try {
-      resolved = import.meta.resolve(dep);
+      // The URL is parsed INSIDE the guard on purpose. This runs before the CLI
+      // does anything, so a throw here would replace the whole run with an error
+      // about the probe — the same rule the two reporters below are written to.
+      pathname = new URL(import.meta.resolve(dep)).pathname;
     } catch {
-      // Not installed, or no such subpath. Not this probe's business.
+      // Not installed, no such subpath, or an answer that is not a URL. Not this
+      // probe's business, and never this probe's report.
       continue;
     }
-    if (/\.[cm]?tsx?$/.test(new URL(resolved).pathname)) return dep;
+    if (/\.[cm]?tsx?$/.test(pathname)) return dep;
   }
   return '';
 }
