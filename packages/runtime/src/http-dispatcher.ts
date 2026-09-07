@@ -652,8 +652,19 @@ export class HttpDispatcher {
         // that had nothing to do with the data layer. The dependency check
         // belongs on `/ready`, whose failure mode (leave the LB rotation) is
         // the one that actually helps.
+        //
+        // [#15910] `liveness: true` extends that promise from this handler's
+        // BODY to the whole REQUEST (maintainer ruling 2026-09-06, decision
+        // batch #57, option C — verbatim 「同意」). The handler checked nothing,
+        // but `dispatch()`'s identity step ran before it and read the tenancy
+        // posture, so after #15909 a `tenancy` service that was registered and
+        // failed to build answered an uncredentialed `GET /health` with 503 —
+        // the restart loop this comment already argues against, arriving
+        // through the preamble instead of through the body. The flag is read by
+        // `DomainHandlerRegistry.resolveLiveness`; see the carve-out at the head
+        // of `dispatch()` for why the set is derived and never listed.
         this.domainRegistry.register({
-            prefix: '/health', match: 'exact', methods: ['GET'],
+            prefix: '/health', match: 'exact', methods: ['GET'], liveness: true,
             handler: async () => ({
                 handled: true,
                 response: this.success({
@@ -2303,6 +2314,44 @@ export class HttpDispatcher {
     async dispatch(method: string, path: string, body: any, query: any, context: HttpProtocolContext, prefix?: string): Promise<HttpDispatcherResult> {
         let cleanPath = path.replace(/\/$/, ''); // Remove trailing slash if present, but strict on clean paths
 
+        // ── Liveness carve-out — the ONE route family that runs no preamble ──
+        // [#15910, maintainer ruling 2026-09-06 (decision batch #57), option C,
+        // verbatim 「同意」] "Carve liveness out of the identity step. `/health`
+        // (liveness) answers 200 whenever the process can serve HTTP, regardless
+        // of configuration faults; `/ready` (readiness) keeps returning 503 for
+        // the identity/configuration fault so traffic is withheld until the
+        // fault is fixed. A configuration fault must never restart a pod that
+        // cannot be fixed by restarting."
+        //
+        // WHAT THIS IS NOT. It is deliberately NOT the fast path the anchored
+        // invariant below forbids: nothing here resolves a handler for a route
+        // that did not DECLARE itself a liveness probe, so no migrated domain is
+        // un-gated and no handler receives an unresolved context it wanted
+        // resolved. `/health`'s body reads process-local state only — it is the
+        // one handler in this table for which "already-scoped, already-gated" was
+        // never part of the contract.
+        //
+        // WHY THE SET IS DERIVED. `resolveLiveness` is `resolve` plus one field
+        // read, so "which routes are liveness" is answered by the live route
+        // table through the same matcher that picks the handler. ⛔ Never replace
+        // it with an array of liveness paths: a second list of routes drifts from
+        // the first one silently, and this repo has paid for that shape more than
+        // once. A future liveness route becomes liveness by declaring it at its
+        // own registration — the only edit that cannot be forgotten, because it
+        // is the same object that makes the route exist.
+        //
+        // WHY BEFORE THE SCOPED-URL STRIP. `cleanPath` is still environment-
+        // scoped here, so `/environments/:id/health` does NOT match and keeps
+        // today's behaviour end to end (it resolves its environment, runs both
+        // gates, and answers from the same handler — pinned in
+        // `http-dispatcher.scoped-url-strip.test.ts`). No orchestrator wires a
+        // scoped probe: the liveness surface is the unscoped `${prefix}/health`
+        // the dispatcher plugin mounts, and that is exactly the set carved out.
+        const livenessRoute = this.domainRegistry.resolveLiveness(cleanPath, method);
+        if (livenessRoute) {
+            return await livenessRoute.handler({ path: cleanPath, method, body, query }, context);
+        }
+
         // ── Gates run BEFORE any domain body (ADR-0076 D11 step ③) ──
         // Scope resolution plus the two gates below are the dispatcher's half of
         // the D11 contract: a body extracted to `./domains/` receives an
@@ -2312,7 +2361,9 @@ export class HttpDispatcher {
         // ordering is not overhead to optimize away: moving the domain-registry
         // resolve (further down) above these lines would un-gate every migrated
         // domain at once and hand handlers a context whose per-request kernel was
-        // never resolved (#5155). Anchored in scripts/adr-anchors/.
+        // never resolved (#5155). Anchored in scripts/adr-anchors/. The one
+        // exception is the DECLARED liveness carve-out above, which resolves no
+        // route that did not ask to run without a preamble (#15910).
         await this.resolveRequestScope(context, cleanPath);
 
         // ── ADR-0069 Authentication-policy gate ──
