@@ -1,7 +1,27 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * `os create <type> [name]` — scaffold a plugin or an example application.
+ * `os create <type> [name]` — scaffold a kernel code plugin.
+ *
+ * ## `os create example` is retired (#16483)
+ *
+ * The `example` template emitted a SUBSET of what `os init` writes, plus one
+ * README. #15531 rendered and hashed both command families' real emission: the
+ * only template-level duplication left between them was this one template, and
+ * the ruling (decision batch #66, option B) is that the template goes rather
+ * than that the two families merge — they emit two different artifacts, and a
+ * kernel code `Plugin` is not a declarative app. The maintainer ruled the same
+ * week that it goes with NO alias and NO deprecation window.
+ *
+ * ⛔ The template is not merely deleted. `os create example` still ANSWERS, and
+ * the answer names `os init` — see {@link RETIRED_TEMPLATES}. Letting it fall
+ * through to the `Unknown type:` branch would print the surviving roster and
+ * nothing else, so a reader arriving from an old doc page, a tutorial or a CI
+ * script would learn only that their spelling is not on the list, and the
+ * natural next move is to hunt for the right spelling of something that no
+ * longer exists. A removal that leaves a generic failure behind is the outcome
+ * the ruling exists to prevent, so the refusal is part of the contract and is
+ * pinned as one (`test/create-example-retired.e2e.test.ts`).
  *
  * ## What this command emits, and why it has two shapes
  *
@@ -42,9 +62,9 @@
  *                            project lands in the developer's own directory.
  *   `in-repo`     (--in-repo) the platform-work shape: `workspace:*` deps, a
  *                            `tsconfig.json` that extends this repo's root
- *                            config, landing under `packages/plugins/` or
- *                            `examples/`. Explicit and documented, never the
- *                            default — its output installs nowhere else.
+ *                            config, landing under `packages/plugins/`.
+ *                            Explicit and documented, never the default — its
+ *                            output installs nowhere else.
  *
  * ## The version the standalone shape pins
  *
@@ -85,17 +105,13 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
-import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import {
   getCliVersion,
   NPM_PACKAGE_NAME_MAX_LENGTH,
   renderPnpmWorkspaceYaml,
   renderScaffoldTsconfig,
-  sanitizeNamespace,
   SCAFFOLD_PNPM_RANGE,
   SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
-  SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
-  SCAFFOLD_TSX_RANGE,
   SCAFFOLD_TYPES_NODE_RANGE,
   SCAFFOLD_TYPESCRIPT_RANGE,
   SCAFFOLD_VITEST_RANGE,
@@ -235,7 +251,7 @@ export function validateEmittedPackageName(packageName: string): string | null {
  * The fold is GENERALISED, not narrowed: every run of characters illegal in a
  * JS identifier is the separator `-` already was — dropped, with the character
  * after it upper-cased — and a leading digit takes the `'a'` prefix that
- * `sanitizeNamespace()` (imported one line away) has always used for exactly
+ * `init.ts`'s `sanitizeNamespace()` has always used for exactly
  * this rule. Ordinary names are unchanged: `my-app` still yields `myApp`.
  *
  * ⛔ This normalises the CODE identifier and nothing else. The package name,
@@ -257,7 +273,6 @@ export function sanitizeIdentifier(name: string): string {
 }
 
 const PLUGIN_IN_REPO_DIR = 'packages/plugins';
-const EXAMPLE_IN_REPO_DIR = 'examples';
 
 export const templates: Record<string, CreateTemplate> = {
   plugin: defineTemplate({
@@ -382,136 +397,73 @@ MIT
       return files;
     },
   }),
-
-  example: defineTemplate({
-    description: 'Create a new ObjectStack example application',
-    inRepoDir: EXAMPLE_IN_REPO_DIR,
-    dirName: (name: string) => name,
-    filesFor: (placement: ScaffoldPlacement) => {
-      const standalone = placement === 'standalone';
-      const files: Record<string, FileRenderer> = {
-        'package.json': (name: string) => ({
-          name: `@example/${name}`,
-          version: '0.1.0',
-          private: true,
-          ...(standalone ? { type: 'module' } : {}),
-          description: `ObjectStack Example: ${name}`,
-          ...(standalone ? { engines: { pnpm: SCAFFOLD_PNPM_RANGE } } : {}),
-          scripts: {
-            build: 'objectstack compile',
-            dev: 'objectstack dev',
-            test: 'vitest',
-            typecheck: 'tsc --noEmit',
-          },
-          dependencies: {
-            '@objectstack/spec': objectstackDependencySpec(placement),
-            '@objectstack/cli': objectstackDependencySpec(placement),
-            zod: SCAFFOLD_ZOD_RANGE,
-          },
-          devDependencies: {
-            '@types/node': SCAFFOLD_TYPES_NODE_RANGE,
-            tsx: SCAFFOLD_TSX_RANGE,
-            typescript: SCAFFOLD_TYPESCRIPT_RANGE,
-            vitest: SCAFFOLD_VITEST_RANGE,
-          },
-        }),
-        'objectstack.config.ts': (name: string) => {
-          const namespace = sanitizeNamespace(name);
-          return `import { defineStack } from '@objectstack/spec';
-
-// Barrel imports — add more as you create new type folders
-// import * as objects from './src/objects';
-// import * as actions from './src/actions';
-// import * as apps from './src/apps';
-
-export default defineStack({
-  manifest: {
-    id: 'com.example.${namespace}',
-    namespace: '${namespace}',
-    version: '0.1.0',
-    type: 'app',
-    name: '${name}',
-    description: '${name} example application',
-    // Protocol compatibility range: the metadata-protocol major this app is
-    // authored against. The runtime checks it before it loads anything, so a
-    // runtime outside the range refuses this app at the boundary with the
-    // exact migration command instead of crashing later. Scaffolding stamped
-    // it to match the ObjectStack version you installed — change it when you
-    // deliberately move to a new protocol major, not to silence a mismatch.
-    // Guide: https://objectstack.ai/docs/upgrading
-    engines: { protocol: '^${PROTOCOL_MAJOR}' },
-  },
-  
-  objects: [
-    // Object.values(objects),  // Uncomment after creating src/objects/index.ts
-  ],
-  
-  apps: [
-    // Object.values(apps),     // Uncomment after creating src/apps/index.ts
-  ],
-});
-`;
-        },
-        'README.md': (name: string) => `# ${name} Example
-
-ObjectStack example application: ${name}
-
-## Quick Start
-
-\`\`\`bash
-# Install dependencies
-pnpm install
-
-# Build the configuration
-pnpm build
-
-# Run in development mode
-pnpm dev
-\`\`\`
-
-## Structure
-
-- \`objectstack.config.ts\` - Main configuration file
-- \`dist/objectstack.json\` - Compiled artifact
-
-## Learn More
-
-${
-  standalone
-    ? '- [ObjectStack Documentation](https://objectstack.ai/docs)\n'
-      + '- [CLI Reference](https://objectstack.ai/docs/deployment/cli)\n'
-    : '- [ObjectStack Documentation](../../content/docs)\n- [Examples](../)\n'
-}`,
-        'tsconfig.json': (name: string) =>
-          standalone
-            ? renderScaffoldTsconfig({
-                rootDir: '.',
-                include: SCAFFOLD_TSCONFIG_INCLUDE_WITH_ROOT_CONFIG,
-              })
-            : {
-                extends: rootTsconfigExtends(EXAMPLE_IN_REPO_DIR, name),
-                compilerOptions: {
-                  outDir: 'dist',
-                  rootDir: '.',
-                },
-                include: ['*.ts', 'src/**/*'],
-              },
-      };
-
-      if (standalone) {
-        files['pnpm-workspace.yaml'] = () => renderPnpmWorkspaceYaml();
-      }
-      return files;
-    },
-  }),
 };
+
+/**
+ * Templates that were withdrawn, and what this command says when one is run.
+ *
+ * ⛔ A retired template is NOT an unknown template, and must never be allowed to
+ * fall through to the `Unknown type:` branch below. That branch prints the
+ * surviving roster and nothing else — so the reader of an old doc page, an
+ * older tutorial or a CI script that still names the retired template learns
+ * only that their spelling is off the list, and goes looking for the right
+ * spelling of something that no longer exists. The retirement replaces the
+ * command with a SIGNPOST; a generic failure is the outcome it exists to
+ * prevent.
+ *
+ * `example` (#16483, under the #15531 ruling): the template emitted a subset of
+ * what `os init` writes plus one README, measured by rendering and hashing both
+ * command families' whole emission. Every entry therefore owes both halves —
+ * why the template went, and the command to run instead, spelled so it can be
+ * copied straight out of the terminal.
+ */
+export const RETIRED_TEMPLATES: Record<string, {
+  /** Reason clause completing "`os create <type>` was retired — …". */
+  reason: string;
+  /** Body lines, printed in order; an empty string prints a blank line. */
+  detail: string[];
+}> = {
+  example: {
+    // ⛔ No `#NNNN` in the printed strings below: a runtime message reaches
+    // authors and operators who cannot resolve a tracker id. The card is
+    // named in this comment and in the block above (`pnpm check:doc-authoring`).
+    reason: 'it was a weaker `os init`.',
+    detail: [
+      'It emitted a SUBSET of what `os init` writes, plus one README. The two',
+      'command families were measured file by file and hashed: there was no',
+      'shape this template produced that `os init` does not.',
+      '',
+      'Use `os init` instead — it writes the same objectstack.config.ts and',
+      'tsconfig.json, and adds src/objects, a .gitignore and the dependency',
+      'install this template never had:',
+      '',
+      '    os init <name>             ->  a full application project',
+      '    os init <name> -t empty    ->  objectstack.config.ts only',
+      '',
+      'There is no alias and no deprecation window: `os create example` will not',
+      'come back, so change the command rather than pinning an older CLI.',
+      '',
+      '`os create plugin <name>` is unaffected. It scaffolds the kernel code',
+      '`Plugin` contract, which `os init` does not emit — see the scaffolder',
+      'table on https://objectstack.ai/docs/deployment/cli',
+    ],
+  },
+};
+
+/** The roster an unknown type is shown, derived so a removal cannot outlive it. */
+function availableTypes(): string {
+  return Object.keys(templates).join(', ');
+}
 
 export default class Create extends Command {
   static override description =
-    'Create a new standalone plugin or example project from a built-in template';
+    'Create a new standalone kernel code plugin from a built-in template';
 
   static override args = {
-    type: Args.string({ description: 'Type of project to create (plugin, example)', required: true }),
+    type: Args.string({
+      description: `Type of project to create (${Object.keys(templates).join(', ')})`,
+      required: true,
+    }),
     name: Args.string({ description: 'Name of the project', required: false }),
   };
 
@@ -523,7 +475,7 @@ export default class Create extends Command {
     'in-repo': Flags.boolean({
       default: false,
       description:
-        'Scaffold INSIDE an ObjectStack monorepo checkout (packages/plugins/ or examples/) with '
+        'Scaffold INSIDE an ObjectStack monorepo checkout (packages/plugins/) with '
         + 'workspace:* dependencies. For platform work only — the emitted project installs nowhere else.',
     }),
   };
@@ -534,9 +486,24 @@ export default class Create extends Command {
     console.log(chalk.bold(`\n📦 ObjectStack Project Creator`));
     console.log(chalk.dim(`-------------------------------`));
     
+    // A withdrawn template answers for itself, AHEAD of the roster lookup and
+    // ahead of the "name is required" check below — `os create example` with no
+    // name at all must still reach the signpost rather than be told to supply
+    // an argument to a command that no longer exists. See RETIRED_TEMPLATES.
+    const retired = RETIRED_TEMPLATES[args.type];
+    if (retired) {
+      console.error(chalk.red(`\n❌ \`os create ${args.type}\` was retired — ${retired.reason}`));
+      console.error('');
+      for (const line of retired.detail) {
+        console.error(line ? chalk.dim(`  ${line}`) : '');
+      }
+      console.error('');
+      process.exit(1);
+    }
+
     if (!templates[args.type as keyof typeof templates]) {
       console.error(chalk.red(`\n❌ Unknown type: ${args.type}`));
-      console.log(chalk.dim('Available types: plugin, example'));
+      console.log(chalk.dim(`Available types: ${availableTypes()}`));
       process.exit(1);
     }
     

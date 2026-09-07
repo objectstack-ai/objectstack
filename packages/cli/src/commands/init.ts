@@ -332,10 +332,11 @@ export const SCAFFOLD_TSCONFIG_COMPILER_OPTIONS = {
  *
  * `rootDir` and `include` are the only things the emitted shapes differ on:
  * `os create plugin` compiles `src/` alone, while `os init`'s three templates
- * and `os create example` also compile the `objectstack.config.ts` at the
- * project root. Measured before this renderer existed, four of the five
- * emitted `tsconfig.json` files were already byte-identical and the fifth
- * differed only in those two keys — so nothing here is a new decision.
+ * also compile the `objectstack.config.ts` at the project root. Measured before
+ * this renderer existed, four of the five emitted `tsconfig.json` files were
+ * already byte-identical and the fifth differed only in those two keys — so
+ * nothing here is a new decision. (Five because `os create example` was one of
+ * them; it was retired in #16483, and the measurement is left as it was taken.)
  */
 export function renderScaffoldTsconfig(
   options: { rootDir: string; include: string[] },
