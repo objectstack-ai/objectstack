@@ -439,3 +439,84 @@ describe('[#15021] §4 grading inputs — is the window transient, and can the r
     // real session backend fails on only one of two consecutive reads.
   });
 });
+
+// ---------------------------------------------------------------------------
+// §5 — The reachability question the pattern census cannot answer on its own.
+//
+// §3 asks which mounted PATTERNS are allow-listed. That is not the same as
+// asking which allow-listed CONCRETE paths this server would answer: a greedy
+// CRUD matcher such as `/api/v1/:object/:id` captures `/api/v1/auth/sign-in`
+// with `object = 'auth'`, and that concrete path IS allow-listed. If any such
+// capture exists AND its handler resolves a context, the window reaches a
+// remediation path for real.
+// ---------------------------------------------------------------------------
+
+/**
+ * The shipped matcher's `:param` / `*` semantics, mirrored rather than
+ * imported: `compileRoutePattern` lives in `@objectstack/plugin-hono-server`,
+ * which this package does not depend on and must not start depending on for a
+ * test. Kept byte-comparable to that source — `:param` is one non-empty
+ * segment, `*` is the rest, everything else is a literal.
+ */
+function matchesPattern(pattern: string, path: string): boolean {
+  const norm = (p: string) => (p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p);
+  const body = norm(pattern).split('/').map((seg) => {
+    if (seg.startsWith(':')) return '[^/]+';
+    if (seg === '*') return '.*';
+    return seg.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  }).join('/');
+  return new RegExp(`^${body}$`).test(norm(path));
+}
+
+describe('[#15021] §5 can a mounted route capture a CONCRETE remediation path?', () => {
+  it('sanity: the mirrored matcher behaves like the shipped one on the shapes this leg relies on', () => {
+    expect(matchesPattern('/api/v1/:object/:id', '/api/v1/auth/sign-in')).toBe(true);
+    expect(matchesPattern('/api/v1/data/:object', '/api/v1/data/health')).toBe(true);
+    expect(matchesPattern('/api/v1/data/:object', '/api/v1/data/a/b')).toBe(false);
+    expect(matchesPattern('/api/v1/auth/*', '/api/v1/auth/two-factor/enable')).toBe(true);
+  });
+
+  it('CENSUS: which mounted patterns capture a canonical allow-listed remediation path', () => {
+    // Canonical remediation paths, taken from the allow-list's own purpose
+    // statement in `auth-gate.ts`: change-password, two-factor enrollment,
+    // sign-out, plus the two UI-bootstrap reads.
+    const REMEDIATION = [
+      '/api/v1/auth/change-password',
+      '/api/v1/auth/two-factor/enable',
+      '/api/v1/auth/sign-out',
+      '/api/v1/auth/me/localization',
+      '/api/v1/me/apps',
+    ];
+    const configs: Array<[string, any]> = [
+      ['default (unscoped)', {}],
+      ['scoping optional', { api: { enableProjectScoping: true, projectResolution: 'optional' } }],
+      ['scoping required', { api: { enableProjectScoping: true, projectResolution: 'required' } }],
+    ];
+    const hits: string[] = [];
+    for (const [name, config] of configs) {
+      const { mounted } = census(config);
+      for (const path of REMEDIATION) {
+        for (const r of mounted) {
+          if (matchesPattern(r.path, path)) hits.push(`${name}: ${r.method} ${r.path} <- ${path}`);
+        }
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.log('[#15021] mounted patterns capturing a canonical remediation path: %d\n%s',
+      hits.length, hits.length ? hits.map((h) => `  ${h}`).join('\n') : '  (none)');
+    // ⭐ MEASURED ZERO, and pinned rather than merely recorded. This is the
+    // fact that separates "the seam is path-blind" (§2, certain) from "a gated
+    // user cannot remediate" (the card's impact sentence): on today's tree no
+    // route this server mounts would answer any of those paths, so the §2
+    // refusal reaches none of them HERE. They are served by terminal raw-app
+    // mounts (`plugin-auth`'s `/api/v1/auth/*`, `plugin-hono-server`'s
+    // `/auth/me/*`) that never enter `computeExecCtx`.
+    //
+    // ⚠️ If this goes RED, the reachability qualifier on #15021 is gone and the
+    // card's impact sentence has become true: a mounted route now answers a
+    // remediation path, and §2 says every such answer is 503 for the duration
+    // of a session-backend fault. ⛔ Do not relax this to make a new mount
+    // pass — take it back to the decision inbox.
+    expect(hits).toEqual([]);
+  });
+});
