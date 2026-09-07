@@ -27,16 +27,37 @@
 //
 //   From CI, no special run needed. Every Test Core shard passes --summarize
 //   and, on merge_group builds, uploads `.turbo/runs/` as the
-//   `test-core-run-summary-<shard>-of-6` artifact. Download all six from any
-//   green queue build and:
-//     node scripts/measure-test-shard-timings.mjs <dir>/*.json \
+//   `test-core-run-summary-<shard>-of-6` artifact.
+//
+//   ⚠ ONE RUN IS NOT ENOUGH, AND THIS SENTENCE USED TO SAY IT WAS. It read
+//   "download all six from any green queue build and re-run the generator",
+//   which is optimistic in a way nobody had measured until the refresh lane ran
+//   for real: a single green run yields between 2 and 52 of the ~71 measurable
+//   packages, depending on nothing but how warm that run's turbo cache was, and
+//   the union of every retained green run converges around 57. The rest are
+//   cache HITs, which this file refuses (see the CACHED TASKS rule below). So
+//   the honest procedure is:
+//
+//     node scripts/measure-test-shard-timings.mjs \
+//       --run <run-a-id> <run-a-dir>/*.json \
+//       --run <run-b-id> <run-b-dir>/*.json \
+//       --merge-into scripts/test-shard-timings.json \
 //       --out scripts/test-shard-timings.json
-//   Feeding MORE THAN ONE run means saying which is which -- `--run <id>`
-//   before each run's six summaries. Slices are summed within a run and the
-//   per-run sums medianed across runs, so a file-sharded package gets the same
-//   median treatment as every other package (#16473); undeclared multi-run
-//   input is REFUSED rather than resolved by guessing.
-//   `.github/workflows/shard-timings-refresh.yml` runs this on a weekly timer.
+//
+//   `--run` fences each run: slices are summed within a run and the per-run sums
+//   medianed across runs, so a file-sharded package gets the same median
+//   treatment as every other package (#16473); undeclared multi-run input is
+//   REFUSED rather than resolved by guessing.
+//
+//   `--merge-into` is what makes a partial measurement sound. A package this
+//   pass did not measure keeps its previous weight -- but ONLY when a cache HIT
+//   witnesses that its inputs are unchanged, which is the evidence that the old
+//   number still describes it. Those packages are named in `carriedOver`.
+//   Anything absent for any other reason is simply not in the output, so the
+//   caller can name it rather than estimate it.
+//
+//   `.github/workflows/shard-timings-refresh.yml` does all of this on a weekly
+//   timer and opens the PR.
 //
 //   Locally, on a 4-vCPU box (the hosted runner's shape):
 //     pnpm exec turbo run build
@@ -57,7 +78,7 @@
 // Usage:
 //   node scripts/measure-test-shard-timings.mjs <summary.json>... [--out <path>]
 //   node scripts/measure-test-shard-timings.mjs --run <id> <summary.json>... \
-//     --run <id> <summary.json>... [--out <path>]
+//     --run <id> <summary.json>... [--merge-into <dataset>] [--out <path>]
 //   node scripts/measure-test-shard-timings.mjs --self-test
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -189,7 +210,7 @@ export function fallbackRate(measured, fileCounts) {
   return Math.round(median(rates) * 1000) / 1000;
 }
 
-export function buildDataset({ perSummary, fileCounts, provenance }) {
+export function buildDataset({ perSummary, fileCounts, provenance, carryFrom = null }) {
   const bySample = new Map();
   const cachedNames = new Set();
   const push = (name, seconds) => {
@@ -311,6 +332,44 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
   const measured = new Map(
     [...bySample.entries()].map(([name, values]) => [name, Math.round(median(values) * 100) / 100])
   );
+
+  // ⛔ A CARRIED WEIGHT NEEDS A CACHE HIT AS ITS WITNESS. NOTHING ELSE CARRIES.
+  //
+  // Measured on the first two live runs of the refresh lane: NO set of retained
+  // green runs measures the whole workspace. The best single run covered 52 of
+  // the 71 packages the dataset holds, the accumulation of all seven converged
+  // at 57, and the last 14 were turbo cache HITs in every one of them. That is
+  // the cache design rather than luck -- the key is namespaced per shard and
+  // only main pushes write it, so a package whose inputs have not changed is a
+  // HIT, and this file refuses hits rather than recording a replayed ~0.1s
+  // window as a suite's cost.
+  //
+  // So "regenerate" cannot mean "replace". It means MERGE, and the merge is
+  // sound for one specific reason: a cache HIT is not missing data, it is
+  // POSITIVE EVIDENCE that the package's inputs are unchanged since the run
+  // whose output was replayed. Its last measured weight therefore still
+  // describes it -- the number is not stale, and turbo is the witness. Carrying
+  // it forward preserves this file's whole invariant: every number in it is a
+  // real measurement of code as it stands, never an estimate.
+  //
+  // The witness requirement is what keeps that from becoming a licence to keep
+  // anything. A package absent from the summaries for ANY OTHER reason -- it
+  // never ran, its suite failed, its slices could not be assembled -- has no
+  // evidence behind it, so it is NOT carried. It drops out and the caller's
+  // coverage check names it. `skippedAsCached` is exactly the witnessed set, so
+  // the carry reads it rather than inventing a second classification.
+  const carriedOver = [];
+  if (carryFrom) {
+    for (const name of Object.keys(carryFrom).sort((a, b) => a.localeCompare(b, 'en'))) {
+      if (measured.has(name)) continue;
+      if (!cachedNames.has(name)) continue;
+      const seconds = carryFrom[name];
+      if (typeof seconds !== 'number' || !(seconds >= 0)) continue;
+      measured.set(name, seconds);
+      carriedOver.push(name);
+    }
+  }
+
   const packages = {};
   for (const name of [...measured.keys()].sort((a, b) => a.localeCompare(b, 'en'))) {
     packages[name] = measured.get(name);
@@ -319,12 +378,22 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
     note:
       'GENERATED by scripts/measure-test-shard-timings.mjs -- do not hand-edit. Per-package ' +
       '`turbo run test` durations in seconds, the balancing input for the Test Core shard ' +
-      'split (scripts/partition-test-shards.mjs). See `provenance.refresh` to regenerate.',
+      'split (scripts/partition-test-shards.mjs). See `provenance.refresh` to regenerate. ' +
+      'Every weight is a real measurement: the ones in `carriedOver` were measured by an earlier ' +
+      'refresh and re-confirmed unchanged by a turbo cache HIT in this one.',
     provenance,
     secondsPerTestFileFallback: fallbackRate(measured, fileCounts),
     packages,
     skippedAsCached: [...cachedNames].sort((a, b) => a.localeCompare(b, 'en')),
     skippedIncompleteSlices: incompleteSlices,
+    // Beside `skippedAsCached` rather than folded into a per-package
+    // `measuredAt`, and the choice is forced by the reader: partition-test-
+    // shards.mjs reads `packages` as name -> NUMBER (`timings.packages[name] /
+    // sliceCount`) and never opens `provenance` at all, so per-package dates
+    // would mean changing that shape and every consumer of it. A single
+    // `provenance.measuredAt` paired with this list carries the same
+    // information and needs no change in the partitioner.
+    carriedOver,
   };
 }
 
@@ -356,7 +425,7 @@ export function buildDataset({ perSummary, fileCounts, provenance }) {
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'measure-test-shard-timings self-test': 41,
+  'measure-test-shard-timings self-test': 50,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -751,6 +820,110 @@ function selfTest() {
     }
   });
 
+  // The MERGE, and the witness rule that bounds it (#16464). No retained run set
+  // measures the whole workspace, so a refresh that REPLACED the dataset would
+  // demote every cache-hit package to a test-file-count estimate. Carrying is
+  // sound only because a cache HIT is evidence the package is unchanged, so the
+  // cases below pin the carry AND its boundary: what has a witness carries, what
+  // does not is simply absent for the caller to name.
+  const priorDataset = { a: 10, cached: 500, vanished: 700 };
+  const mergeSummary = summary([
+    testTask('a', 0, 12_000),
+    { taskId: 'cached#test', task: 'test', package: 'cached', cache: { status: 'HIT' }, execution: { startTime: 0, endTime: 90, exitCode: 0 } },
+  ]);
+  const mergedSet = buildDataset({
+    perSummary: [samplesFromSummary(mergeSummary, 'm')],
+    fileCounts: new Map([['a', 6], ['cached', 250], ['vanished', 300]]),
+    provenance: {},
+    carryFrom: priorDataset,
+  });
+
+  // 1. A CARRIED package: weight unchanged, and named.
+  check(() => {
+    if (mergedSet.packages.cached !== 500) {
+      throw new Error(`merge: a cache-hit package was not carried at its previous weight (got ${mergedSet.packages.cached}, expected 500)`);
+    }
+  });
+  check(() => {
+    if (!mergedSet.carriedOver.includes('cached')) {
+      throw new Error(`merge: the carried package was not named in carriedOver (${mergedSet.carriedOver.join(', ') || 'empty'})`);
+    }
+  });
+  // 2. A freshly MEASURED package takes the new number, and is NOT called carried.
+  check(() => {
+    if (mergedSet.packages.a !== 12) throw new Error(`merge: a measured package did not take its new weight (${mergedSet.packages.a})`);
+  });
+  check(() => {
+    if (mergedSet.carriedOver.includes('a')) throw new Error('merge: a package measured in this pass was reported as carried');
+  });
+  // 3. HIT-WITNESSED CARRY versus ABSENT: `vanished` is in the prior dataset but
+  //    appears in NO summary, so nothing witnesses that it is unchanged. It must
+  //    NOT be carried — this is the case that separates a merge from "keep
+  //    whatever was there", and without it the carry would launder a stale
+  //    number for a package that may have been deleted, renamed, or gone red.
+  check(() => {
+    if (Object.hasOwn(mergedSet.packages, 'vanished')) {
+      throw new Error(`merge: a package with no cache-hit witness was carried anyway (${mergedSet.packages.vanished})`);
+    }
+  });
+  check(() => {
+    if (mergedSet.carriedOver.includes('vanished')) throw new Error('merge: an unwitnessed package was named as carried');
+  });
+  // 4. No carryFrom at all is the plain replace, and reports an empty list
+  //    rather than omitting the field — an absent key and "nothing was carried"
+  //    must not read the same way to the caller's coverage check.
+  check(() => {
+    const plain = buildDataset({
+      perSummary: [samplesFromSummary(mergeSummary, 'm')],
+      fileCounts: new Map([['a', 6]]),
+      provenance: {},
+    });
+    if (!Array.isArray(plain.carriedOver) || plain.carriedOver.length !== 0) {
+      throw new Error(`merge: a run with no --merge-into did not report an empty carriedOver (${JSON.stringify(plain.carriedOver)})`);
+    }
+  });
+  // 5. The merge does NOT rescue a run that measured nothing: an all-cached pass
+  //    still refuses, so "everything carried" can never masquerade as a refresh.
+  check(() => {
+    if (!threw(() =>
+      buildDataset({
+        perSummary: [samplesFromSummary(summary([testTask('a', 0, 40, 'HIT')]), 'f')],
+        fileCounts: new Map([['a', 6]]),
+        provenance: {},
+        carryFrom: priorDataset,
+      })
+    )) {
+      throw new Error('merge: a pass that measured NOTHING produced a dataset out of carried weights alone');
+    }
+  });
+  // 6. MONOTONE ACCUMULATION: feeding a second run measures more, and a package
+  //    measured by the newer run stops being carried and takes its real number.
+  check(() => {
+    const oneRun = buildDataset({
+      perSummary: [{ ...samplesFromSummary(mergeSummary, 'm'), run: 'r1' }],
+      fileCounts: new Map([['a', 6], ['cached', 250]]),
+      provenance: {},
+      carryFrom: priorDataset,
+    });
+    const twoRuns = buildDataset({
+      perSummary: [
+        { ...samplesFromSummary(mergeSummary, 'm'), run: 'r1' },
+        { ...samplesFromSummary(summary([testTask('cached', 0, 480_000)]), 'n'), run: 'r2' },
+      ],
+      fileCounts: new Map([['a', 6], ['cached', 250]]),
+      provenance: {},
+      carryFrom: priorDataset,
+    });
+    if (oneRun.carriedOver.length !== 1 || twoRuns.carriedOver.length !== 0) {
+      throw new Error(
+        `merge: accumulation is not monotone — one run carried ${oneRun.carriedOver.length}, two carried ${twoRuns.carriedOver.length} (expected 1 then 0)`
+      );
+    }
+    if (twoRuns.packages.cached !== 480) {
+      throw new Error(`merge: the second run measured the package but it kept its carried weight (${twoRuns.packages.cached})`);
+    }
+  });
+
   // Workspace resolution, at the depth that actually caught a defect. A
   // one-level scan resolves `packages/*` and returns null for the ~60% of the
   // workspace that lives under `packages/drivers/*`, `packages/services/*` and
@@ -886,6 +1059,7 @@ function main() {
     return;
   }
   let out = DEFAULT_OUT;
+  let mergeInto = null;
   // Each input carries the run it belongs to (#16473). `--run <id>` opens a
   // group and every summary AFTER it belongs to that run, so one CI run's six
   // artifacts are named together the way they are fetched together. Summaries
@@ -896,7 +1070,13 @@ function main() {
   let currentRun = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = path.resolve(argv[++i]);
-    else if (argv[i] === '--run') {
+    else if (argv[i] === '--merge-into') {
+      const value = argv[++i];
+      if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
+        throw new Error('--merge-into needs the path of the dataset to carry unchanged weights from');
+      }
+      mergeInto = path.resolve(value);
+    } else if (argv[i] === '--run') {
       const value = argv[++i];
       if (typeof value !== 'string' || value.length === 0 || value.startsWith('--')) {
         throw new Error('--run needs a run identifier (the id of the CI run whose summaries follow it)');
@@ -907,7 +1087,8 @@ function main() {
   }
   if (inputs.length === 0) {
     console.error(
-      'usage: measure-test-shard-timings.mjs [--run <id>] <run-summary.json>... [--out <path>]'
+      'usage: measure-test-shard-timings.mjs [--run <id>] <run-summary.json>... ' +
+        '[--merge-into <dataset>] [--out <path>]'
     );
     process.exit(1);
   }
@@ -917,19 +1098,36 @@ function main() {
     perSummary.push({ ...samplesFromSummary(JSON.parse(readFileSync(file, 'utf8')), file), run });
   }
 
-  const fileCounts = new Map();
-  for (const { samples } of perSummary) {
-    for (const name of samples.keys()) {
-      if (fileCounts.has(name)) continue;
-      const dir = packageDirForName(name);
-      fileCounts.set(name, dir ? countTestFiles(dir) : 0);
+  // The prior dataset, when a merge was asked for. Read before the file counts,
+  // because a carried package needs a count too -- it votes on the fallback rate
+  // exactly like a freshly measured one, which is what keeps that rate derived
+  // from the numbers actually in the file rather than from a subset of them.
+  let carryFrom = null;
+  if (mergeInto !== null) {
+    const prior = JSON.parse(readFileSync(mergeInto, 'utf8'));
+    if (!prior || typeof prior.packages !== 'object' || prior.packages === null) {
+      throw new Error(
+        `--merge-into ${path.relative(REPO_ROOT, mergeInto)}: expected a dataset with a {packages:{...}} ` +
+          'map to carry unchanged weights from. Refusing to merge into a shape this did not write.'
+      );
     }
+    carryFrom = prior.packages;
+  }
+
+  const fileCounts = new Map();
+  const needCount = new Set();
+  for (const { samples } of perSummary) for (const name of samples.keys()) needCount.add(name);
+  if (carryFrom) for (const name of Object.keys(carryFrom)) needCount.add(name);
+  for (const name of needCount) {
+    const dir = packageDirForName(name);
+    fileCounts.set(name, dir ? countTestFiles(dir) : 0);
   }
 
   const declaredRuns = [...new Set(inputs.map((i) => i.run).filter((r) => r !== null))];
   const dataset = buildDataset({
     perSummary,
     fileCounts,
+    carryFrom,
     provenance: {
       measuredAt: new Date().toISOString().slice(0, 10),
       summaries: inputs.map((i) => path.basename(i.file)),
@@ -940,14 +1138,23 @@ function main() {
       // summed within their run first and only the per-run sums are medianed.
       mergeRule:
         'median across runs; a file-sharded package is summed from its slices WITHIN one run ' +
-        'first, and a run that cannot assemble every slice contributes no sample for it',
+        'first, and a run that cannot assemble every slice contributes no sample for it; a package ' +
+        'not measured in this pass keeps its previous weight ONLY when a turbo cache HIT witnesses ' +
+        'that its inputs are unchanged, and every such package is named in `carriedOver`',
+      // `measuredAt` is the date of THIS pass, and it dates the measured
+      // weights. The carried ones were measured earlier and re-confirmed
+      // unchanged by a cache HIT today; `carriedOver` names them, which is why a
+      // single date is enough and per-package dates are not needed. See the note
+      // on `carriedOver` in buildDataset for why the reader forces that choice.
       refresh:
-        'node scripts/measure-test-shard-timings.mjs [--run <id>] <run-summary.json>... --out ' +
-        'scripts/test-shard-timings.json (summaries: the `test-core-run-summary-<n>-of-6` artifacts of ' +
-        'any green run, or a local `pnpm exec turbo run test --concurrency=4 --summarize`. Feeding more ' +
-        'than one run REQUIRES a `--run <id>` before each run\'s summaries, so a sliced package is ' +
-        'assembled per run and then medianed like every other package. `.github/workflows/' +
-        'shard-timings-refresh.yml` does this weekly.)',
+        'node scripts/measure-test-shard-timings.mjs [--run <id>] <run-summary.json>... ' +
+        '--merge-into scripts/test-shard-timings.json --out scripts/test-shard-timings.json ' +
+        '(summaries: the `test-core-run-summary-<n>-of-6` artifacts of any green run, or a local ' +
+        '`pnpm exec turbo run test --concurrency=4 --summarize`. ⚠ ONE RUN COVERS ONLY 2-52 of ~71 ' +
+        'packages depending on cache warmth, so feed SEVERAL runs -- a `--run <id>` before each ' +
+        'run\'s summaries is REQUIRED, so a sliced package is assembled per run and then medianed ' +
+        'like every other package -- and `--merge-into` to carry the cache-hit remainder. ' +
+        '`.github/workflows/shard-timings-refresh.yml` does all of this weekly.)',
     },
   });
   writeFileSync(out, `${JSON.stringify(dataset, null, 2)}\n`);

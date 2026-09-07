@@ -49,9 +49,11 @@
 //   node scripts/ci/select-shard-timings-run.mjs --self-test
 //
 // `--candidates` needs GITHUB_TOKEN and GITHUB_REPOSITORY in the environment and
-// prints a JSON array, newest first. `--check-coverage` exits non-zero when the
-// refreshed dataset lost a package the committed one measured and the workspace
-// still contains.
+// prints a JSON array, newest first. `--check-coverage` judges MEASURED UNION
+// CARRIED against the workspace and exits non-zero when a package that HAD a
+// measured weight has neither -- it names workspace packages that were never
+// measured too, but those are a report rather than a refusal, because the
+// partitioner already estimated them and this refresh did not change that.
 
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
@@ -162,23 +164,53 @@ export function runIsEligible({ jobs, artifacts }, shardCount = SHARD_COUNT) {
 // direction this refuses in. Comparing against the live workspace is what keeps
 // a package legitimately deleted from the monorepo from blocking every future
 // refresh -- it is gone from `workspace`, so it is not required.
+// Coverage is judged on MEASURED UNION CARRIED, which after a `--merge-into`
+// pass is simply the refreshed dataset's own key set: the generator has already
+// folded in every package a cache HIT witnessed as unchanged, and refused to
+// fold in anything else. Two outcomes are reported separately because they are
+// different facts and only one of them is a regression:
+//
+//   `lost`   — the package HAD a measured weight, this refresh neither measured
+//              it nor found a cache HIT to witness it, so it would drop to a
+//              test-file-count ESTIMATE. That is the silent degradation this
+//              whole lane exists to prevent, so it is a REFUSAL, by name.
+//
+//   `neverMeasured` — the package is in the workspace and has no measured
+//              weight before OR after: a new package, or one the dataset has
+//              never covered. The partitioner already estimates it from its
+//              test-file count and this refresh changed nothing about it, so it
+//              cannot be a regression — but it is NAMED rather than passed over
+//              in silence, because "estimated" must never be something a reader
+//              has to infer from an absence.
 export function coverageReport({ committed, refreshed, workspace, exclude = [] }) {
   const excluded = new Set(exclude);
   const inWorkspace = new Set(workspace);
-  const required = Object.keys(committed?.packages ?? {}).filter(
+  const priorPackages = committed?.packages ?? {};
+  const covered = new Set(Object.keys(refreshed?.packages ?? {}));
+  const carried = new Set(refreshed?.carriedOver ?? []);
+
+  const required = Object.keys(priorPackages).filter(
     (name) => inWorkspace.has(name) && !excluded.has(name)
   );
-  const measured = new Set(Object.keys(refreshed?.packages ?? {}));
-  const lost = required.filter((name) => !measured.has(name)).sort((a, b) => a.localeCompare(b, 'en'));
-  const gained = [...measured]
-    .filter((name) => !Object.hasOwn(committed?.packages ?? {}, name))
+  const lost = required.filter((name) => !covered.has(name)).sort((a, b) => a.localeCompare(b, 'en'));
+
+  const neverMeasured = [...inWorkspace]
+    .filter((name) => !excluded.has(name) && !covered.has(name) && !Object.hasOwn(priorPackages, name))
     .sort((a, b) => a.localeCompare(b, 'en'));
+
+  const gained = [...covered]
+    .filter((name) => !Object.hasOwn(priorPackages, name))
+    .sort((a, b) => a.localeCompare(b, 'en'));
+
   return {
     ok: lost.length === 0,
     lost,
+    neverMeasured,
     gained,
+    carriedCount: carried.size,
+    freshCount: covered.size - carried.size,
     requiredCount: required.length,
-    measuredCount: measured.size,
+    measuredCount: covered.size,
   };
 }
 
@@ -265,7 +297,7 @@ export async function listCandidates({
 // stopped running, and the remedy is to find what stopped registering, never to
 // lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'select-shard-timings-run self-test': 30,
+  'select-shard-timings-run self-test': 35,
 });
 const SELF_TEST_BATTERY_FLOOR = 1;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
@@ -466,6 +498,66 @@ function selfTest() {
     if (!r.ok || r.gained.join(',') !== 'd') throw new Error(`coverage: a newly measured package was not reported (${r.gained.join(',')})`);
   });
 
+  // -- Coverage under the MERGE (#16464). After a `--merge-into` pass the
+  //    refreshed dataset already holds the carried weights, so coverage is
+  //    judged on measured UNION carried; what the cases below separate is the
+  //    two ways a package can be missing, because only one of them is a
+  //    regression.
+  check(() => {
+    // A carried package COUNTS as covered — it has a real weight, witnessed
+    // unchanged by a cache hit — so a refresh that measured only `a` and
+    // carried `b` and `c` is complete, not short.
+    const r = coverageReport({
+      committed,
+      refreshed: { packages: { a: 11, b: 20, c: 30 }, carriedOver: ['b', 'c'] },
+      workspace: ws,
+    });
+    if (!r.ok) throw new Error(`coverage: carried packages were not counted as covered (${r.lost.join(', ')})`);
+    if (r.carriedCount !== 2 || r.freshCount !== 1) {
+      throw new Error(`coverage: the carried/fresh split is wrong (carried ${r.carriedCount}, fresh ${r.freshCount})`);
+    }
+  });
+  check(() => {
+    // The regression that still refuses: `c` had a weight and is in NEITHER set.
+    const r = coverageReport({
+      committed,
+      refreshed: { packages: { a: 11, b: 20 }, carriedOver: ['b'] },
+      workspace: ws,
+    });
+    if (r.ok) throw new Error('coverage: a package that lost its measured weight was accepted');
+    if (r.lost.join(',') !== 'c') throw new Error(`coverage: the lost package was not named (${r.lost.join(',')})`);
+  });
+  check(() => {
+    // A workspace package that NEVER had a weight is named but is not a
+    // refusal: the partitioner already estimated it and this refresh changed
+    // nothing about it.
+    const r = coverageReport({
+      committed,
+      refreshed: { packages: { a: 11, b: 20, c: 30 }, carriedOver: [] },
+      workspace: [...ws, 'brand-new'],
+    });
+    if (!r.ok) throw new Error(`coverage: a never-measured package was treated as a regression (${r.lost.join(',')})`);
+    if (r.neverMeasured.join(',') !== 'brand-new') {
+      throw new Error(`coverage: the never-measured package was not named (${r.neverMeasured.join(',')})`);
+    }
+  });
+  check(() => {
+    // …and it is not confused with a carried one.
+    const r = coverageReport({
+      committed,
+      refreshed: { packages: { a: 11, b: 20, c: 30 }, carriedOver: ['c'] },
+      workspace: [...ws, 'brand-new'],
+    });
+    if (r.neverMeasured.includes('c') || r.carriedCount !== 1) {
+      throw new Error(`coverage: carried and never-measured were conflated (never ${r.neverMeasured.join(',')}, carried ${r.carriedCount})`);
+    }
+  });
+  check(() => {
+    // A dataset with no carriedOver key at all (a plain replace) still reads.
+    const r = coverageReport({ committed, refreshed: { packages: { a: 1, b: 2, c: 3 } }, workspace: ws });
+    if (!r.ok || r.carriedCount !== 0) throw new Error('coverage: a dataset without carriedOver was misread');
+  });
+
   // -- The workspace reader refuses a shape it cannot trust, rather than
   //    returning an empty list that would make every package look deleted.
   check(() => {
@@ -546,20 +638,32 @@ async function main() {
     const refreshed = readJson(value('--refreshed'));
     const workspace = workspaceNames(readJson(value('--workspace')));
     const report = coverageReport({ committed, refreshed, workspace, exclude });
+    // Named whichever way the verdict goes: a package the partitioner estimates
+    // must never be something a reader infers from an absence.
+    if (report.neverMeasured.length > 0) {
+      console.error(
+        `select-shard-timings-run: ${report.neverMeasured.length} workspace package(s) have no measured ` +
+          `weight before or after this refresh and are ESTIMATED by the partitioner from their ` +
+          `test-file count: ${report.neverMeasured.join(', ')}. Not a regression — this refresh did not ` +
+          'change their standing — but they are named rather than passed over, because an estimate that ' +
+          'reads as a measurement is this dataset\'s signature hazard.'
+      );
+    }
     if (!report.ok) {
       console.error(
-        `select-shard-timings-run: COVERAGE SHORTFALL -- ${report.lost.length} package(s) the committed ` +
-          'dataset measured, and the workspace still contains, are NOT measured by the runs accumulated ' +
-          `so far: ${report.lost.join(', ')}. Every one of them would silently fall back to the ` +
-          'test-file-count ESTIMATE, so what has been read so far is a warm cache rather than the ' +
-          'workspace. Not a verdict on any one run: no single run measures everything (turbo caches per ' +
-          'shard, and the generator refuses hits), so the caller adds the next older run and asks again.'
+        `select-shard-timings-run: COVERAGE SHORTFALL -- ${report.lost.length} package(s) HAD a measured ` +
+          'weight and this refresh neither re-measured them nor found a turbo cache HIT to witness that ' +
+          `they are unchanged: ${report.lost.join(', ')}. Each would drop to the test-file-count ` +
+          'ESTIMATE, which is the silent degradation this lane exists to prevent, so this is a refusal. ' +
+          'Not a verdict on any one run: no single run measures everything, so the caller adds the next ' +
+          'older run and asks again.'
       );
       process.exit(1);
     }
     console.error(
-      `select-shard-timings-run: coverage OK -- ${report.measuredCount} package(s) measured, ` +
-        `${report.requiredCount} required, ${report.gained.length} newly measured` +
+      `select-shard-timings-run: coverage OK -- ${report.measuredCount} package(s) covered ` +
+        `(${report.freshCount} measured in these runs, ${report.carriedCount} carried on a cache-hit ` +
+        `witness), ${report.requiredCount} required, ${report.gained.length} newly measured` +
         `${report.gained.length > 0 ? ` (${report.gained.join(', ')})` : ''}.`
     );
     return;

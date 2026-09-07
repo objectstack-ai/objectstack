@@ -73,6 +73,19 @@
 # accumulated runs gets the median of three observations, which is the property
 # the dataset's own merge rule always claimed and could not previously deliver.
 #
+# ⚠ AND ACCUMULATION ALONE STILL FALLS SHORT, so the pass MERGES rather than
+# replaces. Measured on the same live runs: the union of all seven retained runs
+# reaches 57 of 71 packages and converges there, because 14 packages are cache
+# HITs in every one of them. Those are carried at their previous weights through
+# `--merge-into`, and the carry is sound for one specific reason — a cache HIT is
+# not missing data, it is POSITIVE EVIDENCE that the package's inputs are
+# unchanged since the run whose output was replayed, so its last measured weight
+# still describes it. Every carried package is named in the dataset's
+# `carriedOver` list, and a package absent for any OTHER reason is not carried at
+# all: it drops out and the coverage check names it as a refusal. The file's
+# invariant is preserved exactly — every number in it is a real measurement of
+# code as it stands, never an estimate.
+#
 # THE PINS, AND THE ONE THING A MACHINE MUST NOT DECIDE
 # ----------------------------------------------------
 # partition-test-shards.mjs `--self-test` grades the dataset against the
@@ -316,7 +329,14 @@ jobs:
               ARGS+=( "${RUN_FILES[@]}" )
             done
 
+            # `--merge-into` the committed dataset, because no retained run set
+            # measures the whole workspace (see the header). A package this pass
+            # did not measure keeps its previous weight ONLY when a turbo cache
+            # HIT witnesses that its inputs are unchanged; anything else is left
+            # out for the coverage check below to name. The workflow still writes
+            # no byte the generator did not emit — the merge happens inside it.
             if ! node scripts/measure-test-shard-timings.mjs "${ARGS[@]}" \
+                 --merge-into scripts/test-shard-timings.json \
                  --out "$WORK/refreshed.json"; then
               echo "::warning::The generator refused the set including run $RUN_ID; dropping that run and continuing."
               unset 'ACCEPTED[-1]'
@@ -337,7 +357,7 @@ jobs:
           done
 
           if [ -z "$CHOSEN" ]; then
-            echo "::error::The ${#ACCEPTED[@]} eligible run(s) on main, accumulated together, still do not measure every package the committed dataset holds — the shortfall above names what is missing. A package can stay unmeasured across every retained run: turbo's cache key is namespaced per shard and only main pushes write it, so a package whose inputs have not changed is a HIT in all of them, and the generator refuses hits rather than recording a replay as a duration. NOTHING was regenerated and no PR was opened — this is a refusal, not a quiet success. If this is the steady state rather than a quiet week, the dataset needs a merge rule (keep the last measured weight for a package this refresh did not measure) rather than a wider run window; that is a decision, not a tuning knob, and it is tracked on the card."
+            echo "::error::The ${#ACCEPTED[@]} eligible run(s) on main, accumulated and merged with the committed dataset, still leave a package that HAD a measured weight with neither a fresh measurement nor a turbo cache HIT to witness that it is unchanged — the shortfall above names them. Each would drop to the test-file-count ESTIMATE, which is the silent degradation this lane exists to prevent. NOTHING was regenerated and no PR was opened: this is a refusal, not a quiet success. A package that merely went unmeasured is NOT this error — that case is carried on its cache-hit witness — so a shortfall here means a suite failed, a package was renamed or removed, or its slices could not be assembled in any run."
             exit 1
           fi
           # Candidates arrive newest-first, so ACCEPTED[0] is the most recent run
@@ -403,6 +423,24 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Read out of the generated dataset itself rather than recomputed, so the
+          # sentence in the PR cannot drift from the file it describes.
+          CARRY_LINE=$(node -e '
+            const d = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/refresh/refreshed.json", "utf8"));
+            const carried = d.carriedOver ?? [];
+            const total = Object.keys(d.packages).length;
+            const fresh = total - carried.length;
+            if (carried.length === 0) {
+              console.log(`All ${total} package weights were measured in these runs; nothing was carried.`);
+            } else {
+              console.log(
+                `${total} package weights: ${fresh} measured in these runs, and ${carried.length} carried ` +
+                `forward at their previous values because a turbo cache HIT witnessed that their inputs are ` +
+                `unchanged (so the old number still describes them). Carried: ${carried.join(", ")}.`
+              );
+            }
+          ')
+
           SHARDS=$(node -e '
             const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
             const r = rs.find((x) => String(x.run_id) === process.env.RUN_ID);
@@ -433,6 +471,12 @@ jobs:
             echo "- Every run above had all six \`Test Core (N/6)\` jobs conclude \`success\` with its six"
             echo "  run-summary artifacts still retained; runs that were cancelled, failed or had lost"
             echo "  their artifacts were rejected by name in the log before any of these were used."
+            echo
+            echo "$CARRY_LINE"
+            echo
+            echo "⚠️ This PR references #16173 and #16222 but does NOT carry a closing keyword for them,"
+            echo "because a weekly lane cannot know which cards a given run ought to retire. If this is"
+            echo "the first refresh to land, retire those two by hand as part of merging it."
             echo
             echo "## Measured per-shard suite time on the newest run in the set"
             echo
