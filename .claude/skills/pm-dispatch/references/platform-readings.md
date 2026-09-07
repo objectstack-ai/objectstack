@@ -346,8 +346,8 @@
 - 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
 - ⛔ 别处写下的计数值一律先复测再用。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
-- 同一路径吃掉标题里的尖括号跨度 ⇒ 标题占位写裸词(NAME / :id),⛔ 不写尖括号形。
 - 建卡改走 REST `POST /issues` 页脚存活;回读后 `PATCH /issues/{n}` 重送正文逐字节存下。
+- 内联双引号 JSON 建卡:标题反引号标识符被 shell 以 root 展开,正文完好 —— 内容被执行。
 - CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
 - Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。
 - 无 `packageManager` 的目录里 corepack 运行时解析 registry `latest` ⇒ 同 SHA 前绿后红是 tag 移了。
