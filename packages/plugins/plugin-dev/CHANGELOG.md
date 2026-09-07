@@ -1,5 +1,209 @@
 # @objectstack/plugin-dev
 
+## 17.4.0
+
+### Patch Changes
+
+- 88a35c2: fix(plugin-dev): the i18n auto-detect resolves `translations` from `packages[]`, not only the flattened top level (#15232)
+  
+  `DevPlugin.init`'s 3b block read `options.stack.translations` and nothing else.
+  For a multi-package app under the ADR-0130 D4 option-B shape — where
+  `packages[]` carries each definition exactly once and the flattened top-level
+  copy is gone — that read returns `undefined`, the detection concludes "this app
+  declared no copy", and the boot continues. Nothing throws and nothing logs.
+  
+  What the developer gets instead is the wrong strings. `I18nServicePlugin`
+  (`@objectstack/service-i18n`) is never registered, so the `i18n` slot keeps the
+  core in-memory fallback: `os dev` serves message KEYS, or last release's copy,
+  for an app that declared real translations. It reads as "the translations are
+  broken", not as "a collection went missing", which is why it is a reader fix
+  rather than a footnote.
+  
+  The detection now reads the flattened top level FIRST and then each package
+  body, in the order `resolveArtifactPackageOrder` (`@objectstack/core`,
+  ADR-0130 D4+D5) registers them:
+  
+  - **Every artifact the platform emits today answers bit-identically.** The
+    flattened level still answers first and short-circuits, so the `packages[]`
+    pass can only supply a declaration the top level did not have. This is the
+    reader half of the ruled order (readers first, emitter last, the artifact
+    additive throughout), so it lands with no change to what any command emits.
+  - **The caller's original expression is preserved, not re-expressed.**
+    `Array.isArray(t) && t.length > 0` still decides the top level, per package
+    body as well — re-expressing a gate as a resolved-and-counted traversal is
+    what silently changes the verdict for a stack that declares the key empty.
+  - **⛔ `stack.packages` is not iterated directly.**
+    `resolveArtifactPackageOrder` is the platform's one traversal and also the
+    GATE that parses each entry, so a second traversal would disagree with the
+    load path about which artifacts are loadable. An artifact with no `packages`
+    key is left entirely on the old path — the key's absence is checked before
+    the call, because D4's second branch would otherwise hand the caller's own
+    object back and read the same `translations` twice.
+  - **A malformed `packages` is refused, not skipped.** A non-array `packages`,
+    an entry inlined instead of wrapped under `manifest:`, or a duplicate package
+    id raises the same ADR-0112 envelope (`code` + `status: 422`) that
+    `ObjectQL.registerApp` raises for the same object later in the same boot.
+  
+  The decision — detection plus the locales it derives — is now one exported
+  function, `devI18nPluginOptions`, so the #15004 option-B acceptance pin
+  measures it by CALLING it rather than re-implementing the read. `DevPlugin`
+  keeps the dynamic import and its degradation: those are about the optional
+  package being installed, which is a different question from what the stack
+  declares.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [98191d2]
+- Updated dependencies [ca326b5]
+- Updated dependencies [f1a1028]
+- Updated dependencies [8f404a5]
+- Updated dependencies [7079694]
+- Updated dependencies [a56baa2]
+- Updated dependencies [d4c2cb1]
+- Updated dependencies [c1eafe6]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [8e500f2]
+- Updated dependencies [4b3955e]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [4bc9821]
+- Updated dependencies [6491463]
+- Updated dependencies [da1cffb]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [ddfbf04]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2003259]
+- Updated dependencies [a646120]
+- Updated dependencies [65846bc]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [33388f9]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [fa85759]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [65846bc]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [3e7ef9c]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [25a3d91]
+- Updated dependencies [6615a02]
+- Updated dependencies [9f39897]
+- Updated dependencies [4ca358d]
+- Updated dependencies [1cf7392]
+- Updated dependencies [5f4f1f6]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [a7da4de]
+- Updated dependencies [d0ee598]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [48b0fcf]
+- Updated dependencies [6acb37e]
+- Updated dependencies [26144c2]
+- Updated dependencies [9e9f03a]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [c64e65f]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [ac6213e]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [06c762e]
+- Updated dependencies [11f848e]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [e13ede8]
+- Updated dependencies [7d7ca6c]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [e6279dc]
+- Updated dependencies [53cbad9]
+- Updated dependencies [9b459b7]
+- Updated dependencies [f5cc78b]
+- Updated dependencies [46803fa]
+- Updated dependencies [8a12067]
+- Updated dependencies [de75e40]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [401e50a]
+- Updated dependencies [ee32e1c]
+- Updated dependencies [4b0508e]
+- Updated dependencies [b31ebfe]
+- Updated dependencies [4c0b22b]
+- Updated dependencies [8744de9]
+- Updated dependencies [ebb5550]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [b8c82de]
+- Updated dependencies [9408b7f]
+- Updated dependencies [ec0a6e7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [eddd612]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f7ffbd6]
+- Updated dependencies [d61d6e3]
+  - @objectstack/core@17.4.0
+  - @objectstack/objectql@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/runtime@17.4.0
+  - @objectstack/plugin-auth@17.4.0
+  - @objectstack/rest@17.4.0
+  - @objectstack/driver-memory@17.4.0
+  - @objectstack/plugin-hono-server@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/service-i18n@17.4.0
+  - @objectstack/plugin-security@17.4.0
+  - @objectstack/service-storage@17.4.0
+  - @objectstack/service-realtime@17.4.0
+  - @objectstack/account@17.4.0
+  - @objectstack/setup@17.4.0
+
 ## 17.3.0
 
 ### Patch Changes

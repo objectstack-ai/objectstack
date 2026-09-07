@@ -1,5 +1,118 @@
 # @objectstack/plugin-email
 
+## 17.4.0
+
+### Patch Changes
+
+- dfb7a0d: `plugin-email` strips read decorations with the shared list, not a blanket underscore sweep.
+  
+  `readEffectiveTemplate` — the layered read a `DELETE /meta/email_template/:name` runs to restore the packaged baseline an overlay was hiding — removed decorations with a module-local copy of `stripReadDecorations` that dropped **every** key beginning with `_`. The shared list it drifted from, `METADATA_READ_DECORATIONS` in `@objectstack/spec/kernel`, is exactly `['_diagnostics', '_draft']`, and its module header names the ADR-0010 protection envelope (`_lock`, `_lockReason`, `_lockSource`, `_provenance`, `_packageId`, `_packageVersion`, `_lockDocsUrl`) as deliberately **not** a member: it is envelope state the write path legitimately carries, and the closed metadata schemas allowlist it so a served document keeps its provenance on re-parse.
+  
+  The private copy justified its sweep on the claim that `EmailTemplateDefinitionSchema` "declares no underscore key". That is false — `email-template.zod.ts` spreads `MetadataProtectionFields` into its `strictObject`, so every envelope key is declared and parses clean. The copy was removing keys the schema was deliberately widened to accept, and the list lives in `spec` precisely so a producer and its consumers cannot drift like this.
+  
+  The path now calls the shared helper, matching the other read-back-envelope consumers (the dataset query in `rest-server.ts`, the cold-boot flow bind in `service-automation`, `saveMetaItem`'s verbatim persist, and the route-level seed apply). Two behavioural consequences:
+  
+  - An underscore key that is neither a decoration nor declared is no longer swallowed before validation. The closed schemas exist to reject exactly that (protocol 17), and the rejection is now reported on the write's own response through the mutation projector, instead of the reset quietly succeeding against a body the schema would have refused.
+  - The ADR-0010 envelope survives the strip. It still does not reach `sys_email_template`: `upsertDeclaredEmailTemplate` projects the parsed template through `mapTemplateToRow`, a closed column list, and the object declares no underscore column — so no stored row changes shape. There is deliberately no second, envelope-stripping pass beside the shared one; spelling one would re-create the drift this fixes, one layer up.
+- a4816a7: The three provenance-stamp `beforeUpdate` hooks stop re-reading a row the engine has already read, and their contract now states what they actually do on a multi-row update.
+  
+  `sys_email_template`, `sys_sharing_rule` and `sys_webhook` each carry a hook that stamps `customized: true` when a non-system caller edits a package- or platform-seeded row — the half of seed-not-clobber that detects the admin edit. All three carried the same two comments, and both were assertions about runtime behaviour that runtime measurement falsifies:
+  
+  - **"multi-row updates (no single `input.id`) are not stamped."** Not true on any engine these packages ship against. A predicate (`multi: true`) update dispatches `beforeUpdate` once per matched row, and every per-row context arrives with `input.id` bound — so the `if (!id) return` guard answered "single write" on every row of a batch and declined nothing. The rows were being stamped all along.
+  - **"`previous` is not resolved before beforeUpdate hooks run — read the current row ourselves."** The engine binds `previous` before dispatching `beforeUpdate` on both write shapes, so each hook was issuing its own `find` for a row the engine had just read — on a bulk edit, one extra read **per matched row**.
+  
+  Observable behaviour is deliberately unchanged: the same rows are stamped, with the same values, and a bulk edit whose matched rows disagree on `managed_by` is still refused by the engine with `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` (HTTP 400) rather than widening one row's stamp across the batch. What changes is the cost and the contract: the redundant per-row read is gone, and the header of each hook now describes the per-row dispatch, the single `SET` clause a predicate write shares, and why declining to stamp on a bulk edit was rejected — unstamped rows are exactly the ones the next boot's seeder overwrites.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [098cbb7]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/formula@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

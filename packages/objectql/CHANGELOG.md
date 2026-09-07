@@ -1,5 +1,642 @@
 # @objectstack/objectql
 
+## 17.4.0
+
+### Minor Changes
+
+- 2ed6be6: Advisory validation rules no longer flood the startup log, and no longer count a row twice on a clean first boot.
+  
+  A `severity: 'warning'` (or `'info'`) validation rule is advisory: it never blocks a write, and its message is written for a person filling in a form. Evaluated across a seed load it produced one `WARN` line per row, so a clean-database first boot opened with a wall of form hints re-cast as boot diagnostics — and an app could reach "zero warnings" only by bending its data or deleting the rule.
+  
+  Two changes, and neither moves what a rule evaluates to:
+  
+  - **Aggregated reporting on the seed/boot path.** `SeedLoaderService.load()` now runs inside an advisory aggregation scope, and reports one summary line per rule — the rule, the object, the row count, the rule's own message and example rows — instead of one line per row. Off that path (an ordinary interactive write) nothing changes: the same per-write line is emitted verbatim. The new scope is `runWithAdvisoryAggregation` / `recordAdvisoryHit` in `@objectstack/core`.
+  - **Advisory rules are counted by row, not by write.** An `update` whose payload touches only platform-injected system columns — the shape `claimSeedOwnership` writes when it hands seeded rows to the first admin, `{ owner_id }` — changes no business field, so it no longer re-evaluates the object's advisory rules. Previously a seeded row rang once on insert and again when the claim scan rewrote `owner_id`, so anyone counting startup warnings over-estimated by the number of claimed objects.
+  
+  `error`-severity rules are untouched by both changes: an invariant is still enforced on every write, whoever issued it and however little it moved. Membership of the "system column" set is resolved per object by `resolveInjectedSystemColumns`, so an object that declares `ownership: 'org'` (no `owner_id`) or `systemFields: false` is judged on its own columns rather than a fixed list.
+- a56baa2: feat(metadata,objectql): a keyed plural read on `MetadataManager`, `listNames` fault parity, and an action audit that answers from the same identity and sources as the router
+  
+  Two plural reads of one metadata plane could disagree with a by-name read of
+  that same plane, and the ADR-0110 D5 action-governance audit stood on the
+  disagreement — reporting `registered handler with NO declaration … REFUSED at
+  dispatch` about a route the router was resolving and dispatching in the same
+  boot.
+  
+  **`MetadataManager.listNames` gains the per-loader `try`/`catch` that
+  `loadMany` and `list()` have carried since #5108.** One loader fault used to
+  produce two different facts depending only on which plural read a caller
+  reached for: `loadMany` swallowed it and answered short, `listNames` threw. It
+  now degrades the same way, through the same `reportLoaderReadFailure` /
+  `reportLoaderReadRecovered` helpers — one outage, one line, one vocabulary.
+  Callers that relied on `listNames` throwing to detect an outage should read
+  `listDiagnosed()`, which reports `degraded` explicitly.
+  
+  **New: `MetadataManager.loadManyKeyed(type, options?)`** — `loadMany` read under
+  the identity the STORE holds each item by, returning `{ name, data }` pairs. It
+  delegates to a loader's own `loadManyKeyed` where one is offered (on
+  `DatabaseLoader` that shares `loadMany`'s single query, so it costs nothing
+  extra) and otherwise falls back to that loader's `list()` + per-name `load()`.
+  ⛔ **`loadMany`'s published return shape does not change**, and no existing
+  consumer is touched: the key travels *beside* the body, never inside it, so a
+  body that deliberately carries no `name` stays byte-identical to what was
+  stored (#14205).
+  
+  **The action-governance audit now mirrors the router on both halves of the D5
+  bijection.** The declaration half enumerates the plane keyed
+  (`loadStandaloneActionsKeyed`), so a row whose body does not name itself — a
+  `sys_metadata` row keyed by its `name` column, or a `FilesystemLoader` file
+  whose identity is its path — is a declaration to the audit exactly as it is to
+  the router; the handler half also probes the plane BY NAME
+  (`lookupMetadataAction`, `loadDiagnosed`/`load`, injected like the existing
+  registry rung), so a loader fault a plural read swallows can no longer turn a
+  dispatchable handler into an accusation. Both probes stay conservative in one
+  direction only: a source that throws leaves the handler on the list.
+  
+  Additive on every published signature. `runActionGovernanceInventory` and
+  `collectEngineActionDeclarations` gain optional parameters and keep their old
+  ones working unchanged; declaration rows gain an optional `storeKey` (the new
+  exported `ActionDeclarationRow`).
+  
+  **Population change, reported:** `unboundDeclarations` now sees declarations
+  whose identity is the store key. Its BEFORE was **0, structurally rather than
+  by sampling** — a nameless row was dropped before reconciliation ran, so it
+  could never be reported however many a plane held. Its one deliberate
+  subtraction: a row with neither an own `name` nor a store key is no longer
+  reported as `actionName: undefined`, which read as a parse failure in the
+  warning rather than as a finding.
+  
+  Known boundary, stated in the audit's docblock rather than left to be
+  rediscovered: a boot-time audit runs outside any request scope, so if a
+  composition ever registered `metadata` as `SCOPED` the audit could not reach
+  that instance at all — before any read method runs. No shipped composition does
+  (`packages/metadata/src/plugin.ts` registers a static instance), and reaching a
+  request-scoped service from a boot-time audit is a separate change.
+- ddfbf04: Three more engine refusals publish their error `code` as an importable constant.
+  
+  Each of these classes already tells the reader, in its own docblock, that it is *"Identified by `code` rather than `instanceof` so it survives crossing package boundaries"* — and none of them offered anything to import. The only way to FOLLOW that published instruction was to re-spell the wire string in your own package, which acquires a `check:error-code-provenance` stamp site there and can then drift from what the engine throws with no compile error to say so.
+  
+  Three new exports from `@objectstack/objectql`, each graded on its own:
+  
+  - `DRIVER_CONNECT_CODE` — `DriverConnectError`'s ADR-0112 `code`. Thrown by `ObjectQL.init()` when boot-registered drivers fail to connect, which aborts kernel bootstrap. **Additive widening, `minor`.**
+  - `DATASOURCE_UNAVAILABLE_CODE` — `DatasourceUnavailableError`'s ADR-0112 `code`. Thrown by `getDriver()` when an object's datasource was declared but has no live driver. **Additive widening, `minor`.**
+  - `SUMMARY_RECOMPUTE_CODE` — `SummaryRecomputeError`'s ADR-0112 `code`. Thrown by `insert`/`update`/`delete` when parent roll-up summaries fail to recompute *after the triggering records were written*. **Additive widening, `minor`.**
+  
+  **The cost these close is already shipped, not hypothetical.** Three first-party packages in this repo match these refusals by `code` today and therefore carry a second spelling of the string: `packages/rest/src/error-response.ts` (datasource-unavailable), `packages/rest/src/import-runner.ts` and `packages/metadata-protocol/src/seed-loader.ts` (summary-recompute — both to implement the documented "the records WERE written, treat it as a warning" recovery). They keep working unchanged; they can now import the constant instead of authoring the string.
+  
+  **Why `code` and not `instanceof`.** This package declares both realms in its own `exports` (`import` reaches `dist/index.mjs`, `require` reaches `dist/index.js`), so a consumer holding the other realm's copy of a class gets `instanceof` === false — measured, and silent. A `code` compare is the check that survives that boundary, which is what these docblocks have been telling readers to do.
+  
+  **Nothing about the wire changed.** Each constant holds text byte-identical to the literal it replaces; every refusal throws the same `code` and the same message as before. Consumers that spell the strings themselves keep working unchanged — this adds affordances, it removes nothing.
+  
+  **All three classes were already exported and stay exported.** The constants join them on the batteries barrel; like every other `*_CODE` in this package they are deliberately not added to the lean `core.ts` entry, even though `DriverConnectError` and `DatasourceUnavailableError` themselves are published there. That asymmetry is #16260's subject for the whole family and is not decided here.
+- 33388f9: Engine refusals now declare their HTTP status under both spellings: `httpStatus` beside the existing `status`, same number, at every producer in the package.
+  
+  `status` is unchanged and stays. It is what every HTTP door in this repo reads — `resolveThrownHttpError` (`@objectstack/types`) resolves `.status` then `.statusCode` and knows no other spelling — so nothing about what the REST or dispatcher doors answer changes.
+  
+  What changes is what a consumer holding the **thrown** error can read. ADR-0112 D5 records the destination as "the HTTP status lives on the transport and (optionally) `error.httpStatus`", and `httpStatus` is the key the client SDK already stamps on every wire failure. A consumer that caught an engine refusal locally had no status at all: `os migrate summary-nulls --json --recompute-undefined-on-empty customer.nope` emitted `{ error, code: 'INVALID_FIELD' }` with no status field, while the same refusal arriving over the wire carried `httpStatus: 400`. It now carries `httpStatus: 400` on both paths.
+  
+  Additive on thrown errors, so no caller that reads `status` needs to change. The 20 producers: the `INVALID_SORT` / `INVALID_FIELD` / `VALIDATION_ERROR` / `INVALID_METADATA` / `DELETE_RESTRICTED` refusals in `engine.ts`, the `INVALID_FILTER` / `INVALID_FIELD` refusals in `filter-comparand-shape.ts`, `resolveRecomputeScope` in `summary-backfill.ts`, and the eight error classes declaring a `readonly status` (`DuplicateRecordError`, `HookUnscopedDataAccessError`, `MultiUpdateHookKeyDivergenceError`, `EmptyCredentialWriteError`, `SystemWriteOrganizationRequiredError`, `NamespaceConflictError`, `ArtifactObjectNameConflictError`, `ObjectOwnershipConflictError`).
+- fa125f3: feat(objectql,spec): `Field.valueDomain` binds at the write seam — a non-member is refused with `value_domain` (maintainer ruling 2026-09-02 on #14168, engine half)
+  
+  **BREAKING** accept-set narrowing on the ObjectQL record write path, shipped as
+  `minor` under the repo's launch-window convention for breaking changes.
+  
+  The key is **already published, and published unenforced**. The version-packages
+  cut `8a1bad8b8` (2026-09-04 10:20Z) consumed the spec half's changeset
+  `field-value-domain-slot.md` and released `@objectstack/spec@17.3.0`, which
+  declares `Field.valueDomain`, parses it, and refuses it on any type other than
+  `text` — and never reads it when a record is written. The 17.3.0 liveness ledger
+  states the gap in its own words: "a non-member WRITTEN to a `text` field
+  declaring a domain is accepted today". That write is accepted on 17.3.0 and is
+  refused from this release on.
+  
+  **Refused shape**, precisely: a record write that supplies a value for a `text`
+  field whose definition declares `valueDomain`, where the WRITTEN value is not a
+  member of the named standard. It fails with the field error code `value_domain`,
+  carrying `constraint: { valueDomain }` and a message that names the standard in
+  all four platform locales. Nothing else narrows — a field that declares no
+  `valueDomain` is untouched, and so is every other field type, because the schema
+  accepts the key on `text` alone and the validator judges exactly that set.
+  
+  **Remedy: write a member of the declared standard.** `iana_time_zone` admits
+  `UTC` and refuses `Mars/Olympus`; `iso_4217_currency` admits `CHF` and refuses
+  `chf`; `iso_3166_alpha2` admits `CH` and refuses `ZZ`. Dropping the
+  `valueDomain` declaration from the field lifts the refusal entirely, for an
+  author who declared a domain they did not mean.
+  
+  **No stored row is touched, and none becomes invalid.** This is the `min` /
+  `max` / `maxLength` transition-gate class: a value stored before the domain was
+  declared — or before this release — is never re-read, and it survives an edit of
+  another field on the same record. An absent or empty value follows the field's
+  `required` handling, not this check.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is
+  renamed, retired or tombstoned. `Field.valueDomain` keeps its name, its type and
+  its position; this release only makes the declaration the key already carries
+  bind at the write seam, so `objectstack migrate meta` has no metadata to
+  rewrite — a document that declares a domain is already in its final spelling,
+  and one that declares none is untouched. ⚠️ This disposition does NOT rest on
+  the key being unpublished, and must not be read that way: 17.3.0 shipped
+  `Field.valueDomain` declared, parsed and UNENFORCED, which is exactly why this
+  changeset carries the BREAKING banner above. It rests on the stored side
+  instead. A stored value outside a declared domain is never re-read, so no stored
+  row is invalidated here and none is reachable by a ledger entry at all. And
+  which member a stored non-member SHOULD have been is authoring intent no ledger
+  entry can decide: the stored string carries no evidence of whether the author
+  meant a different member of that standard, a different standard, or no
+  declaration at all. The channel that reaches the author is the refusal itself,
+  raised at the write, naming the standard — the same ground the sibling
+  accept-set narrowing #15319 stands its own `no-migration-prescription`
+  disposition on. -->
+  
+  - The membership test is the spec's shared `isValueDomainMember` — the same
+    predicate, over the same closed vocabulary, that a settings specifier's
+    `valueDomain` uses. A time zone accepted in Settings is the time zone
+    accepted in a field.
+  - The two authoring forms (`fieldForm`, `objectForm`) gain a `valueDomain`
+    control, shown on exactly the types the schema accepts the key on. The
+    object-form control's choices are derived from the vocabulary, not re-typed.
+- 7778115: `ObjectQL.find()` now guarantees the array it declares: an `afterFind` hook that replaces the result container is refused with `FIND_HOOK_RESULT_NOT_ARRAY`.
+  
+  `find()` is declared `Promise<any[]>`, but on the hook path it returned `hookContext.result` with nothing re-checking the value after the `afterFind` dispatch. A handler assigning `ctx.result = { records: [ … ] }` therefore made a read declared to resolve to an array resolve to an envelope instead — silently, with no throw, no diagnostic and no log, while roughly 140 call sites read the answer as an array on the strength of the declaration.
+  
+  The engine now refuses that, immediately after the `afterFind` dispatch and ahead of the two consumers that already assume the array (secret-field masking and the `__search` companion strip). The refusal is a named error, `FindHookResultNotArrayError`, carrying the registered ADR-0112 code `FIND_HOOK_RESULT_NOT_ARRAY` and HTTP `500`; its message names the hook event and the object, and `developerMessage` carries the remedy.
+  
+  **Shaping stays legal, and nothing about it changes.** A handler may still mutate rows in place, delete keys, filter rows out, or assign a *different array* built from them — `Array.isArray` is the whole predicate, deliberately, so that `ctx.result = ctx.result.map(…)` keeps working. Only the container is protected.
+  
+  What to do if this refusal fires:
+  
+  - to answer no rows, assign `[]`;
+  - to refuse the read, `throw` from the handler — the supported way for any hook guard to say no;
+  - to hand a caller a different structure, build it in the caller, not in the hook.
+  
+  `@objectstack/spec` widens by one member: `FIND_HOOK_RESULT_NOT_ARRAY` joins `ERROR_CODE_LEDGER` under `@objectstack/objectql`, so the generated `ErrorCode` union — and therefore `ApiErrorSchema.code` — accepts it. Additive: no existing code is removed or renamed.
+  
+  Scope: this closes the one `return hookContext.result` site in the engine with a concrete declared shape to violate. `findOne`, `update` and `delete` declare `Promise<any>` and carry no enforceable declaration; that is a separate question about those declarations and is deliberately not answered here.
+- f9a3c32: feat(security): the Layer 0 tenant wall records its verdict on the operation, and the bulk data-event producer reads it instead of re-deriving the wall
+  
+  `BulkDataEventSchema.organizationId` is stamped on a `data.records.updated` / `data.records.deleted` event only when the Layer 0 tenant wall named exactly one organization for the whole predicate write. The producer (`publishBulkDataEvent`, `@objectstack/objectql`) used to decide that by re-deriving the wall's inputs — posture, context, and the object's own tenancy clauses. It could never see the third clause plugin-security folds into `tenancyDisabled`: the deployment-declared `platformGlobalObjects` carve-out (#12699). On such an object under an armed wall the producer stamped the caller's organization while Layer 0 had composed no wall at all — a wrong key asserting "every affected record belongs to this organization" over a batch that could span several, the #13566 leak shape reappearing on the bulk path (#15706).
+  
+  Ruled on #15706 (seam (i), ADR-0131 D8 「一道谓词，算一次」): the wall records what it decided, and the reader composes nothing.
+  
+  - **`@objectstack/spec`** — new export `TenantLayer0VerdictSchema` / `TenantLayer0Verdict` (`@objectstack/spec/security`): the four verdicts a Layer 0 wall can reach for one operation — `none`, `organization`, `organizations`, `deny`. Additive.
+  - **`@objectstack/objectql`** — `OperationContext` gains an optional member `tenantLayer0Verdict`, written by the enforcement layer at the moment it composes the wall onto the operation's predicate. Additive widening of a published surface, hence `minor`. `publishBulkDataEvent` now reads that member and nothing else: a recorded `organization` (or a one-member `organizations`) verdict stamps the key; `none`, `deny`, a multi-member set, a malformed value, or NO recorded verdict all omit it. The engine no longer consults the enforced posture, the execution context or the object schema to answer the question — the mirror is deleted, not moved.
+  - **`@objectstack/plugin-security`** — the engine middleware records `opCtx.tenantLayer0Verdict` on every operation whose predicate it composes the wall onto (reads and predicate writes); `computeTenantLayer0Filter` is now a projection of the new `computeTenantLayer0Verdict`, so the recorded verdict and the injected predicate come from one computation. An on-behalf-of write records the intersection of the caller's and the delegator's walls. System contexts and by-id writes record nothing (no wall is composed for them).
+  
+  What moves, and in which direction: a deployment-exempted object under an armed wall now publishes `organizationId` ABSENT (it was wrongly present); a `PLATFORM_ADMIN` rung on a PUBLIC tenant object now publishes it PRESENT (the wall stands there; it was conservatively absent); a hand-built context with no rung is answered by the plugin's capability probe rather than conservatively absent. Every population the previous producer answered correctly is unchanged.
+- d0ee598: fix(objectql): the boot loop refuses a view container whose `name` disagrees with the object it binds to, instead of silently rewriting the author's field (#14666)
+  
+  **BREAKING** accept-set narrowing on the ObjectQL boot loop's SOURCE registrar
+  (`registerMetadataCollections`), shipped as `minor` under the repo's
+  launch-window convention for breaking changes. Ruled on #14666 (2026-09-03,
+  direction 2).
+  
+  An aggregated `defineView` container is keyed by the OBJECT it binds to, not
+  by its own row identity, and `ViewSchema` declares an optional `name` whose
+  own description says that for an object-scoped container it *is* the object
+  name. Nothing enforced that. A container written as
+  `{ name: 'lead_views', object: 'crm_lead', list: { ... } }` therefore reached
+  the two SOURCE registrars and got opposite answers: this boot loop overwrote
+  `name` with the derived key `crm_lead` and registered it, discarding the
+  author's field with no diagnostic, while the artifact/HMR loader
+  (`MetadataPlugin._parseAndRegisterArtifact`) refused the whole artifact load
+  through `assertMetadataRegisterContract` (#7378 row 1, `VALIDATION_ERROR` /
+  400). Same document, and whether it loaded at all depended on how the package
+  was loaded.
+  
+  The boot loop now **refuses loudly**, with the same `VALIDATION_ERROR` / 400
+  envelope the artifact door raises, naming the container's own `name`, the
+  object key it derived, and both remedies: drop `name`, or set it to that
+  derived key. #7378 row 1 already ruled that resolving such a disagreement
+  silently, in either direction, files the item under a key the caller never
+  wrote, so the two registrars converge on the refusal rather than on the
+  rewrite; the artifact door is unchanged.
+  
+  **Refused shape**, precisely: an aggregated view container in a stack `views:`
+  collection that carries a non-empty top-level `name` AND derives a different
+  object key from its own `object` (or, failing that, `list.data.object` /
+  `form.data.object`).
+  
+  Scope, which the ruling names as this change's main risk. A container with no
+  `name` is untouched, and still registers under its derived key. So is a
+  container whose `name` already equals that key, and one that declares no
+  binding anywhere else, since the derivation then falls back to that same
+  `name` and cannot disagree with itself. No other metadata kind changes
+  behaviour: the refusal is gated inside the `views` branch of the generic
+  registration loop. Standalone ViewItems and flattened overlays travelling in
+  the assembled `viewItems:` channel are untouched, because a container cannot
+  reach that channel at all. Every one of these has a control test.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A validity narrowing over an existing optional key: `ViewSchema.name` is neither removed, renamed nor re-shaped, and forbidding it on object-scoped containers in spec was the direction the ruling explicitly refused, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. Which of the three repairs an affected container wants is authoring intent no migration entry can decide: the author may have meant the container name to go, may have meant it to become the object key, or may have mistyped `object` and want THAT corrected instead, and the stored document carries no evidence of which. The refusal is the channel that reaches the author, at the registration site, naming both values and both remedies. Measured in-repo population of affected sources is zero: no `views:` collection reaching this seam carries a divergent container `name` (the three engine-booting fixtures with inline containers are in `packages/objectql`, and the example apps' `.view.ts` containers declare no top-level `name` at all). -->
+- 48b0fcf: `@objectstack/objectql` now publishes a recognizer for the org-less system-write refusal, so a consumer no longer has to choose between an unsound check and a re-spelled string.
+  
+  `SystemWriteOrganizationRequiredError` has always documented that it is identified by `code` rather than `instanceof`, "so the check survives crossing a package boundary where two copies of this module can exist". The convention was correct; the affordance for following it was missing. This package declares **both** realms in its own `exports` — `import` to `dist/index.mjs`, `require` to `dist/index.js` — so a consumer that loads it through the other realm than the engine did holds a second copy of the module. Measured across that split from a real consumer package: same class identity (`A === B`) **false**, `instA instanceof A` within one realm **true**, `instA instanceof B` across the two **false**, and a `code` compare **true**. So `instanceof` against this class was unsound for every consumer, and it failed silently — a `catch` that simply never fires.
+  
+  That left a consumer with one sound option: re-spelling `'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED'` as a literal. That spelling is what `check:error-code-provenance` counts as a stamp site, so recognising one engine refusal cost the consumer's package a provenance decision of its own, and left the string spelled in two places with the typo failure mode standing — a typo in a `catch` produces a branch that never fires rather than an error.
+  
+  Two new exports close it, both from the package root:
+  
+  - **`SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE`** — the code as a value. Same shape as this package's five existing published codes (`DUPLICATE_RECORD_CODE`, `HOOK_TARGET_REBIND_ERROR_CODE`, `HOOK_UNSCOPED_DATA_ACCESS_CODE`, `MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE`, `EMPTY_CREDENTIAL_REFUSAL_CODE`) rather than a new abstraction. The class field now reads from it, so exactly one spelling of the string remains in the package and a typo at an import site is a compile error instead of a dead branch.
+  - **`isSystemWriteOrganizationRequiredError(err): boolean`** — the code compare itself, so a consumer performs the sound check without authoring the string at all.
+  
+  The predicate deliberately returns `boolean` and does **not** narrow to `err is SystemWriteOrganizationRequiredError`. A `code` compare is satisfied by any value carrying that code, including an envelope a transport rebuilt from the wire — #5437 withholds the prose and keeps the machine-readable code — so a type guard would promise `object`, `posture` and `reason` members such a value need not have, moving the unsoundness one layer down instead of removing it.
+  
+  ⛔ Nothing about the refusal itself changes: not its `code`, not its 500 status, not when it fires, and not the #8844 `derive-or-refuse` ruling behind it. `SystemWriteOrganizationRequiredError['code']` stays the literal type it was, which is what the existing cross-package consumer types its own constant from. This is purely an addition to what the package publishes.
+- 11f848e: `ReadonlyFieldRejectedError`'s error `code` is now an importable constant.
+  
+  The strict-readonly refusal — thrown by `engine.update` and `engine.insert` when `options.strictReadonlyWrites` is set and the payload carried caller-supplied fields the engine would have stripped — already told readers to identify it by `code`. `content/docs/kernel/contracts/data-engine.mdx` says so in its own words: *"Catch it by `code`, not `instanceof`, and read `drops` for the per-reason breakdown"*. Until now the code was an inline string literal with nothing to import, so the only way to FOLLOW that published instruction was to re-spell `'ERR_READONLY_FIELD_REJECTED'` in your own package — which acquires a `check:error-code-provenance` stamp site there and can then drift from what the engine throws with no compile error to say so.
+  
+  One new export from `@objectstack/objectql`:
+  
+  - `READONLY_FIELD_REJECTED_CODE` — `ReadonlyFieldRejectedError`'s ADR-0112 `code`.
+  
+  **Why `code` and not `instanceof`.** This package declares both realms in its own `exports` (`import` reaches `dist/index.mjs`, `require` reaches `dist/index.js`), so a consumer holding the other realm's copy of the class gets `instanceof` === false — measured, and silent. A `code` compare is the check that survives crossing that boundary, which is exactly what the documentation has been telling readers to do.
+  
+  **Nothing about the wire changed.** The constant holds text byte-identical to the literal it replaces; the refusal throws the same `code` and the same message as before. Consumers that spell the string themselves keep working unchanged — this adds an affordance, it removes nothing.
+  
+  **`ReadonlyFieldRejectedError` itself was already exported and stays exported.** Unlike the classes converted alongside it on this sweep, both routes are published here, so the class and the constant must name the same refusal; a test pins that they do.
+- e6279dc: The registry's three conflict refusals now publish their error `code` as an importable constant.
+  
+  `SchemaRegistry`'s install-time and registration refusals each already told the reader, in their own docblocks, to identify them by `code` rather than `instanceof` — and offered nothing to import. `NAMESPACE_CONFLICT`, `DUPLICATE_ARTIFACT_OBJECT_NAME` and `OBJECT_OWNERSHIP_CONFLICT` were inline string literals, so the only way to follow that instruction was to re-spell the string in the consumer's own package, which acquires a `check:error-code-provenance` stamp site there and can then drift from what the engine throws with no compile error to say so.
+  
+  Three new exports from `@objectstack/objectql`:
+  
+  - `NAMESPACE_CONFLICT_CODE` — the ADR-0048 Phase 1 install-time namespace gate's refusal.
+  - `DUPLICATE_ARTIFACT_OBJECT_NAME_CODE` — the ADR-0130 D3 one-artifact object-name refusal.
+  - `OBJECT_OWNERSHIP_CONFLICT_CODE` — the ADR-0029 D3 single-owner-per-object-name refusal.
+  
+  **Why `code` and not `instanceof`.** This package declares both realms in its own `exports` (`import` reaches `dist/index.mjs`, `require` reaches `dist/index.js`), so a consumer holding the other realm's copy of a class gets `instanceof` === false — measured, and silent. A `code` compare is the check that survives crossing that boundary.
+  
+  **Nothing about the wire changed.** Each constant holds text byte-identical to the literal it replaces; the refusals throw the same `code`, the same `status: 422` and the same message as before. Existing consumers that spell the string themselves keep working unchanged — this adds an affordance, it removes nothing.
+  
+  **The error classes stay unexported, deliberately.** Publishing them would publish the `instanceof` route this convention exists to replace.
+- ec0a6e7: feat(objectql,cli): `backfillSummaryNulls` accepts `recomputeUndefinedOnEmpty` — a caller who KNOWS a `min`/`max`/`avg` roll-up column was just declared can have it filled; `os migrate summary-nulls --recompute-undefined-on-empty object.field` surfaces it (#15064)
+  
+  A roll-up value has three producers — the insert-time seed, the child-write
+  recompute, and the one-off backfill — and **declaring a summary field on an
+  object that already has rows reaches none of them**. For `count`/`sum` the
+  backfill repairs that as a side effect (every `NULL` is a hole to it). For
+  `min`/`max`/`avg` it could not: `summaryNullIsBackfillable` decides on the
+  function alone, so "never computed" and "no child rows" were indistinguishable,
+  the column stayed `NULL` on every pre-existing parent, and the report said
+  `filled: 0` — a false all-clear that a timed flow built on the column then
+  turned into "matches nothing" (the customer case behind cloud#1908).
+  
+  **What changes** — maintainer ruling on #15064, option A: the caller who holds
+  the fact gets a way to say it; the predicate and the default run do not move.
+  
+  - `SummaryBackfillOptions.recomputeUndefinedOnEmpty?: string[]` — `object.field`
+    roll-ups the caller knows were never computed. A named `min`/`max`/`avg` is
+    walked like a `count`: every `NULL` parent is recomputed through the same
+    `aggregateSummaryValue` the engine writes. A parent whose aggregate is the
+    empty-set reading (`null` — no child rows) already holds the engine's own
+    value, so it is neither counted as a hole nor written; the scoped run is
+    therefore idempotent in the same "re-run until it reports zero" sense.
+    Naming a `count`/`sum` is accepted and changes nothing, so a publish path can
+    pass every column it just declared without knowing the empty-set list.
+  - A name that resolves to no roll-up owned by an object the run walks — a typo,
+    a plain field, or an object `objects` left out — is **refused before any row
+    is read**, dry run or apply, with an ADR-0112 envelope (`code:
+    'INVALID_FIELD'`, `status: 400` — the code the projection and write axes
+    that name a field already answer, while sorting keeps `INVALID_SORT`;
+    `field` names the first unresolved entry, `fields` all of them). A silent
+    no-op there would be the same false all-clear this option exists to end.
+  - `SummaryBackfillReport.recomputedUndefinedOnEmpty: string[]` — the complement
+    of `skippedUndefinedOnEmpty`, same `object.field (fn)` spelling; `[]` on an
+    unscoped run. `SummaryBackfillFieldOutcome.fn` widens from `'count' | 'sum'`
+    to every roll-up function, since a named `max` now appears in `fields`.
+  - `os migrate summary-nulls --recompute-undefined-on-empty object.field`
+    (repeatable) passes the scope through; the confirmation prompt names the
+    columns; `formatSummaryBackfillReport` lists them under "Recomputed on
+    request" and explains a `NULL` that remains.
+  
+  **What does not change:** without the option the walk, the writes, every
+  counter and the human-readable report are byte-for-byte what they were (pinned
+  against output captured on `main` before this change); `min`/`max`/`avg` stay
+  out of scope and keep being reported under `skippedUndefinedOnEmpty`; the
+  predicate `summaryNullIsBackfillable` is untouched, so `os migrate
+  summary-nulls` keeps its meaning on every deployment. The only visible delta on
+  an unscoped run is the one additive report key, `recomputedUndefinedOnEmpty: []`.
+  
+  `minor` for both packages: an optional parameter on a published exported
+  function, a new report key, and a new CLI flag are each a purely additive
+  widening of a published surface, which takes at least `minor` (bump-level rule,
+  2026-09-04); the `fix`-shaped motivation does not lower it.
+- b398ad2: **BREAKING (behaviour):** a static `readonly` field is now stripped from a **non-system caller's INSERT payload inside `engine.insert`**, exactly as it already was on `engine.update`. A non-system create that used to write a read-only column now has that column dropped, reported through `onFieldsDropped` / `droppedFields`, logged at `warn`, and refused outright under `strictReadonlyWrites`. Seeding a read-only column at create time is a **system** act — use `context.isSystem`, a flow's `runAs: 'system'`, a system hook or a seed.
+  
+  Until now the create-side strip lived only at the DataProtocol ingress (`stripReadonlyForInsert` in `@objectstack/metadata-protocol`), so `readonly` meant one thing on insert and another on update: every external REST/GraphQL/MCP create was stripped, while a caller reaching `engine.insert` directly — the automation engine's `create_record` among them — wrote the column with no refusal, no `WARN` and no dropped-field event.
+  
+  - `stripReadonlyForInsert` and its five call sites in `@objectstack/metadata-protocol` are **deleted**, not kept as a second implementation; every create face — `createData`, `cloneData`, `createManyData`, `insertManyData`, and `batchData`'s `create` rows and both arms of `upsert` that create — now hands the caller's payload to the engine whole, and every face whose response carries `droppedFields` (`createData`, `createManyData`, `insertManyData`, every `batchData` row that created) reports the engine's own verdict there, so `droppedFields` says the same thing at each of those seams. `cloneData` forwards whole but reports nothing on the wire: its response contract (`CloneDataResponseSchema`, declared as produced) has no `droppedFields` member, so a clone that carried or overrode a read-only column is stripped and logged at `warn` but not reported in the 201 body — adding that key is a spec change, not part of this one.
+  - `create_record` (`@objectstack/service-automation`) starts receiving readonly drops on the `onFieldsDropped` channel it has been wired for since #3407 — a flow without `runAs: 'system'` that seeds a read-only column now reports a node warning and `output.droppedFields` instead of a clean success. That package's own code changes only in prose; the traffic is new, the surface is not.
+  - Unchanged, deliberately: `isSystem` is still the exemption; `preserveAudit` is still an UPDATE-path exemption and a create that asks for it is told so out loud; runtime-owned types (`autonumber`) keep their own pass and their own wider whitelist; platform objects (`managedBy`, the `sys_` namespace) are still left to their own field-write guards; `readonlyWhen` still has no create-side strip. A stripped key's `defaultValue` is re-derived, so a forged `approval_status` becomes `draft` rather than NULL.
+  - `@objectstack/service-settings` is `patch`: prose only — the `upsertRow` docblock, which ships in the package's `.d.ts`, no longer states the superseded INSERT exemption; it names the platform-object carve-out that actually keeps a `sys_setting` insert outside the strip.
+  - `@objectstack/lint` and `@objectstack/spec` are `patch`: both change prose only. All three lint rules — `validate-readonly-action-writes`, `validate-readonly-flow-writes`, `validate-readonly-hook-writes` — drop the superseded "INSERT is exempt" premise from their docblocks and from the justification of their green control cases; the two non-elevated rules now name their `insert`/`create` silence as a scan gap rather than an exemption (the action rule additionally records its now-reasoned refusal as a module-local constant that its `index` does not re-export, so no public surface widens). The spec change is prose only: one docblock sentence that named the deleted function, the `strictReadonlyWrites` contract docblock (which now states what strict refuses on insert), and the `readonly` liveness-ledger verdict, whose evidence pointer named the deleted ingress strip.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The BREAKING here is a WRITE-PATH BEHAVIOUR change, not a retirement of an authorable or published surface, so there is nothing for the ledger to carry to `objectstack migrate meta`, `spec-changes.json` or the upgrade guide: no spec property, metadata key, accepted value or exported symbol disappears, and this body prescribes no FROM/TO migration. The remedy for an affected caller is to declare the write trusted (`context.isSystem` / `runAs: 'system'`), which is application code, not a metadata migration. The obvious retirement candidate is a non-question in the same direction: `stripReadonlyForInsert` was a bare module-private `function` in `packages/metadata-protocol/src/protocol.ts`, absent from that package's `index.ts` (the only path its `exports` map offers), so no consumer could name it. -->
+- eddd612: Both transaction-seam refusals publish their error `code` as an importable constant.
+  
+  `packages/objectql/src/transaction-errors.ts` opens by telling the reader that the errors in it "identify themselves by a `code` field rather than by `instanceof`, for the reason `DriverConnectError` already records: the check has to survive crossing a package boundary, where two copies of this module can exist" — and neither of them offered anything to import. The only way to FOLLOW that published instruction was to re-spell the wire string in your own package, which acquires a `check:error-code-provenance` stamp site there and can then drift from what the engine throws with no compile error to say so.
+  
+  Two new exports from `@objectstack/objectql`, each graded on its own:
+  
+  - `TRANSACTION_UNSUPPORTED_CODE` — `TransactionUnsupportedError`'s ADR-0112 `code`. Thrown by `transaction(cb, base, { require: true })` when the datasource's driver has no `beginTransaction`, refused before the callback runs so nothing has been written. **Additive widening, `minor`.**
+  - `CROSS_DATASOURCE_TRANSACTION_WRITE_CODE` — `CrossDatasourceTransactionWriteError`'s ADR-0112 `code`. Thrown when a business write inside an open `transaction()` resolves to a driver that transaction does not cover. **Additive widening, `minor`.**
+  
+  **The second one is a refusal callers are meant to recover from.** Its own message prescribes the remedy — split the work into per-datasource units and reconcile them explicitly — which is code a caller writes *around* this refusal, and therefore code that has to recognise it first. That recognition now has something to import.
+  
+  **Why `code` and not `instanceof`.** This package declares both realms in its own `exports` (`import` reaches `dist/index.mjs`, `require` reaches `dist/index.js`), so a consumer holding the other realm's copy of a class gets `instanceof` === false — measured, and silent. A `code` compare is the check that survives that boundary, which is what this module's header has been telling readers to do.
+  
+  **Nothing about the wire changed.** Each constant holds text byte-identical to the literal it replaces; every refusal throws the same `code` and the same message as before. Consumers that spell the strings themselves keep working unchanged — this adds affordances, it removes nothing.
+  
+  **Both classes were already exported and stay exported**, and neither is published from the lean `./core` entry, so the constants join them on the one entry point that publishes them: class and constant are reachable from exactly the same place.
+- f7ffbd6: `accept-language: zh` now reads a Chinese refusal on the response whose labels are already Chinese.
+  
+  `@objectstack/spec` has one locale-negotiation rule — `resolveBundleLocale`: exact match, then case-insensitive, then base language, then **variant expansion**, which is the step that reaches a `zh-CN` bundle from a bare `zh`. `pickData` calls it, and every document translator (`translateObject`, `translateView`, `translateDataset`, …) goes through `pickData`. That is why an app shipping only `zh-CN` still answered `accept-language: zh` with translated object, view and dataset labels.
+  
+  The write path's message bridge was the one consumer that never negotiated. `ExecutionContext.locale` is the header's first tag verbatim — `preferredLocaleFromHeader` reports what was *asked for* and expands nothing, deliberately, because each of its callers negotiates differently — and the engine handed that tag straight to `II18nService.t()`. A served adapter resolves a locale exactly and then falls to its declared fallback (`FileI18nAdapter.t()` is `resolveFromLocale(key, locale)` then `resolveFromLocale(key, fallbackLocale)`), so `zh` missed the `zh-CN` bundle and the English text came back. The result was a half-translated response an app had no way to see coming: the bundle key was present and correct and the coverage gate was green.
+  
+  `ObjectQL`'s validation-message context now resolves the requested tag against what the bridged service reports it holds (`II18nService.getLocales()`), through that same `resolveBundleLocale`. The rule is not re-implemented in the engine — the document translators ask it about a bundle's keys, and this asks it about the service's locales. Authored `objects.<object>._validations.<rule>.message` text, `validation.field.*` overrides and translated field labels all follow, because they read one locale.
+  
+  Unchanged: **which** writes are refused, and everything machine-readable about a refusal — the `code`, the `field`, the `constraint`, the status. Only the language of the sentence moves. `preferredLocaleFromHeader` is untouched, and so is every other caller of it. A request with nothing to negotiate against — no i18n service, a service that cannot report its locales, or a tag no variant of which is on offer — passes through exactly as before.
+  
+  `ObjectQL.setI18nService` accepts an optional `getLocales?: () => string[]` alongside `t`. `II18nService` has always required `getLocales()`, so every real service already satisfies it; a partial shim that omits it keeps today's behaviour rather than being negotiated against.
+
+### Patch Changes
+
+- 7079694: fix(objectql): the audit binder stamps `created_at` from the system clock on an ordinary create, so a caller-supplied value no longer survives a plain `POST` (#15964)
+  
+  The `beforeInsert` audit stamp was `record.created_at = record.created_at ?? now` — client-preferred on every insert, with no flag and no privilege required. Since the static-`readonly` strip moved INSIDE `engine.insert` (2026-09-03 ruling, option C) it runs AFTER the before-phase hooks, and its guard treats a key a `beforeInsert` hook ASSIGNED as the hook's write rather than a caller forgery. The `??` therefore laundered the caller's bytes past that strip: a normal authenticated `POST /api/v1/data/OBJECT` carrying `created_at: '1999-01-01T00:00:00.000Z'` stored exactly that on an object declaring `created_at` as `readonly: true`, while `id`, `updated_at` and every other author-declared readonly datetime in the same payload were taken. `created_at` is the audit anchor, so a forgeable one makes after-the-fact attribution untrustworthy.
+  
+  The stamp now takes the same shape as `updated_at`:
+  
+  ```ts
+  record.created_at = preserveAudit ? (record.created_at ?? now) : now;
+  ```
+  
+  **What changes for a caller.** An ordinary create no longer preserves a supplied `created_at` — the value is overwritten with the server instant rather than deleted, so the column is still a real stamp and no `defaultValue` re-derivation is involved. This narrows the accept set to the `readonly` contract the field already documents; no exported symbol, schema or config key moves.
+  
+  **The historical-import channel is unchanged and pinned.** `runImport({ treatAsHistorical: true })` sets `preserveAudit: true` on the write context (`@objectstack/rest`), and that branch still reinstates an original `created_at`, exactly as it has reinstated `updated_at`/`updated_by` since #3493. This is why the fix is the `preserveAudit` ternary rather than a bare `= now`. The create-side strip still does not read `preserveAudit` (2026-08-08 ruling, untouched): the preservation is the audit binder's, and it always was.
+  
+  **A creator that back-dated rows through the old `??` must now ask for it.** Any insert path that supplied a historical `created_at` without `preserveAudit` now gets the server instant. The remedy is one context key on the write (`preserveAudit: true`), the same one `treatAsHistorical` sets.
+  
+  Ruled by the maintainer on 2026-09-06 (decision batch #54, option A).
+- 4b3955e: fix(objectql): a published `BulkDataEvent` now names the ONE organization the tenant wall named for the batch
+  
+  `BulkDataEventSchema.organizationId` (`@objectstack/spec/api`, declared by the
+  contract half) is one organization for a whole predicate write, or absent. The
+  only bulk producer — `publishBulkDataEvent`, behind the `multi: true` branches
+  of `update()` / `delete()` — never set it, so every `data.records.updated` /
+  `data.records.deleted` event read "not asserted" and a tenant-scoped consumer
+  could deliver nothing per organization on the bulk path. This is the bulk half
+  of the cross-tenant webhook fan-out leak; the single-record half (`DataEvent`)
+  landed separately.
+  
+  The producer now stamps the key from what it already holds — no second query
+  on the publish path: under `isolated` the caller's active organization (the
+  Layer 0 wall's equality term), under `group` the caller's membership set when
+  it names exactly one organization. It is OMITTED — never the caller's active
+  organization standing in — on a `single`-posture deployment, on an `isSystem`
+  context (no wall composed), on a multi-membership `group` sweep, when no
+  enforcement layer injected a posture (the `OS_TENANCY_POSTURE` env fallback is
+  deliberately not consulted), when the caller may have crossed the wall as a
+  `PLATFORM_ADMIN` or carries no resolved posture rung, and on an object the wall
+  does not key on. `absent` here means "the producer did not assert one
+  organization for the batch", deliberately NOT the `DataEvent` reading
+  "belongs to no organization".
+  
+  Which objects "the wall does not key on", stated exactly rather than claimed as
+  a mirror: plugin-security's Layer 0 composes no wall when its `tenancyDisabled`
+  input is true or the object carries no `organization_id`, and it folds THREE
+  clauses into `tenancyDisabled` — `tenancy.enabled === false`,
+  `systemFields.tenant === false`, and the deployment's `platformGlobalObjects`
+  carve-out. The producer reads the registry's binding of that predicate
+  (`carriesTenantScopeColumn`: the first two clauses plus the column clause) and
+  answers absent on a federated (`external`) object; a custom
+  `tenancy.tenantField` is therefore not an exit by itself — the object is walled
+  iff it carries `organization_id`, and the key follows the wall. The third
+  clause is deployment-declared and not readable by the engine: a
+  deployment-exempted object under an armed wall is still stamped with the
+  caller's organization by this producer alone, and that population's exact
+  answer is decided by the seam ruled on in #15706.
+  
+  `patch`, not `minor`: the act adds no member to this package's published
+  surface. `carriesTenantScopeColumn` is exported at module level inside
+  `registry.ts` only — `@objectstack/objectql`'s entries (`.`, `./core`) re-export
+  named members and never `export *`, so `dist/index.d.ts`, `dist/core.d.ts` and
+  both entries' runtime export lists are unchanged (measured on the built `dist`,
+  with a firing control) — and the emitted event's member was declared, typed
+  and paid for at `minor` by the spec half. Producer conformance to an existing
+  optional member under `fix(` changes no public surface of this package.
+- 65846bc: fix(objectql): `DuplicateRecordError.developerMessage` names the wire spelling a client branches on (#14723)
+  
+  The envelope's `developerMessage` — the remedy sentence addressed to the
+  application author — told its reader to "branch on `code === 'DUPLICATE_RECORD'`",
+  which is the engine's THROWN identity and holds only for an in-process caller of
+  `engine.insert` / `engine.update`. Every REST route reports the same refusal as
+  `UNIQUE_VIOLATION`, and since #14723 the per-row reports of the batch and import
+  surfaces do too, so the sentence was a platform contradicting itself on the one
+  line an author is most likely to copy. It now says both halves: over the HTTP
+  API branch on `code === 'UNIQUE_VIOLATION'` on every route, whole-request and
+  per-row alike; inside the engine the thrown class carries `DUPLICATE_RECORD`.
+  The class's own docblock says the same. Nothing else about the envelope moves:
+  `code`, `status`, `cause`, `field`, `object` and the user-facing `message` are
+  byte-identical, and every pin on the engine's thrown code holds.
+- 25a3d91: Stop reporting a declarative `operation: 'update'` action as "a button wired to nothing"
+  
+  The boot action-governance inventory (ADR-0110 D5) built its `unboundDeclarations`
+  finding from a `type`-only test. The declarative single-record field write
+  (`operation: 'update'` + `patch`, #14092) is exactly the shape that test mistakes
+  for a dead button: `ActionSchema` refuses `target` and `body` beside it and keeps
+  `type` at its default `script`, because the platform action route is where the
+  write is performed. Every such action was named at every boot and every
+  `metadata:reloaded` — with a prescription ("add a `body`, or register a handler
+  under the declared `target`") that parse itself refuses.
+  
+  Both readers now read `operation` before `type`, the precedence the runtime doors
+  already use: the engine inventory, and the authoring-time AI tool-reference rule,
+  which had diverged from the runtime's listing door and reported a resolvable
+  `action_<name>` reference as fictional.
+- 3bd9b34: feat(metadata): `deriveViewContainerObject` gets a leaf `/view-container` subpath, so objectql's lean ADR-0076 entry stops loading the manager, chokidar, glob and js-yaml for a six-line pure function
+  
+  `packages/objectql/src/engine.ts` reached `deriveViewContainerObject` through
+  `@objectstack/metadata`'s ROOT entry. `core.ts` — the ADR-0076 lean entry —
+  re-exports `engine.ts`, so `@objectstack/objectql/core`'s module-init closure
+  inherited the whole root entry: `MetadataPlugin` -> `NodeMetadataManager` ->
+  `chokidar`, plus `glob`, `js-yaml` and `readdirp`.
+  
+  The same file already carried the answer 79 lines above, at its
+  `@objectstack/metadata/errors` import: that leaf subpath exists "precisely so a
+  cross-package consumer gets the predicate without the manager, the loaders or
+  the YAML/filesystem machinery behind the root entry". This is that pattern,
+  taken a second time.
+  
+  **Measured on the built artifacts, not asserted** — every module Node actually
+  evaluates when `@objectstack/objectql/core` is loaded in a fresh process,
+  recorded through a `module.registerHooks` load hook (ESM and CJS) plus
+  `require.cache`, byte sizes from `statSync`:
+  
+  | `@objectstack/objectql/core` | modules | bytes |
+  |:---|---:|---:|
+  | before (ESM `dist/core.mjs`) | 190 | 12,348,424 |
+  | after (ESM `dist/core.mjs`) | 185 | 11,849,808 |
+  | **delta** | **-5** | **-498,616 (-486.9 KiB)** |
+  | before (CJS `dist/core.js`) | 188 | 12,654,238 |
+  | after (CJS `dist/core.js`) | 183 | 12,141,034 |
+  | **delta** | **-5** | **-513,204 (-501.2 KiB)** |
+  
+  Six modules stop loading — `packages/metadata/dist/index.js` (237,747 B),
+  `js-yaml` (114,610 B), `glob` (82,749 B), `chokidar` (2 files, 54,220 B) and
+  `readdirp` (9,836 B) — and one 469-byte module takes their place. Marginal
+  module-init time for that root entry, measured on a warm lean closure, was
+  ~22 ms (median of 7; 20.4-27.5 ms) out of ~630 ms.
+  
+  ⚠️ The figure the finding was argued on — "~3.6 KB to ~450 KB" — is right about
+  the delta and wrong about the baseline: the lean entry's closure was already
+  ~11.5 MiB before this import existed, dominated by `@objectstack/spec`
+  (9,587,914 B) and `zod` (567,918 B), neither of which the metadata root entry
+  contributes. What the root import cost was ~487 KiB *on top of* that, not a
+  closure of 450 KB.
+  
+  The derivation itself moves to `packages/metadata/src/view-container.ts`, a
+  module with **no imports at all**, and `view-container-expansion.ts` imports
+  and re-exports it, so `index.ts`'s root export and `plugin.ts` keep their
+  spelling and the symbol stays on the root entry — this subpath is an additional
+  door, not a relocation. A re-export shim onto `view-container-expansion.ts` was
+  tried first and rejected on measurement: esbuild tree-shakes the unused
+  `expandRuntimeViewContainer` but keeps its two `@objectstack/spec` import
+  statements, so that shim's own closure was 84 modules / 3,035 KiB. The real
+  leaf's is 1 module / 469 B.
+  
+  `expandRuntimeViewContainer` is deliberately not exported from the new subpath:
+  `metadata-manager.ts` is its only caller, the root entry does not export it
+  either, and it is the half that carries the spec machinery.
+- e9fcd6b: fix(objectql): the declarative hook wrapper reads the renamed `hook.timeoutMs` (#14478)
+  
+  `wrapDeclarativeHook` reads its wall-clock abort budget from `meta.timeoutMs`
+  instead of `meta.timeout`, following the `@objectstack/spec` rename of the
+  authored key (the unit now lives in the key name). Same value, same magnitude,
+  same abort; no public surface of this package changes.
+- 26144c2: The platform-object tenancy census is derived and gated instead of hand-written in a comment. Documentation only — no runtime behaviour changes.
+  
+  `PLATFORM_OBJECT_TENANCY`'s header explained why the reclassification needs a ledger rather than a schema read, and backed the argument with three hand-written digits and a parenthetical attributing them. Nothing re-derived any of it, so it was true only until the population moved and failed silently when it did — in both of the directions a prose count can.
+  
+  The parenthetical mis-attributed the exclusion: it named `sys_sso_provider`'s `tenancy.enabled: false` as an addition to the `managedBy: 'better-auth'` set that object was already in, and left `sys_api_key`'s identical opt-out unnamed. The arithmetic stayed right, which is why no reader and no gate caught it — a wrong reason producing a right total is the shape that survives longest. The digits then went stale when an object opted out of the tenant column through a third mechanism the parenthetical's taxonomy had no slot for (`systemFields: { tenant: false }`), while the gated page next door was updated in the same commit.
+  
+  The digits and the parenthetical are deleted rather than corrected. The header now points at `scripts/platform-object-tenancy-census.json` and states the PREDICATE it was missing: an object is inside the machinery when `resolveTenantFieldName` answers non-null on the **registered** schema — after `applySystemFields` has injected the tenant column, because the injected column is what the engine sees, not what the author typed. Counting `managedBy` as if the resolver read it is the mistake that produced the wrong reason.
+  
+  The artefact is derived by `scripts/platform-object-tenancy-census.mjs`, which loads `resolveTenantFieldName` and `resolveInjectedSystemColumns` from source and executes them rather than re-spelling what they decide, and is held to the tree by `scripts/check-platform-object-tenancy-census.mjs`. It records per object the declaration on that object's own schema that puts it outside the reach; declarations are not mutually exclusive and an object carrying two keeps both. An excluded object with no declared mechanism is an error, not a default: the generator refuses to commit the row and the gate reds, so a new exclusion mechanism is adjudicated rather than absorbed into an existing total.
+- d61d6e3: `os migrate value-shapes` now prescribes the key rename on a legacy `{latitude, longitude}` location, instead of reporting the missing-pair type error.
+  
+  A value-shape rejection was read positionally — `parse.error.issues[0]` — at both places the value-shape detail is produced: the write path's warn-first / strict branch, and the exported `valueShapeViolation` the scan imports. zod reports per-member issues before the object-level `unrecognized_keys` one, so on a value whose keys were **renamed** the actionable message sorts last and was discarded. A `location` stored as `{latitude, longitude}` — the exact legacy shape the scan's own header names as one it exists to find — reported `Invalid input: expected number, received undefined`, leaving an operator to derive a rename that edit distance cannot reach (`latitude` -> `lat`), while `LocationValueSchema` had built the prescription and thrown it away.
+  
+  Both readers now prefer the undeclared-key issue when the rejection carries one, through a single shared helper — two readings of the same rejection drifting by one clause is how one path prescribes the rename and the other does not. The affected strings are the `os migrate value-shapes` finding `detail`, the warn-first `[value-shape]` log line, and the `invalid_value_shape` error's `detail` under strict enforcement.
+  
+  ⛔ No verdict moves. The same values are flagged, the same writes are rejected or admitted, and the deployment gate opens on exactly the same evidence — only the operator-facing text changes.
+  
+  Scoped by measurement rather than by assumption: of the sixteen types these readers cover, only `location` and `address` are backed by a key-closed object schema, so only they can emit `unrecognized_keys` at all — for the other fourteen the preference cannot change a single character. Both classes it does reach curate the alias map that makes the undeclared key the more actionable half. The defect reaches `address` as well as `location`: every address member being optional rules out a *missing*-member type error, but not a *wrong-typed* declared one, which still sorts ahead of the undeclared-key issue.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [a56baa2]
+- Updated dependencies [65846bc]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [098cbb7]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [0c5d035]
+- Updated dependencies [281bf0d]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [3e7ef9c]
+- Updated dependencies [3e7ef9c]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [e1d4f9e]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [c1d274d]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [784cb92]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [a7da4de]
+- Updated dependencies [8647c87]
+- Updated dependencies [b4b37e5]
+- Updated dependencies [ba426b0]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [efc5447]
+- Updated dependencies [618f70d]
+- Updated dependencies [4b0508e]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [615fac3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [7d711c9]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/metadata-protocol@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/metadata@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

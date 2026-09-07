@@ -1,5 +1,322 @@
 # @objectstack/platform-objects
 
+## 17.4.0
+
+### Minor Changes
+
+- 4ca358d: `sys_session.revoke_reason` accepts `organization_membership_ended` — "Remove member" now actually signs the person out
+  
+  Removing a member deleted the `sys_member` row and left the session alive, for up to seven
+  days. #15409 closed the security half per request (a session whose `activeOrganizationId`
+  is not backed by a membership resolves with no active organization). This is the courtesy
+  half an admin was promised, and it is **never the enforcement**: a trigger can be missed,
+  an evaluation cannot.
+  
+  - **New `revoke_reason` value, `organization_membership_ended`** — an accept-set widening
+    on a published system object, hence `minor` on `@objectstack/platform-objects`. Every
+    reason before it is a timer (`idle_timeout`, `absolute_max`, `concurrent_cap`) or an
+    interactive revoke (`user_revoked`, `admin`); this is the first authorization-event
+    cause. There is no Zod enum behind the column — it is free `text` — so the field's own
+    description is the published vocabulary, and that is where the value is declared. The
+    string deliberately matches the one the API-key arm of the same ruling family already
+    mints for this event (`authRefusal.reason` in `resolve-authz-context.ts`), so one grep
+    finds every place the platform acts on a membership ending.
+  - **The trigger acts on the ORGANIZATION'S CLAIM, never on the user** (maintainer ruling,
+    decision batch #49 item 4, option B). A user who still holds another membership is
+    **re-pointed** to it — never signed out of organizations they legitimately belong to. A
+    user with no remaining membership has their session revoked through the existing
+    `revoked_at` / `revoke_reason` mechanism, which expires it in place: better-auth returns
+    nothing on the next request and the Console's existing 401 → login redirect handles it,
+    with **no client change**.
+  - **The seam is an engine hook on `sys_member`**, not a hook on better-auth's
+    `/organization/remove-member`. A census measured that the endpoint, a direct delete, a
+    bulk delete, the cascade from a `sys_user` delete and an organization re-point all reach
+    the hook, while an endpoint hook would have reached one of them. Same precedent as
+    `last-admin-guard.ts`.
+  - **New public surface on `@objectstack/plugin-auth`** — `MEMBERSHIP_ENDED_REVOKE_REASON`,
+    `endSessionClaimsForEndedMembership` and `registerMembershipEndedSessionTrigger`, hence
+    `minor` rather than `patch`.
+  
+  Known open by measurement, not by omission: a raw driver delete bypasses the trigger
+  entirely, and cloud's package-uninstall sample-data purge is one (filed as cloud#2003). The
+  per-request check covers it; the courtesy does not.
+- 6acb37e: feat(platform-objects,plugin-auth): `sys_business_unit.timezone` and `sys_organization.timezone` — the organization hierarchy carries the IANA zone a date boundary is computed in (#14238)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A NON-BREAKING ADDITION, registered here in writing because ADR-0087's registries have no additive entry kind (their three tables are semantic TODOs, retired keys and retired defs, and `spec-changes.json`'s `added[]` is the release-time export diff of `@objectstack/spec`, which platform-object columns are not on). Two nullable `text` columns are added to two `isSystem` platform objects; no metadata key, export, config field or stored shape is renamed, retired, re-typed or tombstoned, so `objectstack migrate meta` has nothing to rewrite and no consumer has to change anything. The physical columns are provisioned by boot schema-sync, which is additive-only (`initObjects` creates missing columns and never alters existing ones). MIGRATION NOTE, as the ruling requires it stated: existing deployments resolve to UTC until the root default is set — every pre-existing row reads null in both columns, null on `sys_organization.timezone` means UTC, and null on `sys_business_unit.timezone` means inherit (parent chain, then the organization, then UTC), so a deployment computes every date boundary in UTC after upgrading exactly as it did before, until an administrator sets `sys_organization.timezone`. -->
+  
+  Maintainer ruling 2026-09-02 (director summon #8), quoted verbatim and untranslated: 「同意」 — adopting option A on #14238.
+  
+  **The gap.** No platform object carried a timezone, so every application that has to answer "when does this day / week / period end?" invented a column of its own — on its tenant object, its team object or its user — and two apps in one deployment would disagree about when Tuesday ended, with nothing to report. A date boundary decides *which record exists*, not how one is shown: a monthly duty "due on the 5th" expires at midnight, and in UTC+8 that midnight is 08:00 UTC.
+  
+  **What lands.**
+  
+  - `sys_business_unit.timezone` — `text`, optional, `maxLength: 64`, `valueDomain: 'iana_time_zone'`, no default, in the Hierarchy group. Null means **inherit**: the nearest ancestor up the `parent_business_unit_id` chain that carries a value, then `sys_organization.timezone`, then `UTC`.
+  - `sys_organization.timezone` — the same shape, in the Configuration group: the **root default** of that chain. Null means `UTC`.
+  - plugin-auth registers `sys_organization.timezone` as an ADR-0105 D7 extension field (the collision guard proves better-auth's organization schema owns no `timezone` at the pinned version) and as generically editable under the ADR-0092 D2 identity write guard — the same tier as `require_mfa` and the group-structure fields. A root default the guard stripped on every administrator write would be a column nobody can set. `sys_business_unit` is `managedBy: 'platform'` and needs no entry.
+  
+  **The inheritance is a documented contract, not a mechanism.** Measured on the tree: nothing on the platform walks `parent_business_unit_id` *upward* to resolve an attribute. The three existing walkers (plugin-sharing's business-unit graph, plugin-approvals' recursive department approver, plugin-security's delegated-admin frontier) all descend to a unit's *descendants* and read no column beyond the parent link, `active` and `organization_id`. **No resolver API ships with this change** — the ruling holds option B ("the effective zone for this record") for a second consumer — so an application resolving a boundary reads the columns and walks the chain itself, in the order above. Nothing on the platform reads either column yet; both docblocks say so, so the next author does not read inheritance onto a field that stores what was written.
+  
+  **Validated on write.** Both columns declare `valueDomain: 'iana_time_zone'` — the ruling's own precondition (「rather than shipping an unvalidated text column」), met now that the record validator reads the key (#14168 / #15161). A non-member written to either column (`Mars/Olympus`, `Europe/Munich`, `UTC+8`) is refused with the ADR-0114 field code `value_domain` and `constraint.valueDomain`; membership is the shared `Intl.DateTimeFormat` probe, never the `Intl.supportedValuesOf('timeZone')` enumeration, which omits `UTC` — the very fallback this contract names. `UTC` is admitted, and pinned.
+  
+  **One shape, on purpose.** The platform's own two earlier IANA columns disagree with each other — `sys_job.timezone` (`maxLength: 100`, no default) and `sys_report_schedule.timezone` (`maxLength: 64`, default `UTC`), neither validated. The ruled pair takes 64 (the smaller precedent, and twice the domain's real ceiling: the enumeration's longest name on the repo's Node baseline is 30 characters, the longest tzdb link 32) and no schema default on either column (a default on the unit would mean "stop inheriting"; one on the organization would give UTC two spellings). Those two precedent columns are not retrofitted here — outside the ruling's scope, carded separately.
+  
+  **Not the home.** `sys_user` (option C): two people in different zones owning work in the same period would compute different boundaries for what the business considers one period. A per-user zone is a display preference on top of an org-resolved boundary, not a substitute for it. This change is distinct from the settings door's `localization.timezone` (the deployment-wide default analytics buckets dates in today); how the two relate is the future resolver's question.
+- 0a038cc: feat(platform-objects): `sys_job.timezone` and `sys_report_schedule.timezone` are validated against the IANA domain (#15872)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A NON-BREAKING ADDITION of one field property to two existing columns. `valueDomain` is the `min`/`max`/`maxLength` transition-gate class: only a WRITTEN value is judged, a stored value outside a domain declared later is never re-read and survives unrelated edits, so `objectstack migrate meta` has nothing to rewrite. No metadata key, export, config field or stored shape is renamed, retired, re-typed or tombstoned; no column is added, dropped or re-bounded (`maxLength` is unchanged on both, deliberately), so boot schema-sync plans no DDL either. MIGRATION NOTE, stated rather than assumed: a deployment that already stored a non-IANA string in either column keeps it and reads it back unchanged; what changes is that the next WRITE of such a value is refused with the ADR-0114 field error code `value_domain`. For `sys_report_schedule` that refusal is the point — see the behaviour note below. -->
+  
+  The platform's two oldest IANA time-zone columns predate `valueDomain` and disagreed with each other in three dimensions at once — length (100 vs 64), default (none vs `'UTC'`) and validation (neither). This closes the third: both now declare `valueDomain: 'iana_time_zone'`, the same declaration and the same `Intl.DateTimeFormat` membership probe that `sys_business_unit.timezone` and `sys_organization.timezone` carry (#14238). Four columns, one spelling of "is this a real zone".
+  
+  **What it was worth, measured before the fix rather than assumed.** The two columns are not equally exposed, and only one of them was dangerous.
+  
+  - `sys_report_schedule.timezone` is read back and handed to a scheduler. `ReportService.nextRunAt` calls `new Cron(cron, { timezone }).nextRun(from)`, and croner does not reject a non-member zone at construction when there is no callback — it throws from `nextRun()`. That throw was caught and turned into a fall back to `interval_minutes`. So a typo'd zone silently discarded the cron expression: an admin's "every weekday 09:00 Asia/Shanghai" became "every 1440 minutes, forever", logged only as `invalid cron '<expr>'` — a warning naming the wrong input, because the expression was fine. Not a throw and not a fall back to UTC: the wrong instant, permanently. Refusing the write is what closes it. (`scheduleReport`'s eager create-time guard did not catch it either: it constructs a callback-less `Cron` and is blind to exactly this half of its own input. That is a separate defect in `plugin-reports`, carded, not fixed here.)
+  - `sys_job.timezone` is written and never read. `DbJobAdapter` mirrors the in-memory schedule onto the row; its three `sys_job` read sites take `id` / `run_count` / `failure_count` only. The zone the scheduler honours never travels through this column, and `DbJobAdapter.schedule` awaits the cron adapter before it upserts the row, so a non-member cannot even reach the column that way — croner constructed WITH a callback throws, and `AppPlugin` reports it as `Background job FAILED TO SCHEDULE — it will never run`. The door this declaration closes there is the other one: a direct write from Studio, REST or a script, which had no validation at all.
+  
+  **What is deliberately NOT converged**, and is pinned so that staying unconverged is a decision rather than a drift someone repairs by reflex:
+  
+  - **the defaults still differ.** A default here is a consumer semantic, not a shape question. `sys_report_schedule` documents and implements a UTC default; `sys_job` has no reader at all, and minting one would change what an unset row means.
+  - **the bounds still differ (100 vs 64).** `maxLength` is not only a write bound — it reaches DDL, and narrowing a physical `varchar(100)` is `driver-sql`'s `narrow_varchar` op at severity `error`, category destructive ("narrowing may truncate"). What the column physically holds in a deployment is not readable from the repo, so the convergence is a separate decision and #15872 stays open on it. Note what the domain declaration already costs the wider bound: no member is longer than 32 characters on the current Node baseline, so 100 now admits nothing 64 would not.
+
+### Patch Changes
+
+- 159dbad: `attestFreshDatastore` looks its `os migrate` remedy up instead of defaulting it
+  
+  When a fresh datastore's own boot has already admitted a value that contradicts a
+  migration's contract, that id is not attested and the operator is told what closes
+  the gate on real evidence. The sentence used to be built from a two-way branch: the
+  file-references id got `files-to-references`, and **every other id** got
+  `value-shapes` by default.
+  
+  `CREATION_ATTESTED_MIGRATION_IDS` has three members. For the third —
+  `adr-0030-notification-event` — that default is a wrong prescription: `os migrate
+  value-shapes --apply` neither attests nor clears it, and there is no `os migrate
+  notification-event` sub-command to send an operator to at all (that cut-over is an
+  operator call with no self-check).
+  
+  The branch is now an explicit id-to-remedy register, total over the ids a
+  value-shape tally can contradict. The loop asks it rather than falling into an arm,
+  so an id with no value-shape contract is never-contradictable by that evidence and
+  is attested on the birth observation as before. A new member therefore inherits no
+  remedy: adding a third arm that happened to be right today would only have moved the
+  same defect onto the fourth member.
+  
+  No behaviour changes for the two ADR-0104 ids, which is where every reachable path
+  runs today: the shipped engine keys its admitted-violation tally from a closed
+  `'media' | 'value-shape'` union, so it cannot name a third id.
+- 85a2459: fix(spec): the dashboard `gap` field no longer describes itself to app authors in Tailwind vocabulary
+  
+  `ui/dashboard`'s `gap` key told app authors its value in the vocabulary of a CSS
+  library they never chose and cannot act on. **Two** independent producer strings
+  carried that wording, and they feed two independent customer-facing surfaces:
+  
+  - `dashboardForm`'s `helpText` — `Grid gap (Tailwind units)` — rendered verbatim in
+    the Studio property panel, which is spec-driven and feeds this form straight into
+    the generic form renderer.
+  - `DashboardSchema.gap`'s `.describe()` — `Grid gap in Tailwind spacing units` —
+    rendered as this field's row in the published reference page
+    `content/docs/references/ui/dashboard.mdx`. The reference corpus renders
+    `.describe()`, never `helpText`.
+  
+  Both now read **Space between widgets, in steps of 0.25rem (4 = 1rem)**: what the
+  author decides, plus the magnitude, stated in a CSS unit instead of a framework's
+  scale. The magnitude had to survive the rewrite rather than be dropped with the
+  framework name — the number is a spacing step, so `4` means `1rem` and not `4px`,
+  and an author who lost that would come away knowing less than before.
+  
+  The step size is stated as measured rather than inferred: the dashboard renderer
+  sets the grid gap as an inline style computed from this key, so every accepted
+  value is linear and one step is exactly `0.25rem`. "Tailwind units" was doubly
+  wrong — it named an implementation dependency, and it named one the consumer of
+  this key does not have.
+  
+  **No schema change.** `gap` stays `z.number().int().min(0).optional()` and accepts
+  exactly what it accepted before; nothing is added to or removed from any public
+  surface. `columns` is deliberately untouched on both of its producer lines —
+  `12` is an author-visible fact about the grid being laid out, not a framework
+  detail — and this is one field's two strings, not a sweep for framework words.
+  
+  The `en` metadata-forms translation bundle is a mechanical copy of the form source,
+  so it is regenerated to match. Translated locales are not touched: regeneration
+  fills gaps only and never overwrites an existing leaf.
+- cbca47d: fix(platform-objects): the es-ES and ja-JP `dashboard.gap` help text says what its source now says
+  
+  `metadataForms.dashboard.fields.gap.helpText` read `Separación de cuadrícula (unidades
+  Tailwind)` in es-ES and 「グリッド間隔（Tailwind 単位）」 in ja-JP. Both were faithful
+  translations of the source they were extracted against, `Grid gap (Tailwind units)` — but
+  that source has since been rewritten to `Space between widgets, in steps of 0.25rem
+  (4 = 1rem)`, which deliberately drops the CSS framework unit an app author never chose and
+  cannot act on, and adds the magnitude the author can size a dashboard with.
+  
+  Both leaves kept the retired vocabulary and never gained the magnitude, because bundle
+  merge fills gaps only: a present-but-stale leaf is not a gap, so no amount of
+  re-extraction corrects it. They now read `Espacio entre widgets, en incrementos de 0.25rem
+  (4 = 1rem)` and 「ウィジェット間の間隔、0.25rem 刻み（4 = 1rem）」 — the grid framing is gone
+  exactly as it is upstream, `widgets` / 「ウィジェット」 is the word each bundle already uses
+  for dashboard widgets, and the conversion is carried so a Spanish- or Japanese-reading
+  author can size `gap` without reading the English.
+  
+  Two leaves. `columns` is unchanged upstream, so `Columnas de cuadrícula (predeterminado
+  12)` and 「グリッド列（既定 12）」 stay accurate, and the other 13 source-derived prose leaves
+  of this subtree (5 section descriptions plus 8 further field help texts) were read against
+  the current English and are accurate in both locales.
+- e9fcd6b: fix(platform-objects): the dashboard metadata-form bundles follow the `refreshIntervalSeconds` rename (#14478)
+  
+  The `metadataForms.dashboard` translation bundles key the auto-refresh field as
+  `refreshIntervalSeconds`, following the `@objectstack/spec` rename of the
+  authored key. Regenerated with `node scripts/check-i18n-bundles.mjs --write`; the
+  hand-written `zh-CN` / `ja-JP` / `es-ES` label and help text were carried across
+  the rename unchanged, because the field still means what it meant and each help
+  text already named the unit.
+- 2bb0614: fix(platform-objects): `sys_email.error` field help now covers pre-delivery rejections, not only transport failures
+  
+  `sys_email.error` was declared as *"Transport error message when status=failed"*.
+  Since `EmailService.recordRejectedMessage` landed, the same column also carries
+  the reason a message was rejected by `normalizeMessage` **before** it reached a
+  transport (an unsendable `from`, no recipient, no subject, no body) — those rows
+  are written with `status: 'failed'` too, prefixed `rejected before delivery: `.
+  
+  Nothing was misleading in the *data*: the row prefixes its own reason, so an
+  operator reading a failed row is never sent chasing an SMTP host for a message
+  that never reached one. What was stale was the field's declared `description`,
+  which Studio surfaces as the field's help text — it named only the transport
+  case, narrower than what the column has held since that change landed.
+  
+  The description now reads: *"Why the message failed — a transport error, or the
+  validation that rejected it before delivery."* It stays true under both row
+  shapes and deliberately does not name the row's own `rejected before delivery:`
+  prefix, so it will not go stale again if that prefix's wording changes.
+- b3820c3: `sys_email.highlightFields` names the recipient column that exists, so the platform's own email log stops rendering one column short (#15629)
+  
+  The list read `['subject', 'to', 'status', 'sent_at']`. Three of those four resolve; `to` does not — `sys_email`'s recipient column is `to_addresses`. It now reads `['subject', 'to_addresses', 'status', 'sent_at']`, and nothing else about the object moved.
+  
+  `highlightFields` is the object's ordered "most important fields" pointer (ADR-0085): it drives the default list columns, record cards, previews and the detail highlight strip. Every consumer **silently skips** an entry it cannot resolve — nothing throws and nothing logs — so each of those surfaces rendered one field short, and the field missing from the platform's own outbound-email log was the recipient.
+  
+  There was a second, louder consequence that nobody could reach by accident. Since `object-field-ref-unknown` crossed onto the object write door (#15254), this body could not be republished through `PUT /api/v1/meta/object` or a package publish: the door answers `422 INVALID_METADATA`. `sys_email` reaches the runtime as a code-shipped registry object instead — `EmailServicePlugin` hands it to the manifest service, a path that runs no authoring gate — so boot was never affected and no deployment was failing. It was a trap laid for whoever next edited the object through a door rather than the file.
+  
+  `sys-email.highlight-fields-resolve.test.ts` pins it through that real door rather than by comparing the array against `Object.keys(fields)`: it runs `runRuntimeAuthoringRules({ type: 'object' })` over the shipped declaration with the audit module's other objects as resolution context, and a control case restores the old entry and requires the same call to refuse it — so a green result means the door read this object and accepted it, never that nothing looked.
+- 021a735: fix(platform-objects): the zh-CN `dashboard.gap` help text says what its source now says
+  
+  `metadataForms.dashboard.fields.gap.helpText` in `zh-CN.metadata-forms.generated.ts`
+  read 「栅格间距（Tailwind 单位）」. That was a faithful translation of the source it was
+  extracted against, `Grid gap (Tailwind units)` — but the source has since been rewritten
+  to `Space between widgets, in steps of 0.25rem (4 = 1rem)`, which deliberately drops the
+  CSS framework unit an app author never chose and cannot act on, and adds the magnitude
+  the author can size a dashboard with.
+  
+  The leaf kept the retired vocabulary and never gained the magnitude, because bundle merge
+  fills gaps only: a present-but-stale leaf is not a gap, so no amount of re-extraction
+  corrects it. It now reads 「组件之间的间距，每级 0.25rem（4 = 1rem）」 — `widgets` is
+  「组件」 as it is everywhere else in this bundle, the grid framing is gone exactly as it is
+  upstream, and the conversion is carried so a zh author can size `gap` without reading the
+  English.
+  
+  One leaf. `columns` is unchanged upstream, so 「栅格列数（默认 12）」 stays accurate, and
+  the other five leaves of this subtree were corrected separately.
+- 7bdb163: fix(platform-objects): 21 zh-CN metadata-form leaves say what their source says
+  
+  `zh-CN.metadata-forms.generated.ts` carries 615 leaves that differ from `en` and hold no
+  digest in `zh-CN.source-hashes.generated.ts` — LEGACY-TRUSTED values carried in from a
+  pre-consolidation hand vocabulary (`e0077ea36` deleted a 746-line
+  `src/metadata-translations/zh-CN.ts` and imported its strings) and never reconciled
+  against the English the same commit range seeded. A census of all 613 (as the population
+  then stood) found 26 that assert something the source does not, or drop a distinct concept
+  the source names. Five of the 26 — the whole `dashboard` subtree — landed in `9f57f1e31`.
+  These are the remaining 21.
+  
+  They are not stale fills and no gate can see them: a stale fill is a byte copy of a
+  previous source revision, detectable by cross-locale agreement or a recorded digest, and
+  these are neither. Nor does re-extraction correct them — bundle merge fills gaps only, and
+  a present-but-wrong leaf is not a gap.
+  
+  Three defect kinds, all decided against this bundle's own usage:
+  
+  - **Asserts an input that does not exist.** `skill.sections.triggers.description` promised
+    「触发关键词」 for a section holding only `triggerConditions` (`triggerPhrases` was
+    removed with the key); `email_template.fields.variables.helpText` promised a per-variable
+    「默认值」 that `EmailTemplateDefinitionVariableSchema` does not declare;
+    `action.sections.advanced.description` promised 「批量」 after `bulkEnabled` was removed
+    from that section.
+  - **Names the wrong technology.** `action.fields.body.helpText` said the body is
+    「JavaScript 代码」; an L1 expression is not JavaScript. It now reads
+    「L1 表达式或 L2 沙箱 JS 体」 — verbatim the sibling `hook.fields.body.helpText`, which
+    translates the identical source sentence correctly.
+  - **Drops a distinct concept the source names.** `object.fields.isSystem.helpText` dropped
+    「共享默认为公开」; `view.fields.filter.helpText` reduced a sentence about the shared
+    visual builder to 「筛选规则」; `permission.sections.identity.description` dropped both
+    sentences explaining how permission sets stack on profiles.
+  
+  zh-CN only: es-ES and ja-JP are untouched here. The 18 looser paraphrases the census
+  excluded are also untouched.
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/spec@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

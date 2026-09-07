@@ -1,5 +1,153 @@
 # @objectstack/service-storage
 
+## 17.4.0
+
+### Patch Changes
+
+- ebb5550: fix(service-storage): put the test layer in front of tsc, and repair what it was hiding (#15050)
+  
+  `packages/services/service-storage` had **no `typecheck` script at all** — its
+  scripts were `build` and `test` — so no tsc program anywhere read this
+  package's test layer, and its errors were carried instead as a 51-error DEBT
+  entry in `scripts/check-type-check-coverage.mjs`. Gives it the #14062 /
+  #14181 "checked test zone" shape: a sibling `tsconfig.test.json` (module
+  semantics only — `esnext` / `bundler` / `lib: ES2022` — matching how vitest
+  actually executes these files; strictness inherited and untouched) plus a
+  `tsconfig.scripts.json` for `scripts/i18n-extract.config.ts` (the ninth
+  instance of #11351, previously excluded from that ledger only because this
+  package had no `typecheck` script to hang it on), both named by a new
+  `typecheck` script.
+  
+  Measured before repair: 51 errors under BUILD semantics (`tsc --noEmit -p
+  tsconfig.json`, which already includes the tests — matching the DEBT entry's
+  recorded number exactly), 10 under the split. Unlike `service-cluster`
+  (#14181), this package's BUILD reading was *not* already clean, so both
+  programs needed genuine repair, not just the test-only split: 23 `TS2835`
+  (relative imports missing their `.js` extension, required under BUILD's
+  NodeNext resolution) were fixed by *adding* the extension — which resolves
+  correctly under both NodeNext and the split's bundler mode — and clearing
+  that also cleared all 15 `TS7006` "implicitly any" as a downstream cascade
+  from the same unresolved imports (the shape `@objectstack/core` reported at
+  98 → 4). The remaining 3 `TS2550` (`Array.prototype.at` needing `lib`
+  es2022) are rewritten to indexed access rather than widening the shared
+  BUILD `tsconfig.json`. The 8 code-tier errors (`TS2339` × 4 — a test
+  helper's object-spread dropped its `Record<string, unknown>` index
+  signature, fixed with an explicit return-shape annotation; `TS2347` × 4 — a
+  fake `ctx: any`'s `getService<T>(...)` calls converted to `getService(...)
+  as T`, the pattern one call site in the same file had already adopted for
+  exactly this reason) are genuine test-file fixes. Both readings now agree at
+  0/0 — the same result `service-cluster` reported, reached by a longer road.
+  
+  The package's DEBT entry (51 errors) is **deleted**, not lowered — the
+  graduation this ratchet's invariant requires. No `test-typecheck-debt.json`
+  is added: residue is 0, so none is owed (#5286, maintainer-only to open).
+  `check:type-source-resolution` went red from onboarding the two new
+  programs (the documented onboarding-limb case): a registry entry is added
+  rather than `paths`, measured both ways — `paths` takes this package's test
+  layer from 0 errors to 306, all in other packages' source.
+  
+  No runtime code changes: `src/**` excluding tests is byte-identical, so no
+  shipped behaviour moves. The `patch` level reflects the published
+  `package.json` gaining `typecheck` / `check:test-typecheck` scripts and a
+  `tsx` devDependency.
+- b8c82de: The storage download door derives the tenancy posture before resolving the caller
+  
+  `buildFileReadAuthorizer` resolved every gated download with `resolveAuthzContext({ ql: engine, headers, getSession })` and supplied no `tenancyPosture`. Both posture-conditional API-key refusals are gated on the caller supplying one — `organization_required` and `organization_membership_ended` — so neither ran at this door. Its headers come from the real request, so `x-api-key` is accepted, and an API key's tenant is `sys_api_key.active_organization_id` copied verbatim: the caller's own stored claim, never vetted against current membership. Under a wall-enforcing posture a key stamped with an organization its owner had left therefore authenticated for downloads and was judged by the ownership and record-reachability checks — checks evaluated for a principal the wall should have refused at the door.
+  
+  The posture is now read off the kernel's `tenancy` service, per download, and classified rather than swallowed: a service that was never registered stays quiet (`undefined` — the supported no-tenancy composition, unchanged behaviour), while one that was registered and failed to build raises `AuthzStoreUnavailableError` instead of degrading to "no posture". Under `isolated` and `group` an ex-member's stamped key is now refused and no download capability is minted; an organization-less key is refused under `isolated` and stays admitted under `group`, whose union scope makes it legitimate. Under `single` nothing changes. Patch rather than minor: no accept set widens, and a declared guard returns to enforced.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

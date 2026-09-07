@@ -1,5 +1,182 @@
 # @objectstack/service-settings
 
+## 17.4.0
+
+### Minor Changes
+
+- 6b8c677: fix(service-settings): the settings door answers from the ONE shared value-domain predicate, and refuses a non-member with `value_domain` (#15162)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves: no spec key, export, config field or stored metadata changes spelling or shape, no schema in `packages/spec` changes, and `objectstack migrate meta` has nothing to rewrite. What moves is the `code` value one `FieldError` carries for one condition — the settings save door's refusal of a value outside a declared `valueDomain` — which now spells the standard-catalog member `value_domain` that the field-level half of the same ruling added. The consumer note below is guidance for a client branching on that code; it prescribes no rewrite of any authored artifact. -->
+  
+  **BREAKING** for a client that branches on the refusal code. Landing inside
+  the launch window, so it ships as `minor` (the lockstep convention forbids
+  `major`); the banner is the carrier, not the bump.
+  
+  The services half of the maintainer's ruling of 2026-09-02: **one closed
+  vocabulary and one membership predicate shared by settings specifiers and
+  object fields**. The spec half declared them in `@objectstack/spec/shared`;
+  this package had been carrying a second copy of all three definitions since
+  `Specifier.valueDomain` shipped. The copies are deleted and the door now asks
+  `isValueDomainMember` — the call the record write path will make when the
+  engine half of the same ruling lands (PR #15316, still open).
+  
+  **The wire change**, measured on `PUT /api/settings/localization` with
+  `{"timezone": "Mars/Olympus"}`, base `a56baa2bd` vs this branch:
+  
+  | | before | after |
+  |:--|:--|:--|
+  | `fields[0].code` | `invalid_value` | `value_domain` |
+  | `fields[0].message` | `Default timezone must be a valid IANA time zone identifier (e.g. 'Europe/Zurich'). Received 'Mars/Olympus'.` | `Default timezone must be a valid IANA time zone identifier, e.g. Europe/Zurich (got "Mars/Olympus")` |
+  
+  Everything else is byte-identical: HTTP 400, the envelope code
+  `SETTINGS_VALIDATION`, `field`, `label`, `constraint: { valueDomain: … }` and
+  the echoed `value`. A client that reads `constraint.valueDomain` — the
+  machine-readable half ADR-0114 asks it to read — is unaffected. A client that
+  branches on `code === 'invalid_value'` for a domain breach must move to
+  `value_domain`.
+  
+  Why the code moved: ADR-0114's rule is that the code is the **constraint's own
+  name**, the way `max_length` names the bound it breached. This branch took
+  `invalid_value` — the catalog's slot for "rejected for a reason no other
+  member names" — only while no member named a standard-domain breach. The
+  field-level card's spec half added one, so the slot no longer applies. The
+  message now renders the published catalog template
+  `value_domain_<domain>` in `en` — the catalog the record write path will render
+  from once PR #15316 lands, so the two doors under one ruling will describe one
+  domain in one set of words instead of each composing its own sentence. For an `encrypted` specifier the offending value is still never
+  echoed: the template's value placeholder takes the same mask the REST boundary
+  uses (`fields[0].value` stays absent, as before).
+  
+  **No value changes verdict.** The accept sets were measured, not assumed, on
+  the repo's Node 22 baseline (v22.22.2):
+  
+  - `iso_3166_alpha2` — the two 249-code lists diffed mechanically before either
+    was deleted: identical, including order; symmetric difference 0.
+  - `iso_4217_currency` — this one changes DEFINITION: a run-time
+    `Intl.supportedValuesOf('currency')` probe becomes the key set of the
+    checked-in CLDR snapshot `CURRENCY_FRACTION_DIGITS`. 162 codes vs 162,
+    symmetric difference 0 in both directions (`CHF` in both, `XYZ` in neither).
+    The behaviour that changes is that the verdict no longer varies with the
+    host's ICU build — the direction the shared module argues for. A door-level
+    test now re-measures it: every code the run-time probe admits must still be
+    admitted.
+  - `iana_time_zone` — the identical `Intl.DateTimeFormat` probe on both sides,
+    unmoved.
+  
+  A ratchet pin (`value-domains.shared-predicate.pin.test.ts`) reddens if any
+  non-test source in this package re-acquires a membership table, an `Intl`
+  enumeration probe, or a second caller of the predicate.
+
+### Patch Changes
+
+- 2024eca: Fix: the settings REST doors now supply the effective tenancy posture to the shared authorization resolver, so both posture-conditional API-key refusals apply here — and the tenant this seam hands onward is a vetted one.
+  
+  Under a wall-enforcing posture (`isolated`), an API key stamped with an organization its owner has left is refused, as is a key carrying no organization at all. Previously neither guard ran at this door, because both are conditional on a posture the caller supplies and this seam supplied none — the key's tenant was its own stored `active_organization_id`, never checked against current membership. This gate does not merely admit the principal: it returns that tenant onward as the resolved settings tenant, so an unvetted claim became the verdict the read/write path acted on. A browser session whose stored active organization is no longer backed by a membership now has that claim dropped here too, rather than passed through.
+  
+  The posture is read from the kernel's `tenancy` service, so it is the posture in force rather than the one requested through `OS_TENANCY_POSTURE`. A deployment that registers no `tenancy` service is unchanged: there is no wall there, and no posture-conditional refusal applies. A `tenancy` service that is registered and fails to build is an outage rather than a quiet admission.
+- b398ad2: **BREAKING (behaviour):** a static `readonly` field is now stripped from a **non-system caller's INSERT payload inside `engine.insert`**, exactly as it already was on `engine.update`. A non-system create that used to write a read-only column now has that column dropped, reported through `onFieldsDropped` / `droppedFields`, logged at `warn`, and refused outright under `strictReadonlyWrites`. Seeding a read-only column at create time is a **system** act — use `context.isSystem`, a flow's `runAs: 'system'`, a system hook or a seed.
+  
+  Until now the create-side strip lived only at the DataProtocol ingress (`stripReadonlyForInsert` in `@objectstack/metadata-protocol`), so `readonly` meant one thing on insert and another on update: every external REST/GraphQL/MCP create was stripped, while a caller reaching `engine.insert` directly — the automation engine's `create_record` among them — wrote the column with no refusal, no `WARN` and no dropped-field event.
+  
+  - `stripReadonlyForInsert` and its five call sites in `@objectstack/metadata-protocol` are **deleted**, not kept as a second implementation; every create face — `createData`, `cloneData`, `createManyData`, `insertManyData`, and `batchData`'s `create` rows and both arms of `upsert` that create — now hands the caller's payload to the engine whole, and every face whose response carries `droppedFields` (`createData`, `createManyData`, `insertManyData`, every `batchData` row that created) reports the engine's own verdict there, so `droppedFields` says the same thing at each of those seams. `cloneData` forwards whole but reports nothing on the wire: its response contract (`CloneDataResponseSchema`, declared as produced) has no `droppedFields` member, so a clone that carried or overrode a read-only column is stripped and logged at `warn` but not reported in the 201 body — adding that key is a spec change, not part of this one.
+  - `create_record` (`@objectstack/service-automation`) starts receiving readonly drops on the `onFieldsDropped` channel it has been wired for since #3407 — a flow without `runAs: 'system'` that seeds a read-only column now reports a node warning and `output.droppedFields` instead of a clean success. That package's own code changes only in prose; the traffic is new, the surface is not.
+  - Unchanged, deliberately: `isSystem` is still the exemption; `preserveAudit` is still an UPDATE-path exemption and a create that asks for it is told so out loud; runtime-owned types (`autonumber`) keep their own pass and their own wider whitelist; platform objects (`managedBy`, the `sys_` namespace) are still left to their own field-write guards; `readonlyWhen` still has no create-side strip. A stripped key's `defaultValue` is re-derived, so a forged `approval_status` becomes `draft` rather than NULL.
+  - `@objectstack/service-settings` is `patch`: prose only — the `upsertRow` docblock, which ships in the package's `.d.ts`, no longer states the superseded INSERT exemption; it names the platform-object carve-out that actually keeps a `sys_setting` insert outside the strip.
+  - `@objectstack/lint` and `@objectstack/spec` are `patch`: both change prose only. All three lint rules — `validate-readonly-action-writes`, `validate-readonly-flow-writes`, `validate-readonly-hook-writes` — drop the superseded "INSERT is exempt" premise from their docblocks and from the justification of their green control cases; the two non-elevated rules now name their `insert`/`create` silence as a scan gap rather than an exemption (the action rule additionally records its now-reasoned refusal as a module-local constant that its `index` does not re-export, so no public surface widens). The spec change is prose only: one docblock sentence that named the deleted function, the `strictReadonlyWrites` contract docblock (which now states what strict refuses on insert), and the `readonly` liveness-ledger verdict, whose evidence pointer named the deleted ingress strip.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The BREAKING here is a WRITE-PATH BEHAVIOUR change, not a retirement of an authorable or published surface, so there is nothing for the ledger to carry to `objectstack migrate meta`, `spec-changes.json` or the upgrade guide: no spec property, metadata key, accepted value or exported symbol disappears, and this body prescribes no FROM/TO migration. The remedy for an affected caller is to declare the write trusted (`context.isSystem` / `runAs: 'system'`), which is application code, not a metadata migration. The obvious retirement candidate is a non-question in the same direction: `stripReadonlyForInsert` was a bare module-private `function` in `packages/metadata-protocol/src/protocol.ts`, absent from that package's `index.ts` (the only path its `exports` map offers), so no consumer could name it. -->
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

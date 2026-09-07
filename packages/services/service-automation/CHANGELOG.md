@@ -1,5 +1,481 @@
 # @objectstack/service-automation
 
+## 17.4.0
+
+### Minor Changes
+
+- 954cb0b: feat(service-automation): an `assignment` value may be a CEL envelope — evaluated at run time, validated at `registerFlow`, `objectstack validate` and the runtime publish gate (#15137, the executor half of #14149)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-typed: the `assignments` map and every value form it accepted still parse. The only newly refused shape is a malformed CEL value envelope, a spelling declared one day earlier in #15113 and offered by no authoring surface before it, so `objectstack migrate meta` has nothing to rewrite and this changeset carries no rewrite instructions for a consumer to follow. -->
+  
+  **BREAKING** in the accept-set sense, landing in the launch window as `minor`
+  (the lockstep convention; the level also follows the 2026-09-04 bump ruling —
+  this adds `AutomationEngine.evaluateValueEnvelope` to a published surface, and an
+  additive widening is at least `minor`). No ADR-0087 conversion: no authorable key
+  is renamed or retired, and the shape this refuses was never a shape any surface
+  offered.
+  
+  The maintainer's 2026-09-02 ruling on #14149 made an assignment value able to be
+  a CEL **value** expression, so the declared stdlib (`joinNonEmpty`, `map`, `size`
+  …) is finally reachable from metadata — until now CEL was only ever asked for a
+  boolean. The spec half landed the contract (PR #15113); this is the half that
+  makes it do something.
+  
+  ```yaml
+  # before: written into the variable verbatim, and rendered by `notify` as
+  #         {"dialect":"cel","source":"joinNonEmpty(...)"}
+  # now:    evaluated — digest is "Renewal due\nInvoice overdue"
+  assignments:
+    digest: { dialect: cel, source: 'joinNonEmpty(rows.map(r, r.subject), "\n")' }
+  ```
+  
+  - **Evaluated at run time.** The built-in `assignment` executor evaluates a
+    `value`-role envelope with the expression engine and assigns the result, in the
+    same CEL scope a flow predicate is evaluated in (one shared scope builder, so a
+    predicate and a value expression cannot disagree about what `rows` means). A
+    plain string keeps today's `{token}` interpolation, and every other literal is
+    still assigned as data.
+  - **Refused at three doors.** A malformed envelope now stops the flow registering
+    (`registerFlow` throws, the severity a malformed predicate gets) and surfaces as
+    a located `error` finding naming the node and the author's own variable —
+    `config.assignments.digest` — both at `objectstack validate` and at the runtime
+    publish gate a Studio / REST / MCP flow write goes through
+    (`validateStackExpressions` is registered `CLI_AND_RUNTIME`, `runtimeTypes:
+    ['flow']`). Malformed is a composition, not a fixed list: whatever
+    `AssignmentValueSchema` refuses in the envelope's shape — among them a missing,
+    empty or non-string `source`, a dialect other than `cel`, a non-object `meta` —
+    and then CEL that does not parse. All three doors derive that set from the same
+    two published validators, so none refuses a shape the executor would have run,
+    and a registered flow never faults for a shape those validators judge malformed.
+    Two shapes sit outside what either validator can judge — an `ast`-only envelope
+    and a whitespace-only `source` (it passes `min(1)` and reads as "not authored"
+    to the validator, while the CEL engine parses it untrimmed) — and those fault
+    loudly at run time rather than assigning a value. Both are pinned and tracked in
+    #15430.
+  - **Only the canonical map.** The ledger declares `assignment.assignments.*` and
+    nothing else, so the two legacy shapes the executor still normalizes — the
+    `assignments: [{ variable, value }]` array and the bare `{ <variable>: <value> }`
+    config — keep every meaning they had, envelope-shaped values included.
+    `AssignmentConfigSchema` is deliberately NOT wired into `parseNodeConfig` for the
+    array form: refusing it would break flows that register today, and that refusal
+    is a maintainer ruling rather than a lane's call (#15137 ask 3).
+  
+  **What changes silently, and how far it reaches.** A flow that today authors an
+  envelope-shaped object *as data* in the canonical `assignments` map now evaluates
+  it — no error on either side, a different value. The discriminator is the spec's
+  own `isExpressionEnvelopeShaped`: a plain object naming a **string** `dialect`,
+  in the declared map only. Data that names no `dialect`, names a non-string one,
+  nests the envelope one level down, or sits in either legacy shape is untouched
+  and byte-identical. The remaining overlap — a well-formed
+  `{ dialect: 'cel', source: … }` written as data in the canonical map — is exactly
+  the spelling the ruling reinterprets; every near-miss the two validators can
+  judge now refuses loudly at registration instead of changing value in silence.
+- d30ccb9: A contained per-iteration failure is now visible at run level, attributed to its iteration, and bound to its row.
+  
+  `loop { body: [ try_catch { try, catch } ] }` is the containment spelling for a per-iteration failure that must not end the sweep (there is deliberately no `loop.config.onIterationError` key). Containment already worked — the failure was caught, the loop went on and the run completed — but nothing said what it had contained: a sweep that lost two rows out of five reported `status=completed selected=5 acted=9 skipped=0` and was indistinguishable from one that lost none. The failure was in the step log and in `nodes[].failures`; no run-level number carried it, the failing step named no row, and `$error` bound no row identity.
+  
+  Four changes populate the contract `@objectstack/spec` already declares:
+  
+  - **`FlowRunSummary.failed`** — `summarizeRun` now folds `failed = Σ nodes[].failures` over the per-node array it publishes, so the run-level count can never disagree with the breakdown it summarizes. It counts every node execution that failed, contained or fatal; on a run that completed, all of them were contained.
+  - **`failed=N` on the run summary line** — `formatRunSummaryLine` prints the token whenever the count is present, `failed=0` included. That is the opposite of the `unmeasured` rule beside it and deliberate: `unmeasured` qualifies `acted`, while `failed` answers a question a completed run's line otherwise cannot be asked at all. Read `failed=0` precisely: **no node execution of this run failed**. It is the node fold and only that, so a `subflow` child's own contained failures stay on the child's summary rather than rolling up the way `acted` does — see #15617, where the declaration's two paragraphs are being reconciled.
+  - **Iteration through `try_catch`** — a step that ran in a `try` or `catch` region inside a loop body now carries the enclosing loop's `iteration`, with `regionKind` still `try` / `catch`. The step says which region ran it *and* which row it ran for. (`parallel` branch tagging was unchanged by *this* change; the entry below retires the `iteration` overload it left standing.)
+  - **`$error` binds the row** — the value bound to `errorVariable` (default `$error`) is the declared `TryCatchErrorValue`: `nodeId` and `message` as before, plus `iteration` and the loop's current `item` when the failure happened inside a loop body. A `subflow` / `map` child run has its own variable scope and therefore binds neither, so a parent's row identity never leaks into a child's `$error`.
+  
+  **`failed` absent means "not tracked", never `0`.** Runs recorded before this change keep it absent — no migration and no default, the same convention `unmeasured` carries. Defaulting it to zero would tell an operator "nothing failed" about a run nobody measured. Absent, the summary line prints no `failed=` token at all; present-and-zero prints `failed=0`. The count rides in the persisted `summary_json`, including on a summary compacted past the size cap, where the per-node `failures` it folds are exactly what gets dropped.
+- 56fe8c2: A flow predicate authored as a CEL envelope is now refused at build time, instead of running unread by either validator.
+  
+  A `predicate`-role expression slot holds **bare CEL text** — `DecisionConditionSchema.expression` is declared `z.string()`, and so is a screen field's `visibleWhen`. An author who instead wrote the `{ dialect, source }` expression *envelope* there reached a shape nothing could see: a flow node's `config` is an open `z.record(z.unknown())` that no Zod schema is parsed against, the unknown-key walk exempts the schemaless node types on purpose (`decision` publishes no descriptor `configSchema`), and the expression ledger's `predicate` arm skipped every non-string as "a type violation for the schema pass to report" — a schema pass that, for those node types, does not exist. `registerFlow` accepted the flow, `objectstack validate` reported nothing, and the evaluator was the only layer that ever read the predicate.
+  
+  - `resolveFlowNodeExpressions` now emits a non-string sitting in a `predicate` slot, and the new `predicateSlotRefusal` / `PREDICATE_SLOT_STRING_REFUSAL` say why it is refused — one notion, derived once, read by both validators so build time and author time cannot disagree about the shape. `flow-template` slots keep the old rule: no validator implements that dialect, so a finding there is one nobody could judge.
+  - `registerFlow` throws, naming the node, the slot and the index, and attributing the finding to the envelope's own `source`. `objectstack validate` reports the same refusal as a located `error`.
+  
+  **String predicates are untouched, deliberately.** A whitespace-only string still means "not authored" on both sides, exactly as before; what a non-empty string *says* is still judged by `validateExpression('predicate', …)`, brace trap and all. Only the shape moved.
+  
+  An app that authored an envelope in one of these slots now fails to register with a message naming the slot; the fix is to write the predicate as bare CEL text (`record.rating >= 4`). The `{ dialect, source }` envelope remains the `value`-role spelling, on the `assignment` node's `assignments` map.
+- 65ec530: The run step log tells a `parallel` branch apart from a `loop` row: `iteration` is the enclosing loop's iteration, always, and the branch index moves to `branch`.
+  
+  The engine half of the ruling `@objectstack/spec` already declares (`ExecutionStepLogSchema.branch`). One field used to hold both meanings, told apart only by reading `regionKind` first, and `runRegion`'s tagger let the innermost region win outright — it skipped any step a nested region had already tagged. Together those two facts made `loop { body: [ parallel { branches } ] }` unreadable: every branch step recorded its branch index and **no** step of that branch recorded the row it ran for, so a per-row failure inside a branch was attributable to a branch and never to a row. That is the shape a fan-out inside a sweep has, and the one an operator most needs to read.
+  
+  - **`branch` is written, and only inside a parallel branch.** `parallel` tags its branch regions with `branch: i` instead of `iteration: i`. A step outside a parallel branch carries no `branch` at all.
+  - **`iteration` is single-valued and carried through nesting.** `runRegion`'s tagger now splits what "innermost wins" governs. The IDENTITY fields — `parentNodeId`, `regionKind`, `retryAttempt` — answer *which region ran this step* and still belong to the innermost region outright; an enclosing region never relabels them. The INDEX fields — `iteration` and `branch` — answer *which pass of which region*, and nested regions contribute different ones that are both true of the same step, so an enclosing region now fills the index the inner region left undefined instead of being turned away at the door. A branch step inside a loop body therefore carries **both**: the row on `iteration`, the branch on `branch`.
+  - **`try` / `catch` inside a loop is unchanged**, deliberately. Such a region has no index of its own, so its steps keep carrying the enclosing loop's `iteration` with `regionKind` still naming the region, and gain no `branch`. It is the control arm of this change, not a subject of it.
+  - **Nested loops are unchanged too.** "Fill only what is undefined" still holds in both halves, so for `loop { loop }` the inner loop's `iteration` stands.
+  
+  `StepLogEntry` (exported) gains `branch?: number`. It is not derived from the spec type, and is now held equal to it by a type-level pin rather than by a comment claiming they agree.
+  
+  **Reading a run recorded before this change.** `iteration` on a `regionKind: 'parallel-branch'` step written by an older engine is a BRANCH index, not a row — the same absent-versus-zero care the run summary's other counters need. Nothing is migrated and nothing is defaulted: a step with no `branch` key is either a pre-change record or a step that ran outside a parallel branch, and `regionKind` is what tells those apart. Bumped `minor` rather than `major` to match the contract half of the same ruling, which shipped its declaration change that way.
+- b31ebfe: A screen flow can now be completed by a headless caller, and `list_actions` publishes its input names.
+  
+  An `ai.exposed` action whose target is a **screen flow** could be started over MCP and never finished. `run_action` seeded the flow's `isInput` variables from the caller's `params` — correctly — and the screen node suspended anyway, because the only inputs to that decision were "does the node declare fields" and the author's `waitForInput` flag. The MCP tool set has no verb to resume a parked run, so `ai.exposed` meant "the agent can invoke this", not "the agent can complete this". The fallback an agent took instead — re-implementing the flow's tail with `create_record` + `update_record` — bypasses whatever business rules the flow encapsulated.
+  
+  Two independent halves:
+  
+  - **A screen the caller already answered no longer pauses.** When the caller named at least one of the screen's own fields and every `required` one has a value from that caller, there is nothing left to collect and the run continues. Optional fields may come from anywhere (including a declared `defaultValue`).
+  - **`list_actions` publishes a flow action's inputs.** A `type: 'flow'` action's contract is its target flow's `isInput` variables, not `action.params`; those are now surfaced in declaration order with the `label`, `type`, `required` and select `options` of the screen field that collects each one. An action that declares its own `params[]` keeps them — the flow is read only where the action declared nothing.
+  
+  **Interactive runs are unchanged.** A console launch carries the record it was launched from and that record's id — never a value for the screen's own fields — so the form renders exactly as before. That covers both shapes a launch actually supplies: a subject-record column named like one of the screen's fields, and a field named like one of the row-id keys the dispatch doors seed (`recordId`, the camelCase `<object>Id` alias, an action's declared `recordIdParam`), none of which counts as the caller answering the screen.
+  
+  **Accepted cost, precisely:** a field is never treated as caller-supplied when it is named `recordId` or `<object>Id`, or when its value equals what the bag carries under `recordId`, `<object>Id`, or `record.id` (normally the launched row's id); a required such field is therefore always collected interactively, an optional one simply does not count as answering the screen. Two screens never take the new path, because they declare nothing to satisfy and must not be answered vacuously: a message-only screen (no fields), and any screen whose author wrote `waitForInput: true`. `waitForInput: false` remains the wrong tool for the headless case — it skips the form for interactive users too.
+  
+  ⚠️ One known gap, on the trigger-record leg only: a run continued from the **durable** suspended-run store judges against a JSON copy of its context, so a later wizard screen whose field collides with a **non-scalar** column (an array or object) of the trigger record can read as caller-supplied and be skipped. Scalar columns are unaffected, as is any run that has not been through a pause.
+  
+  ⚠️ This does **not** make every screen flow completable over MCP. A call that omits the inputs still parks, and nothing on that surface can resume it; that half is a resume verb and is not this change.
+- 5964124: feat(automation): a resume that consumed the pause and then failed downstream answers `status: 'stranded'` (#13937)
+  
+  The services half of the #13937 shape-4 ruling (maintainer 2026-09-01):
+  `resumeInternal`'s consumption order is kept — the suspension is consumed
+  before downstream nodes run, which is what buys exactly-once across a crash —
+  and the state that order leaves behind when a downstream node throws now
+  carries the platform-level name #14384 put on the contract.
+  
+  `AutomationEngine.resume()` (and every engine continuation that reaches the
+  same catch arm) returns `{ success: false, status: 'stranded', … }` where it
+  returned no `status` at all. Stamped on that one exit only: the pause a
+  durable decision was waiting on is gone, the run is recorded `failed`, and it
+  can be re-armed only by the explicit operator verb
+  `restoreConsumedSuspension` (#13909 slice 2, already published) — never by
+  `resume` (which answers `RUN_NOT_FOUND`) and never automatically. Distinct
+  from `'failed'` on purpose: that one says the run ran and was rejected; this
+  one says a recorded continuation stopped mid-flight and an operator has
+  something to repair. The result's verdict and the restore verb are held to
+  agree by test: a stranded result is exactly a restorable run.
+  
+  Not changed: the run's RECORDED status (the run log, `getRun`, `listRuns`, the
+  durable `sys_automation_run` history row) stays `failed` — that vocabulary is
+  `ExecutionStatus` in `@objectstack/spec`, which the ruling did not widen; the
+  durable discriminator for the condition remains the snapshot the terminal row
+  carries. No resume semantics move for any pausing node type; shapes 2 and 3
+  of the decision stay excluded.
+  
+  Also in this change, under the same ruling's exactly-once guarantee, two
+  repairs to how `restoreConsumedSuspension` finds a stranded run's snapshot:
+  
+  - The durable run-history row of a stranded run now records the PAUSE node in
+    `node_id`. It recorded the node that threw — the run's last step — and the
+    object store read that column back as the snapshot's node, so a restore
+    from the row (after a restart, or on another replica) re-armed the run at
+    the failed node and the next resume skipped it while reporting the run
+    completed. The throwing node stays in the row's step log and `error`.
+    Visible on the Runs surface: `sys_automation_run`'s row title and highlight
+    set are built from `node_id` (`titleFormat '{flow_name} · {node_id}'`), so a
+    stranded run's row now names the PAUSED node — the one an operator can
+    re-arm — where it named the node that threw; ordinary completed / failed
+    rows are unchanged. The `node_id` and `variables_json` field descriptions
+    carry this carve-out, the way `node_type`'s already did.
+  - The verb reads the durable row and its own per-process journal as two
+    witnesses of one strand instead of trusting either alone. The hot copy is
+    preferred when both describe the same pause (it is the verbatim object the
+    failure was journalled from). A row that carries no snapshot is read as
+    "the run moved on" only when this process's own history write landed —
+    the replica that stranded a run used to keep a hot copy that could re-arm
+    the run after another replica had restored, resumed and finished it, and
+    the next resume re-ran every node after the pause. A snapshot the object
+    store could not persist (over its 256 KiB row budget) is now recorded in
+    the row as dropped, with the pause it belonged to, so the replica holding
+    the hot copy still restores and any other replica is refused with a reason
+    that names the budget and the remedy.
+  
+  In-memory and store-less deployments observe no behaviour difference. On the
+  object store, same-replica restores re-arm the pause node on every path, and
+  restores from the row alone do too; restores across replicas of a run that
+  finished elsewhere are refused.
+- 9408b7f: A flow condition that is neither CEL text nor an expression is now refused at build time, instead of being read as an empty condition and answering a silent `false`.
+  
+  `evaluateCondition` derives its source as `typeof expression === 'string' ? expression : (expression?.source ?? '')`. For a value that is neither — a number, a boolean, an array — the read yields `undefined`, the `??` supplies `''`, and the empty-source arm returns **`false`**: the "an unauthored branch must not open" rule, applied to a value that was very much authored. Measured: a `decision` node carrying `config: { condition: 42 }` **registered clean** and executed `success: true` with nothing said at any layer; `{ source: 1 }` did not even get that far and threw a bare `TypeError: exprStr.trim is not a function` out of the validator. `config.condition` is also the key a **start node's trigger gate** is read from, so the same value could gate a whole flow shut forever with no signal to the author.
+  
+  - The new `structuralConditionRefusal` / `STRUCTURAL_CONDITION_SHAPE_REFUSAL` in `@objectstack/spec/automation` are the single shared notion of why, read by both validators so build time and author time cannot disagree about the shape. `registerFlow` throws, naming the node or edge and attributing the finding; `objectstack validate` reports the same refusal as a located `error`.
+  
+  **This is deliberately NOT the `predicate`-slot rule, and the difference is measured.** A ledger `predicate` slot (`decision.conditions[].expression`, a screen field's `visibleWhen`) is declared `z.string()`, so `PREDICATE_SLOT_STRING_REFUSAL` refuses every non-string including an envelope. Neither structural slot is declared that way: `FlowEdgeSchema.condition` is `ExpressionInputSchema`, whose string arm **transforms into** `{ dialect: 'cel', source }` — so after `FlowSchema.parse` every authored edge condition *is* an envelope — and `FlowNodeSchema.config` is an open `z.record` that passes an envelope written at `config.condition` through verbatim, where `evaluateCondition` evaluates it correctly. Both shapes stay accepted here; an envelope with no `dialect`, and an `ast`-carrying one (`ExpressionSchema`'s own `source`-or-`ast` rule), stay accepted too.
+  
+  **Strings are untouched, deliberately.** A whitespace-only condition still means "not authored" and still answers `false` on both sides — consistent behaviour, ruled correct, not a defect. What a non-empty string *says* is still `validateExpression('predicate', …)`'s verdict, brace trap and all. Only the shape moved.
+  
+  An app that authored a number, a boolean, an array or a source-less object in a node or edge `condition` now fails to register with a message naming the site; the fix is to write the condition as bare CEL text (`record.rating >= 4`) or as an expression envelope.
+
+### Patch Changes
+
+- a775510: A run whose nodes all succeeded is no longer reported `stranded`, journalled for repair, or re-armed because its terminal run-history write threw — which made the "repair" re-run every node after the pause.
+  
+  `AutomationEngine.resumeInternal` called `recordLog({ status: 'completed' })` from inside the `try` whose `catch` exists for **node** failures, so a throw out of a history write on a run that had already finished successfully was handled as though a node had thrown. The arm journalled a repair snapshot, stamped `status: 'stranded'`, and answered `success: false`; `restoreConsumedSuspension` then correctly honoured that snapshot and put the pause back, so the next resume drove the downstream nodes a **second** time. The defence that normally prevents a re-armed run from becoming double-runnable reads the durable terminal row first, and on this path the durable terminal row is precisely what failed to land — so it could not fire.
+  
+  Two statements inside `recordLog` reach that `catch`, and both are host-supplied surfaces rather than in-repo ones. `store.recordTerminal` escapes when it throws **synchronously**: the `void write.catch(...)` beneath the call only ever sees a returned promise's rejection, and a store returning a non-thenable makes `write.catch` itself a synchronous `TypeError`. Both stores shipped in this package are `async` methods and so cannot reach it, but `SuspendedRunStore` is an exported, optional-method interface a host may implement. The second statement is the run-summary line `logger.info(...)`, which is on by default (`runSummaryLog: 'info'`) and calls a host-injected `Logger`, so it needs no store at all.
+  
+  - **The completion-path history write is now guarded at its own site**, restoring the invariant that call's own documentation states: a history write must never block or break the run that produced it. `resume` answers the truthful `success: true`, no snapshot is journalled, `restoreConsumedSuspension` refuses with `RUN_COMPLETED`, and the downstream node runs exactly once.
+  - **The lost history row is still reported**, at `error`, naming in its first line that the run completed, that its terminal row never landed and nothing retries it, that the run must not be repaired or re-run, and that the driver's own failure is in the record's structured slot.
+  - **`restoreConsumedSuspension` is unchanged.** It judged correctly on the evidence it was handed; the evidence was what was wrong, and a completed run now journals none. A genuine node failure still journals, still reports `stranded`, and is still repairable.
+- 60c0f61: A suspended run whose durable save fails is now kept resumable in this process even when a concurrent read landed mid-park — and the error record that reports the failure says how to check that.
+  
+  `AutomationEngine.persistSuspendedRun` writes its map entry BEFORE it awaits `store.save()`, and marks the run cache-only only once that save settles. For the whole of that await the entry is live but unqualified, so a concurrent per-id `hasSuspendedRun` / `resume` reads a store that truthfully has no row yet, finds no qualifier, and evicts a run that is being parked right now. That window is bounded and stays as it was: the strict load is store-first, so once the save lands the run is resumable from the store, and only the cache-only listing under-reports.
+  
+  Compounded with the save then **failing**, it was not bounded. The catch marked the run cache-only, but the map entry that marking qualifies had already been evicted, so the run had neither a durable row nor an in-memory copy: `hasSuspendedRun` answered `false` and `resume` answered `RUN_NOT_FOUND`. The run was lost **in this process**, not merely un-durable — for example a paused approval that no decision can ever advance. Reaching it needs a store that rejects the write while still answering reads with "no row" rather than throwing: a healthy read replica behind a broken write path, a missing `INSERT` grant, a full disk.
+  
+  - **The failure path now re-seats the map entry** alongside the cache-only marking, so the marking qualifies something again and the documented degradation — a failed save costs cross-restart durability, not in-process resumability — holds in this interleaving too. The cache-only marking is not widened, no lock is added, and the save is not reordered, so a run is still never readable out of the map while the store is authoritative for it.
+  - **The error record for a failed save is corrected.** It kept telling the operator the run was "kept in memory only" and that they had until the next restart to act, which in this interleaving pointed away from the loss: the run was already gone, and the restart would take the blame. It now names the two reads that must still answer for the run (`hasSuspendedRun()` and `listSuspendedRuns()`), so the promise can be checked rather than trusted. It still reports the same cause in the same structured slot, at the same `error` level.
+- 4e090ec: `ObjectStoreSuspendedRunStore` no longer announces "no cross-replica advance guarantee is offered" *after* it has issued the guarded delete.
+  
+  `claimSuspension` is the cross-replica half of the resume idempotency guard: it removes the `sys_automation_run` row only if the run is still parked where this replica read it, and the affected-row count names the winner. The refusal for an engine that does not resolve such a count was decided on the SHAPE of the return value — one line after the compare-and-set had already gone out. On such an engine that made the refusal a statement about a write that had already landed: the conditional delete was performed against the shared row and its verdict discarded, `AutomationEngine.claimAdvance` read `'unsupported'` as `unguarded`, and a replica that **actually lost** the claim (0 rows affected) resumed anyway — running every downstream side effect a second time, on the one composition that declares itself unable to prevent that.
+  
+  The capability question is now settled before anything is claimed, and `'unsupported'` is retired as an answer once the row has been touched:
+  
+  - **A one-time capability probe, before the compare-and-set.** Once per store instance, `claimSuspension` issues one delete down the very route the claim takes (`multi: true` with a `where` carrying keys besides `id`, which is what dispatches to `driver.deleteMany`) against a sentinel predicate that matches no row — the same value in `id`, `node_id` and `correlation` at once. An engine that resolves something other than a count is refused with **nothing consumed**, so `claimAdvance`'s `unguarded` reading is true when it is taken. Concurrent first claims share one probe, and a probe that *throws* is deliberately not memoized: a store that was unreachable for one second must not answer for the life of the process.
+  - **After the write, an unreadable verdict is `STORE_UNAVAILABLE`, not `unguarded`.** If a probed-counting engine still resolves a non-count for a real claim, the compare-and-set is committed and its verdict is unrecoverable — a winner and a loser both find the row gone, so no follow-up read can tell them apart. The store throws instead of answering `'unsupported'`; `claimAdvance` already maps that to `STORE_UNAVAILABLE`, whose text is written for exactly this fact ("a failure can arrive after a committed delete"), and the resume is **refused** rather than continued. A claim that in fact won is then stranded until an operator retries — the deliberate direction, since a doubled side effect is the worse outcome.
+  
+  **What this does not do, stated so it is not read into it.** It does not give an uncounted engine the guarantee. `ObjectQL.delete` declares `Promise<any>`, so "does a multi-delete return a count" has no contractual answer to look up and no read-only instrument to measure — a probe can observe the route once, never promise what the next call resolves to. Closing that gap belongs to the engine boundary, where the count is contracted one layer down (`IDataDriver.deleteMany`, `Promise<number>`) and erased to `any` on the way up. On such a composition the store still degrades to an unguarded resume; what changed is that it says so before consuming anything, and the run's durable row is still removed by the consumption choke point exactly as before.
+  
+  Every measured shipped composition already resolves a count (memory, sql/better-sqlite3, sqlite-wasm, turso local and remote transport, sql with the security plugin composed), so the observable cost there is one extra `DELETE … WHERE` that matches nothing, once per process. It emits no hook dispatch, no realtime event and no row change: the per-row before phase is "zero matched rows is zero dispatches", the after phase iterates the same empty set, and `publishBulkDataEvent` returns at `matched === 0` by design.
+- 7bf96cf: A `map` node inside a `loop` body now runs its collection on every iteration, not just the first.
+  
+  `map` tracks its progress through the collection in the flow variable `<nodeId>.$mapState`, and wrote it into the flow's **shared** variable scope without ever removing it. A `loop` body region runs in that same scope by construction — that is what makes the iterator variable and the body's mutations visible to the rest of the flow — so the state written by iteration 1 was still there when iteration 2 entered the map. It read back `started === collection.length`, correctly concluded there was nothing left to start, and returned.
+  
+  The result was silent partial work reported as success: measured on the engine, **5 iterations x 2 items produced 2 child runs instead of 10**, the map step reported `success` on all five iterations, and the run finished `completed`. Nothing threw and nothing was caught, so `FlowRunSummary.failed` — the run-level counter that exists to expose contained failures — reported `failed = 0` over it. An operator reading that counter was told the run was clean while it had done a fifth of its work.
+  
+  The fix is a lifetime correction, not a new key: `$mapState` is now removed once the collection is exhausted, so its lifetime is one execution of the collection rather than the enclosing scope's.
+  
+  **The durable-pause path is deliberately unchanged.** A `map` whose per-item subflow pauses still writes its progress before suspending, and still reads it back when the engine re-enters the node — that write is the mechanism resume depends on, because a resume rebuilds the variable scope from the snapshot taken at the suspend and so can never see any later write. Only the node's terminal path clears the key. A `map` resumed mid-collection continues where it left off, exactly as before, and no item is re-run.
+- 4177ed3: A wizard screen is no longer skipped after a durable pause because a record column happens to be an array.
+  
+  `judgeHeadlessScreen` decides a screen was already answered by proving the negative: a field is **not** caller-supplied when the subject record carries that key and `params` holds the same value — necessary because the params bag a flow action arrives with is `{ ...record, recordId, <object>Id, ...params }`, so every column of the launched row is in there whether the caller named it or not.
+  
+  That comparison was reference identity (`Object.is`), which is real in memory and does not survive persistence. A suspended run stores its context as JSON and resumes from the parsed copy — and the store is preferred over the in-process cache whenever one is wired, so no restart is needed. After that round trip an **array or object** column is equal but no longer identical: the record leg could not disprove it, the field read as caller-supplied, and a later screen with no required fields of its own was **skipped on a run that had supplied nothing**. An interactive user pressed a button and never saw a form they should have been shown; the run completed carrying the row's own value as if they had typed it. Reproduced end to end against a wired store, not inferred.
+  
+  The record leg now compares by value (`isDeepStrictEqual`), which survives serialisation. That predicate compares primitives with `Object.is` itself, so this is a strict widening of the "not caller-supplied" set — every pair the old check called equal it still calls equal, plus the structurally identical non-primitives. More screens render, never fewer, which is the direction this module resolves every ambiguity in.
+  
+  **Accepted cost, precisely.** A caller that genuinely re-sends a value structurally identical to the row's column is no longer distinguishable from the dispatcher's seed, so it now gets the screen rendered instead of skipped — a lost skip on a headless call, never a lost run, and the same trade the module's other legs already make. Scalar columns behave exactly as before, on both sides of a pause. The row-id leg keeps identity comparison deliberately: a row id is a scalar by construction, so serialisation cannot defeat it and there is nothing there to widen. Measured overhead is a deep compare per declared screen field at screen entry: ~1.5 µs added for a deliberately maximal screen that declares a field for every one of a ten-column row, which is about 38% of one `JSON.stringify` of the run context — a cost the durable store already pays on every suspend.
+  
+  This closes the gap the same release's screen-flow headless-satisfaction note records as known.
+- 0cf0867: Keep a resume's `status: 'stranded'` verdict when the bookkeeping after the repair journal throws.
+  
+  `resumeInternal`'s catch arm journals the consumed suspension — the snapshot `restoreConsumedSuspension` puts back — and only then stamps `status: 'stranded'`. Two statements sat between them and could throw out of the whole arm: `recordLog`'s terminal run-summary line, and a store whose `recordTerminal` throws synchronously (the `void write.catch(...)` beneath that call only ever sees a returned promise's rejection). `failAncestors` follows them.
+  
+  A throw in that window left the run genuinely repairable while the verdict never shipped, and every consumer derives repairability from the verdict — `plugin-approvals` computes its operator-facing `repairable` as `status === 'stranded'` — so the approvals decision door reported `repairable: false` about a run that `restoreConsumedSuspension` answers `restored: true` for. That is a false negative on a repair instruction: it tells an operator not to attempt a repair that works.
+  
+  The window is now guarded. The bookkeeping may still fail — and says so loudly, at `error`, naming the run, what did not land, and the verb that repairs the strand — while the verdict still ships. Measured: with a store whose terminal write throws, `resume` now returns `{ success: false, status: 'stranded' }` instead of throwing, the door reports `repairable: true`, and the repair verb succeeds on that same run.
+  
+  The guard opens **after** the journal, so only a run that demonstrably has a snapshot can reach the stamp: a throw from the journal itself still propagates, every exit above the consumption point still carries no status at all, and cascade-failed ancestors — which journal nothing — are untouched and still correctly non-repairable.
+  
+  ⚠️ This change also makes a pre-existing fault **visible** rather than creating it. The completion path's history write sits inside the same `try` as the node-failure arm, so a run that **completed** — every node succeeded — is journalled and reported `stranded` when its `completed` history row throws, and repairing such a run **re-runs the flow**. That phantom, its repair snapshot and the double run were all measurable before this change; what changes here is only that more store failures now report the verdict instead of throwing over it, so an operator can now be told to repair a completed run. Filed as #15944, with the measurement on both trees.
+  
+  ⚠️ `repairable` remains a point-in-time fact, and this change does not make it durable: the run in the case above has no terminal history row (that write is what failed), so the repair rides on the in-memory journal and a restart loses it. The verdict reports what an operator can do now, which is exactly what was being denied.
+- 1375344: automation: a subflow parent left STRANDED by a failed up-bubble is reported at `error`, not `warn`
+  
+  When an approval (or any pause) sits inside a subflow child, resuming the child
+  bubbles up to the parent. If the parent's own continuation then fails on the
+  engine's stranded exit — its suspension consumed, a repair snapshot journalled,
+  the run recorded `failed` — nothing but a `warn` said so, while the child's
+  resumer (an approvals decision door, a wait timer) was told the resume
+  succeeded. Persisted state and runtime state disagree and nothing looks broken
+  from the outside, which is the durability class.
+  
+  `bubbleToParent` now grades that record by the engine's own
+  `AutomationResult.status` discriminator: `'stranded'` is reported at `error`,
+  naming the parent run and the `restoreConsumedSuspension` verb that repairs it.
+  Every other parent-resume failure — a concurrent resume, an unreachable store,
+  a thrown resume — stays at `warn` unchanged, on a narrower ground: those exits
+  carry no `'stranded'` discriminator. `'stranded'` is the one exit that journals
+  a repair snapshot, so it is the one an operator can act on, and grading by the
+  engine's own verdict is what keeps `error` readable.
+  
+  ⚠️ That is a statement about what this seam can KNOW, not a guarantee that
+  every other exit left the parent healthy. Two exits are known not to be:
+  
+  - a **thrown** parent resume carries no discriminator at all, and #15555
+    documents a window in which a throw between the journal and the stamp hides a
+    parent that IS stranded. Left at `warn` deliberately, for that card;
+  - the **claim-path** store failure reports, in its own envelope text, that
+    whether the suspension was consumed is UNKNOWN — it relies on a retry to
+    settle it, and an up-bubble has no retrier. ("Not consumed" is the guarantee
+    of the strict-load store failure only, not of every store failure.)
+  
+  ⚠️ This is the log half only. What the child's resumer is told is unchanged.
+- 3890244: A restored suspension now carries the state the run was paused with, including nested values.
+  
+  `restoreConsumedSuspension` is the operator exit from a run whose resume consumed the pause and then failed downstream: it puts the suspension back so the run is resumable again. What it put back was documented as the pause "verbatim", and was — for the top-level variables only.
+  
+  The flow scope a resume hands the downstream nodes was rebuilt as `new Map(Object.entries(run.variables))`: that copies the keys and shares every value object with the parked snapshot. An executor that keeps state in the scope and updates it **in place** — `map` tracks its progress in `<nodeId>.$mapState` — therefore wrote straight through into the snapshot, and the journal recorded the result as the pause. An operator repairing a stranded `map` run got a snapshot claiming progress made by the attempt that failed, not the progress the run actually had when it paused.
+  
+  Measured, not inferred: the durable row held `started: 1` at the pause and the restore put back `started: 99`.
+  
+  The pause's variables are now copied before the failed attempt runs, on the line that already captures the pause's step count for the same reason. No later placement works — the node mutates and then throws, so a copy taken when the journal is written copies the mutation. Nothing else changes: the running flow still sees exactly the scope it saw before, the resume ordering is untouched, and a value that cannot be copied falls back to the previous behaviour with a warning rather than costing the operator the repair.
+- 1157e7b: fix(service-automation): evict a suspension consumed by another replica, so the run listings stop reporting phantoms (#15832)
+  
+  `AutomationEngine` had exactly one eviction site for its `suspendedRuns`
+  map, inside `forgetSuspendedRun` — and that runs in whichever process
+  **consumes** the suspension. In a multi-replica deployment that is routinely
+  not the process that parked it: replica A parks a run, replica B resumes it,
+  and nothing ever removes A's entry. There is no invalidation channel from B
+  to A.
+  
+  The card that found this located the leak on `resumeInternal`'s
+  `claim.kind === 'lost'` branch, which returns before that choke point. That
+  branch does leak, but it is not the common shape: the **no-race** variant
+  leaks identically — A parks, only B ever resumes, A never attempts a claim
+  and there is no `'lost'` anywhere in the sequence — so an eviction hung on
+  `'lost'` alone would have left the ordinary deployment untouched.
+  
+  The retained snapshot was **not only memory**. Two readers handed it back:
+  `listSuspendedRuns()` (synchronous, cache-only, and the one listing on the
+  `AutomationService` spec contract) and `listSuspendedRunsDurable()` (which
+  deliberately appends map entries the durable list lacks). Once the other
+  replica **completed** the run, both reported a phantom — a finished run
+  listed as suspended, whose `getSuspendedScreen()` answers `null`, so a
+  consumer that listed and then opened got an entry it could not act on.
+  
+  An entry is now dropped whenever this process holds a store-authoritative,
+  per-id "no row" answer for it: the strict loader's store miss (which reaches
+  `resume`, `hasSuspendedRun`, `cancelRun` and `getSuspendedScreen`), a lost
+  advance claim, and a bounded per-id reconcile for the map-only entries of
+  `listSuspendedRunsDurable()`.
+  
+  **Nothing here moves the cache-only listing's contract.** The fix only ever
+  *removes* entries. The spec says `listSuspendedRuns()` lists "the currently
+  suspended (paused) runs awaiting a resume"; the engine's own docblock adds
+  only that it may OMIT runs (those parked in a previous process lifetime),
+  because it reads the cache alone. Under-reporting is therefore already
+  inside the declared latitude, and over-reporting was never inside the
+  promise. Neither listing becomes store-backed, and `listSuspendedRuns()`
+  stays synchronous.
+  
+  Three shapes are deliberately **never** evicted, each pinned by a control:
+  no store attached (the map IS the authority); a run whose durable save
+  failed (`cacheOnlySuspensions` — the store was never handed the row, so its
+  silence says nothing about it); and a store read that THROWS (an outage
+  means the run's existence is unknown, not gone). A failed `list()`
+  enumeration likewise triggers no per-id reconcile — during an outage that
+  would ask about every live run in the process.
+  
+  **Residual, stated rather than implied.** Eviction is demand-driven: a
+  phantom is cleared when this process next obtains the per-id answer for that
+  run — any `resume` / `hasSuspendedRun` / `getSuspendedScreen`, or a
+  `listSuspendedRunsDurable()` reconcile. A process that never looks at the
+  run again keeps the entry until it does. With no invalidation channel
+  between replicas, closing that last gap needs either a background sweep or a
+  store-backed listing, and both are decisions above this change; the boundary
+  is pinned by a `RESIDUAL` test rather than left to be discovered.
+  
+  Note 2 of the same card — the `'unsupported'` branch deciding on the shape of
+  a value the conditional delete has **already** been issued to obtain — is
+  **not** addressed here: its honest fix is a declared return contract for the
+  engine's multi-row delete, which lands in another package.
+- 3e9065c: `$error` now names the most recent failure in a flow run, whichever way that failure arrived.
+  
+  The automation engine has two failure arms. When a node FAILS BY RETURNING `{ success: false }`, the engine rewrote the run-wide `$error` (and `<nodeId>.error`) and then decided whether a `fault` edge could route it. When a node FAILED BY THROWING — a `timeoutMs` firing, a dying nested container, a thrown guard — it did both **inside** the `fault`-edge branch, so a thrown failure with no `fault` edge of its own left `$error` holding an earlier, unrelated failure's value.
+  
+  A node inside a structured region never has a `fault` edge of its own: the region's synthetic sub-flow carries only the region's own edges. So every thrown failure inside a `try_catch`, `loop` body or other region hit this. The result was not a crash but a plausible-looking wrong value: **the message and the code came from two different failures** — `{ code: 'DUPLICATE_RECORD', message: "Node 'mk' timed out after 20ms" }` — and a catch region branching on `{$error.code}` swallowed a store failure as "the row is already there" while the run reported success.
+  
+  The throw arm now publishes `$error` and `<nodeId>.error` before deciding whether the failure routes, exactly as the returned-failure arm does. What a thrown failure publishes is `{ nodeId, message }`: there is no node result on that path, so no `output` and no classified `code` exist to carry — and that absence is the right answer for a throw rather than a reason to leave a stale `code` standing.
+  
+  Routing is unchanged. A guard refusal that throws (ADR-0049's unscoped-run refusal, for one) is still un-routable, still fatal, and still reports its own message; the thrown value itself is rethrown exactly as caught.
+- b398ad2: **BREAKING (behaviour):** a static `readonly` field is now stripped from a **non-system caller's INSERT payload inside `engine.insert`**, exactly as it already was on `engine.update`. A non-system create that used to write a read-only column now has that column dropped, reported through `onFieldsDropped` / `droppedFields`, logged at `warn`, and refused outright under `strictReadonlyWrites`. Seeding a read-only column at create time is a **system** act — use `context.isSystem`, a flow's `runAs: 'system'`, a system hook or a seed.
+  
+  Until now the create-side strip lived only at the DataProtocol ingress (`stripReadonlyForInsert` in `@objectstack/metadata-protocol`), so `readonly` meant one thing on insert and another on update: every external REST/GraphQL/MCP create was stripped, while a caller reaching `engine.insert` directly — the automation engine's `create_record` among them — wrote the column with no refusal, no `WARN` and no dropped-field event.
+  
+  - `stripReadonlyForInsert` and its five call sites in `@objectstack/metadata-protocol` are **deleted**, not kept as a second implementation; every create face — `createData`, `cloneData`, `createManyData`, `insertManyData`, and `batchData`'s `create` rows and both arms of `upsert` that create — now hands the caller's payload to the engine whole, and every face whose response carries `droppedFields` (`createData`, `createManyData`, `insertManyData`, every `batchData` row that created) reports the engine's own verdict there, so `droppedFields` says the same thing at each of those seams. `cloneData` forwards whole but reports nothing on the wire: its response contract (`CloneDataResponseSchema`, declared as produced) has no `droppedFields` member, so a clone that carried or overrode a read-only column is stripped and logged at `warn` but not reported in the 201 body — adding that key is a spec change, not part of this one.
+  - `create_record` (`@objectstack/service-automation`) starts receiving readonly drops on the `onFieldsDropped` channel it has been wired for since #3407 — a flow without `runAs: 'system'` that seeds a read-only column now reports a node warning and `output.droppedFields` instead of a clean success. That package's own code changes only in prose; the traffic is new, the surface is not.
+  - Unchanged, deliberately: `isSystem` is still the exemption; `preserveAudit` is still an UPDATE-path exemption and a create that asks for it is told so out loud; runtime-owned types (`autonumber`) keep their own pass and their own wider whitelist; platform objects (`managedBy`, the `sys_` namespace) are still left to their own field-write guards; `readonlyWhen` still has no create-side strip. A stripped key's `defaultValue` is re-derived, so a forged `approval_status` becomes `draft` rather than NULL.
+  - `@objectstack/service-settings` is `patch`: prose only — the `upsertRow` docblock, which ships in the package's `.d.ts`, no longer states the superseded INSERT exemption; it names the platform-object carve-out that actually keeps a `sys_setting` insert outside the strip.
+  - `@objectstack/lint` and `@objectstack/spec` are `patch`: both change prose only. All three lint rules — `validate-readonly-action-writes`, `validate-readonly-flow-writes`, `validate-readonly-hook-writes` — drop the superseded "INSERT is exempt" premise from their docblocks and from the justification of their green control cases; the two non-elevated rules now name their `insert`/`create` silence as a scan gap rather than an exemption (the action rule additionally records its now-reasoned refusal as a module-local constant that its `index` does not re-export, so no public surface widens). The spec change is prose only: one docblock sentence that named the deleted function, the `strictReadonlyWrites` contract docblock (which now states what strict refuses on insert), and the `readonly` liveness-ledger verdict, whose evidence pointer named the deleted ingress strip.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The BREAKING here is a WRITE-PATH BEHAVIOUR change, not a retirement of an authorable or published surface, so there is nothing for the ledger to carry to `objectstack migrate meta`, `spec-changes.json` or the upgrade guide: no spec property, metadata key, accepted value or exported symbol disappears, and this body prescribes no FROM/TO migration. The remedy for an affected caller is to declare the write trusted (`context.isSystem` / `runAs: 'system'`), which is application code, not a metadata migration. The obvious retirement candidate is a non-question in the same direction: `stripReadonlyForInsert` was a bare module-private `function` in `packages/metadata-protocol/src/protocol.ts`, absent from that package's `index.ts` (the only path its `exports` map offers), so no consumer could name it. -->
+- 6c439f2: Flow templates: `{TODAY() + n}` and `{TODAY() - n}` now do their day arithmetic on the same calendar they render on (UTC), so the resolved date no longer lands a day off across a DST transition.
+  
+  The offset branch of the template resolver shifted the day on the **local** calendar (`getDate` / `setDate`) and then rendered the result on the **UTC** one (`toISOString`). `setDate` preserves wall-clock time, so a local day shift moves the underlying instant by exactly n x 24 hours only while every local day in the window is 24 hours long. Across a spring-forward the window is 23 hours and across a fall-back 25, and when that one hour of slack crosses a UTC midnight the rendered date comes out a day early (spring-forward) or a day late (fall-back).
+  
+  The window is narrow — roughly one hour per DST-observing zone, twice a year — but the values written through it persist: a quote expiration, a follow-up date, a close date. Measured across 34 zones at every 30 minutes of 2026 for offsets `+1` and `-1` (1,191,360 instant-offset pairs), the old spelling disagreed with the UTC day in 190 of them, spread over 24 DST-observing zones; the new spelling disagrees in none.
+  
+  The same branch serves `{NOW() + n}`, which likewise now moves the instant by exactly n x 24 hours instead of preserving a wall-clock time across the transition.
+  
+  Nothing else moves. The bare `{TODAY()}` and `{NOW()}` forms never entered this branch and are byte-for-byte unchanged — they already resolved on UTC, and the offset forms now agree with them. This is not a timezone feature: these tokens remain timezone-unaware by design, and whether they should be is a separate question.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [098cbb7]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

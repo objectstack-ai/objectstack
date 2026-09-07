@@ -1,5 +1,226 @@
 # @objectstack/verify
 
+## 17.4.0
+
+### Patch Changes
+
+- c550baf: fix(verify): `os verify` no longer reports a green run over a multi-package app it measured nothing about
+  
+  Every reader in this package took the artifact's **flattened** top level and
+  nothing else. A multi-package app whose definitions live under `packages[]` —
+  the shape ADR-0130 D4's option B emits — therefore reached `deriveCrudCases`
+  with no objects and no datasources, and reached `rlsProbePermissionSet` and
+  `declaredPositionNames` with no objects and no positions. Nothing threw. The run
+  derived zero CRUD round-trip cases, built an empty RLS probe permission set,
+  minted no persona for any declared position, and printed `✓ verify passed`.
+  
+  That is the most expensive place in the platform for a false green: `verify`'s
+  entire job is to be the thing that notices. A missing collection is at least
+  missing — zero coverage dressed as a passing run is not.
+  
+  The four reads now resolve through `resolveArtifactPackageOrder`
+  (`@objectstack/core`, ADR-0130 D4+D5), **flattened top level first**:
+  
+  - `deriveCrudCases` — the objects it derives cases for, and the datasource-by-
+    name map behind ADR-0015's double write gate. Both, because objects alone
+    would leave a write-opted-in federated object judged against an empty
+    datasource map and reported read-only, i.e. skipped by a verifier that says it
+    covered it.
+  - `declaredPositionNames` — one RLS persona per declared position.
+  - `rlsProbePermissionSet` — the object grants and the owner-scoped narrowing
+    that are what make an RLS run a probe rather than a report about the object
+    gate.
+  
+  The top-level read still answers first and is returned untouched, so an app on
+  today's additive artifact gets a bit-identical answer, and a stack that declares
+  an empty collection (`objects: []` is truthy) still gets an empty one. Only a
+  top level that does not carry the key at all consults `packages[]`. A malformed
+  `packages` array now surfaces `resolveArtifactPackageOrder`'s ADR-0112 refusal
+  instead of reading as "this app declares nothing".
+- Updated dependencies [2ed6be6]
+- Updated dependencies [dcad825]
+- Updated dependencies [6136293]
+- Updated dependencies [07f40e5]
+- Updated dependencies [6573af9]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [fd014b1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [98191d2]
+- Updated dependencies [ca326b5]
+- Updated dependencies [f1a1028]
+- Updated dependencies [8f404a5]
+- Updated dependencies [954cb0b]
+- Updated dependencies [159dbad]
+- Updated dependencies [7079694]
+- Updated dependencies [a56baa2]
+- Updated dependencies [d4c2cb1]
+- Updated dependencies [c1eafe6]
+- Updated dependencies [a775510]
+- Updated dependencies [60c0f61]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [8e500f2]
+- Updated dependencies [4b3955e]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [4e090ec]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [d30ccb9]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [81919a7]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [fb447b4]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [4bc9821]
+- Updated dependencies [6491463]
+- Updated dependencies [da1cffb]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [ddfbf04]
+- Updated dependencies [65846bc]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [33388f9]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [fa85759]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [65846bc]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [3e7ef9c]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [25a3d91]
+- Updated dependencies [6615a02]
+- Updated dependencies [9f39897]
+- Updated dependencies [7bf96cf]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [a7da4de]
+- Updated dependencies [d0ee598]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [48b0fcf]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [26144c2]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [9e9f03a]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [c64e65f]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [9fa5775]
+- Updated dependencies [ac6213e]
+- Updated dependencies [d770b3e]
+- Updated dependencies [a4816a7]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [06c762e]
+- Updated dependencies [11f848e]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [e13ede8]
+- Updated dependencies [7d7ca6c]
+- Updated dependencies [65ec530]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [e6279dc]
+- Updated dependencies [53cbad9]
+- Updated dependencies [9b459b7]
+- Updated dependencies [f5cc78b]
+- Updated dependencies [46803fa]
+- Updated dependencies [8a12067]
+- Updated dependencies [de75e40]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [401e50a]
+- Updated dependencies [ee32e1c]
+- Updated dependencies [4b0508e]
+- Updated dependencies [b31ebfe]
+- Updated dependencies [4177ed3]
+- Updated dependencies [4c0b22b]
+- Updated dependencies [8744de9]
+- Updated dependencies [a646120]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [2024eca]
+- Updated dependencies [6b8c677]
+- Updated dependencies [2e35765]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [0cf0867]
+- Updated dependencies [5964124]
+- Updated dependencies [9408b7f]
+- Updated dependencies [1375344]
+- Updated dependencies [ec0a6e7]
+- Updated dependencies [3890244]
+- Updated dependencies [1157e7b]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [3e9065c]
+- Updated dependencies [b398ad2]
+- Updated dependencies [6c439f2]
+- Updated dependencies [eddd612]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f7ffbd6]
+- Updated dependencies [d61d6e3]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/objectql@17.4.0
+  - @objectstack/service-analytics@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/runtime@17.4.0
+  - @objectstack/service-automation@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/plugin-auth@17.4.0
+  - @objectstack/service-datasource@17.4.0
+  - @objectstack/rest@17.4.0
+  - @objectstack/plugin-hono-server@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/plugin-security@17.4.0
+  - @objectstack/plugin-sharing@17.4.0
+  - @objectstack/service-settings@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

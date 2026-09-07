@@ -1,5 +1,137 @@
 # @objectstack/plugin-hono-server
 
+## 17.4.0
+
+### Minor Changes
+
+- 5f7fa1d: feat(hono-server): `GET /auth/me/localization` → `locale` is now the signed-in user's language — `sys_user.locale` when set, then the request's `Accept-Language`, then the deployment default (#14788)
+  
+  Maintainer ruling 2026-09-03 (option D on #14788): this endpoint is the ONE
+  read face for "what language is this user", now that `sys_user.locale` is a
+  user-stated preference (#13881 / #14787) and the never-produced
+  `SessionUser.language` is retired from the session contract
+  (`@objectstack/spec`, same release).
+  
+  What changed, for an authenticated caller:
+  
+  - `locale` resolves **the user's own `sys_user.locale`** first — read under a
+    system context by the caller's own id and accepted only when it passes the
+    column's OWN `locale_bcp47_shape` rule as the registry declares it (the
+    endpoint evaluates that rule; it carries no second locale parser). A
+    malformed, blank or unverifiable value falls through, it is never served.
+  - then **the request's `Accept-Language`** preference (`preferredLocaleFromHeader`,
+    the same parse REST and the runtime dispatcher feed `execCtx.locale` from);
+  - then **the deployment default** (`resolveLocalizationContext` — the
+    `localization.locale` settings cascade, floor `en-US`).
+  
+  Before, the resolver behind this endpoint assembled no localization at all, so
+  `locale` was `null` for every authenticated caller; it is now always a string
+  for an authenticated caller. The response shape is unchanged
+  (`{ authenticated, currency, locale, timezone }`), `currency` / `timezone`
+  are untouched, and the unauthenticated answer (`{ authenticated: false }`) is
+  unchanged. `resolveSignedInUserLocale` is exported for hosts that compose the
+  current-user endpoints directly.
+- 6615a02: fix(plugin-hono-server): the current-user faces assemble their `ExecutionContext` through the shared assembler (#15747)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention (`major` is refused by `check-changeset-no-major`, so the BREAKING banner and the ADR-0087 disposition are the carriers, not the level).
+  
+  `makeExecutionContextResolver` is exported from this package's index. Its declared return moves **from** `(ctx: CurrentUserEndpointsContext) => (c: any) => Promise<any | undefined>` — in practice `any`, since the exported function carried no return annotation at all and the envelope it built was a hand-rolled object literal cast `as any` — **to** `(ctx: CurrentUserEndpointsContext) => (c: any) => Promise<ExecutionContext | undefined>`. `any` is assignable to everything and admits every property read, so a consumer's code really can stop compiling.
+  
+  What this asks of a consumer holding the resolver directly (the serverless host path that composes it, cloud#924): narrow the `undefined` arm before reading the envelope — under `strictNullChecks` the resolver has always been able to answer `undefined` for a request with no session, and no caller was ever asked to handle it; and stop reading members `ExecutionContext` does not declare, since the receiver is no longer `any`. A consumer that only calls `registerCurrentUserEndpoints` sees no change.
+  
+  The envelope itself is now assembled by `assembleExecutionContext` (`@objectstack/core`) — the fail-closed entry every other HTTP transport already uses — instead of the hand-rolled literal, which omitted six fields of the closed entry set: `principalKind`, `onBehalfOf`, `audience`, `accessToken`, `authGate` and `oauthScopes`. `principalKind` is `'human'` on these faces, the value the shared assembler derives for a session-backed principal; the other five are withheld on the record. A field added to `ExecutionContext` from now on fails to compile here until this face decides it.
+  
+  No runtime behaviour changes: `/auth/me/permissions`, `/auth/me/localization` and `/me/apps` answer byte-identical bodies, pinned as goldens.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/plugins/plugin-hono-server/src/current-user-endpoints.ts#makeExecutionContextResolver) A published return type moves off an erased `any` onto the kernel's own `ExecutionContext`: no metadata key is removed, renamed or re-shaped, this diff touches no `packages/spec/**` path and no ADR-0087 shape surface (no `*.zod.ts`, no `packages/spec/src/contracts/**` entry, no object definition), and nothing exists for `objectstack migrate meta` to rewrite. The affected party is a TypeScript consumer and the delivery channel is the compiler at their own call site, which reaches every one of them rather than the subset who read release notes. -->
+
+### Patch Changes
+
+- fa85759: `GET /auth/me/localization` answers the deployment's resolved `currency` and `timezone` instead of `null`
+  
+  The handler read both off the request `ExecutionContext`, citing ADR-0053, but the resolver serving this surface is a hand-rolled envelope that never carried them — so every authenticated caller was answered `currency: null, timezone: null` whatever the `localization` settings said, and the console's regional-formatting seed was fed nulls. All three values now come from one reading of the same `resolveLocalizationContext` cascade the dispatcher's shared assembler uses. `locale` resolution is unchanged. `timezone` now always answers (cascade floor `UTC`); `currency` still answers `null` when the deployment configures none — that value has no floor.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

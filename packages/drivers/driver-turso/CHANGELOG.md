@@ -1,5 +1,149 @@
 # @objectstack/driver-turso
 
+## 17.4.0
+
+### Minor Changes
+
+- e9fcd6b: feat(driver-turso)!: the published connection config names its timeout's unit (#15682, ruling B on #14478)
+  
+  <!-- adr-0087: registered turso-config-timeout-to-timeout-ms -->
+  <!-- The protocol-18 conversion above is registered by card 5/6 of the #14478 stack; relative to
+       `main` this combined diff is what adds it, so `registered` is the honest disposition at this
+       level even though `already-registered` was honest per-card. -->
+  
+  **BREAKING** — `TursoConfigSchema`'s `timeout` is renamed to **`timeoutMs`**. The
+  value is unchanged: the same milliseconds, the same `min(0)` bound, the same
+  optionality.
+  
+  `@objectstack/spec`'s own turso contract renamed the same authored key in
+  #15680. This package publishes a parallel schema for the same connection config
+  — the Spec / Studio metadata a host reads to expose Turso configuration UI — so
+  until now the two declarations of one setting disagreed on its spelling. They
+  agree again.
+  
+  The unit was never in the key name, only in the describe prose, while
+  `sync.intervalSeconds` — the same shape, three keys above — already spelled its
+  own. One published config carrying both conventions is what made the bare name
+  dangerous rather than untidy: an author who has just written
+  `intervalSeconds: 30` has no reason to read `timeout: 30` as milliseconds, and
+  nothing in the schema, the type or the parse would have told them otherwise.
+  
+  The old spelling is not dropped in silence. `TursoConfigSchema` is a plain
+  `z.object`, so a bare deletion would have STRIPPED `timeout` and parsed
+  successfully. The key stays declared as a tombstone instead: `tsc` refuses it on
+  anything typed `TursoConfig`, and a value that reaches the parse raises a
+  message naming `timeoutMs` rather than a generic unrecognised-key error.
+  
+  ```diff
+  - TursoConfigSchema.parse({ url: 'libsql://app.turso.io', timeout: 30000 })
+  + TursoConfigSchema.parse({ url: 'libsql://app.turso.io', timeoutMs: 30000 })
+  ```
+  
+  `TursoDriverConfig` — this package's TypeScript constructor option, a separate
+  declaration — keeps its `timeout` spelling and is untouched here.
+- a646120: The remote transport compiles a text operator over a declared numeric or boolean column to the contract's declared answer, in step with the local transport.
+  
+  `RemoteTransport.buildWhereSQL` compiles filters independently of `SqlDriver` and keeps no schema, so a text operator over a `Field.number` used to compile `"col" GLOB ?` and coerce the REAL in the storage class's spelling (`5` as `'5.0'`). `TursoDriver` now hands the transport its declared-type rule (`setNonTextColumnResolver`, the same shape as the temporal `setFilterColumnSql` rule), answered from the registries `registerRemoteFieldMetadata` already fills at schema sync — so a positive text operator over such a column compiles to `1 = 0` and `$notContains` to `1 = 1` on BOTH transports (`FILTER_TEXT_CASES`' `score` rows, maintainer ruling 2026-09-05), instead of a dialect accident. A transport nobody handed the rule to compiles exactly as before, and every comparand refusal still runs ahead of the constant.
+- 2200f8e: feat(driver-turso): the `update()` override publishes its honest type — `Record<string, unknown> | null`, not `any` (#14438)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, shipped as `minor` under the launch-window convention. `TursoDriver` overrides `update()` rather than inheriting it, and the override was written out with its own explicit `Promise<any>` — so this package's emitted `.d.ts` re-declared the door as `any` on its own and would not have picked up the `@objectstack/driver-sql` narrowing. Both of its branches already answered the contract's type: the local branch forwards to `SqlDriver.update()` (narrowed alongside, #14438) and the remote branch passes `RemoteTransport.update()`'s `Record<string, unknown> | null` (#14428) through the generic `formatRemoteRow`. The override now declares what it answers. A caller that read fields off the result through the `any` now narrows the `null` arm first. No runtime behaviour changes.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/drivers/driver-turso/src/turso-driver.ts#update) A published driver method's declared return moves off an explicit `any` onto the contract's own shape; no metadata key moves, `packages/spec` is untouched, and the obligation is a TypeScript narrowing at the consumer's own call site, delivered by the compiler. -->
+
+### Patch Changes
+
+- d5d8d50: Correct the documented reason for rejecting `CAST(col AS BLOB) LIKE ?` as a portable case-exact construct.
+  
+  Four headers stated, as a universal fact about SQLite, that the construct "was measured to return NOTHING". That is not a property of SQLite: whether `LIKE` is false for a BLOB operand is fixed when SQLite is compiled, by `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, and the two SQLite builds this project ships disagree about it. Measured over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` compiled to that construct returns `[]` on better-sqlite3 13.0.3 (SQLite 3.53.4, flag compiled in) and `['1','2']` on sql.js 1.14.1 (SQLite 3.49.1, flag absent) — the latter being exactly the ASCII case-folding defect the construct was being considered to avoid.
+  
+  No behaviour changes and no conclusion changes: all four sites still reject the construct and still choose `GLOB`. The rejection is now stated in a form that does not depend on any particular return value — a construct whose meaning is decided by an upstream compile flag cannot carry a read scope, because it means two different things on the two builds shipped here. Two supporting readings are recorded alongside it: `typeof CAST(name AS BLOB)` is `'blob'` on both builds, so the CAST is not the part that differs, and `GLOB` answers identically on both.
+  
+  Documentation only. `@objectstack/spec` and `@objectstack/driver-turso` ship the corrected text in their published type declarations (and `spec` also publishes the corrected source file directly, via its `src/**/*.zod.ts` entry); for `@objectstack/driver-sql` and `@objectstack/service-analytics` the change reaches published output only through sourcemaps.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [54bb2f1]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [1ca95df]
+- Updated dependencies [a646120]
+- Updated dependencies [2200f8e]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [61821e5]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [33e939f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/driver-sql@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

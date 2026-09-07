@@ -1,5 +1,196 @@
 # @objectstack/plugin-sharing
 
+## 17.4.0
+
+### Minor Changes
+
+- 9fa5775: feat(plugin-sharing): the `field` sharing recipient is enforced — expanded once per matched record
+  
+  `ShareRecipientType` gained `field` on the spec side (#14103, maintainer ruling
+  B): `sharedWith: { type: 'field', value: '<user-field-name>' }` shares each
+  record the rule's criteria match with the user or users named by that column
+  on the record. This is the executor half (#15072):
+  
+  - `SharingRuleService` reads the named user-typed column on each matched
+    record. A `multiple: true` column shares with every user it names; a single-
+    user column with the one it names. **Fail-closed on empty**: a null or empty
+    column materialises no grant — never a match-all principal, never a fallback
+    to the record owner. `field` is the only recipient resolved per record; every
+    other kind (`user`, `team`, `position`, `business_unit`,
+    `unit_and_subordinates`) still expands once per rule.
+  - The grants re-materialise on the record's own write: the existing
+    `afterUpdate` hook has no changed-field gating, so an update that touches only
+    the recipient column re-runs the per-record reconcile, which revokes the
+    stale grant and materialises the new one. No second trigger was added.
+  - The whole-rule pass (`evaluateRule` — the background re-grant after an
+    unbounded bulk write, the `kernel:bootstrapped` backfill and the REST evaluate
+    endpoint) derives per-record (record, user) pairs for a `field` rule instead
+    of a matched-records × recipients product, so the rule is as correct after a
+    bulk write and a restart as it is inline. The recipient-axis revoke
+    (`revokeRuleGrantsForRetiredRecipients`) declines `field` rules — they have no
+    rule-wide recipient set to retire against.
+  - The declared-rule bootstrap seeds `field` rules (previously skipped with a
+    warning), the `sys_sharing_rule.recipient_type` select accepts `field`, and
+    `defineRule` refuses a `field` recipient whose `recipientId` is not a field
+    name (the same grammar the spec applies at parse).
+  - An active `field` rule whose column the object does not declare as user-typed
+    grants nobody and says so once per rule.
+  
+  There is no `manager` recipient: "the owner's manager" is a user field the
+  application stores on the record, named by a `field` recipient.
+
+### Patch Changes
+
+- ac6213e: Four server-side authorization sites stop deriving platform-operator authority from a NAME in `ExecutionContext.positions`, and read the ADR-0095 posture rung instead.
+  
+  `positions[]` is the security axis, so it carries ADR-0057 D4 `sys_user_position` names alongside the built-ins. `sys_user_position` is `apiEnabled` and its `position` values are unconstrained, so a tenant could mint a row spelling `platform_admin` for one of their own users: `resolveUserAuthzGrants` pushed that name straight onto `grants.positions`, while `grants.posture` — derived from the unscoped `admin_full_access` grant and nothing else — correctly stayed `MEMBER`. Every reader of the name therefore answered `true` for a principal enforcement treats as an ordinary member. `resolve-authz-context.ts` states the rule at `hasPlatformAdminStanding` ("read the RUNG — never `positions.includes(...)`"), but a comment is not a gate and these four had not followed it.
+  
+  Each site now tests `posture === 'PLATFORM_ADMIN'`, byte-for-byte what `hasPlatformAdminStanding` returns:
+  
+  - **`plugin-sharing`** — `hasPlatformAuthority`. The minted row satisfied `assertResolvableAdminScope`, so an org-less caller holding only the ORG-scoped `manage_sharing` capability was answered with **every tenant's** sharing rules, and could delete platform-global rules. The `manage_platform_settings` capability spelling is unchanged.
+  - **`plugin-approvals`** — `isOverrideActor`. This predicate already read the rung and then ORed the name onto it, which is no protection: an OR is only as strong as its weakest arm. Because the platform arm deliberately crosses the tenant wall, the minted row let a member of one organization approve, reject or recall a **different organization's** pending request while holding no slot in its slate. The `ADMIN_FULL_ACCESS` capability arm and both TENANT_ADMIN arms are unchanged.
+  - **`runtime`** — the ADR-0126 §5 activation gate. Under a `group` or `isolated` posture this gate is the only thing between a tenant org admin and the **install-wide** `sys_metadata_activation` row, so the minted row reopened #10243 with a durable row behind it.
+  - **`plugin-security`** — `derivePosture` in the explain engine. Narrower than the other three, and stated precisely rather than overclaimed: the name-read sat behind an early `ctx.posture` return that `buildContextForUser` always populates, so the shipping path was already gated and a D4 row never moved it. What the read did reach was a posture-less hand-built context, where it made the panel **report** `PLATFORM_ADMIN` for a principal enforcement treats as a MEMBER — a misreport rather than an admission, but in the one tool an administrator opens to check exactly this.
+  
+  No behaviour changes for a genuine platform operator: their resolved context carries the rung, and the built-in position is still projected onto `positions[]` for display and predicate use. What changes is that the name alone no longer answers the authorization question.
+  
+  Graded `patch` on the surface it moves: no exported type, signature or contract changes, and no authorable metadata is added, removed or renamed. The only observable difference is that a principal who never held the capability grant stops being admitted — which is the defect, not a feature anyone could have depended on.
+- a4816a7: The three provenance-stamp `beforeUpdate` hooks stop re-reading a row the engine has already read, and their contract now states what they actually do on a multi-row update.
+  
+  `sys_email_template`, `sys_sharing_rule` and `sys_webhook` each carry a hook that stamps `customized: true` when a non-system caller edits a package- or platform-seeded row — the half of seed-not-clobber that detects the admin edit. All three carried the same two comments, and both were assertions about runtime behaviour that runtime measurement falsifies:
+  
+  - **"multi-row updates (no single `input.id`) are not stamped."** Not true on any engine these packages ship against. A predicate (`multi: true`) update dispatches `beforeUpdate` once per matched row, and every per-row context arrives with `input.id` bound — so the `if (!id) return` guard answered "single write" on every row of a batch and declined nothing. The rows were being stamped all along.
+  - **"`previous` is not resolved before beforeUpdate hooks run — read the current row ourselves."** The engine binds `previous` before dispatching `beforeUpdate` on both write shapes, so each hook was issuing its own `find` for a row the engine had just read — on a bulk edit, one extra read **per matched row**.
+  
+  Observable behaviour is deliberately unchanged: the same rows are stamped, with the same values, and a bulk edit whose matched rows disagree on `managed_by` is still refused by the engine with `MULTI_UPDATE_HOOK_KEY_DIVERGENCE` (HTTP 400) rather than widening one row's stamp across the batch. What changes is the cost and the contract: the redundant per-row read is gone, and the header of each hook now describes the per-row dispatch, the single `SET` clause a predicate write shares, and why declining to stamp on a bulk edit was rejected — unstamped rows are exactly the ones the next boot's seeder overwrites.
+- 4db3c61: `publicSharing.enabled` now has one canonical predicate, exported from the package that declares the key.
+  
+  `isPublicSharingEnabled(schema)` is a new export of `@objectstack/spec/data`, declared in `src/data/object.zod.ts` beside the `publicSharing` block itself — the same shape as the neighbouring `isTenancyDisabled`. It is additive: nothing was removed or narrowed from the spec's public API.
+  
+  Until now the same policy read existed in two spellings. `@objectstack/plugin-sharing` defined it (for the share-link service's redemption gate and the route probe above it), and `@objectstack/runtime` carried a documented private mirror for its `/share-links` dispatcher domain — copied rather than imported because the plugin is only a **dev** dependency of the runtime. That reasoning was true of that one home and not of the question: both packages already depend on `@objectstack/spec`, so a shared home existed all along and the de-duplication adds no dependency edge. Both surfaces now consume the exported predicate and the runtime copy is deleted.
+  
+  Behaviour is unchanged, fail-closed included: an absent `publicSharing` block, an absent schema, and an engine that cannot answer `getSchema` at all remain **one** answer, `false`, and only the boolean `true` enables. The two pins that held the copies equal — `share-link-eligibility.test.ts` in the plugin and `share-links-enforcement-context.test.ts` in the runtime, which assert the same observable answer on both surfaces rather than trusting the copy — are unchanged and still green; they are what proves the merge did not move behaviour. The predicate's own contract, which those tests can only observe indirectly, is now pinned directly in `packages/spec/src/data/object.test.ts`.
+- 2e35765: The share-link REST surface now derives the tenancy posture before it resolves the caller, so an API key stamped with an organization its owner has left can no longer mint links into that organization.
+  
+  `resolveAuthzContext` gates every posture-conditional refusal on a `tenancyPosture` its **caller** supplies. `SharingServicePlugin`'s share-link door supplied none, so none of them ran: `organization_required` (`core/security/api-key.ts`), `organization_membership_ended` (`core/security/resolve-authz-context.ts`), and the session arm beside it that drops an `activeOrganizationId` claim no `sys_member` row backs. An API key's tenant is `sys_api_key.active_organization_id` copied verbatim — the caller's own stored claim, never vetted against current membership — so under a wall-enforcing posture (`isolated`, `group`) a key belonging to an ex-member was admitted carrying that organization, and `createLink` minted a capability token on a record inside it. The same door carried the session half: a browser session whose owner had been removed kept its organization claim until the session expired.
+  
+  Measured at the door, under `isolated`: the ex-member's key went from `200` / `201` with the link landing in the store to `401` / `401` with nothing landing; an organization-less key went from admitted to `401`; an ex-member's *session* now has its stale claim dropped and is refused by Layer 0 at `403` while staying signed in. A current member and an anonymous caller are unchanged in every wiring.
+  
+  A `tenancy` service that was **never registered** stays a supported composition and resolves quietly to "no posture" — behaviour on an embedding without `plugin-auth` is exactly what it was. A `tenancy` service that **was registered and failed to build** now raises `AuthzStoreUnavailableError`, which reaches the wire as `SERVICE_UNAVAILABLE` / 503 rather than being laundered into a `401`: admission was never decided, so it must not be answered.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [7079694]
+- Updated dependencies [a56baa2]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [4b3955e]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [ddfbf04]
+- Updated dependencies [65846bc]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [33388f9]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [098cbb7]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [25a3d91]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [3bd9b34]
+- Updated dependencies [a7da4de]
+- Updated dependencies [d0ee598]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [48b0fcf]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [26144c2]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [11f848e]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [e6279dc]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [ec0a6e7]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [eddd612]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [f7ffbd6]
+- Updated dependencies [d61d6e3]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/objectql@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/formula@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/metadata-core@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
