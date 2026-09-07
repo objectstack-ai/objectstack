@@ -1,7 +1,7 @@
 ---
 "@objectstack/spec": minor
 "@objectstack/runtime": minor
-"@objectstack/client": patch
+"@objectstack/client": minor
 ---
 
 The automation resume route's `400 FLOW_FAILED` now says whether the run is stranded.
