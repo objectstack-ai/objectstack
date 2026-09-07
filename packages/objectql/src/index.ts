@@ -354,7 +354,19 @@ export type { RelatedTitleTarget } from './record-title.js';
 export { evaluateFormulaField } from './engine.js';
 
 // Export Validation
-export { ValidationError, validateRecord } from './validation/record-validator.js';
+// [#16159] `VALIDATION_FAILED_CODE` joins the class it belongs to: this package
+// declares BOTH realms in its own `exports` (`import` -> dist/index.mjs,
+// `require` -> dist/index.js), so a consumer holding the other realm's copy of
+// `ValidationError` gets `instanceof` === false, silently (#14936). The sound
+// route is a `code` compare, and until now that meant re-spelling the wire
+// string in the consumer's own package -- which acquires a
+// `check:error-code-provenance` stamp site there and is then free to drift from
+// what this engine throws with no compile error to say so. The class stays
+// exported exactly as it was; this adds an affordance and removes nothing.
+// [#16260] The constant is batteries-only while `ValidationError` is ALSO on the
+// lean `./core` entry, matching every existing `*_CODE` in this package; that
+// asymmetry is #16260's question, deliberately not decided here.
+export { ValidationError, validateRecord, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation

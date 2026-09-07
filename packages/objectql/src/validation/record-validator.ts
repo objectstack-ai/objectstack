@@ -132,8 +132,62 @@ export interface FieldValidationError {
   options?: string[];
 }
 
+/**
+ * [#16159] The ADR-0112 `code` {@link ValidationError} carries, as a constant a
+ * consumer can import instead of re-spelling.
+ *
+ * This is the LAST row of #16159's eleven-row census, and the one whose
+ * consumer-side re-spelling is measurably the widest: `'VALIDATION_FAILED'` is
+ * re-authored as an inline literal at 148 non-test sites in 33 files across
+ * this repo. Most of those are INDEPENDENT PRODUCERS minting their own
+ * house-code envelope, not consumers of this class — but the recognizers that
+ * genuinely catch THIS error had, until now, no importable spelling to compare
+ * against: `packages/types/src/validation-failure.ts` and
+ * `packages/rest/src/error-response.ts` both test
+ * `code === 'VALIDATION_FAILED' || name === 'ValidationError'`, each holding
+ * its own copy of the string, each free to drift from what this engine throws
+ * with no compile error to say so.
+ *
+ * ⛔ The string is byte-identical to the literal it replaces. This moves where a
+ * spelling lives, never what it says.
+ *
+ * ⛔⛔ It also does NOT answer the question the card fenced off: `secret-fields.ts`
+ * spells its refusal `EMPTY_CREDENTIAL_REFUSAL_CODE = 'VALIDATION_ERROR'` while
+ * this one is `'VALIDATION_FAILED'`, and *"whether they should converge is a
+ * question this card does not answer"*. Publishing the current spelling leaves
+ * that decision exactly as open as it was: converging them was a breaking
+ * rename of a registered wire code before this constant existed and still is
+ * after, and a rename would move this constant's VALUE, not its existence.
+ *
+ * ⚠️ `VALIDATION_FAILED` IS registered in `ERROR_CODE_LEDGER` under
+ * `@objectstack/objectql` (`packages/spec/src/api/error-code-ledger.zod.ts`),
+ * so this declaration is a `constdef` stamp site `check:error-code-provenance`
+ * DOES see — that gate skips unregistered codes — and it is listed under this
+ * package's own owner key, which is what makes the gate accept it. Equally, no
+ * row moves in `packages/runtime/src/dispatcher-error-vocabulary.ts`: that
+ * table records UNREGISTERED code sites, so a registered code is invisible to
+ * it by construction. The two gates are exactly inverted — measured on this
+ * branch, not assumed.
+ *
+ * The `_CODE` NAME and the bare `readonly code = VALIDATION_FAILED_CODE;`
+ * spelling are load-bearing rather than cosmetic: the first is the shape
+ * `check:error-code-provenance`'s `constdef` pattern can see, the second is the
+ * shape `check:dispatcher-error-vocabulary` classifies as `classconst` — its
+ * pattern requires the constant name to be followed by `;`, `,` or a newline,
+ * so an `as const` suffix on the FIELD takes the site out of it. ⛔ Never rename
+ * out of either shape to quiet a gate.
+ *
+ * ⚠️ Re-exported from the `index.ts` barrel beside the class, and ⛔ NOT from the
+ * lean `./core` entry — matching every existing `*_CODE` in this package.
+ * {@link ValidationError} itself IS on `./core`, so this row adds one more
+ * instance to the asymmetry #16260 owns; ⛔ deciding that question for one
+ * member of the family inside a mechanical sweep is the thing this card's
+ * slicing exists to prevent.
+ */
+export const VALIDATION_FAILED_CODE = 'VALIDATION_FAILED' as const;
+
 export class ValidationError extends Error {
-  readonly code = 'VALIDATION_FAILED';
+  readonly code = VALIDATION_FAILED_CODE;
   readonly fields: FieldValidationError[];
   constructor(fields: FieldValidationError[]) {
     // The top-level message is what generic UI surfaces (toasts, CLI output)
