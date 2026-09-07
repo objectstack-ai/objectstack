@@ -325,7 +325,7 @@ resolve is exactly this map — a subpath is added here on purpose, with a
 | Subpath | What it is for |
 |:---|:---|
 | `@objectstack/cli` | The command classes `bin/run.js` loads — the oclif entry. |
-| `@objectstack/cli/console` | Console SPA resolution helpers (`resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` and the drift guards), consumed by cloud's `objectos-runtime` node server to mount the Console. |
+| `@objectstack/cli/console` | Exactly three Console SPA mounting helpers — `resolveConsolePath`, `hasConsoleDist`, `createConsoleStaticPlugin` — consumed by cloud's `objectos-runtime` node server to mount the Console. The drift guards and the rest of `utils/console.ts` are **not** on this subpath (#16046). |
 | `@objectstack/cli/hook-body` | The hook-body extractor `os build` and `os lint` apply, for an app harness that must run the **same** body-only lowering the build ships (below). |
 | `@objectstack/cli/package.json` | The manifest itself, for the ordinary tooling idiom of reading a dependency's own version. |
 
