@@ -1,0 +1,13 @@
+---
+"@objectstack/platform-objects": minor
+---
+
+`sys_organization` admits generic `update` on the data door, column-gated by the ADR-0092 D2 identity write guard (#15873 — maintainer ruling 2026-09-07, decision batch #64, option (a), verbatim 「同意」).
+
+The organization table carries four platform-owned columns better-auth never reads or writes — `require_mfa` (ADR-0069 D3), `parent_organization_id` and `sort_order` (ADR-0105 D6), `timezone` (#14238). plugin-auth declares them generically editable (`MANAGED_EXTENSION_EDITABLE_FIELDS.sys_organization`, the guard's per-object update whitelist), while the object's `enable.apiMethods: ['get', 'list']` answered every `PATCH /api/v1/data/sys_organization/:id` with 405 `OBJECT_API_METHOD_NOT_ALLOWED` before the engine — and the guard — was reached. Declared editable, reachable from no product surface: the columns could be set only by a system-context caller. The ruling answers the card's question — yes, an administrator sets these columns through the product — and refuses the alternative of declaring them system-writable only.
+
+What widens (Clause ②): the accept set of the published door. `enable.apiMethods` becomes `['get', 'list', 'update']`, and `userActions: { edit: true }` declares the affordance ADR-0103 D3's `reconcileManagedApiMethods` requires before it lets a `managedBy` object keep a write verb at registration (without it the verb is stripped with a warning and the door keeps answering 405 — the second silent gate #7727 measured on `sys_api_key`). `update` alone: `create` / `delete` still answer 405, and `bulk` is not granted (recorded in `SINGLE_RECORD_WRITE_ONLY`).
+
+What does not widen: the column set. The guard clamps every user-context update on this table to the whitelist. A PATCH of a better-auth column sent alone (`name`, `slug`, `logo`, `metadata`) is now refused by the guard's own verdict — 403 `PERMISSION_DENIED` — instead of the method gate's 405; sent beside a whitelisted column it is stripped and the whitelisted column lands. better-auth's own columns keep changing through better-auth's `organization/update` (the `update_organization` row action, unchanged). Per ADR-0092 D4's form-rendering constraint the four better-auth columns are now `readonly: true` on the object, so a standard edit form offers exactly what the guard admits; the engine's static-readonly strip exempts system-context writers, so better-auth's adapter is unaffected.
+
+Not breaking: no key, export or accepted value is removed; every request that succeeded before succeeds unchanged, and the 405 → 403 change applies only to requests that were refused before and are refused still.
