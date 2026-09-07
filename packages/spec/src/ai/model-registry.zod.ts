@@ -118,8 +118,8 @@ export const PromptTemplateSchema = lazySchema(() => z.object({
   label: z.string().describe('Display name'),
   
   /** Template Content */
-  system: TemplateExpressionInputSchema.optional().describe('System prompt — supports {{var}} interpolation'),
-  user: TemplateExpressionInputSchema.describe('User prompt template — supports {{var}} interpolation'),
+  system: TemplateExpressionInputSchema.optional().describe('[EXPERIMENTAL — not enforced] System prompt — supports {{var}} interpolation. No runtime renders or executes the template today.'),
+  user: TemplateExpressionInputSchema.describe('[EXPERIMENTAL — not enforced] User prompt template — supports {{var}} interpolation. No runtime renders or executes the template today.'),
   assistant: z.string().optional().describe('Assistant message prefix'),
   
   /** Variables */

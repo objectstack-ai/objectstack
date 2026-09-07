@@ -340,22 +340,22 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  * "nothing throws" would have had to be deleted or weakened on the day it was
  * written, and would then never have caught the next one.
  *
- * Every entry names a reader OUTSIDE what #15636 could touch:
+ * It is EMPTY today, and that is a measurement, not an aspiration: no rule in
+ * the table throws on a non-record member of any collection swept here. Two
+ * rows have come out since it was written, each because the sweep went red
+ * demanding a throw that no longer happens — which is the both-directions half
+ * earning its keep, since neither removal started with anyone going looking:
  *
- *  - `objects[].fields` — `buildFieldIndex` in `validate-expressions.ts:137`,
- *    which casts inline instead of through a helper, so the `asArray` sweeps
- *    that produced #15552 and #15636 never saw it. Filed as #15742.
- *
- * `stack.datasets` was here too, for `indexDatasets` in
- * `validate-chart-bindings.ts`. #15741 re-pointed that reader and these
- * assertions went red demanding a throw that no longer happens, which is the
- * both-directions half earning its keep: the rows came out because the sweep
- * failed, not because anyone went looking for them.
+ *  - `stack.datasets` — `indexDatasets` in `validate-chart-bindings.ts`,
+ *    re-pointed by #15741.
+ *  - `objects[].fields` — `buildFieldIndex` in `validate-expressions.ts`, which
+ *    cast each member inline instead of reading through a helper, so the
+ *    `asArray` greps that produced #15552 and #15636 never saw it. It now reads
+ *    the list through `recordsOf` (#15742), which drops a non-record member of
+ *    the array shape whole and in silence, exactly as the file's two sibling
+ *    field readers already did.
  */
-const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
-  'objects[].fields · null': ['validateStackExpressions'],
-  'objects[].fields · undefined': ['validateStackExpressions'],
-};
+const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
  * Where a junk member still draws a finding no author's file justifies — the

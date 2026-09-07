@@ -208,7 +208,17 @@ interface TursoDriverConfig {
 
   /**
    * Operation timeout in milliseconds for remote operations.
-   * Effective in replica and remote modes.
+   * Effective in replica and remote modes; 0 or unset = no bound.
+   * - Remote mode over HTTP (libsql:// / https:// / http://): every request the
+   *   client makes is aborted once the window elapses, and the operation fails
+   *   as TIMEOUT / 504 instead of hanging. wss:// and ws:// URLs use the
+   *   WebSocket transport, which has no such seam, and are not bounded.
+   * - Replica mode: bounds sync(), the one remote operation on that arm. A
+   *   sync still running when the window closes rejects with the same
+   *   envelope; the native binding's own sync is not cancelled, only no longer
+   *   awaited.
+   * Not the libSQL busy timeout (`Config.timeout`), which is a local-file
+   * lock-contention setting that remote clients ignore.
    */
   timeout?: number;
 

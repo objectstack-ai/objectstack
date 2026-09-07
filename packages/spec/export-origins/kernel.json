@@ -224,6 +224,7 @@
     "PLATFORM_CAPABILITY_PROVIDERS": "src/kernel/platform-capabilities.ts#PLATFORM_CAPABILITY_PROVIDERS (const)",
     "PLATFORM_CAPABILITY_TOKENS": "src/kernel/platform-capabilities.ts#PLATFORM_CAPABILITY_TOKENS (const)",
     "PLATFORM_PLUGIN_WIRED_RUNTIMES": "src/kernel/platform-capabilities.ts#PLATFORM_PLUGIN_WIRED_RUNTIMES (const)",
+    "PLUGIN_UI_REQUIRED_KEY_MISSING": "src/kernel/plugin.zod.ts#PLUGIN_UI_REQUIRED_KEY_MISSING (const)",
     "PROTOCOL_MAJOR": "src/kernel/protocol-version.ts#PROTOCOL_MAJOR (const)",
     "PROTOCOL_VERSION": "src/kernel/protocol-version.ts#PROTOCOL_VERSION (const)",
     "PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS": "src/kernel/public-auth-features.ts#PUBLIC_AUTH_CONFIG_NON_FLAG_KEYS (const)",

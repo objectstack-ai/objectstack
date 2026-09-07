@@ -534,7 +534,7 @@ function isObjectQLValidationError(
  * the guards live in this package but throw a plain engine-shaped error so that
  * BOTH transports can map it — `mapDataError` gives the REST data routes a 403,
  * this gives the auth pipeline one. The concrete case is the break-glass
- * last-administrator ban guard (ADR-0024 D5.2, `last-admin-ban-guard.ts`):
+ * last-administrator ban guard (ADR-0024 D5.2, `last-admin-guard.ts`):
  * without this arm, an over-broad SCIM deprovision would be refused correctly
  * and then reported to the IdP as an opaque 500, which is the one thing a guard
  * whose whole product is an explanation must not do.

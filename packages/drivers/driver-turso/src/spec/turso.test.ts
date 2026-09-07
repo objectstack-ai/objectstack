@@ -31,25 +31,30 @@ describe('TursoConfigSchema', () => {
     expect(config.url).toBe(':memory:');
   });
 
+  // The replica's local file is named by `url` alone — the fixture used to
+  // author a `localPath` beside it, which the schema accepted and nothing read
+  // (#16024). It authors the shape the driver actually consumes.
   it('should accept embedded replica config', () => {
     const config = TursoConfigSchema.parse({
       url: 'file:./local-replica.db',
       syncUrl: 'libsql://my-db-orgname.turso.io',
       authToken: 'eyJhbGciOi...',
-      localPath: './local-replica.db',
       sync: {
         intervalSeconds: 30,
         onConnect: true,
       },
     });
 
+    expect(config.url).toBe('file:./local-replica.db');
     expect(config.syncUrl).toBe('libsql://my-db-orgname.turso.io');
-    expect(config.localPath).toBe('./local-replica.db');
     expect(config.sync).toBeDefined();
     expect(config.sync!.intervalSeconds).toBe(30);
     expect(config.sync!.onConnect).toBe(true);
   });
 
+  // "All fields" is every field the driver READS. `localPath` and `wasm` used
+  // to sit in this fixture too, and their presence here is what the #16024
+  // measurement found: accepted, asserted, consumed by nothing.
   it('should accept config with all fields', () => {
     const config = TursoConfigSchema.parse({
       url: 'libsql://my-db-orgname.turso.io',
@@ -57,19 +62,16 @@ describe('TursoConfigSchema', () => {
       encryptionKey: 'my-secret-key-256',
       concurrency: 50,
       syncUrl: 'libsql://my-db-orgname.turso.io',
-      localPath: '/data/replica.db',
       sync: {
         intervalSeconds: 120,
         onConnect: false,
       },
       timeoutMs: 30000,
-      wasm: true,
     });
 
     expect(config.encryptionKey).toBe('my-secret-key-256');
     expect(config.concurrency).toBe(50);
     expect(config.timeoutMs).toBe(30000);
-    expect(config.wasm).toBe(true);
   });
 
   it('should apply correct defaults', () => {
@@ -81,10 +83,58 @@ describe('TursoConfigSchema', () => {
     expect(config.authToken).toBeUndefined();
     expect(config.encryptionKey).toBeUndefined();
     expect(config.syncUrl).toBeUndefined();
-    expect(config.localPath).toBeUndefined();
     expect(config.sync).toBeUndefined();
     expect(config.timeoutMs).toBeUndefined();
-    expect(config.wasm).toBeUndefined();
+    // The two retired keys are tombstones: declared, unwritable, and absent
+    // from a parse that never wrote them (mirrors the `timeout` case below).
+    expect('localPath' in config).toBe(false);
+    expect('wasm' in config).toBe(false);
+  });
+
+  // [#16024, ADR-0049] The two REMOVED keys, asserted on the refusal envelope
+  // for the same reason the `timeout` tombstone below is: a bare `toThrow()`
+  // stays green for a schema that lost the tombstone and required `url`, and
+  // green for a strip that never refused. What must hold is that each key is
+  // REFUSED, that the refusal names what actually does the job the key
+  // pretended to (`url` for the replica file; the remote arm for a runtime
+  // without native bindings), and that it carries the migration command.
+  it('refuses the removed `localPath`, and the refusal points at `url`', () => {
+    const result = TursoConfigSchema.safeParse({
+      url: 'file:./local-replica.db',
+      syncUrl: 'libsql://my-db-orgname.turso.io',
+      localPath: './local-replica.db',
+    });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'localPath');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('`turso config.localPath` was removed');
+    expect(issue!.message).toContain('named by `url`');
+    expect(issue!.message).toContain('Delete the key');
+    expect(issue!.message).toContain('os migrate meta --from 17');
+  });
+
+  it('refuses the removed `wasm`, and the refusal says no WASM build was ever selected', () => {
+    const result = TursoConfigSchema.safeParse({ url: 'libsql://my-db.turso.io', wasm: true });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'wasm');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('`turso config.wasm` was removed');
+    expect(issue!.message).toContain('nothing selects a WASM build');
+    expect(issue!.message).toContain('Delete the key');
+    expect(issue!.message).toContain('os migrate meta --from 17');
+  });
+
+  // The other half, as for `timeout`: a tombstone refuses a VALUE and leaves a
+  // config that never wrote the key untouched — `false` is a value too.
+  it('the two tombstones refuse `wasm: false` as firmly as `wasm: true`, and touch nothing else', () => {
+    expect(TursoConfigSchema.safeParse({ url: ':memory:', wasm: false }).success).toBe(false);
+
+    const config = TursoConfigSchema.parse({ url: 'file:./replica.db', syncUrl: 'libsql://db.turso.io' });
+    expect(config.url).toBe('file:./replica.db');
+    expect('localPath' in config).toBe(false);
+    expect('wasm' in config).toBe(false);
   });
 
   it('should accept https URL', () => {

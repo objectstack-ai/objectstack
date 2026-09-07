@@ -232,5 +232,63 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       expect(msg).toContain("COALESCE(organization_id, '__global__')");
       expect(msg).not.toContain('HASH COLLISION');
     }, 60_000);
+
+    /**
+     * The OVERFLOW TAIL — the half of that message no test in this repo could
+     * see. The report is assembled by the module-local `formatDuplicateGroups`
+     * (#14902), shared with the drift entry and both plain-unique logs, and it
+     * renders at most FIVE groups before counting the rest. Every duplicate
+     * fixture in this package conflicts a single group, so the tail had never
+     * been rendered by a test at all, and the `Conflicting group(s):`
+     * assertion above is a PREFIX — green whatever follows it.
+     *
+     * #16289 is that hole cashing in: this arm hand-rolled the same
+     * five-then-count shape the helper exists to own, and its tail read
+     * `…and N more` where the helper's reads `…and N more group(s)`. Two
+     * durability logs about the same failure class, emitted from the same
+     * `catch`, disagreed on how they say "there are more" — the exact drift
+     * the helper's docblock names, recurring on the one arm left behind.
+     *
+     * SIX groups is the smallest fixture in which the tail renders at all,
+     * and the five-shown count is what makes this a pin on the SHARED
+     * renderer rather than on one arm's private spelling of it.
+     */
+    it('counts the sixth conflicting group in the shared "more group(s)" tail', async () => {
+      driver = new SqlDriver(cell.config());
+      const logs: string[] = [];
+      (driver as any).logger = {
+        warn: (msg: string) => logs.push(String(msg)),
+        error: (msg: string) => logs.push(String(msg)),
+      };
+      const bare = orgUniqueOn('os12998_tail');
+      // Bound to a variable, like the fixture above: `initObjects`' parameter
+      // type does not declare `indexes`, and an inline literal would be
+      // rejected by tsc for a key the driver reads regardless (#16570).
+      const withoutIndex = { ...bare, indexes: [] };
+      await driver.initObjects([withoutIndex]);
+      const knex = (driver as any).knex;
+      // Six DISTINCT values, each doubled under a NULL organization: six
+      // conflicting groups once the declared key folds NULL into the global
+      // bucket. Long, like every fixture here, because the over-the-ceiling
+      // TEXT column is what makes MySQL refuse the direct index and take the
+      // shadow route into this arm.
+      const rows = ['a', 'b', 'c', 'd', 'e', 'f'].flatMap((ch) => {
+        const v = ch.repeat(900);
+        return [
+          { id: `${ch}1`, v, organization_id: null },
+          { id: `${ch}2`, v, organization_id: null },
+        ];
+      });
+      await knex('os12998_tail').insert(rows);
+
+      await expect(driver.initObjects([bare])).resolves.not.toThrow();
+
+      const diagnosis = logs.find((l) => l.includes('cannot create hash-shadow unique index'));
+      expect(diagnosis, 'the degradation must be logged').toBeTruthy();
+      // Five groups rendered in full …
+      expect(String(diagnosis).match(/\u00d7 2 rows/g) ?? []).toHaveLength(5);
+      // … and the sixth counted in the helper's wording, not a second one.
+      expect(diagnosis).toMatch(/; \u2026and 1 more group\(s\)\./);
+    }, 60_000);
   });
 });

@@ -116,6 +116,52 @@ export function isConsumerInstallable(type: string | undefined): boolean {
   return type != null && (CONSUMER_INSTALLABLE_TYPES as readonly string[]).includes(type);
 }
 
+/**
+ * The stable code a `PluginSchema` refusal carries when a `type: 'ui'` plugin
+ * omits a key the `ui` type requires (#16334).
+ *
+ * `staticPath` and `slug` are described below as `(Required for type="ui")`
+ * and were declared `.optional()` with nothing behind the prose. Once
+ * `kernel.use()` ran the schema on the boot path (#16049) that prose became a
+ * promise the runtime visibly did not keep. The `superRefine` on
+ * `PluginSchema` makes it true: a `type: 'ui'` plugin missing either key is
+ * refused with one issue per missing key, `path` naming the key.
+ *
+ * Where the code is readable — MEASURED on this tree, not assumed:
+ *
+ *  - At the HEAD of the issue's `message`. The one runtime caller of
+ *    `PluginSchema` is `PluginLoader.validatePluginContract`
+ *    (`packages/core/src/plugin-loader.ts`, #16049), which surfaces the first
+ *    issue's `path` and `message` and reads nothing else, and
+ *    `ObjectKernel.use()` re-wraps that into a fresh `Error` carrying only the
+ *    message. So the code reaches the boot log verbatim today, with no loader
+ *    change:
+ *
+ *      PLUGIN_CONTRACT_VIOLATION: plugin '@acme/console' is refused by the
+ *      declared plugin contract at 'staticPath': PLUGIN_UI_REQUIRED_KEY_MISSING: …
+ *
+ *  - On the issue's `params.code` (zod's slot for custom-issue metadata), with
+ *    `params.key` naming the missing key — for a reader that wants the code as
+ *    a field rather than a message prefix. No reader does today; whether the
+ *    loader should stamp it onto `err.code` is the boot path's seam (#16049),
+ *    not this one.
+ *
+ * Spelled the ADR-0112 way and deliberately NOT wire vocabulary: it is raised
+ * at authoring / `kernel.use()`, before any HTTP boundary exists —
+ * `door: 'none'` / `boot-refusal` in
+ * `packages/runtime/src/dispatcher-error-vocabulary.ts`, beside
+ * `PLUGIN_CONTRACT_VIOLATION`, the envelope it rides.
+ */
+export const PLUGIN_UI_REQUIRED_KEY_MISSING = 'PLUGIN_UI_REQUIRED_KEY_MISSING';
+
+/**
+ * The keys `type: 'ui'` requires — exactly the two whose `.describe()` says
+ * `(Required for type="ui")`. Module-private on purpose: the published symbol
+ * is the refusal code above; the key set itself is pinned by
+ * `plugin-ui-required-keys.test.ts`, one case per key.
+ */
+const PLUGIN_UI_REQUIRED_KEYS = ['staticPath', 'slug'] as const;
+
 export const PluginSchema = lazySchema(() => z.object({
   id: z.string().min(1).optional().describe('Unique Plugin ID (e.g. com.example.crm)'),
   type: z.enum([
@@ -131,6 +177,27 @@ export const PluginSchema = lazySchema(() => z.object({
   description: z.string().optional(),
   author: z.string().optional(),
   homepage: z.string().url().optional(),
+}).superRefine((plugin, ctx) => {
+  // #16334 — the `(Required for type="ui")` prose on `staticPath` / `slug`,
+  // enforced. Scoped to `type === 'ui'` exactly: every other type, and a
+  // plugin declaring no `type` (`.default('standard')`), owes neither key.
+  // Absence only — a PRESENT value is judged by its own declaration above
+  // (`slug` keeps its regex, `staticPath` stays any string), never re-judged.
+  if (plugin.type !== 'ui') return;
+  for (const key of PLUGIN_UI_REQUIRED_KEYS) {
+    if (plugin[key] !== undefined) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: [key],
+      message:
+        `${PLUGIN_UI_REQUIRED_KEY_MISSING}: a \`type: 'ui'\` plugin must declare \`${key}\` — `
+        + (key === 'staticPath'
+          ? 'the absolute path of the static assets it serves.'
+          : 'the URL path segment it is mounted under.')
+        + " Declare it, or drop `type: 'ui'` if this plugin serves no assets.",
+      params: { code: PLUGIN_UI_REQUIRED_KEY_MISSING, key },
+    });
+  }
 }));
 
 export type PluginDefinition = z.input<typeof PluginSchema>;

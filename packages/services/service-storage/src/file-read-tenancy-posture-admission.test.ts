@@ -567,31 +567,44 @@ describe('[#15352] §5b — a `tenancy` service that was REGISTERED and FAILED i
   const OUTAGE: Wiring = { kind: 'factory-throws' };
 
   /**
-   * ⚠️ MEASURED on this tree, and deliberately pinned as a CLASS rather than as
-   * digits: this door answers **`403 FILE_DOWNLOAD_DENIED`** on a failed
-   * posture read, not the `503 SERVICE_UNAVAILABLE` the
-   * `AuthzStoreUnavailableError` brand carries.
+   * ⭐ THE 403 ARM RETIRED HERE. This block used to pin the outage as a CLASS —
+   * `status` in `{403, 500, 503}` — because MEASURED on this tree the door
+   * answered **`403 FILE_DOWNLOAD_DENIED`** on a failed posture read, not the
+   * `503 SERVICE_UNAVAILABLE` the `AuthzStoreUnavailableError` brand carries.
+   * #15999's ruling item 3 repaired exactly that, and item 4 said in the same
+   * stroke that this pin's 403 arm retires with the fix. It is retired below:
+   * the digits are now asserted, and they are the declared ones.
    *
-   * The authorizer DOES re-raise the brand (`isAuthzStoreUnavailableError(err)
-   * ⇒ throw`, #13279) — but `registerStorageRoutes`' `authorizeDownload` wraps
-   * the whole authorizer in `catch { verdict = 'deny' }` one frame up, so on
-   * this door the re-raise is absorbed and rendered as the gate's own refusal.
-   * That flattening is PRE-EXISTING — it has swallowed the #13279
-   * permission-store outage here since that card landed, out of the same
-   * `catch` — and is ⛔ not repaired by this one; it is filed separately.
+   * What happened: the authorizer always re-raised the brand
+   * (`isAuthzStoreUnavailableError(err) ⇒ throw`, #13279), and
+   * `registerStorageRoutes`' `authorizeDownload` absorbed that re-raise one
+   * frame up in `catch { verdict = 'deny' }`, rendering an outage as the gate's
+   * own capability refusal — the confusion #13279 exists to prevent. That
+   * `catch` now RELAYS the declared envelope instead (⛔ not a bare re-raise:
+   * the route's outer `catch` would answer `500 INTERNAL`, and the shared
+   * render for an escaped envelope is #16545 and has not landed).
    *
-   * The property this file is about is the SECURITY one: a FAILURE must not
-   * read as "this check does not apply". So the assertions below say the outage
-   * is never answered as an ADMISSION and never mints a capability, and leave
-   * the digits free — a later repair that promotes this to 503 must not have to
-   * redden a security pin.
+   * ⚠️ The SECURITY property this file is about is unchanged and still asserted
+   * first: a FAILURE must never read as "this check does not apply". Every arm
+   * below still says the outage is never answered as an ADMISSION and never
+   * mints a capability. The status assertion is additive to that, not a
+   * replacement for it — a door that answered 503 after minting a URL would
+   * pass a status-only suite and still have issued the capability.
+   *
+   * The relay's own controls (the `deny` 403 spellings that must SURVIVE, and
+   * every non-branded throw that must still fall closed) live in
+   * `storage-routes.authz-outage-relay.test.ts`.
    */
   it('⛔ the ex-member is NOT admitted on a failed posture read — the defect a quiet `catch` would restore', async () => {
     const h = await mount(OUTAGE);
     const res = await h.call('url', FILE_OPEN, RAW_EXMEMBER_KEY);
-    expect([403, 500, 503]).toContain(res.status);
+    // The security half, unchanged and asserted first.
     expect(res.status).not.toBe(200);
     expect(h.minted()).toBe(0);
+    // The half #15999 repaired: the declared envelope, no longer the gate's own
+    // 403. `[403, 500, 503]` is what this line used to accept.
+    expect(res.status).toBe(503);
+    expect((res.json?.error as { code?: string } | undefined)?.code).toBe('SERVICE_UNAVAILABLE');
   });
 
   it('⛔ nor is the redirect door — no 302, no Location, no capability', async () => {
@@ -601,6 +614,8 @@ describe('[#15352] §5b — a `tenancy` service that was REGISTERED and FAILED i
     expect(res.status).not.toBe(200);
     expect(res.headers.Location).toBeUndefined();
     expect(h.minted()).toBe(0);
+    // The redirect sibling relays the same declared envelope (#15999).
+    expect(res.status).toBe(503);
   });
 
   it('the outage is not selective either: a CURRENT member is refused too, and nothing is minted', async () => {
@@ -611,6 +626,9 @@ describe('[#15352] §5b — a `tenancy` service that was REGISTERED and FAILED i
     const res = await h.call('url', FILE_OPEN, RAW_MEMBER_KEY);
     expect(res.status).not.toBe(200);
     expect(h.minted()).toBe(0);
+    // …and the healthy caller gets the same DIAGNOSABLE answer (#15999), not a
+    // refusal that would send an operator hunting for a permission problem.
+    expect(res.status).toBe(503);
   });
 });
 
