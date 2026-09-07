@@ -1,4 +1,4 @@
-# ADR-0132: Identity and access architecture — the open half, mirrored from cloud ADR-0024
+# ADR-0135: Identity and access architecture — the open half, mirrored from cloud ADR-0024
 
 **Status**: The DECISION is Accepted — it is `objectstack-ai/cloud` ADR-0024, accepted there on
 2026-06-25, and its mechanism half is implemented in this repository today. ⚠️ This **file** is a
