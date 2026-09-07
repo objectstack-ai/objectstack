@@ -301,17 +301,47 @@ describe('PIN: a throwing run leaves a FAILED claim that a plain replay() re-run
 });
 
 describe('PIN: the ticker survives the throw — the error isolation must NOT regress', () => {
-    it('a throwing flow never rejects out of the job handler', async () => {
-        const r = await rig({ throws: true });
-        await expect(r.tick()).resolves.toBeUndefined();
+    // ⚠ These assert on the handler the trigger REGISTERS, not on a fire routed
+    // through `DbJobAdapter.trigger()`. Measured on `origin/main`: the adapter
+    // chain swallows too — `IntervalJobAdapter.executeJob` catches every handler
+    // rejection and records it as a `failed` execution — so a fire driven
+    // through the adapter resolves whether or not the trigger's own catch
+    // exists, and a pin written that way would be green against a trigger that
+    // rethrows. The property the ruling protects is the trigger's, so it is
+    // pinned where it lives.
+    function bareJobService() {
+        const jobs = new Map<string, (c: { jobId: string }) => Promise<void>>();
+        const service: JobServiceSurface = {
+            async schedule(name, _s, handler) { jobs.set(name, handler as any); },
+            async cancel(name) { jobs.delete(name); },
+            setReplayGuard() { /* not exercised here */ },
+        };
+        return { service, fire: (id = 'j1') => jobs.get(JOB)!({ jobId: id }) };
+    }
+
+    async function throwingRig(now: Date, store = new InMemoryFlowDispatchStore()) {
+        const { ledger } = realLedger(store);
+        const { logger, warn } = recordingLogger();
+        const bare = bareJobService();
+        const runs: string[] = [];
+        let clock = now;
+        const trigger = new ScheduleTrigger(() => bare.service, logger, () => ledger, () => clock);
+        trigger.start(CRON, async () => { runs.push('r'); throw new Error('digest render blew up'); });
+        await flush();
+        return { fire: bare.fire, runs, warn, setNow: (d: Date) => { clock = d; } };
+    }
+
+    it('a throwing flow never rejects out of the handler the trigger registered', async () => {
+        const r = await throwingRig(IN_WINDOW);
+        await expect(r.fire()).resolves.toBeUndefined();
         expect(r.warn).toHaveBeenCalledWith(expect.stringContaining('execution failed: digest render blew up'));
     });
 
     it('and the next window still fires — one bad run does not stop the schedule', async () => {
-        const r = await rig({ throws: true });
-        await r.tick();
+        const r = await throwingRig(IN_WINDOW);
+        await expect(r.fire()).resolves.toBeUndefined();
         r.setNow(NEXT_WINDOW);
-        await expect(r.tick()).resolves.toBeUndefined();
+        await expect(r.fire()).resolves.toBeUndefined();
         expect(r.runs).toHaveLength(2);
     });
 
