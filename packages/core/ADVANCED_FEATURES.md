@@ -223,14 +223,15 @@ for (const [pluginName, health] of allHealth) {
 
 ### 7. Performance Metrics
 
-Track plugin startup times:
+Track plugin startup durations -- the map values are elapsed milliseconds,
+not start instants:
 
 ```typescript
 await kernel.bootstrap();
 
-const metrics = kernel.getPluginMetrics();
-for (const [pluginName, startTime] of metrics) {
-  console.log(`${pluginName}: ${startTime}ms`);
+const durations = kernel.getPluginStartupDurations();
+for (const [pluginName, duration] of durations) {
+  console.log(`${pluginName}: ${duration}ms`);
 }
 // plugin-1: 150ms
 // plugin-2: 320ms
@@ -327,7 +328,8 @@ Both kernels adhere to the same `Plugin` interface, but `ObjectKernel` supports 
 - `async shutdown(): Promise<void>`
 - `async checkPluginHealth(pluginName: string): Promise<PluginHealthStatus>`
 - `async checkAllPluginsHealth(): Promise<Map<string, PluginHealthStatus>>`
-- `getPluginMetrics(): Map<string, number>`
+- `getPluginStartupDurations(): Map<string, number>`
+- `getPluginMetrics(): Map<string, number>` *(deprecated alias of the above)*
 - `async getServiceAsync<T>(name: string, scopeId?: string): Promise<T>`
 - `onShutdown(handler: () => Promise<void>): void`
 - `getState(): string`

@@ -132,7 +132,18 @@ export type { AdmittedValueShapeViolationTally } from './engine.js';
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
 // `sys_secret` references can name the shape it reads instead of re-declaring it.
 export type { DatasourceDef } from './engine.js';
-export { SummaryRecomputeError } from './summary-errors.js';
+// [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
+// docblock tells a caller to identify it by `code` rather than `instanceof`
+// (the two-realm split #14936 measured: this package declares BOTH realms in
+// its own `exports`, so a consumer holding the other realm's copy of the class
+// gets `instanceof` === false, silently) — and until now offered nothing to
+// import. Two first-party packages already re-spell this code to implement the
+// documented "the records WERE written, treat it as a warning" recovery
+// (`packages/rest/src/import-runner.ts`,
+// `packages/metadata-protocol/src/seed-loader.ts`); they can now import it
+// instead. The class stays exported exactly as it was — this adds an
+// affordance, it removes nothing.
+export { SummaryRecomputeError, SUMMARY_RECOMPUTE_CODE } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
 // payload would have had read-only fields stripped. Exported so an in-process
@@ -206,7 +217,22 @@ export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.j
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
-export { DriverConnectError, DatasourceUnavailableError } from './driver-connect-errors.js';
+// [#16159] `DRIVER_CONNECT_CODE` and `DATASOURCE_UNAVAILABLE_CODE` join the two
+// classes they name, for the same reason: both refusals' docblocks say they are
+// "Identified by `code` rather than `instanceof` so it survives crossing package
+// boundaries", and neither offered anything to import.
+// `packages/rest/src/error-response.ts` already matches the datasource refusal
+// by `code` and re-authors the same spelling into the envelope it builds.
+// ⚠️ Both CLASSES are also published from the lean `./core` entry while these
+// constants, like every other `*_CODE` in this package, are batteries-only —
+// #16260 owns that asymmetry for the whole family and ⛔ this sweep does not
+// decide it.
+export {
+  DriverConnectError,
+  DatasourceUnavailableError,
+  DRIVER_CONNECT_CODE,
+  DATASOURCE_UNAVAILABLE_CODE,
+} from './driver-connect-errors.js';
 export type {
   DriverConnectFailure,
   DriverHealth,
@@ -219,12 +245,27 @@ export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
 // datasource cannot give a real transaction. Exported so a caller that fails
 // closed can narrow on the class; `code` is the boundary-crossing identity.
-export { TransactionUnsupportedError } from './transaction-errors.js';
+// [#16159] `TRANSACTION_UNSUPPORTED_CODE` joins the class it names: the line
+// above already tells a caller that `code` is the boundary-crossing identity,
+// and offered nothing to import — so following it meant re-spelling the wire
+// string in the consumer's own package. The class stays exported exactly as it
+// was; this adds an affordance and removes nothing.
+export { TransactionUnsupportedError, TRANSACTION_UNSUPPORTED_CODE } from './transaction-errors.js';
 // [#5351/#5696] Thrown when a BUSINESS write inside an open transaction()
 // resolves to a driver that transaction does not cover. Append-only system
 // ledgers (lifecycle.class audit/telemetry/event) are carved out and never
 // raise it. Narrow on the class in-process; `code` crosses package boundaries.
-export { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
+// [#16159] `CROSS_DATASOURCE_TRANSACTION_WRITE_CODE` joins its class for the same
+// reason (#14936: this package declares BOTH realms in its own `exports`, so a
+// consumer holding the other realm's copy of the class gets `instanceof` ===
+// false, silently). ⭐ Neither class in `transaction-errors.js` is published from
+// the lean `./core` entry, so batteries-only constants introduce no asymmetry
+// here — class and constant are reachable from exactly one entry point, the same
+// one. #16260 owns that question for the classes that ARE on `./core`.
+export {
+  CrossDatasourceTransactionWriteError,
+  CROSS_DATASOURCE_TRANSACTION_WRITE_CODE,
+} from './transaction-errors.js';
 
 // [#4550] The delete-dispatch contract, exported so a TEST DOUBLE that stands
 // in for the engine can import the producer's own decision rather than
