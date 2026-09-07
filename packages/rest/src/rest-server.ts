@@ -300,6 +300,8 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { runImport } from './import-runner.js';
+// [#16581] The public picker's authoring-dialect → parser-grammar lowering.
+import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
@@ -10530,9 +10532,25 @@ export class RestServer {
                     // then the search predicate over displayFields. The
                     // search predicate uses `contains` on the first
                     // display field so non-indexed columns still work.
-                    const filters: any[] = [];
-                    if (Array.isArray(picker.filter)) filters.push(...picker.filter);
-                    if (q) filters.push({ field: displayFields[0], operator: 'contains', value: q });
+                    //
+                    // [#16581] …and then LOWER the composed rows to the filter
+                    // grammar the ingress parses. BOTH halves are the authoring
+                    // dialect `FormFieldPublicPickerSchema.filter` declares
+                    // (`{field, operator, value}`) — the declared rows because
+                    // an author wrote them, the search row because this route
+                    // built it in the same shape — and the normalizer refuses
+                    // that shape with `400 INVALID_FILTER`. So the endpoint
+                    // answered 400 for EVERY non-empty search, with or without a
+                    // declared `publicPicker.filter`; only the degenerate
+                    // no-filter call could succeed. `lowerViewFilterRules` is
+                    // the one-way translation (authoring dialect →
+                    // `FilterArray`) and lives at this door because this is the
+                    // door that speaks both; ⛔ the repair the ruling excludes
+                    // is teaching `findData` a second dialect.
+                    const rules: any[] = [];
+                    if (Array.isArray(picker.filter)) rules.push(...picker.filter);
+                    if (q) rules.push({ field: displayFields[0], operator: 'contains', value: q });
+                    const filters = lowerViewFilterRules(rules);
 
                     const context: any = {
                         permissions: ['guest_portal'],
@@ -10547,16 +10565,16 @@ export class RestServer {
                         // moves the value verbatim, so this is a spelling change
                         // and nothing else.
                         //
-                        // ⚠️ The VALUE on `where` is unchanged and is NOT a
-                        // `FilterCondition`: `filters` carries `ViewFilterRule`
-                        // rows (`{field, operator, value}` objects, the dialect
-                        // `FormFieldPublicPickerSchema.filter` declares) composed
-                        // with the route's own search row, and the ingress refuses
-                        // a non-empty one with `400 INVALID_FILTER` — measured, and
-                        // filed as #16581. ⛔ Not repaired here: this card retypes
-                        // the SPELLING of these literals and moves no behaviour.
-                        // `FilterCondition`'s `[key: string]: any` index signature
-                        // is why the array still compiles against the slot.
+                        // ⚠️ The VALUE on `where` is a `FilterArray`, not a
+                        // `FilterCondition`. #16337 left `ViewFilterRule` OBJECTS
+                        // here — the dialect `FormFieldPublicPickerSchema.filter`
+                        // declares — which the ingress refuses with
+                        // `400 INVALID_FILTER`; #16581 lowers them above, so what
+                        // arrives is the declared array grammar the normalizer
+                        // parses. `FilterCondition`'s `[key: string]: any` index
+                        // signature is why an array compiles against the slot at
+                        // all; that the value is now a filter the ingress ACCEPTS
+                        // is measured end-to-end, not asserted by the type.
                         query: {
                             object: referenceTo,
                             limit: maxResults,

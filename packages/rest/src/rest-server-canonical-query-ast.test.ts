@@ -41,7 +41,15 @@
  * pair is asserted equal by both REFUSING — its `where` carries
  * `ViewFilterRule` rows, which the ingress declines with `400 INVALID_FILTER`
  * before and after this card alike. Equality is the assertion; the verdict on
- * either side is the ingress's, and repairing it is #16581.
+ * either side is the ingress's.
+ *
+ * [#16581] The ROUTE no longer builds that literal — it lowers the rule rows to
+ * the `FilterArray` grammar before dispatch — but the pair stays exactly as
+ * frozen here, and its CONTROL becomes load-bearing in a second way: it is one
+ * of the two independent pins that the object dialect is still REFUSED, i.e.
+ * that #16581 lowered the route rather than loosening the parser. ⛔ Never
+ * "update" the picker pair to the lowered shape: a frozen BEFORE that is
+ * rewritten to match the after measures nothing.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -330,6 +338,13 @@ describe('[#16337] §3 the rewrite moves nothing — driven through the real nor
         // Stated rather than left implicit: this pair's equality is not evidence
         // that the picker query is served. Both sides carry `ViewFilterRule`
         // rows on the filter slot, which is not a `FilterCondition`.
+        //
+        // [#16581] ⭐ And this is now the discriminating control for that card:
+        // the route lowers those rows before dispatch, so it no longer sends
+        // this literal — while the literal itself must still be REFUSED. A
+        // green picker search plus a green line here means "the route lowers";
+        // a green picker search with this line flipped would have meant "the
+        // parser was loosened", the repair the ruling excludes.
         const outcome = await normalized(PAIRS[3].canonical) as { refused?: { code?: string; status?: number } };
         expect(outcome.refused).toEqual({ code: 'INVALID_FILTER', status: 400 });
     });
