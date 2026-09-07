@@ -1368,7 +1368,20 @@ describe('translatePage', () => {
       expect(byId(out, 'ai_briefing').properties.description).toBe('Open the assistant panel.');
     });
 
-    it('lets the id-addressed route win over the page-name route on a header that has an id', () => {
+    // Ruled 2026-09-06 (maintainer, verbatim 「同意」, decision batch #58,
+    // option 1): "The page-name route is canonical for a region-level
+    // `page:header`. `translatePage` stops reading the id route
+    // (`pages.PAGE.components.HEADERID.*`) for a `page:header` at region
+    // level; a `page:header` nested inside a container stays id-only, as its
+    // doc already says. One component, one address — `title` and `subtitle`
+    // now follow the same rule."
+    //
+    // This test previously asserted the OPPOSITE (`title` resolving to
+    // `快速新建`, the id route beating the page-name one). It is inverted, not
+    // deleted, because the inversion IS the behaviour change the ruling
+    // records: the id route was live for this component and preferred, and a
+    // bundle that used it now falls back to the page-name key.
+    it('reads a region-level `page:header` by page name only, id or no id (batch #58)', () => {
       const doc = {
         name: 'sales_home_page',
         regions: [{
@@ -1384,10 +1397,15 @@ describe('translatePage', () => {
         }],
       };
       const out = translatePage(doc, homeBundle, { locale: 'zh-CN' });
-      // `components.quick_create.title` is more specific than `pages.<name>.label`.
-      expect(out.regions[0].components[0].properties.title).toBe('快速新建');
-      // The page-name route still supplies what the id route did not.
+      // `components.quick_create.title` (`快速新建`) is NOT read here — the
+      // page-name route is, falling back to `pages.<name>.label` for `title`.
+      expect(out.regions[0].components[0].properties.title).toBe('销售看板');
       expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+      // Control: the very same bundle entry still reaches the component that
+      // actually owns it, so the assertion above is about the header's route
+      // and not about a bundle that stopped resolving.
+      expect(byId(translatePage(homePage(), homeBundle, { locale: 'zh-CN' }), 'quick_create')
+        .properties.title).toBe('快速新建');
     });
 
     it('does not mutate the input page', () => {

@@ -835,6 +835,16 @@ const translationDataShape = () => ({
    * because `page:header` instances carry no stable `id`; the page name is the
    * only addressable identifier for them. Every other component does have one,
    * which is what `components` addresses — see its own note.
+   *
+   * **One component, one address.** For a REGION-LEVEL `page:header` the two
+   * keys above are the ONLY route, even when the component happens to carry an
+   * `id`: `translatePage` does not read `components.<id>` for it (ruled
+   * 2026-09-06, decision batch #58 — the page-name route is canonical). Before
+   * that ruling the id route was read here and WON, so a bundle could address
+   * one header `title` two ways while `subtitle` — excluded from `components`
+   * for exactly this reason, see its note below — only ever had one. A
+   * `page:header` NESTED inside a container is a different component: the
+   * page-name route does not reach it, so it stays id-only.
    */
   pages: z.record(z.string(), strictObject({
     surface: 'this page translation',
@@ -868,7 +878,7 @@ const translationDataShape = () => ({
      *
      * | key | declared by |
      * |:---|:---|
-     * | `title` | `page:card`, `record:related_list` (and `page:header`, see below) |
+     * | `title` | `page:card`, `record:related_list` (and a NESTED `page:header` — a region-level one is page-name-addressed, see the `subtitle` note below) |
      * | `label` | `page:tabs`, `page:accordion`, `record:details`, `record:related_list`, `record:path`, `element:button`, `element:record_picker`, `element:text_input` |
      * | `description` | `element:text_input` |
      * | `placeholder` | `element:record_picker`, `element:text_input` |
@@ -896,7 +906,11 @@ const translationDataShape = () => ({
      * - **`subtitle` is not here** — `page:header` is its only declarer, and
      *   that component is addressed by page name above. Declaring it in both
      *   places would give one string two spellings, which is how the
-     *   dashboards/pages asymmetry started.
+     *   dashboards/pages asymmetry started. The 2026-09-06 ruling settled the
+     *   same question for its sibling `title` in the same direction: a
+     *   region-level `page:header` is read by page name only, so the component
+     *   now has ONE address for both of its keys rather than two for one of
+     *   them.
      * - **`content` is not here** — `element:text`'s one authored string is
      *   declared `content: I18nLabelSchema` (`ui/component.zod.ts`), so it is
      *   localizable at its own authoring site, and adding it to this face would

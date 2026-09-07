@@ -1663,12 +1663,25 @@ export function walkAddressedPageComponents(
  * `pages.<name>.label` so translators need not repeat a string that is normally
  * identical to the page's nav label.
  *
+ * **One component, one address.** A REGION-LEVEL `page:header` is addressed by
+ * page name and by nothing else: the id route
+ * (`pages.<name>.components.<id>.*`) is NOT read for it, even when it carries
+ * an id (ruled 2026-09-06, decision batch #58 — the page-name route is
+ * canonical). It used to be read there and to WIN, which put the header's
+ * `title` under two addresses while its `subtitle` — not in
+ * {@link PAGE_COMPONENT_COPY_KEYS} — only ever had one; the ruling makes the
+ * two keys of one component follow the same rule. It is also the half of the
+ * failure pair {@link walkAddressedPageComponents} exists to prevent that was
+ * still open: the CLI extractor deliberately offers nothing under
+ * `components.<id>` for this component, so every key read here was a key no
+ * tooling ever offered, counted or reported.
+ *
  * Every OTHER component is addressed by its own `id` through
  * `pages.<name>.components.<id>` (#6080), which overlays that component's
  * `properties` — the page half of what `dashboards.<name>.widgets.<id>` has
- * always given dashboards. Because the id route is the more specific of the
- * two, it wins wherever both could apply (a `page:header` that does carry an
- * id).
+ * always given dashboards. That includes a `page:header` NESTED in a
+ * container, which the page-name route does not reach (below) and which is
+ * therefore id-only.
  *
  * Components nested in a container's declared `properties.children` array are
  * visited too, recursively (#12961, ruled 2026-08-29). This REVERSES the
@@ -1740,8 +1753,24 @@ export function translatePage<T extends PageLike>(
     // within one call `lookupPageComponentCopy` is a pure function of the id
     // (bundle, page name and options are fixed), so the walk's claim-on-first-
     // sighting selects the same component a claim-on-resolved-lookup would.
+    //
+    // The one component this route does NOT serve is a REGION-LEVEL
+    // `page:header`: its copy is addressed by page name below, and reading
+    // `components.<id>` for it too would give one string two addresses. The
+    // condition is written to MIRROR the extractor's emission exception in
+    // `collectExpectedEntries` (`packages/cli`) — same shape, opposite verb —
+    // so the pair the shared walk exists to prevent cannot reopen from this
+    // side. `nested` keeps a `page:header` inside a container on the id route,
+    // which is the only route that reaches it.
+    //
+    // The walk's `addressed` arbitration is deliberately NOT touched: a
+    // region-level `page:header`'s id still CLAIMS its bundle entry and still
+    // blocks a nested namesake. Which component owns an id is a property of
+    // the document, decided identically for every consumer of the walk; only
+    // whether this consumer READS the entry changes here, and the extractor
+    // blocks the namesake the same way.
     let copy: Partial<Record<PageComponentCopyKey, string>> | undefined;
-    if (addressed) {
+    if (addressed && (nested || component.type !== PAGE_HEADER_COMPONENT)) {
       copy = lookupPageComponentCopy(bundle, name, id as string, opts);
     }
 
@@ -1774,9 +1803,11 @@ export function translatePage<T extends PageLike>(
       ...next,
       properties: {
         ...next.properties,
-        // The id-addressed copy above is more specific — do not overwrite what
-        // it already resolved for this header.
-        ...(headerTitle !== undefined && copy?.title === undefined ? { title: headerTitle } : {}),
+        // No `copy?.title` guard: the id route is not read for a region-level
+        // `page:header` at all, so there is nothing here to defer to. A guard
+        // that can never fire is a phantom check — it would read as "the id
+        // route still wins sometimes", which is exactly what the ruling ended.
+        ...(headerTitle !== undefined ? { title: headerTitle } : {}),
         ...(headerSubtitle !== undefined ? { subtitle: headerSubtitle } : {}),
       },
     };
