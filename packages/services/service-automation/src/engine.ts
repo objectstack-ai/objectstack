@@ -1464,6 +1464,53 @@ export interface SuspensionRestoreResult {
 }
 
 /**
+ * [#15358] What {@link AutomationEngine.inspectConsumedSuspension} answers:
+ * would {@link AutomationEngine.restoreConsumedSuspension} have a consumed
+ * suspension to put back for this run? READ from the same two witnesses that
+ * verb reads, and re-arming nothing.
+ *
+ * Every arm is earned by its own observation, and the three negative ones are
+ * deliberately not folded into one boolean — a consumer that branches on
+ * `repairable` alone reads the middle one wrong in both directions:
+ *
+ *  - `repairable: true` — a consumed-suspension snapshot is held for the run,
+ *    in this process's hot journal or on the durable terminal row (`witness`
+ *    says which). The restore verb re-arms it.
+ *  - `'SNAPSHOT_DROPPED'` — the run DID strand, but the store could not
+ *    persist the snapshot (over its row budget — the row says so,
+ *    {@link RunRecord.consumedSuspensionDropped}) and THIS process holds no
+ *    hot copy of it. Repairable only by the process that stranded it, while
+ *    that process is still running; the restore verb refuses it here naming
+ *    the budget. ⛔ Neither "unrepairable" nor "never a strand".
+ *  - `'NO_CONSUMED_SUSPENSION'` — neither witness holds anything: the run
+ *    reached a terminal state that was NOT a strand (completed, cancelled,
+ *    cascade-failed — `failSuspendedRun` consumes an ancestor's pause and
+ *    journals nothing) or never paused at all. Deliberately does not claim
+ *    which: nothing in the engine can tell those apart.
+ *  - `'RUN_SUSPENDED'` — a live suspension exists, so the run is resumable
+ *    already (typically: it was restored). Nothing to repair.
+ */
+export type ConsumedSuspensionInspection =
+    | {
+        repairable: true;
+        runId: string;
+        flowName: string;
+        /**
+         * The pause a restore would re-arm — its identity, the pair
+         * {@link SuspendedRunStore.claimSuspension} compares.
+         */
+        nodeId: string;
+        correlation?: string;
+        /** Which of the two witnesses answered (see the restore verb's read). */
+        witness: 'journal' | 'durable';
+        /** When the resume that consumed the suspension failed. */
+        consumedAt: string;
+    }
+    | { repairable: false; runId: string; reason: 'RUN_SUSPENDED'; nodeId: string }
+    | { repairable: false; runId: string; reason: 'SNAPSHOT_DROPPED'; dropped: ConsumedSuspensionDropNotice }
+    | { repairable: false; runId: string; reason: 'NO_CONSUMED_SUSPENSION' };
+
+/**
  * [#14333] Where a suspension was parked when the caller READ it — the
  * condition a {@link SuspendedRunStore.claimSuspension} compare-and-set is
  * taken against.
@@ -6587,6 +6634,92 @@ export class AutomationEngine implements IAutomationService {
         return hot.persisted === 'landed';
     }
 
+    /**
+     * [#15358] The two-witness READ of a run's consumed suspension — this
+     * process's hot journal against the durable terminal row — factored out of
+     * {@link restoreConsumedSuspension} so that {@link inspectConsumedSuspension}
+     * answers from the same reading and the two cannot disagree. PURE: it
+     * mutates nothing. A hot copy the row proves stale is REPORTED
+     * (`staleHot`) for the restore verb to drop; the read-only verb leaves it.
+     *
+     * [#13937] Two witnesses of one strand, and neither is trusted alone —
+     * the contract review of that ruling's services half measured both
+     * single-witness readings wrong, one store class apart:
+     *
+     *  - This process's HOT copy is the verbatim object the failure was
+     *    journalled from: the pause's own node, variables, step log as of the
+     *    pause. It is a per-process cache. The replica that stranded a run
+     *    keeps it after another replica restored, resumed and FINISHED the
+     *    run, and re-arming it then re-runs every node after the pause —
+     *    shape 2's silent double-run, through the restore verb's side door
+     *    (pinned in `stranded-run-status.test.ts`, red on the hot-only tree).
+     *  - The DURABLE row is the record every replica can read, and a
+     *    flattened, column-bounded copy of the same snapshot: the object
+     *    store rebuilds it from columns, DROPS it over a byte budget — and
+     *    says so in the row, `consumedSuspensionDropped` — and receives it
+     *    fire-and-forget. Read alone, a snapshot-less row sent a run the
+     *    store could not persist into NO_CONSUMED_SUSPENSION on the very
+     *    replica holding its copy (pinned in `stranded-run-object-store.test.ts`,
+     *    red on the durable-first tree).
+     *
+     * So: the hot copy is preferred whenever both describe the SAME pause
+     * ({@link rowSupersedesJournal}). When they describe different pauses,
+     * the newest strand wins — a hot copy whose own write never landed
+     * (`persisted` is not `'landed'`: the #13617 exception, a row the store
+     * was never handed says nothing) beats the older row, and a landed hot
+     * copy yields to the later strand another replica recorded. A row with
+     * neither a snapshot nor a drop notice is "the run moved on" only for a
+     * hot copy whose write did land — that copy is then stale rather than
+     * honoured. A hot copy answers alone where there is no row to ask: no
+     * store, no run history, a write that never landed or is still in flight.
+     *
+     * @param terminal - The durable terminal row, already loaded by the
+     *   caller (each caller owns its own outage posture for that read).
+     */
+    private resolveConsumedSuspensionWitnesses(
+        runId: string,
+        terminal: RunRecord | null,
+    ): {
+        consumed?: ConsumedSuspension;
+        witness?: 'journal' | 'durable';
+        dropped?: ConsumedSuspensionDropNotice;
+        /** The hot copy describes a pause the run has since LEFT. */
+        staleHot: boolean;
+    } {
+        const hot = this.consumedSuspensions.get(runId);
+        if (!terminal) {
+            return hot ? { consumed: hot, witness: 'journal', staleHot: false } : { staleHot: false };
+        }
+        if (terminal.consumedSuspension) {
+            const durable: ConsumedSuspension = {
+                run: terminal.consumedSuspension,
+                consumedAt: terminal.finishedAt ?? terminal.startedAt,
+                error: terminal.error ?? '',
+            };
+            if (hot && !this.rowSupersedesJournal(hot, durable.run)) {
+                return { consumed: hot, witness: 'journal', staleHot: false };
+            }
+            return { consumed: durable, witness: 'durable', staleHot: hot !== undefined };
+        }
+        if (terminal.consumedSuspensionDropped) {
+            const dropped = terminal.consumedSuspensionDropped;
+            if (hot && !this.rowSupersedesJournal(hot, dropped)) {
+                return { consumed: hot, witness: 'journal', dropped, staleHot: false };
+            }
+            return { dropped, staleHot: hot !== undefined };
+        }
+        if (hot && hot.persisted !== 'landed') {
+            // The row predates this strand — this process's own write for it
+            // never reached the store (in flight, or failed and reported at
+            // `error`). The store's silence says nothing.
+            return { consumed: hot, witness: 'journal', staleHot: false };
+        }
+        // A later terminal record with no snapshot and no drop notice:
+        // completed, cancelled or cascade-failed after any hot copy was
+        // taken. Stale by definition.
+        return { staleHot: hot !== undefined };
+    }
+
     /** Build a refusal from {@link restoreConsumedSuspension}. */
     private refuseRestore(
         runId: string,
@@ -6756,40 +6889,11 @@ export class AutomationEngine implements IAutomationService {
             }
 
             // [#13937] Two witnesses of one strand, and neither is trusted
-            // alone — the contract review of this ruling's services half
-            // measured both single-witness readings wrong, one store class
-            // apart:
-            //
-            //  - This process's HOT copy is the verbatim object the failure
-            //    was journalled from: the pause's own node, variables, step
-            //    log as of the pause. It is a per-process cache. The replica
-            //    that stranded a run keeps it after another replica restored,
-            //    resumed and FINISHED the run, and re-arming it then re-runs
-            //    every node after the pause — shape 2's silent double-run,
-            //    through this verb's side door (pinned in
-            //    `stranded-run-status.test.ts`, red on the hot-only tree).
-            //  - The DURABLE row is the record every replica can read, and a
-            //    flattened, column-bounded copy of the same snapshot: the
-            //    object store rebuilds it from columns, DROPS it over a byte
-            //    budget — and says so in the row, `consumedSuspensionDropped`
-            //    — and receives it fire-and-forget. Read alone, a snapshot-less
-            //    row sent a run the store could not persist into
-            //    NO_CONSUMED_SUSPENSION on the very replica holding its copy
-            //    (pinned in `stranded-run-object-store.test.ts`, red on the
-            //    durable-first tree).
-            //
-            // So: the hot copy is preferred whenever both describe the SAME
-            // pause (`rowSupersedesJournal`). When they describe different
-            // pauses, the newest strand wins — a hot copy whose own write never
-            // landed (`persisted` is not `'landed'`: the #13617 exception, a
-            // row the store was never handed says nothing) beats the older
-            // row, and a landed hot copy yields to the later strand another
-            // replica recorded. A row with neither a snapshot nor a drop notice
-            // is "the run moved on" only for a hot copy whose write did land —
-            // that copy is then DROPPED rather than honoured. A hot copy
-            // answers alone where there is no row to ask: no store, no run
-            // history, a write that never landed or is still in flight.
-            const hot = this.consumedSuspensions.get(runId);
+            // alone — the read is {@link resolveConsumedSuspensionWitnesses},
+            // shared with the read-only {@link inspectConsumedSuspension} so
+            // what that verb calls repairable is what this one restores. The
+            // durable row is loaded HERE because this verb's posture on an
+            // unreadable history is its own: a refusal, never a guess.
             let terminal: RunRecord | null = null;
             if (this.store?.loadTerminal) {
                 try {
@@ -6811,38 +6915,10 @@ export class AutomationEngine implements IAutomationService {
                 }
             }
 
-            let consumed: ConsumedSuspension | undefined;
-            let dropped: ConsumedSuspensionDropNotice | undefined;
-            if (!terminal) {
-                consumed = hot;
-            } else if (terminal.consumedSuspension) {
-                const durable: ConsumedSuspension = {
-                    run: terminal.consumedSuspension,
-                    consumedAt: terminal.finishedAt ?? terminal.startedAt,
-                    error: terminal.error ?? '',
-                };
-                consumed = hot && !this.rowSupersedesJournal(hot, durable.run) ? hot : durable;
-                // A hot copy of a pause the run has since LEFT — re-arming it
-                // would send the run back through work it already did.
-                if (hot && consumed !== hot) this.consumedSuspensions.delete(runId);
-            } else if (terminal.consumedSuspensionDropped) {
-                dropped = terminal.consumedSuspensionDropped;
-                if (hot && !this.rowSupersedesJournal(hot, dropped)) {
-                    consumed = hot;
-                } else if (hot) {
-                    this.consumedSuspensions.delete(runId);
-                }
-            } else if (hot && hot.persisted !== 'landed') {
-                // The row predates this strand — this process's own write for
-                // it never reached the store (in flight, or failed and
-                // reported at `error`). The store's silence says nothing.
-                consumed = hot;
-            } else if (hot) {
-                // A later terminal record with no snapshot and no drop notice:
-                // completed, cancelled or cascade-failed after this copy was
-                // taken. Stale by definition.
-                this.consumedSuspensions.delete(runId);
-            }
+            const { consumed, dropped, staleHot } = this.resolveConsumedSuspensionWitnesses(runId, terminal);
+            // A hot copy of a pause the run has since LEFT — re-arming it
+            // would send the run back through work it already did.
+            if (staleHot) this.consumedSuspensions.delete(runId);
 
             if (!consumed) {
                 // Nothing to restore — say WHICH nothing. The remedy differs for
@@ -6973,6 +7049,73 @@ export class AutomationEngine implements IAutomationService {
         } finally {
             this.restoring.delete(runId);
         }
+    }
+
+    /**
+     * [#15358] **Read-only**: would {@link restoreConsumedSuspension} have a
+     * consumed suspension to put back for `runId`? Answers from the SAME two
+     * witnesses that verb reads — this process's hot journal and the durable
+     * terminal row, reconciled by {@link resolveConsumedSuspensionWitnesses}
+     * — and re-arms nothing, drops nothing, writes nothing.
+     *
+     * ## Why a dedicated member, and not a field on the run
+     *
+     * The discriminator lives on the durable {@link RunRecord}
+     * (`consumedSuspension` / `consumedSuspensionDropped`) and in this
+     * process's journal; {@link getRun} answers an {@link ExecutionLogEntry},
+     * which carries neither ON PURPOSE — `recordLog` keeps the snapshot off
+     * that interface because `GET /automation/:name/runs/:runId` serves it
+     * verbatim. So a consumer reading `getRun` sees `status: 'failed'` and
+     * cannot tell the #13909 strand (repairable by the restore verb) from a
+     * cascade-failed ancestor (`failAncestors` → `failSuspendedRun`, which
+     * consumes the ancestor's pause and journals nothing — repairable by
+     * nothing; #15222's shape). Ruled on #15358 (B′, 2026-09-07): the answer is
+     * published as a dedicated read-only engine member, never on the wire.
+     * plugin-approvals' stranded-request inspection is the first consumer.
+     *
+     * ⛔ Not a single `loadTerminal` read. A snapshot-less row is "the run
+     * moved on" only when this process holds no hot copy whose write never
+     * landed, and a drop notice is repairable from the hot copy on the very
+     * replica that stranded the run — both measured wrong under a
+     * single-witness reading (#13937's contract review). Sharing the read
+     * with the restore verb is what keeps that from regressing in one of the
+     * two alone.
+     *
+     * ## What it does NOT judge
+     *
+     * Whether re-arming would be SAFE at this instant — the `restoring` /
+     * `resuming` guards — is the restore verb's own pre-flight. A verdict
+     * here is about what survives, not about the moment.
+     *
+     * @throws when a store read fails — the suspended-run store or the run
+     *   history. An unreadable store is UNKNOWN, and a read-only verdict that
+     *   turned an outage into `NO_CONSUMED_SUSPENSION` would send an operator
+     *   (or a sweep) to give up on a run that is repairable. Same posture as
+     *   {@link hasSuspendedRun}; the restore verb answers `STORE_UNAVAILABLE`
+     *   for the same observation.
+     */
+    async inspectConsumedSuspension(runId: string): Promise<ConsumedSuspensionInspection> {
+        // Already resumable? STRICT read — a store outage throws through.
+        const live = await this.loadSuspendedRunStrict(runId);
+        if (live) return { repairable: false, runId, reason: 'RUN_SUSPENDED', nodeId: live.nodeId };
+
+        let terminal: RunRecord | null = null;
+        if (this.store?.loadTerminal) terminal = await this.store.loadTerminal(runId);
+
+        const { consumed, witness, dropped } = this.resolveConsumedSuspensionWitnesses(runId, terminal);
+        if (consumed && witness) {
+            return {
+                repairable: true,
+                runId,
+                flowName: consumed.run.flowName,
+                nodeId: consumed.run.nodeId,
+                ...(consumed.run.correlation !== undefined ? { correlation: consumed.run.correlation } : {}),
+                witness,
+                consumedAt: consumed.consumedAt,
+            };
+        }
+        if (dropped) return { repairable: false, runId, reason: 'SNAPSHOT_DROPPED', dropped };
+        return { repairable: false, runId, reason: 'NO_CONSUMED_SUSPENSION' };
     }
 
     /**
