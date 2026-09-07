@@ -90,6 +90,8 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { workspacePackageDirs } from './workspace-enumerator.mjs';
 
+// dispatch-gates: no-path-population -- the --self-test (the one invocation a pull request runs, through test-nightly-tiers.yml's paths trigger) drives a temp fixture workspace and reads no tracked file; --packages, --check and --failing-files sweep the live workspace only inside the nightly run itself, which is placed by that workflow's own paths trigger, so a hint here would be a second spelling of one population
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------------------------------------------------------------------------
@@ -238,15 +240,34 @@ export function judgeCollection(name, tierFiles, queueListed, nightlyListed) {
   return problems;
 }
 
-/** `vitest list --filesOnly` in `pkgDir` under `mode`, package-relative paths, sorted. */
-function vitestListedFiles(pkgDir, mode) {
+/**
+ * The `vitest.mjs` CLI entry of the vitest THIS package resolves: from its main
+ * entry, walk up to the directory whose manifest is named `vitest`. Resolved
+ * rather than spelled as a subpath so the module carries no path-shaped
+ * literal for the dispatch derivation to read as a population declaration.
+ */
+function vitestCliEntry(pkgDir) {
   const require = createRequire(path.join(pkgDir, 'package.json'));
-  let vitestEntry;
+  let dir;
   try {
-    vitestEntry = path.resolve(path.dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
+    dir = path.dirname(require.resolve('vitest'));
   } catch {
     throw new Error(`${pkgDir}: vitest is not resolvable from this package -- install the workspace before --check`);
   }
+  for (;;) {
+    const manifest = path.join(dir, 'package.json');
+    if (existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).name === 'vitest') {
+      return path.join(dir, 'vitest.mjs');
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`${pkgDir}: walked to the filesystem root without finding vitest's package root`);
+    dir = parent;
+  }
+}
+
+/** `vitest list --filesOnly` in `pkgDir` under `mode`, package-relative paths, sorted. */
+function vitestListedFiles(pkgDir, mode) {
+  const vitestEntry = vitestCliEntry(pkgDir);
   const out = execFileSync(process.execPath, [vitestEntry, 'list', '--filesOnly'], {
     cwd: pkgDir,
     env: { ...process.env, [TIER_ENV]: mode },

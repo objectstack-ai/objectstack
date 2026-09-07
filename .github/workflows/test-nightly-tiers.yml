@@ -62,13 +62,14 @@ name: Nightly Tiers
 # regex over the log — the log is presentation, the report is the contract.
 #
 # ⛔ A run on any ref but `main` NEVER writes to the board — a
-# `workflow_dispatch` on a branch proves the transport, the sharding and the
-# rendering on a real runner and publishes the would-be card to the run
-# summary instead. That is how the card that landed this was smoke-tested.
+# `workflow_dispatch` on a branch, or the `pull_request` run below, proves the
+# transport, the sharding and the rendering on a real runner and publishes the
+# would-be card to the run summary instead. That is how the card that landed
+# this was smoke-tested.
 #
 # ⛔ This job is NOT a required context and must never become one: it runs on
-# no pull request at all, so a ruleset naming it would block every PR forever
-# on a check that cannot report.
+# no pull request but one editing its own two files, so a ruleset naming it
+# would block every other PR forever on a check that cannot report.
 
 on:
   schedule:
@@ -79,6 +80,23 @@ on:
     # (05:00) have started and well before `showcase-smoke` (07:00).
     - cron: '29 5 * * *'
   workflow_dispatch: {}
+  # ⛔ PATHS-FILTERED TO THIS FILE AND THE SWITCH READER IT INVOKES, and that
+  # filter is the whole reason this trigger is allowed to exist: a change to
+  # the nightly itself is exercised before it merges — the posture every patrol
+  # in this repo keeps, and the one `scripts/pm/dispatch-gates.mjs` pins
+  # tree-wide (a family reachable only from a scheduled workflow is refused
+  # there by name). A trigger that fires only on a pull request editing these
+  # two files puts ≈ 15 minutes of e2e on no unrelated PR's critical path.
+  #
+  # ⛔ Do NOT widen this list toward the tests themselves: a `packages/**`
+  # entry here would put the two tiers back on the per-PR path, which is the
+  # thing the card this landed removed. A `pull_request` run never writes to
+  # the board — its `github.ref` is the merge ref, not `main`, and the board
+  # write is gated on `main` by name.
+  pull_request:
+    paths:
+      - '.github/workflows/test-nightly-tiers.yml'
+      - 'scripts/nightly-tiers.mjs'
 
 # Least privilege. The shards read the repo and publish artifacts of their own
 # run; the report job writes issues and nothing else — no label on anybody's
@@ -87,10 +105,12 @@ permissions:
   contents: read
   issues: write
 
-# One nightly at a time. A dispatch overlapping the schedule would have two
-# `report` jobs racing the same lookup, and the loser would mint a duplicate.
+# One nightly at a time PER REF. A dispatch overlapping the schedule on `main`
+# would have two `report` jobs racing the same lookup, and the loser would mint
+# a duplicate; a `pull_request` run never writes, so it need not queue behind
+# `main`'s run — keying the group by ref keeps exactly the writers serial.
 concurrency:
-  group: test-nightly-tiers
+  group: test-nightly-tiers-${{ github.ref }}
   cancel-in-progress: false
 
 env:
