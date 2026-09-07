@@ -125,6 +125,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { ANCHOR_GRAMMAR, commentProse, defineCorpus, sweepCorpus } from './symbol-anchors.mjs';
 
@@ -362,9 +363,15 @@ export function selfTest() {
       '// A bare path code span `some/abbreviated/spelling.ts` is NOT judged here.',
     ].join('\n'));
     write('scripts/exempt.mjs', '// An excused anchor `src/gone.ts:7` <!-- anchor-exempt: HISTORICAL --> is silent.');
-    // the sweep reads `git ls-files`, so the fixture needs to be a repo
-    execFileSync('git', ['init', '-q'], { cwd: tmp });
-    execFileSync('git', ['add', '-A'], { cwd: tmp });
+    /* The sweep reads `git ls-files`, so the fixture needs to be a repo — and
+     * both children get an EXPLICIT, GIT_*-stripped environment (#16624). A
+     * hook exports `GIT_DIR` into everything it runs and that outranks `cwd`,
+     * so an inheriting `git init` here creates nothing and the inheriting
+     * `git add -A` writes THE REPOSITORY's index instead. Measured on this
+     * repo, from `pre-commit`: 8,190 paths staged as deleted, and `core.bare`
+     * written into the SHARED `.git/config`, by a self-test that printed `ok`. */
+    execFileSync('git', ['init', '-q'], { cwd: tmp, env: gitFreeEnv() });
+    execFileSync('git', ['add', '-A'], { cwd: tmp, env: gitFreeEnv() });
 
     const { findings, counts, declined } = sweepCorpus(CORPUS, tmp);
     const kinds = findings.map((f) => f.kind);
