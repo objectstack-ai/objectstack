@@ -62,6 +62,25 @@ const TIMEOUT_RETIRED =
   + '`timeoutMs`; the value (milliseconds) is unchanged. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
 
+/**
+ * The prescriptions the two REMOVED keys raise (ADR-0049 enforce-or-remove).
+ * Same channels and closing sentence as the rename above; the middle clause
+ * says what actually names the thing each key pretended to name.
+ */
+const LOCAL_PATH_RETIRED =
+  '`turso config.localPath` was removed in @objectstack/driver-turso 17 (ADR-0049) — it never had an '
+  + 'effect: no code read it, and the embedded replica\'s local file has always been named by `url` '
+  + '(`file:./replica.db`, with `syncUrl` pointing at the remote primary). Delete the key; a path it '
+  + 'named that differs from `url` belongs in `url`. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
+const WASM_RETIRED =
+  '`turso config.wasm` was removed in @objectstack/driver-turso 17 (ADR-0049) — it never had an '
+  + 'effect: nothing selects a WASM build of libSQL, and the driver loads whatever `@libsql/client` '
+  + 'resolves to on the host runtime. Delete the key; a runtime that cannot load native bindings uses '
+  + 'the remote arm (`libsql://` / `https://`), which needs none. '
+  + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.';
+
 export const TursoConfigSchema = lazySchema(() => z.object({
   /**
    * Database URL.
@@ -102,12 +121,17 @@ export const TursoConfigSchema = lazySchema(() => z.object({
   syncUrl: z.string().optional().describe('Remote sync URL for embedded replica mode'),
 
   /**
-   * Local file path for the embedded replica.
-   * Required when using embedded replica mode (syncUrl is provided).
-   * The local file serves reads with microsecond latency while writes
-   * propagate to the remote primary.
+   * Tombstone for the REMOVED `localPath` (#16024, ADR-0049 enforce-or-remove).
+   *
+   * It promised "Local file path for embedded replica" and was read by no
+   * code: the replica arm names its local file via `url`, which is what the
+   * driver's own docs and `@objectstack/spec`'s turso contract both say —
+   * forwarding it would have created a second way to say the same thing.
+   * `z.never()` rather than a bare deletion for the reason `timeout` below
+   * spells out: this shape is a plain `z.object`, and a deletion would strip
+   * the key in silence.
    */
-  localPath: z.string().optional().describe('Local file path for embedded replica'),
+  localPath: z.never({ error: () => LOCAL_PATH_RETIRED }).optional().describe(`[REMOVED] ${LOCAL_PATH_RETIRED}`),
 
   /**
    * Sync configuration for embedded replicas.
@@ -115,7 +139,7 @@ export const TursoConfigSchema = lazySchema(() => z.object({
   sync: TursoSyncConfigSchema.optional().describe('Sync settings for embedded replica mode'),
 
   /**
-   * Timeout for database operations in milliseconds.
+   * Operation timeout in milliseconds for remote operations; `0` = no bound.
    *
    * Renamed from `timeout` (#15682, ruling B on #14478): the unit lived only in
    * the describe prose, while `sync.intervalSeconds` — the same shape, three
@@ -125,8 +149,15 @@ export const TursoConfigSchema = lazySchema(() => z.object({
    * key in #15680; this mirror now agrees with it, and with the ADR-0087
    * conversion (`turso-config-timeout-to-timeout-ms`) that rewrites the stored
    * spelling on load.
+   *
+   * It reaches the driver as `TursoDriverConfig.timeout` (the datasource seam
+   * in `@objectstack/service-datasource` maps the authored `timeoutMs` onto the
+   * driver's bare spelling), and since #16024 that key does what the describe
+   * promises: remote mode over HTTP aborts every request once the window
+   * elapses, replica mode bounds `sync()`. `TursoDriverConfig.timeout`'s own
+   * docblock carries the per-arm detail.
    */
-  timeoutMs: z.number().int().min(0).optional().describe('Operation timeout in milliseconds'),
+  timeoutMs: z.number().int().min(0).optional().describe('Operation timeout in milliseconds for remote operations (0 = no bound)'),
 
   /**
    * Tombstone for the rename above (#15682, ruling B on #14478).
@@ -146,11 +177,16 @@ export const TursoConfigSchema = lazySchema(() => z.object({
   timeout: z.never({ error: () => TIMEOUT_RETIRED }).optional().describe(`[REMOVED] ${TIMEOUT_RETIRED}`),
 
   /**
-   * Enable WASM mode.
-   * When true, uses the WASM build of libSQL for browser or edge runtime
-   * environments that cannot run native bindings (e.g., Cloudflare Workers).
+   * Tombstone for the REMOVED `wasm` (#16024, ADR-0049 enforce-or-remove).
+   *
+   * It promised "Use WASM build for edge/browser environments" and nothing
+   * selected one: a browser or edge deployment got whatever
+   * `import('@libsql/client')` resolved to, with or without the flag.
+   * Forwarding would have meant building a WASM selection that does not
+   * exist, so the key goes — as a tombstone, for the same silent-strip reason
+   * as `localPath` above.
    */
-  wasm: z.boolean().optional().describe('Use WASM build for edge/browser environments'),
+  wasm: z.never({ error: () => WASM_RETIRED }).optional().describe(`[REMOVED] ${WASM_RETIRED}`),
 }).describe('Turso/libSQL Connection Configuration'));
 
 // ==========================================================================

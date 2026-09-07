@@ -103,7 +103,25 @@ export interface TursoDriverConfig {
 
   /**
    * Operation timeout in milliseconds for remote operations.
-   * Effective in replica and remote modes.
+   * Effective in replica and remote modes; `0` or unset means no bound.
+   *
+   * What it bounds, per arm (measured against `@libsql/client@0.17.4`):
+   *
+   * - **Remote mode over HTTP** (`libsql://`, `https://`, `http://`): every
+   *   request the client's HTTP transport makes. The driver hands
+   *   `@libsql/client` a `fetch` that aborts once the window elapses, so a
+   *   stalled endpoint fails the operation as `TIMEOUT` / 504 instead of
+   *   hanging it. A `wss://` / `ws://` URL rides the WebSocket transport, which
+   *   exposes no such seam in this client version; the key does not bound it.
+   * - **Replica mode**: `sync()` — the one remote operation on this arm (reads
+   *   and writes run against the local file). A sync still running when the
+   *   window closes rejects with the same envelope; the native binding's own
+   *   sync is not cancelled, only no longer awaited.
+   *
+   * Deliberately NOT forwarded to `@libsql/client`'s `Config.timeout`: that is
+   * the busy timeout for lock contention on local `file:` databases, which
+   * "remote clients ignore" — a different setting that happens to share the
+   * name.
    */
   timeout?: number;
 
@@ -219,6 +237,82 @@ function refuseRemoteAutonumber(object: string, fields: string[], path: string):
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   throw err;
+}
+
+// ── Remote operation timeout ─────────────────────────────────────────────────
+
+/**
+ * The failure a remote operation raises when `TursoDriverConfig.timeout`
+ * closes on it — the ADR-0112 envelope (`code` + `status`), so a caller and the
+ * REST layer read a stalled Turso endpoint as a gateway timeout rather than as
+ * the platform's bare `TimeoutError` DOMException or an anonymous `Error`.
+ */
+function remoteOperationTimedOut(what: string, timeoutMs: number): Error & { code: string; status: number } {
+  const err = new Error(
+    `Turso ${what} did not complete within the configured timeout of ${timeoutMs} ms ` +
+      `(\`TursoDriverConfig.timeout\`): the remote did not answer inside the window, so the ` +
+      `operation was abandoned rather than left hanging. Raise \`timeout\`, or omit it for no bound.`,
+  ) as Error & { code: string; status: number };
+  err.code = StandardErrorCode.enum.TIMEOUT;
+  err.status = 504;
+  return err;
+}
+
+/**
+ * The `fetch` handed to `@libsql/client`'s HTTP transport when `timeout` is
+ * set.
+ *
+ * Why this seam and not `Config.timeout`: measured against
+ * `@libsql/client@0.17.4` (`@libsql/core@0.17.4`), that option is the BUSY
+ * timeout for lock contention on local `file:` databases — its own docblock
+ * says "remote clients ignore it" — so forwarding the driver's key to it would
+ * have left remote mode exactly as inert as before while giving replica mode a
+ * different setting under the same name. `Config.fetch` is the one seam the
+ * remote transport exposes: the hrana HTTP client routes EVERY request through
+ * it (the protocol-version probe included), and the WebSocket transport takes
+ * no such hook at all.
+ *
+ * A signal already on the request is honoured alongside the window
+ * (`AbortSignal.any`), so a caller's own abort keeps working; only an abort the
+ * window itself raised is translated into the timeout envelope.
+ */
+function fetchBoundedBy(timeoutMs: number): typeof globalThis.fetch {
+  return async (input, init) => {
+    const deadline = AbortSignal.timeout(timeoutMs);
+    const upstream = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    const signal = upstream ? AbortSignal.any([upstream, deadline]) : deadline;
+    try {
+      return await globalThis.fetch(input, { ...init, signal });
+    } catch (error) {
+      if (deadline.aborted) throw remoteOperationTimedOut('remote request', timeoutMs);
+      throw error;
+    }
+  };
+}
+
+/**
+ * Await `operation` for at most `timeoutMs`, rejecting with the timeout
+ * envelope when the window closes first. The operation itself is not
+ * cancelled — the replica arm's `sync()` runs in the native binding, which
+ * offers no cancellation — it is simply no longer what the caller waits on.
+ * `Promise.race` keeps a handler on it, so a late rejection is observed rather
+ * than unhandled.
+ */
+async function boundedBy<T>(operation: Promise<T>, timeoutMs: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(remoteOperationTimedOut(what, timeoutMs)), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The configured window, or `undefined` for "no bound" — `0` and unset alike. */
+function timeoutWindow(config: TursoDriverConfig): number | undefined {
+  return config.timeout && config.timeout > 0 ? config.timeout : undefined;
 }
 
 // ── Turso Driver ─────────────────────────────────────────────────────────────
@@ -423,16 +517,7 @@ export class TursoDriver extends SqlDriver {
       // connect() was never called, failed on first attempt, or the client
       // was lost (e.g. serverless cold-start, transient network error).
       this.remoteTransport.setConnectFactory(async () => {
-        if (this.tursoConfig.client) {
-          this.libsqlClient = this.tursoConfig.client;
-        } else {
-          const { createClient } = await import('@libsql/client');
-          this.libsqlClient = createClient({
-            url: this.tursoConfig.url,
-            authToken: this.tursoConfig.authToken,
-            concurrency: this.tursoConfig.concurrency,
-          });
-        }
+        this.libsqlClient = this.tursoConfig.client ?? (await this.createRemoteClient());
         return this.libsqlClient;
       });
     }
@@ -521,6 +606,25 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
+   * The `@libsql/client` for the remote arm — one builder for both sites that
+   * need it (`connect()` and the transport's lazy connect factory), so the two
+   * cannot drift apart on which config keys reach the client. That drift is how
+   * `timeout` sat declared-but-unforwarded four lines from a forwarded
+   * `concurrency` until the ADR-0049 ruling on it: see `fetchBoundedBy` for
+   * why the window rides `Config.fetch` and not `Config.timeout`.
+   */
+  private async createRemoteClient(): Promise<Client> {
+    const { createClient } = await import('@libsql/client');
+    const timeoutMs = timeoutWindow(this.tursoConfig);
+    return createClient({
+      url: this.tursoConfig.url,
+      authToken: this.tursoConfig.authToken,
+      concurrency: this.tursoConfig.concurrency,
+      ...(timeoutMs === undefined ? {} : { fetch: fetchBoundedBy(timeoutMs) }),
+    });
+  }
+
+  /**
    * Check if this driver instance is in remote mode.
    */
   get isRemote(): boolean {
@@ -554,16 +658,7 @@ export class TursoDriver extends SqlDriver {
   override async connect(): Promise<void> {
     if (this.isRemote) {
       // Remote mode: initialize @libsql/client only
-      if (this.tursoConfig.client) {
-        this.libsqlClient = this.tursoConfig.client;
-      } else {
-        const { createClient } = await import('@libsql/client');
-        this.libsqlClient = createClient({
-          url: this.tursoConfig.url,
-          authToken: this.tursoConfig.authToken,
-          concurrency: this.tursoConfig.concurrency,
-        });
-      }
+      this.libsqlClient = this.tursoConfig.client ?? (await this.createRemoteClient());
       this.remoteTransport!.setClient(this.libsqlClient);
       return;
     }
@@ -577,6 +672,13 @@ export class TursoDriver extends SqlDriver {
         this.libsqlClient = this.tursoConfig.client;
       } else {
         const { createClient } = await import('@libsql/client');
+        // No `fetch` and no `Config.timeout` here, on purpose. This arm is the
+        // native `libsql` binding (a `file:` url with `syncUrl`), which consults
+        // no fetch — a wrapped one would be forwarded to a channel that ignores
+        // it, the inert shape this key just left. And `Config.timeout` is that
+        // binding's BUSY timeout for local lock contention, not the remote
+        // operation timeout `TursoDriverConfig.timeout` promises. That promise
+        // is kept on `sync()`, the one remote operation this arm performs.
         this.libsqlClient = createClient({
           url: this.tursoConfig.url,
           authToken: this.tursoConfig.authToken,
@@ -1412,11 +1514,21 @@ export class TursoDriver extends SqlDriver {
   /**
    * Trigger manual sync of the embedded replica with the remote primary.
    * No-op if no syncUrl is configured or libSQL client is not initialized.
+   *
+   * Bounded by `TursoDriverConfig.timeout` when one is set: a sync that has not
+   * completed within the window rejects with the `TIMEOUT` / 504 envelope. This
+   * is the replica arm's whole share of that key — the native binding runs the
+   * sync and offers neither a `fetch` seam nor cancellation, so the bound is on
+   * what the caller awaits (see `boundedBy`).
    */
   async sync(): Promise<void> {
-    if (this.libsqlClient && this.tursoConfig.syncUrl) {
+    if (!(this.libsqlClient && this.tursoConfig.syncUrl)) return;
+    const timeoutMs = timeoutWindow(this.tursoConfig);
+    if (timeoutMs === undefined) {
       await this.libsqlClient.sync();
+      return;
     }
+    await boundedBy(this.libsqlClient.sync(), timeoutMs, 'embedded replica sync');
   }
 
   /**

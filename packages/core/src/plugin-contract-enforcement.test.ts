@@ -34,6 +34,7 @@ import { describe, expect, it } from 'vitest';
 import { ObjectKernel } from './kernel.js';
 import { PluginLoader } from './plugin-loader.js';
 import { ObjectLogger } from './logger.js';
+import { PLUGIN_UI_REQUIRED_KEY_MISSING } from '@objectstack/spec/kernel';
 import type { Plugin, PluginContext } from './types.js';
 
 /** A kernel that registers plugins and installs no process signal handlers. */
@@ -48,17 +49,21 @@ function stored(kernel: ObjectKernel, name: string): Record<string, unknown> | u
 }
 
 /**
- * A plugin object with an arbitrary extra surface. The keys under test
- * (`type`, `slug`, `homepage`, `id`) are declared by `PluginSchema` and NOT by
- * the `Plugin` interface, which is one reason the repo contained no producer of
- * them — so the fixture states the extra surface rather than casting it away.
+ * A plugin object under test. The keys under test (`type`, `slug`, `homepage`,
+ * `id`, `staticPath`) used to be declared by `PluginSchema` and NOT by the
+ * `Plugin` interface — one reason the repo contained no producer of them, and
+ * why this alias once had to widen `Plugin` to spell them. Since #16334
+ * `Plugin` inherits every `PluginSchema` key through `PluginDefinition`, so a
+ * plain `Plugin` states the whole surface; the alias survives as the name.
  */
-type Fixture = Plugin & {
-    id?: string;
-    slug?: string;
-    homepage?: string;
-    staticPath?: string;
-};
+type Fixture = Plugin;
+
+/**
+ * A `type: 'ui'` fixture owes `staticPath` and `slug` (#16334), so every `ui`
+ * fixture below carries both unless the case is ABOUT one of them. Nothing at
+ * `kernel.use()` reads the path off disk — the loader validates the object.
+ */
+const UI_STATIC_PATH = '/srv/os-fixture/ui/dist';
 
 /**
  * The refusal `promise` produced, or a loud failure if it produced none.
@@ -93,6 +98,10 @@ describe('A — the legacy `ui-plugin` value is refused at kernel.use() (#15638,
             // The value #15638 MEASURED as accepted, stored verbatim and mounting
             // routes. It is not a member of `CORE_PLUGIN_TYPES`.
             type: 'ui-plugin' as unknown as Plugin['type'],
+            // Both `ui` keys declared (#16334), so the calibration twin below
+            // differs from this fixture in `type` and nothing else.
+            staticPath: UI_STATIC_PATH,
+            slug: 'legacy-ui',
         });
 
         await expect(kernel.use(legacy)).rejects.toThrow(/PLUGIN_CONTRACT_VIOLATION/);
@@ -111,7 +120,12 @@ describe('A — the legacy `ui-plugin` value is refused at kernel.use() (#15638,
 
     it('CALIBRATION — the same fixture with the modern `ui` value loads', async () => {
         const kernel = makeKernel();
-        const modern = fixture({ name: '@os-fixture/modern-ui', type: 'ui' });
+        const modern = fixture({
+            name: '@os-fixture/modern-ui',
+            type: 'ui',
+            staticPath: UI_STATIC_PATH,
+            slug: 'modern-ui',
+        });
 
         await expect(kernel.use(modern)).resolves.toBe(kernel);
         expect(stored(kernel, '@os-fixture/modern-ui')?.type).toBe('ui');
@@ -208,7 +222,7 @@ describe('C — ⭐ a CLASS-BASED plugin still loads, prototype chain intact', (
 describe('D — the other two refusals the changeset states', () => {
     it('refuses an invalid `slug`', async () => {
         const kernel = makeKernel();
-        const bad = fixture({ name: '@os-fixture/bad-slug', type: 'ui', slug: 'Not A Slug' });
+        const bad = fixture({ name: '@os-fixture/bad-slug', type: 'ui', staticPath: UI_STATIC_PATH, slug: 'Not A Slug' });
 
         const err = await refusal(kernel.use(bad));
         expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
@@ -217,7 +231,7 @@ describe('D — the other two refusals the changeset states', () => {
 
     it('CALIBRATION — the same fixture with a legal slug loads', async () => {
         const kernel = makeKernel();
-        const good = fixture({ name: '@os-fixture/good-slug', type: 'ui', slug: 'not-a-slug' });
+        const good = fixture({ name: '@os-fixture/good-slug', type: 'ui', staticPath: UI_STATIC_PATH, slug: 'not-a-slug' });
 
         await expect(kernel.use(good)).resolves.toBe(kernel);
     });
@@ -236,6 +250,67 @@ describe('D — the other two refusals the changeset states', () => {
         const good = fixture({ name: '@os-fixture/good-homepage', homepage: 'https://example.com' });
 
         await expect(kernel.use(good)).resolves.toBe(kernel);
+    });
+});
+
+describe('F — a `ui` plugin owes `staticPath` and `slug`, refused at kernel.use() (#16334)', () => {
+    /**
+     * The spec half of #16049: `PluginSchema` describes both keys as
+     * `(Required for type="ui")` and, since #16334, refuses a `ui` plugin
+     * missing either — one issue per missing key, `path` naming the key,
+     * `PLUGIN_UI_REQUIRED_KEY_MISSING` at the head of the issue message. These
+     * pins measure that the boot path SURFACES that code unchanged: the loader
+     * re-emits the first issue's `path` and `message`, so the spec's code rides
+     * inside `PLUGIN_CONTRACT_VIOLATION`'s envelope. Group B's untyped and
+     * `standard` fixtures, which declare neither key and load, are the scope
+     * control: only `type: 'ui'` owes them.
+     */
+    it('refuses a `ui` plugin with no `staticPath`, naming the key and the spec code', async () => {
+        const kernel = makeKernel();
+        const bad = fixture({ name: '@os-fixture/ui-no-static-path', type: 'ui', slug: 'ui-no-static-path' });
+
+        const err = await refusal(kernel.use(bad));
+        expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
+        expect(err.message).toContain("at 'staticPath'");
+        expect(err.message).toContain(PLUGIN_UI_REQUIRED_KEY_MISSING);
+        expect(stored(kernel, '@os-fixture/ui-no-static-path')).toBeUndefined();
+    });
+
+    it('refuses a `ui` plugin with no `slug`, naming the key and the spec code', async () => {
+        const kernel = makeKernel();
+        const bad = fixture({ name: '@os-fixture/ui-no-slug', type: 'ui', staticPath: UI_STATIC_PATH });
+
+        const err = await refusal(kernel.use(bad));
+        expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
+        expect(err.message).toContain("at 'slug'");
+        expect(err.message).toContain(PLUGIN_UI_REQUIRED_KEY_MISSING);
+    });
+
+    it('CALIBRATION — the same `ui` fixture with both keys loads, stored verbatim', async () => {
+        const kernel = makeKernel();
+        const good = fixture({ name: '@os-fixture/ui-complete', type: 'ui', staticPath: UI_STATIC_PATH, slug: 'ui-complete' });
+
+        await expect(kernel.use(good)).resolves.toBe(kernel);
+        const entry = stored(kernel, '@os-fixture/ui-complete');
+        expect(entry).toBe(good);
+        expect(entry?.staticPath).toBe(UI_STATIC_PATH);
+        expect(entry?.slug).toBe('ui-complete');
+    });
+
+    it('SCOPE — a `standard` plugin declaring neither key still loads', async () => {
+        const kernel = makeKernel();
+        const plain = fixture({ name: '@os-fixture/standard-keyless', type: 'standard' });
+
+        await expect(kernel.use(plain)).resolves.toBe(kernel);
+    });
+
+    it('the two keys are members of `Plugin` itself — inherited from PluginDefinition, not restated', () => {
+        // Compile-time half of the derivation (#16334): before it `staticPath`
+        // and `slug` were not members of `Plugin`, and every fixture in this
+        // file needed a widening alias to spell them. A plain `Plugin` now does.
+        const declared: Plugin = { name: 'x', type: 'ui', staticPath: UI_STATIC_PATH, slug: 'x', init() {} };
+        expect(declared.slug).toBe('x');
+        expect(declared.staticPath).toBe(UI_STATIC_PATH);
     });
 });
 

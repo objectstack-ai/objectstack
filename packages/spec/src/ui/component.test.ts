@@ -21,6 +21,7 @@ import {
   ElementRecordPickerPropsSchema,
   ElementTextInputPropsSchema,
   ObjectMetricPropsSchema,
+  ObjectKanbanPropsSchema,
 } from './component.zod';
 import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema } from './page.zod';
 
@@ -2769,6 +2770,68 @@ describe('#7751 — object-* block props schemas', () => {
     ] as const) {
       expect(ComponentPropsMap[type].safeParse({}).success, type).toBe(true);
     }
+  });
+});
+
+// #16503 — the spec half of objectui#8172 (decision batch #68, 2026-09-07,
+// option A: the contract declares the capability that already ships, is
+// documented and is in use). Measured at the objectui pin this repo builds
+// against (`.objectui-sha` = `a472b0716`): `plugin-kanban/src/ObjectKanban.tsx:264`
+// queries `$top: schema.limit ?? DEFAULT_KANBAN_LIMIT` (100, `:71`),
+// `plugin-kanban/src/index.tsx:395-398` maps `limit: 'limit'` in
+// `OBJECT_KANBAN_DATA_SOURCE`, `plugin-kanban/src/types.ts:134` declares
+// `KanbanSchema.limit?: number`, and `content/docs/plugins/plugin-kanban.mdx`
+// teaches `limit: 250` with a Properties row. The strict map refused the key by
+// name — the same `unrecognized_keys` verdict as the `bogusProp` control — so an
+// author following the published docs wrote a node the save gate rejected.
+describe('ObjectKanbanPropsSchema limit — the row cap four objectui faces already implement (#16503)', () => {
+  const kanban = ComponentPropsMap['object-kanban'];
+
+  it("accepts the documented shape `{ objectName: 'x', limit: 250 }` and carries the value through", () => {
+    const result = kanban.safeParse({ objectName: 'x', limit: 250 });
+    expect(result.success).toBe(true);
+    const parsed = (result.success ? result.data : undefined) as { limit?: number } | undefined;
+    // Carried through to the parsed output, not stripped: what the board
+    // lowers to `$top` is what the author wrote.
+    expect(parsed?.limit).toBe(250);
+  });
+
+  it('still refuses an undeclared sibling on the same node — the accept above is not vacuous', () => {
+    // The card's own control, and the half that proves the object stayed
+    // strict: without it the green above would also be green on a map that
+    // had stopped refusing anything.
+    const result = kanban.safeParse({ objectName: 'x', bogusProp: 250 });
+    expect(result.success).toBe(false);
+    const issue = result.error?.issues.find((i) => i.code === 'unrecognized_keys') as
+      | { keys?: string[] }
+      | undefined;
+    expect(issue?.keys).toEqual(['bogusProp']);
+  });
+
+  it('refuses a cap the query could not lower to `$top` — zero, negative, fractional, or a string — at the VALUE, not the key', () => {
+    // `z.number().int().positive()`: the shape `element:record_picker` and
+    // `record:related_list` declare for the same `$top` read, so the flat row
+    // caps in this map are one contract rather than three dialects. The key is
+    // recognised (no `unrecognized_keys`); the value is what fails.
+    for (const limit of [0, -1, 1.5, '250']) {
+      const result = kanban.safeParse({ objectName: 'x', limit });
+      expect(result.success, JSON.stringify(limit)).toBe(false);
+      const codes = (result.error?.issues ?? []).map((i) => i.code);
+      expect(codes, JSON.stringify(limit)).not.toContain('unrecognized_keys');
+      expect(result.error?.issues[0]?.path, JSON.stringify(limit)).toEqual(['limit']);
+    }
+  });
+
+  it('keeps a `.describe()` that names the `$top` the board lowers it to and the binding that outranks it', () => {
+    // The describe is the artifact an auditor reads instead of hunting across
+    // repos, and the row the generated reference page prints; deleting it is
+    // what re-opens the "is this key live?" question this record answers.
+    const shape = (ObjectKanbanPropsSchema as unknown as {
+      def: { shape: Record<string, { description?: string }> };
+    }).def.shape;
+    expect(shape.limit?.description).toContain('$top');
+    expect(shape.limit?.description).toContain('row cap');
+    expect(shape.limit?.description).toContain('dataSource.limit');
   });
 });
 

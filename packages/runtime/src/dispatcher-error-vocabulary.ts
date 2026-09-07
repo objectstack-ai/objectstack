@@ -800,6 +800,31 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + '`message`. If a transport ever ANSWERS with this fact, the verdict becomes '
             + 'pending-registration and the code belongs in the ledger batch.',
     },
+    // [#16334] The spec's own code for the one CONDITIONAL requirement
+    // `PluginSchema` carries — `type: 'ui'` owes `staticPath` and `slug` —
+    // stamped by the schema's `superRefine` onto the zod ISSUE (`params.code`,
+    // and at the head of `message`), never onto a thrown error. The scanner
+    // sees it as an `objlitconst` site because the literal sits inside
+    // `ctx.addIssue({ …, params: { code } })` in a `.zod.ts` file.
+    {
+        code: 'PLUGIN_UI_REQUIRED_KEY_MISSING',
+        file: 'packages/spec/src/kernel/plugin.zod.ts',
+        shape: 'objlitconst',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Stamped on a zod ISSUE, not on a thrown error: `PluginSchema`\'s `superRefine` adds one '
+            + '`custom` issue per missing key when a `type: \'ui\'` plugin omits `staticPath` or `slug`, '
+            + 'with this code on `params.code` and at the head of `message`. MEASURED reachability: the '
+            + 'only runtime caller of `PluginSchema` is `PluginLoader.validatePluginContract` '
+            + '(`packages/core/src/plugin-loader.ts`, the `PLUGIN_CONTRACT_VIOLATION` row above), which '
+            + 'reads the first issue\'s `path` and `message` and re-raises them inside the '
+            + '`PLUGIN_CONTRACT_VIOLATION` envelope at `kernel.use()` — before bootstrap, and therefore '
+            + 'before any HTTP boundary exists. So this code reaches a reader only as a substring of that '
+            + 'boot refusal\'s message; no door answers with it and `error.code` never carries it. Same '
+            + 'class and same reasoning as the row above. If a door ever answers with it, the verdict '
+            + 'becomes pending-registration and it belongs in the ledger batch.',
+    },
     // [ADR-0130 D4] The artifact load path's three wrapper refusals, added with the
     // N-package load path itself. The pre-HTTP reasoning is the one the rows above
     // cite; what is specific to these three is the second half recorded in each `why`
