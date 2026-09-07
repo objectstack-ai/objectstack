@@ -3,7 +3,13 @@ title: Error Code Catalog
 description: Complete reference for all ObjectStack error codes with causes, fixes, and retry strategies
 ---
 
-ObjectStack uses a structured error system with **9 error categories** and **50 standardized error codes**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+ObjectStack uses a structured error system with **9 error categories** and **51 error codes reachable on the wire**. Every error includes a machine-readable code, HTTP status mapping, and retry guidance.
+
+This catalog documents the **wire face** — the codes a client can actually receive. That is not quite the
+`StandardErrorCode` enum: the enum also carries in-process spellings the REST door translates at the
+boundary, and the catalog carries [error-code ledger](/docs/references/api/error-code-ledger) codes the
+enum does not. A translated code is documented under the spelling clients receive, and named in that
+entry's cross-reference sentence so the in-process one stays findable.
 
 <Callout type="info">
 **Source:** `packages/spec/src/api/errors.zod.ts`  
