@@ -55,7 +55,10 @@ defineJob({ name: 'nightly_sweep', schedule: { type: 'cron', expression: '0 1 * 
 new MetadataManager({ cache: { databaseLoader: { ttlMs: 60_000 } } }); // the outer `ttl` is deleted, not renamed (#15624)
 ```
 
-**Migration.** Rename each key; no value changes. Authoring an old spelling
+**Migration.** Rename each key; no value changes — with one exception: the outer
+`MetadataManagerConfig.cache.ttl` is DELETED, not renamed (its respelling `ttlSeconds`
+was retired before it shipped, #15624; nothing ever read the outer `cache` block, and
+the nested `cache.databaseLoader.ttl → ttlMs` rename above is unchanged). Authoring an old spelling
 fails to compile (`tsc`: the input type is `never`) and fails to parse with a
 prescription naming the new key. For `hooks[]` / `jobs[]` the rename is a
 mechanical D2 conversion (`hook-timeout-to-timeout-ms`,
