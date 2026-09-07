@@ -11938,13 +11938,7 @@ export class SqlDriver implements IDataDriver {
                     ...nullSafe,
                   ]);
                   if (duplicates.length > 0) {
-                    const shown = duplicates
-                      .slice(0, 5)
-                      .map((g) => `(${g.key}) × ${g.rows} rows`)
-                      .join('; ');
-                    report = ` Conflicting group(s): ${shown}${
-                      duplicates.length > 5 ? `; …and ${duplicates.length - 5} more` : ''
-                    }.`;
+                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
                   }
                 } catch {
                   // The probe is a diagnostic; the refusal below stands without it.
