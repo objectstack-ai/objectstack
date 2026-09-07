@@ -292,7 +292,28 @@ jobs:
     # ~5× a normal sharded run (~4-6 min), with margin for a cold Turbo cache;
     # the old 45 left a hung job "running" for half an hour past any plausible
     # healthy finish.
-    timeout-minutes: 30
+    #
+    # ⚠ TEMPORARY RAISE, 30 -> 45 (#16173). Shard 5/6 is being killed at the
+    # 30-minute wall — 12+ observations at 30:16-30:21 with every other job in
+    # every one of those runs green — so the paragraph above describes the
+    # value this line must RETURN to, not the value it currently carries.
+    #
+    # Two reasons, both #16173's:
+    #   1. Unblock. The only uncensored shard-5 readings are 25:32 and 27:36,
+    #      and shard 6/6 has been seen at 28:56 — a ~1 minute margin at the top
+    #      of the observed green band against a 30:00 wall.
+    #   2. Un-censor. Every tail observation is a reading of THIS number, not
+    #      of the shard: the true duration is >= 30:16, unbounded above. So the
+    #      shard timings cannot be re-derived from CI history while the wall
+    #      stands here. Raising it produces the durations #16173 needs before
+    #      anyone touches `scripts/test-shard-timings.json`.
+    #
+    # ⛔ REVERT CONDITION, explicit: back to `30` once #16173 lands its shard
+    # rebalance. This value is temporary and carries no other expiry — a raise
+    # with no revert condition written beside it becomes permanent by
+    # forgetting. The backstop stays loose only for that window; the stall
+    # guard named above remains the primary hang detector throughout.
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
