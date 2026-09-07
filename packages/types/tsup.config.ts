@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 /**
  * Two entries, deliberately. `src/index.ts` is the edge/browser-safe root that
  * `@objectstack/hono` (Cloudflare Workers, Deno, Bun) and the Worker-bootable
@@ -25,4 +27,5 @@ export default defineConfig({
   dts: !process.env.OS_SKIP_DTS,
   format: ['esm', 'cjs'],
   target: 'es2020',
+  esbuildOptions: dropSourcesContent,
 });
