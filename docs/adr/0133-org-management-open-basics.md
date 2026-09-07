@@ -2,7 +2,7 @@
 
 - **Status**: Proposed (2026-09-06) — awaiting the maintainer's hand-merge, which is the acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing in this file is a new decision; see [Provenance](#provenance--read-this-before-citing-this-file).
 - **Mirrors**: `objectstack-ai/cloud` **ADR-0081** (Status: Accepted, founder-decided in session, 2026-07-09) — **D1, D3 and D4 only**, the half whose mechanism is open code in this repository.
-- **Deliberately not mirrored**: cloud ADR-0081 **D2**, its non-goals, and its commercial consequences. Those govern a packaging choice, stay in cloud, and are cited as `cloud ADR-0081` — never restated here. See [Relationship to the D2 reversal](#relationship-to-the-d2-reversal-16215).
+- **Deliberately not mirrored**: cloud ADR-0081 **D2**, its non-goals, and its commercial consequences — cited as `cloud ADR-0081`, never restated here. ⚠️ D2 is absent for a stronger reason than the other two: it has been **reversed** by [ADR-0132](./0132-multi-organization-runtime-is-open-core.md), and the multi-organization machinery it packaged now ships in this repository (`packages/plugins/organizations`). What stays in cloud is that *record* — together with the non-goals and the commercial consequences, which the reversal leaves untouched. See [Relationship to the D2 reversal](#relationship-to-the-d2-reversal-adr-0132).
 - **Cross-checked against** (cite, do not duplicate): [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (tenancy mode; the membership lifecycle; D9 already anchors the active-organization resolution), [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) (group tenancy posture; D12 anchors the multi-org entitlement), [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) (total organization ownership; D1/D7/D9)
 - **Filed by**: [#14508](https://github.com/objectstack-ai/objectstack/issues/14508), a sub-issue of [#14496](https://github.com/objectstack-ai/objectstack/issues/14496) (maintainer ruling 2026-09-02, option 2: mirror the open half, do not move files)
 - **Consumers**: `@objectstack/platform-objects` (the identity surface and the Setup navigation contributions), `@objectstack/plugin-auth` (better-auth's organization plugin and the default-organization bootstrap), `@objectstack/spec` (the public auth-feature roster), and the objectui console that renders the surface
@@ -55,21 +55,21 @@ than resolved.
 
 ---
 
-## Relationship to the D2 reversal (#16215)
+## Relationship to the D2 reversal (ADR-0132)
 
 **A separate local record — "The multi-organization runtime is open core" —
-reverses cloud ADR-0081 D2.** It is open as a draft PR
-([#16215](https://github.com/objectstack-ai/objectstack/pull/16215)) and is not
-yet on `main`.
+reverses cloud ADR-0081 D2.** It is
+[ADR-0132](./0132-multi-organization-runtime-is-open-core.md), and it is **on
+`main`** (landed 2026-09-07): a record, not a proposal.
 
-⛔ **It is referenced here by PR number and never by its ADR number, and that is
-a gate requirement rather than a style choice.** `pnpm check:adr-anchors` fails
-any citation of an ADR number that names no record under `docs/adr/`: an
-unmerged number is a squat, and every citation of it is retroactively falsified
-if the record lands under a different number. A PR reference cannot rot that
-way. **When #16215 merges, its number becomes citable and this file should be
-updated to use it** — that edit is cheap, mechanical, and owed to whichever of
-the two records lands second.
+⛔ **It is cited here by ADR number and relative link, and nothing about that
+reversal is re-derived, restated or evaluated below.** This file previously
+cited it by PR number, which was a gate requirement rather than a style choice:
+`pnpm check:adr-anchors` fails any citation of an ADR number that names no
+record under `docs/adr/`, so while the record was unmerged its number was a
+squat and a citation of it would have been retroactively falsified had it landed
+under a different number. That constraint is discharged — the number resolves,
+so it is the citable form and the PR reference is retired from this file.
 
 The division of labour between the two records is exact and neither restates
 the other:
@@ -77,22 +77,23 @@ the other:
 | cloud ADR-0081 | who carries it locally |
 |---|---|
 | **D1** — the "add a teammate" basics stay open | **this record** |
-| **D2** — the multi-organization machinery is enterprise | the record proposed in **#16215**, which reverses it. ⛔ Not re-derived, restated or evaluated here |
+| **D2** — the multi-organization machinery is enterprise | **reversed** by [ADR-0132](./0132-multi-organization-runtime-is-open-core.md), which is on `main`. ⛔ Not re-derived, restated or evaluated here |
 | **D3** — the in-shell organization surface | **this record** |
 | **D4** — org-scoped roster reads | **this record** |
 | the non-goals and the commercial consequences | stay in cloud, cited as `cloud ADR-0081` |
 
-⚠️ **A note for the hand-merge, stated rather than decided.** #16215's record
-says in its own "What this record does not decide" section that D1/D3/D4 "are
-mirrored into this repository by #14508", and asks that writer to cite its
-decisions rather than open a *competing* record — which this file does: it
-decides nothing that record decides. A later comment on #14508 goes further and
-proposes folding D1/D3/D4 into that file instead of writing a second one. That
-option was not available to this change: the file does not exist on `main`, so
-"extending" it would mean building on an unmerged governed PR and coupling two
-hand-merges into one. **If the maintainer prefers one combined record, that is a
-merge-time call** — the two files are disjoint, so folding them is a move, not a
-rewrite.
+⚠️ **A note for the hand-merge, stated rather than decided.** ADR-0132 says in
+its own "What this record does not decide" section that D1/D3/D4 "are mirrored
+into this repository by #14508", and asks that writer to cite its decisions
+rather than open a *competing* record — which this file does: it decides nothing
+that record decides. A later comment on #14508 goes further and proposes folding
+D1/D3/D4 into that file instead of writing a second one. When this file was
+drafted that option was not available: ADR-0132 did not exist on `main`, so
+"extending" it would have meant building on an unmerged governed PR and coupling
+two hand-merges into one. That obstacle is gone — the record has landed — so the
+choice now stands on its merits alone. This change does not take it. **If the
+maintainer prefers one combined record, that is still a merge-time call** — the
+two files are disjoint, so folding them is a move, not a rewrite.
 
 ---
 
@@ -243,8 +244,9 @@ resolved here.
    and D14), not a mirror's to settle.
 
 4. **What an enterprise subscription buys, and where the multi-organization
-   machinery lives.** Cloud ADR-0081 D2 and the record proposed in #16215,
-   respectively. ⛔ Not evaluated here.
+   machinery lives.** Cloud ADR-0081 D2 and
+   [ADR-0132](./0132-multi-organization-runtime-is-open-core.md), respectively.
+   ⛔ Not evaluated here.
 
 ---
 
