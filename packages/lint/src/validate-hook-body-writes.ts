@@ -711,6 +711,28 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
 /**
  * Validate L2 hook-body writes against target-object field declarations.
  * Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or post-parse stacks.
+ *
+ * ## Which intakes reach a hook authored as an inline `handler` (#16095)
+ *
+ * This rule opens on `body.language === 'js'`. A hook written as
+ * `handler: async (ctx) => { … }` carries no `body`, so whether it is judged
+ * is a property of the DOOR — what each caller hands this function — not of
+ * the rule. Measured (`packages/cli/test/lint-hook-rules-reach-handler-hooks*`):
+ *
+ *   `os build`     lowers every inline handler to a metadata body before its
+ *                  parse (`lowerCallables`) — REACHED, always was.
+ *   `os lint`      hands the registry's `parsed` tier that same lowered view —
+ *                  REACHED since #16095.
+ *   `os validate`  parses the normalized stack without lowering — NOT reached;
+ *                  the body-authored control fires there. Changing that
+ *                  changes what `os validate` refuses and is its own decision.
+ *   direct call    judges exactly the stack it is given — NOT reached unless
+ *                  the caller lowers first.
+ *
+ * A handler the extractor refuses (forbidden token, free identifier,
+ * unparseable) is left with no `body` on every door, so this rule stays silent
+ * on it; the refusal itself is reported by `os lint`'s `hook-body/*` rules and
+ * by `os build`'s warn-and-bundle line, never guessed at here.
  */
 export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
   const findings: HookBodyWriteFinding[] = [];
