@@ -24,19 +24,21 @@
  * `api-surface/` records `name (kind)` for every public entry point, so it
  * answers both questions directly. Two asymmetries drive the rules below:
  *
- *  - **Type side is decidable.** `build-api-surface.ts`'s `kindOf` tests
- *    TypeAlias/Interface BEFORE Variable, so a name that carries a type is
- *    never reported as `const`. A `type`/`interface`/`class`/`enum` kind
- *    therefore PROVES `import type { N }` resolves, and `const` proves it does
- *    not.
- *  - **Value side is not.** The same ordering hides the value half of a merged
- *    declaration: `export const FieldType = z.enum(…)` plus
- *    `export type FieldType = …` is reported as `type` only. So value-ness
- *    cannot be read off the kind, and PRESENCE is the strongest sound signal.
- *    That is enough here, because `build-schemas.ts` derives a JSON Schema's
- *    name from an actual runtime export key of that same entry by stripping a
- *    `Schema` suffix — so the const behind schema `N` is `NSchema` or `N`, and
- *    whichever of the two the entry exports is it.
+ *  - **Type side is decidable.** `build-api-surface.ts` emits one row per
+ *    DECLARED kind, so every kind a name carries is in its set here. A
+ *    `type`/`interface`/`class`/`enum` kind in that set PROVES
+ *    `import type { N }` resolves, and a set without one proves it does not.
+ *  - **Value side is read by PRESENCE, deliberately.** Until #15919 it had to
+ *    be: a first-match-wins `kindOf` reported a merged
+ *    `export const FieldType = z.enum(…)` + `export type FieldType = …` as
+ *    `type` alone, so value-ness could not be read off the kind at all. That is
+ *    fixed — such a name now records BOTH `FieldType (const)` and
+ *    `FieldType (type)` — but this resolver still asks only whether the name is
+ *    exported, because presence is sound for every shape and needs no kind list
+ *    to maintain. It is enough here, because `build-schemas.ts` derives a JSON
+ *    Schema's name from an actual runtime export key of that same entry by
+ *    stripping a `Schema` suffix — so the const behind schema `N` is `NSchema`
+ *    or `N`, and whichever of the two the entry exports is it.
  *
  * A name that resolves to nothing is not emitted (the docs stop advertising a
  * dead import) AND is reported as a gap, so the omission is loud rather than

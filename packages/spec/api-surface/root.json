@@ -68,6 +68,7 @@
     "ExpandViewResult (interface)",
     "ExpandedViewItem (interface)",
     "Expression (type)",
+    "ExpressionDialect (const)",
     "ExpressionDialect (type)",
     "ExpressionInput (type)",
     "ExpressionInputSchema (const)",
