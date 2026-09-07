@@ -47,8 +47,8 @@ const result = EqualityOperatorSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **$eq** | `any` | optional |  |
-| **$ne** | `any` | optional |  |
+| **$eq** | `any` | optional | Equal to — the DEFAULT operator: a bare value written against a field key is the same condition as this one. Lowered to `=` on the SQL family and to `$eq` on MongoDB. The comparand is a literal, or a `{ $field }` reference to another column of the same table ($eq is one of the six scalar comparisons a reference may be the whole comparand of). `{ "$eq": null }` is the has-NO-value predicate — the same question `{ "$null": true }` asks, and it is about the VALUE, never about whether a key is present. |
+| **$ne** | `any` | optional | Not equal to. Lowered to `<>` / `!=` on the SQL family and to `$ne` on MongoDB. The comparand is a literal, or a `{ $field }` reference to another column of the same table ($ne is one of the six scalar comparisons a reference may be the whole comparand of). `{ "$ne": null }` is the HAS-A-VALUE predicate — the same question `{ "$exists": true }` asks: it matches rows whose field holds a value, never rows that merely carry the key. |
 
 
 ---
@@ -121,7 +121,7 @@ Type: `[FilterArray](#filterarray)[]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **where** | `any` | optional |  |
+| **where** | `any` | optional | The condition tree the query filters by. A field-keyed entry is a condition on that field — a bare value is implicit equality, an object is a map of field operators — and `$and` / `$or` / `$not` combine conditions. `$not` is NULL-safe: a row whose compared column is null does NOT satisfy the negated condition and IS returned. An empty `$and` is the AND identity (no constraint); an empty `$or` is the OR identity (zero rows). |
 
 
 ---
@@ -156,10 +156,10 @@ Type: `[FilterArray](#filterarray)[]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **$contains** | `string` | optional |  |
-| **$notContains** | `string` | optional |  |
-| **$startsWith** | `string` | optional |  |
-| **$endsWith** | `string` | optional |  |
+| **$contains** | `string` | optional | Contains substring, CASE-SENSITIVELY — "acme" does NOT match "ACME". Lowered to `LIKE '%?%'` (case-exact) on the SQL family, and answered case-exactly on every JS evaluation face the platform ships. The comparand is matched LITERALLY: "%", "_" and regex metacharacters are ordinary characters, because this family escapes and anchors the comparand on the caller's behalf. To bind the wildcards yourself, write $like (case-exact) or $ilike (ASCII-folded). Case-INSENSITIVE containment is $icontains, which folds ASCII case only. |
+| **$notContains** | `string` | optional | Does not contain substring, CASE-SENSITIVELY — the negation of $contains, on the same comparand contract. Lowered to `NOT LIKE '%?%'` (case-exact) on the SQL family. The comparand is matched LITERALLY: "%", "_" and regex metacharacters are ordinary characters, because this family escapes and anchors the comparand on the caller's behalf. To bind the wildcards yourself, write $like (case-exact) or $ilike (ASCII-folded). |
+| **$startsWith** | `string` | optional | Starts with prefix, CASE-SENSITIVELY. Lowered to `LIKE '?%'` (case-exact) on the SQL family. The comparand is matched LITERALLY: "%", "_" and regex metacharacters are ordinary characters, because this family escapes and anchors the comparand on the caller's behalf. To bind the wildcards yourself, write $like (case-exact) or $ilike (ASCII-folded). |
+| **$endsWith** | `string` | optional | Ends with suffix, CASE-SENSITIVELY. Lowered to `LIKE '%?'` (case-exact) on the SQL family. The comparand is matched LITERALLY: "%", "_" and regex metacharacters are ordinary characters, because this family escapes and anchors the comparand on the caller's behalf. To bind the wildcards yourself, write $like (case-exact) or $ilike (ASCII-folded). |
 | **$icontains** | `string` | optional | Contains substring, ignoring case — but ONLY ASCII case (A-Z against a-z). Every other character compares literally, so "café" does NOT match "CAFÉ" and "москва" does not match "МОСКВА". The domain is ASCII because that is the one fold all five backends can deliver: SQLite (and therefore turso and sqlite-wasm) folds ASCII only, so a Unicode promise here would be a guarantee three of the five could not keep. The comparand is matched LITERALLY — "%", "_" and regex metacharacters are ordinary characters, not wildcards. Case-SENSITIVE containment is $contains. Lowered on the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on both transports) and on every JS evaluation face, so it is portable across every backend the platform ships. |
 | **$like** | `string` | optional | Whole-string pattern match with CALLER-bound wildcards: "%" matches any sequence (including empty), "_" matches exactly one character, and a backslash escapes the character after it ("\\%", "\\_", "\\\\") so it matches literally. The pattern must cover the WHOLE value — a pattern with no wildcards is an exact comparison, NOT a substring search; write $contains for containment. A pattern ending in a lone unpaired backslash is refused (INVALID_FILTER). Comparison is case-SENSITIVE, same contract as $contains (Q2 = A); $ilike is the case-insensitive twin. Answered by the SQL family (driver-sql, driver-sqlite-wasm, driver-turso on both transports), by driver-memory and by @objectstack/formula. driver-mongodb, objectql `having` and service-analytics REFUSE it in the INVALID_FILTER envelope rather than approximating it — see FILTER_OPERATORS for why it is staged out of that allowlist. |
 | **$ilike** | `string` | optional | Whole-string pattern match like $like — "%" / "_" wildcards bound by the caller, backslash escapes — but ignoring ASCII case (A-Z against a-z) and ONLY ASCII case: "café" does NOT match "CAFÉ", the same Q1 = A boundary $icontains declares, because SQLite's fold is ASCII-only and three of the five backends are SQLite underneath. Staged with $like — see FILTER_OPERATORS. |
