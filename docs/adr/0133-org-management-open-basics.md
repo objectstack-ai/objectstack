@@ -91,9 +91,13 @@ D1/D3/D4 into that file instead of writing a second one. When this file was
 drafted that option was not available: ADR-0132 did not exist on `main`, so
 "extending" it would have meant building on an unmerged governed PR and coupling
 two hand-merges into one. That obstacle is gone — the record has landed — so the
-choice now stands on its merits alone. This change does not take it. **If the
-maintainer prefers one combined record, that is still a merge-time call** — the
-two files are disjoint, so folding them is a move, not a rewrite.
+choice now stands on its merits alone. ⚠️ One of those merits is structural and
+survived the merge: that record carries **its own D1 through D6**, which are
+different decisions from cloud ADR-0081's D1/D3/D4, so folding this file into it
+would put two unrelated `D1`s in one document — the property the unrenumbered
+mirror above exists to keep checkable. This change takes the option neither way.
+**If the maintainer prefers one combined record, that is still a merge-time
+call** — the two files are disjoint, so folding them is a move, not a rewrite.
 
 ---
 
