@@ -70,7 +70,10 @@ function permissiveService() {
   return {
     listManifests: () => [{ namespace: NS }],
     getNamespace: async () => ({ manifest: { namespace: NS }, values: {} }),
-    secretKeysOf: () => [] as string[],
+    // `ReadonlySet<string>` is the real `SettingsService` shape — an array
+    // makes the redaction helpers' `.size` read `undefined` and the PUT door
+    // answers 500, i.e. the control would fail for a fixture reason.
+    secretKeysOf: () => new Set<string>(),
     setMany: async () => ({}),
     runAction: async () => ({ ok: true }),
   } as any;
