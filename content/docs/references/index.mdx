@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1576 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1577 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -20,7 +20,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 11 | 66 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 31 | 436 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 31 | 437 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 73 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Cloud Protocol](/docs/references/cloud) | 11 | 94 | Environments, packages and versions, marketplace, developer portal, tenancy. |
 | [Data Protocol](/docs/references/data) | 29 | 168 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
@@ -33,7 +33,7 @@ counts are sums of the rows they head. Regenerate with
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 33 | 272 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **198** | **1576** | 14 protocol modules |
+| **Total** | **198** | **1577** | 14 protocol modules |
 
 ---
 
@@ -61,7 +61,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **31 pages, 436 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **31 pages, 437 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -70,7 +70,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`analytics.zod.ts`](/docs/references/api/analytics) | `AnalyticsEndpoint`, `AnalyticsMetadataResponse`, `AnalyticsQueryRequest`, `AnalyticsResultResponse`, `AnalyticsSqlResponse`, `GetAnalyticsMetaRequest` |
 | [`auth.zod.ts`](/docs/references/api/auth) | `AuthProvider`, `LoginRequest`, `LoginType`, `RefreshTokenRequest`, `RegisterRequest`, `Session`, `SessionResponse`, `SessionUser`, `UserProfileResponse` |
 | [`auth-endpoints.zod.ts`](/docs/references/api/auth-endpoints) | `AuthEndpoint`, `AuthFeaturesConfig`, `AuthProviderInfo`, `DeviceRequestResponse`, `DeviceTokenResponse`, `EmailPasswordConfigPublic`, `GetAuthConfigResponse` |
-| [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `FlowSummary`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListFlowsRequest`, `ListFlowsResponse`, `ListRunsRequest`, `ListRunsResponse`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
+| [`automation-api.zod.ts`](/docs/references/api/automation-api) | `AutomationApiErrorCode`, `AutomationFlowPathParams`, `AutomationRunPathParams`, `CreateFlowRequest`, `CreateFlowResponse`, `DeleteFlowRequest`, `DeleteFlowResponse`, `FlowSummary`, `GetFlowRequest`, `GetFlowResponse`, `GetRunRequest`, `GetRunResponse`, `ListFlowsRequest`, `ListFlowsResponse`, `ListRunsRequest`, `ListRunsResponse`, `ResumeFailureDetails`, `ToggleFlowRequest`, `ToggleFlowResponse`, `TriggerFlowRequest`, `TriggerFlowResponse`, `UpdateFlowRequest`, `UpdateFlowResponse` |
 | [`batch.zod.ts`](/docs/references/api/batch) | `BatchConfig`, `BatchOperationResult`, `BatchOperationType`, `BatchOptions`, `BatchRecord`, `BatchUpdateRequest`, `BatchUpdateResponse`, `CrossObjectBatchDroppedFields`, `CrossObjectBatchOperation`, `CrossObjectBatchRequest`, `CrossObjectBatchResponse`, `DeleteManyRequest`, `UpdateManyRecord`, `UpdateManyRequest` |
 | [`contract.zod.ts`](/docs/references/api/contract) | `ApiError`, `BaseResponse`, `BatchLoadingStrategy`, `BulkRequest`, `BulkResponse`, `CreateRequest`, `DataLoaderConfig`, `DeleteResponse`, `ExportRequest`, `IdRequest`, `ListRecordResponse`, `ModificationResult`, `QueryOptimizationConfig`, `RecordData`, `SingleRecordResponse`, `UpdateRequest` |
 | [`discovery.zod.ts`](/docs/references/api/discovery) | `ApiRoutes`, `CapabilityDescriptor`, `Discovery`, `DiscoveryEnvironment`, `RouteHealthEntry`, `RouteHealthReport`, `ServiceInfo`, `ServiceSelfInfo`, `ServiceStatus`, `WellKnownCapabilities` |
