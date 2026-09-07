@@ -575,7 +575,7 @@ export const CEILINGS = new Map([
   // line cap when merged, so there is no re-wrap slack at all, and re-wrap funding
   // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 362],
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 388],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -999,6 +999,20 @@ export const CROSS_FILE_MOVES = new Map([
             + ' (option C rejected); no line is dropped (option B not needed)."',
           date: '2026-09-06',
           delta: 3,
+        },
+        {
+          // The ruling's own words, copied from comment 5563909225 rather than
+          // paraphrased; the +26 is accounted for line by line on PR #16379.
+          ruling:
+            'the fifth-increment raise on'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — maintainer,'
+            + ' decision batch #62, 2026-09-07, verbatim and untranslated: 「同意」 on option'
+            + ' A, and the sentences that ruling adopts, in the director record\'s own words'
+            + ' (comment 5563909225): "`references/platform-readings.md`\'s line ceiling rises'
+            + ' to the measured count: 385 on today\'s `main` (359 → 385), or 388 if PR'
+            + ' #15955\'s ruled raise (362) lands first — the same +26 either way."',
+          date: '2026-09-07',
+          delta: 26,
         },
       ],
       sources: [
