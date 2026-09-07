@@ -158,7 +158,47 @@
  * diff, and failing an unrelated PR's CI over it would punish the wrong actor.
  */
 
-// dispatch-gates: no-path-population -- this gate reads no file in the tree as its input: it judges a PR's DIFF, supplied by its caller from the API or from `git diff`, so no card's file surface can predict it. The path globs in its module body are patterns matched against diff filenames, never files it opens (#16448)
+// ⛔ NO `dispatch-gates: no-path-population` MARKER HERE — deliberately, and the
+// reasoning is worth the paragraph because the marker LOOKS right.
+//
+// This gate's CI command is its own `--self-test`, which is the second of the
+// three causes that marker's docblock lists ("the derivation NEED NOT place it").
+// On that reading the declaration is true: no card's file surface should
+// schedule this command, because running it says nothing about that card's diff.
+//
+// But the marker is refused by `dispatch-gates`'s live guard the moment a family
+// NAMES paths, and this one names 59 of them (measured on this tree): 9 from its
+// own module body — the registry table, the objectui mirror glob, the two repo
+// slugs and four fixture filenames — and 50 inherited from the two registers it
+// imports ON PURPOSE, `SUSPECT_TIER_GLOBS` and `REGEN_ARTIFACTS`. That guard's
+// own text gives the fork: "If the literals are the real population, delete the
+// marker and let the matched column do its job; if they are artifacts rather
+// than a population, the marker stands and the literals do not belong in a
+// scanned position."
+//
+// Both halves of getting them out of scanned positions cost more than they buy:
+// the 9 would have to become segment predicates instead of paths, and the 50
+// would have to become a HAND COPY of two registers this file imports precisely
+// so it can never disagree with them — which is the drift
+// `check:pm-governed-prose` exists to stop one family over, and the single
+// strongest property this gate has. So the marker goes and the derivation
+// stands.
+//
+// What the derivation now says, and why it is not wrong: a card touching any of
+// those 59 paths gets `pnpm check:pm-widening-tells` in its MATCHED column. For
+// `packages/spec/src/**`, `packages/spec/api-surface/**` and the three
+// registries that is exactly right — they are the surfaces this gate polices,
+// and a dev editing one is the dev whose claim it will judge. For the tail
+// inherited from `REGEN_ARTIFACTS` (`*/test-typecheck-debt.json`,
+// `content/docs/references/**`, and the rest) it is noise, and the cost of that
+// noise is bounded and small: the command is an offline self-test that runs in
+// about a second and whose green means "the tells still work". An
+// over-matched gate pastes one cheap command into a prompt; the alternative was
+// a marker sitting above a live population, which is the rot direction
+// `dispatch-gates` measured and refused. ⛔ Do not re-add the marker without
+// first removing the imports — a green local run is not evidence, because the
+// case that catches this sits at ~1534 of the self-test's assertions and needs
+// well over 540s to reach (#16448 patch round 2).
 
 import process from 'node:process';
 import { existsSync, readFileSync } from 'node:fs';
