@@ -10,7 +10,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { AutomationEngine } from './engine.js';
-import { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
+import {
+    InMemoryFlowDispatchStore,
+    ObjectStoreFlowDispatchStore,
+    isSettleAllowed,
+} from './flow-dispatch-store.js';
 import type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
 
 function testLogger() {
@@ -286,5 +290,75 @@ describe('the claim OUTCOME half (#14501)', () => {
         await engine.settleDispatch('k1', 'succeeded');
         await expect(engine.readDispatch('k1')).resolves.toMatchObject({ outcome: 'succeeded' });
         await expect(engine.readDispatch('never')).resolves.toBeNull();
+    });
+});
+
+describe('the settle write rule: `succeeded` is ABSORBING (#14501 contract review)', () => {
+    it('ObjectStoreFlowDispatchStore: failed -> succeeded is allowed — a repaired window must refuse the next replay', async () => {
+        const { engine, rows } = fakeQl();
+        const store = new ObjectStoreFlowDispatchStore(engine);
+        await store.claim('schedule:digest:w1');
+        await store.settle('schedule:digest:w1', 'failed');
+        await expect(store.read('schedule:digest:w1')).resolves.toMatchObject({ outcome: 'failed' });
+
+        await store.settle('schedule:digest:w1', 'succeeded');
+        await expect(store.read('schedule:digest:w1')).resolves.toMatchObject({ outcome: 'succeeded' });
+        expect(rows.get('schedule:digest:w1')?.outcome).toBe('succeeded');
+    });
+
+    it('ObjectStoreFlowDispatchStore: succeeded -> failed is REFUSED, and refused means no write at all', async () => {
+        let updates = 0;
+        const { engine, rows } = fakeQl();
+        const counting: FlowDispatchStoreEngine = {
+            find: engine.find,
+            insert: engine.insert,
+            update: (...args) => { updates++; return engine.update(...args); },
+        };
+        const store = new ObjectStoreFlowDispatchStore(counting);
+        await store.claim('schedule:digest:w1');
+        await store.settle('schedule:digest:w1', 'succeeded');
+        expect(updates).toBe(1);
+
+        // A FORCED replay that throws must not rewrite a delivered window:
+        // doing so would silently reopen the UNFORCED re-delivery door.
+        await store.settle('schedule:digest:w1', 'failed');
+        expect(updates).toBe(1);
+        expect(rows.get('schedule:digest:w1')?.outcome).toBe('succeeded');
+    });
+
+    it('the refusal is a no-op, never a throw — it is the invariant working, not an error', async () => {
+        const { engine } = fakeQl();
+        const store = new ObjectStoreFlowDispatchStore(engine);
+        await store.claim('k');
+        await store.settle('k', 'succeeded');
+        await expect(store.settle('k', 'failed')).resolves.toBeUndefined();
+    });
+
+    it('InMemoryFlowDispatchStore holds the same rule', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        await store.claim('k');
+        await store.settle('k', 'failed');
+        await store.settle('k', 'succeeded');
+        await expect(store.read('k')).resolves.toMatchObject({ outcome: 'succeeded' });
+        await store.settle('k', 'failed');
+        await expect(store.read('k')).resolves.toMatchObject({ outcome: 'succeeded' });
+    });
+
+    it('isSettleAllowed is the predicate, and it names exactly one refused transition', () => {
+        expect(isSettleAllowed(null, 'succeeded')).toBe(true);
+        expect(isSettleAllowed(null, 'failed')).toBe(true);
+        expect(isSettleAllowed('failed', 'succeeded')).toBe(true);
+        expect(isSettleAllowed('failed', 'failed')).toBe(true);
+        expect(isSettleAllowed('succeeded', 'succeeded')).toBe(true);
+        expect(isSettleAllowed('succeeded', 'failed')).toBe(false);
+    });
+
+    it("the engine's IN-PROCESS fallback obeys the same rule, so it cannot reopen a door the ledger keeps shut", async () => {
+        const { logger } = testLogger();
+        const engine = new AutomationEngine(logger);
+        await engine.claim('k');
+        await engine.settleDispatch('k', 'succeeded');
+        await engine.settleDispatch('k', 'failed');
+        await expect(engine.readDispatch('k')).resolves.toMatchObject({ outcome: 'succeeded' });
     });
 });

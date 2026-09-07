@@ -133,6 +133,12 @@ export interface TickWindow {
  *    calendar to disagree with. `croner` resolves patterns to whole seconds,
  *    so the reference is advanced to the start of the next second to turn its
  *    strictly-before answer into the at-or-before one this needs.
+ *    ⚠️ That "one calendar" property rests on an assumption worth naming: an
+ *    absent `schedule.timezone` falls back to `'UTC'` here, which is the same
+ *    default `CronJobAdapter` applies to the fire (`options.timezone ?? 'UTC'`).
+ *    A host that constructed its adapter with a different default timezone
+ *    would fire on its calendar while this keys on UTC, and the two would part
+ *    company at a DST boundary.
  *  - **interval** — the epoch-anchored bucket `floor(now / intervalMs)`.
  *    Anchored to the epoch and not to registration time on purpose: a restart
  *    re-registers the timer at a new offset, and a window that moved with it
@@ -358,6 +364,13 @@ export class ScheduleTrigger implements FlowTrigger {
      * asked for and then abandoned is overwritten by the next one instead of
      * outliving its window — at most one outstanding pass per bound flow, and
      * `stop()` takes it with the binding.
+     *
+     * ⚠️ Residue is therefore bounded but not zero: an abandoned pass survives
+     * until this flow's next guard call or its next fire, whichever comes
+     * first. Its blast radius is one fire of one flow inside the window the
+     * pass names — a fire that would have been a no-op runs instead — and a
+     * pass for a window that has already passed can never match again, because
+     * the key is compared against the window computed at fire time.
      */
     private readonly replayPasses = new Map<string, string>();
     /** Whether the in-process-only dedup degradation has been said (once). */

@@ -38,14 +38,48 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
  *
  * Narrower than `SuspendedRunStoreEngine` on purpose, and the narrowness is
  * load-bearing: the ledger still never DELETES (the platform Reaper owns
- * deletion via the object's declared retention), and `update` exists for
- * exactly one transition, `outcome`/`settled_at` from unset to terminal. A
- * test double that implements only what is used stays honest about that.
+ * deletion via the object's declared retention), and `update` only ever writes
+ * `outcome`/`settled_at`, never a claim column. Two of the three transitions
+ * those columns admit reach it — `null → succeeded` and `null → failed` from an
+ * ordinary run, and `failed → succeeded` when a replay repairs a window. The
+ * third, `succeeded → failed`, is REFUSED by {@link ObjectStoreFlowDispatchStore.settle}
+ * and never reaches the engine at all. A test double that implements only what
+ * is used stays honest about that.
  */
 export interface FlowDispatchStoreEngine {
   find(object: string, options?: any): Promise<any[]>;
   insert(object: string, data: any, options?: any): Promise<any>;
   update(object: string, data: any, options?: any): Promise<any>;
+}
+
+/**
+ * The ledger's write rule for `outcome`, in one predicate — **`succeeded` is
+ * absorbing** (#14501, seat ruling in the contract review of this change).
+ *
+ * Three transitions are allowed and one is refused:
+ *
+ * | from | to | |
+ * |:---|:---|:---|
+ * | `null` | `succeeded` / `failed` | an ordinary run settling its own claim |
+ * | `failed` | `succeeded` | REQUIRED — a replay repaired the window, and the next unforced replay must now be refused |
+ * | `succeeded` | `failed` | **refused** |
+ *
+ * The refusal is not fussiness about monotonicity. The ruling guarantees that
+ * a window whose claim succeeded is refused, and "latest attempt wins" erodes
+ * exactly that: a FORCED replay that throws would rewrite a delivered window
+ * to `failed` and silently reopen the *unforced* re-delivery door — the
+ * duplicate-delivery harm this whole card exists to close. An operator whose
+ * forced replay failed has to force again, which is louder and safer than a
+ * door that reopens itself.
+ *
+ * `succeeded → succeeded` and `failed → failed` are allowed and simply refresh
+ * `settled_at`.
+ */
+export function isSettleAllowed(
+  current: FlowDispatchOutcome | null,
+  next: FlowDispatchOutcome,
+): boolean {
+  return !(current === 'succeeded' && next === 'failed');
 }
 
 /** Shape both stores write and read back — see {@link FlowDispatchClaim}. */
@@ -77,6 +111,7 @@ export class InMemoryFlowDispatchStore implements FlowDispatchStore {
   async settle(key: string, outcome: FlowDispatchOutcome): Promise<void> {
     const existing = this.claims.get(key);
     if (!existing) return;
+    if (!isSettleAllowed(existing.outcome, outcome)) return;
     this.claims.set(key, { ...existing, outcome, settledAt: new Date().toISOString() });
   }
 
@@ -130,8 +165,17 @@ export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
    * delivered dispatch into a thrown one, so callers treat this as
    * best-effort; the cost of losing it is a row stuck at `outcome: null`,
    * which reads as "not delivered" and lets an operator replay through.
+   *
+   * Reads the row first because {@link isSettleAllowed} needs the current
+   * outcome: `succeeded` is absorbing, and a downgrade is a silent no-op here
+   * rather than a throw — refusing to write is the invariant working, not an
+   * error, and reporting it as one would turn the trigger's honest "could not
+   * record the outcome" warning into a lie.
    */
   async settle(key: string, outcome: FlowDispatchOutcome): Promise<void> {
+    const current = await this.read(key);
+    if (!current) return; // never claimed — settling does not create rows
+    if (!isSettleAllowed(current.outcome, outcome)) return;
     // `update(object, { id, …fields }, options)` — the id rides in the PAYLOAD,
     // which is the by-id dispatch shape the ObjectQL engine actually takes.
     // ⛔ Not a 4-argument `update(object, id, data, options)`: no engine here

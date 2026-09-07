@@ -308,6 +308,45 @@ describe('PIN: a throwing run leaves a FAILED claim that a plain replay() re-run
         expect(r.runs).toHaveLength(2);
     });
 
+    it('and the REPAIRED window is then refused: failed -> plain replay() -> succeeded -> next unforced replay refused', async () => {
+        // The full repair round-trip the contract review asked to be pinned.
+        // Its second half is what makes `failed -> succeeded` a REQUIRED
+        // transition rather than a tolerated one.
+        const store = new InMemoryFlowDispatchStore();
+        const key = scheduleDispatchKey(FLOW, computeTickWindow(CRON.schedule as any, IN_WINDOW)!);
+
+        const bad = await rig({ store, throws: true });
+        await bad.tick();
+        await expect(store.read(key)).resolves.toMatchObject({ outcome: 'failed' });
+
+        // A fresh binding over the same ledger, this time with a flow that works.
+        const good = await rig({ store });
+        await expect(good.replayThroughGuard()).resolves.toBeUndefined();
+        expect(good.runs).toHaveLength(1);
+        await expect(store.read(key)).resolves.toMatchObject({ outcome: 'succeeded' });
+
+        await expect(good.replayThroughGuard()).rejects.toThrow(/refused:/);
+        expect(good.runs).toHaveLength(1);
+    });
+
+    it('a FORCED replay that throws leaves the window recorded delivered — it must not reopen the unforced door', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        const key = scheduleDispatchKey(FLOW, computeTickWindow(CRON.schedule as any, IN_WINDOW)!);
+
+        const good = await rig({ store });
+        await good.tick();
+        await expect(store.read(key)).resolves.toMatchObject({ outcome: 'succeeded' });
+
+        // The operator forces a re-send and the flow blows up this time.
+        const bad = await rig({ store, throws: true });
+        await expect(bad.replayThroughGuard(true)).resolves.toBeUndefined();
+        expect(bad.runs).toHaveLength(1);
+
+        // The claim still says delivered, so an UNFORCED replay is still refused.
+        await expect(store.read(key)).resolves.toMatchObject({ outcome: 'succeeded' });
+        await expect(bad.replayThroughGuard()).rejects.toThrow(/refused:/);
+    });
+
     it('an UNSETTLED claim — the process died mid-launch — reads as not delivered and replays too', async () => {
         const store = new InMemoryFlowDispatchStore();
         const key = scheduleDispatchKey(FLOW, computeTickWindow(CRON.schedule as any, IN_WINDOW)!);

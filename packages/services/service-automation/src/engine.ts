@@ -2101,8 +2101,15 @@ export class AutomationEngine implements IAutomationService {
      * delivered flow into a thrown one to report a bookkeeping failure is
      * strictly worse than leaving the row unsettled — an unsettled row reads
      * as "not delivered", so the only cost is that a later replay is allowed
-     * through instead of refused. A ledger without `settle()` (one predating
-     * #14501) is the same cost, said once by {@link readDispatch}.
+     * through instead of refused. A ledger without `settle()` is the same
+     * cost, said once by {@link readDispatch}.
+     *
+     * ⚠️ Not every call writes. `succeeded` is ABSORBING: a claim that already
+     * recorded success stays `succeeded` even if a later forced replay throws,
+     * because rewriting it would silently reopen the unforced re-delivery door
+     * the #14501 ruling closed. The store enforces that (`isSettleAllowed`) and
+     * refuses by not writing, never by throwing — a refusal is the invariant
+     * working, not a failure to report.
      */
     async settleDispatch(key: string, outcome: FlowDispatchOutcome): Promise<void> {
         const store = this.flowDispatchStore;
@@ -2120,7 +2127,13 @@ export class AutomationEngine implements IAutomationService {
             }
         }
         const existing = this.inProcessDispatchClaims.get(key);
-        if (existing) this.inProcessDispatchClaims.set(key, { ...existing, outcome });
+        // Same write rule as the persisted ledger: `succeeded` is absorbing, so
+        // the fallback cannot reopen a re-delivery door the durable path keeps
+        // shut. Kept here rather than imported so the engine stays free of a
+        // dependency on the store module it merely drives.
+        if (existing && !(existing.outcome === 'succeeded' && outcome === 'failed')) {
+            this.inProcessDispatchClaims.set(key, { ...existing, outcome });
+        }
     }
 
     /**
@@ -2152,8 +2165,9 @@ export class AutomationEngine implements IAutomationService {
             // The ledger predates the outcome half of the claim contract.
             this.logger.warn(
                 '[automation] the attached flow-dispatch ledger has no read()/settle() — ' +
-                    'dispatch claims are still deduplicated, but no claim records an OUTCOME, so a scheduled ' +
-                    "flow's replay refusal can never fire: every replay is allowed through.",
+                    'dispatch claims are still deduplicated, but no claim records an OUTCOME durably, so a ' +
+                    "scheduled flow's replay refusal survives no restart: within one process lifetime the " +
+                    'in-process fallback still records outcomes and still refuses, but nothing outlives it.',
             );
         }
         this.pruneInProcessDispatchClaims(Date.now());

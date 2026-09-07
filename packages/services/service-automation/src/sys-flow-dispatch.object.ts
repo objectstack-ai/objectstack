@@ -37,14 +37,29 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * only when that window was **delivered**, and re-runs it when the claim is
  * absent *or failed*. So `claim()` still writes the row before the launch (the
  * race is still won on the primary key), and the dispatcher now settles it
- * afterwards with {@link FlowDispatchStore.settle} — `outcome` /
- * `settled_at` are the only columns any writer ever updates, and only from
- * `null` to a terminal value.
+ * afterwards with {@link FlowDispatchStore.settle}.
  *
- * A row left at `outcome: null` is a dispatch whose process died mid-flight.
- * It reads as **not delivered** — the `replay()` contract's "failed" row —
- * because "we claimed it and never saw it finish" is exactly the case an
- * operator replay exists to repair.
+ * **The write rule, exactly** — `outcome` and `settled_at` are the only columns
+ * any writer ever updates, and `succeeded` is ABSORBING:
+ *
+ * - `null → succeeded` / `null → failed` — an ordinary run settling its claim.
+ * - `failed → succeeded` — REQUIRED, not an exception: a plain `replay()`
+ *   re-runs a failed window, and when that run lands the window really is
+ *   delivered, so the next unforced replay must be refused.
+ * - `succeeded → failed` — **refused**. A FORCED replay that throws leaves the
+ *   window recorded `succeeded`, because rewriting it would silently reopen the
+ *   *unforced* re-delivery door this whole ledger exists to shut. The operator
+ *   whose forced replay failed has to force again: louder, and safer.
+ *
+ * The predicate is `isSettleAllowed` in `flow-dispatch-store.ts`, and refusing
+ * is a no-op rather than a throw — it is the invariant working, not an error.
+ *
+ * A row left at `outcome: null` is a dispatch whose process died mid-flight, or
+ * a claim written before #14501, or a `time-relative:` claim (which is never
+ * settled at all — only `schedule:` keys have an outcome). All of them read as
+ * **not delivered** — the `replay()` contract's "failed" row — because "we
+ * claimed it and never saw it finish" is exactly the case an operator replay
+ * exists to repair.
  *
  * Writers: the automation engine's {@link FlowDispatchStore} — `claim()`
  * (check-and-record) and `settle()` (outcome only) — under a system context.
@@ -86,23 +101,26 @@ export const SysFlowDispatch = ObjectSchema.create({
       group: 'State',
     }),
 
-    // [#14501] The claim's outcome. OPTIONAL, and its absence is meaningful:
-    // `null` is the mid-flight state between `claim()` and `settle()`, and it
-    // is also every row a pre-#14501 ledger already holds. Both read as "not
-    // delivered", which is the safe direction — a replay re-runs rather than
-    // refusing on a claim nobody ever settled.
+    // [#14501] The claim's outcome, and only for a `schedule:` key. OPTIONAL,
+    // and its absence is meaningful three ways: the mid-flight state between
+    // `claim()` and `settle()`, every row a ledger predating the outcome
+    // columns already holds, and every `time-relative:` row — that trigger
+    // dedups per (flow, record, window) and never settles, so half this table
+    // stays null by design. All three read as "not delivered", the safe
+    // direction: a replay re-runs rather than refusing on a claim nobody
+    // settled.
     outcome: Field.select(['succeeded', 'failed'], {
       label: 'Outcome',
       required: false,
       description:
-        'What the claimed dispatch turned into: succeeded (delivered — an unforced replay of this window is refused) or failed (the flow threw; a replay re-runs it). Null means claimed and never settled, which reads as not delivered.',
+        'For a scheduled-flow (schedule:) claim, what the dispatch turned into: succeeded (delivered — an unforced replay of this window is refused) or failed (the flow threw; a replay re-runs it). Succeeded is absorbing: a later failed run never overwrites it. Null means not delivered — claimed and never settled, written before this column existed, or a time-relative claim, which never settles.',
       group: 'State',
     }),
 
     settled_at: Field.datetime({
       label: 'Settled At',
       required: false,
-      description: 'When the outcome was recorded (immediately after the flow launch this row deduplicates returned).',
+      description: 'When the outcome was recorded (immediately after the flow launch this row deduplicates returned). Null wherever outcome is.',
       group: 'State',
     }),
 
