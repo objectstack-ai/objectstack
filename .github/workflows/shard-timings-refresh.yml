@@ -50,12 +50,28 @@
 # regeneration happens where the data already is, on a timer, and no seat needs
 # reachability it does not have.
 #
-# CHOOSING THE RUN IS THE HARD PART — see scripts/ci/select-shard-timings-run.mjs
+# CHOOSING THE RUNS IS THE HARD PART — see scripts/ci/select-shard-timings-run.mjs
 # ------------------------------------------------------------------------------
 # "The newest run" is wrong three different ways here (cancelled runs, cache
 # replays, expired artifacts), and a refresh built on the wrong run is worse than
 # no refresh because it stamps a fresh `measuredAt` on numbers nobody measured.
 # That script carries the argument and the self-test; this file only drives it.
+#
+# ⚠ AND IT IS "RUNS", PLURAL, WHICH THE DOCUMENTED PROCEDURE DOES NOT SAY.
+# Measured on this lane's first live run (34083991141): of the seven retained
+# green push runs on main, the BEST measured 52 of the 71 packages the committed
+# dataset holds, and the others measured 2, 3, 13, 18, 22 and 49. All seven were
+# partial cache replays. That follows from the cache design rather than from luck
+# — turbo's key is namespaced per shard and only main pushes write it, so a
+# package whose inputs have not changed is a HIT, and the generator refuses hits
+# rather than recording a replayed ~0.1s window as a suite's cost. "Download six
+# artifacts from any green run" therefore measures a SLICE of the workspace.
+#
+# So the regeneration step accumulates runs, each under its own `--run <id>`
+# group — the grouping #16473 added, which sums a sliced package's slices within
+# a run and medians the per-run sums across runs. A package seen in three of the
+# accumulated runs gets the median of three observations, which is the property
+# the dataset's own merge rule always claimed and could not previously deliver.
 #
 # THE PINS, AND THE ONE THING A MACHINE MUST NOT DECIDE
 # ----------------------------------------------------
@@ -214,11 +230,30 @@ jobs:
             for (const r of runs) console.log(`  ${r.run_id}  ${r.created_at}  ${r.head_sha.slice(0, 10)}`);
           '
 
-      # Each eligible run is tried in turn: download, generate, and then judge
-      # whether it MEASURED the workspace. A run that passed selection can still
-      # be a cache replay, and the only honest test for that is the resulting
-      # dataset's package coverage — so the loop is the point, not a retry.
-      - name: Regenerate the dataset from the first run that actually measured
+      # ACCUMULATE runs until the workspace is covered — do not look for one run
+      # that covers it, because there is no such run.
+      #
+      # MEASURED on the first live run of this lane (run 34083991141), and it is
+      # the fact that shapes this step: of the seven retained green push runs on
+      # main, the BEST measured 52 of the 71 packages the committed dataset
+      # holds, and the rest measured 2, 3, 13, 18, 22 and 49. Every one of them
+      # was a partial cache replay. That is not bad luck, it is the cache design:
+      # turbo's key is namespaced per shard and only main pushes write it, so a
+      # package whose inputs have not changed is a HIT — and the generator
+      # refuses hits rather than recording a replayed ~0.1s window as a suite's
+      # cost. "Download six artifacts from any green run" therefore measures a
+      # SLICE of the workspace, never all of it.
+      #
+      # So runs are accumulated. Each contributes its six summaries under its own
+      # `--run <id>` group, which is exactly the grouping #16473 added: slices are
+      # summed within a run and the per-run sums are medianed across runs, so a
+      # package measured by three of these runs gets a median of three
+      # observations rather than whichever run happened to be read last. Feeding
+      # several runs WITHOUT that grouping is refused by the generator by name.
+      #
+      # The loop stops at the first accumulation that covers the workspace, so a
+      # quiet week costs one run's download and a busy one costs a few.
+      - name: Regenerate the dataset, accumulating runs until the workspace is covered
         id: generate
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -227,6 +262,7 @@ jobs:
           WORK="$RUNNER_TEMP/refresh"
           mkdir -p "$WORK"
           CHOSEN=''
+          ACCEPTED=()
 
           RUN_COUNT=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8")).length)')
           for i in $(seq 0 $((RUN_COUNT - 1))); do
@@ -265,20 +301,29 @@ jobs:
               echo "::endgroup::"; continue
             fi
 
-            # One run, so no `--run` grouping is needed: every summary here came
-            # from run $RUN_ID. Feeding SEVERAL runs would require `--run <id>`
-            # before each run's six files — the generator refuses the ambiguity
-            # rather than taking the last value (#16473).
-            # An array, not `xargs`: a split invocation would run the generator
-            # twice and the second would overwrite the first's output with a
-            # partial dataset.
-            mapfile -t SUMMARY_FILES < "$SUMDIR/summaries.txt"
-            if ! node scripts/measure-test-shard-timings.mjs "${SUMMARY_FILES[@]}" \
+            ACCEPTED+=("$RUN_ID")
+
+            # The argument list is REBUILT from the accepted set every round
+            # rather than appended to, so a run the generator refuses can be
+            # dropped cleanly instead of poisoning every later attempt. Each run
+            # is fenced by its own `--run <id>`; an array, not `xargs`, because a
+            # split invocation would run the generator twice and the second would
+            # overwrite the first's output with a partial dataset.
+            ARGS=()
+            for R in "${ACCEPTED[@]}"; do
+              ARGS+=( --run "$R" )
+              mapfile -t RUN_FILES < "$WORK/$R/summaries.txt"
+              ARGS+=( "${RUN_FILES[@]}" )
+            done
+
+            if ! node scripts/measure-test-shard-timings.mjs "${ARGS[@]}" \
                  --out "$WORK/refreshed.json"; then
-              echo "::warning::The generator refused run $RUN_ID's summaries; skipping this run."
+              echo "::warning::The generator refused the set including run $RUN_ID; dropping that run and continuing."
+              unset 'ACCEPTED[-1]'
               echo "::endgroup::"; continue
             fi
 
+            echo "Accumulated ${#ACCEPTED[@]} run(s): ${ACCEPTED[*]}"
             if node scripts/ci/select-shard-timings-run.mjs --check-coverage \
                  --committed scripts/test-shard-timings.json \
                  --refreshed "$WORK/refreshed.json" \
@@ -292,11 +337,18 @@ jobs:
           done
 
           if [ -z "$CHOSEN" ]; then
-            echo "::error::No eligible run produced a complete measurement of the workspace. Every candidate was a cache replay, refused by the generator, or lost its artifacts. NOTHING was regenerated and no PR was opened — this is a refusal, not a quiet success."
+            echo "::error::The ${#ACCEPTED[@]} eligible run(s) on main, accumulated together, still do not measure every package the committed dataset holds — the shortfall above names what is missing. A package can stay unmeasured across every retained run: turbo's cache key is namespaced per shard and only main pushes write it, so a package whose inputs have not changed is a HIT in all of them, and the generator refuses hits rather than recording a replay as a duration. NOTHING was regenerated and no PR was opened — this is a refusal, not a quiet success. If this is the steady state rather than a quiet week, the dataset needs a merge rule (keep the last measured weight for a package this refresh did not measure) rather than a wider run window; that is a decision, not a tuning knob, and it is tracked on the card."
             exit 1
           fi
-          echo "run_id=$CHOSEN" >> "$GITHUB_OUTPUT"
-          echo "head_sha=$(node -e 'const rs=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"));console.log(rs.find(r=>String(r.run_id)===process.argv[1]).head_sha)' "$CHOSEN")" >> "$GITHUB_OUTPUT"
+          # Candidates arrive newest-first, so ACCEPTED[0] is the most recent run
+          # in the set and its commit is the one the refresh is dated from. The
+          # full list travels alongside it: every run in it contributed
+          # measurements, and the PR body names them all rather than implying one.
+          NEWEST="${ACCEPTED[0]}"
+          echo "run_id=$NEWEST" >> "$GITHUB_OUTPUT"
+          echo "runs=${ACCEPTED[*]}" >> "$GITHUB_OUTPUT"
+          echo "run_count=${#ACCEPTED[@]}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(node -e 'const rs=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"));console.log(rs.find(r=>String(r.run_id)===process.argv[1]).head_sha)' "$NEWEST")" >> "$GITHUB_OUTPUT"
 
       # Byte comparison, and it decides everything downstream. `cmp -s` rather
       # than a diff of parsed JSON: the committed artefact is the file, so the
@@ -343,6 +395,8 @@ jobs:
         if: steps.compare.outputs.changed == 'true'
         env:
           RUN_ID: ${{ steps.generate.outputs.run_id }}
+          RUNS: ${{ steps.generate.outputs.runs }}
+          RUN_COUNT: ${{ steps.generate.outputs.run_count }}
           HEAD_SHA: ${{ steps.generate.outputs.head_sha }}
           PARTITIONER_EXIT: ${{ steps.bins.outputs.partitioner_exit }}
           USED_PAT: ${{ secrets.RELEASE_PUSH_TOKEN != '' }}
@@ -364,14 +418,23 @@ jobs:
             echo
             echo "## Source"
             echo
-            echo "- Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
-            echo "- Commit measured: \`$HEAD_SHA\`"
-            echo "- Selected because its six \`Test Core (N/6)\` jobs all concluded \`success\`, its six"
-            echo "  run-summary artifacts were still retained, and the dataset it produced measures every"
-            echo "  package the committed one measured that is still in the workspace (the check that"
-            echo "  rejects a cache replay)."
+            echo "Measured across $RUN_COUNT accumulated run(s). No single green run measures the whole"
+            echo "workspace — turbo's cache is namespaced per shard and only main pushes write it, so a"
+            echo "package whose inputs have not changed is a HIT and the generator refuses hits rather"
+            echo "than recording a replay as a duration. Runs are therefore accumulated, each fenced by"
+            echo "its own \`--run\` group, until every package the committed dataset holds is measured"
+            echo "again; a package seen in several of them gets the median of those observations."
             echo
-            echo "## Measured per-shard suite time on that run"
+            for R in $RUNS; do
+              echo "- https://github.com/$GITHUB_REPOSITORY/actions/runs/$R"
+            done
+            echo
+            echo "- Newest run in the set: \`$RUN_ID\`, commit \`$HEAD_SHA\` — the date this refresh carries."
+            echo "- Every run above had all six \`Test Core (N/6)\` jobs conclude \`success\` with its six"
+            echo "  run-summary artifacts still retained; runs that were cancelled, failed or had lost"
+            echo "  their artifacts were rejected by name in the log before any of these were used."
+            echo
+            echo "## Measured per-shard suite time on the newest run in the set"
             echo
             echo "\`\`\`"
             echo "$SHARDS"
@@ -431,7 +494,7 @@ jobs:
           # heredoc would carry its own leading whitespace into the message body.
           git commit \
             -m "chore(ci): refresh the Test Core shard-timings dataset" \
-            -m "Regenerated by .github/workflows/shard-timings-refresh.yml from the six test-core-run-summary artifacts of run $RUN_ID ($HEAD_SHA). Generated, never hand-edited."
+            -m "Regenerated by .github/workflows/shard-timings-refresh.yml from the test-core-run-summary artifacts of $RUN_COUNT accumulated run(s) ($RUNS), newest $RUN_ID at $HEAD_SHA. Generated, never hand-edited."
           git push origin "$BRANCH"
 
           PR_URL=$(gh pr create --base main --head "$BRANCH" \

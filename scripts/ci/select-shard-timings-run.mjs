@@ -549,10 +549,11 @@ async function main() {
     if (!report.ok) {
       console.error(
         `select-shard-timings-run: COVERAGE SHORTFALL -- ${report.lost.length} package(s) the committed ` +
-          'dataset measured, and the workspace still contains, are NOT measured by this refresh: ' +
-          `${report.lost.join(', ')}. Every one of them would silently fall back to the test-file-count ` +
-          'ESTIMATE, so this run measured a warm cache rather than the workspace. Rejecting it and trying ' +
-          'an older run.'
+          'dataset measured, and the workspace still contains, are NOT measured by the runs accumulated ' +
+          `so far: ${report.lost.join(', ')}. Every one of them would silently fall back to the ` +
+          'test-file-count ESTIMATE, so what has been read so far is a warm cache rather than the ' +
+          'workspace. Not a verdict on any one run: no single run measures everything (turbo caches per ' +
+          'shard, and the generator refuses hits), so the caller adds the next older run and asks again.'
       );
       process.exit(1);
     }
