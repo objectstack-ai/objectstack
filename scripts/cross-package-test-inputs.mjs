@@ -504,6 +504,16 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // declaration, and declaring one rarely-touched file is cheaper than
       // rewording prose to dodge a scanner.
       'scripts/cross-package-test-inputs.mjs',
+      // `nightly-tiers.mjs` is the mention shape a FIFTH time, and the one entry
+      // that was already HALF declared: turbo.json has carried it (and its
+      // `.d.mts`) in this task's `inputs` all along, because `vitest-tiers.ts`
+      // imports it and it decides which files the `test` task collects at all.
+      // What was missing was the row here, and nothing forced it until a test
+      // named the path in prose --- test/create-example-retired-docs-parity.test.ts,
+      // explaining which tier its sibling pin runs in. Settled the way
+      // `check-nul-bytes.mjs` above is, and it costs nothing in practice: the file
+      // is already a real input to this package's verdict.
+      'scripts/nightly-tiers.mjs',
       // `translation.zod.ts` is the second entry no test READS -- named in a
       // comment in test/i18n-section-coverage.test.ts, which describes it as the
       // DECLARATION face of the schema that test asserts against. It appears

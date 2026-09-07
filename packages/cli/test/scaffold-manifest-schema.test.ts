@@ -40,6 +40,14 @@
  * sweep that pretended otherwise would report on a surface `ManifestSchema`
  * does not govern.
  *
+ * Since #16483 that leaves `os create` contributing NOTHING: `example`, the
+ * scaffold that drifted and the only `create` template that emitted a config,
+ * was retired in favour of `os init`. That is a measurement rather than a hole
+ * — the filter is still derived from the live map, so a `create` template that
+ * grows a config later is swept the day it arrives. It is asserted as the
+ * roster it selects from, not as a bare count, because an empty harvest and a
+ * broken filter produce the same count.
+ *
  * ## Why the manifest is read back off a LOADED config, not off the source text
  *
  * Both scaffolders render their config as a template literal, so the only
@@ -174,15 +182,22 @@ describe('every shipped scaffold emits a manifest `ManifestSchema` accepts', () 
   it('sweeps both scaffolders, and every template that emits a config', () => {
     expect(initScaffolds.length).toBe(Object.keys(TEMPLATES).length);
     expect(initScaffolds.length).toBeGreaterThan(0);
-    expect(createScaffolds.length).toBeGreaterThan(0);
+    // `os create`'s whole roster, spelled out: the filter above selects from
+    // THIS set, so a template added to it that emits a config joins the sweep,
+    // and a template added that does not emit one reddens this line until a
+    // reader has decided which it is.
+    expect(Object.keys(createTemplates)).toEqual(['plugin']);
+    expect(createScaffolds.map((s) => s.id)).toEqual([]);
     expect(SCAFFOLDS.length).toBe(initScaffolds.length + createScaffolds.length);
   });
 
-  // The reported instance, named so a future edit that drops the identity
-  // block again fails with the incident's own vocabulary rather than a bare
-  // count.
-  it('includes `os create example` — the scaffold that drifted', () => {
-    expect(SCAFFOLDS.map((s) => s.id)).toContain('create:example');
+  // The reported instance. `os create example` is retired (#16483) — the
+  // scaffold that drifted is gone rather than fixed, so what is named here is
+  // its ABSENCE, in the incident's own vocabulary. The refusal that replaced it
+  // is pinned in `create-example-retired.e2e.test.ts`.
+  it('no longer sweeps `os create example` — the scaffold that drifted is retired', () => {
+    expect(Object.keys(createTemplates)).not.toContain('example');
+    expect(SCAFFOLDS.map((s) => s.id)).not.toContain('create:example');
   });
 
   it.each(SCAFFOLDS.map((s) => s.id))(
