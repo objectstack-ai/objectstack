@@ -688,13 +688,17 @@ export interface IAutomationService {
      *
      * Consumes the run's continuation and records a terminal `cancelled` run
      * log, so it stops surfacing as resumable; `reason` lands on that terminal
-     * record's `error`. Answers `true` only when a suspension was consumed by
-     * THIS call, and `false` when no suspended run exists under the id — it is
-     * already terminal, or unknown — which callers treat as idempotent
-     * success. ⚠️ A durable store the implementation could not READ also
-     * answers `false`: the two are indistinguishable to the caller and the
-     * run may still be parked, which is why an implementation reports that
-     * path at `error` — nothing above it can tell the difference.
+     * record's `error`. Answers `true` when it cancelled a suspended run, and
+     * `false` when no suspended run exists under the id — it is already
+     * terminal, or unknown — which callers treat as idempotent success. `true`
+     * is NOT exclusive to this call — this contract carries no cancel-side
+     * exclusivity guarantee, so two cancels of one run overlapping in time can
+     * each answer `true` (and each record the terminal log): a caller may not
+     * read `true` as sole authorship, nor use it as an idempotency token for a
+     * once-only side effect. ⚠️ A durable store the implementation could not
+     * READ also answers `false`: the two are indistinguishable to the caller
+     * and the run may still be parked, which is why an implementation reports
+     * that path at `error` — nothing above it can tell the difference.
      *
      * **The persistent face (the #13953 ruling, maintainer 2026-09-05):**
      * "listing and acting go through `sys_automation_run` (the persistent
