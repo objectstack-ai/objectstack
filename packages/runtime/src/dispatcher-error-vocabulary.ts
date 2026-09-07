@@ -303,7 +303,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // (`@objectstack/spec`) — were registered and ratcheted out; the
     // reachability each row recorded now lives on its ledger row. The
     // `boot-refusal` rows still below are the same class and owe the same
-    // registration (FOLLOWUP_CARD); `packages/spec/src/**` can no longer carry
+    // registration (#16649); `packages/spec/src/**` can no longer carry
     // one at all — `check:dispatcher-error-vocabulary` refuses any verdict
     // there but `foreign-vocabulary` / `runtime-pinned`. ──
 
