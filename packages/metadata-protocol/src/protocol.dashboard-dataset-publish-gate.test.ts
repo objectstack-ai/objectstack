@@ -397,7 +397,11 @@ describe('#16225 a `sys_metadata` read is not answered from the journal tables',
         const journal = [
             ...tableOf('sys_metadata_history').values(),
             ...tableOf('sys_metadata_audit').values(),
-        ] as Record<string, unknown>[];
+            // `Partial<Row>` and not `Record<string, unknown>`: `Row` declares no
+            // index signature, so that widening is a TS2352, and `Partial` is
+            // the honest type anyway — a journal row carries `type` and `name`
+            // and does NOT carry the `state` the assertions below look for.
+        ] as Partial<Row>[];
         expect(
             journal.length,
             'the firing control: one save must WRITE the journal tables, or the read below '

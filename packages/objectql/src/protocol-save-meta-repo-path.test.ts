@@ -439,7 +439,7 @@ describe('#16225 a `sys_metadata` read is not answered from the journal tables',
             ...tableOf('sys_metadata_history').values(),
             ...tableOf('sys_metadata_commit').values(),
             ...tableOf('sys_metadata_audit').values(),
-        ] as any[];
+        ] as Partial<Row>[];
 
         // The firing control. Without it a green here would be consistent with
         // this save having stopped writing the journals altogether, which
