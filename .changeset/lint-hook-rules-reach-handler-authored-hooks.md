@@ -14,4 +14,6 @@ The `hook-body-write-unknown-field`, `hook-body-write-unprovisioned-anchor`, `ho
 - Nothing about what `objectstack build` accepts changes, and `objectstack validate` — which parses without lowering — is unchanged and still does not see handler-authored hooks; both are recorded in the rules' headers.
 - The lint input is never mutated: rules that read the live function value (`hook-body/not-lowerable` and its siblings) keep seeing it, and a handler the extractor refuses has no body on any command, so no rule guesses about a body that was not produced.
 
-`@objectstack/lint` carries only the header ledger recording which commands reach each hook rule; its behaviour is unchanged.
+Measured on this repository's own four example apps (`examples/app-crm`, `app-showcase`, `app-todo`, `app-multi-package`), before and after: **121 findings before, 121 after — row for row identical, and zero at `error` on both sides.** No config that passes today starts failing. Two of the six hooks in that corpus are `handler`-authored and were invisible to this family before; their bodies write nothing the family objects to, which is why the delta is zero rather than the family being unreached. The reach itself is pinned separately, with a body-authored control beside every leg.
+
+`@objectstack/lint` carries only the header ledger recording which *intakes* reach each hook rule — the call sites of `runAuthoringRules`, which are more numerous than the three commands (the scaffold validator is a fourth, and it has always reached this family). Its behaviour is unchanged.

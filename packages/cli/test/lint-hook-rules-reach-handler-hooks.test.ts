@@ -20,6 +20,7 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
 import { lintConfig } from '../src/commands/lint';
+import { runScaffoldAuthoringRules } from '../src/utils/scaffold-validate';
 
 const READONLY_RULE = 'hook-api-update-readonly-field';
 const READONLY_WHEN_RULE = 'hook-api-update-readonly-when-field';
@@ -197,5 +198,45 @@ describe('#16095 — the lowering is a VIEW for the registry, not a rewrite of t
     expect(issues.filter((i) => i.rule === 'hook-body/not-lowerable')).toHaveLength(1);
     // And because that handler could NOT be lowered, the family has no body to judge.
     expect(issues.filter((i) => i.rule === READONLY_RULE)).toEqual([]);
+  });
+});
+
+/**
+ * The FOURTH door, and the reason it is pinned here rather than left to the
+ * three `os *` legs in the e2e sibling.
+ *
+ * `runScaffoldAuthoringRules` is a separate entry into the same registry —
+ * `os init` / `dev` drive it over a freshly rendered template — and it is NOT
+ * one of the three commands. It reaches the family, and always did, because it
+ * lowers before it parses exactly as `compile.ts` does; nothing in this card
+ * changed it. It is pinned because an unpinned reached door is the failure the
+ * ledger in the two rule headers exists to prevent: a reachability claim
+ * measured through one entry point is a claim about that entry point, not
+ * about the rule. The control below is what makes the RED leg readable — if
+ * the scaffold path ever stops lowering, the handler leg goes silent while the
+ * body leg keeps firing, and that asymmetry is the signal.
+ */
+describe('#16095 — door: `runScaffoldAuthoringRules` (reached, and not one of the three commands)', () => {
+  const scaffoldStack = (hook: Hook) => ({ objects: OBJECTS, hooks: [hook] });
+  const familyOf = (hook: Hook) => {
+    const report = runScaffoldAuthoringRules(scaffoldStack(hook));
+    // A schema failure returns empty lists, which would read exactly like "no
+    // finding" — assert the stack actually parsed before reading the verdict.
+    expect(report.schemaError).toBeNull();
+    return [...report.errors, ...report.advisories].filter((f) => f.rule === READONLY_RULE);
+  };
+
+  it('INTAKE — the handler-authored hook IS judged here (it lowers before it parses)', () => {
+    expect(
+      familyOf(
+        handlerHook('escalate', async (ctx: any) => {
+          await ctx.api.object('crm_case').update({ id: ctx.input.id, is_escalated: true });
+        }),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('CONTROL — the identical statement as an explicit `body` fires the same finding', () => {
+    expect(familyOf(bodyHook('escalate_body', WRITE_READONLY_SOURCE))).toHaveLength(1);
   });
 });

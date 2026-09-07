@@ -284,15 +284,27 @@ function isRec(v: unknown): v is AnyRec {
  * is a property of the DOOR — what each caller hands this function — not of
  * the rule. Measured (`packages/cli/test/lint-hook-rules-reach-handler-hooks*`):
  *
- *   `os build`     lowers every inline handler to a metadata body before its
- *                  parse (`lowerCallables`) — REACHED, always was.
- *   `os lint`      hands the registry's `parsed` tier that same lowered view —
- *                  REACHED since #16095.
- *   `os validate`  parses the normalized stack without lowering — NOT reached;
- *                  the body-authored control fires there. Changing that
- *                  changes what `os validate` refuses and is its own decision.
- *   direct call    judges exactly the stack it is given — NOT reached unless
- *                  the caller lowers first.
+ * Every leg below was measured with the body-authored control beside it, so a
+ * silent leg is a reading about that door and never about this rule. The doors
+ * are the call sites of `runAuthoringRules`, enumerated — not the three `os *`
+ * commands, which are fewer than the doors:
+ *
+ *   `os build` union        `compile.ts` lowers every inline handler to a
+ *                           metadata body BEFORE its parse (`lowerCallables`)
+ *                           and judges the parsed result — REACHED, always was.
+ *   `os build` per-package  same lowered `result.data`, re-entered one package
+ *                           manifest at a time — REACHED, always was.
+ *   `os lint`               hands the registry's `parsed` tier that same
+ *                           lowered view — REACHED since #16095.
+ *   scaffold validate       `runScaffoldAuthoringRules` (`os init` / `dev` over
+ *                           a rendered template) lowers before it parses too —
+ *                           REACHED, always was, and pinned since #16095.
+ *   `os validate`           parses the normalized stack WITHOUT lowering — NOT
+ *                           reached; the body-authored control fires there.
+ *                           Changing that changes what `os validate` refuses
+ *                           and is its own decision, not this card's.
+ *   direct call             judges exactly the stack it is given — NOT reached
+ *                           unless the caller lowers first; measured both ways.
  *
  * A handler the extractor refuses (forbidden token, free identifier,
  * unparseable) is left with no `body` on every door, so this rule stays silent
