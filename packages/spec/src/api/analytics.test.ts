@@ -80,7 +80,7 @@ describe('AnalyticsQueryRequestSchema — the BARE AnalyticsQuery shape (#3878)'
       dimensions: ['product_category'],
       where: { status: 'active', stage: { $nin: ['lost'] } },
       timeDimensions: [
-        { dimension: 'created_at', granularity: 'month', dateRange: 'Last 7 days' },
+        { dimension: 'created_at', granularity: 'month', dateRange: 'last_7_days' },
       ],
       order: { total_revenue: 'desc' },
       limit: 100,

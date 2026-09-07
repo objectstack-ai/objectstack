@@ -9,6 +9,8 @@
     "data/AggregationNode",
     "data/AggregationPipeline",
     "data/AggregationStage",
+    "data/AnalyticsDateRange",
+    "data/AnalyticsDateRangePreset",
     "data/AnalyticsQuery",
     "data/ApiMethod",
     "data/ApiOperation",

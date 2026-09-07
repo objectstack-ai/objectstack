@@ -262,39 +262,33 @@ type TransportScopedMetaRequest<R> = R & { environmentId?: string };
  * What the compiler regains here is the KEY SET — an undeclared member (TS2353)
  * and a missing required member (TS2739/TS2741) — not the value types of keys
  * read off the request bag.
+ *
+ * ⭐ [#16337] The one slot this alias could NOT cover is now covered too, and
+ * the helper that covered for it is gone. #15866 left three server-built
+ * `findData` literals — the import-job listing, the export chunk loop and the
+ * public reference picker — speaking the UNDECLARED wire dialect (`$filter`,
+ * `$top`, `$skip`, `$orderby`, `$expand`, `filters`, `select`, `sort`) and
+ * routed them through a `wireDialectQuery` helper that cast the `query` member
+ * to `FindDataRequest['query']`. All three now build the CANONICAL QueryAST
+ * (`object`, `where`, `orderBy`, `limit`, `offset`, `fields`, `expand`), so the
+ * `query` slot compiles against the declared contract like every other member
+ * and the helper has been retired with this card.
+ *
+ * ⚠️ The rewrite is a spelling change ONLY, and that is measurable rather than
+ * asserted: `@objectstack/metadata-protocol`'s `findData` folds every alias
+ * spelling onto the canonical key by the spec's own table
+ * (`RPC_QUERY_ALIAS_SLOTS`) and moves the value verbatim, so both dialects
+ * reach `engine.find` as the same option bag. `rest-server-canonical-query-ast
+ * .test.ts` drives the before/after pairs through the real normalizer and
+ * asserts that equality, so a future edit that changes the option bag while
+ * still compiling reddens there.
+ *
+ * ⛔ Server-built means server-built: the wire aliases stay accepted at the
+ * HTTP door for CALLERS. Declaring them there is #16066's spec half and is not
+ * this file's business.
  */
 type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
-/**
- * [#15866] The ONE thing restoring the data doors' compile-time check could not
- * type honestly, isolated behind a name so what stays erased is countable and
- * greppable instead of diffuse — and so the next person meets the reason rather
- * than a bare cast.
- *
- * `FindDataRequest.query` declares the AST (`QuerySchema`). But
- * `@objectstack/metadata-protocol`'s `findData` ingress accepts TWO dialects
- * through that one slot: the AST, and the WIRE dialect its normalizer folds —
- * the bare transport spellings and the OData `$` forms (`$top`→`top`→`limit`,
- * `$orderby`→`orderBy`, `filter`/`filters`/`$filter`→`where`, …). That second
- * set is deliberately undeclared: the normalizer's own table calls them "the
- * wire-only spellings no schema declares", and its sibling hint table is
- * documented as never accepting input precisely so a second de-facto contract
- * does not grow (Prime Directive #12).
- *
- * Three server-built literals in this file speak that wire dialect (the
- * import-job listing, the export chunk loop, the public picker). ⛔ The two
- * repairs this card forbids are exactly the two that would make them compile:
- * widening `QuerySchema` to admit `$`-forms, and dropping back to a runtime
- * `safeParse`. So the honest move is neither — it is to keep the erasure, make
- * it one slot wide instead of one call wide, and hand the gap back: the
- * declared-vs-shipped mismatch on this slot is a CONTRACT question, filed
- * separately, not something this door may settle by itself.
- *
- * ⚠️ What is NOT erased at those three sites, and was before: the method name,
- * the arity, and every other member of the request literal.
- */
-const wireDialectQuery = (query: Record<string, unknown>): FindDataRequest['query'] =>
-    query as FindDataRequest['query'];
 import {
     buildFieldMetaMap,
     referenceFieldNames,
@@ -306,6 +300,8 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { runImport } from './import-runner.js';
+// [#16581] The public picker's authoring-dialect → parser-grammar lowering.
+import { lowerViewFilterRules } from './view-filter-rule-lowering.js';
 import { prepareImportRequest } from './import-prepare.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 import { enrichOpenApiWithEndpoints } from './openapi-endpoints.js';
@@ -8970,12 +8966,20 @@ export class RestServer {
         // Shared loader: fetch one job row by id. Used by the read routes, the
         // cancel route, and the background worker's durable cancellation checks.
         const loadImportJob = async (p: any, jobId: string, environmentId?: string, context?: any): Promise<any | undefined> => {
-            const r = await p.findData({
+            // [#16337] The FOURTH server-built `findData` literal in this file,
+            // and the one the card's three did not name — because nothing could
+            // see it: `p` is `any`, so this call was type-checked by nothing at
+            // all and its `$filter` / `$top` wire spellings cost no diagnostic.
+            // Annotating the literal is what puts it back under the same
+            // compiler check as its three siblings; canonicalising it is the
+            // same mechanical rewrite (`$filter`→`where`, `$top`→`limit`).
+            const jobLoadRequest: ServerScopedDataRequest<FindDataRequest> = {
                 object: IMPORT_JOB_OBJECT,
-                query: { $filter: { id: jobId }, $top: 1 },
+                query: { object: IMPORT_JOB_OBJECT, where: { id: jobId }, limit: 1 },
                 ...(environmentId ? { environmentId } : {}),
                 ...(context ? { context } : {}),
-            });
+            };
+            const r = await p.findData(jobLoadRequest);
             const rows = Array.isArray(r?.records) ? r.records
                 : Array.isArray(r?.data) ? r.data
                     : Array.isArray(r?.rows) ? r.rows
@@ -9340,7 +9344,19 @@ export class RestServer {
                     const offset = Math.max(0, Number(q.offset) || 0);
                     const jobsListRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: IMPORT_JOB_OBJECT,
-                        query: wireDialectQuery({ $filter: filter, $orderby: { created_at: 'desc' }, $top: limit, $skip: offset }),
+                        // [#16337] Canonical QueryAST, not the wire dialect this
+                        // literal used to speak (`$filter` / `$orderby` / `$top` /
+                        // `$skip`). The normalizer folds those onto exactly these
+                        // keys and the record sort form onto exactly this node
+                        // list, so the option bag reaching `engine.find` is
+                        // unchanged — pinned in `rest-server-canonical-query-ast.test.ts`.
+                        query: {
+                            object: IMPORT_JOB_OBJECT,
+                            where: filter,
+                            orderBy: [{ field: 'created_at', order: 'desc' }],
+                            limit,
+                            offset,
+                        },
                         ...(environmentId ? { environmentId } : {}),
                         ...(context ? { context } : {}),
                     };
@@ -9644,15 +9660,30 @@ export class RestServer {
                         const take = Math.min(chunkSize, limit - exported);
                         const findArgs: ServerScopedDataRequest<FindDataRequest> = {
                             object: objectName,
-                            query: wireDialectQuery({
-                                ...(filter ? { $filter: filter } : {}),
-                                ...(search ? { $search: search } : {}),
-                                ...(search && searchFields ? { $searchFields: searchFields } : {}),
-                                ...(orderby ? { $orderby: orderby } : {}),
-                                ...(expandFields.length > 0 ? { $expand: expandFields.join(',') } : {}),
-                                $top: take,
-                                $skip: skip,
-                            }),
+                            // [#16337] Canonical QueryAST. `expand` is spelled as
+                            // the relation map the AST declares rather than as the
+                            // comma list `$expand` accepted: the normalizer lowers
+                            // that list to `{name: {object: name}}`, which is what
+                            // this builds directly — same map, one fewer dialect.
+                            // (The nested `object` naming the RELATION rather than
+                            // its target is the normalizer's own lowering, kept
+                            // byte-identical here on purpose.)
+                            query: {
+                                object: objectName,
+                                ...(filter ? { where: filter } : {}),
+                                ...(search ? { search } : {}),
+                                ...(search && searchFields ? { searchFields } : {}),
+                                ...(orderby ? { orderBy: orderby } : {}),
+                                ...(expandFields.length > 0
+                                    ? {
+                                        expand: Object.fromEntries(
+                                            expandFields.map((rel): [string, { object: string }] => [rel, { object: rel }]),
+                                        ),
+                                    }
+                                    : {}),
+                                limit: take,
+                                offset: skip,
+                            },
                             ...(environmentId ? { environmentId } : {}),
                             ...(context ? { context } : {}),
                         };
@@ -10501,9 +10532,25 @@ export class RestServer {
                     // then the search predicate over displayFields. The
                     // search predicate uses `contains` on the first
                     // display field so non-indexed columns still work.
-                    const filters: any[] = [];
-                    if (Array.isArray(picker.filter)) filters.push(...picker.filter);
-                    if (q) filters.push({ field: displayFields[0], operator: 'contains', value: q });
+                    //
+                    // [#16581] …and then LOWER the composed rows to the filter
+                    // grammar the ingress parses. BOTH halves are the authoring
+                    // dialect `FormFieldPublicPickerSchema.filter` declares
+                    // (`{field, operator, value}`) — the declared rows because
+                    // an author wrote them, the search row because this route
+                    // built it in the same shape — and the normalizer refuses
+                    // that shape with `400 INVALID_FILTER`. So the endpoint
+                    // answered 400 for EVERY non-empty search, with or without a
+                    // declared `publicPicker.filter`; only the degenerate
+                    // no-filter call could succeed. `lowerViewFilterRules` is
+                    // the one-way translation (authoring dialect →
+                    // `FilterArray`) and lives at this door because this is the
+                    // door that speaks both; ⛔ the repair the ruling excludes
+                    // is teaching `findData` a second dialect.
+                    const rules: any[] = [];
+                    if (Array.isArray(picker.filter)) rules.push(...picker.filter);
+                    if (q) rules.push({ field: displayFields[0], operator: 'contains', value: q });
+                    const filters = lowerViewFilterRules(rules);
 
                     const context: any = {
                         permissions: ['guest_portal'],
@@ -10512,13 +10559,28 @@ export class RestServer {
 
                     const pickerRequest: ServerScopedDataRequest<FindDataRequest> = {
                         object: referenceTo,
-                        // [#15866] `filters` is a WIRE-only spelling the normalizer folds to
-                        // `where`, and no schema declares it — see {@link wireDialectQuery}.
-                        query: wireDialectQuery({
+                        // [#16337] Canonical QueryAST: `filters` → `where`,
+                        // `select` → `fields`, `sort` → `orderBy`. The normalizer
+                        // folds each of those aliases onto exactly these keys and
+                        // moves the value verbatim, so this is a spelling change
+                        // and nothing else.
+                        //
+                        // ⚠️ The VALUE on `where` is a `FilterArray`, not a
+                        // `FilterCondition`. #16337 left `ViewFilterRule` OBJECTS
+                        // here — the dialect `FormFieldPublicPickerSchema.filter`
+                        // declares — which the ingress refuses with
+                        // `400 INVALID_FILTER`; #16581 lowers them above, so what
+                        // arrives is the declared array grammar the normalizer
+                        // parses. `FilterCondition`'s `[key: string]: any` index
+                        // signature is why an array compiles against the slot at
+                        // all; that the value is now a filter the ingress ACCEPTS
+                        // is measured end-to-end, not asserted by the type.
+                        query: {
+                            object: referenceTo,
                             limit: maxResults,
                             offset: 0,
-                            filters,
-                            select: ['id', ...displayFields],
+                            where: filters,
+                            fields: ['id', ...displayFields],
                             // [#7485] Ordering is FIXED — first display field,
                             // ascending. This used to read `picker.sort`, a key
                             // `FormFieldPublicPickerSchema` (#7467) deliberately
@@ -10528,8 +10590,8 @@ export class RestServer {
                             // permanently-maintained public key on an
                             // UNAUTHENTICATED surface. A pre-schema stored row
                             // still carrying `sort` is IGNORED, not an error.
-                            sort: [{ field: displayFields[0], order: 'asc' }],
-                        }),
+                            orderBy: [{ field: displayFields[0], order: 'asc' }],
+                        },
                         ...(environmentId ? { environmentId } : {}),
                         context,
                     };
@@ -10537,7 +10599,23 @@ export class RestServer {
 
                     // Project the response server-side too — never trust
                     // that the driver respected `select`.
-                    const rows: any[] = Array.isArray(result?.data) ? result.data : Array.isArray(result?.items) ? result.items : [];
+                    //
+                    // [#16581] `records` FIRST, which is the key `findData`
+                    // actually returns (`{ object, records, total, hasMore }`)
+                    // and the order the other three read sites in this file
+                    // already use. This one read `data` / `items` and NOT
+                    // `records`, so against the real protocol it matched
+                    // nothing and the picker answered `200 {"data":[]}` — an
+                    // empty list for every search. Invisible until the filter
+                    // above stopped 400ing, and invisible to the sibling suite
+                    // because its `findData` double answers `{ data }`, a shape
+                    // the protocol does not produce. The legacy aliases stay so
+                    // those doubles and alternate protocols keep working.
+                    const rows: any[] = Array.isArray(result?.records) ? result.records
+                        : Array.isArray(result?.data) ? result.data
+                            : Array.isArray(result?.items) ? result.items
+                                : Array.isArray(result?.rows) ? result.rows
+                                    : Array.isArray(result) ? result : [];
                     const projected = rows.slice(0, maxResults).map((row: any) => {
                         const out: any = { id: row?.id };
                         for (const f of displayFields) {
