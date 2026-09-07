@@ -443,10 +443,10 @@ export function declareUnprovisionedCell(cell: DialectCell, matrix: string): voi
  * about which bound it hit. ⛔ It is NOT `driver-mongodb`'s 30_000 carried over
  * by analogy — that is that package's number, and this one is this package's.
  *
- * It clears the derived floor by 4x, which is the room a cold pool needs to
- * establish more than one connection inside a single test body before the
- * budget can pre-empt the driver, and sits an order of magnitude under the
- * derived ceiling. `live-dialect-matrix.budget.test.ts` pins both inequalities
+ * It clears the derived floor by 4x — arithmetically, room for four
+ * full-length pool creations inside one test body before the budget could
+ * pre-empt the driver — and sits an order of magnitude under the derived
+ * ceiling. `live-dialect-matrix.budget.test.ts` pins both inequalities
  * against the bound the driver ACTUALLY installs, read off a constructed
  * connection rather than copied here, so the two halves cannot drift apart in
  * silence.
@@ -509,8 +509,8 @@ export function declareDialectCell(
   // A suite-level `timeout` cascades to the tests the consumer's own describes
   // declare, and an explicit per-`it` third argument still wins over it — both
   // asserted in `live-dialect-matrix.budget.test.ts`, so the 62 explicit
-  // budgets already in this package (60_000, one 40_000, one 120_000) keep the
-  // value their own site chose.
+  // budgets already in this package (60 x 60_000, one 40_000, one 120_000)
+  // keep the value their own site chose.
   if (!cell.live) {
     measure(cell);
     return;
