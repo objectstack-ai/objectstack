@@ -56,7 +56,8 @@
  * A symbol anchor cannot say WHICH read inside a symbol it means. Measured on the
  * tree this migration ran against: 106 read sites live in 89 distinct symbols
  * across 45 files, and 9 of those files hold more than one read inside a single
- * symbol (`objectql/src/engine.ts` and `rest-server.ts` are the widest, at 10
+ * symbol (`packages/objectql/src/engine.ts` and `packages/rest/src/rest-server.ts`
+ * are the widest, at 10
  * reads in 9 symbols and 6 reads in 2). So:
  *
  *   ⭐ Delete a whole symbol and this gate REDS -- twice over: the anchor stops
@@ -146,7 +147,8 @@
  * ⭐ `collapsesOntoRead` is the declaration this migration made necessary. Under
  * symbol granularity a citation can share its symbol with a census read site -- the
  * `owner_id` guard block and the short-circuit that skips it are both inside
- * `security-plugin.ts#start` -- so the row stops EXCUSING anything while its `why`
+ * `packages/plugins/plugin-security/src/security-plugin.ts#start` -- so the row
+ * stops EXCUSING anything while its `why`
  * and its `rowSeams` are still worth keeping. The field says so, and the gate
  * refuses when the declaration and the census disagree in EITHER direction: an
  * undeclared overlap reads as a row that excuses an anchor when it does not, and a
