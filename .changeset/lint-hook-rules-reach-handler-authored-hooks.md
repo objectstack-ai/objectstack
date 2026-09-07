@@ -1,6 +1,6 @@
 ---
 "@objectstack/cli": minor
-"@objectstack/lint": patch
+"@objectstack/lint": minor
 ---
 
 `objectstack lint` now judges hooks authored as inline `handler` functions with the same write-set rules it already applied to explicit `body` hooks.
