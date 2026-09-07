@@ -3235,6 +3235,20 @@ jobs:
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
 
+      # Test Core package selection self-test (#16453). ci.yml's "Compute this
+      # shard's package set" step is a thin call into
+      # scripts/ci/select-shard-packages.sh — environment in, turbo-ls.json
+      # out — so that the `merge_group` branch, which by construction cannot
+      # run before a PR is already in the queue, is proved here instead: the
+      # self-test drives every branch of every event (pull_request, merge_group,
+      # push) offline, against a throwaway upstream + clone and a fake `turbo`
+      # on PATH, and pins which `turbo ls` calls were made and with what base,
+      # whether the cross-package union ran, every `::warning::` fallback and
+      # the absence of the ones that must not fire (an empty docs-only merge
+      # group selects nothing WITHOUT the #10057 complaint). Offline; ~2s.
+      - name: Test Core package selection self-test
+        run: pnpm check:select-shard-packages
+
       # Aggregator roster gate (#10490). Three required contexts are aggregate
       # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
       # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
@@ -3596,6 +3610,29 @@ jobs:
       # be wrong while every package is right.
       - name: Published-files whitelist guard
         run: pnpm check:published-files
+
+      # The PROVENANCE half of the same packaging hygiene (#15991). The guard
+      # above owns published package CONTENTS — what the tarball contains — and
+      # says nothing about where the tarball claims its source lives. npm renders
+      # `repository.directory` as the package page's "source" deep link, and
+      # until this gate NOTHING in this repo read the field: two
+      # `packages/triggers/*` manifests shipped a value naming
+      # `packages/plugins/plugin-trigger-*`, a path removed when the family was
+      # promoted, so both npm pages published a 404 on the one link a consumer
+      # follows to read the code. The history is why it is a state check over the
+      # whole population rather than a rule about moves: one of the three commits
+      # involved moved nothing at all — it edited `repository.url` in the same
+      # JSON object with the stale `directory` line as visible hunk context, and
+      # it shipped. Humans looked and missed it twice. ⛔ It judges only manifests
+      # that DECLARE the field; whether declaring is mandatory for a publishable
+      # package is an open policy question and a maintainer's to answer, so
+      # silence is counted and never a finding. Runs its own --self-test first:
+      # this population is `git ls-files` plus a field predicate, so a changed
+      # glob or a renamed field empties it silently and the production run would
+      # print exactly what a clean tree prints. Static read of tracked manifests;
+      # no build, no network, sub-second.
+      - name: Manifest repository.directory guard
+        run: pnpm check:manifest-repository-directory
 
       # Engine test-double contract gate (#4550, from #4434). A test double
       # LOOSER than the implementation it replaces turns a green suite into no

@@ -2222,6 +2222,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-approvals/src/stranded-run-repairability.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-run-repairability.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/subflow-hosted-approval-strand.test.ts",
       "verb": "delete",
       "pinned": 1
