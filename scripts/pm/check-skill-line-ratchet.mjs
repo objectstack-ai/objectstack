@@ -868,7 +868,18 @@ export const CEILINGS = new Map([
   // 1162 → 1058: the rules-only rewrite — every incident narrative, ruling date and
   // quotation out, every rule kept as one sentence; re-pinned at the landed count,
   // headroom 0 (lowering is always legitimate).
-  ['AGENTS.md', 1058],
+  //
+  // 1058 → 1068: the merge-tree corollary (PR #15885, card #15871), +10 lines — a
+  // local `merge-tree` of a `merge=os-regen` path is NOT GitHub's mergeability, the
+  // driver-less bare-clone probe that answers GitHub's question, and the ⛔ refusal
+  // of `-c merge.os-regen.driver=`. Maintainer ruling, verbatim and untranslated:
+  // 「同意」 (decision batch #63, 2026-09-07, PR #15885 comment 5564103435) and
+  // 「15885 你接手跟进合并」 (2026-09-07, quoted in the director's correction comment
+  // on PR #15885). Re-wrap and cross-file moves are refused per the header: the
+  // bullet is already typeset at the surrounding block's 90-byte prose width, and
+  // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
+  // applies. Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1068],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
