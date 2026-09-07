@@ -145,6 +145,7 @@
     "check:undeclared-dep-imports": "node scripts/check-undeclared-dep-imports.mjs --self-test && node scripts/check-undeclared-dep-imports.mjs",
     "check:keyed-text-bounds": "node scripts/check-keyed-text-bounds.mjs --self-test && node scripts/check-keyed-text-bounds.mjs",
     "check:published-files": "node scripts/check-published-files.mjs --self-test && node scripts/check-published-files.mjs",
+    "check:manifest-repository-directory": "node scripts/check-manifest-repository-directory.mjs --self-test && node scripts/check-manifest-repository-directory.mjs",
     "check:published-readme-exports": "node scripts/check-published-readme-exports.mjs --self-test && node scripts/check-published-readme-exports.mjs",
     "check:published-readme-links": "node scripts/check-published-readme-links.mjs --self-test && node scripts/check-published-readme-links.mjs",
     "check:dual-build-cjs-loads": "node scripts/check-dual-build-cjs-loads.mjs --self-test && node scripts/check-dual-build-cjs-loads.mjs",
