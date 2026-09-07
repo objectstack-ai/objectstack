@@ -17,6 +17,12 @@
  *   node scripts/pm/check-clause2-carriers.mjs --pair 13910 --pair-json pair.json
  *   node scripts/pm/check-clause2-carriers.mjs --pair 13910 --pair-json -
  *
+ * Since #16448 `--pair` also carries C5 — the WIDENING TELL row: a diff that
+ * adds a schema key, a closed-set member, a published export or a registry
+ * entry while its card declares `Clause-②: no`. The tells themselves live in
+ * `check-widening-tells.mjs` (imported, with its own self-test); this file
+ * supplies the declaration and the diff and joins them.
+ *
  * ## The gate, and the three limbs it is supposed to stand on
  *
  * `scripts/pm/ensure-pm-labels.sh` states the gate in its own words: a PR whose
@@ -77,9 +83,22 @@
  * reading is "a HINT, never a verdict" because clause ② is judged from a card's
  * CONTENT. A second declaration of that surface here would be a hand copy of a
  * register — the exact drift `check:pm-governed-prose` exists to stop one
- * family over — and it would cost a changed-file listing per pair for a reading
- * that decides nothing this file reports. Every row below is derivable from the
- * declaration and the two carriers alone.
+ * family over. C1–C4 are all derivable from the declaration and the two
+ * carriers alone, and none of them costs a changed-file listing.
+ *
+ * ⭐ C5 (#16448) is the one row that reads a DIFF, and it is still not limb ①.
+ * Limb ① asks "does this card's file surface suggest the contract tier?" and
+ * answers with a hint; C5 asks "does this diff have the SHAPE of a widening,
+ * while its card declared `no`?" and answers about the pair. The tells, the
+ * surfaces and the refusal sentence all live in `check-widening-tells.mjs`,
+ * which IMPORTS `SUSPECT_TIER_GLOBS` rather than restating it — so the contract
+ * surface is still declared exactly once in this tree. The maintainer's
+ * condition on the directional clause-② ruling (#16349) was that the direction
+ * claim become checkable instead of trusted, and this row is that condition;
+ * `SUSPECT_TIER_GLOBS`'s own docblock had already promised the reading ("the
+ * PR's ACTUAL diff passes the clause-② enqueue gate before the card may
+ * enqueue — the diff is a fact; the card's semantics were a prediction") and
+ * pointed at a gate that, until #16448, was a human.
  *
  * **It relaxes no spelling.** `Clause-②: yes` / `Clause-②: no` are the only two
  * readings that count, and prose is not one of them. #12409 measured where the
@@ -193,6 +212,11 @@
  *             "events":   { "13476": the `/issues/N/events` rows }  — optional
  *             "commits":  { "HEAD-SHA": { commit: { committer: { date } } } }
  *                         — optional
+ *             "files":    { "13910": the `/pulls/N/files` rows }  — optional,
+ *                         keyed by PR NUMBER (not card), because that is what
+ *                         the endpoint is keyed by. Owed only by a pair whose
+ *                         card declares `Clause-②: no`; omitting it there
+ *                         reads `null` → C5 UNJUDGED, never a narrow diff.
  *           }
  *
  *         ⛔ A key the document does not carry reads `null`, which is UNJUDGED
@@ -211,10 +235,20 @@
  * the PR delivers (the card, its comment thread). A C3 candidate adds its two
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
- * The sweep pays the listing once and the same per-pair cost for every pair it
- * derives. ⇒ a `--pair` run costs 3–6 requests, while a 29-PR sweep costs about
- * 60 — which is exactly GitHub's documented anonymous hourly budget, one more
- * reason the run prints the remaining count instead of assuming it.
+ * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
+ * listing, for C5 (#16448). The sweep pays the listing once and the same
+ * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–7 requests,
+ * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
+ * anonymous hourly budget, one more reason the run prints the remaining count
+ * instead of assuming it.
+ *
+ * ⭐ That last read is `--pair` ONLY, and the asymmetry is deliberate. Paying it
+ * per sweep pair would push a routine sweep past the anonymous budget it
+ * already sits on, and a widening tell on somebody else's pair is a board fact
+ * rather than a verdict about the PR that happens to run CI next — the same
+ * call the sweep/`--pair` split already makes for every other row here. In a
+ * sweep `pair.files` is therefore `undefined`, which no row reads; `null` means
+ * a read that WAS owed came back short, and that is UNJUDGED.
  *
  * ## Exit codes — the refusal to read as clean, in one table
  *
@@ -245,9 +279,14 @@
  *      ⚠️ 0 is not "the review passed"; the PASS reading is human and
  *      is precondition ① of the landing check, not this exit code.
  *   2  also the answer when a C3 candidate's event stream or head commit could
- *      not be read: an unread stream is not a never-hung gate, so it is UNJUDGED
- *      rather than either verdict.
- *   4  they do not. Deliberately NOT 3: a verdict about the PAIR must be
+ *      not be read, or when a `Clause-②: no` pair's changed-file listing could
+ *      not be: an unread stream is not a never-hung gate and an unread diff is
+ *      not a narrow one, so both are UNJUDGED rather than either verdict.
+ *   4  they do not — or, since #16448, the declaration reads `no` while the
+ *      diff carries a widening tell (row C5). One exit code with several
+ *      adverse reasons is the shape this table already had: the ROW says which,
+ *      and the exit says only "a verdict about this pair, adverse".
+ *      Deliberately NOT 3: a verdict about the PAIR must be
  *      impossible to confuse with "the environment could not answer", so a
  *      seat reading `$?` cannot turn a refusal into a clearance. And ⛔ never
  *      0-with-a-message: silence is what this whole file exists against.
@@ -280,6 +319,15 @@ import {
   proxyRearmPlan,
   resolveSweepRepo,
 } from './check-half-states.mjs';
+import {
+  EXIT_INCOMPLETE as WT_EXIT_INCOMPLETE,
+  EXIT_OK as WT_EXIT_OK,
+  EXIT_REFUSED as WT_EXIT_REFUSED,
+  EXIT_USAGE as WT_EXIT_USAGE,
+  REFUSAL_SENTENCE,
+  refusalLines,
+  wideningRefusal,
+} from './check-widening-tells.mjs';
 
 // dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
 
@@ -309,7 +357,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the #13910 specimen, end to end': 2,
   'pairing, derived from the same relation H8/H31 read': 3,
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
-  'the exit register is distinct in every direction it must be': 3,
+  'C5: the direction claim checked against the diff (#16448)': 16,
+  'the exit register is distinct in every direction it must be': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1106,6 +1155,88 @@ export function c4VerdictSelfReview(pair) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// C5 -- the direction claim, checked against the diff (#16448 / #16349)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this pair owe a changed-file listing?
+ *
+ * ⭐ ONLY a card that DECLARED `no`. The whole point of the #16349 ruling is
+ * that `no` is the reading which BUYS a lower tier, so `no` is the reading that
+ * must be checkable; a `yes` already routes to contract review and a tell on
+ * top of it decides nothing. Every other declaration state (`missing`,
+ * `absent`, `malformed`, `misplaced`, `unreadable`) is C2's row and not this
+ * one's: two readers of the same limb is the drift this file was written to
+ * avoid one family over.
+ *
+ * It is exported and used by BOTH the fetch and the UNJUDGED accounting, the
+ * way `needsGateHistory` is, so the set that owes a listing and the set that
+ * gets one cannot drift apart -- and a pair that owes nothing can never be
+ * reported as missing a read the reader was never going to make.
+ */
+export function needsWideningRead(pair) {
+  const d = cardDeclaration(pair?.cardComments ?? null);
+  return d.state === 'declared' && d.value === 'no';
+}
+
+/**
+ * The widening verdict for one pair -- the sibling gate, given this pair's
+ * declaration and diff.
+ *
+ * The tells, the surfaces and the refusal sentence all live in
+ * `check-widening-tells.mjs`; this function is the JOIN and nothing else, so
+ * the shape of a tell is stated once in the tree.
+ */
+export function pairWidening(pair, repo) {
+  if (!needsWideningRead(pair)) return { state: 'not-applicable', rows: [], gaps: [], text: null };
+  return wideningRefusal({ declaration: 'no', files: pair?.files ?? null, repo });
+}
+
+/**
+ * C5 -- a widening tell on a diff whose card declares `Clause-②: no`.
+ *
+ * The #16349 ruling made clause ② DIRECTIONAL on the maintainer's explicit
+ * condition that the direction claim become checkable instead of trusted. This
+ * row is that condition: `SUSPECT_TIER_GLOBS`'s own docblock already promised
+ * that "whichever tier is dispatched, the PR's ACTUAL diff passes the clause-②
+ * enqueue gate before the card may enqueue -- the diff is a fact; the card's
+ * semantics were a prediction", and until #16448 that gate was a human reading.
+ *
+ * ⚠️ A TELL, never a proof, in BOTH directions: a false positive costs the
+ * author one word in the claim comment, and a false negative is the cost the
+ * ruling accepted when it took the directional reading. So this row never
+ * asserts that the diff widens -- it asserts that the diff has the SHAPE of one
+ * that does, while the claim says it does not, and names the file:line so the
+ * author can answer with the file open.
+ */
+export function c5WideningTell(pair, repo) {
+  const v = pairWidening(pair, repo);
+  if (v.state !== 'refused') return null;
+  const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
+  return (
+    `${head} declares \`Clause-②: no\` while its diff carries ${v.rows.length} widening tell(s) -- ` +
+    `${REFUSAL_SENTENCE}. ${v.rows.map((r) => `${r.file}:${r.line} (${r.tell})`).join(', ')}. ` +
+    'Neither reading is overturned here: the declaration stands as written and the diff stands as ' +
+    `pushed, and they disagree. ${NEVER_WRITES}`
+  );
+}
+
+/**
+ * C5's own #4690 half -- a diff this file could not READ is not a narrow diff.
+ *
+ * Reached only for a pair that owes the listing, so a `yes` pair and a pair
+ * with no declaration can never be reported as missing a read nobody owed.
+ */
+export function wideningUnjudged(pair, repo) {
+  const v = pairWidening(pair, repo);
+  if (v.state !== 'unreadable' && v.state !== 'incomplete') return null;
+  return (
+    `pair PR #${pair?.pr} / card #${pair?.card} declares \`Clause-②: no\`, and its diff is UNJUDGED ` +
+    `for widening tells: ${v.text}`
+  );
+}
+
 /** Every row for one pair, in reporting order. */
 export function pairRows(pair) {
   const rows = [];
@@ -1482,7 +1613,39 @@ async function readHeadCommitDate(repo, sha) {
 }
 
 /**
- * The five reads `gather` performs, named once.
+ * The PAGE CAP on one PR's changed-file listing.
+ *
+ * Three pages is 300 files, past anything this board's PRs produce, and the
+ * files that matter here are a handful of contract sources. A PR that exceeds
+ * it is answered `null` -> UNJUDGED, never clean: a listing read short does not
+ * merely lose detail, it loses the very file whose added key is the tell.
+ */
+export const FILE_PAGE_CAP = 3;
+
+/**
+ * One PR's changed files, with their patches, paged to exhaustion -- or `null`.
+ *
+ * Owed by the widening-tell reading ALONE, and only for a pair whose card
+ * declares `Clause-②: no` (`needsWideningRead`, the same predicate the
+ * UNJUDGED accounting reads), so no pair can owe a request the live reader was
+ * never going to make.
+ *
+ * ⛔ Never a partial array, for the reason `readCarrierEvents` states one
+ * function over: a caller cannot tell a short read from a narrow diff.
+ */
+async function readPullFiles(repo, number) {
+  const out = [];
+  for (let page = 1; page <= FILE_PAGE_CAP; page++) {
+    const batch = await restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
+    if (!Array.isArray(batch)) return null;
+    out.push(...batch);
+    if (batch.length < 100) return out;
+  }
+  return null; // cap hit: the tail is unread, so the diff is unread.
+}
+
+/**
+ * The six reads `gather` performs, named once.
  *
  * A reader implements every one of them and may answer with a value OR a
  * promise of one (`gather` awaits either), which is what lets the offline
@@ -1496,6 +1659,7 @@ export const READER_METHODS = Object.freeze([
   'readCardComments',
   'readCarrierEvents',
   'readHeadCommitDate',
+  'readPullFiles',
 ]);
 
 /** Paths (i) and (ii): the network, down the ladder `rest` implements. */
@@ -1507,6 +1671,7 @@ const NETWORK_READER = Object.freeze({
   readCardComments: (repo, n) => restOrNull(`/repos/${repo}/issues/${n}/comments?per_page=100`),
   readCarrierEvents: (repo, n) => readCarrierEvents(repo, n),
   readHeadCommitDate: (repo, sha) => readHeadCommitDate(repo, sha),
+  readPullFiles: (repo, n) => readPullFiles(repo, n),
 });
 
 /** A resource the document does not carry — `null`, i.e. UNJUDGED (#4690). */
@@ -1559,6 +1724,10 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
       const commit = fromDocument(doc.commits, sha);
       return serve(commit?.commit?.committer?.date ?? null);
     },
+    readPullFiles: (_repo, n) => {
+      const rows = fromDocument(doc.files, n);
+      return serve(Array.isArray(rows) ? rows : null);
+    },
   });
 }
 
@@ -1584,7 +1753,7 @@ export function pairJsonRepoConflict(docRepo, repo) {
  * sweep's cost at one PR listing plus two reads per pair, plus — for the C3
  * candidates ALONE — their two event streams and one head commit.
  */
-async function gather(repo, prFilter = null, reader = NETWORK_READER) {
+async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFiles = false } = {}) {
   const pulls = (await reader.listOpenPulls(repo)).filter((pr) => (prFilter ? pr.number === prFilter : true));
   const pairs = [];
   for (const pr of pulls) {
@@ -1623,6 +1792,23 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER) {
       pair.headCommittedAt = await reader.readHeadCommitDate(repo, pair.headSha);
     }
   }
+
+  // Third pass -- the changed-file listing, for the widening reading (#16448).
+  //
+  // ⭐ `--pair` ONLY, and only for the pairs that declared `no`. The report-only
+  // SWEEP deliberately does not pay for it: a 29-PR sweep already costs about
+  // GitHub's whole documented anonymous hourly budget, one row per pair here
+  // would push it past that, and a widening tell on somebody else's pair is a
+  // board fact rather than a verdict about the PR that happens to run next --
+  // the same call the sweep/`--pair` split already makes everywhere else in
+  // this file. `pair.files` is therefore `undefined` in a sweep, which no row
+  // reads, and `null` only when a read that WAS owed came back short.
+  if (readFiles) {
+    for (const pair of pairs) {
+      if (!needsWideningRead(pair)) continue;
+      pair.files = await reader.readPullFiles(repo, pair.pr);
+    }
+  }
   return { pulls, pairs };
 }
 
@@ -1655,21 +1841,38 @@ function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
   return unjudged.length > 0 ? EXIT_INCOMPLETE : EXIT_OK;
 }
 
-function renderPair(pair) {
+function renderPair(pair, repo) {
   const gap = pairUnjudged(pair);
   if (gap) {
     console.error(`✗ check-clause2-carriers --pair: ${gap}`);
     return EXIT_INCOMPLETE;
   }
   const rows = pairRows(pair);
+  const widening = pairWidening(pair, repo);
+  const wideningRow = c5WideningTell(pair, repo);
+  if (wideningRow) rows.push({ code: 'C5', text: wideningRow });
+  const wideningGap = wideningUnjudged(pair, repo);
   if (rows.length === 0) {
+    if (wideningGap) {
+      console.error(`✗ check-clause2-carriers --pair: ${wideningGap}`);
+      return EXIT_INCOMPLETE;
+    }
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
-        'readable in the fixed spelling and both carriers agree.',
+        'readable in the fixed spelling and both carriers agree' +
+        (widening.state === 'clean'
+          ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
+          : '.'),
     );
     return EXIT_OK;
   }
   for (const row of rows) console.error(`✗ ${row.code} — ${row.text}`);
+  // The file:line list, one per line, so an author can paste it into an editor.
+  for (const line of refusalLines(widening)) console.error(`    ${line}`);
+  // An adverse row OUTRANKS a gap -- a tell that WAS read is a fact about this
+  // pair whatever else could not be read -- but the gap is still printed, or a
+  // reader would take the rows below for the whole reading.
+  if (wideningGap) console.error(`⚠️  ${wideningGap}`);
   console.error(
     `check-clause2-carriers: PR #${pair.pr} / card #${pair.card} is NOT clause-② legible ` +
       `(exit ${EXIT_PAIR_ADVERSE}). ⛔ This is a verdict about this pair, not about the environment.`,
@@ -2151,11 +2354,51 @@ export function selfTest() {
   t('…and refuses to state a budget it did not see, rather than implying plenty', says(renderRateNote(null), 'UNKNOWN'));
 
   // -- the exit register is distinct in every direction it must be -----------
+  // -- C5: the direction claim, checked against the diff (#16448) -----------
+  //
+  // The tells themselves are the SIBLING's, with its own 120-case self-test;
+  // what is pinned here is the JOIN — which pairs owe a diff read, what a pair
+  // that owes none reports, and that a tell reaches the exit register.
+  battery('C5: the direction claim checked against the diff (#16448)');
+  const WIDENS = [{
+    filename: 'packages/spec/src/kernel/plugin.zod.ts',
+    status: 'modified',
+    patch: "@@ -95,0 +95,1 @@\n+  'workflow',",
+  }];
+  const NARROWS = [{
+    filename: 'packages/spec/src/kernel/plugin.zod.ts',
+    status: 'modified',
+    patch: "@@ -95,1 +95,0 @@\n-  'legacy',",
+  }];
+  const declaring = (value, files) => ({ pr: 13910, card: 13476, draft: false, cardLabels: [], prLabels: [], cardComments: [CLAIM(`Clause-②: ${value}`)], files });
+  t('only a card that DECLARED `no` owes a changed-file listing', needsWideningRead(declaring('no', null)) === true);
+  t('⛔ a `yes` owes none — it already routes to contract review', needsWideningRead(declaring('yes', null)) === false);
+  t('⛔ a card with a claim comment but NO declaration owes none — that is C2\'s row, not C5\'s', needsWideningRead({ cardComments: [CLAIM('Domain: `domain:engine`')] }) === false);
+  t('⛔ an UNREADABLE thread owes none — a second reader of the same limb is the drift this file avoids', needsWideningRead({ cardComments: null }) === false);
+  t('a widening tell on a `no` pair is a C5 row', typeof c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack') === 'string');
+  t('…naming the file:line', says(c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack'), 'packages/spec/src/kernel/plugin.zod.ts:95'));
+  t('…and carrying the card\'s own refusal sentence, unparaphrased', says(c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack'), REFUSAL_SENTENCE));
+  t('…and the never-writes boundary every other row carries', says(c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack'), '自查放行'));
+  t('⛔ the SAME diff with `yes` is not a row — a tell never blocks the honest declaration', c5WideningTell(declaring('yes', WIDENS), 'objectstack-ai/objectstack') === null);
+  t('⛔ a removal-only diff with `no` is not a row — the ruling is directional', c5WideningTell(declaring('no', NARROWS), 'objectstack-ai/objectstack') === null);
+  t('a `no` pair whose listing could NOT be read is UNJUDGED, never clean', typeof wideningUnjudged(declaring('no', null), 'objectstack-ai/objectstack') === 'string');
+  t('…and it is not also a row — unread is not adverse', c5WideningTell(declaring('no', null), 'objectstack-ai/objectstack') === null);
+  t('⛔ a `yes` pair with no listing is NOT unjudged — it never owed one', wideningUnjudged(declaring('yes', null), 'objectstack-ai/objectstack') === null);
+  t('a sweep pair (files never fetched) that declared `no` reads as owing the listing', needsWideningRead({ cardComments: [CLAIM('Clause-②: no')] }) === true);
+  t('the reader roster carries the sixth read, so both readers must implement it', READER_METHODS.includes('readPullFiles'));
+  t('…and the offline document serves it from its own `files` bag', typeof pairJsonReader({ pulls: [], files: { 13910: [] } }).readPullFiles === 'function');
+
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
   t('every exit code is distinct — a verdict can never be read as an environment complaint', new Set(codes).size === codes.length, JSON.stringify(codes));
   t('the adverse-pair code is NOT the prerequisite code', EXIT_PAIR_ADVERSE !== EXIT_PREREQUISITE_NOT_MET);
   t('the prerequisite code is the sibling\'s, imported rather than re-picked', EXIT_PREREQUISITE_NOT_MET === 3);
+  // The widening gate is a second file with its own exits; a seat reading `$?`
+  // must read ONE table. The pin is written HERE, on the importing side, so the
+  // two modules stay acyclic.
+  t('the widening gate\'s REFUSED is this file\'s adverse-pair code', WT_EXIT_REFUSED === EXIT_PAIR_ADVERSE);
+  t('…its INCOMPLETE is this file\'s INCOMPLETE', WT_EXIT_INCOMPLETE === EXIT_INCOMPLETE);
+  t('…and its OK and USAGE agree too', WT_EXIT_OK === EXIT_OK && WT_EXIT_USAGE === EXIT_USAGE);
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
@@ -2306,7 +2549,7 @@ async function main(argv) {
 
   let swept = 0;
   try {
-    const { pulls, pairs } = await gather(repo, only, reader);
+    const { pulls, pairs } = await gather(repo, only, reader, { readFiles: only !== null });
     swept = pairs.length;
     if (only !== null) {
       if (pairs.length === 0) {
@@ -2320,7 +2563,7 @@ async function main(argv) {
       }
       let worst = EXIT_OK;
       for (const p of pairs) {
-        const code = renderPair(p);
+        const code = renderPair(p, repo);
         if (code !== EXIT_OK) worst = code === EXIT_INCOMPLETE && worst === EXIT_PAIR_ADVERSE ? worst : code;
       }
       return worst;
