@@ -240,8 +240,9 @@ function measure(cell: DialectCell): void {
       expectCanonicalInstant(row.newest_created, 'max(created_at)');
       expectCanonicalInstant(row.newest_updated, 'max(updated_at)');
       // Agrees with what find() presents for the same column, value for value.
-      expect(row.newest_created).toBe([...rows.map((r) => r.created_at)].sort().at(-1));
-      expect(row.newest_updated).toBe([...rows.map((r) => r.updated_at)].sort().at(-1));
+      const last = (values: string[]): string => [...values].sort()[values.length - 1];
+      expect(row.newest_created).toBe(last(rows.map((r) => r.created_at)));
+      expect(row.newest_updated).toBe(last(rows.map((r) => r.updated_at)));
       // A numeric aggregate over a datetime stays a number.
       expect(Number(row.n)).toBe(CLOSED_AT.length);
     });
