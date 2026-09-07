@@ -109,6 +109,12 @@ import {
   AuditMetaItemResponse,
   RollbackMetaItemResponse,
   DiffMetaItemResponse,
+  // [#13523] The change-log body of `GET /meta/:type/:name/history`, the one
+  // door of the family above whose declaration (#12005, PR #13521) landed
+  // AFTER the ruling's bindings were written — so both of its exits carried a
+  // pre-declaration spelling until now. Bound here on the same terms as its
+  // `AuditMetaItemResponse` twin: the PAYLOAD, envelope-free.
+  HistoryMetaItemResponse,
   PackagePublishResult,
   DiscardPackageDraftsResponse,
   ListPackageCommitsResponse,
@@ -1726,22 +1732,27 @@ export class ObjectStackClient {
      * Returns events recorded in `sys_metadata_history` for every
      * overlay put/delete, ordered by `event_seq` ascending. Non-overlay
      * metadata types return an empty list.
+     *
+     * [#13523] Returns {@link HistoryMetaItemResponse} — the published
+     * declaration (#12005), replacing the inline shape this method carried
+     * from before that schema existed. The route answers BARE, so the named
+     * type is the whole body, exactly as on the `getAudit` twin.
+     *
+     * ⚠️ The rebind is NOT field-for-field: the inline shape declared
+     * `actor: string` for a door that answers `null` on every
+     * system-initiated write (boot sync, migration, scheduled job — the
+     * producer's own `rowToEvent`), so a caller that read `actor` without a
+     * null check was type-checked against a promise the door never made. It
+     * also declared `op` as a plain `string` where the producer's vocabulary
+     * is closed, `ref.org` as optional where the producer always writes one,
+     * and omitted `ref.version` / `version` / `previousName` entirely. See
+     * the card for the field-by-field measurement.
      */
     getHistory: async (
         type: string,
         name: string,
         options?: { sinceSeq?: number; limit?: number },
-    ): Promise<{ events: Array<{
-        seq: number;
-        op: string;
-        ref: { org?: string; type: string; name: string };
-        hash: string | null;
-        parentHash: string | null;
-        actor: string;
-        message?: string;
-        ts: string;
-        source: string;
-    }> }> => {
+    ): Promise<HistoryMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
@@ -1749,7 +1760,7 @@ export class ObjectStackClient {
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse(res);
+        return this.unwrapResponse<HistoryMetaItemResponse>(res);
     },
     
     /**
@@ -6870,11 +6881,26 @@ export class ScopedEnvironmentClient {
       // Bare body, same as the unscoped twin — `_unwrap` is `unwrapResponse`.
       return this.parent._unwrap<DeleteMetaItemResponse>(res);
     },
+    /**
+     * The durable change-log for a metadata item, scoped to this
+     * environment. Reaches the SAME handler as the unscoped twin — one
+     * `registerForBase` replay against `/environments/:environmentId` — so
+     * the body is byte-identical and the declaration must be too.
+     *
+     * [#13523] Returns {@link HistoryMetaItemResponse}. This exit declared
+     * NOTHING before: no return annotation, and `_unwrap` called with no type
+     * argument, so `T` had no inference site and the published method
+     * answered `Promise<unknown>` — every caller forced to narrow by hand,
+     * against no contract. The unscoped twin meanwhile declared a DIFFERENT,
+     * inline shape. Binding one exit and not the other would have relocated
+     * that divergence rather than removed it (the #7019 direction), so both
+     * exits name this one type.
+     */
     getHistory: async (
       type: string,
       name: string,
       options?: { sinceSeq?: number; limit?: number },
-    ) => {
+    ): Promise<HistoryMetaItemResponse> => {
       const params = new URLSearchParams();
       if (options?.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
       if (options?.limit !== undefined) params.set('limit', String(options.limit));
@@ -6882,7 +6908,7 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(
         this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
       );
-      return this.parent._unwrap(res);
+      return this.parent._unwrap<HistoryMetaItemResponse>(res);
     },
   };
 
