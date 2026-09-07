@@ -476,6 +476,13 @@ export class ScheduleTrigger implements FlowTrigger {
      * It hits the handler's claim gate and returns having done nothing, which
      * is the silent no-op the ruling exists to prevent, so it is said out loud
      * here instead.
+     *
+     * ⚠ Said only when a ledger is actually attached. With no ledger nothing is
+     * ever RECORDED as delivered, so there is no refusal to lose and the line
+     * would be a false alarm — that deployment's real degradation is the
+     * "delivery is NOT deduplicated" warning {@link claimDispatch} already
+     * emits, and stacking a second, vacuous warning on top of it buries the
+     * one that matters.
      */
     private installReplayGuard(
         jobService: JobServiceSurface,
@@ -484,7 +491,7 @@ export class ScheduleTrigger implements FlowTrigger {
         schedule: JobSchedule,
     ): void {
         if (typeof jobService.setReplayGuard !== 'function') {
-            if (!this.replayGuardDegradationWarned) {
+            if (!this.replayGuardDegradationWarned && this.getLedger() !== null) {
                 this.replayGuardDegradationWarned = true;
                 this.logger.warn(
                     `[schedule] job service has no replay guard registration — a replay of a scheduled flow's ` +
