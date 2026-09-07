@@ -247,7 +247,10 @@ describe('AutoEnqueuer', () => {
         const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
-        await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+        // [#13566] The event names the subscription's own organization: an
+        // organization-owned subscription receives only its organization's
+        // events now, so the stamp is pinned on a delivery that still happens.
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }, undefined, { organizationId: 'org_pin_alpha' }));
         await flush();
 
         expect(calls).toHaveLength(1);
@@ -646,7 +649,9 @@ describe('AutoEnqueuer — bulk data events (#4639)', () => {
         const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
-        await realtime.publish(bulkEvent('updated', 'contact', 3));
+        // [#13566] Same as the per-record pin: the batch is attributed to the
+        // subscription's own organization, so the delivery still happens.
+        await realtime.publish(bulkEvent('updated', 'contact', 3, undefined, { organizationId: 'org_pin_alpha' }));
         await flush();
 
         expect(calls).toHaveLength(1);
