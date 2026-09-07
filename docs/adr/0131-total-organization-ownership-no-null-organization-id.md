@@ -1,8 +1,6 @@
 # ADR-0131: Organization ownership is total — no NULL `organization_id`; declared metadata stays in code; a row exists only when an organization authored it
 
-**Status**: Proposed (2026-09-04) — awaiting the maintainer's hand-merge, which is itself the
-acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing below is settled until
-this record merges; the implementation cards are cut **from** the merged ADR, never ahead of it.
+**Status**: Accepted (2026-09-04) — accepted by the merge that landed it on `main` ([#14976](https://github.com/objectstack-ai/objectstack/pull/14976), commit `0ed271574`), which is itself the acceptance act for a governed surface (Prime Directive #14). Execution is paused under #15193 and the maintainer's standing instruction; that pause is carried there, not by this status line.
 **Deciders**: ObjectStack maintainer, 2026-09-03/04, live chat on
 [#13564](https://github.com/objectstack-ai/objectstack/issues/13564), verbatim and untranslated,
 in the order the model was built: the premise 「我理解只有代码定义的元数据是跨租户的，对象、字段、视图等

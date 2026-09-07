@@ -19,12 +19,12 @@
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
-    "@objectstack/spec": "workspace:*"
+    "@objectstack/spec": "workspace:*",
+    "croner": "^10.0.1"
   },
   "devDependencies": {
     "@objectstack/service-automation": "workspace:*",
     "@types/node": "^26.2.0",
-    "croner": "^10.0.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

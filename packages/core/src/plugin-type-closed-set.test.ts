@@ -57,9 +57,21 @@ describe('Plugin.type closed set — runtime parity with the spec enum (#13925)'
         expect(CORE_PLUGIN_TYPES).toHaveLength(7);
     });
 
+    /**
+     * The minimal spec-legal object per member. `ui` alone owes more than its
+     * `type`: `staticPath` and `slug` are required for it since #16334
+     * (`plugin-ui-required-keys.test.ts` in spec pins that), so a bare
+     * `{ type: 'ui' }` is refused at `['staticPath']` / `['slug']` — a reading
+     * about those two keys, not about the enum this file pins. Every other
+     * member is legal with its `type` alone, which the bare `{ type }` states.
+     */
+    function minimalLegal(type: PluginType): Record<string, unknown> {
+        return type === 'ui' ? { type, staticPath: '/srv/ui/dist', slug: 'ui' } : { type };
+    }
+
     it('every union member parses through PluginSchema', () => {
         for (const type of UNION_MEMBERS) {
-            const result = PluginSchema.safeParse({ type });
+            const result = PluginSchema.safeParse(minimalLegal(type));
             expect(result.success, `PluginSchema refused union member '${type}'`).toBe(true);
         }
     });
