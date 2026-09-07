@@ -62,16 +62,40 @@ describe('#15873: sys_organization platform-owned columns through PATCH /data/sy
   const patchOrg = (id: string, body: unknown) => stack.apiAs(token, 'PATCH', `/data/sys_organization/${id}`, body);
 
   beforeAll(async () => {
-    stack = await bootStack(showcaseStack, {});
+    // ── The organization is minted the way the product mints it ─────────────
+    //
+    // Measured on the plain single-tenant showcase boot: ZERO `sys_organization`
+    // rows exist (system-context read) and the seeded admin's session carries
+    // `activeOrganizationId: null`, so there is no row for the door to reach —
+    // and `beforeCreateOrganization` denies `organization/create` outright
+    // unless an organization wall is in force (#5261). `multiTenant:
+    // 'posture-only'` registers the harness's stand-in for the enterprise
+    // `org-scoping` runtime so the tenancy service resolves a real `isolated`
+    // posture and the create route runs; it activates the POSTURE, never the
+    // WALL (`BootOptions.multiTenant` states the limit), and nothing below
+    // asserts isolation. It is the same fixture `org-create-default-team
+    // .dogfood.test.ts` opens the route with.
+    stack = await bootStack(showcaseStack, { multiTenant: 'posture-only' });
     token = await stack.signIn();
-    // The seeded admin is bound to the deployment's default organization at
-    // sign-up (plugin-auth's membership reconciler); read it back through the
-    // same door rather than assuming its id.
-    const list = await stack.apiAs(token, 'GET', '/data/sys_organization');
-    expect(list.status).toBe(200);
-    const rows = (((await list.json()) as any).records ?? []) as Array<Record<string, unknown>>;
-    expect(rows.length, 'the showcase boots with at least one organization').toBeGreaterThan(0);
-    orgId = String(rows[0]!.id);
+
+    // better-auth's `organization/create` — the `create_organization` row
+    // action's target. The creator is seated as owner; the ACTIVE organization
+    // is set explicitly so the session is org-bound in the one field that
+    // reaches `ExecutionContext`.
+    const created = await stack.apiAs(token, 'POST', '/auth/organization/create', {
+      name: 'Door Org 15873',
+      slug: 'door-org-15873',
+    });
+    expect(created.status, `organization/create returned ${created.status}: ${await created.clone().text()}`).toBe(200);
+    orgId = String(((await created.json()) as { id?: string }).id);
+    expect(orgId).toBeTruthy();
+    const active = await stack.apiAs(token, 'POST', '/auth/organization/set-active', { organizationSlug: 'door-org-15873' });
+    expect(active.status, `set-active: ${await active.clone().text()}`).toBe(200);
+
+    // And the row is what the data door serves back, before anything is written.
+    const row = await readOrg(orgId);
+    expect(row.name).toBe('Door Org 15873');
+    expect(row.slug).toBe('door-org-15873');
   }, 120_000);
 
   afterAll(async () => { await stack?.stop?.(); });
