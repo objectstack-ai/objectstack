@@ -896,6 +896,69 @@ function backendStatementFaultError(object: string, cause: unknown, targetedTabl
 }
 
 /**
+ * [#16019] The raw-execution twin of {@link backendStatementFaultError}: the
+ * envelope {@link SqlDriver.execute} raises when the backend refuses a
+ * statement it was handed verbatim. `no such function: translate` on a SQLite
+ * datasource whose analytics compiler emitted a function the dialect lacks
+ * (#16028) is the measured case; every other dialect refusal on this path is
+ * the same class.
+ *
+ * # Why this exists beside the read-exit terminal
+ *
+ * Every typed read exit (`find`, `count`, `aggregate`) already terminates in
+ * {@link SqlDriver.backendStatementFault}, so a dialect refusal there leaves
+ * the driver DECLARED — `code: DATABASE_ERROR`, `status: 500` — and the HTTP
+ * doors withhold its prose by that declaration (`declaresServerFault`). The
+ * raw path had no terminal at all: `execute()` awaited `knex.raw()` bare, so
+ * the dialect's own error object left the driver with no `status`, a `code`
+ * from the backend's vocabulary (`SQLITE_ERROR`) and knex's `<statement> -
+ * <diagnostic>` message. Undeclared, it fell to `looksLikeInternalErrorLeak`
+ * at the doors — a phrasing heuristic that recognises `no such column:` and
+ * not `no such function:` — so whether a caller saw the engine's text was a
+ * property of which limb the message happened to match, and one transport
+ * over, of whether the message carried a statement prefix at all.
+ *
+ * Maintainer ruling 2026-09-06 (decision batch #57, option 3): the substring
+ * list is not grown; the driver declares its own fault and the doors classify
+ * on the declaration. This is that declaration for the raw path — the idiom
+ * this file already spells at its other terminals, not a second mechanism.
+ *
+ * # What the envelope carries, and what it does not
+ *
+ * The message is COMPOSED, for the reason `backendStatementFaultError` gives:
+ * there is no cut of a dialect's text that keeps its words and reliably drops
+ * a caller's inlined value. No statement, no diagnostic and no function name
+ * reaches the message. The dialect error travels whole under `cause`,
+ * NON-ENUMERABLE — readable by cause-following predicates
+ * (`isMissingTableError` still classifies a missing table on this path
+ * through it), invisible to `JSON.stringify` and `{ ...err }` — and the driver
+ * writes it to the server log before composing. ⛔ No `DRIVER_TARGETED_TABLE`
+ * is declared here: a raw statement may reference any number of tables, and
+ * naming one would make a missing JOINED table read as the caller's own — the
+ * misclassification #13438 exists to prevent.
+ *
+ * @param cause - the dialect error, kept whole for the log and for
+ *                cause-following predicates.
+ */
+function rawStatementFaultError(cause: unknown): Error {
+  const err = new Error(
+    'The database refused to run a raw statement. The driver could not attribute the failure ' +
+      'to any part of the request, so no verdict about the statement is claimed here. The ' +
+      "backend's own diagnostic and the statement were written to the server log for an " +
+      'operator to read.',
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.DATABASE_ERROR;
+  err.status = 500;
+  Object.defineProperty(err, 'cause', {
+    value: cause,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return err;
+}
+
+/**
  * [#9354] How long a widening ALTER waits for a metadata lock, in seconds.
  *
  * Named for the seam it arrived on; since #9542 it governs BOTH callers of
@@ -8213,6 +8276,39 @@ export class SqlDriver implements IDataDriver {
   // ===================================
 
   /**
+   * [#16019] The terminal of the raw path — compose
+   * {@link rawStatementFaultError} for a backend refusal nothing declared,
+   * writing the statement and the dialect's own message to the SERVER LOG on
+   * the way.
+   *
+   * The same "is it already ours" gate {@link SqlDriver.backendStatementFault}
+   * applies, asked over the DECLARED status and ⛔ never over an error class: a
+   * transport that already answers with an ADR-0112 envelope must not be
+   * buried under a generic one.
+   *
+   * Returns the error rather than throwing it — the shape every sibling
+   * terminal in this file uses — so each call site spells its own `throw`.
+   * `protected` so a subclass that routes `execute()` around this class's knex
+   * (`TursoDriver` in remote mode) declares through the SAME composition.
+   */
+  protected rawStatementFault(command: string, error: unknown): Error {
+    const declared = (error as { status?: unknown } | null | undefined)?.status;
+    if (typeof declared === 'number') return error as Error;
+
+    const detail = (error as { message?: unknown } | null | undefined)?.message;
+    const code = (error as { code?: unknown } | null | undefined)?.code;
+    this.logger.warn(
+      '[sql-driver] DATABASE_ERROR — the backend refused a raw statement' +
+        (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
+        '. The statement and the dialect message below are kept server-side: the message ' +
+        'carries the compiled statement, and on the dialects that inline them the bound ' +
+        `literals too. statement: ${command}; dialect: ` +
+        `${typeof detail === 'string' ? detail : String(error)}`,
+    );
+    return rawStatementFaultError(error);
+  }
+
+  /**
    * Run a raw SQL string or knex builder through the underlying knex
    * connection.
    *
@@ -8238,7 +8334,13 @@ export class SqlDriver implements IDataDriver {
         ? this.knex.raw(command, params || []).transacting(options.transaction as Knex.Transaction)
         : this.knex.raw(command, params || []);
 
-    const result = await builder;
+    let result: unknown;
+    try {
+      result = await builder;
+    } catch (error) {
+      // [#16019] The raw path's terminal — see {@link SqlDriver.rawStatementFault}.
+      throw this.rawStatementFault(command, error);
+    }
     // Only after the statement actually succeeded — an index we failed to
     // create is not one we own (#4884).
     if (INDEX_DDL_PREFIX.test(command)) this.noteRuntimeIndexDdl(command);

@@ -1119,8 +1119,8 @@ describe('RestServer', () => {
 
       // Always return full chunks so the loop is bounded only by `limit`.
       protocol.findData.mockImplementation(async ({ query }: any) => {
-        const take = query?.$top ?? 0;
-        return { data: Array.from({ length: take }, (_v, i) => ({ id: String((query?.$skip ?? 0) + i) })) };
+        const take = query?.limit ?? 0;
+        return { data: Array.from({ length: take }, (_v, i) => ({ id: String((query?.offset ?? 0) + i) })) };
       });
 
       const { res, chunks } = makeRes();
@@ -1214,7 +1214,7 @@ describe('RestServer', () => {
       expect(lines[0]).toBe('1,写代码,是,高,2026-06-30,张三');
     });
 
-    it('injects $expand for reference fields into the findData query', async () => {
+    it('injects expand for reference fields into the findData query', async () => {
       const p = protocolWithSchema([RAW_TASK_ROW]);
       const rest = new RestServer(server as any, p as any, ANON_API as any);
       (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
@@ -1226,7 +1226,11 @@ describe('RestServer', () => {
 
       expect(p.findData).toHaveBeenCalled();
       const firstQuery = p.findData.mock.calls[0][0].query;
-      expect(firstQuery.$expand).toBe('owner');
+      // [#16337] The door builds the canonical relation MAP the QueryAST
+      // declares. It used to build the comma list `$expand` accepted, which
+      // the normalizer lowered to exactly this map — same value, one fewer
+      // dialect between the door and the engine.
+      expect(firstQuery.expand).toEqual({ owner: { object: 'owner' } });
     });
 
     it('formats values readably in JSON, leaving unknown keys untouched', async () => {
@@ -1326,7 +1330,7 @@ describe('RestServer', () => {
       p.getMetaItem = vi.fn().mockResolvedValue({ type: 'object', name: 'task', item: NAMED_SCHEMA });
       // First page returns one row, subsequent pages are empty (ends the stream).
       p.findData = vi.fn(async ({ query }: any) =>
-        (query?.$skip ?? 0) === 0 ? { data: [{ id: '1', title: 'x', done: true }] } : { data: [] },
+        (query?.offset ?? 0) === 0 ? { data: [{ id: '1', title: 'x', done: true }] } : { data: [] },
       );
 
       // i18nServiceProvider is the 14th constructor arg (after server, protocol,
