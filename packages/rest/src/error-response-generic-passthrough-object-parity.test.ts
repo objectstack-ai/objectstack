@@ -93,9 +93,39 @@ const singleDoor = (error: unknown, object?: string): Wire => mapDataError(error
 /**
  * A producer that declares `code` + `status` and NOTHING a bespoke arm keys
  * on — no `name`, no envelope class — so it reaches the generic passthrough at
- * both doors. That reachability is the whole point of the case, so it is
- * asserted rather than assumed: `structuredCodeAnswer` recognising the code
- * later would make these pins measure the bespoke path instead.
+ * both doors.
+ *
+ * ⛔ That reachability is NOT asserted anywhere in this file. §1 reads only the
+ * two doors' answers; nothing here reads `structuredCodeAnswer`'s arms. An arm
+ * added later for one of §1's codes therefore leaves those cases GREEN while
+ * they quietly measure the bespoke path instead — the pin's subject migrates
+ * without changing colour. What actually holds the reachability, named so a
+ * reader can re-run it rather than trust this sentence:
+ *
+ *  - **An ablation, run by hand — ⛔ not a standing assertion.** Deleting
+ *    `resolveErrorResponse`'s generic 4xx `...(object ? { object } : {})` limb
+ *    reddens §1's three code cases, its `handleRouteError` case, and the three
+ *    siblings below. No gate re-runs it, so it demonstrates reachability at the
+ *    moment it is run and pins nothing afterwards.
+ *  - **§2's "declared status + door-supplied object: both doors answer 404 with
+ *    `object`"** — `recordNotFoundError` (`@objectstack/core`) declares
+ *    `status = 404`, which carries it PAST the `RECORD_NOT_FOUND` arm into this
+ *    same passthrough.
+ *  - **§3's "a sniff-matching message with a DIFFERENT declared code keeps the
+ *    declared answer on both doors"** — a declared 409 that no arm claims.
+ *  - **`error-response-structured-arm-door-parity.test.ts` §4's "CONVERGED: a
+ *    5xx ARM never displaces a status the producer declared in the 4xx band"**
+ *    — `ERR_DATASOURCE_UNAVAILABLE` HAS an arm, and that arm is declined for a
+ *    declared 4xx, so it reaches this passthrough structurally rather than by
+ *    the absence of an arm.
+ *
+ * ⚠️ "Three siblings" is itself easy to over-read, so the measured limit: §3
+ * keys on `RECORD_LOCKED`, one of §1's OWN codes, so an arm for that code
+ * migrates §3 along with §1. Only §2 and #14541's §4 are independent of the
+ * codes below. #14541 §5's "every arm in the SHARED classification has a §1
+ * parity case" reddens when an arm ARRIVES, but goes green again as soon as its
+ * author adds the parity case it asks for — it does not hold THIS file's §1 to
+ * the passthrough.
  */
 function genericDeclared(code: string, status: number, message: string): any {
     const err: any = new Error(message);

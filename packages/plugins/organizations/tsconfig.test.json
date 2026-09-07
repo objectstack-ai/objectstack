@@ -1,0 +1,39 @@
+// The TEST-layer type-check program, in the shape the `packages/plugins/**`
+// family adopted (#14062). `tsconfig.json` beside this one is the BUILD
+// config and stays exactly as it is; this sibling puts the test layer in front
+// of tsc under the module semantics vitest really executes it with, and
+// `package.json`'s `typecheck` script NAMES it (via `check:test-typecheck
+// --project`), because a config no script invokes is a phantom check.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite); matching that is fidelity, not laxity.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir` and `types` are all INHERITED from `tsconfig.json` and none of
+//     them is re-declared here. ⚠️ A child that declared its own `paths` would
+//     REPLACE the parent map rather than merge into it, silently sending a
+//     source-resolved specifier back to `dist/` — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//   - `lib: ["ES2022"]`, for the reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// This package arrives COVERED (AGENTS.md: "new packages arrive covered"), so
+// its `test-typecheck-debt.json` beside this config is expected to be empty.
+// The ledger is EXACT and shrink-only: a file that gains an error is red, one
+// that loses an error is red until re-recorded, and a file NOT listed there may
+// have no errors at all.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

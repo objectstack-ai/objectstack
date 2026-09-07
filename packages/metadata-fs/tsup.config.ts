@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
   entry: ['src/index.ts'],
   splitting: false,
@@ -11,4 +13,5 @@ export default defineConfig({
   format: ['esm', 'cjs'],
   target: 'es2020',
   external: ['chokidar', '@objectstack/metadata-core'],
+  esbuildOptions: dropSourcesContent,
 });

@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import type { IQueueService } from '@objectstack/spec/contracts';
+import type { IQueueService, NormalizedEmailMessage } from '@objectstack/spec/contracts';
 import {
   EmailService,
   EMAIL_SEND_QUEUE,
@@ -277,7 +277,10 @@ describe('EmailService — queue delivery on', () => {
   });
 
   it('still refuses the queue for attachments OVER the limit, and stores nothing (#5177)', async () => {
-    const transport = { send: vi.fn(async () => ({ messageId: '<big@x>' })) };
+    // The parameter is DECLARED (unlike this file's other transport fakes) so
+    // the captured call below is typed rather than cast — see the identity
+    // assertion and its note further down.
+    const transport = { send: vi.fn(async (_message: NormalizedEmailMessage) => ({ messageId: '<big@x>' })) };
     const queue = makeQueue();
     const { p, rows } = makePersistence();
     const logger = makeLogger();
@@ -289,11 +292,24 @@ describe('EmailService — queue delivery on', () => {
     const res = await svc.send({ ...MSG, attachments: [{ filename: 'big.bin', content: huge }] });
 
     // Pre-#5177 behaviour, unchanged: delivered inline and delivered WHOLE.
+    //
+    // "WHOLE" is asserted by IDENTITY, not by deep equality (#16506). Deep
+    // equality is the weaker claim: it passes for a *copy* too, so it cannot
+    // tell an untouched buffer from one the service re-encoded, sliced and
+    // rebuilt to the same bytes. `toBe` proves the exact instance the caller
+    // allocated travelled through the over-limit path untouched — which is
+    // what "whole" means here, and it is what the inline path promises when
+    // it declines the queue. Do NOT "simplify" this back to
+    // `toHaveBeenCalledWith(objectContaining({ attachments: [...] }))`: that
+    // asserts less AND deep-compares a 256 KiB + 1 buffer, which cost 674 ms
+    // of this file's 800 ms — its 21 siblings total 126 ms between them — and
+    // ejected two PRs from the merge queue on vitest's 5000 ms default.
     expect(res.status).toBe('sent');
     expect(queue.published).toHaveLength(0);
-    expect(transport.send).toHaveBeenCalledWith(expect.objectContaining({
-      attachments: [{ filename: 'big.bin', content: huge }],
-    }));
+    const [delivered] = transport.send.mock.calls[0]!;
+    expect(delivered.attachments).toHaveLength(1);
+    expect(delivered.attachments![0]!.filename).toBe('big.bin');
+    expect(delivered.attachments![0]!.content).toBe(huge);
     // The row must stay bounded: over-limit content never lands in the column.
     expect(rows.get(res.id)!.attachments_json).toBeUndefined();
     const info = logger.info.mock.calls.map((c) => String(c[0])).join('\n');

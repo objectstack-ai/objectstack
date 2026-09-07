@@ -1615,7 +1615,13 @@ carefully was not tightening it.**
 Whole-spec context (fourteen directories, out of the ruling's forced scope, same
 instrument): 1940 → 1722 sites, strict 15 → 361, strip 1903 → 1338. The untriaged
 directories are coarse-classified in the section above and are not this campaign's
-debt; `api/`, `system/`, `kernel/` and `cloud/` are wire surface by construction.
+debt; of them only `cloud/` is wire surface by construction. `api/`, `system/` and
+`kernel/` all read **mixed** in that table, each with an authored file named in its
+own row — `endpoint.zod.ts` (split at #5384), the manifest/datasource blocks, and
+`manifest.zod.ts` (split at #14192, `strictObject` since). ⛔ Do not read this
+paragraph as a blanket wire verdict over those three: the rows above are the
+finding, and twice already a flat `wire` cell was correct when written and then
+silently expired.
 
 ### The three closing claims, confirmed
 

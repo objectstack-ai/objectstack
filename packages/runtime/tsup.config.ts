@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
   entry: ['src/index.ts'],
   splitting: false,
@@ -34,4 +36,5 @@ export default defineConfig({
     '@objectstack/metadata',
     '@objectstack/objectql',
   ],
+  esbuildOptions: dropSourcesContent,
 });

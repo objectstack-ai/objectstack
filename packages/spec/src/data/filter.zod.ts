@@ -217,15 +217,42 @@ export type FieldReference = z.input<typeof FieldReferenceSchema>;
 // ============================================================================
 
 /**
+ * The `describe()` `$eq` carries, shared by the documentation copy
+ * ({@link EqualityOperatorSchema}) and the enforced copy
+ * (`FieldOperatorsSchema`) — the pairing every other operator family in this
+ * file already uses, so the two copies cannot drift and the published
+ * reference cannot describe one of them and not the other.
+ */
+const EQ_DESCRIPTION =
+  'Equal to — the DEFAULT operator: a bare value written against a field key is the same '
+  + 'condition as this one. Lowered to `=` on the SQL family and to `$eq` on MongoDB. The '
+  + 'comparand is a literal, or a { $field } reference to another column of the same table '
+  + '($eq is one of the six scalar comparisons a reference may be the whole comparand of). '
+  + '`{ "$eq": null }` is the has-NO-value predicate — the same question `{ "$null": true }` '
+  + 'asks, and it is about the VALUE, never about whether a key is present.';
+
+/**
+ * The `describe()` `$ne` carries, shared by the documentation copy
+ * ({@link EqualityOperatorSchema}) and the enforced copy
+ * (`FieldOperatorsSchema`). See {@link EQ_DESCRIPTION}.
+ */
+const NE_DESCRIPTION =
+  'Not equal to. Lowered to `<>` / `!=` on the SQL family and to `$ne` on MongoDB. The '
+  + 'comparand is a literal, or a { $field } reference to another column of the same table '
+  + '($ne is one of the six scalar comparisons a reference may be the whole comparand of). '
+  + '`{ "$ne": null }` is the HAS-A-VALUE predicate — the same question `{ "$exists": true }` '
+  + 'asks: it matches rows whose field holds a value, never rows that merely carry the key.';
+
+/**
  * Comparison operators for equality and inequality checks.
  * Supported data types: Any
  */
 export const EqualityOperatorSchema = lazySchema(() => z.object({
   /** Equal to (default) - SQL: = | MongoDB: $eq */
-  $eq: z.any().optional(),
-  
+  $eq: z.any().optional().describe(EQ_DESCRIPTION),
+
   /** Not equal to - SQL: <> or != | MongoDB: $ne */
-  $ne: z.any().optional(),
+  $ne: z.any().optional().describe(NE_DESCRIPTION),
 }));
 
 /**
@@ -677,10 +704,17 @@ const rangeEndpointSchema = (index: 0 | 1) =>
           : undefined,
   });
 
+/**
+ * The `describe()` `$between` carries, shared by the documentation copy
+ * ({@link RangeOperatorSchema}) and the enforced copy (`FieldOperatorsSchema`)
+ * — the same pairing {@link SET_MEMBER_DESCRIPTION} gives the set slots.
+ */
+const RANGE_BETWEEN_DESCRIPTION = `Between (inclusive). ${RANGE_ENDPOINT_DESCRIPTION}`;
+
 export const RangeOperatorSchema = lazySchema(() => z.object({
   /** Between (inclusive) - takes [min, max] array */
   $between: z.tuple([rangeEndpointSchema(0), rangeEndpointSchema(1)]).optional()
-    .describe(`Between (inclusive). ${RANGE_ENDPOINT_DESCRIPTION}`),
+    .describe(RANGE_BETWEEN_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -796,25 +830,46 @@ export const RangeOperatorSchema = lazySchema(() => z.object({
  * @see https://github.com/objectstack-ai/objectstack/issues/5702 (the SQL family — landed)
  * @see https://github.com/objectstack-ai/objectstack/issues/6520 (the JS faces — landed)
  */
-export const StringOperatorSchema = lazySchema(() => z.object({
-  /** Contains substring, CASE-SENSITIVELY - SQL: LIKE %?% (case-exact) */
-  $contains: z.string().optional(),
+/**
+ * The comparand contract the four CASE-SENSITIVE members of this family share
+ * (#5701 / #4706 Q2 = A), stated once because it is one contract: the comparand
+ * is matched LITERALLY. `%`, `_` and regex metacharacters are ordinary
+ * characters here — this family escapes the comparand and adds the anchoring on
+ * the caller's behalf, which is exactly the difference {@link StringOperatorSchema}'s
+ * `$like` docblock names ("nothing here is escaped or wrapped on the comparand's
+ * behalf"). An author who wants to bind the wildcards writes `$like` / `$ilike`.
+ */
+const LITERAL_COMPARAND_DESCRIPTION =
+  'The comparand is matched LITERALLY: "%", "_" and regex metacharacters are ordinary '
+  + 'characters, because this family escapes and anchors the comparand on the caller\'s '
+  + 'behalf. To bind the wildcards yourself, write $like (case-exact) or $ilike (ASCII-folded).';
 
-  /** Does not contain substring, CASE-SENSITIVELY - SQL: NOT LIKE %?% (case-exact) */
-  $notContains: z.string().optional(),
+/** The `describe()` `$contains` carries in both copies. See {@link EQ_DESCRIPTION} for the pairing. */
+const CONTAINS_DESCRIPTION =
+  'Contains substring, CASE-SENSITIVELY — "acme" does NOT match "ACME". Lowered to '
+  + '`LIKE \'%?%\'` (case-exact) on the SQL family, and answered case-exactly on every JS '
+  + `evaluation face the platform ships. ${LITERAL_COMPARAND_DESCRIPTION} `
+  + 'Case-INSENSITIVE containment is $icontains, which folds ASCII case only.';
 
-  /** Starts with prefix, CASE-SENSITIVELY - SQL: LIKE ?% (case-exact) */
-  $startsWith: z.string().optional(),
+/** The `describe()` `$notContains` carries in both copies. */
+const NOT_CONTAINS_DESCRIPTION =
+  'Does not contain substring, CASE-SENSITIVELY — the negation of $contains, on the same '
+  + 'comparand contract. Lowered to `NOT LIKE \'%?%\'` (case-exact) on the SQL family. '
+  + `${LITERAL_COMPARAND_DESCRIPTION}`;
 
-  /** Ends with suffix, CASE-SENSITIVELY - SQL: LIKE %? (case-exact) */
-  $endsWith: z.string().optional(),
+/** The `describe()` `$startsWith` carries in both copies. */
+const STARTS_WITH_DESCRIPTION =
+  'Starts with prefix, CASE-SENSITIVELY. Lowered to `LIKE \'?%\'` (case-exact) on the SQL '
+  + `family. ${LITERAL_COMPARAND_DESCRIPTION}`;
 
-  /**
-   * Contains substring, IGNORING ASCII case (#5701). The replacement for the
-   * retired `$regex` — see {@link RETIRED_FILTER_OPERATORS}.
-   */
-  $icontains: z.string().optional().describe(
-    'Contains substring, ignoring case — but ONLY ASCII case (A-Z against a-z). '
+/** The `describe()` `$endsWith` carries in both copies. */
+const ENDS_WITH_DESCRIPTION =
+  'Ends with suffix, CASE-SENSITIVELY. Lowered to `LIKE \'%?\'` (case-exact) on the SQL '
+  + `family. ${LITERAL_COMPARAND_DESCRIPTION}`;
+
+/** The `describe()` `$icontains` carries in both copies. */
+const ICONTAINS_DESCRIPTION =
+  'Contains substring, ignoring case — but ONLY ASCII case (A-Z against a-z). '
     + 'Every other character compares literally, so "café" does NOT match "CAFÉ" '
     + 'and "москва" does not match "МОСКВА". The domain is ASCII because that is '
     + 'the one fold all five backends can deliver: SQLite (and therefore turso and '
@@ -824,17 +879,11 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + 'wildcards. Case-SENSITIVE containment is $contains. Lowered on the SQL '
     + 'family (driver-sql, driver-sqlite-wasm, driver-turso on both transports) '
     + 'and on every JS evaluation face, so it is '
-    + 'portable across every backend the platform ships.'
-  ),
+    + 'portable across every backend the platform ships.';
 
-  /**
-   * [#7536] Whole-string SQL `LIKE` pattern match — the comparand IS the
-   * pattern, and the CALLER binds the wildcards. The operator every `like`
-   * spelling of the AST vocabulary lowers to; unlike the `$contains` family
-   * above, nothing here is escaped or wrapped on the comparand's behalf.
-   */
-  $like: z.string().optional().describe(
-    'Whole-string pattern match with CALLER-bound wildcards: "%" matches any '
+/** The `describe()` `$like` carries in both copies. */
+const LIKE_DESCRIPTION =
+  'Whole-string pattern match with CALLER-bound wildcards: "%" matches any '
     + 'sequence (including empty), "_" matches exactly one character, and a '
     + 'backslash escapes the character after it ("\\%", "\\_", "\\\\") so it '
     + 'matches literally. The pattern must cover the WHOLE value — a pattern '
@@ -847,21 +896,49 @@ export const StringOperatorSchema = lazySchema(() => z.object({
     + '@objectstack/formula. driver-mongodb, objectql `having` and '
     + 'service-analytics REFUSE it in the INVALID_FILTER envelope rather than '
     + 'approximating it — see FILTER_OPERATORS for why it is staged out of that '
-    + 'allowlist.'
-  ),
+    + 'allowlist.';
+
+/** The `describe()` `$ilike` carries in both copies. */
+const ILIKE_DESCRIPTION =
+  'Whole-string pattern match like $like — "%" / "_" wildcards bound by the '
+    + 'caller, backslash escapes — but ignoring ASCII case (A-Z against a-z) '
+    + 'and ONLY ASCII case: "café" does NOT match "CAFÉ", the same Q1 = A '
+    + 'boundary $icontains declares, because SQLite\'s fold is ASCII-only and '
+    + 'three of the five backends are SQLite underneath. Staged with '
+    + '$like — see FILTER_OPERATORS.';
+
+export const StringOperatorSchema = lazySchema(() => z.object({
+  /** Contains substring, CASE-SENSITIVELY - SQL: LIKE %?% (case-exact) */
+  $contains: z.string().optional().describe(CONTAINS_DESCRIPTION),
+
+  /** Does not contain substring, CASE-SENSITIVELY - SQL: NOT LIKE %?% (case-exact) */
+  $notContains: z.string().optional().describe(NOT_CONTAINS_DESCRIPTION),
+
+  /** Starts with prefix, CASE-SENSITIVELY - SQL: LIKE ?% (case-exact) */
+  $startsWith: z.string().optional().describe(STARTS_WITH_DESCRIPTION),
+
+  /** Ends with suffix, CASE-SENSITIVELY - SQL: LIKE %? (case-exact) */
+  $endsWith: z.string().optional().describe(ENDS_WITH_DESCRIPTION),
+
+  /**
+   * Contains substring, IGNORING ASCII case (#5701). The replacement for the
+   * retired `$regex` — see {@link RETIRED_FILTER_OPERATORS}.
+   */
+  $icontains: z.string().optional().describe(ICONTAINS_DESCRIPTION),
+
+  /**
+   * [#7536] Whole-string SQL `LIKE` pattern match — the comparand IS the
+   * pattern, and the CALLER binds the wildcards. The operator every `like`
+   * spelling of the AST vocabulary lowers to; unlike the `$contains` family
+   * above, nothing here is escaped or wrapped on the comparand's behalf.
+   */
+  $like: z.string().optional().describe(LIKE_DESCRIPTION),
 
   /**
    * [#7536] `$like`'s case-insensitive twin — same pattern language, folding
    * ASCII case only (the #4706 Q1 = A domain `$icontains` pinned).
    */
-  $ilike: z.string().optional().describe(
-    'Whole-string pattern match like $like — "%" / "_" wildcards bound by the '
-    + 'caller, backslash escapes — but ignoring ASCII case (A-Z against a-z) '
-    + 'and ONLY ASCII case: "café" does NOT match "CAFÉ", the same Q1 = A '
-    + 'boundary $icontains declares, because SQLite\'s fold is ASCII-only and '
-    + 'three of the five backends are SQLite underneath. Staged with '
-    + '$like — see FILTER_OPERATORS.'
-  ),
+  $ilike: z.string().optional().describe(ILIKE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -1151,29 +1228,41 @@ export function likePatternToGlobPattern(pattern: string): string {
 // 3.5 Special Operators
 // ============================================================================
 
+/** The `describe()` `$null` carries in both copies. See {@link EQ_DESCRIPTION} for the pairing. */
+const NULL_PREDICATE_DESCRIPTION =
+  'Is-null check. `true` matches rows where the field is null, `false` matches rows '
+  + 'where it is not null. Lowered to `IS NULL` (true) / `IS NOT NULL` (false) on the '
+  + 'SQL family and to `{ field: null }` (true) / `{ $ne: null }` (false) on MongoDB.';
+
+/**
+ * The `describe()` `$exists` carries in both copies.
+ *
+ * ⛔ The wording is load-bearing: this operator asks whether the field HAS A
+ * VALUE, and it is NEVER a key-presence test. #13539 shipped the key-presence
+ * reading to customers and `scripts/check-corpus-claim-drift.mjs` exists to
+ * keep it out of the teaching corpus — a rewrite here must keep saying "has a
+ * value".
+ */
+const EXISTS_PREDICATE_DESCRIPTION =
+  'Has-a-value check — the exact inverse of `$null`. `true` matches rows where the '
+  + 'field holds a value (`!= null`), `false` matches rows where it holds none. '
+  + 'Portable across every backend the platform ships: lowered to `IS NOT NULL` (true) / '
+  + '`IS NULL` (false) on the SQL family and to `{ $ne: null }` (true) / '
+  + '`{ $eq: null }` (false) on MongoDB.';
+
 /**
  * Special check operators for null and existence.
  */
 export const SpecialOperatorSchema = lazySchema(() => z.object({
   /** Is null check - SQL: IS NULL (true) / IS NOT NULL (false) | MongoDB: field: null */
-  $null: z.boolean().optional().describe(
-    'Is-null check. `true` matches rows where the field is null, `false` matches rows '
-    + 'where it is not null. Lowered to `IS NULL` (true) / `IS NOT NULL` (false) on the '
-    + 'SQL family and to `{ field: null }` (true) / `{ $ne: null }` (false) on MongoDB.'
-  ),
-  
+  $null: z.boolean().optional().describe(NULL_PREDICATE_DESCRIPTION),
+
   /**
    * Field HAS A VALUE (`!= null`) — the inverse of `$null`, never key presence.
    * Lowered to `IS NOT NULL` (true) / `IS NULL` (false) on SQL and to
    * `{$ne: null}` / `{$eq: null}` on MongoDB.
    */
-  $exists: z.boolean().optional().describe(
-    'Has-a-value check — the exact inverse of `$null`. `true` matches rows where the '
-    + 'field holds a value (`!= null`), `false` matches rows where it holds none. '
-    + 'Portable across every backend the platform ships: lowered to `IS NOT NULL` (true) / '
-    + '`IS NULL` (false) on the SQL family and to `{ $ne: null }` (true) / '
-    + '`{ $eq: null }` (false) on MongoDB.'
-  ),
+  $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -1185,10 +1274,13 @@ export const SpecialOperatorSchema = lazySchema(() => z.object({
  * These can be applied to individual fields in a filter.
  */
 export const FieldOperatorsSchema = lazySchema(() => z.object({
-  // Equality
-  $eq: z.any().optional(),
-  $ne: z.any().optional(),
-  
+  // Equality. Both slots read the SAME description constants the documentation
+  // copy ({@link EqualityOperatorSchema}) reads — the pairing the ordering and
+  // set slots below already use, extended to every remaining family so no
+  // operator can be described in one copy and blank in the other.
+  $eq: z.any().optional().describe(EQ_DESCRIPTION),
+  $ne: z.any().optional().describe(NE_DESCRIPTION),
+
   // Ordering. `string` is in the union for the reason {@link ComparisonOperatorSchema}
   // gives at length (#5685): the date-macro resolver and all three first-party
   // callers produce ISO/clock STRINGS in these slots and nothing else. This copy
@@ -1219,24 +1311,25 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // documentation copy first and left the reachable surface still rejecting the
   // platform's own output; both spellings move together, which is why the
   // endpoint is one shared `rangeEndpointSchema` factory here too.
-  $between: z.tuple([rangeEndpointSchema(0), rangeEndpointSchema(1)]).optional(),
+  $between: z.tuple([rangeEndpointSchema(0), rangeEndpointSchema(1)]).optional()
+    .describe(RANGE_BETWEEN_DESCRIPTION),
 
   // String-specific. Case-SENSITIVE, except `$icontains` which folds ASCII case
   // only — see {@link StringOperatorSchema} for the contract and its boundary.
-  $contains: z.string().optional(),
-  $notContains: z.string().optional(),
-  $startsWith: z.string().optional(),
-  $endsWith: z.string().optional(),
-  $icontains: z.string().optional(),
+  $contains: z.string().optional().describe(CONTAINS_DESCRIPTION),
+  $notContains: z.string().optional().describe(NOT_CONTAINS_DESCRIPTION),
+  $startsWith: z.string().optional().describe(STARTS_WITH_DESCRIPTION),
+  $endsWith: z.string().optional().describe(ENDS_WITH_DESCRIPTION),
+  $icontains: z.string().optional().describe(ICONTAINS_DESCRIPTION),
   // Pattern-matching pair (#7536): the comparand IS a LIKE pattern, wildcards
   // bound by the CALLER — see {@link StringOperatorSchema} for the language.
   // `$ilike` folds ASCII case only, `$like` is case-exact.
-  $like: z.string().optional(),
-  $ilike: z.string().optional(),
+  $like: z.string().optional().describe(LIKE_DESCRIPTION),
+  $ilike: z.string().optional().describe(ILIKE_DESCRIPTION),
 
   // Special
-  $null: z.boolean().optional(),
-  $exists: z.boolean().optional(),
+  $null: z.boolean().optional().describe(NULL_PREDICATE_DESCRIPTION),
+  $exists: z.boolean().optional().describe(EXISTS_PREDICATE_DESCRIPTION),
 }));
 
 // ============================================================================
@@ -1517,8 +1610,22 @@ export const FilterConditionSchema: z.ZodType<FilterCondition, FilterCondition> 
  * }
  * ```
  */
+/**
+ * The `describe()` `where` carries. Only the two semantics an author cannot
+ * read off the shape are stated — `$not`'s NULL-safety (#5146) and the empty
+ * combinator identities (#5322) — because both were ruled rather than inherited
+ * from any host language, and both are spelled at length on
+ * {@link FilterConditionSchema}.
+ */
+const WHERE_DESCRIPTION =
+  'The condition tree the query filters by. A field-keyed entry is a condition on that '
+  + 'field — a bare value is implicit equality, an object is a map of field operators — and '
+  + '`$and` / `$or` / `$not` combine conditions. `$not` is NULL-safe: a row whose compared '
+  + 'column is null does NOT satisfy the negated condition and IS returned. An empty `$and` '
+  + 'is the AND identity (no constraint); an empty `$or` is the OR identity (zero rows).';
+
 export const QueryFilterSchema = lazySchema(() => z.object({
-  where: FilterConditionSchema.optional(),
+  where: FilterConditionSchema.optional().describe(WHERE_DESCRIPTION),
 }));
 
 // ============================================================================

@@ -26,6 +26,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { MetadataManager } from '@objectstack/metadata';
 import { RestServer } from './rest-server';
 import { loadExcelJs } from './xlsx-module.js';
 
@@ -130,7 +131,15 @@ function makeRes() {
   return res;
 }
 
-async function boot() {
+/**
+ * @param services [#15907] the kernel's service registry, when the test needs
+ * one installed. Only the `metadata` service producer path uses it — a
+ * {@link MetadataManager} reaches `GET /meta/:type` through
+ * `getServicesRegistry()`, so it cannot be attached after the protocol is
+ * constructed. Omitted ⇒ no registry at all, which is what every other suite
+ * in this file boots and what it booted before that path was pinned.
+ */
+async function boot(services?: Map<string, any>) {
   const engine = new ObjectQL();
   liveEngines.push(engine);
   engine.registerDriver(makeSqliteDriver(), true);
@@ -144,7 +153,10 @@ async function boot() {
   await engine.insert('user', { id: 'u1', name: '张三', email: 'zhang@x.com' });
   await engine.insert('user', { id: 'u2', name: '李四', email: 'li@x.com' });
 
-  const protocol = new ObjectStackProtocolImplementation(engine as any);
+  const protocol = new ObjectStackProtocolImplementation(
+    engine as any,
+    services ? () => services : undefined,
+  );
   const rest = new RestServer(createMockServer() as any, protocol as any, { api: { requireAuth: false } } as any);
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
@@ -674,5 +686,140 @@ describe('import + create routes — number `scale` enforcement (#7501)', () => 
     } as any, ok);
     expect(ok._status ?? 200).toBeLessThan(400);
     expect((await engine.findOne('member', { where: { id: 'w5' } }))?.work_hours).toBe(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #15907 — the PRODUCER-side pin on `GET /api/v1/meta/mapping`'s per-item shape.
+//
+// The console's import wizard FEATURE-DETECTS its saved-mapping selector:
+// `@object-ui/data-objectstack`'s `listImportMappings` keeps the items whose
+// TOP-LEVEL `targetObject` names the object being imported, and degrades every
+// failure — a throw, a refusal, a body it cannot read — to an EMPTY LIST. So a
+// producer that started serving the `MetadataManager` publish envelope
+// (`name` / `packageId` / `state` / `metadata`) instead of the document itself
+// would fail NOWHERE: the selector would simply stop appearing, on every
+// deployment, and a released feature would read downstream as a hardcoded
+// client — which is exactly how #14026 was raised.
+//
+// Nothing else covers it. `GetMetaItemsResponseSchema` declares `items` as
+// `unknown[]`, so the spec states nothing about the per-item shape; the
+// consumer-side pin (objectui#7738) carries a COPIED FIXTURE of today's body
+// and by construction moves right or wrong TOGETHER with this producer; and the
+// named-mapping suite above reads its artifact through `getMetaItem`, never
+// through the list door. A consumer that degrades to empty + a schema that
+// declares nothing + no producer pin = a reading that cannot fail. This block
+// is the producer's half of it.
+//
+// ⭐ THREE producer paths, and the third is the reason this is not one test.
+// A pin over `registerApp` alone would be green forever precisely because
+// `registerApp` is not the producer anyone would change. `MetadataManager`
+// — installed as the `metadata` service, the registrar the file-based artifact
+// loader uses — is the one whose envelope could realistically start reaching
+// the wire, so it is pinned here explicitly rather than assumed to travel with
+// the others. Measured: the three paths agree on the document but NOT on the
+// decorations — `registerApp` stamps `_packageId` + `_provenance` (it knows the
+// owning package), the other two carry `_diagnostics` alone — so "they all look
+// the same" is not a premise this block is entitled to.
+//
+// ⚠️ Scope: this asserts the two facts the consumer actually reads — a
+// TOP-LEVEL `targetObject`, and NO nested `metadata` member. Whether
+// `GetMetaItemsResponseSchema.items` should be narrowed from `unknown` is a
+// SPEC decision (narrowing a published declaration carries a manual floor) and
+// is deliberately not taken here.
+// ---------------------------------------------------------------------------
+describe('GET /meta/mapping — items are raw documents, not publish envelopes (#15907)', () => {
+  const MAPPING_TEMPLATE = {
+    name: 'saved_task_feed',
+    label: 'Saved task feed',
+    sourceFormat: 'csv',
+    targetObject: 'task',
+    fieldMapping: [
+      { source: 'ID', target: 'id', transform: 'none' },
+      { source: 'Task Title', target: 'title', transform: 'none' },
+    ],
+    mode: 'upsert',
+    upsertKey: ['id'],
+  };
+
+  // Every producer path DECORATES the document it was handed, IN PLACE, so each
+  // registration gets its own copy. A shared literal carries one path's
+  // `_packageId` into the next path's reading — measured while writing this
+  // block, and it makes the weaker paths look like the stronger one.
+  const mappingDoc = () => JSON.parse(JSON.stringify(MAPPING_TEMPLATE));
+
+  /**
+   * The consumer's own predicate, replicated on this side of the wire:
+   * `listImportMappings` keeps the items whose TOP-LEVEL `targetObject` names
+   * the object. Spelled as a filter rather than an index lookup because the
+   * filter is what makes a shape change SILENT downstream — it answers `[]`,
+   * not an error — and therefore what has to be made loud here.
+   */
+  const asConsumerSees = (items: unknown[], object: string) =>
+    (items ?? []).filter((it: any) => it?.targetObject === object);
+
+  const listMapping = async (rest: any) => {
+    const route = rest.getRoutes().find(
+      (r: any) => r.method === 'GET' && r.path === '/api/v1/meta/:type',
+    );
+    expect(route).toBeDefined();
+    const res = makeRes();
+    // `headers` is not dressing — the conditional-GET branch reads
+    // `req.headers['if-none-match']`.
+    await route.handler(
+      { method: 'GET', params: { type: 'mapping' }, query: {}, body: {}, headers: {} } as any,
+      res,
+    );
+    return res;
+  };
+
+  /** The whole claim, applied identically to every producer path below. */
+  const expectRawDocumentShape = (res: any) => {
+    expect(res._status ?? 200).toBeLessThan(400);
+    expect(res._json).toMatchObject({ type: 'mapping' });
+    expect(Array.isArray(res._json.items)).toBe(true);
+
+    // What the console actually sees. A publish envelope has no top-level
+    // `targetObject`, so this filter answers `[]` — the silent failure, made
+    // into a red one.
+    const visible = asConsumerSees(res._json.items, 'task');
+    expect(visible.map((m: any) => m.name)).toEqual(['saved_task_feed']);
+
+    const item: any = visible[0];
+    // `targetObject` is TOP-LEVEL — not `item.metadata.targetObject`.
+    expect(item.targetObject).toBe('task');
+    // …and there is no nested `metadata` member it could have moved into. The
+    // envelope this refuses is `{ name, packageId, state, metadata }`.
+    expect(Object.prototype.hasOwnProperty.call(item, 'metadata')).toBe(false);
+    // The rest of the document is served at the top level as well, so a
+    // half-move (identity kept, body nested) cannot pass either.
+    expect(item.sourceFormat).toBe('csv');
+    expect(Array.isArray(item.fieldMapping)).toBe(true);
+    expect(item.fieldMapping[0]).toMatchObject({ source: 'ID', target: 'id' });
+  };
+
+  it('path 1 — a manifest `mappings:` entry installed through `registerApp`', async () => {
+    const { engine, rest } = await boot();
+    engine.registerApp({ id: 'feed_pkg', name: 'feed_pkg', mappings: [mappingDoc()] });
+    expectRawDocumentShape(await listMapping(rest));
+  });
+
+  it('path 2 — a direct `registry.registerItem`', async () => {
+    const { engine, rest } = await boot();
+    engine.registry.registerItem('mapping', mappingDoc() as any, 'name');
+    expectRawDocumentShape(await listMapping(rest));
+  });
+
+  it('path 3 — `MetadataManager.register`, installed as the `metadata` service', async () => {
+    // The registrar the file-based artifact loader uses. It holds the document
+    // under `(type, name)` and `list()` hands the document back; the publish
+    // envelope this test refuses is the shape it would serve if that ever
+    // became the thing it returns.
+    const services = new Map<string, any>();
+    const metadata = new MetadataManager({ formats: ['json'], loaders: [] });
+    await metadata.register('mapping', MAPPING_TEMPLATE.name, mappingDoc());
+    services.set('metadata', metadata);
+    const { rest } = await boot(services);
+    expectRawDocumentShape(await listMapping(rest));
   });
 });
