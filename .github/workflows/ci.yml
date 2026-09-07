@@ -1596,6 +1596,15 @@ jobs:
       - name: Every published require entry point actually loads
         run: pnpm check:dual-build-cjs-loads
 
+      # #16469 (build half of #15905's E3 question 1): `sourcesContent` is off
+      # by construction at the shared tsup/esbuild layer, so a `.map` file that
+      # carries it means a config skipped the shared hook, or a toolchain
+      # upgrade changed esbuild's default back to embedding. Lives here for the
+      # same reason the step above does: it reads a real `dist/`, and refuses
+      # (exit 3) rather than passing silently when there is none.
+      - name: No published source map embeds source text
+        run: pnpm check:sourcemap-no-sources-content
+
       - name: Analyze bundle size
         run: pnpm --filter @objectstack/spec analyze
 

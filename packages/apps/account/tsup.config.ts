@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
@@ -12,4 +14,5 @@ export default defineConfig({
   sourcemap: true,
   splitting: false,
   treeshake: true,
+  esbuildOptions: dropSourcesContent,
 });

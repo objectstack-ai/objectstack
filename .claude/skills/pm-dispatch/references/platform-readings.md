@@ -23,9 +23,11 @@
 - `dirty` 即队列入口否决(冲突对象是当前 main);draft PR 恒回 `draft`。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
 - 它直接列出冲突文件;读数随 fetch 老化,重跑先 fetch。
-- 它只答默认文本合并,不套 `.gitattributes` 的 merge driver。
-- ⇒ 两侧同动一条 `merge=os-regen` 路径时系统性低报,方向危险:报干净而真合并会停。
-- 这类 diff 由 `mergeable_state` 或 scratch worktree 里的真 `git merge` 定夺。
+- 它跑 `git merge` 的 merge-ort ⇒ 注册 `merge=os-regen` 的克隆照用驱动,未注册的退回文本合并。
+- 注册按克隆(`pnpm install` 的 prepare),服务端一个驱动都不跑 ⇒ 两侧答的不是同一个问题。
+- 驱动接手的路径上 exit 0 只说内容判断被推迟,⛔ 不是无冲突:它对内容什么都没说。
+- ⇒ 对照复现的是被测条件不只是命令:冲突证明从无驱动裸克隆 `clone --bare --shared` 探。
+- ⛔ 永不用 `-c merge.os-regen.driver=` 覆盖:驱动不是被关掉而是跑失败,路由路径全报冲突。
 - 入队决策点才整对象 `get` 一次;挂了 flip 定点到点读,⛔ 不又查又等。
 - 状态核验用最小字段(search/list 加 `fields`)或等事件。
 - 聚合读数(`blocked`/`dirty`)只作阴性筛查再定位;放行按名定向读单条 job,⛔ 不拉全表。
@@ -349,8 +351,6 @@
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
-- `merge-tree` 套不套 `.gitattributes` 驱动随本克隆注册与否变,驱动 exit 0 只说驱动收下了。
-- ⇒ 驱动管辖的路径上冲突证明跑两遍,第二遍带 `-c merge.os-regen.driver=false` 关掉驱动。
 
 ## 闭合关键词解析(PR 正文写侧)
 

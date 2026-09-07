@@ -1,5 +1,7 @@
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 /**
  * `@objectstack/core` ships two entry points:
  * - `index.ts` — full microkernel (Node-only; pulls in plugin sandbox,
@@ -16,4 +18,5 @@ export default defineConfig({
   dts: !process.env.OS_SKIP_DTS,
   format: ['esm', 'cjs'],
   target: 'es2020',
+  esbuildOptions: dropSourcesContent,
 });

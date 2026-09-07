@@ -45,10 +45,14 @@
  *     by `SETUP_NAV_CONTRIBUTIONS` and by capability plugins, so a bundle
  *     generated from a static walk of `SETUP_APP` would be structurally
  *     incomplete — regenerating over it would DELETE 40 live nav
- *     translations per locale. Their gate is `pnpm check:app-nav-i18n`
- *     (`packages/cli/scripts/check-app-nav-i18n.mjs`), which boots the real
- *     composition and judges the MERGED app — not the bundle-drift gate, and
- *     not the coverage ratchet.
+ *     translations per locale. The gate for `apps` / `dashboards` is
+ *     `pnpm check:app-nav-i18n` (`packages/cli/scripts/check-app-nav-i18n.mjs`),
+ *     which boots the real composition and judges the MERGED app — not the
+ *     bundle-drift gate, and not the coverage ratchet. `pages` is judged by
+ *     `packages/cli/test/platform-page-i18n-parity.test.ts` instead: it moved
+ *     off that roster on #15743, because a NAV roster (every entry must land a
+ *     nav id, and `@objectstack/plugin-auth` cannot) is structurally unable to
+ *     reach two of the six pages the platform ships.
  *
  *     This paragraph used to end "Their gate is the coverage ratchet
  *     (`scripts/check-i18n-coverage.mjs`), baselined at 0 for this package",

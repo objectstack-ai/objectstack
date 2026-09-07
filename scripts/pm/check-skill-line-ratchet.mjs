@@ -746,12 +746,15 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
-  // Project Director seat charter (maintainer ruling 2026-08-27, verbatim in the
-  // file: 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」) — a
-  // human-invoked seat owning the contract-review chain, the adjudication duty and
-  // the maintainer-action ledger. A lane charter is read per seat session like
-  // every entry above. Set at the landed line count read from this ratchet's own
-  // run (headroom 0, same convention as the entries above).
+  // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
+  // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
+  // carries it as a rule line since the rules-only rewrite, not as this quotation)
+  // — a human-invoked seat holding the contract-review after-audit, the
+  // adjudication duty, the maintainer-action ledger and the governed-merge audit,
+  // with any number of summons running concurrently: no occupant, no handover. A
+  // lane charter is read per seat session like every entry above. Set at the
+  // landed line count read from this ratchet's own run (headroom 0, same
+  // convention as the entries above).
   // 75 → 77: maintainer-directed placement (2026-08-27, verbatim: 「创业阶段不渐进
   // 应该写入项目总监skills」) — the no-gradualism standing rule lands here by that
   // directive; the file sat at headroom 0 with no losslessly compressible slack in
