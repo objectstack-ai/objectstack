@@ -136,8 +136,17 @@ const poll = setInterval(() => {
   mark(`LISTENERS count=${process.stderr.listenerCount('error')}`);
   if (UNGUARDED) {
     // The live positive control — in this process only, never on disk.
-    process.stderr.removeAllListeners('error');
-    mark(`ARM unguarded listeners=${process.stderr.listenerCount('error')}`);
+    //
+    // ⛔ BY NAME, not `removeAllListeners('error')`. The two are equivalent on
+    // today's tree, but the control has to measure "the ENTRY's listener is
+    // absent"; clearing the stream measures "no listener at all", and the day
+    // anything else attaches one here — a library, a future prologue, node
+    // itself — that would silently become a different experiment from the one
+    // the driving case claims to run.
+    for (const fn of process.stderr.listeners('error')) {
+      if (fn?.name === LISTENER_NAME) process.stderr.removeListener('error', fn);
+    }
+    mark(`ARM unguarded listeners=${process.stderr.listenerCount('error')} guard=${guardAttached()}`);
   } else {
     mark(`ARM guarded listeners=${process.stderr.listenerCount('error')}`);
   }

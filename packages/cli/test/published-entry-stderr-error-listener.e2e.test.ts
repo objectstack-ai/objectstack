@@ -61,7 +61,8 @@
  * case asserting it would smuggle that reading back in.
  *
  * The reachability half is not left unheld either — the last case below keeps
- * the premise the measurement rests on: `serve` still writes to stderr RAW.
+ * the premise the measurement rests on: `serve`'s `printDiagnostic`, the one
+ * writer the reproduction ran through, still writes to stderr RAW.
  */
 
 import { spawn } from 'node:child_process';
@@ -166,7 +167,7 @@ afterAll(() => {
 });
 
 describe('the published entry point survives a failed stderr write', () => {
-  it('attaches its OWN listener before anything of its own can write', () => {
+  it('has its OWN listener on process.stderr by the time the probe looks', () => {
     // The probe reports what it SAW rather than being assumed to have found it:
     // `LISTENER ABSENT` is the reading when `bin/run.js` stops attaching one,
     // and it is a different sentence from "the probe never ran".
@@ -177,6 +178,13 @@ describe('the published entry point survives a failed stderr write', () => {
     // `LISTENER ATTACHED after 20 ms` against a tree with the whole block
     // deleted — measured, under the ablation below. The count is carried in
     // the markers as evidence and decides nothing.
+    //
+    // ⛔ PRESENCE ONLY, and the name says so deliberately. `LISTENER ATTACHED
+    // after N ms` is true for every N inside the probe's 15 s wait, so this
+    // case cannot tell an attach at the top of `bin/run.js` apart from one
+    // moved below `await run(…)`. The ORDER is the next case, read from the
+    // entry's source, because no reading this process can take will ever
+    // distinguish them.
     expect(
       guarded.marks,
       `the probe never reached the listener check, so it measured NOTHING — a zero reading, not a pass. Markers:\n${guarded.marks}`,
@@ -186,6 +194,46 @@ describe('the published entry point survives a failed stderr write', () => {
       `bin/run.js no longer attaches its \`error\` listener to process.stderr — a failed stderr write is an ` +
         `uncaught exception again on the entry point a customer's install runs (#14858, #15564). Markers:\n${guarded.marks}`,
     ).toContain('LISTENER ATTACHED');
+  });
+
+  it('attaches it ABOVE `await run(…)`, which is the order the entry claims', () => {
+    // ⭐ Why this case exists at all. The case above pins PRESENCE; a refactor
+    // that moved the attach BELOW `await run(…)` would keep it — and every
+    // other runtime case here — green, while the entry's own claim ("⚠️ BEFORE
+    // `run()`, and that order is the whole point") had quietly stopped being
+    // true. The probe cannot see the difference: it is one process, `--version`
+    // settles oclif in a few hundred ms, and by the time the poll can look,
+    // both have already happened. So the order is read STRUCTURALLY, from the
+    // entry's source, which is the only place it is visible.
+    //
+    // What the order buys, in the entry's words: everything the CLI writes to
+    // stderr is written from inside `run()`, so a listener installed after it
+    // has already missed the writes it exists to survive.
+    //
+    // ⚠️ Both sites are located BY TEXT, never by line number — the docblocks
+    // around them move whenever anyone edits them. Comments are masked so the
+    // paragraphs that DISCUSS this order, several of which name `run()`, can
+    // never answer for the code.
+    const entry = maskComments(readFileSync(RUN_JS, 'utf8'));
+    const attaches = [...entry.matchAll(/process\.stderr\.on\s*\(\s*['"]error['"]/g)].map((m) => m.index ?? -1);
+    expect(
+      attaches.length,
+      `${RUN_JS} no longer attaches any \`error\` listener to process.stderr — a failed stderr write is an uncaught ` +
+        `exception again on the entry point a customer's install runs (#14858, #15564).`,
+    ).toBeGreaterThan(0);
+    const runCall = entry.search(/\bawait\s+run\s*\(/);
+    expect(
+      runCall,
+      `${RUN_JS} no longer calls \`await run(\`. That is not automatically a defect, but this case can no longer ` +
+        `read the order it pins — re-locate both sites by text before trusting it.`,
+    ).toBeGreaterThan(-1);
+    expect(
+      Math.max(...attaches),
+      `${RUN_JS} attaches its \`error\` listener at or after \`await run(\` (last attach at offset ` +
+        `${Math.max(...attaches)}, \`await run(\` at ${runCall}). Every byte this CLI puts on stderr is written from ` +
+        `inside \`run()\`, so a listener installed there has already missed what it exists to survive — and no runtime ` +
+        `case in this file can see that, because both have happened by the time the probe looks.`,
+    ).toBeLessThan(runCall);
   });
 
   it("keeps the probe's mirror of the listener name equal to the entry's own", () => {
@@ -224,7 +272,11 @@ describe('the published entry point survives a failed stderr write', () => {
     // `console.error` that swallows its own errors, a node that stopped
     // reporting EPIPE here — would be green on the guarded arm forever. This
     // arm removes the listener IN THE CHILD's process (nothing on disk), so the
-    // hazard is re-armed against the same tree in the same run.
+    // hazard is re-armed against the same tree in the same run. It removes the
+    // entry's listener BY NAME rather than clearing the stream: the control has
+    // to be "the entry's guard is gone", and a `removeAllListeners('error')`
+    // would silently become "nothing is listening at all" the day anything else
+    // attaches one — a different experiment from the one this case claims.
     const evidence = `this child ran ${unguarded.elapsedMs} ms. Markers:\n${unguarded.marks}`;
     expect(unguarded.marks, `the unguarded arm never made its write. ${evidence}`).toContain('WROTE');
     expect(
@@ -238,22 +290,65 @@ describe('the published entry point survives a failed stderr write', () => {
 });
 
 describe('the premise the measurement rests on', () => {
-  it('keeps a RAW stderr write on a long-lived published command', () => {
+  it('keeps a RAW stderr write inside `printDiagnostic`, the writer it reproduced on', () => {
     // ⚠️ The reachability half, held rather than assumed. `serve` is what
     // #15564 reproduced on, and only because two things are true of it at once:
     // it writes to stderr WITHOUT `console.error`'s `ignoreErrors` guard, and
-    // it stays alive across the write. If every raw write here were ever routed
+    // it stays alive across the write. If that raw write were ever routed
     // through `console.error`, the measurement in this file's header would no
     // longer describe the tree — re-measure before reading the pins above as
     // covering a live hazard.
     //
-    // Comments are masked so the docblocks that DISCUSS `process.stderr.write`
-    // — including the one at the call site — cannot answer for the call itself.
+    // ⛔ ANCHORED ON `printDiagnostic`'S OWN BODY, not on the file. `serve.ts`
+    // holds about a dozen `process.stderr.write(` sites, so a whole-file
+    // `toContain` stays green while the ONE writer this reproduction rests on
+    // — the boot diagnostic, #7915, the line the crash was measured at — moves
+    // to `console.error` and stops being able to crash anything.
+    //
+    // ⚠️ Located BY SYMBOL, never by line number. Comments are masked so the
+    // docblocks that DISCUSS `process.stderr.write` — including the one
+    // directly above this declaration — cannot answer for the call itself.
     const code = maskComments(readFileSync(SERVE_COMMAND, 'utf8'));
+    const decl = code.indexOf('const printDiagnostic =');
     expect(
-      code,
-      `${SERVE_COMMAND} no longer writes to stderr directly. That is not automatically a defect, but it ` +
-        `removes the reproduction #15564 measured, so the header above needs re-measuring rather than trusting.`,
+      decl,
+      `${SERVE_COMMAND} no longer declares \`const printDiagnostic =\`. That is not automatically a defect, but it ` +
+        `is the writer #15564 measured the crash on, so re-locate it by symbol and re-point this case rather than ` +
+        `widening it back to the whole file.`,
+    ).toBeGreaterThan(-1);
+    // Brace-matched over comment-masked source: the body is one statement and
+    // carries no braces of its own today, and the length bound below is what
+    // keeps a desynchronised match from reporting green against some other
+    // writer further down the file.
+    const open = code.indexOf('{', decl);
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i >= 0 && i < code.length; i += 1) {
+      if (code[i] === '{') depth += 1;
+      else if (code[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const body = end > open ? code.slice(open, end + 1) : '';
+    expect(
+      body.length,
+      `could not read \`printDiagnostic\`'s body out of ${SERVE_COMMAND} — the brace match ran away (${body.length} ` +
+        `chars), so this case measured NOTHING. Re-locate the declaration before trusting any verdict from it.`,
+    ).toBeGreaterThan(0);
+    expect(
+      body.length,
+      `\`printDiagnostic\`'s body read back as ${body.length} chars, far past the one statement it is — the brace ` +
+        `match lost sync, so a hit below would be about some other writer in ${SERVE_COMMAND}.`,
+    ).toBeLessThan(1000);
+    expect(
+      body,
+      `\`printDiagnostic\` in ${SERVE_COMMAND} no longer writes to stderr RAW. That is not automatically a defect, ` +
+        `but \`console.error\` carries \`ignoreErrors\` and cannot crash this process at any size, so it removes the ` +
+        `reproduction #15564 measured — the header above needs re-measuring rather than trusting.`,
     ).toContain('process.stderr.write(');
   });
 });
