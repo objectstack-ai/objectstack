@@ -286,7 +286,7 @@ const PLUGIN_IN_REPO_DIR = 'packages/plugins';
 
 export const templates: Record<string, CreateTemplate> = {
   plugin: defineTemplate({
-    description: 'Create a new ObjectStack plugin',
+    description: 'Create a new kernel code plugin (TypeScript implementing the kernel Plugin contract)',
     inRepoDir: PLUGIN_IN_REPO_DIR,
     dirName: (name: string) => `plugin-${name}`,
     filesFor: (placement: ScaffoldPlacement) => {
