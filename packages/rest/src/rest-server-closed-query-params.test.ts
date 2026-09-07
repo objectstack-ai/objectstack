@@ -303,18 +303,20 @@ describe('#7606 §2 — GET /data/:object/export', () => {
         // is what makes this a preservation pin: `limit` silently dropped
         // exports the whole table with a perfectly ordinary 200.
 
-        // `limit` is the binding cap here (25 < 100), so $top proves IT arrived.
+        // `limit` is the binding cap here (25 < 100), so the query's `limit`
+        // proves IT arrived. (Spelled `$top` until #16337 canonicalised the
+        // door's literal; the assertion is unchanged in what it measures.)
         const capped = boot();
         const byLimit = await capped.exportRows({ format: 'csv', limit: '25', page: '100' });
         expect(byLimit.status).toBe(200);
-        expect((capped.findData.mock.calls[0][0] as any)?.query?.$top).toBe(25);
+        expect((capped.findData.mock.calls[0][0] as any)?.query?.limit).toBe(25);
 
-        // `page` is the binding cap here (50 < 200), so $top proves IT arrived
-        // — a default chunk would have read 500.
+        // `page` is the binding cap here (50 < 200), so the query's `limit`
+        // proves IT arrived — a default chunk would have read 500.
         const chunked = boot();
         const byPage = await chunked.exportRows({ format: 'csv', limit: '200', page: '50' });
         expect(byPage.status).toBe(200);
-        expect((chunked.findData.mock.calls[0][0] as any)?.query?.$top).toBe(50);
+        expect((chunked.findData.mock.calls[0][0] as any)?.query?.limit).toBe(50);
     });
 
     it('PRESERVATION: the row-selection axes still narrow the export', async () => {

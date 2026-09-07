@@ -132,8 +132,10 @@ describe('[#16337] §1 no server-built `query` slot in rest-server.ts is erased 
         ).toEqual([]);
     });
 
-    it('no `query` slot carries an `as` cast', () => {
-        const cast = querySlots().filter(({ line }) => /\bas\s+(any|unknown|FindDataRequest)\b/.test(slotBody(line)));
+    it('no server-built `query` literal carries an `as` cast', () => {
+        const cast = querySlots()
+            .filter(({ text }) => text.trim() !== CALLER_SUPPLIED_SLOT)
+            .filter(({ line }) => /\bas\s+(any|unknown|FindDataRequest)\b/.test(slotBody(line)));
         expect(cast.map((c) => `line ${c.line}`)).toEqual([]);
     });
 
