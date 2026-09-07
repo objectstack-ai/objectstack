@@ -4,7 +4,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
  * sys_flow_dispatch — Persisted idempotency ledger for trigger dispatches
- * (#10220).
+ * (#10220), and — since #14501 — the record of what each claimed dispatch
+ * turned into.
  *
  * A time-relative sweep (`config.timeRelative`) evaluates its date window on
  * every tick and launches the flow once per matching record — but the sweep
@@ -28,9 +29,27 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * catch-up sweeps, which this ledger unblocks; widen there if that work needs
  * more).
  *
- * Writers: the automation engine's {@link FlowDispatchStore} (`claim()`),
- * check-and-record under a system context. Readers: the same claim path, and
- * operability surfaces ("what did this sweep dispatch?").
+ * **The row is two-phase since #14501, and this is the one place it stopped
+ * being immutable.** #10220 wrote the row once, before the launch, and never
+ * touched it again — a row's existence was the whole of its meaning. The
+ * maintainer's A + a2 ruling on #14501 needs a second bit the existence of a
+ * row cannot carry: `IJobService.replay()` refuses a scheduled flow's window
+ * only when that window was **delivered**, and re-runs it when the claim is
+ * absent *or failed*. So `claim()` still writes the row before the launch (the
+ * race is still won on the primary key), and the dispatcher now settles it
+ * afterwards with {@link FlowDispatchStore.settle} — `outcome` /
+ * `settled_at` are the only columns any writer ever updates, and only from
+ * `null` to a terminal value.
+ *
+ * A row left at `outcome: null` is a dispatch whose process died mid-flight.
+ * It reads as **not delivered** — the `replay()` contract's "failed" row —
+ * because "we claimed it and never saw it finish" is exactly the case an
+ * operator replay exists to repair.
+ *
+ * Writers: the automation engine's {@link FlowDispatchStore} — `claim()`
+ * (check-and-record) and `settle()` (outcome only) — under a system context.
+ * Readers: the same claim path, `replay()`'s pre-flight check, and operability
+ * surfaces ("what did this sweep dispatch, and did it land?").
  *
  * @namespace sys
  */
@@ -49,10 +68,10 @@ export const SysFlowDispatch = ObjectSchema.create({
     retention: { maxAge: '30d' },
   },
   description:
-    'Idempotency ledger for trigger dispatches (#10220): one row per claimed (flow, record, matched-window) key, so a re-scan or a rebuilt kernel never re-launches a flow for a window it already dispatched.',
+    'Idempotency ledger for trigger dispatches (#10220): one row per claimed dispatch key — (flow, record, matched-window) for a time-relative sweep, (flow, tick-window) for a scheduled flow — so a re-scan, a rebuilt kernel or an operator replay never re-launches a flow for a window it already delivered.',
   displayNameField: 'id',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  highlightFields: ['id', 'dispatched_at'],
+  highlightFields: ['id', 'dispatched_at', 'outcome'],
 
   fields: {
     // The dispatch key IS the identity — using it as the primary key makes
@@ -64,6 +83,26 @@ export const SysFlowDispatch = ObjectSchema.create({
       label: 'Dispatched At',
       required: true,
       description: 'When the dispatch key was claimed (immediately before the flow launch it deduplicates).',
+      group: 'State',
+    }),
+
+    // [#14501] The claim's outcome. OPTIONAL, and its absence is meaningful:
+    // `null` is the mid-flight state between `claim()` and `settle()`, and it
+    // is also every row a pre-#14501 ledger already holds. Both read as "not
+    // delivered", which is the safe direction — a replay re-runs rather than
+    // refusing on a claim nobody ever settled.
+    outcome: Field.select(['succeeded', 'failed'], {
+      label: 'Outcome',
+      required: false,
+      description:
+        'What the claimed dispatch turned into: succeeded (delivered — an unforced replay of this window is refused) or failed (the flow threw; a replay re-runs it). Null means claimed and never settled, which reads as not delivered.',
+      group: 'State',
+    }),
+
+    settled_at: Field.datetime({
+      label: 'Settled At',
+      required: false,
+      description: 'When the outcome was recorded (immediately after the flow launch this row deduplicates returned).',
       group: 'State',
     }),
 

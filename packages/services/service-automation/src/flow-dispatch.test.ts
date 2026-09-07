@@ -2,6 +2,10 @@
 //
 // Trigger dispatch idempotency (#10220): the persisted `sys_flow_dispatch`
 // claim ledger and the `AutomationEngine.claim()` surface triggers consume.
+//
+// #14501 extends the same ledger with the OUTCOME half the maintainer's
+// A + a2 ruling requires: a claim is settled after the launch returns, and
+// read back before an operator replay.
 
 import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine } from './engine.js';
@@ -44,6 +48,12 @@ function fakeQl() {
             rows.set(id, data as Record<string, unknown>);
             return data;
         },
+        async update(_table, id, data) {
+            const row = rows.get(String(id));
+            if (!row) throw new Error(`fake driver: no row ${String(id)}`);
+            rows.set(String(id), { ...row, ...(data as Record<string, unknown>) });
+            return rows.get(String(id));
+        },
     };
     return { engine, rows };
 }
@@ -81,6 +91,7 @@ describe('ObjectStoreFlowDispatchStore', () => {
             async insert() {
                 throw new Error('UNIQUE constraint failed: sys_flow_dispatch.id');
             },
+            async update() { throw new Error('not reached'); },
         };
         const store = new ObjectStoreFlowDispatchStore(engine);
         await expect(store.claim('k1')).resolves.toBe(false);
@@ -90,6 +101,7 @@ describe('ObjectStoreFlowDispatchStore', () => {
         const engine: FlowDispatchStoreEngine = {
             async find() { return []; },
             async insert() { throw new Error('no such table: sys_flow_dispatch'); },
+            async update() { throw new Error('not reached'); },
         };
         const store = new ObjectStoreFlowDispatchStore(engine);
         await expect(store.claim('k1')).rejects.toThrow('no such table');
@@ -147,5 +159,115 @@ describe('AutomationEngine.claim (#10220)', () => {
             expect.stringContaining('falling back to in-process dedup'),
             expect.anything(),
         );
+    });
+});
+
+describe('the claim OUTCOME half (#14501)', () => {
+    it('ObjectStoreFlowDispatchStore: claim leaves the row unsettled, settle() writes the terminal outcome', async () => {
+        const { engine, rows } = fakeQl();
+        const store = new ObjectStoreFlowDispatchStore(engine);
+
+        await store.claim('schedule:digest:2026-09-07T01:00:00.000Z');
+        await expect(store.read('schedule:digest:2026-09-07T01:00:00.000Z')).resolves.toMatchObject({
+            outcome: null,
+            settledAt: null,
+        });
+
+        await store.settle('schedule:digest:2026-09-07T01:00:00.000Z', 'succeeded');
+        const claim = await store.read('schedule:digest:2026-09-07T01:00:00.000Z');
+        expect(claim?.outcome).toBe('succeeded');
+        expect(claim?.settledAt).toEqual(expect.any(String));
+        // The claim columns are untouched by the settle — it is a transition,
+        // not a rewrite.
+        expect(rows.get('schedule:digest:2026-09-07T01:00:00.000Z')?.dispatched_at).toEqual(
+            expect.any(String),
+        );
+    });
+
+    it("read() of a key that was never claimed is null, not a fabricated 'absent' claim", async () => {
+        const { engine } = fakeQl();
+        const store = new ObjectStoreFlowDispatchStore(engine);
+        await expect(store.read('never-claimed')).resolves.toBeNull();
+    });
+
+    it('InMemoryFlowDispatchStore settles and reads back the same three states', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        await expect(store.read('k')).resolves.toBeNull();
+        await store.claim('k');
+        await expect(store.read('k')).resolves.toMatchObject({ outcome: null });
+        await store.settle('k', 'failed');
+        await expect(store.read('k')).resolves.toMatchObject({ outcome: 'failed' });
+    });
+
+    it('settle() of a key that was never claimed does not invent a row', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        await store.settle('ghost', 'succeeded');
+        await expect(store.read('ghost')).resolves.toBeNull();
+    });
+
+    it('AutomationEngine.settleDispatch/readDispatch carry the outcome through the ledger', async () => {
+        const { logger, warn } = testLogger();
+        const engine = new AutomationEngine(logger);
+        engine.setFlowDispatchStore(new InMemoryFlowDispatchStore());
+
+        await expect(engine.claim('k1')).resolves.toBe(true);
+        await expect(engine.readDispatch('k1')).resolves.toMatchObject({ outcome: null });
+        await engine.settleDispatch('k1', 'succeeded');
+        await expect(engine.readDispatch('k1')).resolves.toMatchObject({ outcome: 'succeeded' });
+        expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('a ledger predating #14501 (no read/settle) reports every claim unclaimed, warned exactly once', async () => {
+        const { logger, warn } = testLogger();
+        const engine = new AutomationEngine(logger);
+        // A pre-#14501 store: `claim` only.
+        engine.setFlowDispatchStore({ async claim() { return true; } });
+
+        await expect(engine.readDispatch('k1')).resolves.toBeNull();
+        await expect(engine.readDispatch('k2')).resolves.toBeNull();
+        const degradations = warn.mock.calls.filter(
+            (c) => typeof c[0] === 'string' && (c[0] as string).includes('predates #14501'),
+        );
+        expect(degradations).toHaveLength(1);
+    });
+
+    it('a read that THROWS reports the key unclaimed — a refusal is a positive reading, never a failed one', async () => {
+        const { logger, warn } = testLogger();
+        const engine = new AutomationEngine(logger);
+        engine.setFlowDispatchStore({
+            async claim() { return true; },
+            async read() { throw new Error('ledger unreachable'); },
+            async settle() { throw new Error('ledger unreachable'); },
+        });
+
+        await expect(engine.readDispatch('k1')).resolves.toBeNull();
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('reporting the key as UNCLAIMED'),
+            expect.anything(),
+        );
+    });
+
+    it('a settle that THROWS never fails the caller — the dispatch already happened', async () => {
+        const { logger, warn } = testLogger();
+        const engine = new AutomationEngine(logger);
+        engine.setFlowDispatchStore({
+            async claim() { return true; },
+            async settle() { throw new Error('ledger unreachable'); },
+        });
+
+        await expect(engine.settleDispatch('k1', 'succeeded')).resolves.toBeUndefined();
+        expect(warn).toHaveBeenCalledWith(
+            expect.stringContaining('stays UNSETTLED'),
+            expect.anything(),
+        );
+    });
+
+    it('with NO ledger attached the in-process fallback still carries an outcome', async () => {
+        const { logger } = testLogger();
+        const engine = new AutomationEngine(logger);
+        await expect(engine.claim('k1')).resolves.toBe(true);
+        await engine.settleDispatch('k1', 'succeeded');
+        await expect(engine.readDispatch('k1')).resolves.toMatchObject({ outcome: 'succeeded' });
+        await expect(engine.readDispatch('never')).resolves.toBeNull();
     });
 });

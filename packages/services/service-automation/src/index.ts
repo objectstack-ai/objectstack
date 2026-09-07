@@ -26,6 +26,8 @@ export type {
     SuspensionParkedAt,
     SuspensionClaimOutcome,
     FlowDispatchStore,
+    FlowDispatchClaim,
+    FlowDispatchOutcome,
     // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
     // the durable off-switch that REPLACES the retired process-local
     // `flowEnabled` map (#10243). Exported so a host can supply its own
