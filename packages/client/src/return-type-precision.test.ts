@@ -48,6 +48,23 @@ import type {
     AuthTwoFactorVerificationResult,
     AuthWireUser,
 } from './index';
+import type {
+    OrganizationCreateResult,
+    OrganizationEchoWire,
+    OrganizationFullWire,
+    OrganizationInvitationAcceptResult,
+    OrganizationInvitationRejectResult,
+    OrganizationInvitationWire,
+    OrganizationMembersPage,
+    OrganizationMemberWire,
+    OrganizationMemberWithUserWire,
+    OrganizationRemoveMemberResult,
+    OrganizationTeamMemberRemovedReceipt,
+    OrganizationTeamMemberWire,
+    OrganizationTeamRemovedReceipt,
+    OrganizationTeamWire,
+    OrganizationWire,
+} from './index';
 import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
     AnalyticsMetadataResponse,
@@ -783,6 +800,136 @@ export async function returnTypePrecisionPins14313(): Promise<void> {
     expectTypeOf(await client.auth.deleteUser({ password: 'p' })).toEqualTypeOf<any>();
 }
 
+
+/**
+ * [#14314 — the `organizations.*` family, card 3 of 3 of #12104] The twenty
+ * ledger entries of the family: NINETEEN unannotated `return res.json()`
+ * members (organizations 11 · invitations 3 · teams 5) bound here, plus
+ * `invitations.resend`, which carries no annotation of its own and inherits
+ * `invite`'s — pinned below as closing for free, with no edit to its site.
+ *
+ * ## These shapes were read off the WIRE, not off better-auth's `.d.ts`
+ *
+ * Every route was driven against a real `AuthManager` (better-auth 1.7.2,
+ * organization plugin with teams enabled) over a real `SqlDriver`
+ * (better-sqlite3) and again through this very client with only the socket
+ * stood in for, plus an in-memory-engine leg for the absent-vs-null
+ * question. Four times the vendor's declaration was the wrong answer:
+ *
+ *  1. `delete`'s OpenAPI stub declares the deleted id as a STRING; the handler
+ *     answers the organization row.
+ *  2. `updateMemberRole`'s stub declares `{ member }`; the handler answers the
+ *     membership row bare.
+ *  3. `metadata` is decoded on `create` / `update` only; `setActive`, `get`
+ *     and `delete` answer the stored JSON TEXT — two types, not one.
+ *  4. `removeMember` joins `user` on only when the member was addressed by
+ *     email; the by-id path strips it — so `user?`.
+ *
+ * ## The ruling's ISO-8601 clause has sites on every row type here
+ *
+ * `createdAt` / `updatedAt` / `expiresAt` are the vendor's `Date` fields. On
+ * the wire they are ISO-8601 strings, and the pins hold them there: no
+ * `Date` is declared and no revival layer exists.
+ *
+ * ## Nothing in this family answers with a zero-byte body
+ *
+ * `setActive` and `get` can answer the 4-byte JSON `null` (an empty
+ * `organizationId` with no active organization to fall back to), which
+ * `res.json()` resolves — declared `| null`, never invented away.
+ *
+ * Type-level for the reason this file's header gives: only a compile-time
+ * assertion can observe a return-type change.
+ */
+export async function returnTypePrecisionPins14314(): Promise<void> {
+    // ── the nineteen bindings ────────────────────────────────────────────
+    expectTypeOf(await client.organizations.create({ name: 'n' })).toEqualTypeOf<OrganizationCreateResult>();
+    expectTypeOf(await client.organizations.update('o', { name: 'n' })).toEqualTypeOf<OrganizationEchoWire>();
+    expectTypeOf(await client.organizations.setActive('o')).toEqualTypeOf<OrganizationWire | null>();
+    expectTypeOf(await client.organizations.get('o')).toEqualTypeOf<OrganizationFullWire | null>();
+    expectTypeOf(await client.organizations.listMembers('o')).toEqualTypeOf<OrganizationMembersPage>();
+    expectTypeOf(await client.organizations.invite({ email: 'e@example.com' }))
+        .toEqualTypeOf<OrganizationInvitationWire<'pending'>>();
+    expectTypeOf(await client.organizations.leave('o')).toEqualTypeOf<OrganizationMemberWithUserWire>();
+    expectTypeOf(await client.organizations.delete('o')).toEqualTypeOf<OrganizationWire>();
+    expectTypeOf(await client.organizations.removeMember('o', { memberIdOrEmail: 'm' }))
+        .toEqualTypeOf<OrganizationRemoveMemberResult>();
+    expectTypeOf(await client.organizations.updateMemberRole('o', { memberId: 'm', role: 'admin' }))
+        .toEqualTypeOf<OrganizationMemberWire>();
+    expectTypeOf(await client.organizations.getActiveMember('o')).toEqualTypeOf<OrganizationMemberWithUserWire>();
+    expectTypeOf(await client.organizations.invitations.cancel('i'))
+        .toEqualTypeOf<OrganizationInvitationWire<'canceled'>>();
+    expectTypeOf(await client.organizations.invitations.accept('i')).toEqualTypeOf<OrganizationInvitationAcceptResult>();
+    expectTypeOf(await client.organizations.invitations.reject('i')).toEqualTypeOf<OrganizationInvitationRejectResult>();
+    expectTypeOf(await client.organizations.teams.create({ name: 't', organizationId: 'o' }))
+        .toEqualTypeOf<OrganizationTeamWire>();
+    expectTypeOf(await client.organizations.teams.update({ teamId: 't', data: { name: 'n' } }))
+        .toEqualTypeOf<OrganizationTeamWire>();
+    expectTypeOf(await client.organizations.teams.delete({ teamId: 't' })).toEqualTypeOf<OrganizationTeamRemovedReceipt>();
+    expectTypeOf(await client.organizations.teams.addMember({ teamId: 't', userId: 'u' }))
+        .toEqualTypeOf<OrganizationTeamMemberWire>();
+    expectTypeOf(await client.organizations.teams.removeMember({ teamId: 't', userId: 'u' }))
+        .toEqualTypeOf<OrganizationTeamMemberRemovedReceipt>();
+
+    // ── the twentieth entry closes for FREE ──────────────────────────────
+    // `resend` has no annotation of its own and delegates to `invite`; its
+    // ledger entry said binding `invite` closes it too. This equality is what
+    // makes that a measurement rather than a note: it holds only while the
+    // delegation is the return path and `invite` is bound.
+    expectTypeOf(await client.organizations.invitations.resend({ email: 'e@example.com', organizationId: 'o' }))
+        .toEqualTypeOf<OrganizationInvitationWire<'pending'>>();
+
+    // ── the ruling, made mechanical ──────────────────────────────────────
+    // ISO-8601 STRINGS on every row type of the family; red if a later sweep
+    // "improves" any of them to `Date` (forbidden outright) or to a number.
+    expectTypeOf((await client.organizations.delete('o')).createdAt).toEqualTypeOf<string>();
+    expectTypeOf((await client.organizations.invite({ email: 'e' })).expiresAt).toEqualTypeOf<string>();
+    expectTypeOf((await client.organizations.teams.update({ teamId: 't', data: {} })).updatedAt).toEqualTypeOf<string>();
+    expectTypeOf((await client.organizations.teams.addMember({ teamId: 't', userId: 'u' })).createdAt)
+        .toEqualTypeOf<string>();
+    expectTypeOf((await client.organizations.updateMemberRole('o', { memberId: 'm', role: 'r' })).createdAt)
+        .toEqualTypeOf<string>();
+    // The status literals the handlers pin, relayed from the spec vocabulary.
+    expectTypeOf((await client.organizations.invite({ email: 'e' })).status).toEqualTypeOf<'pending'>();
+    expectTypeOf((await client.organizations.invitations.cancel('i')).status).toEqualTypeOf<'canceled'>();
+    expectTypeOf((await client.organizations.invitations.accept('i')).invitation.status).toEqualTypeOf<'accepted'>();
+    expectTypeOf((await client.organizations.invitations.reject('i')).invitation.status).toEqualTypeOf<'rejected'>();
+    expectTypeOf((await client.organizations.invitations.reject('i')).member).toEqualTypeOf<null>();
+    // The two metadata shapes: decoded on the write echo, stored text on the read row.
+    expectTypeOf((await client.organizations.update('o', {})).metadata).toEqualTypeOf<Record<string, unknown> | undefined>();
+    expectTypeOf((await client.organizations.delete('o')).metadata).toEqualTypeOf<string | null | undefined>();
+    // `create.members` is the literal one-element tuple the handler answers.
+    expectTypeOf((await client.organizations.create({ name: 'n' })).members).toEqualTypeOf<[OrganizationMemberWire]>();
+    // `removeMember.member.user` is conditional on the by-email path.
+    expectTypeOf((await client.organizations.removeMember('o', { memberIdOrEmail: 'm' })).member.user)
+        .toEqualTypeOf<OrganizationMemberWithUserWire['user'] | undefined>();
+    // The receipts are literals: a refusal is a throw, never another message.
+    expectTypeOf((await client.organizations.teams.delete({ teamId: 't' })).message)
+        .toEqualTypeOf<'Team removed successfully.'>();
+
+    // ── direction 2: WRONG shapes must now be refused ────────────────────
+    // While these methods returned `any` every suppression below was unused
+    // (TS2578) and this file did not build — which is what makes them
+    // evidence of the narrowing rather than decoration.
+    // @ts-expect-error these routes are served BARE by better-auth — there is no `{ success, data }` envelope
+    void (await client.organizations.listMembers('o')).data;
+    // @ts-expect-error the wire sends an ISO string; `Date` methods do not exist on it
+    void (await client.organizations.leave('o')).createdAt.getTime();
+    // @ts-expect-error `sys_organization.updated_at` never reaches the wire — the adapter walks the vendor schema only
+    void (await client.organizations.delete('o')).updatedAt;
+    // @ts-expect-error delete answers the organization ROW, not the id string the vendor's OpenAPI stub declares
+    void (await client.organizations.delete('o')).length;
+    // @ts-expect-error updateMemberRole answers the member BARE, not `{ member }` as the vendor's stub declares
+    void (await client.organizations.updateMemberRole('o', { memberId: 'm', role: 'r' })).member;
+    // @ts-expect-error setActive can answer `null` (empty id, no active organization) — narrow before reading
+    void (await client.organizations.setActive('o')).id;
+    // @ts-expect-error on the read routes `metadata` is the stored JSON TEXT, not an object
+    void (await client.organizations.get('o'))?.metadata?.plan;
+    // @ts-expect-error on the write echo `metadata` is already decoded — it is not a string to parse
+    void JSON.parse((await client.organizations.update('o', {})).metadata);
+    // @ts-expect-error updateMemberRole strips the user join; only the joined routes carry `user`
+    void (await client.organizations.updateMemberRole('o', { memberId: 'm', role: 'r' })).user;
+}
+
 /**
  * ⚠️ GREEN IN BOTH STATES — regression guards, recorded as such rather than
  * counted as evidence that this card's change was needed. Each pins a
@@ -944,6 +1091,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins14312).toBe('function');
         expect(typeof returnTypePrecisionPins15451).toBe('function');
         expect(typeof returnTypePrecisionPins14313).toBe('function');
+        expect(typeof returnTypePrecisionPins14314).toBe('function');
         expect(typeof returnTypePrecisionPins13023).toBe('function');
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
         expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');

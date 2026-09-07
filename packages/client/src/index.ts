@@ -1164,6 +1164,241 @@ export interface AuthSetInitialPasswordResult {
     success: true;
 }
 
+/**
+ * The columns every organization answer of the `organizations.*` family
+ * carries — exactly better-auth's organization schema (`id`, `name`, `slug`,
+ * `logo`, `metadata`, `createdAt`), served BARE (no `{ success, data }`
+ * envelope). The adapter's output transform walks that schema and nothing
+ * else, so `sys_organization`'s `updated_at` and every other ObjectStack column
+ * stay off the wire — measured against a real server on a real SQL driver.
+ *
+ * ⚠️ **`createdAt` is an ISO-8601 string, never `Date`** (maintainer ruling on
+ * #12104): the adapter is declared `supportsDates: false`, better-auth revives
+ * the stored string into a `Date` server-side, and `JSON.stringify` puts an
+ * ISO string back on the wire — measured `"createdAt":"2026-09-07T09:27:01.545Z"`.
+ * There is no revival layer in this SDK; `new Date(x)` is the caller's step.
+ *
+ * ⚠️ **`metadata` arrives as the stored JSON TEXT, not an object**, on every
+ * route that reads the row back (`setActive`, `get`, `delete`, `list`): better-auth
+ * stores it `JSON.stringify`-ed in a text column and only the two write routes
+ * decode it — see {@link OrganizationEchoWire}. `JSON.parse(metadata)` is the
+ * caller's step here. `null` (SQL) or absent (a store that does not
+ * materialise an unset column) when never set; same for `logo`.
+ *
+ * `@objectstack/spec/identity`'s `Organization` is NOT relayed: it declares
+ * `updatedAt` required and `metadata` as an object, and neither is what this
+ * wire carries.
+ */
+export interface OrganizationWire {
+    id: string;
+    name: string;
+    slug: string;
+    /** `null` (SQL) or absent (document store) when unset. */
+    logo?: string | null;
+    /** ISO-8601. */
+    createdAt: string;
+    /** The stored JSON text (`'{"plan":"pro"}'`), undecoded; `null`/absent when unset. */
+    metadata?: string | null;
+}
+
+/**
+ * The organization as the two WRITE routes echo it back — `create` and
+ * `update` — which are the only two that decode `metadata` before answering
+ * (`JSON.parse` in the create handler, `parseJSON` in the update adapter).
+ * An unset `metadata` is ABSENT here (the handlers fold it to `undefined`),
+ * never `null`. Every other column is {@link OrganizationWire}'s.
+ */
+export interface OrganizationEchoWire extends Omit<OrganizationWire, 'metadata'> {
+    /** Decoded object; absent when unset. */
+    metadata?: Record<string, unknown>;
+}
+
+/**
+ * A membership row as better-auth serves it — its own member schema, nothing
+ * of ObjectStack's `sys_member` beyond it (no `updatedAt`). `role` is one of
+ * the closed ADR-0108 vocabulary (`owner` / `admin` / `delegated_admin` /
+ * `member`), typed `string` because the wire mirrors the vendor's column, not
+ * because the set is open; the platform refuses a multi-role
+ * (`'admin,member'`) at the door with `400 VALIDATION_FAILED`.
+ *
+ * `@objectstack/spec/identity`'s `Member` is not relayed: it declares
+ * `updatedAt` required and the wire never carries it.
+ */
+export interface OrganizationMemberWire {
+    id: string;
+    organizationId: string;
+    userId: string;
+    role: string;
+    /** ISO-8601. */
+    createdAt: string;
+}
+
+/**
+ * The four-column user projection better-auth hand-picks onto a member on the
+ * routes that join the user (`listMembers`, `get`, `getActiveMember`, `leave`,
+ * `removeMember` by email) — exactly these four, never the full user.
+ */
+export interface OrganizationMemberUserWire {
+    id: string;
+    name: string;
+    email: string;
+    /** `null` (SQL) or absent (document store) when unset. */
+    image?: string | null;
+}
+
+/** A membership row with its user joined on. */
+export interface OrganizationMemberWithUserWire extends OrganizationMemberWire {
+    user: OrganizationMemberUserWire;
+}
+
+/**
+ * What `POST /organization/create` answers: the new organization (metadata
+ * decoded) plus `members`, which is ALWAYS exactly one row — the creator's
+ * `owner` membership (the handler answers the literal `[member]`). The default
+ * team the server also mints (teams are enabled on this platform) is NOT
+ * echoed; read it through `get`.
+ */
+export interface OrganizationCreateResult extends OrganizationEchoWire {
+    members: [OrganizationMemberWire];
+}
+
+/**
+ * The team row as better-auth serves it from `teams.create` / `teams.update`.
+ * `updatedAt` is on the wire from both, for two different reasons: the
+ * `create-team` handler writes `updatedAt: new Date()` itself, while the
+ * `update-team` handler writes NO timestamp of its own (its update is
+ * `{ name, ...additionalFields }`) — the value comes from better-auth's team
+ * schema, which declares `updatedAt` with an `onUpdate` default the adapter
+ * applies on every update of the model, with the platform's own audit stamping
+ * of `sys_team.updated_at` behind it. Measured: `update-team` on the default
+ * team (which the vendor creates without `updatedAt`) answered a fresh
+ * `updatedAt` on a real SQL driver and on an engine with no platform stamping
+ * in the loop at all. The vendor's `memberCount` column is stripped on these
+ * routes — but NOT inside `get`, see {@link OrganizationFullTeamWire}.
+ */
+export interface OrganizationTeamWire {
+    id: string;
+    name: string;
+    organizationId: string;
+    /** ISO-8601. */
+    createdAt: string;
+    /** ISO-8601. */
+    updatedAt: string;
+}
+
+/**
+ * The team rows inside `get(...).teams`. Two differences from
+ * {@link OrganizationTeamWire}: the full-organization join does not strip the
+ * vendor's `memberCount` (measured), and the default team minted at
+ * organization creation is written without `updatedAt` by the vendor, so on
+ * this row the value is the platform's own `sys_team.updated_at` stamp rather
+ * than better-auth's (measured at rest on a real SQL driver before any
+ * update). `updatedAt` is optional here as the safe direction for a store
+ * without that stamping; the only place it was observed absent was a
+ * hand-rolled test fake, never a real driver.
+ */
+export interface OrganizationFullTeamWire extends Omit<OrganizationTeamWire, 'updatedAt'> {
+    /** ISO-8601 when present. */
+    updatedAt?: string;
+    memberCount: number;
+}
+
+/**
+ * An invitation row as better-auth serves it: its invitation schema plus the
+ * two `additionalFields` ObjectStack declares on it (`businessUnitId`,
+ * `positions` — the ADR-0105 D8 placement intent), which arrive `null` on
+ * SQL and absent on a document store when unset. No `updatedAt`, so
+ * `@objectstack/spec/identity`'s `Invitation` is not relayed; its
+ * {@link InvitationStatus} vocabulary is (#7781), narrowed per route by the
+ * `Status` parameter where the handler pins it.
+ *
+ * `teamId` is the comma-joined list of team ids the invitee joins on accept,
+ * `null` when none (the handler writes the `null` explicitly).
+ */
+export interface OrganizationInvitationWire<Status extends InvitationStatus = InvitationStatus> {
+    id: string;
+    organizationId: string;
+    email: string;
+    role: string;
+    status: Status;
+    teamId: string | null;
+    inviterId: string;
+    /** ISO-8601. */
+    expiresAt: string;
+    /** ISO-8601. */
+    createdAt: string;
+    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+    businessUnitId?: string | null;
+    /** ADR-0105 D8 placement: `null` (SQL) or absent when the invitation carries none. */
+    positions?: string[] | null;
+}
+
+/** What `POST /organization/accept-invitation` answers. */
+export interface OrganizationInvitationAcceptResult {
+    invitation: OrganizationInvitationWire<'accepted'>;
+    /** The membership just created for the caller — bare, no `user` joined. */
+    member: OrganizationMemberWire;
+}
+
+/**
+ * What `POST /organization/reject-invitation` answers. `member` is the
+ * literal `null` — the vendor keeps the key for symmetry with accept.
+ */
+export interface OrganizationInvitationRejectResult {
+    invitation: OrganizationInvitationWire<'rejected'>;
+    member: null;
+}
+
+/** What `GET /organization/list-members` answers. */
+export interface OrganizationMembersPage {
+    members: OrganizationMemberWithUserWire[];
+    /** Total members in the organization, independent of the page. */
+    total: number;
+}
+
+/**
+ * What `POST /organization/remove-member` answers. ⚠️ `user` is on the wire
+ * ONLY when the member was addressed by EMAIL: that path answers the
+ * user-joined row, while the by-id path explicitly strips the join before
+ * answering (measured both ways). The vendor's OpenAPI stub omits `user`
+ * entirely.
+ */
+export interface OrganizationRemoveMemberResult {
+    member: OrganizationMemberWire & { user?: OrganizationMemberUserWire };
+}
+
+/**
+ * What `GET /organization/get-full-organization` answers: the row (metadata
+ * as stored JSON text, see {@link OrganizationWire}) plus every invitation of
+ * any status, every member with its user joined, and — because this platform
+ * mounts the organization plugin with `teams: { enabled: true }`
+ * unconditionally — the organization's teams.
+ */
+export interface OrganizationFullWire extends OrganizationWire {
+    invitations: OrganizationInvitationWire[];
+    members: OrganizationMemberWithUserWire[];
+    teams: OrganizationFullTeamWire[];
+}
+
+/** A team membership row as `teams.addMember` answers it (idempotent: re-adding answers the same row). */
+export interface OrganizationTeamMemberWire {
+    id: string;
+    teamId: string;
+    userId: string;
+    /** ISO-8601. */
+    createdAt: string;
+}
+
+/** The literal receipt `POST /organization/remove-team` answers; a refusal is a thrown 4xx. */
+export interface OrganizationTeamRemovedReceipt {
+    message: 'Team removed successfully.';
+}
+
+/** The literal receipt `POST /organization/remove-team-member` answers; a refusal is a thrown 4xx. */
+export interface OrganizationTeamMemberRemovedReceipt {
+    message: 'Team member removed successfully.';
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -2915,8 +3150,12 @@ export class ObjectStackClient {
     /**
      * Create a new organization.
      * POST /api/v1/auth/organization/create
+     *
+     * Answers the new organization with `metadata` DECODED (one of the two
+     * routes that does) and `members` holding exactly the creator's `owner`
+     * row — measured; the vendor's OpenAPI stub names the bare Organization.
      */
-    create: async (req: { name: string; slug?: string; logo?: string; metadata?: Record<string, unknown> }) => {
+    create: async (req: { name: string; slug?: string; logo?: string; metadata?: Record<string, unknown> }): Promise<OrganizationCreateResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/create`, {
         method: 'POST',
@@ -2935,7 +3174,7 @@ export class ObjectStackClient {
     update: async (
       organizationId: string,
       data: { name?: string; slug?: string; logo?: string; metadata?: Record<string, unknown> },
-    ) => {
+    ): Promise<OrganizationEchoWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/update`, {
         method: 'POST',
@@ -2950,8 +3189,13 @@ export class ObjectStackClient {
      * handlers (e.g. `EnvironmentProvisioningService`) consult.
      *
      * POST /api/v1/auth/organization/set-active
+     *
+     * Answers the organization row as STORED (`metadata` is the JSON text,
+     * see {@link OrganizationWire}). Answers `null` — measured, a 4-byte body
+     * — when `organizationId` is the empty string and the session has no
+     * active organization to fall back to; a non-member is a thrown 403.
      */
-    setActive: async (organizationId: string) => {
+    setActive: async (organizationId: string): Promise<OrganizationWire | null> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/set-active`, {
         method: 'POST',
@@ -2963,8 +3207,12 @@ export class ObjectStackClient {
     /**
      * Get full organization detail (members, invitations, teams).
      * GET /api/v1/auth/organization/get-full-organization?organizationId=...
+     *
+     * `metadata` is the stored JSON text here (see {@link OrganizationWire}).
+     * Answers `null` (measured) when `organizationId` is the empty string and
+     * the session has no active organization; an unknown id is a thrown 400.
      */
-    get: async (organizationId: string) => {
+    get: async (organizationId: string): Promise<OrganizationFullWire | null> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/get-full-organization?organizationId=${encodeURIComponent(organizationId)}`,
@@ -2975,7 +3223,7 @@ export class ObjectStackClient {
     /**
      * List members of an organization.
      */
-    listMembers: async (organizationId: string) => {
+    listMembers: async (organizationId: string): Promise<OrganizationMembersPage> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/list-members?organizationId=${encodeURIComponent(organizationId)}`,
@@ -2986,7 +3234,7 @@ export class ObjectStackClient {
     /**
      * Invite a user to the organization.
      */
-    invite: async (req: { email: string; role?: string; organizationId?: string }) => {
+    invite: async (req: { email: string; role?: string; organizationId?: string }): Promise<OrganizationInvitationWire<'pending'>> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/invite-member`, {
         method: 'POST',
@@ -2998,7 +3246,7 @@ export class ObjectStackClient {
     /**
      * Leave the given organization.
      */
-    leave: async (organizationId: string) => {
+    leave: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/leave`, {
         method: 'POST',
@@ -3012,11 +3260,14 @@ export class ObjectStackClient {
      *
      * POST /api/v1/auth/organization/delete
      *
+     * Answers the deleted organization's row as it was stored (measured) —
+     * NOT the bare id string the vendor's OpenAPI stub declares.
+     *
      * better-auth removes the organization row, all members, and all
      * pending invitations. Project teardown (per-project DBs, etc.) is
      * handled server-side by hooks attached to the organization plugin.
      */
-    delete: async (organizationId: string) => {
+    delete: async (organizationId: string): Promise<OrganizationWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/delete`, {
         method: 'POST',
@@ -3036,7 +3287,7 @@ export class ObjectStackClient {
     removeMember: async (
       organizationId: string,
       params: { memberIdOrEmail: string },
-    ) => {
+    ): Promise<OrganizationRemoveMemberResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/remove-member`, {
         method: 'POST',
@@ -3052,11 +3303,14 @@ export class ObjectStackClient {
      * Body: `{ memberId, role, organizationId? }`. The `memberId` is the
      * `member` table row id (not user id). `role` is one of the configured
      * organisation roles (default: `owner | admin | member`).
+     *
+     * Answers the updated membership row BARE (measured) — not wrapped in
+     * `{ member }` as the vendor's OpenAPI stub declares, and without `user`.
      */
     updateMemberRole: async (
       organizationId: string,
       params: { memberId: string; role: string },
-    ) => {
+    ): Promise<OrganizationMemberWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/organization/update-member-role`, {
         method: 'POST',
@@ -3066,13 +3320,20 @@ export class ObjectStackClient {
     },
 
     /**
-     * Look up the calling user's membership row in the given organisation.
+     * Look up the calling user's membership row in the ACTIVE organisation.
      * Useful for permission checks on the client without having to scan the
      * full member list.
      *
      * better-auth: GET /organization/get-active-member?organizationId=…
+     *
+     * ⚠️ The server reads only the session's `activeOrganizationId` and
+     * ignores the `organizationId` query this method sends (measured: a query
+     * naming another organization answered the active one's row). Call
+     * `setActive` first if the organisation you mean is not the active one;
+     * with no active organisation the route is a thrown 400
+     * `NO_ACTIVE_ORGANIZATION`.
      */
-    getActiveMember: async (organizationId: string) => {
+    getActiveMember: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(
         `${this.baseUrl}${route}/organization/get-active-member?organizationId=${encodeURIComponent(organizationId)}`,
@@ -3144,7 +3405,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/cancel-invitation */
-      cancel: async (invitationId: string) => {
+      cancel: async (invitationId: string): Promise<OrganizationInvitationWire<'canceled'>> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/cancel-invitation`, {
           method: 'POST',
@@ -3154,7 +3415,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/accept-invitation */
-      accept: async (invitationId: string) => {
+      accept: async (invitationId: string): Promise<OrganizationInvitationAcceptResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/accept-invitation`, {
           method: 'POST',
@@ -3164,7 +3425,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/reject-invitation */
-      reject: async (invitationId: string) => {
+      reject: async (invitationId: string): Promise<OrganizationInvitationRejectResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/reject-invitation`, {
           method: 'POST',
@@ -3220,7 +3481,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/create-team */
-      create: async (req: { name: string; organizationId: string }) => {
+      create: async (req: { name: string; organizationId: string }): Promise<OrganizationTeamWire> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/create-team`, {
           method: 'POST',
@@ -3230,7 +3491,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/update-team */
-      update: async (params: { teamId: string; data: { name?: string } }) => {
+      update: async (params: { teamId: string; data: { name?: string } }): Promise<OrganizationTeamWire> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/update-team`, {
           method: 'POST',
@@ -3240,7 +3501,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/remove-team */
-      delete: async (params: { teamId: string; organizationId?: string }) => {
+      delete: async (params: { teamId: string; organizationId?: string }): Promise<OrganizationTeamRemovedReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/remove-team`, {
           method: 'POST',
@@ -3261,7 +3522,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/add-team-member */
-      addMember: async (params: { teamId: string; userId: string }) => {
+      addMember: async (params: { teamId: string; userId: string }): Promise<OrganizationTeamMemberWire> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/add-team-member`, {
           method: 'POST',
@@ -3271,7 +3532,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /organization/remove-team-member */
-      removeMember: async (params: { teamId: string; userId: string }) => {
+      removeMember: async (params: { teamId: string; userId: string }): Promise<OrganizationTeamMemberRemovedReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/organization/remove-team-member`, {
           method: 'POST',
