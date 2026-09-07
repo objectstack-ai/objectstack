@@ -35,29 +35,45 @@ function keyOf(w: Record<string, unknown>) {
 }
 
 function makeStubEngine() {
-    const rows = new Map<string, Row>();
+    // ⚠️ Keyed BY TABLE, and that is a correctness property of this harness
+    // rather than tidiness. One flat row map answers a read of `sys_metadata`
+    // with rows the protocol wrote to `sys_metadata_history` and
+    // `sys_metadata_commit`: a DRAFT save appends a history row carrying no
+    // `state`, the declared `defaultValue: 'active'` modelled below fills it
+    // in, and the draft comes back as an ACTIVE metadata row. Measured in
+    // #16223, where one assertion's polarity was the only thing that caught it.
+    const tables = new Map<string, Map<string, Row>>();
+    const tableOf = (table: string): Map<string, Row> => {
+        const existing = tables.get(table);
+        if (existing) return existing;
+        const created = new Map<string, Row>();
+        tables.set(table, created);
+        return created;
+    };
+    /** The store table these tests assert on; the journals get their own. */
+    const rows = tableOf('sys_metadata');
     let nextId = 0;
-    const findRow = (w: Record<string, unknown>): { key: string; row: Row } | null => {
+    const findRow = (table: string, w: Record<string, unknown>): { key: string; row: Row } | null => {
         if (w.id !== undefined) {
-            for (const [k, r] of rows) if (r.id === w.id) return { key: k, row: r };
+            for (const [k, r] of tableOf(table)) if (r.id === w.id) return { key: k, row: r };
             return null;
         }
         const k = keyOf(w);
-        const r = rows.get(k);
+        const r = tableOf(table).get(k);
         return r ? { key: k, row: r } : null;
     };
     const engine: any = {
-        async findOne(_t: string, opts: { where: Record<string, unknown> }) {
+        async findOne(table: string, opts: { where: Record<string, unknown> }) {
             // [#11957] Pinned to ObjectQL.findOne's OWN #4419 predicate: `findOne`
             // applies limit: 1, so a query naming no record returns an ARBITRARY row
             // and the engine REFUSES it. A double that answers it anyway is how
             // #11767 shipped a bootstrap bypass that was inert on every real
             // deployment while a 641-line unit matrix stayed green.
-            assertEngineFindOnePredicate(_t, opts);
-            return findRow(opts.where)?.row ?? null;
+            assertEngineFindOnePredicate(table, opts);
+            return findRow(table, opts.where)?.row ?? null;
         },
-        async find(_t: string, opts: { where: Record<string, unknown> }) {
-            return Array.from(rows.values()).filter((r) => {
+        async find(table: string, opts: { where: Record<string, unknown> }) {
+            return Array.from(tableOf(table).values()).filter((r) => {
                 if (opts.where.type && r.type !== opts.where.type) return false;
                 if (opts.where.organization_id !== undefined
                     && r.organization_id !== opts.where.organization_id) return false;
@@ -65,32 +81,31 @@ function makeStubEngine() {
                 return true;
             });
         },
-        async insert(_t: string, data: Record<string, unknown>) {
-            if (_t === 'sys_metadata_audit') return { id: 'audit_skip' };
+        async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;
-            rows.set(keyOf(data), row);
+            tableOf(table).set(keyOf(data), row);
             return { id: row.id };
         },
-        async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+        async update(table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             // [#5480] Pinned to ObjectQL.update's OWN dispatch predicate, the
             // twin of the delete pin below and on the same argument: this file
             // could bind one write verb to the producer and not the other only
             // because `update` had no shared predicate to bind to.
             assertEngineUpdateDispatch(data, opts);
-            const found = findRow(opts.where);
+            const found = findRow(table, opts.where);
             if (!found) return { id: null };
-            rows.set(found.key, { ...found.row, ...(data as any) });
+            tableOf(table).set(found.key, { ...found.row, ...(data as any) });
             return { id: found.row.id };
         },
-        async delete(_t: string, opts: { where: Record<string, unknown> }) {
+        async delete(table: string, opts: { where: Record<string, unknown> }) {
             // [#4550] Pinned to ObjectQL.delete's OWN dispatch predicate. A double
             // looser than the engine it stands in for is how #4434 shipped a REST
             // route that answered 500 to every caller with its suite green.
             assertEngineDeleteDispatch(opts);
-            const found = findRow(opts.where);
+            const found = findRow(table, opts.where);
             if (!found) return { deleted: 0 };
-            rows.delete(found.key);
+            tableOf(table).delete(found.key);
             return { deleted: 1 };
         },
         registry: {
@@ -98,7 +113,7 @@ function makeStubEngine() {
             registerObject: () => {},
         },
     };
-    return { engine, rows };
+    return { engine, rows, tableOf };
 }
 
 describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
@@ -390,5 +405,70 @@ describe('saveMetaItem — repository write path (post PR-10d.6)', () => {
         const create = inserts.find((d) => d.type === 'view' && d.name === 'case_grid');
         expect(create).toBeTruthy();
         expect(create!.package_id).toBe('app.objectstack.hotcrm');
+    });
+});
+
+// -----------------------------------------------------------------------------
+// #16225 — the stub answers the table it was asked about, and only that one
+// -----------------------------------------------------------------------------
+//
+// The objectql half of the pin that makes the table-keying above a MEASUREMENT
+// and not a rename: every other test in this file passes identically with the
+// maps merged back into one, because none of them reads `sys_metadata` as a
+// table. One `saveMetaItem` writes `sys_metadata`, `sys_metadata_history` and
+// `sys_metadata_audit`, all three addressed to the same `(type, name)`, and the
+// two journal rows carry no `state` of their own — so a flat map serves them
+// back to a `sys_metadata` read as rows of the store (#16223).
+describe('#16225 a `sys_metadata` read is not answered from the journal tables', () => {
+    it('serves the store row only, never the history/audit rows the same save wrote', async () => {
+        const { engine, tableOf } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const result = await protocol.saveMetaItem({
+            type: 'view',
+            name: 'case_grid',
+            organizationId: 'org_alpha',
+            item: {
+                name: 'case_grid', type: 'grid', label: 'Cases',
+                columns: ['id', 'title'], object: 'case', viewKind: 'list',
+            },
+        });
+        expect(result.success).toBe(true);
+
+        const journal = [
+            ...tableOf('sys_metadata_history').values(),
+            ...tableOf('sys_metadata_commit').values(),
+            ...tableOf('sys_metadata_audit').values(),
+        ] as Partial<Row>[];
+
+        // The firing control. Without it a green here would be consistent with
+        // this save having stopped writing the journals altogether, which
+        // measures nothing about which table answered the read below.
+        expect(
+            journal.length,
+            'the firing control: one save must WRITE the journal tables, or the read below '
+            + 'proves nothing about which table answered it',
+        ).toBeGreaterThan(0);
+
+        // ── The pin ──────────────────────────────────────────────────────
+        // Asserted on STORE-ONLY columns rather than on the row count. A
+        // journal row is addressed to the same `(type, name, organization_id)`
+        // as the store row, which is this file's whole `keyOf`, so under a
+        // merged map the audit row simply OVERWRITES the store row and a
+        // count- or name-based assertion still reads one row called
+        // `case_grid`. `checksum` and `state` are written by the store leg
+        // alone; a journal row carries neither.
+        const stored = await engine.find('sys_metadata', {
+            where: { type: 'view', organization_id: 'org_alpha' },
+        });
+        expect(
+            stored.map((r: Row) => r.name),
+            'a `sys_metadata` read must answer with the store row and nothing else',
+        ).toEqual(['case_grid']);
+        expect(
+            stored.map((r: Row) => [typeof r.checksum, r.state]),
+            'and the row it answers with must be a STORE row, not a journal row wearing '
+            + 'the same `(type, name, organization_id)`',
+        ).toEqual([['string', 'active']]);
     });
 });
