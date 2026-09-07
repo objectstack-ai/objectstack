@@ -1,0 +1,529 @@
+name: Nightly Tiers
+
+# The `e2e` and `live` test tiers, run nightly on `main` (#16455).
+#
+# Maintainer direction (2026-09-07, verbatim): 「我想的是测试会不会太多，是否都是
+# 必要的，是不是应该砍，每次修改都要完整的测试吗」. The two tiers leave the per-PR
+# and merge-queue runs (ci.yml's Test Core now runs under `OS_TEST_TIERS=queue`)
+# and run here, under `OS_TEST_TIERS=nightly`, selected by their EXISTING
+# filename tiers only — `*.e2e.test.*` and `*.live.test.*` — with no test file
+# renamed, deleted or edited to move it. `scripts/nightly-tiers.mjs` is the one
+# reader of the switch; its header carries the contract, the measured
+# population and the reason it is one module rather than a line per config.
+#
+# ## Shape
+#
+# `coverage-nightly.yml`'s: `schedule` + `workflow_dispatch`, node 22, pnpm,
+# RESTORE-ONLY caches (a scheduled run reads main's pnpm store and Build Core's
+# turbo seeds; the per-push workflows own saving them, and a nightly that saved
+# would churn the rationed 10 GB pool the way PR-side saves once did — see
+# ci.yml's "Restore Turbo cache"). The turbo cache restore is what keeps the
+# dependency closure's `build` tasks a replay: `OS_TEST_TIERS` is hashed into
+# the `test` tasks ONLY (turbo.json), so the builds hit main's entries while
+# every test task misses by construction and runs for real.
+#
+# ## Sharding — TWO shards, derived rather than picked
+#
+# The package set is not the workspace: `scripts/nightly-tiers.mjs --packages`
+# enumerates exactly the packages that own a tier file, in the `turbo ls`
+# document shape, and `scripts/partition-test-shards.mjs` splits THAT with the
+# same measured weights, the same LPT placement and the same
+# `<pkg> k/n` slice grammar Test Core uses. Measured at 6eba38f5a3: one
+# package, `@objectstack/cli`, owning all 60 tier files; its whole suite was
+# 1231s on a hosted runner (run 34009395649) and the e2e tier is ~75% of it
+# (packages/cli/vitest.config.ts, the priced trade), so ≈ 15 min of tests plus
+# ~5 min of restore/install per runner. Under 60 minutes on ONE shard already —
+# but `FILE_SHARDED_PACKAGES` cuts the CLI into two vitest slices, and the
+# partitioner REFUSES to place two slices of one package in one bin
+# (`assertSlicesSpread`), so one shard is not a legal count and two is the
+# smallest one that is. Each shard then carries one slice, ≈ 8 min of tests.
+# Raise the matrix (three places below: `matrix.shard`, the job `name:`, and
+# `--shard k/N`) only when a second tier-owning package arrives heavy enough
+# for the partitioner's own balance line to say so.
+#
+# ## What lands where — the house idiom of `platform-checklist-watchdog.yml`
+#
+# On green this workflow files nothing, edits nothing and closes nothing. On
+# red the `report` job — ONE writer, after both shards, never the shards
+# themselves (two matrix legs racing the same lookup would mint two cards) —
+# opens or refreshes ONE card: fixed title `nightly-tiers: red on main`, labels
+# `bug` · `domain:devx` · `priority:p1` on create only (grading is the devx
+# seat's and a refresh must not undo it), body carrying the run link and the
+# failing files, de-duplicated by scanning OPEN issues for that exact title
+# prefix through the repo-scoped REST API with this workflow's own token. A
+# CLOSED card is not reopened: red again after it was answered is a regression,
+# filed fresh.
+#
+# The body marker is plain text, ⛔ never an HTML comment: this platform's body
+# sanitizer is measured to eat short angle-bracket fragments, and a de-dup key
+# that can be swallowed files a duplicate a day. The failing files come from
+# vitest's own JSON reporter (`--reporter=json`, written per package, collected
+# per shard, read by `scripts/nightly-tiers.mjs --failing-files`), never from a
+# regex over the log — the log is presentation, the report is the contract.
+#
+# ⛔ A run on any ref but `main` NEVER writes to the board — a
+# `workflow_dispatch` on a branch proves the transport, the sharding and the
+# rendering on a real runner and publishes the would-be card to the run
+# summary instead. That is how the card that landed this was smoke-tested.
+#
+# ⛔ This job is NOT a required context and must never become one: it runs on
+# no pull request at all, so a ruleset naming it would block every PR forever
+# on a check that cannot report.
+
+on:
+  schedule:
+    # Nightly. The minute is offset off the top of the hour ON PURPOSE (scheduled
+    # workflows queue behind everyone else's `:00` cron) and off every sibling
+    # patrol's minute, so two of them never contend for the same runner minute;
+    # 05:29 sits after `rerun-safety-nightly` (04:00) and `coverage-nightly`
+    # (05:00) have started and well before `showcase-smoke` (07:00).
+    - cron: '29 5 * * *'
+  workflow_dispatch: {}
+
+# Least privilege. The shards read the repo and publish artifacts of their own
+# run; the report job writes issues and nothing else — no label on anybody's
+# PR, no state, no comment stream.
+permissions:
+  contents: read
+  issues: write
+
+# One nightly at a time. A dispatch overlapping the schedule would have two
+# `report` jobs racing the same lookup, and the loser would mint a duplicate.
+concurrency:
+  group: test-nightly-tiers
+  cancel-in-progress: false
+
+env:
+  # The card's IDENTITY — the title prefix the de-dup scan keys on, and the
+  # plain-text body marker that is its second way in. Single-sourced here so
+  # the report step and a reader of this file see the same strings.
+  CARD_TITLE: 'nightly-tiers: red on main'
+  CARD_MARKER: os-nightly-tiers
+  # Applied on CREATE only, additively; never rewritten on a refresh.
+  CARD_LABELS: 'bug,domain:devx,priority:p1'
+
+jobs:
+  tiers:
+    name: Nightly tiers (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    # Generous against the ≈ 13 min a shard is expected to take, and still
+    # inside the hour the card set as the whole run's bound. A shard killed here
+    # produces no vitest report; the report job says so rather than reading it
+    # as "no failing files".
+    timeout-minutes: 45
+    strategy:
+      # Both shards run to completion: the card should carry every failing
+      # file, not the first shard's.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Kept as this job's own step rather than folded into the composite
+      # below: `scripts/check-node-version.mjs` scans `.github/workflows/*.yml`
+      # only and reports how many setup-node steps it audited, so a step moved
+      # out of sight would silently shrink its census.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only: scheduled runs read main's store cache; the per-push
+      # workflows own saving it.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      # Restore-only, from Build Core's namespace: that job builds the whole
+      # workspace on every main push, so its entries replay every `build` task
+      # this run depends on. The `test` tasks cannot replay from it — their
+      # hash carries `OS_TEST_TIERS`, which no push run has ever set to
+      # `nightly` — which is the property that makes a nightly a test run and
+      # not a cache read.
+      - name: Restore Turbo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-build-core-${{ github.ref_name }}-
+            ${{ runner.os }}-turbo-build-core-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Two readings before a single test runs, both loud on failure:
+      #
+      #   --check   every tier-owning package honours the switch, judged by what
+      #             vitest COLLECTS under each setting (a package that adopted a
+      #             tier without reading the switch would otherwise run its whole
+      #             suite here under the nightly's name, and its tier files in the
+      #             merge queue — both silently);
+      #   --packages the tier-owning packages, in the `turbo ls` document shape
+      #             the partitioner reads, so this run shards exactly them.
+      #
+      # An EMPTY shard short-circuits the test step: `turbo run test` with zero
+      # --filter args runs the entire workspace.
+      - name: Compute this shard's package set
+        run: |
+          node scripts/nightly-tiers.mjs --self-test
+          node scripts/nightly-tiers.mjs --check
+          node scripts/nightly-tiers.mjs --packages > "$RUNNER_TEMP/tier-packages.json"
+          node scripts/partition-test-shards.mjs "$RUNNER_TEMP/tier-packages.json" \
+            --shard ${{ matrix.shard }}/2 \
+            > "$RUNNER_TEMP/shard-packages.txt"
+          echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
+          cat "$RUNNER_TEMP/shard-packages.txt"
+
+      # The same leg loop as ci.yml's "Run this shard's tests", under the
+      # nightly setting, with vitest's JSON reporter added beside the default
+      # one: `--outputFile.json` is RELATIVE so each package writes its own
+      # report under its own root (an absolute path would make a second
+      # tier-owning package overwrite the first's), and the default reporter
+      # stays so the stall guard still sees output flush.
+      #
+      # `--log-order=stream` is MANDATORY under the guard and `--concurrency=4`
+      # matches the hosted runner's cores — both reasons are in ci.yml beside
+      # the step this mirrors; NODE_OPTIONS arms the stall guard's SIGUSR2
+      # diagnostic reports the same way.
+      #
+      # ⛔ A failing leg STOPS the remaining ones, as in ci.yml: a second full
+      # leg on a job that is already red only risks turning an informative red
+      # into a killed job with no report at all.
+      - name: Run this shard's nightly tiers
+        env:
+          OS_TEST_TIERS: nightly
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+        run: |
+          if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
+            echo "No packages on this shard — nothing to test."
+            exit 0
+          fi
+          export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+
+          FILTERS=""
+          SLICES=""
+          while read -r PKG SLICE; do
+            [ -n "$PKG" ] || continue
+            if [ -n "$SLICE" ]; then
+              SLICES="$SLICES $PKG=$SLICE"
+            else
+              FILTERS="$FILTERS --filter=$PKG"
+            fi
+          done < "$RUNNER_TEMP/shard-packages.txt"
+
+          REPORTER="--reporter=default --reporter=json --outputFile.json=.nightly-tiers/vitest-report.json"
+          STATUS=0
+          LOGS=""
+          for LEG in __whole__ $SLICES; do
+            if [ "$LEG" = __whole__ ]; then
+              [ -n "$FILTERS" ] || continue
+              LOG="$RUNNER_TEMP/nightly-tiers-packages.log"
+              set -- pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream -- $REPORTER
+            else
+              PKG="${LEG%%=*}"
+              SLICE="${LEG#*=}"
+              LOG="$RUNNER_TEMP/nightly-tiers-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE" $REPORTER
+            fi
+            LOGS="$LOGS $LOG"
+            node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
+              --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
+          done
+
+          : > "$RUNNER_TEMP/nightly-tiers.log"
+          for LOG in $LOGS; do
+            if [ -f "$LOG" ]; then
+              cat "$LOG" >> "$RUNNER_TEMP/nightly-tiers.log"
+            fi
+          done
+          exit $STATUS
+
+      # Gather what the report job needs, red or green: every package's vitest
+      # JSON report (named by the package directory so two packages never
+      # collide in the merged download) and the tail of this shard's log.
+      # `if: always()` — a red shard is exactly when this earns its keep.
+      - name: Collect this shard's reports
+        if: always()
+        run: |
+          OUT="$RUNNER_TEMP/nightly-reports/shard-${{ matrix.shard }}"
+          mkdir -p "$OUT"
+          find . -path '*/node_modules' -prune -o -path '*/.nightly-tiers/vitest-report.json' -print \
+            | while read -r REPORT; do
+                PKG_DIR="$(dirname "$(dirname "$REPORT")")"
+                cp "$REPORT" "$OUT/$(printf '%s' "$PKG_DIR" | sed 's#^\./##' | tr -c 'A-Za-z0-9' '-').json"
+              done
+          if [ -f "$RUNNER_TEMP/nightly-tiers.log" ]; then
+            tail -n 200 "$RUNNER_TEMP/nightly-tiers.log" > "$OUT/log-tail.txt"
+          fi
+          echo "collected:"
+          ls -la "$OUT"
+
+      - name: Publish this shard's reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-tiers-reports-${{ matrix.shard }}-of-2
+          path: ${{ runner.temp }}/nightly-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The same two questions ci.yml's guard answers about a red suite — was
+      # every test vitest COUNTED actually run, and did every scheduled package
+      # report at all — asked of this shard's log against this shard's schedule.
+      - name: Test completeness guard
+        if: always()
+        run: |
+          if [ ! -f "$RUNNER_TEMP/nightly-tiers.log" ]; then
+            echo "No test log — the test step did not get far enough to produce one."
+            exit 0
+          fi
+          node scripts/check-test-completeness.mjs "$RUNNER_TEMP/nightly-tiers.log" \
+            --scheduled "$RUNNER_TEMP/shard-packages.txt" \
+            --package-list "$RUNNER_TEMP/tier-packages.json"
+
+      - name: Upload stall diagnostic reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stall-reports-nightly-tiers-${{ matrix.shard }}
+          path: ${{ runner.temp }}/stall-reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  report:
+    name: File or refresh the red card
+    needs: tiers
+    # `always()` spelled out: this job must run precisely when a shard FAILED or
+    # was killed, which is the case the implicit `success()` wrapper would
+    # skip. The board write below is further gated on the result and the ref.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # No `pnpm install`: `scripts/nightly-tiers.mjs --failing-files` imports
+      # `node:` builtins and two repo-local helpers only, so installing the
+      # workspace here would buy nothing and would give an unattended nightly a
+      # lockfile it could fail on.
+      - name: Download the shards' reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: nightly-tiers-reports-*
+          path: ${{ runner.temp }}/nightly-reports
+          merge-multiple: true
+
+      # The verdict, read from the matrix job's RESULT — a status read, on
+      # purpose: `failure` is a red tier, `cancelled` is a shard killed by its
+      # timeout or by a human, and neither is a green nightly. The failing
+      # files come from vitest's own JSON reports; a red run that produced none
+      # (a build failure, a stall kill) says so in the body instead of reading
+      # as "nothing failed".
+      - name: Read the verdict
+        id: verdict
+        env:
+          TIERS_RESULT: ${{ needs.tiers.result }}
+        run: |
+          echo "tiers result: $TIERS_RESULT"
+          echo "result=$TIERS_RESULT" >> "$GITHUB_OUTPUT"
+          set +e
+          node scripts/nightly-tiers.mjs --failing-files "$RUNNER_TEMP/nightly-reports" \
+            > "$RUNNER_TEMP/failing-files.txt" 2> "$RUNNER_TEMP/failing-files.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between: `cmd | tail` would report the
+          # pipe's status, and this exit code decides whether the list below is
+          # a reading or a refusal.
+          echo "failing_files_exit=$code" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/failing-files.err" >&2 || true
+          echo "failing nightly-tier files:"
+          cat "$RUNNER_TEMP/failing-files.txt"
+
+      - name: File or refresh the card
+        # RED only, on MAIN only. On green nothing in this job writes anything;
+        # on a branch (the smoke test a card's dev dispatches) the body goes to
+        # the run summary and the board is untouched.
+        if: steps.verdict.outputs.result != 'success' && github.ref == 'refs/heads/main'
+        uses: actions/github-script@v9
+        env:
+          TIERS_RESULT: ${{ steps.verdict.outputs.result }}
+          FAILING_FILES_EXIT: ${{ steps.verdict.outputs.failing_files_exit }}
+        with:
+          # Delivery is retried, never assumed: this write is the entire product
+          # of a red run, and a transient answer from the issues endpoint would
+          # otherwise discard a completed sweep.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = process.env.CARD_TITLE;
+            const marker = process.env.CARD_MARKER;
+            const labels = process.env.CARD_LABELS.split(',').map((s) => s.trim()).filter(Boolean);
+            const result = process.env.TIERS_RESULT;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+
+            const read = (name) => {
+              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+              catch { return ''; }
+            };
+            const failing = read('failing-files.txt').split('\n').map((s) => s.trim()).filter(Boolean);
+            const extractorExit = process.env.FAILING_FILES_EXIT;
+
+            // The log tails, bounded: a GitHub issue body caps at 65536 chars,
+            // and the run link carries the whole log anyway.
+            const tails = [];
+            const reportsDir = path.join(process.env.RUNNER_TEMP, 'nightly-reports');
+            const walk = (dir) => {
+              let entries = [];
+              try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+              for (const e of entries) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) walk(p);
+                else if (e.name === 'log-tail.txt') tails.push({ shard: path.basename(dir), text: fs.readFileSync(p, 'utf8') });
+              }
+            };
+            walk(reportsDir);
+            const BUDGET = 40000;
+            const perTail = Math.max(2000, Math.floor(BUDGET / Math.max(1, tails.length)));
+            const tailBlocks = tails.sort((a, b) => a.shard.localeCompare(b.shard)).flatMap(({ shard, text }) => [
+              `### ${shard} — last lines of the test log`,
+              '',
+              '```',
+              text.length > perTail ? `… (${text.length - perTail} chars elided) …\n${text.slice(-perTail)}` : text,
+              '```',
+              '',
+            ]);
+
+            const filesSection = failing.length > 0
+              ? ['## Failing files', '', ...failing.map((f) => `- \`${f}\``), '']
+              : extractorExit !== '0'
+                ? ['## Failing files', '', `⚠️ The report reader exited ${extractorExit}; no per-file verdict is available. Read the run log.`, '']
+                : ['## Failing files', '', '⚠️ No vitest report named a failing nightly-tier file, yet the tiers job did not succeed — the run died before or outside vitest (a build failure, a stall kill, a cancelled shard). Read the run log.', ''];
+
+            const body = [
+              `${marker} — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the nightly finds this card instead of filing a new one every night.`,
+              '',
+              `# ${title}`,
+              '',
+              `_Swept ${new Date().toISOString()} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · tiers job result \`${result}\`._`,
+              '',
+              'The `e2e` and `live` test tiers — the files named `*.e2e.test.*` and `*.live.test.*` — run here',
+              'nightly on `main` under `OS_TEST_TIERS=nightly` and nowhere else (the per-PR and merge-queue',
+              'Test Core runs under `queue`). A red here is a real suite that no pull request will red on;',
+              'this card is the channel that sees it. Nothing is blocked by it.',
+              '',
+              '⛔ The remedy is never to rename, skip or delete the failing test to make the nightly green.',
+              'Reproduce locally with `OS_TEST_TIERS=nightly pnpm --filter <pkg> test`, fix what it names, and',
+              'let the next nightly refresh this card.',
+              '',
+              ...filesSection,
+              ...tailBlocks,
+              '_Filed by `.github/workflows/test-nightly-tiers.yml`. Generated by [Claude Code](https://claude.ai/code)_',
+            ].join('\n');
+
+            // ── De-dup: the OPEN cards carrying the title prefix ─────────────
+            // Repo-scoped REST, this workflow's token, bounded pages; a
+            // truncated scan cannot establish ABSENCE, and filing on an
+            // unestablished absence is how a nightly mints a duplicate a day.
+            const isThisCard = (i) => !i.pull_request
+              && (String(i.title ?? '').startsWith(title) || String(i.body ?? '').includes(marker));
+            const MAX_PAGES = 10;
+            const candidates = [];
+            let scanComplete = true;
+            for (let page = 1; page <= MAX_PAGES; page += 1) {
+              const res = await github.rest.issues.listForRepo({
+                owner, repo, state: 'open', sort: 'created', direction: 'asc', per_page: 100, page,
+              });
+              candidates.push(...res.data.filter(isThisCard));
+              if (res.data.length < 100) break;
+              if (page === MAX_PAGES) scanComplete = false;
+            }
+            if (!scanComplete) {
+              throw new Error(`the open-issue scan hit its ${MAX_PAGES}-page bound without completing — absence is NOT established, so nothing was filed. The failing files are in this run's summary.`);
+            }
+
+            // The OLDEST open card wins — that is the one any duplicates were
+            // closed against.
+            const existing = candidates.sort((a, b) => a.number - b.number)[0] ?? null;
+
+            if (existing) {
+              // Rewritten in place, never a comment per run. ⛔ Labels are NOT
+              // rewritten — grading is the devx seat's and a refresh must not
+              // undo it.
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              core.info(`refreshed nightly-tiers card #${existing.number} (${body.length} chars, tiers ${result})`);
+              core.notice(`nightly tiers are red on main — card #${existing.number} refreshed.`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner, repo, title, body,
+              // Additive on create; ⛔ nothing here ever replaces a whole label
+              // set (`check:whole-set-label-write` refuses that verb outright).
+              labels,
+            });
+            core.info(`filed nightly-tiers card #${created.data.number} (${body.length} chars, tiers ${result})`);
+            core.notice(`nightly tiers are red on main — card #${created.data.number} filed.`);
+
+      - name: Publish the verdict to the run summary
+        # Always: on green this IS the whole product; on a branch it is the
+        # smoke test's evidence; on a red main run it makes the run
+        # self-contained for whoever opens it from the card.
+        if: always()
+        env:
+          TIERS_RESULT: ${{ steps.verdict.outputs.result }}
+        run: |
+          {
+            echo "### Nightly tiers — tiers job result \`${TIERS_RESULT:-unread}\`"
+            echo
+            if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+              echo "_Board write skipped: this run is on \`${{ github.ref }}\`, not \`main\`. A branch run proves the sharding, the switch and the rendering without filing anything._"
+              echo
+            fi
+            if [ "$TIERS_RESULT" = "success" ]; then
+              echo "Green: every nightly-tier file passed. Nothing filed, nothing edited, nothing closed."
+            else
+              echo "Failing nightly-tier files (from the vitest JSON reports; empty means the run died outside vitest — read the log):"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/failing-files.txt" 2>/dev/null || echo '(no list produced)'
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail the run if the verdict was never read
+        # LAST, on purpose: the card is filed BEFORE this can turn the job red.
+        # A red TIER is not this job's failure — the shard already went red and
+        # the card carries it. What must never look green is a report job that
+        # finished without reading the matrix result at all: nothing downstream
+        # could tell that apart from a green nightly.
+        if: always() && steps.verdict.outputs.result == ''
+        run: |
+          echo "the verdict step recorded no result, so this run is NOT a reading about the nightly tiers -- it is neither a green one nor a red one. See this run's summary."
+          exit 1

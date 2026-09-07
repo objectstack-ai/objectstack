@@ -11,6 +11,7 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
     "typecheck": {
@@ -26,6 +27,7 @@
     "@objectstack/service-settings#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -38,6 +40,7 @@
     "@objectstack/metadata#test": {
       "dependsOn": ["build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -50,6 +53,7 @@
     "@objectstack/spec#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -90,6 +94,7 @@
     "@objectstack/core#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -101,6 +106,7 @@
     "@objectstack/types#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -112,11 +118,14 @@
     "@objectstack/cli#test": {
       "dependsOn": ["build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "$TURBO_ROOT$/scripts/nightly-tiers.mjs",
+        "$TURBO_ROOT$/scripts/nightly-tiers.d.mts",
         "$TURBO_ROOT$/packages/verify/src/**",
         "$TURBO_ROOT$/packages/plugins/plugin-security/src/**",
         "$TURBO_ROOT$/packages/services/service-cluster/src/**",
@@ -150,6 +159,7 @@
     "@objectstack/client#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -176,6 +186,7 @@
     "@objectstack/lint#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -202,6 +213,7 @@
         "^build"
       ],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -216,6 +228,7 @@
         "^build"
       ],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -228,6 +241,7 @@
     "@objectstack/platform-objects#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -243,6 +257,7 @@
     "@objectstack/mcp#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -255,6 +270,7 @@
     "@objectstack/runtime#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -269,6 +285,7 @@
     "@objectstack/objectql#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -281,6 +298,7 @@
     "@objectstack/driver-sql#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -293,6 +311,7 @@
     "@objectstack/example-showcase#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -305,6 +324,7 @@
     "@objectstack/plugin-auth#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -329,6 +349,7 @@
     "@objectstack/trigger-api#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -340,6 +361,7 @@
     },
     "@objectstack/trigger-record-change#test": {
       "dependsOn": ["^build"],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -354,6 +376,7 @@
     },
     "@objectstack/plugin-approvals#test": {
       "dependsOn": ["^build"],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -368,6 +391,7 @@
     "@objectstack/plugin-security#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -380,6 +404,7 @@
     "@objectstack/dogfood#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -405,6 +430,7 @@
     "@objectstack/rest#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -420,6 +446,7 @@
     "@objectstack/formula#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -432,6 +459,7 @@
     "@objectstack/metadata-protocol#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -443,6 +471,7 @@
     "@objectstack/downstream-contract#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",
@@ -455,6 +484,7 @@
     "create-objectstack#test": {
       "dependsOn": ["^build"],
       "outputs": [],
+      "env": ["OS_TEST_TIERS"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "!dist/**",

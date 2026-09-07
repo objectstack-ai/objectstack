@@ -575,6 +575,14 @@ jobs:
       - name: Run this shard's tests
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+          # The `e2e` and `live` filename tiers run NIGHTLY on main
+          # (test-nightly-tiers.yml), not here: `queue` is the per-PR and
+          # merge-queue setting, read once in scripts/nightly-tiers.mjs. Spelled
+          # explicitly even though unset reads the same, so the setting this
+          # required check verifies is written where the check runs.
+          # turbo.json hashes it in the `test` task's `env`, which is what lets
+          # it reach vitest under strict env mode at all.
+          OS_TEST_TIERS: queue
         run: |
           if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
             echo "No packages on this shard — nothing to test."
