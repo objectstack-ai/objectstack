@@ -101,7 +101,7 @@
 // conclusion that gets re-derived from scratch otherwise:
 //
 // WHAT THE LEDGERS DO COVER — richly, and more than this table ever has.
-//   `packages/rest/src/rest-route-ledger.ts`: 94 audited rows over 19 families,
+//   `packages/rest/src/rest-route-ledger.ts`: 91 audited rows over 19 families,
 //     every route `@objectstack/rest` mounts, enumerated through
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
@@ -277,18 +277,21 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     kinds: ['ROUTE_ENUMERATION'],
     probes: 1,
     keys: 19,
-    population: 94,
-    reachable: 94,
+    population: 91,
+    reachable: 91,
     blindSpot: 0,
     populationRule: 'ledger rows inside REST_ROUTE_LEDGER; reachable = rows carrying a `family` (each distinct value mints a key)',
-    controls: { "route: '": 94, "family: '": 94, RestRouteLedgerEntry: 2 },
+    controls: { "route: '": 91, "family: '": 91, RestRouteLedgerEntry: 2 },
     note:
       'The audited disposition of every route @objectstack/rest mounts, enumerated through ' +
       'RestServer.getRoutes() on a booted server and guarded per route by rest-route-ledger.conformance.test.ts. ' +
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 19 families; 1 classified by a ' +
-      'matrix row (metadata), 18 enumerated in the shrink-only baseline.',
+      'matrix row (metadata), 18 enumerated in the shrink-only baseline. Re-measured 94 -> 91 on #14503: the ' +
+      'three REST package read/delete rows (GET /packages, GET /packages/:id, DELETE /packages/:id) left the ' +
+      'ledger when their routes left the registrar; each carried `family: packages`, so `reachable` moved with ' +
+      '`population` (91/91) and the blind spot stays 0 -- the family itself survives on the publish row.',
   },
   {
     file: 'packages/runtime/src/route-ledger.ts',
