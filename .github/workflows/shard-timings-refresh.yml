@@ -1,0 +1,413 @@
+# Regenerate scripts/test-shard-timings.json on a timer, and open the PR.
+#
+# ══════════════════════════════════════════════════════════════════════════════
+# WHY THIS EXISTS: THE BALANCING INPUT WAS THE ONLY PART OF THE LOOP WITH NO
+# CLOCK ON IT. (#16464)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# scripts/test-shard-timings.json is the per-package duration dataset the Test
+# Core split is binned from. It is GENERATED — scripts/measure-test-shard-
+# timings.mjs turns a green run's six turbo summaries into it — but until now it
+# was generated only when a person remembered to. It went 13 days without a
+# refresh while ~700 test files were added, and the shard it mis-weighted was
+# killed by the job wall twelve times in one day and ejected from the merge queue
+# twice (#16173).
+#
+# The rot is one-directional and silent, which is what makes a timer the fix
+# rather than more discipline: suites only get slower, the table stays put, and
+# the shard that drifted heavy reads as balanced on paper right up to the moment
+# it is killed — and a killed shard produces NO measurement while the rollup
+# reads green.
+#
+# WHAT THIS WORKFLOW IS NOT ALLOWED TO DO, AND WHY EACH ONE IS LOAD-BEARING
+# ------------------------------------------------------------------------
+#   ⛔ It never hand-edits the dataset. Every byte it commits came out of the
+#      generator. A hand-touched number wearing a generated file's `provenance`
+#      is worse than a stale one: the staleness is at least visible in
+#      `measuredAt`.
+#   ⛔ It never touches `timeout-minutes`, the shard matrix, MAX_SHARD_OVER_MEAN,
+#      MAX_MEASURED_OVER_PREDICTED or FILE_SHARDED_PACKAGES. The partitioner's
+#      own header calls raising a bound "the one move that cannot be right", and
+#      its pin 3c is built to red on exactly that. If an honest refresh breaches
+#      a bound, that breach is the REPORT, not a problem to be tuned away — it is
+#      quoted verbatim into the PR body and a human decides. See "THE PINS" below.
+#   ⛔ It never opens a PR when the regenerated file is byte-identical. A weekly
+#      no-op PR trains everyone to ignore this PR.
+#
+# HOW IT GETS ITS INPUTS, AND WHY IT RUNS HERE RATHER THAN IN AN AGENT WORKTREE
+# ----------------------------------------------------------------------------
+# The documented refresh path downloads the six `test-core-run-summary-N-of-6`
+# artifacts of a green run. `GET /actions/artifacts/{id}/zip` redirects to
+# `productionresultssa*.blob.core.windows.net`, and every agent container's
+# egress policy answers 403 to CONNECT for that host — reproduced four ways, on
+# two artifacts across two runs, on the pre-signed URL as well as the API one, on
+# two separate days and containers (#16222, and again on #16173). So the
+# documented path cannot be walked from a dev seat at all.
+#
+# A GitHub-hosted runner reaches that host natively — it is the same host
+# `actions/download-artifact` uses. Running the refresh here is therefore not a
+# workaround for the denial, it is the removal of the channel from the loop: the
+# regeneration happens where the data already is, on a timer, and no seat needs
+# reachability it does not have.
+#
+# CHOOSING THE RUN IS THE HARD PART — see scripts/ci/select-shard-timings-run.mjs
+# ------------------------------------------------------------------------------
+# "The newest run" is wrong three different ways here (cancelled runs, cache
+# replays, expired artifacts), and a refresh built on the wrong run is worse than
+# no refresh because it stamps a fresh `measuredAt` on numbers nobody measured.
+# That script carries the argument and the self-test; this file only drives it.
+#
+# THE PINS, AND THE ONE THING A MACHINE MUST NOT DECIDE
+# ----------------------------------------------------
+# partition-test-shards.mjs `--self-test` grades the dataset against the
+# acceptance bound. On a refresh that makes a package heavier than any split can
+# bin, it reds BY DESIGN and names the remedy (raise the slice count — never the
+# bound), and its pin 3c additionally demands a decision the day the CLI comes
+# back under the bound on its own. Both are judgement, so this workflow REPORTS
+# the verdict and never acts on it: the self-test is run on the refreshed file
+# and its output — pass or fail, verbatim — goes into the PR body. The PR is
+# opened either way, because a refusal to open it would lose the measurement,
+# which is the exact silent-rot failure this workflow exists to end.
+
+name: Shard Timings Refresh
+
+on:
+  schedule:
+    # Monday 05:30 UTC. After the nightly lanes, and early enough in the week
+    # that the PR is in front of someone before the week's merge volume builds.
+    - cron: '30 5 * * 1'
+  workflow_dispatch:
+
+# Read-only at the top level; the one job widens to exactly what it writes.
+permissions:
+  contents: read
+
+# One refresh at a time. A second run while the first is mid-push would race on
+# the same bot branch; the newer inputs are the better ones, so the in-flight run
+# yields.
+concurrency:
+  group: shard-timings-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    name: Regenerate the shard-timings dataset
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Declaring any `permissions:` block drops every scope not listed, so all
+      # three are spelled even though only two are writes.
+      contents: write # push the bot branch
+      pull-requests: write # open the PR and add its label
+      actions: read # list runs, read jobs, download run-summary artifacts
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # A PAT when one exists, the Actions token otherwise — the same choice
+          # cut-rc.yml makes, for the same reason, and the difference is stated
+          # in the PR body rather than left to be discovered: a PR opened with
+          # the Actions `GITHUB_TOKEN` starts NO workflow runs (GitHub's
+          # recursion guard), so with the fallback credential the refresh PR
+          # arrives with no CI of its own until someone pushes to it or reopens
+          # it. With the PAT its checks run immediately.
+          token: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Restore-only: scheduled runs read main's store cache; the per-push
+      # workflows own saving it. Same shape as coverage-nightly.yml.
+      - name: Restore pnpm cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Verify the instruments BEFORE trusting their output. Both scripts carry a
+      # battery floor, so this also catches the case where their assertions
+      # stopped running — which would otherwise let a wrong dataset through a
+      # green-looking pipeline.
+      - name: Self-test the generator and the run selector
+        run: |
+          node scripts/measure-test-shard-timings.mjs --self-test
+          node scripts/ci/select-shard-timings-run.mjs --self-test
+
+      # The package list the coverage check judges against. `turbo ls` is
+      # experimental, so the reader asserts its payload loudly rather than
+      # defaulting around it (an empty list would make every package look deleted
+      # and every coverage check pass).
+      - name: List the workspace
+        run: pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
+
+      - name: Choose a green, uncensored, un-replayed run
+        id: select
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/ci/select-shard-timings-run.mjs --candidates --limit 15 \
+            > "$RUNNER_TEMP/candidates.json"
+          echo "Eligible runs, newest first:"
+          node -e '
+            const runs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
+            for (const r of runs) console.log(`  ${r.run_id}  ${r.created_at}  ${r.head_sha.slice(0, 10)}`);
+          '
+
+      # Each eligible run is tried in turn: download, generate, and then judge
+      # whether it MEASURED the workspace. A run that passed selection can still
+      # be a cache replay, and the only honest test for that is the resulting
+      # dataset's package coverage — so the loop is the point, not a retry.
+      - name: Regenerate the dataset from the first run that actually measured
+        id: generate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/refresh"
+          mkdir -p "$WORK"
+          CHOSEN=''
+
+          RUN_COUNT=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8")).length)')
+          for i in $(seq 0 $((RUN_COUNT - 1))); do
+            RUN_ID=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"))[Number(process.argv[1])];console.log(r.run_id)' "$i")
+            echo "::group::Candidate run $RUN_ID"
+            SUMDIR="$WORK/$RUN_ID"
+            rm -rf "$SUMDIR"; mkdir -p "$SUMDIR"
+
+            OK=1
+            for N in 1 2 3 4 5 6; do
+              ART=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"))[Number(process.argv[1])];console.log(r.artifact_ids[process.argv[2]])' "$i" "$N")
+              # curl drops the Authorization header across the redirect to the
+              # blob host, which is correct: that URL is pre-signed and the
+              # header would be rejected.
+              if ! curl -sSL --fail -H "Authorization: Bearer $GITHUB_TOKEN" \
+                   -H "Accept: application/vnd.github+json" \
+                   "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ART/zip" \
+                   -o "$SUMDIR/$N.zip"; then
+                echo "::warning::Could not download artifact $ART (shard $N) of run $RUN_ID; skipping this run."
+                OK=0; break
+              fi
+              unzip -qo "$SUMDIR/$N.zip" -d "$SUMDIR/$N"
+            done
+            if [ "$OK" -ne 1 ]; then echo "::endgroup::"; continue; fi
+
+            # `find` rather than a fixed-depth glob: `upload-artifact` with
+            # `path: .turbo/runs/` puts the summaries at the artifact root, but a
+            # shape assumption here would silently collect NOTHING and hand the
+            # generator an empty argument list, which reads like a refusal for
+            # the wrong reason.
+            find "$SUMDIR" -name '*.json' -type f > "$SUMDIR/summaries.txt"
+            SUMMARY_COUNT=$(wc -l < "$SUMDIR/summaries.txt")
+            echo "Collected $SUMMARY_COUNT run summary file(s) from run $RUN_ID."
+            if [ "$SUMMARY_COUNT" -eq 0 ]; then
+              echo "::warning::Run $RUN_ID's artifacts contained no run-summary JSON; skipping this run."
+              echo "::endgroup::"; continue
+            fi
+
+            # One run, so no `--run` grouping is needed: every summary here came
+            # from run $RUN_ID. Feeding SEVERAL runs would require `--run <id>`
+            # before each run's six files — the generator refuses the ambiguity
+            # rather than taking the last value (#16473).
+            # An array, not `xargs`: a split invocation would run the generator
+            # twice and the second would overwrite the first's output with a
+            # partial dataset.
+            mapfile -t SUMMARY_FILES < "$SUMDIR/summaries.txt"
+            if ! node scripts/measure-test-shard-timings.mjs "${SUMMARY_FILES[@]}" \
+                 --out "$WORK/refreshed.json"; then
+              echo "::warning::The generator refused run $RUN_ID's summaries; skipping this run."
+              echo "::endgroup::"; continue
+            fi
+
+            if node scripts/ci/select-shard-timings-run.mjs --check-coverage \
+                 --committed scripts/test-shard-timings.json \
+                 --refreshed "$WORK/refreshed.json" \
+                 --workspace "$RUNNER_TEMP/turbo-ls.json" \
+                 --exclude @objectstack/dogfood; then
+              CHOSEN="$RUN_ID"
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ -z "$CHOSEN" ]; then
+            echo "::error::No eligible run produced a complete measurement of the workspace. Every candidate was a cache replay, refused by the generator, or lost its artifacts. NOTHING was regenerated and no PR was opened — this is a refusal, not a quiet success."
+            exit 1
+          fi
+          echo "run_id=$CHOSEN" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(node -e 'const rs=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/candidates.json","utf8"));console.log(rs.find(r=>String(r.run_id)===process.argv[1]).head_sha)' "$CHOSEN")" >> "$GITHUB_OUTPUT"
+
+      # Byte comparison, and it decides everything downstream. `cmp -s` rather
+      # than a diff of parsed JSON: the committed artefact is the file, so the
+      # file is what has to differ for a PR to be worth anyone's attention.
+      - name: Compare against the committed dataset
+        id: compare
+        run: |
+          if cmp -s scripts/test-shard-timings.json "$RUNNER_TEMP/refresh/refreshed.json"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The regenerated dataset is BYTE-IDENTICAL to the committed one; no PR." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The before/after halves of ruling 3, taken from the partitioner's OWN
+      # verdict line rather than recomputed here — a second implementation of the
+      # binning would be a second answer to grade against.
+      #
+      # ⛔ `continue-on-error` on the AFTER leg only, and it is not leniency: a
+      # red here is the partitioner refusing an honest measurement, which is
+      # information the PR must carry, not a reason to withhold the PR. The
+      # verdict text goes into the body either way and the PR's own lint job
+      # grades it again.
+      - name: Predicted bins, before and after
+        id: bins
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          node scripts/partition-test-shards.mjs --self-test > "$RUNNER_TEMP/bins-before.txt" 2>&1 || true
+          cp "$RUNNER_TEMP/refresh/refreshed.json" scripts/test-shard-timings.json
+          set +e
+          node scripts/partition-test-shards.mjs --self-test > "$RUNNER_TEMP/bins-after.txt" 2>&1
+          echo "partitioner_exit=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          echo "BEFORE: $(cat "$RUNNER_TEMP/bins-before.txt")"
+          echo "AFTER:  $(cat "$RUNNER_TEMP/bins-after.txt")"
+
+      - name: Push the refresh branch and open the pull request
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PUSH_TOKEN || github.token }}
+          RUN_ID: ${{ steps.generate.outputs.run_id }}
+          HEAD_SHA: ${{ steps.generate.outputs.head_sha }}
+          PARTITIONER_EXIT: ${{ steps.bins.outputs.partitioner_exit }}
+          USED_PAT: ${{ secrets.RELEASE_PUSH_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          BRANCH="claude/shard-timings-refresh-$RUN_ID"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add scripts/test-shard-timings.json
+          # Separate -m flags rather than one embedded newline: a YAML-indented
+          # heredoc would carry its own leading whitespace into the message body.
+          git commit \
+            -m "chore(ci): refresh the Test Core shard-timings dataset" \
+            -m "Regenerated by .github/workflows/shard-timings-refresh.yml from the six test-core-run-summary artifacts of run $RUN_ID ($HEAD_SHA). Generated, never hand-edited."
+          git push origin "$BRANCH"
+
+          SHARDS=$(node -e '
+            const rs = JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP + "/candidates.json", "utf8"));
+            const r = rs.find((x) => String(x.run_id) === process.env.RUN_ID);
+            const s = r.shard_seconds ?? {};
+            console.log([1,2,3,4,5,6].map((n) => (s[n] == null ? "?" : `${n}: ${s[n]}s`)).join("  |  "));
+          ')
+
+          {
+            echo "Refreshes \`scripts/test-shard-timings.json\`, the balancing input for the Test Core"
+            echo "shard split. Opened automatically by \`.github/workflows/shard-timings-refresh.yml\`."
+            echo "Every byte came out of \`scripts/measure-test-shard-timings.mjs\`; nothing here was"
+            echo "hand-edited, and no bound, timeout or matrix entry was touched."
+            echo
+            echo "## Source"
+            echo
+            echo "- Run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$RUN_ID"
+            echo "- Commit measured: \`$HEAD_SHA\`"
+            echo "- Selected because its six \`Test Core (N/6)\` jobs all concluded \`success\`, its six"
+            echo "  run-summary artifacts were still retained, and the dataset it produced measures every"
+            echo "  package the committed one measured that is still in the workspace (the check that"
+            echo "  rejects a cache replay)."
+            echo
+            echo "## Measured per-shard suite time on that run"
+            echo
+            echo "\`\`\`"
+            echo "$SHARDS"
+            echo "\`\`\`"
+            echo
+            echo "## Predicted bins, before and after"
+            echo
+            echo "\`\`\`"
+            echo "BEFORE  $(cat "$RUNNER_TEMP/bins-before.txt")"
+            echo "AFTER   $(cat "$RUNNER_TEMP/bins-after.txt")"
+            echo "\`\`\`"
+            echo
+            if [ "${PARTITIONER_EXIT:-0}" != "0" ]; then
+              echo "## The partitioner's own pins RED on this refresh — read this before merging"
+              echo
+              echo "This is the designed behaviour, not a defect in the refresh: the acceptance bound is"
+              echo "a ratio, and a package that has grown past what any six-way split can bin makes the"
+              echo "pins fail with the arithmetic in the message. The remedy the partitioner names is to"
+              echo "raise the file-level slice count for that package — ⛔ never to raise the bound, and"
+              echo "⛔ never to hand-edit this dataset. This workflow deliberately does neither: it"
+              echo "reports and stops, because both are decisions."
+              echo
+            fi
+            if [ "$USED_PAT" != "true" ]; then
+              echo "## No checks will start on this PR by themselves"
+              echo
+              echo "It was opened with the Actions \`GITHUB_TOKEN\`, and GitHub's recursion guard means a"
+              echo "PR opened that way triggers no workflow runs. Push any commit to the branch, or close"
+              echo "and reopen the PR, to start CI."
+              echo
+            fi
+            # ⛔ No closing keyword is emitted here, in any form. GitHub's
+            # parser matches `fixes`/`closes`/`resolves` plus a number and
+            # ignores every negation around them, so even a sentence saying a
+            # card is NOT closed would close it. This PR is the workflow's
+            # OUTPUT; the cards about the workflow are referenced only.
+            echo "Refs #16464, #16173, #16222."
+          } > "$RUNNER_TEMP/pr-body.md"
+
+          PR_URL=$(gh pr create --base main --head "$BRANCH" \
+            --title "chore(ci): refresh the Test Core shard-timings dataset" \
+            --body-file "$RUNNER_TEMP/pr-body.md")
+          echo "Opened $PR_URL" | tee -a "$GITHUB_STEP_SUMMARY"
+
+          # ADDITIVE label write only. A whole-set PUT replaces the PR's labels
+          # and destroys any that land in between — measured on this repo, one
+          # second wide (see pr-automation.yml's header). POST names only what it
+          # adds, so no interleaving can lose another writer's label.
+          PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq .number)
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+            -f "labels[]=skip-changeset" > /dev/null
+
+          # Read back, because an additive write is necessary and not sufficient:
+          # a concurrent whole-set PUT from another workflow can still strip the
+          # label after a successful POST. `skip-changeset` is this PR's exemption
+          # from the changeset gate — it publishes nothing — so losing it turns
+          # the gate red on a PR that legitimately has no changeset.
+          if gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
+             | grep -qxF 'skip-changeset'; then
+            echo "skip-changeset confirmed on PR #$PR_NUMBER."
+          else
+            echo "::warning::skip-changeset did not survive the write on PR #$PR_NUMBER (a concurrent whole-set label PUT strips it). Re-applying once."
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" \
+              -f "labels[]=skip-changeset" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '.[].name' \
+              | grep -qxF 'skip-changeset' \
+              || echo "::error::skip-changeset is still absent from PR #$PR_NUMBER; the changeset gate will demand a changeset this PR legitimately has none of. Apply the label by hand."
+          fi
+
+      - name: Say what happened when nothing changed
+        if: steps.compare.outputs.changed == 'false'
+        run: |
+          {
+            echo "### Shard timings: byte-identical, no PR"
+            echo
+            echo "Run \`${{ steps.generate.outputs.run_id }}\` (\`${{ steps.generate.outputs.head_sha }}\`)"
+            echo "regenerated \`scripts/test-shard-timings.json\` byte-for-byte identically to the"
+            echo "committed file, so there is nothing to open a pull request about. The dataset is"
+            echo "current, and this is the loop working rather than the loop skipping."
+          } >> "$GITHUB_STEP_SUMMARY"
