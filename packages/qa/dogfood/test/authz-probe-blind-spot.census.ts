@@ -288,10 +288,14 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'That guard is why this file can be a population source and a regex table cannot: a mounted route with no ' +
       'row here is already RED in another package, so a new family cannot be silently absent from this file, ' +
       'and therefore cannot be silently absent from the authz ratchet either. 19 families; 1 classified by a ' +
-      'matrix row (metadata), 18 enumerated in the shrink-only baseline. Re-measured 94 -> 91 on #14503: the ' +
+      'matrix row (metadata), 18 enumerated in the shrink-only baseline. Re-measured 94 -> 91 when the ' +
       'three REST package read/delete rows (GET /packages, GET /packages/:id, DELETE /packages/:id) left the ' +
-      'ledger when their routes left the registrar; each carried `family: packages`, so `reachable` moved with ' +
+      'ledger with their routes; each carried `family: packages`, so `reachable` moved with ' +
       '`population` (91/91) and the blind spot stays 0 -- the family itself survives on the publish row.',
+    // The 94 -> 91 re-measurement above landed with #14503 (the REST registrar
+    // keeps only POST /packages/publish; the dispatcher domain is the single
+    // implementation of the reads and the delete). The id lives here, not in
+    // the string: a runtime string reaches readers who cannot resolve it.
   },
   {
     file: 'packages/runtime/src/route-ledger.ts',
