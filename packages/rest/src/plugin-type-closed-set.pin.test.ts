@@ -89,5 +89,12 @@ describe('Plugin.type closed set — published-surface pins (#13925)', () => {
         // unassignable to it.
         const complete: Equal<Exclude<PluginType, (typeof members)[number]>, never> = true;
         expect(complete).toBe(true);
+
+        // #16334: `Plugin.type` is INHERITED from `PluginDefinition` now, not
+        // spelled on the interface — so "the interface's key IS this union" has
+        // to be pinned, or the inherited key and the exported alias could drift
+        // apart with every directive above still green.
+        const inherited: Equal<NonNullable<Plugin['type']>, PluginType> = true;
+        expect(inherited).toBe(true);
     });
 });

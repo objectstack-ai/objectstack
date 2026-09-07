@@ -84,17 +84,26 @@ afterAll(() => {
 
 /**
  * The two keys the block reads are declared on `PluginSchema`
- * (`packages/spec/src/kernel/plugin.zod.ts`) but NOT on the `Plugin` interface
- * the kernel's `use()` accepts (`packages/core/src/types.ts`) — which is one
- * reason the repo contained no producer of either. The fixture states the extra
- * surface explicitly instead of casting it away, so a future change to `Plugin`
- * that adopts these keys does not silently pass this file by.
+ * (`packages/spec/src/kernel/plugin.zod.ts`) and, since #16334, inherited by
+ * the `Plugin` interface through `PluginDefinition` — the change this alias
+ * was written to notice, and it did: `Plugin` now carries `staticPath`, `slug`
+ * and `default` itself, so the alias survives only as the fixture's name.
  */
-type UiPluginFixture = Plugin & {
-    staticPath?: string;
-    slug?: string;
-    default?: boolean;
-};
+type UiPluginFixture = Plugin;
+
+/**
+ * The refusal `promise` produced, or a loud failure if it produced none — the
+ * shape core's `plugin-contract-enforcement.test.ts` uses, so a case whose
+ * input STOPPED being refused reports "it loaded" instead of a property miss.
+ */
+async function refusal(promise: Promise<unknown>): Promise<Error> {
+    try {
+        await promise;
+    } catch (e) {
+        return e as Error;
+    }
+    throw new Error('expected kernel.use() to refuse the plugin, but it loaded');
+}
 
 function makeFixture(overrides: Partial<UiPluginFixture> & { name: string }): UiPluginFixture {
     return {
@@ -238,12 +247,18 @@ describe('UI plugin auto-discovery (#16050)', () => {
             ]);
         });
 
-        it('derives the slug from the last path segment of the plugin name when none is declared', async () => {
-            const { routes } = await observe(makeFixture({ name: '@os-fixture/console' }));
-
-            // `plugin.slug || plugin.name.split('/').pop()` — the documented
-            // `@org/console -> console` derivation.
-            expect(routes).toEqual(['/console', '/console', '/console/*', '/console/*']);
+        it('a `ui` plugin declaring no `slug` is refused at kernel.use() before the block can derive one (#16334)', async () => {
+            // `plugin.slug || plugin.name.split('/').pop()` — the block's documented
+            // `@org/console -> console` derivation — is UNREACHABLE through the
+            // kernel since #16334: `PluginSchema` requires `slug` for `type: 'ui'`
+            // and `kernel.use()` runs the schema (#16049), so the object never
+            // reaches `kernel.plugins`. Pinned as the refusal, with the spec's
+            // stable code surfacing inside the loader's envelope. The fallback
+            // expression itself is dead code now, awaiting its own card.
+            const err = await refusal(boot(makeFixture({ name: '@os-fixture/console' })));
+            expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
+            expect(err.message).toContain("at 'slug'");
+            expect(err.message).toContain('PLUGIN_UI_REQUIRED_KEY_MISSING');
         });
     });
 
@@ -296,19 +311,20 @@ describe('UI plugin auto-discovery (#16050)', () => {
             expect(routes).toEqual([]);
         });
 
-        it('a `ui` type with no staticPath mounts nothing', async () => {
-            const { routes } = await observe(
-                makeFixture({
-                    name: '@os-fixture/console-no-assets',
-                    staticPath: undefined,
-                    slug: 'console-fixture',
-                }),
-            );
-
-            // The other conjunct of the same guard (`&& plugin.staticPath`), so a
-            // change that keeps the type check but drops the assets check cannot
-            // sit green.
-            expect(routes).toEqual([]);
+        it('a `ui` plugin declaring no `staticPath` is refused at kernel.use() before the block runs (#16334)', async () => {
+            // The other conjunct of the same guard (`&& plugin.staticPath`) is
+            // likewise unreachable through the kernel: `staticPath` is required
+            // for `type: 'ui'` since #16334, so a `ui` plugin without assets is a
+            // boot refusal, not a silent non-mount. The `NON_UI_TYPES` cases
+            // above remain the proof that this harness CAN produce `[]`.
+            const err = await refusal(boot(makeFixture({
+                name: '@os-fixture/console-no-assets',
+                staticPath: undefined,
+                slug: 'console-fixture',
+            })));
+            expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
+            expect(err.message).toContain("at 'staticPath'");
+            expect(err.message).toContain('PLUGIN_UI_REQUIRED_KEY_MISSING');
         });
     });
 

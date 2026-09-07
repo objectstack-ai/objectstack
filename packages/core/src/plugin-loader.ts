@@ -464,6 +464,15 @@ export class PluginLoader {
      * All eight are `.optional()`, which admits absence and `undefined` but
      * never an explicit `null` — so `null` on any of the eight is refused too.
      *
+     * Since #16334 the schema carries ONE conditional requirement on top of
+     * the eight: `type: 'ui'` owes `staticPath` and `slug`, and `PluginSchema`
+     * refuses a `ui` plugin missing either with `PLUGIN_UI_REQUIRED_KEY_MISSING`
+     * at the head of the issue message (`packages/spec/src/kernel/plugin.zod.ts`).
+     * That refusal rides this method's envelope unchanged — reported as
+     * `at 'staticPath'` / `at 'slug'` with the spec's code inside the message —
+     * because this method surfaces `path` and `message` and reads nothing
+     * else. `plugin-contract-enforcement.test.ts` group F pins the surfacing.
+     *
      * ⛔ ENUMERATE ALL EIGHT wherever this is restated. The changeset ships to
      * consumers as `CHANGELOG.md` and is what an upgrading author greps after
      * the refusal, so a shorter enumeration there does not merely omit keys —
