@@ -178,7 +178,7 @@ export interface BootOptions {
    * every request of theirs resolves CARRIES an `organizationId`. Default
    * `false`.
    *
-   * Mechanically it is one flip: `AuthPlugin`'s ADR-0081 D1 default-org
+   * Mechanically it is one flip: `AuthPlugin`'s cloud ADR-0081 D1 default-org
    * bootstrap (`autoDefaultOrganization`), which the harness otherwise pins
    * OFF (see the AuthPlugin registration below). The bootstrap mints a
    * `sys_organization` and binds the platform admin to it as `owner`; the
@@ -235,7 +235,7 @@ export interface BootOptions {
    *  - with `multiTenant: 'posture-only'`, it would be a NO-OP that looks like
    *    a feature. That mode requests the `isolated` posture, and the open
    *    default-org bootstrap deliberately abstains under every WALLED posture
-   *    (`postureEnforcesWall`, ADR-0081 D1) — the open package never
+   *    (`postureEnforcesWall`, cloud ADR-0081 D1) — the open package never
    *    bootstraps an organization for a deployment whose multi-organization
    *    runtime it does not provide. The admin would resolve org-less while the
    *    fixture read as org-bound: vacuity, which is the whole defect class
@@ -334,7 +334,7 @@ export async function bootStack(
       `verify: orgContext:true does not compose with multiTenant:${JSON.stringify(opts.multiTenant)}. ` +
         (opts.multiTenant === 'posture-only'
           ? "'posture-only' requests the `isolated` posture, and the open default-org bootstrap abstains " +
-            'under every walled posture (ADR-0081 D1) — the admin would resolve org-less while the fixture ' +
+            'under every walled posture (cloud ADR-0081 D1) — the admin would resolve org-less while the fixture ' +
             'read as org-bound. Drop one of the two options; a posture-gated seam that also needs an ' +
             'org-bound caller needs the real @objectstack/organizations package.'
           : 'the enterprise @objectstack/organizations package owns the org bootstrap under multiTenant:true ' +
@@ -415,7 +415,7 @@ export async function bootStack(
   // Service plugins `objectstack dev` auto-loads for an app of this shape.
   await kernel.use(new SettingsServicePlugin());
   await kernel.use(opts.analytics ?? new AnalyticsServicePlugin());
-  // `autoDefaultOrganization: false` (ADR-0081 D1): the harness proves the two
+  // `autoDefaultOrganization: false` (cloud ADR-0081 D1): the harness proves the two
   // ENDS of the isolation spectrum — pure single-tenant (no org, no scoping)
   // and, via `opts.multiTenant`, full multi-org (the enterprise plugin owns
   // the org bootstrap). AuthPlugin's single-org default-org bootstrap is a
@@ -653,7 +653,7 @@ export async function bootStack(
               'activeOrganizationId and every org-scoped assertion in this fixture would be vacuous.'
             : 'No sys_user row resolved for that address — check `opts.admin` against the app the ' +
               "harness actually seeded, since the default-org bootstrap targets the platform admin.") +
-          ' (ADR-0081 D1 `ensureDefaultOrganization` is best-effort by design; this is the harness ' +
+          ' (cloud ADR-0081 D1 `ensureDefaultOrganization` is best-effort by design; this is the harness ' +
           'refusing to hand back a stack that quietly means less than it reads.)',
       );
     }

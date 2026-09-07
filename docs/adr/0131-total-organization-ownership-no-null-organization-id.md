@@ -825,9 +825,12 @@ stamp-and-backfill repair (#12929, #13180, #13527, #13572, #13565, #14726) and #
 - The issue body of #13564 cites the arm by a bare line number (7320) that had drifted by ~4,600 lines
   before the first census read it; on `origin/main` `2514d49f3` the
   arms are inside `applyTenantScope` (~12016–12066) and there are **two**. This record cites symbols.
-- `ensure-default-organization.ts` cites "ADR-0081 D1" for the Default Organization; in this
-  repository `docs/adr/0081` is the trusted React page tier — the "0081" is cloud's numbering. The
-  framework record is [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md).
+- `ensure-default-organization.ts` cites "cloud ADR-0081 D1" for the Default Organization; in this
+  repository `docs/adr/0081` is the trusted React page tier — the "0081" is cloud's numbering, and the
+  record is **cloud ADR-0081** (*Organization Management — Open Basics, Enterprise
+  `@objectstack/organizations`*, Accepted 2026-07-09), identified 2026-09-04, so the citations now carry
+  the qualifier rather than resolving here. The framework record is
+  [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md).
 - `resolve-authz-context.ts` already resolves positions **by name** (`{ name: { $in: grants.positions } }`
   against `sys_position`); D4 changes where that lookup goes first, not what it is keyed on.
 - `template-loader.ts` resolves by `(name, locale)`; a grep for `organization` / `tenant` in it returns
