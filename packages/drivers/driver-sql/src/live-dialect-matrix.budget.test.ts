@@ -155,7 +155,24 @@ describe('[#16434] the seam-level suite option behaves the way the seam assumes'
   });
 
   it('leaves a test OUTSIDE that suite on the runner default — the SQLite cells', (ctx) => {
-    expect(ctx.task.timeout).not.toBe(SUITE_BUDGET);
-    expect(ctx.task.timeout).toBe(5_000);
+    expect(
+      ctx.task.timeout,
+      'a suite option leaked out of its own suite — the whole "live cells only" claim rests on ' +
+        'it not doing that',
+    ).not.toBe(SUITE_BUDGET);
+
+    // ⛔ The fence, executable: this package must keep inheriting the runner
+    // default outside a live cell. It reds two ways, and both are the point —
+    // a package-wide `testTimeout` added to `vitest.config.ts` (which is the
+    // fix #16434 declined), or a vitest upgrade that moves the default out from
+    // under the FLOOR argument in `LIVE_CELL_TIMEOUT_MS`'s docblock. Either one
+    // needs a human to re-derive, not a number bumped here.
+    expect(
+      ctx.task.timeout,
+      'a test outside every live cell no longer runs at vitest’s 5000 ms default — either this ' +
+        'package grew a package-wide `testTimeout` (the fix #16434 declined, because it has no ' +
+        'cell-level discrimination) or the runner default moved; re-derive LIVE_CELL_TIMEOUT_MS ' +
+        'rather than editing this number',
+    ).toBe(5_000);
   });
 });
