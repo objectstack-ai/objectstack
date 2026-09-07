@@ -29,6 +29,7 @@
     "AggregationStage": "src/data/driver-nosql.zod.ts#AggregationStage (type)",
     "AggregationStageSchema": "src/data/driver-nosql.zod.ts#AggregationStageSchema (const)",
     "AnalyticsDateRange": "src/data/analytics.zod.ts#AnalyticsDateRange (type)",
+    "AnalyticsDateRangePreset": "src/data/analytics.zod.ts#AnalyticsDateRangePreset (type)",
     "AnalyticsDateRangePresetSchema": "src/data/analytics.zod.ts#AnalyticsDateRangePresetSchema (const)",
     "AnalyticsDateRangeSchema": "src/data/analytics.zod.ts#AnalyticsDateRangeSchema (const)",
     "AnalyticsQuery": "src/data/analytics.zod.ts#AnalyticsQuery (type)",

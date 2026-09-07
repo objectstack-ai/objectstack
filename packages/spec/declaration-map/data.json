@@ -15,6 +15,7 @@
     "AggregationStage": "data/AggregationStage",
     "AggregationStageSchema": "data/AggregationStage",
     "AnalyticsDateRange": "data/AnalyticsDateRange",
+    "AnalyticsDateRangePreset": "data/AnalyticsDateRangePreset",
     "AnalyticsDateRangePresetSchema": "data/AnalyticsDateRangePreset",
     "AnalyticsDateRangeSchema": "data/AnalyticsDateRange",
     "AnalyticsQuery": "data/AnalyticsQuery",
