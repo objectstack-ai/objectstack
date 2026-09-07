@@ -40,6 +40,14 @@ import type {
     OAuthApplicationRegistration,
     OAuthConsentResult,
 } from './index';
+import type {
+    AuthEmailVerificationResult,
+    AuthPasswordChangeResult,
+    AuthSetInitialPasswordResult,
+    AuthStatusReceipt,
+    AuthTwoFactorVerificationResult,
+    AuthWireUser,
+} from './index';
 import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
     AnalyticsMetadataResponse,
@@ -668,6 +676,113 @@ export async function returnTypePrecisionPins15451(): Promise<void> {
     void (await client.oauth.applications.delete('c_1')).client_id;
 }
 
+
+/**
+ * [#14313 — the `auth.*` family, card 2 of 3 of #12104] The fourteen
+ * better-auth-backed methods #12104 censused under `auth.*`. THIRTEEN are
+ * bound here; the fourteenth is named below and is still `Promise< any >`
+ * on purpose.
+ *
+ * ## These shapes were read off the WIRE, not off better-auth's `.d.ts`
+ *
+ * Every route was driven against a real server twice: the real `AuthPlugin`
+ * mounts over a real Hono app with a real `AuthManager` (better-auth 1.7.2)
+ * on the in-memory engine, and again over a real `SqlDriver` (better-sqlite3)
+ * driven THROUGH this very client with only the socket stood in for. Where
+ * the vendor's declaration and the wire disagreed, the wire won:
+ *
+ *  1. `updateUser`'s OpenAPI stub promises `{ user }`; its handler answers
+ *     `{ status: true }` and puts the new fields in the cookie.
+ *  2. `verifyEmail`'s stub declares `user` required; the handler answers
+ *     `user: null` on a plain verification and the updated user only on a
+ *     change-email verification — so `AuthWireUser | null`.
+ *  3. The `image` / `banReason` / `banExpires` columns arrive as `null` on a
+ *     SQL driver and as an ABSENT key on a store that does not materialise
+ *     unset columns — so `?: … | null`, both measured.
+ *
+ * ## The ruling's ISO-8601 clause HAS sites in this family
+ *
+ * `AuthWireUser.createdAt` / `updatedAt` (and `banExpires`) are the vendor's
+ * `Date` fields. On the wire they are ISO-8601 strings, and that is what the
+ * pins hold them to: no `Date` is declared and no revival layer exists.
+ *
+ * ## `auth.deleteUser` is NOT bound, and that is the finding
+ *
+ * Its route is switched OFF by maintainer ruling (2026-08-12 on #7735;
+ * `auth-route-ledger.ts` books it `disabled`). Measured: it answers HTTP 404
+ * with a ZERO-BYTE body once the last-local-credential guard is satisfied,
+ * so `this.fetch` throws before `res.json()` ever runs — the method has no
+ * success path a caller can observe. No declared return type can be honest
+ * for a value the runtime never delivers, so its `exported-any-returns.json`
+ * entry stays open, which is what the shrink-only ledger is for.
+ *
+ * Type-level for the reason this file's header gives: only a compile-time
+ * assertion can observe a return-type change.
+ */
+export async function returnTypePrecisionPins14313(): Promise<void> {
+    // ── the thirteen bindings ────────────────────────────────────────────
+    expectTypeOf(await client.auth.updateUser({ name: 'n' })).toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.changePassword({ currentPassword: 'a', newPassword: 'b' }))
+        .toEqualTypeOf<AuthPasswordChangeResult>();
+    expectTypeOf(await client.auth.setInitialPassword({ newPassword: 'b' }))
+        .toEqualTypeOf<AuthSetInitialPasswordResult>();
+    expectTypeOf(await client.auth.changeEmail({ newEmail: 'e@example.com' })).toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.sendVerificationEmail({ email: 'e@example.com' }))
+        .toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.verifyEmail({ token: 't' })).toEqualTypeOf<AuthEmailVerificationResult>();
+    expectTypeOf(await client.auth.sessions.revoke('t')).toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.sessions.revokeOthers()).toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.sessions.revokeAll()).toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.twoFactor.verifyTotp({ code: '000000' }))
+        .toEqualTypeOf<AuthTwoFactorVerificationResult>();
+    expectTypeOf(await client.auth.twoFactor.disable({ password: 'p' })).toEqualTypeOf<AuthStatusReceipt>();
+    expectTypeOf(await client.auth.twoFactor.verifyBackupCode({ code: 'c' }))
+        .toEqualTypeOf<AuthTwoFactorVerificationResult>();
+    expectTypeOf(await client.auth.accounts.unlink({ accountId: 'a' })).toEqualTypeOf<AuthStatusReceipt>();
+
+    // ── the ruling, made mechanical ──────────────────────────────────────
+    // ISO-8601 STRINGS. These go red if a later sweep "improves" them to
+    // `Date` (which the ruling forbids outright) or to a number.
+    expectTypeOf((await client.auth.changePassword({ currentPassword: 'a', newPassword: 'b' })).user.createdAt)
+        .toEqualTypeOf<string>();
+    expectTypeOf((await client.auth.twoFactor.verifyTotp({ code: '0' })).user.updatedAt).toEqualTypeOf<string>();
+    expectTypeOf((await client.auth.twoFactor.verifyTotp({ code: '0' })).user.banExpires)
+        .toEqualTypeOf<string | null | undefined>();
+    // The receipts are the literal `true`: a refusal is a throw, never `false`.
+    expectTypeOf((await client.auth.sessions.revoke('t')).status).toEqualTypeOf<true>();
+    expectTypeOf((await client.auth.setInitialPassword({ newPassword: 'b' })).success).toEqualTypeOf<true>();
+    // `token` is nullable ONLY where the wire sends `null` (a change-password
+    // that rotated nothing); the 2FA lanes always mint one.
+    expectTypeOf((await client.auth.changePassword({ currentPassword: 'a', newPassword: 'b' })).token)
+        .toEqualTypeOf<string | null>();
+    expectTypeOf((await client.auth.twoFactor.verifyBackupCode({ code: 'c' })).token).toEqualTypeOf<string>();
+    expectTypeOf((await client.auth.verifyEmail({ token: 't' })).user).toEqualTypeOf<AuthWireUser | null>();
+
+    // ── direction 2: WRONG shapes must now be refused ────────────────────
+    // While these methods returned `any` every suppression below was unused
+    // (TS2578) and this file did not build — which is what makes them
+    // evidence of the narrowing rather than decoration.
+    // @ts-expect-error updateUser answers a receipt, not the updated user (its OpenAPI stub lies)
+    void (await client.auth.updateUser({ name: 'n' })).user;
+    // @ts-expect-error these routes are served BARE by better-auth — there is no `{ success, data }` envelope
+    void (await client.auth.sessions.revokeAll()).data;
+    // @ts-expect-error the wire sends an ISO string; `Date` methods do not exist on it
+    void (await client.auth.changePassword({ currentPassword: 'a', newPassword: 'b' })).user.createdAt.getTime();
+    // @ts-expect-error ObjectStack's own sys_user columns never reach better-auth's wire user
+    void (await client.auth.twoFactor.verifyTotp({ code: '0' })).user.locale;
+    // @ts-expect-error set-initial-password is an ObjectStack mount — `{ success }`, not better-auth's `{ status }`
+    void (await client.auth.setInitialPassword({ newPassword: 'b' })).status;
+    // @ts-expect-error the verification receipt carries no session token
+    void (await client.auth.verifyEmail({ token: 't' })).token;
+
+    // ── the method deliberately left open ────────────────────────────────
+    // `deleteUser` still resolves to `any`, so `.anythingAtAll` compiles.
+    // Pinned as an EQUALITY rather than a suppression, exactly as #14312 did
+    // for `oauth.applications.delete`: when the ruling that keeps the route
+    // off is revisited, this line is the one that must be replaced.
+    expectTypeOf(await client.auth.deleteUser({ password: 'p' })).toEqualTypeOf<any>();
+}
+
 /**
  * ⚠️ GREEN IN BOTH STATES — regression guards, recorded as such rather than
  * counted as evidence that this card's change was needed. Each pins a
@@ -828,6 +943,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins12104).toBe('function');
         expect(typeof returnTypePrecisionPins14312).toBe('function');
         expect(typeof returnTypePrecisionPins15451).toBe('function');
+        expect(typeof returnTypePrecisionPins14313).toBe('function');
         expect(typeof returnTypePrecisionPins13023).toBe('function');
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
         expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');
