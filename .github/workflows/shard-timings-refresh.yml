@@ -104,7 +104,12 @@ permissions:
 # the same bot branch; the newer inputs are the better ones, so the in-flight run
 # yields.
 concurrency:
-  group: shard-timings-refresh
+  # Scoped BY REF, not one global group. Two scheduled refreshes cannot overlap
+  # (they would race on the same bot branch, and the newer inputs are the better
+  # ones, so the in-flight run yields) — but two PRs touching this lane are
+  # unrelated runs, and a single global group would have each cancel the other's
+  # dry run and report a cancellation as though the lane were busy.
+  group: shard-timings-refresh-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -310,11 +315,13 @@ jobs:
       # verdict line rather than recomputed here — a second implementation of the
       # binning would be a second answer to grade against.
       #
-      # ⛔ `continue-on-error` on the AFTER leg only, and it is not leniency: a
-      # red here is the partitioner refusing an honest measurement, which is
-      # information the PR must carry, not a reason to withhold the PR. The
-      # verdict text goes into the body either way and the PR's own lint job
-      # grades it again.
+      # ⛔ The AFTER leg's non-zero exit is CAPTURED, not propagated, and that is
+      # not leniency: a red there is the partitioner refusing an honest
+      # measurement, which is information the PR must carry rather than a reason
+      # to withhold the PR. `set +e` around that one command, with `$?` read
+      # immediately and before any pipe, is what keeps the verdict readable
+      # without letting the step's own status swallow it; the text goes into the
+      # body either way and the PR's own lint job grades it again.
       - name: Predicted bins, before and after
         id: bins
         if: steps.compare.outputs.changed == 'true'
