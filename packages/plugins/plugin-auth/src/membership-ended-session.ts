@@ -93,8 +93,8 @@ import { SystemObjectName } from '@objectstack/spec/system';
  *
  * It is deliberately the SAME string the API-key arm of this ruling family
  * already mints for the same event: `resolve-authz-context.ts` refuses an API
- * key whose backing membership ended with
- * `authRefusal.reason: 'organization_membership_ended'` (#15256, decision 1A).
+ * key whose backing membership ended with the `ApiKeyRefusalReason`
+ * `'organization_membership_ended'` (#15256, decision 1A; a server-side line).
  * One grep therefore finds every place the platform acts on a membership
  * ending, across both credential kinds — worth more than four saved
  * characters, and comfortably inside the column's `maxLength: 64`.
