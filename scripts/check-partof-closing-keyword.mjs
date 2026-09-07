@@ -2,9 +2,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check:partof-closing-keyword — the PR-scoped BLOCKING half of the half-state
- * sweep's H7: a pull request may not declare itself only `Part of #N` while
- * also telling GitHub to close that same `#N`.
+ * check:partof-closing-keyword — the PR-scoped BLOCKING guard over BOTH the
+ * surfaces GitHub's reference parser reads when a pull request merges.
+ *
+ *   RULE 1 — THE BODY. A pull request may not declare itself only `Part of #N`
+ *   while also telling GitHub to close that same `#N`. This is the half-state
+ *   sweep's H7, called.
+ *
+ *   RULE 2 — THE COMMIT MESSAGES. No commit on the pull request may carry a
+ *   card-relation trailer at all: no closing keyword, no Part-of and no Refs
+ *   bound to any card number. The body is the only carrier of the relation.
+ *
+ *   RULE 3 — THE BODY, NEGATED. A pull request may not bind a closing keyword
+ *   to a `#N` inside a sentence that reads as NOT closing it. This is the
+ *   half-state sweep's H21, called. It reads the same surface as RULE 1 and is
+ *   disjoint from it by construction.
  *
  *   node scripts/check-partof-closing-keyword.mjs              # judge this PR (CI)
  *   node scripts/check-partof-closing-keyword.mjs --self-test  # verify it offline
@@ -66,12 +78,136 @@
  * whose body has since been fixed replays the stale body and stays red. The
  * remedy is to edit the body (which fires a new run), not to re-run.
  *
+ * ## RULE 2 — why a commit trailer is a defect even when it is TRUE
+ *
+ * This repository squash-merges, so the commit that lands on the default branch
+ * is ASSEMBLED AT MERGE TIME by concatenating the branch's commit messages.
+ * Each of those was written at a different moment about a different slice of
+ * the work, and each can be perfectly honest on its own; the concatenation is
+ * written by nobody and reviewed by nobody.
+ *
+ * Measured on the squash of PR 16247, commit fc3fb7c4619, an ancestor of the
+ * default branch: three bullets assembled from three commit messages, a closing
+ * trailer for a card sitting inside the first bullet's body, and a third bullet
+ * that retracts a claim the first bullet still makes. The landed message
+ * therefore asserts and withdraws the same thing in one text, and it told
+ * GitHub to close the card from inside a bullet nobody read as a declaration.
+ *
+ * Note what RULE 1 cannot see there: the contradictory text existed in no body,
+ * so the body was clean — correctly so. The sweep's H23 reads this surface, but
+ * AFTER the fact, on the default branch, and it binds narrower: it reports only
+ * the Part-of-plus-closing-keyword CONTRADICTION, and the specimen above
+ * carries no Part-of at all, so H23 is silent on exactly this shape.
+ *
+ * RULE 2 is the pre-merge, blocking, strictly WIDER statement, and the width is
+ * what makes it enforceable. "Trailers that would contradict each other once
+ * concatenated" cannot be judged commit by commit, because the contradiction is
+ * a property of the assembly, which does not exist until the merge button. "No
+ * relation trailer in any commit" is a property of ONE commit, so one commit is
+ * enough to judge — and an assembly cannot manufacture what none of its inputs
+ * contain. Squash is not the only cost either: the trailers are also live on
+ * their own, so a branch pushed to the default branch by any other route closes
+ * the cards its intermediate commits name.
+ *
+ * The remedy is the contract this repository already carries, cited rather than
+ * restated — the card relation is declared ONCE, in the PR body, and the merger
+ * takes the squash message from that body. ⛔ Nothing in this gate's output asks
+ * anyone to rewrite history: amend, rebase and force-push are forbidden here,
+ * and a red on an already-pushed branch is repaired the way this repo's merges
+ * already repair it, in the body and at the merge.
+ *
+ * ## Where the commit messages come from, and why the endpoint and not a walk
+ *
+ * The WORKFLOW gathers them and hands them over as data, so the judging path
+ * stays HTTP-free by construction exactly as it is for the body: this script
+ * still makes no request, and its inputs are still only the environment and, now,
+ * a file the environment names.
+ *
+ * The gather is one paginated REST read of the pull request's own commits list,
+ * chosen over a git walk for a measured reason. That endpoint returns exactly
+ * the set GitHub will squash. The git equivalent needs the merge base present in
+ * order to exclude what is already on the default branch, and this job checks
+ * out at depth 1 — so on a branch that has merged the default branch back in, a
+ * shallow walk cannot perform that exclusion and reports ANOTHER author's landed
+ * trailers as this pull request's. The alternatives are a deepen-until-found
+ * loop, which is unbounded, or a full-history clone to read a handful of
+ * messages. The endpoint is bounded, exact, and needs one added read scope.
+ *
+ * The list reaches the script as a FILE named in the environment, not as a value
+ * in it. Commit messages carry newlines, blank lines and quotes; JSON Lines
+ * through a file keeps that payload out of the shell and out of the environment
+ * block, which is the same argument the body's `env:` spelling rests on, applied
+ * to a payload too big and too multi-line to be an environment value.
+ *
+ * ## RULE 3 — the same surface as RULE 1, and the half of the class it misses
+ *
+ * RULE 1's own rationale is stated in fully general terms: GitHub's parser
+ * matches the keyword plus the number and ignores the surrounding prose
+ * entirely, negations and modals included, so the sentence an author writes to
+ * PREVENT an auto-close is exactly what performs it. Its PREDICATE is narrower
+ * than that sentence — it is bound to a Part-of declaration and fires only when
+ * the same number carries both. A body that declares Part of for nothing is
+ * silent under RULE 1 however plainly it says the card stays open.
+ *
+ * RULE 3 is that missing half, and it is the sweep's H21 called rather than a
+ * second rule invented here — the same no-fork posture the import note below
+ * takes for RULE 1. It fires when a closing keyword is bound to a number the
+ * body never declared itself part of, inside a SENTENCE carrying a negation or
+ * filing marker. The trigger is the negation WINDOW and never keyword presence:
+ * 277 of the 300 most recently merged bodies in the measurement behind H21
+ * carry a closing keyword bound to a number, so a presence rule would red every
+ * correct pull request in the corpus.
+ *
+ * Numbered 3 although it reads RULE 1's surface: renumbering the commit rule
+ * would rewrite output text that this file's own self-test pins by name, for no
+ * gain. Read the numbers as the order the rules were learned, not as a grouping
+ * by surface.
+ *
+ * ## Why RULE 3 is here NOW, and not when H21 was written
+ *
+ * H21 shipped deliberately report-only, as a patrol row this gate did not
+ * import, so that widening the class could not widen a check that fails builds
+ * before the class had a baseline. The promotion rode a measurement rather than
+ * a moment, and the measurement is what a reader of this section should know:
+ *
+ *   - Over every pull request that was open at any point between H21 landing
+ *     and 2026-09-07 — 2,285 of them, every body read through the shipped
+ *     predicate — H21 flags three. None is a correct close wrongly refused.
+ *   - One of the three is a second specimen of the original incident, and it is
+ *     the argument for a blocking gate rather than a patrol row. A body said a
+ *     finding was filed rather than repaired, bound a closing keyword to that
+ *     card in the same sentence, and the card closed two seconds after the
+ *     merge — still carrying its bug and queue labels, i.e. a genuine unfixed
+ *     defect reading as finished.
+ *   - The patrol could not have caught it. That pull request was open for 41
+ *     minutes, entirely between two six-hourly sweeps. A report-only row is
+ *     structurally blind to a short-lived pull request; a PR-time gate is not.
+ *     That gap is not a discipline problem and no schedule fixes it.
+ *
  * ## Exit codes — and why an empty body is a VERDICT, not a skip
  *
- *   0  judged, clean.
- *   1  judged, contradiction found. The PR is red until the body is reworded.
- *   2  NOT WIRED — no PR context in the environment at all. A usage/wiring
- *      failure, never a statement about any PR.
+ *   0  judged, clean — BOTH rules, over inputs that were really read.
+ *   1  judged, finding. The PR is red until the body is reworded (RULE 1 and
+ *      RULE 3) or the relation is moved out of the commits and into the body
+ *      (RULE 2). All three findings share this exit: a body that negates the
+ *      relation it also states is the same contradiction class RULE 1 refuses,
+ *      so it is a new finding KIND and not a new exit code.
+ *   2  NOT WIRED — an input this gate judges is missing, so a rule verified
+ *      nothing. A usage/wiring failure, never a statement about any PR.
+ *
+ * Exit 2 covers no PR context at all AND the case where the body arrived but
+ * the commit list did not. That second one is deliberate and is the whole
+ * presence semantics of RULE 2: a wiring that forgot the commits has not seen a
+ * clean commit history, it has seen no commit history, and the two must never
+ * print the same line. An empty commit list is read the same way rather than as
+ * a clean PR with nothing in it — every pull request has at least one commit,
+ * so zero rows means the gather failed, not that the author pushed nothing.
+ *
+ * The precedence when both apply — a real finding and a half-wired run — is
+ * FINDING first, because a finding is a true statement about an input that was
+ * really read, while exit 2 claims nothing was judged. The unread half is still
+ * named in the output, so a run can never quietly drop the fact that it read
+ * only one of the two surfaces.
  *
  * The split matters in both directions. A gate that cannot read its input has
  * verified nothing, and exiting 0 there is the anti-pattern this repo keeps
@@ -126,7 +262,22 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 
-import { h7PartOfWithClosingKeyword } from './pm/check-half-states.mjs';
+// The relation extractors are the sweep's, imported and not re-spelled. Two
+// things ride on that beyond the usual no-fork argument. GitHub's
+// closing-keyword grammar is spelled in three places in this tree and a parity
+// gate holds those three behaviourally equal; a FOURTH spelling here would be a
+// fourth thing to keep in step, and it would be the one nobody remembers when
+// the grammar next moves. And the `markdown: false` reading these are called
+// with is itself a measured contract — a commit message is not markdown, so
+// backticks do not neutralise a keyword there — which is the sweep's H23
+// section, not a call this gate is entitled to re-make.
+import {
+  closingKeywordTargets,
+  h7PartOfWithClosingKeyword,
+  h21NegatedClosingKeyword,
+  partOfTargets,
+  refsTargets,
+} from './pm/check-half-states.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -163,11 +314,18 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Context reading: presence, not truthiness.': 4,
   'The wiring itself. A gate whose workflow step is deleted or whose': 6,
   'The predicate source this gate reuses must still be there to reuse.': 1,
+  'RULE 2 — every card-relation spelling in a commit message is a finding,': 13,
+  'The regression fixture: the squash that assembled a contradiction no': 4,
+  'RULE 2 delegates to the sweep extractors at the commit-message reading.': 3,
+  'The commit list input. An absent, broken or empty list can never read': 8,
+  'The verdict layer over two rules: precedence, and the unread half is': 5,
+  'The wiring gathers the commit list and hands it over as a file path.': 5,
+  'RULE 3 — a closing keyword bound to a card the sentence says it is NOT': 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -253,6 +411,109 @@ export const EXIT_CLEAN = 0;
 export const EXIT_CONTRADICTION = 1;
 export const EXIT_NOT_WIRED = 2;
 
+/** The env var naming the file the wiring writes the PR's commit list to. */
+export const COMMITS_FILE_ENV = 'PR_COMMITS_FILE';
+
+/**
+ * The contract RULE 2's finding CITES. It is quoted, not restated: the sentence
+ * is written down elsewhere in this repository, that copy is the authority, and
+ * a gate that paraphrased it would become a second source for one rule — the
+ * exact drift this file refuses elsewhere by importing its predicate instead of
+ * copying it. Quoted verbatim, in its own language, because a translation of a
+ * ruling is a rewrite of it.
+ *
+ * Named in prose rather than as a bare path literal on purpose: the
+ * dispatch-gates derivation turns quoted path literals in this file into watch
+ * hints, and a sentence with spaces in it cannot become one. The header's last
+ * section is the authority on that.
+ */
+const RELATION_CONTRACT =
+  'The contract is written down in the agent rules at .claude/agents/os-dev.md — '
+  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。'
+  + 'squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。」 '
+  + '(The PR body and the commit messages are parsed separately: the card relation is declared ONCE, '
+  + 'in the body, and a commit carries no card trailer.)';
+
+/**
+ * The commit rows the wiring gathered, as JSON Lines — one object per line,
+ * `{ sha, message }`.
+ *
+ * A commit message is multi-line by nature and JSON escapes those newlines, so
+ * one row really is one line and the format needs no separator of its own. A
+ * malformed line is a PROBLEM and never a skipped row: a parser that silently
+ * dropped what it could not read would shrink the population this rule judges
+ * and report the survivors as the whole PR.
+ */
+export function parseCommitRecords(text) {
+  const rows = [];
+  const lines = String(text ?? '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === '') continue;
+    let row;
+    try {
+      row = JSON.parse(lines[i]);
+    } catch (err) {
+      return { problem: `line ${i + 1} of the commit list is not JSON — ${err.message}` };
+    }
+    if (typeof row?.sha !== 'string' || typeof row?.message !== 'string') {
+      return { problem: `line ${i + 1} of the commit list has no string \`sha\` and \`message\`.` };
+    }
+    rows.push({ sha: row.sha, message: row.message });
+  }
+  return { rows };
+}
+
+/**
+ * Every card-relation trailer one commit message carries, in a fixed order.
+ *
+ * All three relations, because all three are the PR body's to declare: a
+ * closing keyword acts on merge, and Part-of and Refs are read by this repo's
+ * own board tooling, so a commit carrying either tells the board something its
+ * author only meant to tell the pull request. Read at `markdown: false` — see
+ * the import note.
+ */
+export function commitRelations(message) {
+  const found = [];
+  for (const card of partOfTargets(message, { markdown: false })) found.push({ keyword: 'Part of', card });
+  for (const card of refsTargets(message, { markdown: false }).keys()) found.push({ keyword: 'Refs', card });
+  for (const [card, keyword] of closingKeywordTargets(message, { markdown: false })) found.push({ keyword, card });
+  return found;
+}
+
+/** The commit's subject, trimmed to a length that keeps a log line readable. */
+function commitSubject(message) {
+  const first = String(message ?? '').split('\n', 1)[0].trim();
+  return first.length > 72 ? `${first.slice(0, 69)}…` : first;
+}
+
+/**
+ * RULE 2 — one finding sentence per offending commit, empty when clean.
+ *
+ * Per COMMIT rather than per relation: an author fixes a message, not a match,
+ * and a commit carrying three trailers is one edit and should be one line.
+ */
+export function commitTrailerFindings(commits) {
+  const findings = [];
+  for (const commit of commits) {
+    const relations = commitRelations(commit.message);
+    if (relations.length === 0) continue;
+    const sha = String(commit.sha ?? '').slice(0, 9) || '(unknown sha)';
+    const carried = relations.map((r) => `\`${r.keyword} #${r.card}\``).join(', ');
+    findings.push(
+      `commit \`${sha}\` ("${commitSubject(commit.message)}") carries ${carried} in its message. ` +
+        `This repo squash-merges, so every commit message on this PR is concatenated into the one ` +
+        `message that lands on the default branch — a text no one writes and no one reviews, which ` +
+        `carries every trailer its inputs carried and can contradict itself where its parts did not. ` +
+        `The trailer is also live on its own. ${RELATION_CONTRACT} ` +
+        `Remedy: move this relation into the PR body, where it is stated once, and take the squash ` +
+        `message from that body at merge. ` +
+        `⛔ Do NOT amend, rebase or force-push to remove it — rewriting pushed history is forbidden ` +
+        `here, and it is not what fixes this.`,
+    );
+  }
+  return findings;
+}
+
 /**
  * The PR context, or null when this process was handed none.
  *
@@ -263,7 +524,52 @@ export const EXIT_NOT_WIRED = 2;
 export function readPrContext(env) {
   const wired = Object.hasOwn(env, 'PR_BODY') || Object.hasOwn(env, 'PR_NUMBER');
   if (!wired) return null;
-  return { number: String(env.PR_NUMBER ?? '').trim(), body: env.PR_BODY ?? '' };
+  return {
+    number: String(env.PR_NUMBER ?? '').trim(),
+    body: env.PR_BODY ?? '',
+    ...readCommits(env),
+  };
+}
+
+/**
+ * RULE 2's input: `{ commits }` when a list was really read, else
+ * `{ commits: null, commitsProblem }` naming which way it was not.
+ *
+ * Every failure mode lands in `commitsProblem` rather than throwing, so that a
+ * missing or broken commit list is REPORTED by the verdict layer as an unjudged
+ * rule instead of killing the process with a stack trace that reads, to whoever
+ * finds the red X, exactly like the gate itself being broken.
+ *
+ * The `readText` seam exists so the self-test drives every one of these arms
+ * without a temp file; production passes the real reader.
+ */
+export function readCommits(env, readText = (p) => readFileSync(p, 'utf8')) {
+  const path = env[COMMITS_FILE_ENV];
+  if (typeof path !== 'string' || path.trim() === '') {
+    return {
+      commits: null,
+      commitsProblem: `${COMMITS_FILE_ENV} names no file, so the PR's commit messages were never read.`,
+    };
+  }
+
+  let text;
+  try {
+    text = readText(path.trim());
+  } catch (err) {
+    return { commits: null, commitsProblem: `${COMMITS_FILE_ENV} names ${path.trim()}, which could not be read — ${err.message}` };
+  }
+
+  const parsed = parseCommitRecords(text);
+  if (parsed.problem) return { commits: null, commitsProblem: `the commit list at ${path.trim()} is malformed — ${parsed.problem}` };
+  if (parsed.rows.length === 0) {
+    return {
+      commits: null,
+      commitsProblem:
+        `the commit list at ${path.trim()} is EMPTY. Every pull request has at least one commit, so this ` +
+        'is a gather that failed, not a PR with nothing in it — and it must not be read as a clean commit history.',
+    };
+  }
+  return { commits: parsed.rows, commitsProblem: null };
 }
 
 /**
@@ -283,33 +589,106 @@ export function judge(ctx) {
         'verdict: it says nothing about whether any PR body contradicts itself, and no author caused it.',
         '',
         `Fix:  run it from the workflow that supplies the context (${WIRING_WORKFLOW}), or locally with`,
-        '      PR_BODY="$(cat some-body.md)" node scripts/check-partof-closing-keyword.mjs',
+        `      PR_BODY="$(cat some-body.md)" ${COMMITS_FILE_ENV}=some-commits.jsonl \\`,
+        '        node scripts/check-partof-closing-keyword.mjs',
       ],
     };
   }
 
   const where = ctx.number ? `PR #${ctx.number}` : 'this PR';
   const contradiction = h7PartOfWithClosingKeyword({ body: ctx.body });
-  if (!contradiction) {
-    const what = ctx.body.trim() === '' ? 'has an empty body, which can carry no' : 'carries no';
+  // RULE 3, the sweep's H21 called on the same body. Disjoint from RULE 1 by
+  // construction — a number already declared Part of is RULE 1's, and H21 skips
+  // it — so one number can never be reported twice in one verdict.
+  const negated = h21NegatedClosingKeyword({ body: ctx.body });
+  const commitFindings = ctx.commits ? commitTrailerFindings(ctx.commits) : [];
+
+  // The unread half is named wherever it exists, on EVERY exit path — a run
+  // that judged one surface must never present itself as one that judged both.
+  const unread = ctx.commitsProblem ? [`  ⚠️ RULE 2 judged nothing: ${ctx.commitsProblem}`] : [];
+
+  if (contradiction || negated || commitFindings.length) {
+    const lines = [];
+    if (contradiction) {
+      lines.push(
+        `::error::${where} contradicts itself: ${contradiction}`,
+        '',
+        `✗ check:partof-closing-keyword: ${where} contradicts itself.`,
+        '',
+        `  ${contradiction}`,
+        '',
+        '  Why this is blocking rather than advisory: the card closes SILENTLY on merge, and a closed',
+        '  card reads as finished — the one incident behind this gate was found only by a post-merge',
+        '  inventory re-pull. Editing the body re-runs this check; no push and no re-run are needed.',
+      );
+    }
+    if (negated) {
+      if (contradiction) lines.push('');
+      lines.push(
+        `::error::${where} tells GitHub to close a card its own sentence says it is not closing: ${negated}`,
+        '',
+        `✗ check:partof-closing-keyword: ${where} tells GitHub to close a card its own sentence says it`,
+        '  is NOT closing.',
+        '',
+        `  ${negated}`,
+        '',
+        '  Remedy, in order of preference: reword so that no closing keyword sits beside that number —',
+        '  the sentence above names the three approved rewordings, and any of them says the same thing',
+        '  to a reader while saying nothing to the parser. If the keyword must stay in the prose, put',
+        '  it in BACKTICKS: a pull request body is markdown, the parser does not fire inside a code',
+        '  span, and that was measured live rather than assumed. ⛔ Backticks are NOT the escape in a',
+        '  commit message — nothing renders one, so they are ordinary characters there and RULE 2',
+        '  above is the rule that surface answers to.',
+        '',
+        '  Why this is blocking rather than advisory: this body declares no `Part of`, so RULE 1 is',
+        '  silent on it by construction, however plainly the sentence says the card stays open. The',
+        '  close then lands SILENTLY on merge, on a card nobody is watching, and a closed card reads as',
+        '  finished — the measured specimen closed a genuine unfixed defect two seconds after its merge.',
+        '  Editing the body re-runs this check; no push and no re-run are needed.',
+      );
+    }
+    if (commitFindings.length) {
+      if (contradiction || negated) lines.push('');
+      for (const finding of commitFindings) lines.push(`::error::${finding}`);
+      lines.push(
+        '',
+        `✗ check:partof-closing-keyword: ${commitFindings.length} commit message(s) on ${where} carry a`,
+        '  card-relation trailer. The PR body is the only carrier of the relation.',
+        '',
+      );
+      for (const finding of commitFindings) lines.push(`  ${finding}`, '');
+      lines.push(
+        '  Pushing the reworded commits re-runs this check. ⛔ The repair is NOT a history rewrite:',
+        '  state the relation once in the PR body and take the squash message from that body at merge.',
+      );
+    }
+    return { exit: EXIT_CONTRADICTION, lines: [...lines, ...(unread.length ? ['', ...unread] : [])] };
+  }
+
+  if (ctx.commitsProblem) {
     return {
-      exit: EXIT_CLEAN,
-      lines: [`✓ check:partof-closing-keyword: ${where} ${what} Part-of/closing-keyword contradiction.`],
+      exit: EXIT_NOT_WIRED,
+      lines: [
+        `check:partof-closing-keyword: PARTLY WIRED — ${where}'s body was read and carries no Part-of/closing-keyword`,
+        'contradiction, but its COMMIT MESSAGES were not read, so RULE 2 judged nothing. This is a wiring',
+        'failure, NOT a verdict: reporting an unread commit history as a clean one is the exact shape this',
+        'gate exists to refuse.',
+        '',
+        `  ${ctx.commitsProblem}`,
+        '',
+        `Fix:  run it from the workflow that supplies the context (${WIRING_WORKFLOW}), which writes the PR's`,
+        `      commits as JSON Lines and names that file in ${COMMITS_FILE_ENV}.`,
+      ],
     };
   }
 
+  const what = ctx.body.trim() === '' ? 'has an empty body, which can carry no' : 'carries no';
   return {
-    exit: EXIT_CONTRADICTION,
+    exit: EXIT_CLEAN,
     lines: [
-      `::error::${where} contradicts itself: ${contradiction}`,
-      '',
-      `✗ check:partof-closing-keyword: ${where} contradicts itself.`,
-      '',
-      `  ${contradiction}`,
-      '',
-      '  Why this is blocking rather than advisory: the card closes SILENTLY on merge, and a closed',
-      '  card reads as finished — the one incident behind this gate was found only by a post-merge',
-      '  inventory re-pull. Editing the body re-runs this check; no push and no re-run are needed.',
+      `✓ check:partof-closing-keyword: ${where} ${what} Part-of/closing-keyword contradiction and no`,
+      '  closing keyword bound to a card its own sentence says it is not closing, and its',
+      `  ${ctx.commits.length} commit message(s) carry no card-relation trailer.`,
     ],
   };
 }
@@ -336,7 +715,20 @@ function selfTest() {
     registerCase();
     return cases.push([name, actual, expected]);
   };
-  const verdict = (body, number = '1') => judge({ number, body });
+  // Every RULE 1 case below judges a BODY, so each is handed a commit list that
+  // is present and clean. Without one they would all exit 2 on the unread half
+  // and stop testing the thing they were written to test — and the day that
+  // happened they would still print, which is what the battery floor is for.
+  const CLEAN_COMMITS = [{ sha: 'a1b2c3d4e5f60718', message: 'chore(ci): a subject carrying no card relation\n\nBody prose.\n' }];
+  const verdict = (body, number = '1') => judge({ number, body, commits: CLEAN_COMMITS, commitsProblem: null });
+  /** A verdict over COMMITS, with a body that is clean under RULE 1. */
+  const commitVerdict = (...messages) =>
+    judge({
+      number: '1',
+      body: 'A body with no relation declared in it.',
+      commits: messages.map((message, i) => ({ sha: `${i}0deadbeef1234567`, message })),
+      commitsProblem: null,
+    });
 
   // --- The measured arms. All three were read live on one throwaway PR, in one
   // body, at one moment, with the PR OPEN and unmerged: the plain-prose target
@@ -395,7 +787,7 @@ function selfTest() {
     'the verdict is exactly the shipped predicate over every fixture (no forked rule)',
     bodies.every(
       (body) =>
-        (judge({ number: '1', body }).exit === EXIT_CONTRADICTION) ===
+        (judge({ number: '1', body, commits: CLEAN_COMMITS, commitsProblem: null }).exit === EXIT_CONTRADICTION) ===
         (h7PartOfWithClosingKeyword({ body }) !== null),
     ),
     true,
@@ -469,6 +861,255 @@ function selfTest() {
   // --- The predicate source this gate reuses must still be there to reuse.
   battery('The predicate source this gate reuses must still be there to reuse.');
   t('the predicate source exists', existsSync(join(ROOT, PREDICATE_SOURCE)), true);
+
+  // --- RULE 2. Every spelling the ruling names, plus the shapes that must stay
+  // green so the rule does not tax ordinary commit prose.
+  battery('RULE 2 — every card-relation spelling in a commit message is a finding,');
+  for (const spelling of ['Fixes', 'Closes', 'Resolves', 'Part of', 'Refs']) {
+    t(
+      `a commit message carrying "${spelling}" bound to a card is a finding`,
+      commitVerdict(`fix(x): a subject\n\n${spelling} #4242\n`).exit,
+      EXIT_CONTRADICTION,
+    );
+  }
+  const named = commitVerdict('fix(x): the subject that must be quoted back\n\nFixes #4242\n').lines.join('\n');
+  t('the finding names the offending commit by short sha', named.includes('`00deadbee`'), true);
+  t('the finding quotes the commit subject back', named.includes('the subject that must be quoted back'), true);
+  t('the finding names the trailer and the card it binds', named.includes('`Fixes #4242`'), true);
+  t(
+    'the finding CITES the contract rather than restating it in its own words',
+    named.includes(RELATION_CONTRACT),
+    true,
+  );
+  t(
+    'an ordinary commit message with no card relation is clean',
+    commitVerdict('fix(cli): stop counting the walk instead of the tree\n\nBody prose about the change.\n').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'the squash subject marker `(#N)` is not a card relation',
+    commitVerdict('fix(cli): report key counts off the emitted bytes (#16247)\n').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'the word closing is still not a closing keyword on this surface either',
+    commitVerdict('docs: explain why closing #4242 by hand would drop the severe half\n').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'the harness trailer pair carries no card number and stays clean',
+    commitVerdict('fix(x): a subject\n\nCo-Authored-By: Someone <nobody@example.invalid>\nClaude-Session: https://example.invalid/session_0\n').exit,
+    EXIT_CLEAN,
+  );
+
+  // --- The regression fixture. This is the specimen the card was filed on, and
+  // it is the argument for RULE 2 being WIDER than the sweep's H23: the squash
+  // carries a closing trailer and NO Part-of, so the contradiction row is silent
+  // on it while the assembly it produced contradicts itself in plain sight.
+  battery('The regression fixture: the squash that assembled a contradiction no');
+  const FIXTURE_SQUASH = [
+    'fix(cli): report `os i18n extract` key counts off the emitted bytes (#16247)',
+    '',
+    '* fix(cli): report i18n extract key counts off the emitted bytes',
+    '',
+    'Two consequences of the same conflation go with it: the emit gate is now',
+    "the module's own leaf count; and `--json`'s `counts` now counts the",
+    '`bundles` payload beside it, as `metadataFormsCounts` already counted',
+    '`metadataForms`.',
+    '',
+    'Fixes #16121',
+    '',
+    '* fix(cli): unbreak the pin\'s typecheck, drop a false symmetry claim',
+    '',
+    '2. The changeset, the PR body and the `--json` comment all claimed the new',
+    '   `counts`/`bundles` relationship was "the relationship `metadataFormsCounts`',
+    '   already had to `metadataForms`". It is not.',
+  ].join('\n');
+  const fixture = commitVerdict(FIXTURE_SQUASH);
+  t('the fixture squash message is a finding', fixture.exit, EXIT_CONTRADICTION);
+  t('the fixture finding names the trailer it found', fixture.lines.join('\n').includes('`Fixes #16121`'), true);
+  t(
+    'the fixture is INVISIBLE to the contradiction rule — it declares no Part-of',
+    partOfTargets(FIXTURE_SQUASH, { markdown: false }).size,
+    0,
+  );
+  t(
+    'the fixture body alone is clean under RULE 1, which is why RULE 2 exists',
+    h7PartOfWithClosingKeyword({ body: FIXTURE_SQUASH }),
+    null,
+  );
+
+  // --- Delegation again, on the second surface: the reading must be the sweep's
+  // `markdown: false`, or an author who "quotes" the trailer gets a green for a
+  // trailer GitHub still acts on.
+  battery('RULE 2 delegates to the sweep extractors at the commit-message reading.');
+  t(
+    'a trailer inside backticks in a COMMIT is still a finding (a commit is not markdown)',
+    commitVerdict('fix(x): a subject\n\n`Fixes #4242`\n').exit,
+    EXIT_CONTRADICTION,
+  );
+  t(
+    'a trailer inside a fenced block in a COMMIT is still a finding',
+    commitVerdict('fix(x): a subject\n\n```\nFixes #4242\n```\n').exit,
+    EXIT_CONTRADICTION,
+  );
+  t(
+    'the relations found are exactly the sweep extractors\' union over the message',
+    commitRelations('Part of #1 and Refs #2 and Fixes #3').map((r) => `${r.keyword} #${r.card}`),
+    ['Part of #1', 'Refs #2', 'Fixes #3'],
+  );
+
+  // --- The commit list input. Every way it can be missing must land on a
+  // verdict that says the rule judged nothing.
+  battery('The commit list input. An absent, broken or empty list can never read');
+  const noFile = readCommits({});
+  t('an absent file name is not a commit list', noFile.commits, null);
+  t('an absent file name says the messages were never read', noFile.commitsProblem.includes('never read'), true);
+  t('an empty file name is treated as absent', readCommits({ [COMMITS_FILE_ENV]: '   ' }).commits, null);
+  t(
+    'an unreadable file is a problem, not a crash',
+    readCommits({ [COMMITS_FILE_ENV]: 'x.jsonl' }, () => {
+      throw new Error('ENOENT');
+    }).commits,
+    null,
+  );
+  t(
+    'a malformed line is a problem, never a silently dropped row',
+    readCommits({ [COMMITS_FILE_ENV]: 'x.jsonl' }, () => '{"sha":"a","message":"m"}\nnot json\n').commitsProblem !== null,
+    true,
+  );
+  t(
+    'a row missing its message is a problem',
+    readCommits({ [COMMITS_FILE_ENV]: 'x.jsonl' }, () => '{"sha":"a"}\n').commitsProblem !== null,
+    true,
+  );
+  t(
+    'an EMPTY list is a failed gather, never a clean history',
+    readCommits({ [COMMITS_FILE_ENV]: 'x.jsonl' }, () => '\n\n').commitsProblem?.includes('EMPTY'),
+    true,
+  );
+  t(
+    'a well-formed list parses to its rows, blank lines ignored',
+    readCommits({ [COMMITS_FILE_ENV]: 'x.jsonl' }, () => '{"sha":"a","message":"m"}\n\n{"sha":"b","message":"n"}\n').commits
+      ?.length,
+    2,
+  );
+
+  // --- The verdict layer: what wins when both apply, and the rule that an
+  // unjudged half is always SAID.
+  battery('The verdict layer over two rules: precedence, and the unread half is');
+  const partly = judge({ number: '1', body: 'A clean body.', commits: null, commitsProblem: 'the list was not read.' });
+  t('a body-only run is NOT WIRED, never clean', partly.exit, EXIT_NOT_WIRED);
+  t('a body-only run does not read as a clean board', partly.lines.join('\n').includes('✓'), false);
+  t('a body-only run says which rule judged nothing', partly.lines.join('\n').includes('RULE 2 judged nothing'), true);
+  const both = judge({
+    number: '1',
+    body: 'Part of #4242 — close #4242 once the rest lands.',
+    commits: null,
+    commitsProblem: 'the list was not read.',
+  });
+  t('a real finding outranks a half-wired run', both.exit, EXIT_CONTRADICTION);
+  t('and the half-wired run is still named in the output', both.lines.join('\n').includes('RULE 2 judged nothing'), true);
+
+  // --- The wiring's second half: the step that gathers the commit list.
+  battery('The wiring gathers the commit list and hands it over as a file path.');
+  t('the wiring names the commit-list file variable', wiring.includes(`${COMMITS_FILE_ENV}:`), true);
+  t(
+    'the wiring reads the PR commits endpoint rather than walking a shallow clone',
+    /pulls\/[^\n]*\/commits/.test(wiring),
+    true,
+  );
+  t('the wiring pages the endpoint, so a long PR is not silently truncated', wiring.includes('--paginate'), true);
+  t(
+    'the wiring grants the read scope that endpoint needs',
+    /permissions:[\s\S]{0,200}?pull-requests:\s*read/.test(wiring),
+    true,
+  );
+  t(
+    'the commit list reaches the script as a PATH in env, never as a body of text in it',
+    new RegExp(`${COMMITS_FILE_ENV}:\\s*\\$\\{?\\{?\\s*(RUNNER_TEMP|runner\\.temp)`, 'i').test(wiring),
+    true,
+  );
+
+  // --- RULE 3 — a closing keyword bound to a card the sentence says it is NOT
+  // closing. The sweep's H21, called. Every fixture below is a real sentence:
+  // the two positives are measured specimens quoted byte-for-byte, and the
+  // greens are the register the specimens live in, which the corpus behind H21
+  // found 116 times without one of them binding a keyword to a number. That
+  // ratio is the whole reason this rule reads a negation WINDOW and not keyword
+  // presence, and these cases are what stops a later edit from widening it.
+  battery('RULE 3 — a closing keyword bound to a card the sentence says it is NOT');
+  const negatedOut = verdict('## Out of scope\n\nFiled, not fixed: #10240 — the same leak through the delete verb.');
+  const negatedText = negatedOut.lines.join('\n');
+  t('the incident specimen is refused, and under the existing finding exit', negatedOut.exit, EXIT_CONTRADICTION);
+  t(
+    'the second specimen is refused too (measured 2026-08-24, a card closed 2s after its merge)',
+    verdict('One adjacent finding filed rather than fixed: #11745').exit,
+    EXIT_CONTRADICTION,
+  );
+  t('the control passes: an ordinary closing body with no negation is clean', verdict('Fixes #10171').exit, EXIT_CLEAN);
+  t(
+    'the specimen REGISTER stays clean when it binds no keyword to a number (the near miss)',
+    verdict('## Out of scope — filed, not repaired here\n\nThe delete verb keeps its own card.').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    '…and its other measured spelling stays clean for the same reason',
+    verdict('The adjacent leak is filed, not fixed here.').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a multi-card close list under an earlier negation is clean (the sentence bound, measured)',
+    verdict('This does not change the loader.\n\nFixes #10581\nFixes #10582\nFixes #10583').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a markdown structural line start bounds the window, so the negation does not reach the keyword',
+    verdict('This does not touch the loader.\n\n### Closing lines\n\nFixes #10581').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'backticks ARE the escape on this surface, so an author explaining the keyword is not taxed',
+    verdict('Out of scope — this body deliberately does not say `Fixes #10240` in prose.').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    "a number already declared Part of is RULE 1's row: RULE 3 does not double-report it",
+    h21NegatedClosingKeyword({ body: 'Part of #8131 — this does not close #8131 yet.' }),
+    null,
+  );
+  t(
+    '…and that body is still refused, by RULE 1, so the disjointness costs no coverage',
+    verdict('Part of #8131 — this does not close #8131 yet.').exit,
+    EXIT_CONTRADICTION,
+  );
+  const negatedBodies = [
+    'Filed, not fixed: #10240 — the same leak through the delete verb.',
+    'Fixes #10171',
+    'Part of #8131 — this does not close #8131 yet.',
+    'This does not change the loader.\n\nFixes #10581',
+    '',
+    'Out of scope: closes #77.',
+  ];
+  t(
+    'the verdict is exactly the two shipped predicates over every fixture (no forked rule)',
+    negatedBodies.every(
+      (body) =>
+        (judge({ number: '1', body, commits: CLEAN_COMMITS, commitsProblem: null }).exit === EXIT_CONTRADICTION) ===
+        (h7PartOfWithClosingKeyword({ body }) !== null || h21NegatedClosingKeyword({ body }) !== null),
+    ),
+    true,
+  );
+  t('the failure names the "not addressed here" rewording', negatedText.includes('#10240 is not addressed here'), true);
+  t('the failure names the "out of scope" rewording', negatedText.includes('out of scope: #10240'), true);
+  t('the failure names the "remains open" rewording', negatedText.includes('#10240 remains open'), true);
+  t('the failure names the backtick escape, which is valid on THIS surface', negatedText.includes('BACKTICKS'), true);
+  t(
+    '…and says in the same breath that backticks are NOT the escape in a commit message',
+    negatedText.includes('Backticks are NOT the escape in a'),
+    true,
+  );
+  t('the RULE 3 failure is annotated for the GitHub UI', negatedText.includes('::error::'), true);
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.

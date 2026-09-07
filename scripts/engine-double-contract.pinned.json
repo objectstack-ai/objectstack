@@ -1617,6 +1617,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14938-list-drafts-updated-at.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14938-list-drafts-updated-at.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14938-list-drafts-updated-at.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1723,6 +1738,11 @@
     },
     {
       "file": "packages/metadata/src/loaders/database-loader-14037-adapter-boundary-iso.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/loaders/database-loader-14078-invalid-date-total-arm.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -2137,6 +2157,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/organizations/src/claim-org-seed-ownership.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/organizations/src/claim-orphan-org-rows.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
+      "file": "packages/plugins/organizations/src/org-creation-no-cross-org-copy.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2213,6 +2248,16 @@
     },
     {
       "file": "packages/plugins/plugin-approvals/src/restored-approval-continuation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-run-repairability.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/stranded-run-repairability.test.ts",
       "verb": "update",
       "pinned": 1
     },

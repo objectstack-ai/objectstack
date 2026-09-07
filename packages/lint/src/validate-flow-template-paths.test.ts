@@ -419,6 +419,161 @@ describe('validateFlowTemplatePaths', () => {
       expect(findings[0].path).toBe('flows[0].nodes[1]');
     });
   });
+
+  // ── a template outside a node filter ───────────────────────────────────
+  //
+  // Both rule ids declare a per-position severity (`inFilter ? 'error' :
+  // 'warning'`) and a second message for the non-filter half, and that half was
+  // unreachable on the shape a real hand-off flow has: `body` is a region slot
+  // on `loop`, so the region-stripped view a recursive scan must read deleted
+  // `config.body` from EVERY node — including the `http` node whose request
+  // payload it is. The `http` executor interpolates its raw config wholesale,
+  // so a `{record.<typo>}` there renders an empty value into an outbound
+  // request on every run, silently, at authoring time and at run time alike.
+  //
+  // Four pins, one fixture, matching the four injections the report measured.
+  // The two filter pins are NEGATIVE CONTROLS: they pass before this fix and
+  // must keep passing, or a later refactor could break the gating half while
+  // the warning half stays green. `warning` does not move the exit code, so
+  // every assertion below reads the findings array, never a pass/fail verdict.
+  describe('outside a node filter', () => {
+    const CLEAN_FILTER = '{record.crm_account}';
+    const CLEAN_PAYLOAD = '{record.company}';
+
+    /** A billing hand-off: a filter-guarded read, then an http POST payload. */
+    const handoff = (filterId: string, payloadAmount: string) => ({
+      objects: [LEAD_OBJECT],
+      flows: [
+        {
+          name: 'billing_handoff',
+          type: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-update' } },
+            {
+              id: 'fetch',
+              type: 'get_record',
+              label: 'Fetch account',
+              config: { objectName: 'crm_lead', filter: { id: filterId } },
+            },
+            {
+              id: 'post',
+              type: 'http',
+              label: 'Hand off',
+              config: {
+                url: 'https://billing.example/handoff',
+                method: 'POST',
+                body: { amount: payloadAmount },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    it('gates an unknown field in a filter (negative control)', () => {
+      const findings = validateFlowTemplatePaths(handoff('{record.crm_account_nope}', CLEAN_PAYLOAD));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].where).toBe('flow "billing_handoff" node "get_record"');
+    });
+
+    it('gates a lookup traversal in a filter (negative control)', () => {
+      const findings = validateFlowTemplatePaths(handoff('{record.crm_account.owner_id}', CLEAN_PAYLOAD));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].where).toBe('flow "billing_handoff" node "get_record"');
+    });
+
+    it('warns on an unknown field in a payload outside any filter', () => {
+      const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{record.amount_nope}'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_TEMPLATE_UNKNOWN_FIELD);
+      expect(findings[0].severity).toBe('warning');
+      expect(findings[0].where).toBe('flow "billing_handoff" node "http"');
+      expect(findings[0].path).toBe('flows[0].nodes[2]');
+      expect(findings[0].message).toContain('empty string');
+    });
+
+    it('warns on a lookup traversal in a payload outside any filter', () => {
+      const findings = validateFlowTemplatePaths(handoff(CLEAN_FILTER, '{record.crm_account.name}'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+      expect(findings[0].severity).toBe('warning');
+      expect(findings[0].where).toBe('flow "billing_handoff" node "http"');
+      expect(findings[0].message).toContain('empty string');
+    });
+
+    it('is silent on the same fixture with both positions authored correctly', () => {
+      expect(validateFlowTemplatePaths(handoff(CLEAN_FILTER, CLEAN_PAYLOAD))).toEqual([]);
+    });
+
+    it('resolves one leaf used in both positions of a node at the gating severity', () => {
+      const findings = validateFlowTemplatePaths({
+        objects: [LEAD_OBJECT],
+        flows: [
+          {
+            name: 'billing_handoff',
+            type: 'record_change',
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-update' } },
+              {
+                id: 'touch',
+                type: 'update_record',
+                label: 'Touch',
+                config: {
+                  objectName: 'crm_lead',
+                  filter: { company: '{record.full_naem}' },
+                  fields: { company: 'echo {record.full_naem}' },
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+    });
+
+    it('reports a payload nested in a loop body once, on the node that carries it', () => {
+      const findings = validateFlowTemplatePaths({
+        objects: [LEAD_OBJECT],
+        flows: [
+          {
+            name: 'billing_handoff',
+            type: 'record_change',
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'crm_lead', triggerType: 'record-after-update' } },
+              {
+                id: 'each',
+                type: 'loop',
+                label: 'Each',
+                config: {
+                  collection: '{items}',
+                  body: {
+                    nodes: [
+                      {
+                        id: 'post',
+                        type: 'http',
+                        label: 'Hand off',
+                        config: { url: 'https://billing.example/handoff', body: { amount: '{record.amount_nope}' } },
+                      },
+                    ],
+                    edges: [],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('warning');
+      expect(findings[0].path).toBe('flows[0].nodes[1].config.body.nodes[0]');
+      expect(findings[0].where).toBe('flow "billing_handoff" loop "Each" › body node "http"');
+    });
+  });
 });
 
 describe('validateFlowTemplatePaths — unprovisioned injected anchors (#8340)', () => {

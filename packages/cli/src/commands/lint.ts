@@ -891,7 +891,37 @@ export default class Lint extends Command {
   private async runEval(flags: any, timer: ReturnType<typeof createTimer>): Promise<void> {
     let generate: ((prompt: string, id: string) => unknown | Promise<unknown>) | undefined;
 
-    if (flags.generator) {
+    // [#16161] `!== undefined`, not truthiness — the SAME test the
+    // `--generator` precondition guard in `run()` above uses, so one flag has
+    // one rule for "the operator typed it".
+    //
+    // Driven on this entry before this change, from the probe project below,
+    // with a generator that writes a marker file at TOP-LEVEL evaluation:
+    //
+    //     os lint --eval --generator ""   exit 0 · Mode: offline · 5/5 passed · marker ABSENT
+    //     os lint --eval                  exit 0 · Mode: offline · 5/5 passed · marker ABSENT
+    //
+    // Normalise the elapsed-time token and those two stdouts were BYTE-IDENTICAL
+    // (one sha256 across both entries, `bin/run-dev.js` and `bin/run.js`);
+    // stderr was 0 bytes in all four runs and the `--json` face differed only in
+    // `duration`. So the empty string was not merely ineffective — it was
+    // indistinguishable from not passing the flag, on every channel this command
+    // has, while the report said `Mode: offline` to an operator who had asked for
+    // a live run. The classic way to type it is `--generator "$GEN"` with `GEN`
+    // unset in a script.
+    //
+    // ⛔ The opposite rule — empty means "not passed" — is not open here. #15550
+    // settled it for the non-eval side one guard up, and the two sides read one
+    // flag; splitting them would put two spellings of `--generator` under two
+    // rules. Reversing it is a decision, not a patch.
+    //
+    // ⛔ No new refusal shape is invented for the empty case. Once the load is
+    // attempted, an unresolvable path answers the way an unresolvable path
+    // already answers here — the `catch` below, exit 1, `Failed to load
+    // generator ""` on both faces. That is the same envelope
+    // `--generator ./does-not-exist.mjs --eval` has answered with all along; an
+    // empty string is a path that names no module, not a separate error class.
+    if (flags.generator !== undefined) {
       try {
         const { mod } = await bundleRequire({
           filepath: flags.generator,

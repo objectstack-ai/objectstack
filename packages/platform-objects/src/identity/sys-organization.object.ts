@@ -252,9 +252,10 @@ export const SysOrganization = ObjectSchema.create({
     // `sys_business_unit.timezone` by design (`text`, optional, `maxLength: 64`,
     // `valueDomain: 'iana_time_zone'`, no default): the card's thesis is that
     // every author invents this column differently, and the platform's own two
-    // precedents (`sys_job`, `sys_report_schedule`) already disagree on length,
-    // default and validation — the ruled pair is one spelling, pinned in
-    // `org-hierarchy-timezone.test.ts`.
+    // precedents (`sys_job`, `sys_report_schedule`) disagreed on length, default
+    // AND validation — #15872 closed the validation dimension by giving both
+    // this same `valueDomain`, and left the other two as each reader expects.
+    // The ruled pair is one spelling, pinned in `org-hierarchy-timezone.test.ts`.
     timezone: Field.text({
       label: 'Timezone',
       required: false,

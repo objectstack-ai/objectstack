@@ -253,7 +253,7 @@
  * choose between preserving a defect and hiding it.
  */
 
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -553,7 +553,29 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 359],
+  // Raised 359 → 362 by the fourth-increment ruling — again an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // decision batch #56, 2026-09-06, verbatim and untranslated: 「其他同意」 on the
+  // presented recommendation, option A; the director record's own sentences for
+  // it (comment 5559776878):
+  //   The ceiling in `scripts/pm/check-skill-line-ratchet.mjs` for
+  //   `.claude/skills/pm-dispatch/references/platform-readings.md` moves 359 →
+  //   362 … All three lines land as authored … No existing line is deleted to pay
+  //   for them (option C rejected); no line is dropped (option B not needed).
+  // Spent in full at one line per reading, each written in this file's voice and
+  // wrapped by this module's own `wrapLine` rather than estimated: the zero-quota
+  // payload channel's timeline discriminant +1 (compare each array's `edges`
+  // length against `totalCount`; short means the NEWEST items are absent, so a
+  // claim check goes to the paged `get_comments` read), the authoritative reading
+  // of a multi-package `ELIFECYCLE` spray +1 (the `Failed:` line plus that
+  // package's own `##[error]`), and the first-differing-offset comparison that the
+  // platform's two-way blank-line normalisation around a trailing rule forces +1
+  // = +3 exactly. Nothing was paid in place: line-neutral folding was MEASURED,
+  // not assumed — of the file's 333 adjacent rule pairs, ZERO fit the 120-byte
+  // line cap when merged, so there is no re-wrap slack at all, and re-wrap funding
+  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 388],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -724,12 +746,15 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
-  // Project Director seat charter (maintainer ruling 2026-08-27, verbatim in the
-  // file: 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」) — a
-  // human-invoked seat owning the contract-review chain, the adjudication duty and
-  // the maintainer-action ledger. A lane charter is read per seat session like
-  // every entry above. Set at the landed line count read from this ratchet's own
-  // run (headroom 0, same convention as the entries above).
+  // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
+  // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
+  // carries it as a rule line since the rules-only rewrite, not as this quotation)
+  // — a human-invoked seat holding the contract-review after-audit, the
+  // adjudication duty, the maintainer-action ledger and the governed-merge audit,
+  // with any number of summons running concurrently: no occupant, no handover. A
+  // lane charter is read per seat session like every entry above. Set at the
+  // landed line count read from this ratchet's own run (headroom 0, same
+  // convention as the entries above).
   // 75 → 77: maintainer-directed placement (2026-08-27, verbatim: 「创业阶段不渐进
   // 应该写入项目总监skills」) — the no-gradualism standing rule lands here by that
   // directive; the file sat at headroom 0 with no losslessly compressible slack in
@@ -843,7 +868,18 @@ export const CEILINGS = new Map([
   // 1162 → 1058: the rules-only rewrite — every incident narrative, ruling date and
   // quotation out, every rule kept as one sentence; re-pinned at the landed count,
   // headroom 0 (lowering is always legitimate).
-  ['AGENTS.md', 1058],
+  //
+  // 1058 → 1068: the merge-tree corollary (PR #15885, card #15871), +10 lines — a
+  // local `merge-tree` of a `merge=os-regen` path is NOT GitHub's mergeability, the
+  // driver-less bare-clone probe that answers GitHub's question, and the ⛔ refusal
+  // of `-c merge.os-regen.driver=`. Maintainer ruling, verbatim and untranslated:
+  // 「同意」 (decision batch #63, 2026-09-07, PR #15885 comment 5564103435) and
+  // 「15885 你接手跟进合并」 (2026-09-07, quoted in the director's correction comment
+  // on PR #15885). Re-wrap and cross-file moves are refused per the header: the
+  // bullet is already typeset at the surrounding block's 90-byte prose width, and
+  // AGENTS.md is not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
+  // applies. Landed count, headroom 0, same convention.
+  ['AGENTS.md', 1068],
   // #9965: root CLAUDE.md is the other repo-root instruction file — same read
   // path (every seat session), same governance (Prime Directive #14). It is
   // structurally growth-prone in the way the ratchet is built for: it exists to
@@ -963,6 +999,35 @@ export const CROSS_FILE_MOVES = new Map([
         // failure the header warns about. Neither ruling is reopened by this: both
         // are still quoted beside the ceiling, which is where a reader gets back to
         // them, and the lines they bought are the lines this rewrite handed back.
+        {
+          // Quoted beside this entry's ceiling above, where the +3 is accounted
+          // for line by line. Copied from there, not paraphrased.
+          ruling:
+            'the fourth-increment raise on'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — maintainer,'
+            + ' decision batch #56, 2026-09-06, verbatim and untranslated: 「其他同意」 on option'
+            + ' A, and the sentences that ruling adopts, in the director record\'s own words'
+            + ' (comment 5559776878): "The ceiling in `scripts/pm/check-skill-line-ratchet.mjs`'
+            + ' for `.claude/skills/pm-dispatch/references/platform-readings.md` moves 359 → 362'
+            + ' … All three lines land as authored … No existing line is deleted to pay for them'
+            + ' (option C rejected); no line is dropped (option B not needed)."',
+          date: '2026-09-06',
+          delta: 3,
+        },
+        {
+          // The ruling's own words, copied from comment 5563909225 rather than
+          // paraphrased; the +26 is accounted for line by line on PR #16379.
+          ruling:
+            'the fifth-increment raise on'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — maintainer,'
+            + ' decision batch #62, 2026-09-07, verbatim and untranslated: 「同意」 on option'
+            + ' A, and the sentences that ruling adopts, in the director record\'s own words'
+            + ' (comment 5563909225): "`references/platform-readings.md`\'s line ceiling rises'
+            + ' to the measured count: 385 on today\'s `main` (359 → 385), or 388 if PR'
+            + ' #15955\'s ruled raise (362) lands first — the same +26 either way."',
+          date: '2026-09-07',
+          delta: 26,
+        },
       ],
       sources: [
         ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
@@ -1058,7 +1123,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],
   ['.claude/skills/dogfood-verification/SKILL.md', 0],
-  ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  ['.claude/skills/spec-property-retirement/SKILL.md', 326],
   // Lowered 1081 → 768 by the rules-only rewrite: the translations row lost its
   // in-cell narrative; the widest survivor is that same row. Landed width, headroom 0.
   ['AGENTS.md', 768],
@@ -1679,14 +1744,14 @@ function run() {
 // case is attributed to the row actually being run. There is no `battery()`
 // opener: for a table-driven self-test the ROW is the battery.
 //
-// ⭐ ALL 155 rows are floored, the four `...(() => { ... })()` spreads included.
+// ⭐ ALL 157 rows are floored, the four `...(() => { ... })()` spreads included.
 // Those spreads were flagged in the batch-8 census as an IIFE-produced block
 // whose rows could not take a literal roster key. Measured here, that premise
 // does not hold for this file: each IIFE is a SCOPING device that declares
 // local fixture consts and then `return [...]`s an array of LITERAL
 // `[label, actual, expected]` rows. No row label is a template string, none is
 // computed, and no row is produced by a `map`/`push`/loop. Three independent
-// readings agree on 155 -- the source labels extracted by indentation, the
+// readings agree on 157 -- the source labels extracted by indentation, the
 // literal row starts, and the `cases.length` the green line prints on a run --
 // so nothing here is the `extra`-call residue of PR #15286, and leaving any row
 // outside the roster would have been the lossy reading.
@@ -1711,7 +1776,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'SKILL.md is covered': 1,
   'the dev-agent definition is covered': 1,
   'all five compressed references are covered': 1,
-  'all eight lane/seat job descriptions are covered': 1,
+  'every lane/seat job description in the tree carries a ceiling row': 1,
+  '...and one carrying no row is RED, with the message naming that file': 1,
+  '...and an EMPTY roster is RED, not vacuously green: a derived roster checks nothing when the read fails': 1,
   'the other four skills are covered (#9473)': 1,
   'root AGENTS.md is covered (#9792)': 1,
   'root CLAUDE.md is covered (#9965)': 1,
@@ -1863,7 +1930,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // the literal above, so the roster falls below this number; the table
 // cross-check in the floor block is the other half, and names WHICH label
 // collided.
-const SELF_TEST_BATTERY_FLOOR = 155;
+const SELF_TEST_BATTERY_FLOOR = 157;
 
 // Returned by `selfTest()` only after its verdict is printed. The dispatch
 // refuses anything else: a `return` that leaves the function above that line
@@ -1871,8 +1938,73 @@ const SELF_TEST_BATTERY_FLOOR = 155;
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-skill-line-ratchet self-test reached its verdict';
 
+// -- The lane roster, DERIVED from the tree (#15965) -------------------------
+//
+// The case this replaced was an `.every` over eight literal lane names, so the
+// ninth lane file was pinned by nothing: a ceiling row put there for it kept
+// that case green without the case ever naming it, and deleting that row again
+// was caught only by the map-wide cases, which say nothing about a row that is
+// simply GONE. The roster is now read from the DIRECTORY, so the tree and the
+// map are two independent sources checked against one another: a new lane file
+// is pinned by construction, there is no list to keep in step, and no count in
+// the label to keep in step with the list. (This is NOT the derivation the
+// battery-floor note above refuses. That one would read the roster from the
+// very table it checks, so a deleted row would delete its own floor; this one
+// reads a DIFFERENT source from the one it checks, which is the whole repair.)
+//
+// Deriving a roster introduces one failure mode of its own, and it is the same
+// shape as the defect above: `[].every(...)` is `true`, so a lanes/ directory
+// that cannot be read would report perfect coverage of nothing. The verdict
+// therefore refuses an EMPTY roster outright -- #4690's cannot-read rule, on a
+// directory rather than a file. Each red path carries a fixture case beside the
+// live one, because enforcement holds neither: a red path that stopped working
+// runs green forever, which is the same reason the case exists at all.
+const LANES_DIR = '.claude/skills/pm-dispatch/references/lanes/';
+
+/**
+ * The lane/seat job descriptions present in the tree, sorted. An unreadable
+ * directory yields `[]`, which the verdict below reads as RED.
+ *
+ * @returns {string[]}
+ */
+export function laneFilesOnDisk() {
+  try {
+    return readdirSync(new URL(LANES_DIR, REPO_ROOT)).filter((f) => f.endsWith('.md')).sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every lane file in the tree carries a ceiling row keyed by its repo-relative
+ * path -- the key spelling `CEILINGS` itself uses, forward slashes and all.
+ *
+ * @param {string[]} laneFiles lane file names, as read from the tree
+ * @param {Map<string, number>} ceilings the ceiling map to hold them against
+ * @returns {{ok: boolean, msg: string}}
+ */
+export function laneRosterVerdict(laneFiles, ceilings) {
+  if (laneFiles.length === 0) {
+    return {
+      ok: false,
+      msg: `${LANES_DIR} yielded no *.md lane job description — an empty roster checks nothing (every() over nothing is true), so it is red, not a skip.`,
+    };
+  }
+  const uncovered = laneFiles.filter((f) => !ceilings.has(`${LANES_DIR}${f}`));
+  if (uncovered.length > 0) {
+    return {
+      ok: false,
+      msg: `${uncovered.map((f) => `${LANES_DIR}${f}`).join(', ')} — lane job description(s) in the tree carrying no ceiling row, so the ratchet does not read them at all. Give each one a row keyed by that path, or take the lane file out of the tree.`,
+    };
+  }
+  return { ok: true, msg: `all ${laneFiles.length} lane/seat job descriptions in the tree carry a ceiling row.` };
+}
+
 function selfTest() {
   const rel = '.claude/skills/pm-dispatch/SKILL.md';
+  // Fixture for the derived roster's naming red path: a tree that carries
+  // triage.md, against a map holding a row for engine.md only.
+  const laneGap = laneRosterVerdict(['engine.md', 'triage.md'], new Map([[`${LANES_DIR}engine.md`, 32]]));
   const cases = [
     ['under the ceiling -> green', verdict(rel, 2900, 3050).ok, true],
     ['at the ceiling -> green', verdict(rel, 3050, 3050).ok, true],
@@ -1885,7 +2017,9 @@ function selfTest() {
     ['SKILL.md is covered', CEILINGS.has('.claude/skills/pm-dispatch/SKILL.md'), true],
     ['the dev-agent definition is covered', CEILINGS.has('.claude/agents/os-dev.md'), true],
     ['all five compressed references are covered', ['dispatch-runbook', 'platform-readings', 'review-checklist', 'landing-operations', 'seat-post-protocol'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/${n}.md`)), true],
-    ['all eight lane/seat job descriptions are covered', ['engine', 'services', 'cli', 'devx', 'skills', 'spec', 'hotcrm', 'director'].every((n) => CEILINGS.has(`.claude/skills/pm-dispatch/references/lanes/${n}.md`)), true],
+    ['every lane/seat job description in the tree carries a ceiling row', laneRosterVerdict(laneFilesOnDisk(), CEILINGS).ok, true],
+    ['...and one carrying no row is RED, with the message naming that file', !laneGap.ok && laneGap.msg.includes('triage.md'), true],
+    ['...and an EMPTY roster is RED, not vacuously green: a derived roster checks nothing when the read fails', laneRosterVerdict([], CEILINGS).ok, false],
     ['the other four skills are covered (#9473)', ['checklist-test', 'checklist-author', 'dogfood-verification', 'spec-property-retirement'].every((n) => CEILINGS.has(`.claude/skills/${n}/SKILL.md`)), true],
     ['root AGENTS.md is covered (#9792)', CEILINGS.has('AGENTS.md'), true],
     ['root CLAUDE.md is covered (#9965)', CEILINGS.has('CLAUDE.md'), true],

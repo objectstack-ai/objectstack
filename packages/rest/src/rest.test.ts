@@ -4109,6 +4109,16 @@ describe('filterDashboardForUser — ADR-0057 D10 widget requiresService gate', 
 // ---------------------------------------------------------------------------
 
 describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
+  // ⚠️ A MIRROR fixture, NOT this package's response double: it keeps
+  // `statusCode` / `body` off `status` / `json`, and the assertions below read
+  // that mirror rather than the spies. It is in the census stated in
+  // `src/http-response-test-builder.ts` — read that header for why it cannot
+  // adopt the builder by substitution. ⛔ Do not assume this file is done with
+  // mirrors because most of it is: `invoke()` below carries the only
+  // `route.handler` call here whose enclosing binding is untyped, so neither
+  // argument is checked at it. (The `makeRes` under `describe('export
+  // handler')` above is a different shape again — it captures status in a
+  // closure and is outside the census.)
   function makeRes() {
     const res: any = { statusCode: 200, body: undefined };
     res.status = vi.fn((c: number) => { res.statusCode = c; return res; });

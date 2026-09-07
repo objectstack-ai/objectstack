@@ -208,9 +208,9 @@ localStorage / auth gotchas.
    When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW', 'LEGACY')` from `@objectstack/types` (keeps legacy
    working one release). Third-party exceptions kept as-is: `NODE_ENV`, `HOME`, `OPENAI_API_KEY`, `TURSO_*`, OAuth
    `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`.
-10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug,
-    gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub
-    issue with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo a capability the
+10. **File an issue for a reproducible defect, a contract violation, or a metadata-authoring trap; note everything
+    else in the PR's acceptance notes — never expand scope, never bury a defect.** A card names its evidence (repro,
+    contract text or trap); the reviewer files a note that is one. Corollary: **never advertise or demo a capability the
     runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue, but don't fake
     coverage. Trim what can never be enforced, implement the rest, and keep the claim as narrow as the enforcement:
     a `case` label is not enforcement; check every **call site**, bulk paths included.
@@ -583,6 +583,16 @@ Even inside your own worktree, operate defensively:
      (`authorable-surface/`, `json-schema.manifest/`, `api-surface/`) to keep parallel
      spec PRs textually disjoint; every gate reads the whole directory as one set, so
      ratchet semantics are unchanged (`packages/spec/scripts/lib/sharded-artifacts.ts`).
+   - **Corollary — a local `merge-tree` is NOT GitHub's mergeability**: a local
+     `git merge-tree` of any `merge=os-regen` path runs the same merge-ort machinery as
+     `git merge` and therefore honours the custom driver, while GitHub runs none, so the
+     two answer different questions about the same snapshot. Probe from a throwaway bare
+     clone that shares the object store and has no driver registered
+     (`git clone --bare --shared . PROBE.git`, then
+     `git --git-dir=PROBE.git merge-tree --write-tree --name-only BASE HEAD`), ⛔ never
+     with `-c merge.os-regen.driver=`, which does not disable the driver but leaves git
+     failing to run it and reporting a conflict for every routed path, including ones that
+     text-merge cleanly.
    - **Registration is per clone** (`pnpm install` → `prepare` →
      `scripts/setup-git-hooks.mjs`); an unregistered clone falls back to git's default
      text merge — older behaviour, not breakage.

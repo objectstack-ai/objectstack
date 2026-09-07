@@ -153,6 +153,8 @@ import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
     apiExposureDenialReason,
+    isApiOperationAllowed,
+    API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
@@ -403,6 +405,68 @@ interface ApiAccessOpts {
 type NavServabilityGate = (objectName: string, entry: any, appName: string) => boolean;
 
 /**
+ * [#15416] The operation to NAME in a `method-not-allowed` refusal.
+ *
+ * The message and the `allowed` array are ONE envelope and have to agree. They
+ * stopped agreeing wherever the gate judged a CONJUNCTION: `deleteMany` is
+ * `bulk ∧ delete`, and an `insert` import is `import` refined to `create`. An
+ * object granting `bulk` and `update` but not `delete` was therefore refused
+ * with `API operation 'bulk' is not allowed` beside an `allowed` array that
+ * CONTAINS `bulk` — the refusal named the conjunct that PASSED.
+ *
+ * That is worse than a vague message, because the envelope is read as a
+ * DISCRIMINATOR rather than as decoration: a declaration re-widened to
+ * create/update can still 405 for an unrelated reason, so only the set proves
+ * WHICH gate answered. A set contradicting its own message is specific and
+ * wrong, and a later reader concludes either that the verb is still open or
+ * that the gate closed the composite — both false.
+ *
+ * ## Why this probes instead of re-spelling the derivation
+ *
+ * The failing conjunct is found by asking the spec's OWN decision function,
+ * never by copying its table here: widen the declared whitelist by the missing
+ * primitives — smallest combination first — and the widening that clears the
+ * refusal names what the refusal was about. `isApiOperationAllowed` stays the
+ * single source of truth, so a future refinement (another `writeMode`, another
+ * derived verb) is tracked with no second spelling to drift away from it. The
+ * search is monotone and runs only on the 405 path, over six primitives.
+ *
+ * Returns `undefined` when the name is already truthful — the operation as
+ * named is absent from the effective set, so there is no contradiction and the
+ * existing message is left exactly as it was.
+ */
+function deniedConjunctName(
+    enable: any,
+    eff: ReturnType<typeof resolveEffectiveApiMethods>,
+    canonical: string,
+    opts?: ApiAccessOpts,
+): string | undefined {
+    // The contradiction IS the trigger: only rewrite a name the envelope's own
+    // `allowed` array contradicts.
+    if (!eff.operations.has(canonical as any)) return undefined;
+
+    const granted = API_PRIMITIVES.filter((p) => eff.primitives.has(p));
+    const missing = API_PRIMITIVES.filter((p) => !eff.primitives.has(p));
+    const clears = (extra: readonly string[]): boolean =>
+        isApiOperationAllowed(
+            resolveEffectiveApiMethods({ ...(enable ?? {}), apiMethods: [...granted, ...extra] }),
+            canonical,
+            opts,
+        );
+
+    for (const p of missing) if (clears([p])) return p;
+    // Two conjuncts can be missing at once (`upsert` needs create AND update).
+    // Naming either one is truthful and neither is in `allowed`; name the first
+    // in the enum's own order so the message is deterministic.
+    for (let i = 0; i < missing.length; i += 1) {
+        for (let j = i + 1; j < missing.length; j += 1) {
+            if (clears([missing[i]!, missing[j]!])) return missing[i];
+        }
+    }
+    return undefined;
+}
+
+/**
  * Pure per-object API-exposure check: given an object's `enable` block, decide
  * whether `operation` is denied on the *external* REST surface (ADR-0049 /
  * #1889 / #3391). Returns the `{ status, body }` to send, or `null` when
@@ -447,13 +511,19 @@ export function apiAccessDenialFromEnable(
             },
         };
     }
+    // [#15416] Name the conjunct that actually FAILED, not the composite the
+    // route gated under; `deniedConjunctName` returns `undefined` when the
+    // requested name is already absent from `allowed` and nothing needs saying
+    // differently.
+    const eff = resolveEffectiveApiMethods(enable);
+    const named = deniedConjunctName(enable, eff, canonical, opts) ?? operation;
     return {
         status: 405,
         body: {
-            error: `API operation '${operation}' is not allowed on object '${objectName}'`,
+            error: `API operation '${named}' is not allowed on object '${objectName}'`,
             code: 'OBJECT_API_METHOD_NOT_ALLOWED',
             object: objectName,
-            allowed: effectiveOperationsArray(resolveEffectiveApiMethods(enable)),
+            allowed: effectiveOperationsArray(eff),
         },
     };
 }
@@ -657,6 +727,32 @@ function importJobUndoable(row: any): boolean {
  * declaration is right; the emitted value was wrong. This makes the value what
  * the declaration already says.
  *
+ * ## [#14078] The `Date` arm is TOTAL — an Invalid `Date` renders as text
+ *
+ * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
+ * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
+ * because a guard on some arms and not others re-opens the drift the single
+ * spelling closed. Reachability is MEASURED, not assumed (#14409, landed
+ * `3ecb7dc1a`): mysql2 3.23.1 returns a module constant literally named
+ * `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds
+ * `new Date(NaN)` for every year in 275760..294276 — years Postgres itself
+ * stores. Unguarded, `value.toISOString()` raises `RangeError: Invalid time
+ * value`, so `GET /api/v1/data/import/jobs/:jobId` answers **500** on a job
+ * row the operator cannot identify from the error.
+ *
+ * The terminal value is chosen **per call site**, and this one's is the
+ * VISIBLE TEXT `"Invalid Date"`, reached by letting the Invalid `Date` fall
+ * into the `String(value ?? '')` arm — the "rendered as before" branch this
+ * docblock already describes, and the spelling the #13994 repair replaced.
+ * Why not `undefined`, the answer the `metadata-protocol` / `metadata` copies
+ * take: this function returns `string` because its four call sites are the
+ * DTO's last step, `ImportJobProgressSchema.createdAt` is required, and all
+ * four fields are declared plain `z.string()` (`packages/spec/src/api/
+ * export.zod.ts`) rather than `z.string().datetime()` — so the text passes the
+ * contract and reaches the operator watching the import job, which is the
+ * ruling's "required and an operator reads it". ⛔ And NOT a blanket `''`: a
+ * silent blank is the shape that hides the producer's bug.
+ *
  * Same three branches as the two landed normalisers in
  * `@objectstack/metadata-protocol` — `auditMetaItem`'s `occurredAt` in
  * `protocol.ts` and `canonicalIsoInstant` in `sys-metadata-repository.ts`
@@ -670,7 +766,12 @@ function importJobUndoable(row: any): boolean {
  */
 function canonicalIsoStamp(value: unknown): string {
     if (typeof value === 'string') return value;
-    if (value instanceof Date) return value.toISOString();
+    // [#14078] The `Date` arm is TOTAL: an Invalid `Date` fails the guard and
+    // falls into the "rendered as before" arm below, which is `String(value)`
+    // — exactly the visible text `"Invalid Date"` this repair's predecessor
+    // served. See the docblock's Invalid-`Date` paragraph for why the text and
+    // not `undefined` here.
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
     return String(value ?? '');
 }
 
@@ -726,7 +827,15 @@ function formatCsvCell(value: any): string {
     let s: string;
     if (typeof value === 'string') s = value;
     else if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') s = String(value);
-    else if (value instanceof Date) s = value.toISOString();
+    // [#14078] Total `Date` arm. An Invalid `Date` renders as `String(value)`,
+    // which is exactly the visible text `Invalid Date` — the cell an operator
+    // reads and can report. ⛔ Not the `JSON.stringify` arm below: `toJSON()`
+    // answers `null` for an Invalid `Date`, so the bad row would arrive as the
+    // silent blank the ruling forbids. Both CSV paths land here: the formatted
+    // path's `formatDate` returns the value UNCHANGED when `toDate` rejects it
+    // (`export-format.ts`), so this arm is the terminal for the raw path and
+    // the field-metadata path alike.
+    else if (value instanceof Date) s = Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
     else { try { s = JSON.stringify(value); } catch { s = String(value); } }
     if (/[",\r\n]/.test(s)) {
         return `"${s.replace(/"/g, '""')}"`;
@@ -1666,7 +1775,7 @@ export class RestServer {
         }
         // 3. Single-project default fallback. Registered by
         //    `createSingleEnvironmentPlugin()` so bare `/api/v1/data/...` URLs
-        //    (no `/projects/<id>` prefix, no hostname mapping, no header)
+        //    (no `/environments/<id>` prefix, no hostname mapping, no header)
         //    resolve to the lone project's kernel rather than the control
         //    plane.
         if (this.defaultEnvironmentIdProvider) {
