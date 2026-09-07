@@ -529,6 +529,29 @@ export default class I18nExtract extends Command {
         throw new Error('--check needs --out=<dir> — it compares a fresh extract against the bundles committed there.');
       }
 
+      /**
+       * The stdout dump `--dry-run` asks for — and, when `--check` is also on,
+       * NOT a place this run may leave from (#16480).
+       *
+       * `--dry-run` and `--check` are both "write nothing" modes, so the pair
+       * is not a contradiction: one says print the modules instead of writing
+       * them, the other says compare them against what is committed. Neither
+       * cancels the other, and an operator reaching for both in CI is reaching
+       * for the spelling that looks safest.
+       *
+       * This branch used to `return` unconditionally, which put it AHEAD of the
+       * `--check` block: `--check --dry-run --out=DIR` printed the dump and
+       * exited 0 on a tree the very same invocation without `--dry-run` failed
+       * on with `Translation bundles have drifted from the schema`. That is the
+       * dangerous direction of an ignored flag — not bad advice on a real
+       * failure, but a green tick over a comparison that never ran, and a check
+       * that cannot fail is indistinguishable from a check that finds nothing.
+       *
+       * ⛔ So the return is conditional on `--check` being OFF, and exiting 0
+       * without comparing must not come back. When `--check` is on, execution
+       * falls through to the comparison below; the write loop past it is still
+       * unreachable, because `--check` either returns in sync or exits 1.
+       */
       if (flags['dry-run'] || !flags.out) {
         for (const locale of localesEmitted) {
           for (const mod of emittedModules(locale)) {
@@ -536,11 +559,24 @@ export default class I18nExtract extends Command {
             console.log(renderTranslationModule(result.bundles[locale], { locale, kind: mod.kind }));
           }
         }
-        printInfo('Dry run — no files written (pass --out=<dir> to write).');
-        return;
+        if (!flags.check) {
+          // The advice is for the run that HAS no `--out`. Printed
+          // unconditionally, it told an operator who had just passed `--out` to
+          // pass `--out`, which reads as "your directory was ignored" — and it
+          // was not (#16480). With one, name it: that is the same reading in the
+          // direction that is true.
+          printInfo(
+            outDir
+              ? `Dry run — no files written to ${chalk.white(displayPath(outDir))}.`
+              : 'Dry run — no files written (pass --out=<dir> to write).',
+          );
+          return;
+        }
       }
 
-      // `flags.out` is non-empty here — the two branches above return otherwise.
+      // `flags.out` is non-empty here. Of the branches above, the `--json` one
+      // and the `--dry-run` one return; the `--dry-run` one falls through only
+      // under `--check`, and `--check` without `--out` already threw.
       const resolvedOutDir = outDir as string;
 
       // Every file a normal run would emit, paired with its rendered content.
