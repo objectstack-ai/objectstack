@@ -172,8 +172,11 @@ required; the optional fields are `namespace`, `defaultDatasource`, `scope`,
 `loading` keys are **retired tombstones** (ADR-0049 enforce-or-remove): nothing ever
 read any of them, so authoring one is now a compile error and a parse error carrying
 the migration prescription. Any other key is refused at parse — the schema is closed
-against unknown keys, at the manifest root and inside `contributes`, `engine` and
-`engines` — with a message naming the key and, for a near miss, the declared spelling.
+against unknown keys at the manifest root, inside `contributes`, inside each entry of
+`contributes.kinds[]`, and inside `engine` and `engines` — with a message naming the
+key and, for a near miss, the declared spelling. The closure is inherited, not just
+declared: `AssembledPackageBodySchema` extends this schema, so an assembled artifact
+body is refused on an undeclared key too.
 
 The `displayName` / `author` / `license` / `homepage` / `optionalDependencies` /
 `peerDependencies` / `metadata` / `config` / `marketplace` keys above are

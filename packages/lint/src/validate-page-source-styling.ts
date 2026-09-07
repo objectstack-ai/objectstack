@@ -13,6 +13,8 @@
 // `(stack) => Finding[]` rule (ADR-0019), run from `os validate`/`compile` and
 // reusable by AI authoring so the agent self-corrects.
 
+import { collectionEntries } from './collection-entries.js';
+
 export type SourceStyleSeverity = 'error' | 'warning';
 
 export interface SourceStyleFinding {
@@ -27,22 +29,19 @@ export interface SourceStyleFinding {
 export const PAGE_SOURCE_CLASSNAME = 'page-source-className-tailwind';
 
 type AnyRec = Record<string, unknown>;
-const asArray = (v: unknown): AnyRec[] => (Array.isArray(v) ? (v as AnyRec[]) : []);
 
 // `className=` as a JSX attribute: name, optional ws, `=`, then `"`/`'`/`{`.
 const CLASSNAME_ATTR = /\bclassName\s*=\s*["'{]/g;
 
 export function validatePageSourceStyling(stack: AnyRec): SourceStyleFinding[] {
   const findings: SourceStyleFinding[] = [];
-  const pages = asArray(stack.pages);
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
+  for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     if (!page) continue;
     const kind = page.kind;
     if (kind !== 'html' && kind !== 'react' && kind !== 'jsx') continue;
     const source = page.source;
     if (typeof source !== 'string' || source.trim() === '') continue;
-    const name = String(page.name ?? `#${p}`);
+    const name = String(page.name ?? pagePath);
 
     CLASSNAME_ATTR.lastIndex = 0;
     let count = 0;
@@ -53,7 +52,7 @@ export function validatePageSourceStyling(stack: AnyRec): SourceStyleFinding[] {
       severity: 'warning',
       rule: PAGE_SOURCE_CLASSNAME,
       where: `page "${name}"`,
-      path: `pages[${p}].source`,
+      path: `${pagePath}.source`,
       message: `${count} \`className\` attribute${count > 1 ? 's' : ''} in ${String(kind)}-source page — Tailwind utilities in page source silently produce no CSS (the build never scans authored metadata; ADR-0065).`,
       hint:
         kind === 'react'

@@ -44,12 +44,14 @@
  * hand-rolled regex standing in for it.
  *
  * §C is the #14078 NEUTRALITY pin: an Invalid `Date` must reach the consumer
- * UNCHANGED, exactly as this cast passes it through today. The shared
- * `canonicalIsoInstant` spelling in this same file would instead raise
- * `RangeError: Invalid time value` there — measured reachable on both live
- * dialects — and whether it should is the open subject of #14078, which
- * #13973 is blocked on. This card imports neither answer, and §C goes red the
- * moment someone swaps the contested spelling in.
+ * UNCHANGED, exactly as this cast passes it through today. #14078 has since
+ * ruled (option B, 2026-09-02) and `canonicalIsoInstant` in this same file is
+ * now TOTAL — it answers `undefined` for that shape rather than raising
+ * `RangeError: Invalid time value`. The two helpers still differ across the
+ * REST of the input domain, so §C keeps its job unchanged: it goes red the
+ * moment someone swaps the other spelling into this site, which is now the
+ * separately-tracked consolidation decision #16422 rather than an open
+ * ruling.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

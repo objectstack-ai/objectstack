@@ -32,19 +32,37 @@
  *     writable by tenants would be the same leak WITH persistence, which is
  *     strictly worse than what was measured.
  *
- * ## Why the operator test is a POSITION and not a capability
+ * ## Why the operator test is the POSTURE RUNG and not a capability
  *
  * ADR-0126 §5 says "the platform-operator capability"; the platform's actual
- * operator identity is the ADR-0068 D2 built-in `platform_admin` POSITION,
- * documented verbatim as "Platform operator (SaaS admin). NOT a tenant user
- * role", unscoped, sourced from the unscoped `admin_full_access` grant. No
- * capability in `PLATFORM_CAPABILITIES` carries that meaning: `manage_metadata`
- * is the one the tier above already requires, and a tenant org admin can hold
- * it — so spelling this gate as a capability check would either re-ask the
- * question already answered or invent a capability name, which would be a
- * `packages/spec` change ADR-0126 §9 walls this family out of. The position IS
- * the platform's operator concept; this gate reads it rather than minting a
- * synonym.
+ * operator identity is the ADR-0068 D2 platform operator — "Platform operator
+ * (SaaS admin). NOT a tenant user role", unscoped, sourced from the unscoped
+ * `admin_full_access` grant. No capability in `PLATFORM_CAPABILITIES` carries
+ * that meaning: `manage_metadata` is the one the tier above already requires,
+ * and a tenant org admin can hold it — so spelling this gate as a capability
+ * check would either re-ask the question already answered or invent a
+ * capability name, which would be a `packages/spec` change ADR-0126 §9 walls
+ * this family out of.
+ *
+ * ⛔ [#15981] What this gate reads is the ADR-0095 D2/D3 posture RUNG
+ * (`posture === 'PLATFORM_ADMIN'`), NEVER
+ * `positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)`. It used to read the
+ * name, on the reasoning above that the built-in position IS "sourced from the
+ * unscoped `admin_full_access` grant" — a premise that stopped holding when
+ * `positions[]` became the security axis. That array now also carries ADR-0057
+ * D4 `sys_user_position` names; `sys_user_position` is `apiEnabled` with
+ * unconstrained `position` values, so a tenant could mint a row spelling that
+ * very built-in and `resolveUserAuthzGrants` §4 would push it onto the array.
+ * The rung is derived from the unscoped-grant evidence and nothing else, so it
+ * is what the paragraph above always MEANT — and it is byte-for-byte what
+ * `hasPlatformAdminStanding` returns. `resolve-authz-context.ts` states the
+ * rule at that predicate; this gate is one of the four sites #15981 found
+ * ignoring it.
+ *
+ * Driven, not argued: with the minted row present, a tenant org admin holding
+ * only the org-scoped `manage_metadata` capability flipped the install-wide
+ * switch under both walled postures — #10243 again, now with a DURABLE row.
+ * See `activation-gate-positions-name-authority.test.ts`.
  *
  * ## Fail-open on an ABSENT posture is deliberate, not a gap
  *
@@ -57,11 +75,12 @@
 
 // [ADR-0126 §5] The gate's two inputs: the deployment's EFFECTIVE tenancy
 // posture (the same resolver `resolve-execution-context.ts` uses, so admission
-// and this gate can never disagree) and the built-in identity name that means
-// "platform operator, NOT a tenant user role" (ADR-0068 D2).
-import { effectiveTenancyPosture } from '@objectstack/core';
+// and this gate can never disagree) and — since #15981 — the caller's ADR-0095
+// authorization RUNG off the execution context, which is where "platform
+// operator, NOT a tenant user role" (ADR-0068 D2) still means that. The
+// built-in identity NAME is deliberately no longer imported: see the doc block.
+import { effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
-import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
@@ -128,6 +147,26 @@ export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
  * validation, so a refused caller writes nothing and learns nothing about the
  * contract. "Write first, refuse second" is the worst shape here — it is
  * #10243 with an audit trail.
+ *
+ * ⚠️ It has THREE exits, not two: a refusal, `undefined` to proceed, and a
+ * THROW. See the posture read below for the class that throws and why a caller
+ * must not absorb it into "no gate to enforce".
+ *
+ * ⚠️ TWO DOORS, one gate body — so every exit above, the throw included,
+ * reaches BOTH of them and neither is "the" activation door:
+ *
+ *   - `./actions.ts` — `POST /actions/_activation/:object/:action`, calling
+ *     this function directly with {@link ACTION_ACTIVATION_SUBJECT};
+ *   - `./automation.ts` — `POST /automation/:name/toggle`, through its
+ *     `refuseUngrantedFlowActivationWrite` wrapper and
+ *     {@link FLOW_ACTIVATION_SUBJECT}.
+ *
+ * Both `await` the call, so the throw exit is a rejected promise the domain
+ * handler propagates and the dispatcher's error exit renders — nothing is
+ * unhandled at either door. Written down because a change to this body is a
+ * change to two routes: a claim about "the gate" that was measured at one door
+ * is a claim about half the surface, and both doors are pinned together in
+ * `./tenancy-posture-outage-gates.test.ts` for that reason.
  */
 export async function refuseUngrantedActivationWrite(
     deps: DomainHandlerDeps,
@@ -137,16 +176,56 @@ export async function refuseUngrantedActivationWrite(
     const ec: any = context?.executionContext;
     if (ec?.isSystem) return undefined;
 
+    // [#15900, ruled 2026-09-06 — option A] The posture is an authorization
+    // INPUT here, so the two ways it can be missing are two different facts:
+    //
+    //  - **never registered** ⇒ no posture, and no refusal. Unchanged, and load
+    //    bearing: ADR-0093 D4/D5 makes a deployment with no tenancy service the
+    //    same shape as `single`, where install-level and org-level are ONE
+    //    scope and the org admin who already cleared `manage_metadata` is the
+    //    right authority. Refusing here would lock every single-organization
+    //    operator out of their own switch.
+    //  - **registered and unable to answer** ⇒ how far this install-wide row
+    //    reaches was never READ, so whether the operator is required was never
+    //    DECIDED. Serving the write there is #13906 decision 1 option A's
+    //    permissive direction at a second door — 「A posture that could not be
+    //    READ is not a posture that is ABSENT.」 — so it is answered as an
+    //    outage (503), never as a permit.
+    //
+    // Told apart by the REGISTRY's brand (#13905) inside `resolveServiceOrLoud`,
+    // never by message text; the branded class is already absorbed there, so
+    // anything reaching this `catch` is a `tenancy` that is wired and broke.
+    //
+    // ⛔ The plain `resolveService` probe is what this gate used to read, and it
+    // collapses the two: a factory that threw and a name nothing registered
+    // both arrived as the same absent posture, and this gate then returned
+    // `undefined` — no refusal — for both.
+    //
+    // ⚠️ THE SCOPE ID IS PART OF THE READ, not an optimisation. `tenancy` may be
+    // registered `ServiceLifecycle.SCOPED`, and a scoped registration resolved
+    // without a scope id rejects UNBRANDED (`Scope ID required for scoped
+    // service 'tenancy'`) — which the classified lookup correctly re-raises,
+    // and this gate would then answer as a 503 it MANUFACTURED itself on a
+    // perfectly healthy deployment, locking the platform operator out of the
+    // switch that is theirs. `context.environmentId` is the same scope the
+    // identity step and `./keys.ts` already resolve this exact name with, so
+    // all three read one deployment's posture through one scope: an outage
+    // answered here is the service's, never this call site's omission.
     let posture;
     try {
-        posture = effectiveTenancyPosture(await deps.resolveService(context, 'tenancy'));
-    } catch {
-        posture = undefined;
+        posture = effectiveTenancyPosture(
+            await deps.resolveServiceOrLoud(context, 'tenancy', context.environmentId),
+        );
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
     }
     if (!posture || !postureEnforcesWall(posture)) return undefined;
 
-    const positions: string[] = Array.isArray(ec?.positions) ? ec.positions : [];
-    if (positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)) return undefined;
+    // [ADR-0095 D2/D3 · #15981] The platform-operator test is the posture RUNG.
+    // See the "Why the operator test is a POSITION" section above for why this
+    // is the SAME concept that section argues for, read through the one input
+    // that still means it.
+    if (ec?.posture === 'PLATFORM_ADMIN') return undefined;
 
     // The message names the posture and the sanctioned path — the loud-refusal
     // shape ADR-0126 §7 asks for throughout — and says nothing about the

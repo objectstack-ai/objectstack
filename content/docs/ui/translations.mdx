@@ -79,6 +79,7 @@ export default defineStack({
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
 | Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
+| A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
 dashboard, dataset, and page** — a field's labels are translated as part of
@@ -282,6 +283,31 @@ up-to-date bundle re-extracts byte-identically.
 
 Honest limits worth knowing before you plan around them:
 
+- **Both forms of a label are authorized — and an inline locale map is
+  rendered but never extracted.** A label may be a plain string, translated in
+  a bundle under the key from the table above, or an **inline locale map** —
+  `label: { en: 'Members', 'zh-CN': '成员' }` — written out on the metadata and
+  resolved at render time (`pickLocalized` in the UI, `resolveI18nLabel` on the
+  server). The map is the localisation route for the props that have no bundle
+  key at all, and a page localised that way is fully localised. But it never
+  reaches the bundle: `os i18n extract` scaffolds no row for it, so a
+  translator working from your bundles will not find those strings — every
+  locale a map is to carry is one you write in the map itself.
+
+  **Coverage still counts it (#14749).** `os lint` reads the map's own
+  locales: the ones it carries count as covered, the ones it omits are
+  reported against `supportedLocales`. A map written `{ en, 'zh-CN' }` under
+  `supportedLocales: ['en', 'zh-CN', 'ja-JP']` therefore produces a real
+  `missing translation for locale "ja-JP"` finding — close it by adding the
+  locale to the map. Two tools treat the same prop differently and both are
+  right: the gate reports what the author did and did not write, while the
+  extractor refuses to invent a key that a later reordering of two sibling
+  components would silently reassign.
+
+  **No bundle key exists for a map, and none is synthesised from a node's
+  position in the component tree.** That is a settled refusal (maintainer
+  ruling 2026-09-03, #14749) — not a gap awaiting a fix, and not something to
+  plan around.
 - **Validation messages are translatable, but substituted whole — there is no
   interpolation.** Author the message on the rule
   (`object.validations[].message`), which the engine returns on every rejected

@@ -13438,10 +13438,19 @@ function selfTest() {
       `the live tree really carries ${valueBearing.length} value-bearing invocation(s) across ${new Set(valueBearing.map((i) => i.script)).size} script(s), so the cases above judge a live class`,
       valueBearing.length > 0,
     );
+    // Five of the card's six named specimens. The sixth,
+    // `scripts/check-cross-package-test-inputs.mjs`, classified as VARIABLE
+    // through ci.yml's inline package-selection step (`--union-into
+    // "$RUNNER_TEMP/turbo-ls.json" --changed …`) until #16453 moved that step's
+    // shell into scripts/ci/select-shard-packages.sh, which no workflow-text
+    // scan reaches; its only workflow invocation is now the all-literal
+    // `pnpm check:cross-package-test-inputs`, so it belongs to the LITERAL
+    // class below and no longer to this roster — the rot the block comment
+    // above predicts for a typed list, and the reason the count is read.
     t(
       '⭐ the card\'s named specimens all classify as VARIABLE from the workflow text — no per-script table was needed',
       ['scripts/check-empty-changeset.mjs', 'scripts/check-test-completeness.mjs', 'scripts/check-shard-attestation.mjs',
-        'scripts/check-cross-package-test-inputs.mjs', 'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
+        'scripts/check-adr-0087-registration.mjs', 'scripts/check-changeset-no-major.mjs']
         .every((script) => valueBearing.some((i) => i.script === script)),
     );
     t(

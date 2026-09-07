@@ -104,7 +104,7 @@ type NormalizedView = {
         prefix: string;
         enableCache: boolean;
         maskObjectFields: boolean;
-        endpoints: Record<'types' | 'items' | 'item', boolean>;
+        endpoints: Record<'types' | 'items' | 'item' | 'maintenance', boolean>;
     };
     batch: {
         maxBatchSize: number;
@@ -304,8 +304,16 @@ describe('[#11984] §D the four siblings consume the parsed output', () => {
         expect(normalized({ batch: { operations: { deleteMany: false } } }).batch.operations).toEqual({
             createMany: true, updateMany: true, deleteMany: false,
         });
+        // [#15542] `maintenance` joined the block as the whole-store family's
+        // own switch, so a partial `endpoints` now fills FOUR defaults. An
+        // author who wrote only the three older keys keeps `/diagnostics`,
+        // `/_drafts` and the `POST /_migrate-stored` door, which used to leave
+        // with `items: false` — the compatibility cost the ruling priced.
         expect(normalized({ metadata: { endpoints: { item: false } } }).metadata.endpoints).toEqual({
-            types: true, items: true, item: false,
+            types: true, items: true, item: false, maintenance: true,
+        });
+        expect(normalized({ metadata: { endpoints: { maintenance: false } } }).metadata.endpoints).toEqual({
+            types: true, items: true, item: true, maintenance: false,
         });
     });
 

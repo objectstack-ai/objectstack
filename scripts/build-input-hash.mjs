@@ -34,13 +34,29 @@
  *
  * Both hold the SAME digest over the SAME inputs. The difference is which build
  * writes them, and that difference is the whole reason the second one exists —
- * see each constant's docblock, and `inspectDeclarationStamp` for the reader.
+ * see each constant's docblock, and the two `inspect*Stamp` readers at the
+ * bottom for what each stamp may and may not be believed about.
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-/** Where a build records the hash of the inputs it was built from. */
+/**
+ * Where a build records the hash of the inputs it was built from.
+ *
+ * Written by `--stamp` at the end of EVERY build of an amplifier package,
+ * `OS_SKIP_DTS=1` included. Two consumers read it, and the difference between
+ * what they may conclude is the whole reason the sibling stamp below exists:
+ *
+ *   - `check-dev-prereqs.mjs`'s boot gate, for which "this dist was built from
+ *     these sources" is the whole question (#5864);
+ *   - `bundlesAreStale` in scripts/check-regen-pending.mjs, for which it is
+ *     evidence about the emitted `.mjs`/`.js` ONLY — see `inspectBuildStamp`.
+ *
+ * ⛔ It says NOTHING about `dist/**\/*.d.ts`: the flag it is written under can
+ * skip the declaration pass entirely. That is #7122's rejected direction and it
+ * stays rejected; DTS_STAMP_BASENAME is the file that answers for those.
+ */
 export const STAMP_BASENAME = '.build-input-hash';
 
 /**
@@ -166,28 +182,28 @@ export function buildInputHash(root, pkgDir) {
 }
 
 /**
- * Did a declaration-emitting build produce THIS dist from THESE sources?
- *
- * The reader for DTS_STAMP_BASENAME, exported because the caller that needs it
- * is `distIsStale` in scripts/check-regen-pending.mjs — and it has to be THIS
- * function over THIS hash, or the comparison means nothing (the same argument
- * that keeps `--stamp` in this file rather than in a script of its own).
+ * Read ONE of the two stamps and say what it vouches for. Shared by both
+ * readers below, because "the stamp and the reader must compute the same
+ * digest" is exactly as load-bearing between the two stamps as it is between a
+ * stamp and its reader: two copies of this comparison would drift, and the
+ * direction drift takes is the one that acquits.
  *
  * Three verdicts, and the asymmetry between them is deliberate:
  *
  *   - `match`     the recorded digest equals the inputs on disk right now, so
- *                 the declarations describe exactly these sources. This is the
- *                 ONLY verdict that may clear an mtime accusation.
- *   - `mismatch`  a declaration-emitting build ran, and the sources have moved
- *                 since. Nameable in a refusal message: this is not an mtime
- *                 artefact, the content really did change.
+ *                 the artifact this stamp speaks for was emitted from exactly
+ *                 these sources. This is the ONLY verdict that may clear an
+ *                 mtime accusation.
+ *   - `mismatch`  a build that writes this stamp ran, and the sources have
+ *                 moved since. Nameable in a refusal message: this is not an
+ *                 mtime artefact, the content really did change.
  *   - `unstamped` NO EVIDENCE — no stamp, an unreadable one, a digest that
  *                 cannot be computed, or a package whose build does not stamp
  *                 at all. Every one of those collapses to the same answer on
  *                 purpose: "cannot vouch" must never read as "vouched for"
  *                 (#4690), and absence of the input is not licence to acquit.
  *
- * It never throws: it is called from inside a freshness predicate whose failure
+ * It never throws: it is called from inside freshness predicates whose failure
  * direction is a silently wrong artifact, so an unreadable tree has to degrade
  * to `unstamped` rather than take the caller down.
  *
@@ -197,9 +213,9 @@ export function buildInputHash(root, pkgDir) {
  * `actual` is computed only when there is a valid digest to compare it against,
  * so the ~30ms hash stays off the path where no amplifier stamp exists at all.
  */
-export function inspectDeclarationStamp(root, pkgDir) {
+function inspectStamp(root, pkgDir, basename) {
   const none = { state: 'unstamped', recorded: null, actual: null };
-  const stampFile = path.join(pkgDir, 'dist', DTS_STAMP_BASENAME);
+  const stampFile = path.join(pkgDir, 'dist', basename);
   let recorded;
   try {
     if (!existsSync(stampFile)) return none;
@@ -215,4 +231,50 @@ export function inspectDeclarationStamp(root, pkgDir) {
     return { ...none, recorded };
   }
   return { state: recorded === actual ? 'match' : 'mismatch', recorded, actual };
+}
+
+/**
+ * Did a DECLARATION-emitting build produce THIS dist from THESE sources?
+ *
+ * The reader for DTS_STAMP_BASENAME, exported because the caller that needs it
+ * is `distIsStale` in scripts/check-regen-pending.mjs — and it has to be THIS
+ * function over THIS hash, or the comparison means nothing (the same argument
+ * that keeps `--stamp` in this file rather than in a script of its own).
+ */
+export function inspectDeclarationStamp(root, pkgDir) {
+  return inspectStamp(root, pkgDir, DTS_STAMP_BASENAME);
+}
+
+/**
+ * Did a BUNDLE-emitting build produce THIS dist from THESE sources?
+ *
+ * The reader for STAMP_BASENAME, exported for `bundlesAreStale` in
+ * scripts/check-regen-pending.mjs, which measures `dist/**\/*.mjs` and `*.js`
+ * — a different artifact from the declarations, produced by a different pass.
+ *
+ * ## Why reading STAMP_BASENAME is sound HERE and stays rejected next door
+ *
+ * #7122 proposed answering the DECLARATION rule with this stamp, and that was
+ * measured wrong in the dangerous direction: `--stamp` writes this file under
+ * `OS_SKIP_DTS=1`, the one build flag that emits JS and leaves whatever `.d.ts`
+ * was there before — so it says fresh over stale declarations. That rejection
+ * is pinned (`packages/spec/scripts/dist-freshness.test.ts`) and unchanged.
+ *
+ * On the BUNDLE axis the same fact points the other way. `OS_SKIP_DTS=1` emits
+ * every bundle this stamp would then vouch for, so the case that ruled the file
+ * out for declarations is not a hole here at all — it is the ordinary case.
+ * What makes the vouching sound is the build script's ORDER, not the flag:
+ * `packages/spec`'s `build` runs the unconditional `tsup` (the JS pass) before
+ * `--stamp` in the same `&&` chain, so this file is never written by a run that
+ * did not emit bundles. The declaration pass that follows is the one that can be
+ * skipped, and skipping it cannot refresh this stamp because the stamp is
+ * written after both either way.
+ *
+ * The same one-way property still governs: it may only ever ACQUIT a tree the
+ * mtime rule has already accused, never accuse one it cleared. The digest still
+ * cannot see a hand-edited dist, a toolchain change or dependency drift — the
+ * mtime rule remains the only thing that convicts.
+ */
+export function inspectBuildStamp(root, pkgDir) {
+  return inspectStamp(root, pkgDir, STAMP_BASENAME);
 }

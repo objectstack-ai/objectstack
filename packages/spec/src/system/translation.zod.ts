@@ -332,8 +332,13 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * Action translations keyed by action name (snake_case).
    * Convention (auto-resolved by `resolveActionLabel`/`resolveActionConfirm`/`resolveActionSuccess`):
    *   objects.<object>._actions.<action_name>.label
+   *   objects.<object>._actions.<action_name>.description
    *   objects.<object>._actions.<action_name>.confirmText
    *   objects.<object>._actions.<action_name>.successMessage
+   *   objects.<object>._actions.<action_name>.params.<param_name>.label
+   *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
+   *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
+   *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
    *   objects.<object>._actions.<action_name>.resultDialog.*
    */
   _actions: z.record(z.string(), actionTranslationSchema('this object action translation'))
@@ -664,8 +669,13 @@ const translationDataShape = () => ({
    * specific object via `objectName`. Convention (auto-resolved by
    * `resolveActionLabel`/`resolveActionConfirm`/`resolveActionSuccess`):
    *   globalActions.<action_name>.label
+   *   globalActions.<action_name>.description
    *   globalActions.<action_name>.confirmText
    *   globalActions.<action_name>.successMessage
+   *   globalActions.<action_name>.params.<param_name>.label
+   *   globalActions.<action_name>.params.<param_name>.helpText
+   *   globalActions.<action_name>.params.<param_name>.placeholder
+   *   globalActions.<action_name>.params.<param_name>.options.<value>
    *   globalActions.<action_name>.resultDialog.*
    */
   globalActions: z.record(z.string(), actionTranslationSchema('this global action translation'))

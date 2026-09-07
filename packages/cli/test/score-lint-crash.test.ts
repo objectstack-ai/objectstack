@@ -6,12 +6,15 @@
  *
  * ## Why the linter is mocked here rather than driven
  *
- * The crash IS reachable on a schema-valid stack — a localized `label`
+ * The crash WAS reachable on a schema-valid stack — a localized `label`
  * (`{ en: …, 'zh-CN': … }`) on an app, or on a view's `list`, parses clean and
- * makes the label-case rule throw a `TypeError`. That is a defect in the rule,
- * filed on its own; pinning it here would make this suite depend on a bug
- * staying unfixed, and the day someone repairs the rule these assertions would
- * go green for the wrong reason — or be deleted to make them pass.
+ * made the label-case rule throw a `TypeError`. That was a defect in the rule,
+ * filed and fixed on its own (`convention/label-case` now guards on
+ * `typeof label === 'string'`; the pins live in
+ * `lint-label-case-localized.test.ts`). Pinning it here would have made this
+ * suite depend on a bug staying unfixed — and that day has since come: the
+ * repair landed, and had these assertions been driven through the real rule
+ * they would now be green for the wrong reason, or deleted to make them pass.
  *
  * What this file pins is the SCORER's contract, which holds for any throw from
  * any rule: a crash is recorded, never swallowed into `issues: []`. So the

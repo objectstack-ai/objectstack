@@ -770,6 +770,74 @@ describe('visibility-bare-identifier (#6128 / #5149 requirement 3)', () => {
       expect(findings[0].message).toContain('`status`');
     });
   });
+
+  describe('a `has()` guard does not silence an unwrapped occurrence beside it', () => {
+    // Three rows measured on one byte-identical authoring site: a guarded
+    // spelling that forgot the `record.` prefix published clean while the
+    // unguarded spelling of the SAME predicate gated. The exclusion a `has()`
+    // argument earns is per OCCURRENCE — the argument itself is a legitimate
+    // select target — and never spreads to the rest of the predicate.
+    //
+    // The cause was not an exclusion at all: `firstUndeclaredReference` reads
+    // the FIRST error cel-js's checker reports and acts only on
+    // `Unknown variable: X`. A bare `has(x)` — `has()` applied to something
+    // that is not a select — fails the check with `has() invalid argument`
+    // instead, and that different-class first error masked every undeclared
+    // reference behind it in the same predicate.
+
+    it('row 1 — the unguarded spelling gates (the control that must keep firing)', () => {
+      const findings = bareFindings(formStack('status == "qualified"'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].message).toContain('`status`');
+    });
+
+    it('row 2 — the SAME identifier unwrapped beside `has(status)` is reported', () => {
+      const findings = bareFindings(formStack('has(status) && status == "qualified"'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].message).toContain('`status`');
+      expect(findings[0].hint).toContain('`record.status`');
+    });
+
+    it('row 3 — `has(status)` ALONE stays silent (the negative control)', () => {
+      // The exclusion stays: a `has()` argument is a select target, so the one
+      // occurrence that IS the argument earns no bare-identifier verdict. Pinned
+      // so a later refactor cannot delete the exclusion wholesale and still read
+      // green off row 2.
+      expect(validateVisibilityPredicates(formStack('has(status)'))).toEqual([]);
+    });
+
+    it('a prefixed guard beside a bare use still reports the bare use', () => {
+      const findings = bareFindings(formStack('has(record.status) && status == "qualified"'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('`status`');
+    });
+
+    it('a bare guard beside a PREFIXED use is silent — only the argument occurred bare', () => {
+      expect(bareFindings(formStack('has(status) && record.status == "qualified"'))).toEqual([]);
+    });
+
+    it('a bare `has()` does not mask a DIFFERENT name behind it either', () => {
+      // The masking was positional, not name-keyed: everything after the first
+      // non-`Unknown variable` checker error went unjudged, whatever it was
+      // called. This row is what tells the two mechanisms apart.
+      const findings = bareFindings(formStack('has(status) && overdue == true'));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].message).toContain('`overdue`');
+    });
+
+    it('several bare `has()` arguments and nothing else stay silent', () => {
+      expect(validateVisibilityPredicates(formStack('has(status) && has(owner)'))).toEqual([]);
+    });
+
+    it('a comprehension variable behind a `has()` guard is still not a bare identifier', () => {
+      // The checker remains the oracle for macro-bound names: the body is handed
+      // to it unchanged, so `t` keeps resolving the way it does without a guard.
+      expect(validateVisibilityPredicates(formStack("has(record.tags) && record.tags.all(t, t != '')"))).toEqual([]);
+      expect(validateVisibilityPredicates(formStack("has(tags) && record.tags.all(t, t != '')"))).toEqual([]);
+    });
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────

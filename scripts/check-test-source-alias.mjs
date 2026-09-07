@@ -311,7 +311,7 @@
 //   node scripts/check-test-source-alias.mjs --self-test
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { stripComments, scanSource, blank } from './js-comment-mask.mjs';
+import { stripComments, maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { join, resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -809,12 +809,13 @@ const TYPE_QUERY_BEFORE = /\btypeof\s*$/;
  * thing in both: `commentsOnly` keeps every string intact (the import regex has
  * to read the specifier), `codeOnly` masks literal CONTENT as well (the brace
  * scanner must not count a `{` inside a string or a template).
+ *
+ * Both are `js-comment-mask.mjs`'s own exports (#15776) rather than a projection
+ * re-derived here. They agree offset-for-offset because BOTH blank in place --
+ * that is the module's contract, not a property of deriving them from one scan.
  */
 function maskedProjections(source) {
-  const { comment, literal } = scanSource(source);
-  const both = new Uint8Array(source.length);
-  for (let i = 0; i < source.length; i++) both[i] = comment[i] || literal[i] ? 1 : 0;
-  return { commentsOnly: blank(source, comment), codeOnly: blank(source, both) };
+  return { commentsOnly: maskComments(source), codeOnly: maskCommentsAndLiterals(source) };
 }
 
 /**

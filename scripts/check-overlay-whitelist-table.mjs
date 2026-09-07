@@ -173,7 +173,8 @@
  * lines across 13 files. Of those, ~5 are genuine "<type> is <bool>" assertions;
  * the rest are the schema-field reference row, a code sample using an invented
  * type, and sentences ABOUT the flag rather than about any type
- * (`metadata-lifecycle.mdx:121` itself is one). Covering them mechanically
+ * (`content/docs/concepts/metadata-lifecycle.mdx` itself is one, line 121 as
+ * measured). Covering them mechanically
  * means a co-occurrence regex over English plus a per-site allowlist of ~17
  * exceptions to catch ~5 assertions -- a worse gate than none, and the kind
  * whose baseline gets bulk-updated to green. They are left out on purpose, and

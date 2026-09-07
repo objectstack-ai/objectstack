@@ -77,7 +77,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { scanSource, blank } from './js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
@@ -254,12 +254,13 @@ export const RUNNER_ENV_BRACKET_PATTERN =
  *
  * Offsets are preserved by both maskings, so a reported line number still
  * points at the real line.
+ *
+ * Both are `js-comment-mask.mjs`'s own exports (#15776) rather than a
+ * composition re-derived here.
  */
 export function findRunnerEnvReads(source) {
-  const flags = scanSource(source);
-
-  const commentMasked = blank(source, flags.comment);
-  const bothMasked = blank(commentMasked, flags.literal);
+  const commentMasked = maskComments(source);
+  const bothMasked = maskCommentsAndLiterals(source);
 
   const seen = new Set();
   const out = [];

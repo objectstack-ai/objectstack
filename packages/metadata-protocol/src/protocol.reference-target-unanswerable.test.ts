@@ -101,6 +101,34 @@ describe('[#9327] a `field` TARGET is refused, not cleared', () => {
         expect(err.message).toContain('account.owner');
     });
 
+    it('THE PIN: the message opens with PROSE — no machine-shaped bracketed tag', async () => {
+        // [#16145] Since #15685 this sentence reaches the operator VERBATIM, so
+        // its first characters are the first thing they read. Every OTHER bracketed
+        // tag this producer writes (`[item_locked]`, `[no_draft]`, `[invalid_request]`,
+        // …) is a lowercase restatement of that throw's OWN declared `code`, so the
+        // token also rides the `code` axis. This refusal's code is `NOT_IMPLEMENTED`,
+        // so `[unanswerable_target]` restated nothing the envelope carried and nothing
+        // read it — while #12975 (2026-08-29) rules that `error` is HUMAN LANGUAGE and
+        // `code` is the MACHINE TOKEN.
+        //
+        // Pinned as an ABSENCE because nothing else is: with the tag deleted, no other
+        // assertion in this repo would notice it coming back.
+        const protocol = protocolWith({});
+
+        const err = await expectUnanswerableRefusal(
+            () => protocol.findReferencesToMeta({ type: 'field', name: 'account.owner' }),
+        );
+
+        expect(err.message).not.toContain('[unanswerable_target]');
+        expect(
+            err.message.startsWith('['),
+            `the message opens with a bracketed tag: ${err.message.slice(0, 48)}`,
+        ).toBe(false);
+        // …and the prose it opens with INSTEAD is asserted here too, so this pin
+        // cannot go green by the message becoming empty or generic.
+        expect(err.message).toMatch(/^References to a 'field' item cannot be computed\./);
+    });
+
     it('the refusal is PRESCRIPTIVE — it names the answerable question (ADR-0110 D3)', async () => {
         // A refusal that only says "no" moves the operator from a false
         // clearance to a dead end. A field's dependents ARE reachable, through

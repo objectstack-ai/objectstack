@@ -531,8 +531,11 @@ export async function returnTypePrecisionPins12104(): Promise<void> {
 
 /**
  * [#14312 — the `oauth.*` family, card 1 of 3 of #12104] The five better-auth
- * -backed methods #12104 deliberately left alone. FOUR are bound here; the
- * fifth is named below and is still `Promise< any >` on purpose.
+ * -backed methods #12104 deliberately left alone. FOUR are bound here. The
+ * fifth — `oauth.applications.delete` — was left at `Promise< any >` by this
+ * card on purpose and was bound afterwards by #15451; its pins live in
+ * `returnTypePrecisionPins15451` below, and the section further down records
+ * why it could not be bound here.
  *
  * ## These shapes were read off the WIRE, not off better-auth's `.d.ts`
  *
@@ -558,14 +561,15 @@ export async function returnTypePrecisionPins12104(): Promise<void> {
  * pins hold it to. The ruling's PROHIBITIONS still bind and are satisfied
  * here: no `Date` is declared and no revival layer exists.
  *
- * ## `oauth.applications.delete` is NOT bound, and that is the finding
+ * ## `oauth.applications.delete` was NOT bound here, and that was the finding
  *
  * Its route answers HTTP 200 with a ZERO-BYTE body, so the method's
- * `res.json()` rejects with a `SyntaxError` on every successful delete. No
- * annotation can be honest while that stands — binding it needs a behaviour
- * change, which is a decision beyond this family's type-narrowing scope. Its
- * `exported-any-returns.json` entry therefore stays open, which is exactly
- * what the shrink-only ledger is for.
+ * `res.json()` rejected with a `SyntaxError` on every successful delete. No
+ * annotation could be honest while that stood — binding it needed a behaviour
+ * change, which was a decision beyond this family's type-narrowing scope, so
+ * its `exported-any-returns.json` entry stayed open. That is what the
+ * shrink-only ledger is for, and #15451 is the card that collected the debt:
+ * the entry is gone and the binding is pinned below.
  *
  * Type-level for the reason this file's header gives: only a compile-time
  * assertion can observe a return-type change.
@@ -606,13 +610,62 @@ export async function returnTypePrecisionPins14312(): Promise<void> {
     // @ts-expect-error these routes are served BARE by better-auth — there is no `{ success, data }` envelope
     void (await client.oauth.applications.get('c_1')).data;
 
-    // ── the method deliberately left open ────────────────────────────────
-    // `delete` still resolves to `any`, so `.anythingAtAll` compiles. Pinned
-    // as an EQUALITY rather than a suppression: a suppression would go unused
-    // the moment someone bound it and would read as "binding this is a
-    // regression", which is the opposite of the truth. When the open decision
-    // on #14312 lands, this line is the one that must be replaced.
-    expectTypeOf(await client.oauth.applications.delete('c_1')).toEqualTypeOf<any>();
+    // ── the method this card deliberately left open ──────────────────────
+    // `delete` used to be pinned here as `toEqualTypeOf< any >`, with the note
+    // that the line would have to be replaced when #14312's open decision
+    // landed. It landed as #15451, and the replacement is a whole function of
+    // its own rather than a rewritten line, because binding this method was
+    // not a narrowing — see `returnTypePrecisionPins15451`.
+}
+
+/**
+ * [#15451] `oauth.applications.delete` — the fifth member of the `oauth.*`
+ * family, and the one #14312 could not reach.
+ *
+ * ## This is NOT the narrowing its four siblings were
+ *
+ * The other four moved a DECLARATION onto a shape their route already
+ * answered; no byte of their behaviour changed. This one could not: while
+ * `return res.json()` stood, the method REJECTED on every successful delete,
+ * so no declared return type could be true — a `Promise< void >` here would
+ * have promised a resolution that never happened. Binding it meant changing
+ * what the method DOES, and that is why it took its own card.
+ *
+ * ## Measured, then declared
+ *
+ * Real `betterAuth` + real `oauthProvider` over the real ObjectQL adapter,
+ * driven through the real client with only the socket stood in for:
+ *
+ *     POST /oauth2/delete-client -> 200 · 0 bytes · no content-length header
+ *     through the client (before) -> REJECTED: SyntaxError
+ *     the row, server-side (after) -> ALREADY GONE (get-client answers 404)
+ *
+ * `void` is the wire fact. "Deleted" and "was already gone" ARE distinguished
+ * by the route, but on the error channel — a missing client answers 404
+ * `not_found`, which `this.fetch` raises before any success value exists — so
+ * a synthesised `{ deleted: true }` would carry no information the caller
+ * does not already have, and would not be a shape the wire ever sends.
+ *
+ * Type-level for the reason this file's header gives; the RUNTIME half — that
+ * the method resolves on a zero-byte 200 and still rejects on a malformed
+ * non-empty body — is pinned in `oauth-applications-delete.test.ts`, because
+ * a type-level assertion cannot observe a reject/resolve flip.
+ */
+export async function returnTypePrecisionPins15451(): Promise<void> {
+    // ⚠️ RED BEFORE, as an EQUALITY: the method resolved to `any`, and `any`
+    // is not equal to `void` under vitest's branded equality.
+    expectTypeOf(await client.oauth.applications.delete('c_1')).toEqualTypeOf<void>();
+
+    // ── direction 2: the reads `any` used to admit are now refused ───────
+    // While the method returned `any` every suppression below was unused
+    // (TS2578) and this file did not build — which is what makes them
+    // evidence of the binding rather than decoration.
+    // @ts-expect-error the route answers zero bytes; there is no value to read a property off
+    void (await client.oauth.applications.delete('c_1')).anythingAtAll;
+    // @ts-expect-error in particular there is no `{ deleted: boolean }` receipt — that shape belongs to OTHER delete surfaces in this client
+    void (await client.oauth.applications.delete('c_1')).deleted;
+    // @ts-expect-error nor is the deleted application echoed back
+    void (await client.oauth.applications.delete('c_1')).client_id;
 }
 
 /**
@@ -774,6 +827,7 @@ describe('client SDK return-type precision (#8140)', () => {
         expect(typeof returnTypePrecisionPins12034).toBe('function');
         expect(typeof returnTypePrecisionPins12104).toBe('function');
         expect(typeof returnTypePrecisionPins14312).toBe('function');
+        expect(typeof returnTypePrecisionPins15451).toBe('function');
         expect(typeof returnTypePrecisionPins13023).toBe('function');
         expect(typeof deleteDataResponseIsNotTheMetaResetShape).toBe('function');
         expect(typeof metaResetResponseDeclaresTheWireReceipt).toBe('function');

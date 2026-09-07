@@ -1,0 +1,13 @@
+---
+"@objectstack/service-automation": patch
+---
+
+A run whose nodes all succeeded is no longer reported `stranded`, journalled for repair, or re-armed because its terminal run-history write threw — which made the "repair" re-run every node after the pause.
+
+`AutomationEngine.resumeInternal` called `recordLog({ status: 'completed' })` from inside the `try` whose `catch` exists for **node** failures, so a throw out of a history write on a run that had already finished successfully was handled as though a node had thrown. The arm journalled a repair snapshot, stamped `status: 'stranded'`, and answered `success: false`; `restoreConsumedSuspension` then correctly honoured that snapshot and put the pause back, so the next resume drove the downstream nodes a **second** time. The defence that normally prevents a re-armed run from becoming double-runnable reads the durable terminal row first, and on this path the durable terminal row is precisely what failed to land — so it could not fire.
+
+Two statements inside `recordLog` reach that `catch`, and both are host-supplied surfaces rather than in-repo ones. `store.recordTerminal` escapes when it throws **synchronously**: the `void write.catch(...)` beneath the call only ever sees a returned promise's rejection, and a store returning a non-thenable makes `write.catch` itself a synchronous `TypeError`. Both stores shipped in this package are `async` methods and so cannot reach it, but `SuspendedRunStore` is an exported, optional-method interface a host may implement. The second statement is the run-summary line `logger.info(...)`, which is on by default (`runSummaryLog: 'info'`) and calls a host-injected `Logger`, so it needs no store at all.
+
+- **The completion-path history write is now guarded at its own site**, restoring the invariant that call's own documentation states: a history write must never block or break the run that produced it. `resume` answers the truthful `success: true`, no snapshot is journalled, `restoreConsumedSuspension` refuses with `RUN_COMPLETED`, and the downstream node runs exactly once.
+- **The lost history row is still reported**, at `error`, naming in its first line that the run completed, that its terminal row never landed and nothing retries it, that the run must not be repaired or re-run, and that the driver's own failure is in the record's structured slot.
+- **`restoreConsumedSuspension` is unchanged.** It judged correctly on the evidence it was handed; the evidence was what was wrong, and a completed run now journals none. A genuine node failure still journals, still reports `stranded`, and is still repairable.

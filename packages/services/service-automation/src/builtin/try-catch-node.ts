@@ -158,18 +158,25 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         // Sink for THIS attempt's partial steps, filled by `runRegion` only if
         // the attempt throws (#7546).
         const attemptSteps: StepLogEntry[] = [];
-        // #14948 review — the run-wide `$error` this attempt STARTS with. The
-        // engine rewrites `$error` (a fresh object, see engine.ts's
-        // `executeNode`) only when a failing node RETURNS `{ success: false }`,
-        // or when it THROWS through a node that has its OWN `fault` edge — and
-        // a node inside this region's synthetic sub-flow never has one (the
-        // sub-flow carries only the region's own edges). So a node that FAILS
-        // BY THROWING (a `timeoutMs` firing, a dying nested container, a
-        // thrown guard) leaves `$error` exactly as an EARLIER failure left it.
-        // Without this identity check, that earlier failure's `code` (e.g. a
-        // sibling row's `DUPLICATE_RECORD`) leaks onto an unrelated later
-        // failure's binding — a store failure misread as a duplicate through
-        // the very door this card exists to close.
+        // #14948 review — the run-wide `$error` this attempt STARTS with, kept
+        // as the outer bound on what this attempt is allowed to claim as its
+        // own failure.
+        //
+        // It was load-bearing on its own until #14955: the engine's throw arm
+        // used to rewrite `$error` only for a node with its OWN `fault` edge,
+        // and a node inside this region's synthetic sub-flow never has one (the
+        // sub-flow carries only the region's own edges), so a node that FAILED
+        // BY THROWING left `$error` exactly as an EARLIER failure had left it —
+        // and that earlier failure's `code` (a sibling row's
+        // `DUPLICATE_RECORD`, say) leaked onto an unrelated later failure's
+        // binding, a store failure misread as a duplicate. #14955 made the
+        // throw arm publish unconditionally, so a thrown node failure now names
+        // itself here and carries no `code` of its own.
+        //
+        // The check stays because a throw is not always a NODE failure: a
+        // durable pause refused inside a region, a missing region entry, or
+        // anything else `runRegion` raises before reaching a node never touches
+        // `$error` at all, and the stale value must not be claimed then either.
         const errorBefore = variables.get('$error');
         try {
           // #1479: surface the successful try region's steps.
@@ -182,12 +189,17 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
               regionKind: 'try',
               // #14456 — forward the ENCLOSING loop's iteration so a step this
               // region ran says which region ran it AND which row it ran for.
-              // `runRegion`'s tagger fills only fields the INNERMOST tagger
-              // left undefined, so a loop's own tagger can never reach past
-              // this one to a try/catch step; forwarding at this call site is
-              // what closes that, and it leaves both the tagger and `parallel`
-              // untouched (a branch step already carries its own `iteration`,
-              // and nothing here changes what `parallel` writes).
+              // A try/catch region has no index of its own, so `iteration` is
+              // free to carry the row.
+              //
+              // #15230 made `runRegion`'s tagger carry `iteration` THROUGH
+              // nesting, so an enclosing loop would now reach a try/catch step
+              // on its own and this forwarding is no longer the only route.
+              // It stays, and stays FIRST: the value is identical (both are the
+              // loop's row index), it is what `$error.iteration` is bound from
+              // twenty lines below, and it keeps the row on these steps even
+              // when the run unwinds through a path that never gives the loop's
+              // tagger a pass over them.
               ...(loopFrame ? { iteration: loopFrame.iteration } : {}),
               // Only tag the attempt index when a retry ladder is actually
               // declared: on a plain `try_catch` every step would carry a

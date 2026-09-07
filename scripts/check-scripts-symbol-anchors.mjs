@@ -7,6 +7,7 @@
  *
  *   node scripts/check-scripts-symbol-anchors.mjs
  *   node scripts/check-scripts-symbol-anchors.mjs --list
+ *   node scripts/check-scripts-symbol-anchors.mjs --list-unresolvable
  *   node scripts/check-scripts-symbol-anchors.mjs --self-test
  *
  * ⚠️ THE MECHANISM IS NOT HERE. The grammar, the extractor, the comment-prose
@@ -54,15 +55,37 @@
  *
  * ## What this corpus judges, and what it declines to
  *
- * `judgeUntrackedLineAnchors: false`. The 96 citations that name no tracked
- * file are 66 bare filenames inside census tables (`engine.ts` at some line --
- * an abbreviation no resolver can bind to one of this tree's several files of
- * that name), 22 continuations inheriting no path, 11 directory-qualified
- * illustrations or sibling-repo paths, and 1 tilde form. They are a real defect
- * class and are recorded as a follow-up, exactly as the 1,056 bare paths under
- * `checkBarePaths` were for `docs/adr/**` -- but this gate cannot tell their
- * author how to fix them, and a gate whose only remedy is "stop writing that"
- * is the permanently-red gate this repo retired.
+ * `judgeUntrackedLineAnchors: false`. A citation that names no tracked file is
+ * SEEN, COUNTED and ENUMERATED, and judged by nothing: this gate cannot tell
+ * its author how to fix it, and a gate whose only remedy is "stop writing that"
+ * is the permanently-red gate this repo retired. They were a real defect class
+ * and were carded as a follow-up (#15809), exactly as the 1,056 bare paths
+ * under `checkBarePaths` were for `docs/adr/**`.
+ *
+ * ⭐ THAT FOLLOW-UP IS MOSTLY DONE, AND THE REST IS A LIST, NOT A NUMBER. When
+ * the corpus was registered it declined 96 citations; #15809 migrated 81 of
+ * them by the same method PR #15806 used on the tracked-target ones -- the file
+ * as a file-level anchor, the number kept beside it as data, the placeholder
+ * spelling `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` defines for an
+ * illustration, and prose naming the repo for a third-party or dependency
+ * source no in-repo resolver could ever check. ⛔ Not one digit was repaired or
+ * repointed; every number that was in an anchor is still on its page, as data.
+ *
+ * The residual when that landed was 15, and every one of them was a file
+ * another lane held OPEN at that moment -- ⛔ not one was an ambiguity. A
+ * second round (#15809, still) migrated the 7 of those 15 whose holders had
+ * by then merged -- `check-docs-section-name.mjs` and
+ * `docs-audit/affected-docs.mjs` (3 each) and `check-type-check-coverage.mjs`
+ * (1) -- leaving 8, again every one held OPEN and none an ambiguity: 4 in
+ * `check-system-context-census.mjs` and 3 in `cross-package-test-inputs.mjs`
+ * (PR #16215), 1 in `pm/check-half-states.mjs` (PR #16202). Both counts are
+ * DATED readings; `--list-unresolvable` is the live one. ⚠️ It is why the
+ * flag is still `false`: the fence #15809 was dispatched under is that it flips
+ * only when the residual is ZERO and a self-test pins the flip, and a residual
+ * of 8 would make this gate permanently red for the length of somebody else's
+ * pull request. `--list-unresolvable` prints the residual so the next author
+ * inherits a worklist rather than a count; the day it prints nothing, the flag
+ * is a one-line change with a case to pin it.
  *
  * `checkBarePaths: false`, for the same reason and on a measurement: judging
  * every bare path code span in this corpus produces 1,617 findings, nearly all
@@ -213,8 +236,32 @@ export function runCheck(root = process.cwd()) {
 }
 
 function list(root = process.cwd()) {
-  const { findings, counts } = sweepCorpus(CORPUS, root);
-  console.log(JSON.stringify({ counts, findings, allowances: HELD_FILE_ALLOWANCES }, null, 2));
+  const { findings, counts, declined } = sweepCorpus(CORPUS, root);
+  console.log(JSON.stringify({ counts, findings, declined, allowances: HELD_FILE_ALLOWANCES }, null, 2));
+}
+
+/**
+ * The citations this corpus DECLINES to judge, enumerated.
+ *
+ * ⚠️ A listing, never a verdict: this exits 0 whatever it prints, exactly as
+ * `--list` does. `runCheck()` is still the only arm that can fail.
+ *
+ * The count alone (`unresolvableLineCitation`, printed by the green line) says
+ * a residual exists without saying where, so nobody can work it down and
+ * nobody can tell a residual that SHRANK from one that moved. This prints
+ * `file:line -- citation` per row and a tally by shape, which is what a
+ * follow-up card needs to be closed rather than re-measured.
+ */
+function listUnresolvable(root = process.cwd()) {
+  const { counts, declined } = sweepCorpus(CORPUS, root);
+  const byShape = {};
+  for (const d of declined) byShape[d.shape] = (byShape[d.shape] ?? 0) + 1;
+  for (const d of declined) console.log(`${d.doc}:${d.line}  ${d.raw}   [${d.shape}]`);
+  console.log(
+    `\n${declined.length} citation(s) name no tracked file and are not judged `
+      + `(counter: ${counts.unresolvableLineCitation}) — `
+      + Object.entries(byShape).sort().map(([k, v]) => `${v} ${k}`).join(', '),
+  );
 }
 
 /* ─────────────────────────────── self-test ─────────────────────────────── */
@@ -242,11 +289,14 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ check-scripts-symbo
 // row was retired, then 30 → 26 when the `scripts/check-adr-0087-registration.mjs`
 // row was retired and the array went EMPTY (#15765). Any other drop is cases that
 // STOPPED RUNNING; find what stopped registering instead of moving the number.
+// 26 → 29 when the declined citations gained an ENUMERATION beside their count
+// (#15809): three cases hold `declined` equal to `unresolvableLineCitation`, to
+// the file/line/text a residual list needs, and to the shape classification.
 // ⚠️ An empty array does NOT make the allowance battery vacuous: its five
 // fixture cases run off `scripts/bad.mjs`, never off the live rows, so they are
 // not part of this arithmetic and must never fall out of the count.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'check-scripts-symbol-anchors self-test': 26,
+  'check-scripts-symbol-anchors self-test': 29,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -316,7 +366,7 @@ export function selfTest() {
     execFileSync('git', ['init', '-q'], { cwd: tmp });
     execFileSync('git', ['add', '-A'], { cwd: tmp });
 
-    const { findings, counts } = sweepCorpus(CORPUS, tmp);
+    const { findings, counts, declined } = sweepCorpus(CORPUS, tmp);
     const kinds = findings.map((f) => f.kind);
     const count = (k) => kinds.filter((x) => x === k).length;
 
@@ -338,6 +388,19 @@ export function selfTest() {
       'a citation naming no tracked file must not be a finding under judgeUntrackedLineAnchors: false');
     check(counts.unresolvableLineCitation === 2,
       `both declined citations must be SEEN and counted, got ${counts.unresolvableLineCitation}`);
+    // ...and ENUMERATED, not merely counted (#15809). A count says a residual
+    // exists without saying where, so nobody can work it down and a residual
+    // that MOVED reads identically to one that shrank. `--list-unresolvable`
+    // prints this array; these three cases are what keep it equal to the
+    // counter rather than a second, drifting instrument.
+    check(declined.length === counts.unresolvableLineCitation,
+      `the declined ENUMERATION must equal the declined COUNT, got ${declined.length} vs ${counts.unresolvableLineCitation}`);
+    check(declined.every((d) => d.doc.includes('declined.mjs') && Number.isInteger(d.line) && d.raw),
+      'every declined row must carry the file, the line and the citation text it was declined for');
+    check(
+      declined.map((d) => d.shape).sort().join(',') === 'bare-filename,directory-qualified',
+      `the declined rows must be classified by SHAPE, got ${declined.map((d) => d.shape).sort().join(',')}`,
+    );
 
     // 2. The allowance mechanism, in both directions, against the fixture.
     const fake = [{ file: 'scripts/bad.mjs', dated: '2026-01-01', heldBy: 'PR #1', why: 'fixture' }];
@@ -462,6 +525,7 @@ if (isEntrypoint(import.meta.url)) {
       );
       process.exit(1);
     }
-  } else if (process.argv.includes('--list')) list();
+  } else if (process.argv.includes('--list-unresolvable')) listUnresolvable();
+  else if (process.argv.includes('--list')) list();
   else runCheck();
 }

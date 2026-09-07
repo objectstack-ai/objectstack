@@ -673,6 +673,29 @@ jobs:
           echo "template surfaces declared by stampedPaths() (${#TEMPLATE_SURFACES[@]}):"
           sed 's/^/  /' "$TEMPLATE_LIST"
 
+          # The release-index surface `sync-release-index-currency.mjs` stamps, read
+          # from `syncedPaths()` — which derives it from `INDEX_PATH` in the gate
+          # whose finding that rewriter clears. Same terms as the two lists above, and
+          # for the same reason: a third literal here would be a third contract. On an
+          # RC cut this rewriter writes NOTHING (an `-rc` heading is not a GA version,
+          # so the newest GA of the major does not move), so this list normally stages
+          # nothing — it is declared so that the one cut where the index IS stale gets
+          # a complete commit instead of the refusal below.
+          INDEX_LIST="${RUNNER_TEMP:-/tmp}/cut-rc-release-index-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { syncedPaths } from "./scripts/sync-release-index-currency.mjs"; for (const p of syncedPaths()) console.log(p);' \
+                 > "$INDEX_LIST"; then
+            echo "::error::could not resolve syncedPaths() from scripts/sync-release-index-currency.mjs, so the release-index half of the release file surface is unknown. Refusing to push."
+            exit 1
+          fi
+          if [ ! -s "$INDEX_LIST" ]; then
+            echo "::error::syncedPaths() in scripts/sync-release-index-currency.mjs resolved EMPTY, so the release index would go unstaged even though the version pass can rewrite it. Refusing to push."
+            exit 1
+          fi
+          mapfile -t INDEX_SURFACES < "$INDEX_LIST"
+          echo "release-index surfaces declared by syncedPaths() (${#INDEX_SURFACES[@]}):"
+          sed 's/^/  /' "$INDEX_LIST"
+
           git add -A -- \
             '*package.json' \
             '*CHANGELOG.md' \
@@ -680,7 +703,8 @@ jobs:
             .objectui-sha \
             packages/spec/src/kernel/protocol-version.ts \
             "${TEMPLATE_SURFACES[@]}" \
-            "${DOCS_SURFACES[@]}"
+            "${DOCS_SURFACES[@]}" \
+            "${INDEX_SURFACES[@]}"
 
           STAGED="$(git diff --cached --name-only)"
           if [ -z "$STAGED" ]; then
@@ -689,16 +713,17 @@ jobs:
           fi
 
           # Re-check every staged path against the allowlist. The pathspec above is
-          # convenience; THIS is the guarantee. Three filters, same allowlist the
+          # convenience; THIS is the guarantee. Four filters, same allowlist the
           # pathspec used: the fixed release paths by pattern, then the declared
-          # template and doc surfaces by WHOLE-LINE EXACT match (`-xF`) against the
-          # very lists that were staged — so neither derived filter can accept a path
-          # its declaration does not name, and neither needs regex-escaping of the
-          # paths to stay exact.
+          # template, doc and release-index surfaces by WHOLE-LINE EXACT match
+          # (`-xF`) against the very lists that were staged — so no derived filter
+          # can accept a path its declaration does not name, and none needs
+          # regex-escaping of the paths to stay exact.
           BAD="$(printf '%s\n' "$STAGED" \
             | grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^\.objectui-sha$|^packages/spec/src/kernel/protocol-version\.ts$' \
             | grep -vxF -f "$TEMPLATE_LIST" \
-            | grep -vxF -f "$SURFACE_LIST" || true)"
+            | grep -vxF -f "$SURFACE_LIST" \
+            | grep -vxF -f "$INDEX_LIST" || true)"
           if [ -n "$BAD" ]; then
             echo "::error::the version commit would carry paths outside the release file surface. Refusing to push. Offending paths follow; if the version pass legitimately grew a new output, widen the allowlist in this workflow deliberately."
             printf '%s\n' "$BAD" | sed 's/^/::error::  unexpected: /'

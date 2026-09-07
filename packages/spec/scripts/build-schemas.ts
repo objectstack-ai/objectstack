@@ -1088,23 +1088,43 @@ function computeSurfaceReachability(): SurfaceReachability {
  * ⚠️ Every byte of this string is part of the anchor file's canonical form —
  * `readCommittedSurfaceBase` compares the committed file against
  * `serializeSurfaceBase()` and treats any difference as a hand-edit, fatally.
- * So changing this text is not a comment edit: it invalidates the committed
- * anchor in every checkout until someone re-anchors, which is itself the
- * deliberate act #5358 made explicit. It is therefore left verbatim here, and
- * "Written only by `gen:schema`" now UNDER-states the rule rather than
+ * So changing this text is not a comment edit: changed HERE ALONE it leaves the
+ * committed anchor non-canonical in every checkout, which is the deliberate act
+ * #5358 made explicit, read as an accident.
+ *
+ * It is nevertheless changeable WITHOUT re-anchoring, and #14612 measured that:
+ * the canonical form is `serializeSurfaceBase(committed.baseRev, committed.keys)`,
+ * so a diff that rewrites this constant AND `authorable-surface.base.json`'s
+ * `description` to the same bytes leaves `baseRev` and `keys` untouched and
+ * `check:authorable-surface` green. Both halves in one reviewed diff, or neither —
+ * a one-sided edit is the fatal case above, and `build-schemas-check-mode.test.ts`
+ * is what says so, because it seeds its fixtures with the description read off the
+ * committed file and runs THIS generator against them.
+ *
+ * "Written only by `gen:schema`" still UNDER-states the rule rather than
  * contradicting it: the writer is still this generator (`scripts/build-schemas.ts`),
  * but only in its `--update-base` mode (`gen:authorable-surface-base`), never on a
  * plain build. Narrowing in the safe direction. Whoever next re-anchors should
  * bring the sentence with them, in that same reviewed diff.
  */
 const SURFACE_BASE_DESCRIPTION =
-  'In-tree anchor for the authorable-surface deletion gate (#4650, #5235): a verbatim copy of the ' +
-  'keys in authorable-surface/ as they stood at `baseRev`, a commit on origin/main. A build that ' +
-  'CAN reach origin/main anchors on the merge base instead, and re-verifies this file against ' +
-  '`baseRev` — so a PR that edits it to hide a deletion goes red wherever the network exists. A build ' +
-  'that CANNOT reach GitHub (image-build stages, air-gapped, fork, historical-tag reproduction) ' +
-  'anchors here instead of failing. Written only by `gen:schema`, only from a git-resolved baseline — ' +
-  'never from the build that is being checked. See #5235.';
+  '⛔ NOT the live surface — a pinned anchor for the deletion gate; the live surface is ' +
+  '`authorable-surface/*.json`. ⛔ Never answer "is this key authorable today?" from this file: ' +
+  'it is a snapshot at `baseRev`, so every key authored since is missing from it, and reading it ' +
+  'alone yields false negatives that grow with the lag (`check:authorable-surface` prints the ' +
+  'current delta on every run — ⛔ never hard-code that number). Ask the live ratchet instead, or ' +
+  'read the UNION of ratchet and anchor where no key may be dropped: ' +
+  '`scripts/docs-audit/affected-docs.mjs` is the reference consumer for that union read, and its ' +
+  '`--self-test` pins both halves — that a key added after `baseRev` is still authorable, and that ' +
+  'the `[RETIRED]` tombstone annotation the ratchet carries is stripped rather than matched. What ' +
+  'this file IS, and the only question it answers: in-tree anchor for the authorable-surface ' +
+  'deletion gate (#4650, #5235) — a verbatim copy of the keys in authorable-surface/ as they stood ' +
+  'at `baseRev`, a commit on origin/main. A build that CAN reach origin/main anchors on the merge ' +
+  'base instead, and re-verifies this file against `baseRev` — so a PR that edits it to hide a ' +
+  'deletion goes red wherever the network exists. A build that CANNOT reach GitHub (image-build ' +
+  'stages, air-gapped, fork, historical-tag reproduction) anchors here instead of failing. Written ' +
+  'only by `gen:schema`, only from a git-resolved baseline — never from the build that is being ' +
+  'checked. See #5235; #14612 for why the negative leads.';
 
 /** Canonical bytes of the in-tree anchor — the one form the generator writes. */
 function serializeSurfaceBase(baseRev: string, keys: string[]): string {

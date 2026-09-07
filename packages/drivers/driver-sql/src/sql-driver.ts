@@ -11816,6 +11816,12 @@ export class SqlDriver implements IDataDriver {
    *   data that already violates it gets the SAME disposition, where it used to
    *   throw the database's raw error and take the boot down naming no rows and
    *   no remedy.
+   * - #15479: the same disposition on the HASH-SHADOW route (the MySQL arm
+   *   #11627 added, taken when the server refuses to key the column directly).
+   *   Its guard asked `nullSafe.size > 0` as well, so a plain unique reached
+   *   neither branch and took the boot down carrying the UNKEYABLE-COLUMN
+   *   refusal instead of the duplicate rows. Measured on live MySQL 8.0.46 in
+   *   `sql-driver-15479-shadow-plain-unique-duplicates.test.ts`.
    */
   protected async syncDeclaredIndexes(
     tableName: string,
@@ -11950,6 +11956,56 @@ export class SqlDriver implements IDataDriver {
                       .map((c) => (nullSafe.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
                       .join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
                     `for the conflicting rows (ADR-0120 D4).`,
+                  shadowMsg,
+                );
+                continue;
+              }
+              if (isUniqueViolationError(shadowErr)) {
+                // #15479 — the PLAIN unique on the SHADOW route: no
+                // organization key part at all (`tenancy: { enabled: false }`
+                // or an explicit `unique: 'global'`), reached here because
+                // MySQL refused to key the column directly. The uniqueness
+                // limb is supplied by the enclosing `if (unique)` a few lines
+                // above, which is why this asks only the violation question --
+                // the same load-bearing role the explicit `unique &&` limb
+                // plays on the direct arm below, where no enclosing block
+                // supplies it.
+                //
+                // This branch used to be part of the NULL-safe one above,
+                // behind `nullSafe.size > 0`, so with no organization key part
+                // NOTHING fired: the code fell through to
+                // `logDurabilityFailure(unkeyable, msg)` + `throw` and the boot
+                // DIED carrying `ER_BLOB_KEY_WITHOUT_LENGTH` -- a message about
+                // an unkeyable TEXT column, telling the operator to declare a
+                // `maxLength` the field already declares, naming NO rows and NO
+                // remedy -- while the actual cause was duplicate rows. #14902
+                // fixed exactly that on the direct arm; the two arms of one
+                // `catch` then disagreed about one question.
+                //
+                // The message is deliberately NOT the NULL-safe one above.
+                // Neither of its clauses is true here: nothing "admitted" these
+                // rows (there was no previous void constraint, #5030), and
+                // there is no NULL-safe key. Widening the guard while keeping
+                // one message would ship a factually FALSE durability log --
+                // worse than the throw it replaces, because it sends the
+                // operator hunting a NULL-distinct index that never existed.
+                // The sentence below is the direct arm's, verbatim; only the
+                // route noun ("hash-shadow") is this arm's own, because it is
+                // what honestly names which physical route was attempted, and
+                // the NULL-safe branch above already spells it that way.
+                let report = '';
+                try {
+                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
+                  if (duplicates.length > 0) {
+                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
+                  }
+                } catch {
+                  // The probe is a diagnostic; the report below stands without it.
+                }
+                this.logDurabilityFailure(
+                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — existing ` +
+                    `rows violate it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the ` +
+                    `data is deduplicated: run "os migrate plan" for the conflicting rows.`,
                   shadowMsg,
                 );
                 continue;
