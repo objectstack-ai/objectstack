@@ -17,10 +17,13 @@
 //   slot's own path whose message names the fix — the shared dialect fixed its
 //   envelope arm and learned to trim at #15028 / #15035; the sentences are
 //   `TYPED_EXPRESSION_SOURCE_REQUIRED.cron` / `TYPED_EXPRESSION_DIALECT_ONLY.cron`;
-// - cron SYNTAX is not judged at parse time. `'not a cron'` normalizes like
-//   any other string: the syntax verdict belongs to the `cron` dialect engine
-//   (`@objectstack/formula` cron-engine — 5- or 6-field, or an `@` alias) when
-//   the expression is evaluated. That pin is deliberate: it is what keeps the
+// - cron SYNTAX is not judged at parse time, and no engine judges it later
+//   either. `'not a cron'` normalizes like any other string, and this slot is
+//   parsed and reaches no engine: `croner` judges a cron pattern only where a
+//   schedule is wired (`CronSchedule.expression`, a different slot), and
+//   `@objectstack/formula`'s registered `cron` engine has no caller outside
+//   that package. The syntax verdict belongs to whatever external scheduler
+//   the author hands the value to. That pin is deliberate: it is what keeps the
 //   schema's describe honest. If the shared dialect ever gains parse-time
 //   syntax validation, this pin flips, and the describe on the slot must be
 //   rewritten in the same commit.
@@ -103,9 +106,11 @@ describe('KnowledgeRefreshPolicySchema.cron — the typed cron slot (#14825)', (
   });
 
   it('does NOT judge cron syntax at parse time — measured, and the describe promises no more (declared = enforced)', () => {
-    // The syntax verdict is the `cron` dialect engine's at evaluate time:
-    // `@objectstack/formula` cron-engine accepts 5- or 6-field expressions and
-    // the `@yearly`…`@reboot` aliases. The parse only normalizes. If this case
+    // Nothing evaluates this slot, so no engine ever issues a syntax verdict on
+    // it: `croner` judges `CronSchedule.expression`, a different slot, and
+    // `@objectstack/formula`'s registered `cron` engine has no caller outside
+    // that package. The verdict belongs to whatever external scheduler the
+    // author hands the value to. The parse only normalizes. If this case
     // ever goes red because the shared dialect learned to refuse syntax, update
     // the slot's describe in the same commit — do not weaken this pin.
     for (const source of ['not a cron', '0 0 3 * * *', '@daily']) {
