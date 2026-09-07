@@ -1,5 +1,5 @@
 ---
-"@objectstack/cli": patch
+"@objectstack/cli": minor
 ---
 
 `os i18n extract --check --json` now COMPARES. It used to exit 0 having compared nothing, on a tree whose bundles had provably drifted.
@@ -16,3 +16,5 @@ What each invocation now does, with no new member on any published payload:
 - **`--json` without `--check`** — unchanged in every respect.
 
 The run leaves through exactly one of those faces, so stdout still parses as exactly one JSON document.
+
+Graded `minor` rather than `patch` because the PM's clause-② ruling on this card reads the reuse of the existing envelope on a newly reachable path as a widening of the published output face; the maintainer's 2026-09-04 rule puts an already-declared widening at `minor` at least. Nothing an author can write is removed, renamed or narrowed here, and the failure prescribes no consumer code change — so no `**BREAKING**` banner and no ADR-0087 disposition ride along.
