@@ -209,7 +209,12 @@ function dataEngine(): DataEngine {
         find: async (object: string, options: Record<string, any>) => {
             seen = options;
             if (object !== 'ats_job') return [];
-            return JOBS.filter((r) => matchesCondition(r, options?.where));
+            const rows = JOBS.filter((r) => matchesCondition(r, options?.where));
+            // Hold the caller's bound, AFTER the filter and by PRESENCE — a
+            // limit-blind double reports a page size the engine never granted
+            // (`check:objectql-double-limit`). The picker sends
+            // `limit: maxResults`, so this is also the shape it really meets.
+            return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
         },
         aggregate: async () => [],
         count: async () => 0,
