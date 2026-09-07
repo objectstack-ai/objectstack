@@ -9,6 +9,7 @@ import {
   indexObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
+  recordsOf,
   resolveFieldPath,
   suggestName,
   type ObjectGraph,
@@ -37,13 +38,6 @@ import {
  *   name on the bound dataset.
  * - `widget-measure-unknown` — a `values[]` entry is not a measure name on
  *   the bound dataset.
- * - `chart-field-unknown` — a `chartConfig` binding names a field the query
- *   result will not contain: `xAxis.field` must be one of the widget's
- *   dimensions (or a dataset dimension), and each `yAxis[].field` /
- *   `series[].name` must be one of the widget's selected measures
- *   (`values`). Post-cutover (ADR-0021) the result rows are keyed by
- *   measure NAME (e.g. `sum_amount`), not the base column (`amount`) — a
- *   stale base-column reference renders the axis but an empty series.
  * - `widget-legacy-analytics-unrenderable` (#1878/#1894) — a widget uses the
  *   removed pre-ADR-0021 inline-analytics shape (`categoryField`/`rowField`/…)
  *   as its ONLY data wiring: no `dataset`, no `object`, no inline `data`. The
@@ -77,6 +71,17 @@ import {
  *
  * Advisory rules — severity `warning`, build stays green:
  *
+ * - `chart-field-unknown` (#1721; tier ruled on #15463) — a `chartConfig`
+ *   BINDING key names something the widget's selection does not carry:
+ *   `xAxis.field` is not one of the widget's dimensions (or a dataset
+ *   dimension), or a `yAxis[].field` / `series[].name` is not one of its
+ *   selected measures (`values`). Post-cutover (ADR-0021) the result rows are
+ *   keyed by measure NAME (e.g. `sum_amount`), not the base column (`amount`),
+ *   so a stale base-column reference is the usual way to write one. The pinned
+ *   renderer REFUSES all three keys as bindings — see "The three refused
+ *   binding keys" below — so the authored key changes nothing that renders: it
+ *   is a silent no-op, exactly `widget-legacy-analytics-shape`'s class. Kept as
+ *   a finding because the author wrote a binding and believes it is in force.
  * - `chart-config-missing` — a `combo` widget has no `chartConfig`, so no
  *   series carries a mark and the combination chart draws as one uniform
  *   family. Narrowed to `combo` because `chartConfig` carries NO binding:
@@ -91,6 +96,14 @@ import {
  *   rather than error because an empty selection is a legitimate
  *   work-in-progress state a build must tolerate; erroring would gate the
  *   `sys_metadata` publish path on a half-authored widget.
+ * - `widget-measures-missing` (#15508) — a NON-chart dataset widget — a
+ *   single-value family (`metric`/`kpi`/`gauge`/`solid-gauge`/`bullet`) or a
+ *   tabular one (`table`/`pivot`) — selects NO measures. The placeholder above
+ *   is returned for these families too: the pinned `values.length === 0` return
+ *   stands above every family branch, so the KPI number or the table is not
+ *   drawn either. Same warning tier and suppression as the chart-family
+ *   spelling; a separate id because "chart" does not name this condition and
+ *   because the family keeps one id per class.
  * - `chart-dimensions-missing` — a chart-family widget selects at least one
  *   measure but NO dimensions. The pinned renderer's
  *   `isMetric = METRIC_TYPES.has(widgetType) || dimensions.length === 0`
@@ -244,7 +257,7 @@ import {
  *
  * So for every chart family except one, a missing `chartConfig` costs the
  * widget nothing at all, and ADDING one could not have repaired a widget whose
- * selection is empty either — `chart-field-unknown` above refuses a
+ * selection is empty either — `chart-field-unknown` above reports a
  * `yAxis[].field` that names anything the widget did not select, so
  * `chartConfig` can never supply a measure the `values` array is missing.
  *
@@ -303,6 +316,82 @@ import {
  * state an author passes THROUGH, and the family's errors are reserved for
  * bindings the analytics service cannot satisfy.
  *
+ * **The measures shape is every family's, not the chart family's (#15508).**
+ * Re-read at the pinned `.objectui-sha` (`a472b0716`, where the four cited
+ * lines still read as quoted above), `:683` is ABOVE `:423`/`:424` and tests
+ * nothing but `values.length === 0`. So a `metric`, `kpi`, `gauge`,
+ * `solid-gauge`, `bullet`, `table` or `pivot` widget that selects no measures
+ * renders that same placeholder: the KPI number or the table the author
+ * declared is not drawn either, and a missing tile on a board reads as
+ * "nothing to report" rather than as a defect. Nothing else reported it —
+ * `table-count-only` requires `values.length > 0` before it looks, and rules
+ * (b)/(c) iterate the arrays, so an empty one is silent by construction.
+ *
+ * The population therefore widens to every DECLARED widget type
+ * ({@link NON_CHART_DATASET_WIDGET_TYPES} is the taxonomy minus the chart
+ * family), carried by TWO ids rather than one:
+ * {@link CHART_MEASURES_MISSING} keeps the chart family, and
+ * {@link WIDGET_MEASURES_MISSING} takes the rest. Two, because "chart" stops
+ * naming the condition once the population is every family — a `metric` tile
+ * is not a chart — while the old id is depended on from OUTSIDE this file (the
+ * `packages/lint` barrel re-exports it, which
+ * `rule-id-barrel-exports.test.ts` makes a public-surface contract, and a
+ * board may already carry `suppressWarnings: ['chart-measures-missing']`).
+ * Renaming would have retired a reachable id and falsified those references;
+ * splitting keeps every one of them true and lets each message state the
+ * consequence its family actually has (no chart drawn / no KPI number drawn /
+ * no table rendered), which one id could only do by branching anyway.
+ *
+ * The DIMENSIONS shape stays chart-family only, and deliberately: a
+ * dimensionless `metric` or `table` is what those families are FOR (the
+ * shipped `system_overview` KPI tiles are exactly that shape), and a
+ * dimensionless `table` already has its own id in `table-count-only`.
+ *
+ * ### The three refused binding keys (#15463)
+ *
+ * `chart-field-unknown` shipped at `error` with a message that named a QUERY
+ * failure — *"the query result will not contain it"*. Read at the same PINNED
+ * `@object-ui` revision (`.objectui-sha`), that consequence never happens,
+ * because the renderer never reads these keys as bindings at all. The rule id
+ * covers exactly three positions, and all three are refused:
+ *
+ *  - `chartConfig.xAxis.field` — `axisPresentation`
+ *    (`@object-ui/core` `src/utils/chart-presentation.ts`) builds the axis's
+ *    presentation MINUS its `field`, and that dropping is structural, not a
+ *    guard: the x-axis key is `buildChartSeries`' `xAxisKey`, i.e. the widget's
+ *    `dimensions[0]`. An authored `field` re-points nothing.
+ *  - `chartConfig.yAxis[].field` — the same `axisPresentation` call, per entry.
+ *    The entry keeps its SLOT (the count is what turns on a secondary axis) and
+ *    its scale/chrome; only the binding is dropped.
+ *  - `chartConfig.series[].name` — `mergeAuthoredSeries` pairs an authored
+ *    entry with the derived binding whose `dataKey` it EQUALS, one series per
+ *    entry of `values`. A name matching no derived series is *"**ignored** —
+ *    membership belongs to the dataset, so an author cannot add, remove or
+ *    re-point a series from the chart config"*. So the presentation the author
+ *    hung on that entry — the mark, the colour, the stack, the axis side —
+ *    lands on nothing.
+ *
+ * The renderer pins all three by name in
+ * `packages/plugin-dashboard/src/__tests__/DatasetWidget.chartConfig.test.tsx`
+ * (*"ignores an authored axis `field` and keeps the derived axis binding"*,
+ * *"ignores an authored series and keeps one derived series per measure"*).
+ *
+ * So the failure is not a broken page, it is an ignored key — which is the
+ * class `widget-legacy-analytics-shape` above reports at WARNING tier in this
+ * same file (*"the dashboard renderer ignores them … a silent no-op"*). All
+ * three positions therefore drop from `error` to `warning`, suppressible per
+ * widget, and each message states what actually happens instead of a query that
+ * never runs. The finding is KEPT rather than deleted: unlike #14436's
+ * over-reach the metadata really is wrong — the author wrote a binding and
+ * believes it is in force.
+ *
+ * The tier drop is a behaviour change on the `sys_metadata` publish door: the
+ * 2026-08-15 ruling put all SIX of this rule's error ids on that door as one
+ * "this board cannot render" class, and this id leaves that set, so a publish
+ * carrying only a refused `chartConfig` binding key now SUCCEEDS with the
+ * finding on the advisory channel. The remaining five are unchanged; the
+ * accept-set is re-pinned in `runtime-gate.test.ts`.
+ *
  * Warnings can be deliberately suppressed per widget via
  * `suppressWarnings: ['<rule-id>']`; errors cannot — they describe a
  * binding the analytics service cannot satisfy.
@@ -324,6 +413,16 @@ export const CHART_MEASURES_MISSING = 'chart-measures-missing';
  * chart family.
  */
 export const CHART_DIMENSIONS_MISSING = 'chart-dimensions-missing';
+/**
+ * [#15508] A NON-chart dataset widget — a `METRIC_WIDGET_TYPES` or a
+ * `TABULAR_WIDGET_TYPES` one — selects no measures, so the pinned renderer
+ * draws the same "Pick measures (values)" placeholder in place of the KPI
+ * number or the table. The chart-family spelling of the same shape keeps its
+ * own id ({@link CHART_MEASURES_MISSING}); see "The two empty-selection
+ * shapes" in the module docblock for why the population is split across two
+ * ids rather than carried by one.
+ */
+export const WIDGET_MEASURES_MISSING = 'widget-measures-missing';
 export const TABLE_COUNT_ONLY = 'table-count-only';
 export const MEASURE_AGGREGATE_INCOHERENT = 'measure-aggregate-incoherent';
 export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
@@ -382,15 +481,6 @@ export interface WidgetBindingFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function asStrings(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : [];
@@ -465,6 +555,34 @@ export function isChartFamilyWidgetType(type: unknown): boolean {
   return typeof type === 'string' && CHART_FAMILY_WIDGET_TYPES.has(type);
 }
 
+/**
+ * [#15508] The other side of the same taxonomy split: every declared
+ * `ChartTypeSchema` option the pinned renderer does NOT route to its chart
+ * branch — i.e. `METRIC_WIDGET_TYPES` ∪ `TABULAR_WIDGET_TYPES`, derived by
+ * subtraction rather than re-listed, so the three sets stay a partition of the
+ * taxonomy by construction and a family added to either exception set (or to
+ * the taxonomy itself) lands on exactly one side without a second edit here.
+ *
+ * The population that matters for `widget-measures-missing`: the pin's
+ * `values.length === 0` return (`DatasetWidget.tsx:683`) is type-independent,
+ * so these families degrade to the same placeholder as a chart does. A widget
+ * `type` in NEITHER set is not a declared widget type at all, and stays
+ * unjudged by both ids — the same silence the taxonomy check already gave it.
+ */
+export const NON_CHART_DATASET_WIDGET_TYPES: ReadonlySet<string> = new Set(
+  (ChartTypeSchema.options as readonly string[]).filter(
+    (t) => !CHART_FAMILY_WIDGET_TYPES.has(t),
+  ),
+);
+
+/**
+ * [#15508] Does the pinned renderer draw this DECLARED widget `type` as a
+ * single value or a table rather than as a chart?
+ */
+export function isNonChartDatasetWidgetType(type: unknown): boolean {
+  return typeof type === 'string' && NON_CHART_DATASET_WIDGET_TYPES.has(type);
+}
+
 function list(names: Iterable<string>): string {
   const arr = [...names];
   return arr.length > 0 ? arr.join(', ') : '(none)';
@@ -510,7 +628,7 @@ function dashboardFilterDefs(dash: AnyRec): DashFilterDef[] {
     byName.set(DATE_RANGE_FILTER_NAME, { name: DATE_RANGE_FILTER_NAME, field });
   }
 
-  for (const f of asArray(dash.globalFilters)) {
+  for (const f of recordsOf(dash.globalFilters)) {
     if (typeof f.field !== 'string' || !f.field) continue;
     const name = typeof f.name === 'string' && f.name ? f.name : f.field;
     const targetWidgets = Array.isArray(f.targetWidgets)
@@ -558,7 +676,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   const findings: WidgetBindingFinding[] = [];
 
   const datasets = new Map<string, AnyRec>();
-  for (const ds of asArray(stack.datasets)) {
+  for (const ds of recordsOf(stack.datasets)) {
     if (typeof ds.name === 'string') datasets.set(ds.name, ds);
   }
 
@@ -568,10 +686,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // does not depend on any widget), so it is checked once over every dataset
   // whose object's field types are known. Advisory — the page still renders.
   const objectFieldTypes = new Map<string, Map<string, string>>();
-  for (const o of asArray(stack.objects)) {
+  for (const o of recordsOf(stack.objects)) {
     if (typeof o.name !== 'string') continue;
     const fm = new Map<string, string>();
-    for (const f of asArray(o.fields)) {
+    for (const f of recordsOf(o.fields)) {
       if (typeof f.name === 'string' && typeof f.type === 'string') fm.set(f.name, f.type);
     }
     objectFieldTypes.set(o.name, fm);
@@ -585,12 +703,12 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // `validate-dataset-references.ts` does one level down — the same seam, so
   // the two positions cannot drift into two accounts of one object graph.
   const graph: ObjectGraph = indexObjectGraph(stack);
-  const datasetList = asArray(stack.datasets);
+  const datasetList = recordsOf(stack.datasets);
   for (let i = 0; i < datasetList.length; i++) {
     const ds = datasetList[i];
     const fieldTypes = typeof ds.object === 'string' ? objectFieldTypes.get(ds.object) : undefined;
     if (!fieldTypes) continue; // cannot judge without the object's field types
-    const dsMeasures = asArray(ds.measures);
+    const dsMeasures = recordsOf(ds.measures);
     for (let k = 0; k < dsMeasures.length; k++) {
       const m = dsMeasures[k];
       const field = typeof m.field === 'string' ? m.field : undefined;
@@ -615,7 +733,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
     }
   }
 
-  const dashboards = asArray(stack.dashboards);
+  const dashboards = recordsOf(stack.dashboards);
   for (let i = 0; i < dashboards.length; i++) {
     const dash = dashboards[i];
     const dashName = typeof dash.name === 'string' ? dash.name : `(dashboard ${i})`;
@@ -938,11 +1056,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       }
 
       const dimensionNames = new Set<string>();
-      for (const d of asArray(dataset.dimensions)) {
+      for (const d of recordsOf(dataset.dimensions)) {
         if (typeof d.name === 'string') dimensionNames.add(d.name);
       }
       const measures = new Map<string, AnyRec>();
-      for (const m of asArray(dataset.measures)) {
+      for (const m of recordsOf(dataset.measures)) {
         if (typeof m.name === 'string') measures.set(m.name, m);
       }
 
@@ -1042,6 +1160,14 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         // measures; resolve every chartConfig field against that shape.
         const selectedValues = new Set(values.filter((v) => measures.has(v)));
 
+        // [#15463] All three positions below are WARNING tier. The pinned
+        // renderer refuses every one of them as a binding (see "The three
+        // refused binding keys" in the module docblock), so the authored key
+        // is ignored rather than mis-queried — `widget-legacy-analytics-shape`'s
+        // class, and it carries that class's tier and suppressibility.
+        const suppressHint =
+          `Suppress with suppressWarnings: ['${CHART_FIELD_UNKNOWN}'] if the inert key is intentional.`;
+
         const xAxis = (chartConfig.xAxis && typeof chartConfig.xAxis === 'object')
           ? (chartConfig.xAxis as AnyRec)
           : undefined;
@@ -1050,43 +1176,68 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         if (xAxis && typeof xAxis.field === 'string'
             && !dimensionNames.has(xAxis.field) && !dims.includes(xAxis.field)) {
           push({
-            severity: 'error',
+            severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
             message:
               `chartConfig.xAxis.field "${xAxis.field}" does not resolve to a ` +
-              `dimension of dataset "${dsName}" (declared dimensions: ${list(dimensionNames)}).`,
-            hint: `Point xAxis.field at a dataset dimension name.${suggestName(xAxis.field, dimensionNames)}`,
+              `dimension of dataset "${dsName}" (declared dimensions: ${list(dimensionNames)}) — ` +
+              `and the dashboard renderer ignores an authored axis \`field\` in any case: ` +
+              `\`axisPresentation\` strips it, so the x-axis stays bound to this widget's ` +
+              `first dimension (${list(dims)}). The binding is a silent no-op, not a query ` +
+              `that fails.`,
+            hint:
+              `Point xAxis.field at a dataset dimension name, or drop the key — \`xAxis\` ` +
+              `carries presentation only (title, format, gridlines) and the axis binding ` +
+              `comes from this widget's \`dimensions\`.` +
+              `${suggestName(xAxis.field, dimensionNames)} ${suppressHint}`,
           });
         }
 
-        const measureField = (label: string, field: string): void => {
+        // [#15463] The two measure-side positions are refused for DIFFERENT
+        // reasons — an axis `field` is stripped and the derived binding stands,
+        // while a `series[].name` is the MATCH KEY and an unmatched entry is
+        // dropped whole — so the consequence sentence is per position.
+        const measureField = (label: string, field: string, kind: 'axis' | 'series'): void => {
           if (values.includes(field)) return; // resolvable, or already errored via rule (c)
           const declaredButUnselected = measures.has(field);
+          const nameClause = declaredButUnselected
+            ? `chartConfig.${label} "${field}" is a measure of dataset "${dsName}" ` +
+              `but is not selected in the widget's values (${list(values)})`
+            : `chartConfig.${label} "${field}" does not resolve to a measure of ` +
+              `dataset "${dsName}" (declared measures: ${list(measures.keys())})`;
+          const consequence = kind === 'series'
+            ? `the dashboard renderer derives one series per selected measure and matches an ` +
+              `authored entry BY NAME, so this entry pairs with no series and the presentation ` +
+              `on it (mark, colour, stack, axis side) lands on nothing`
+            : `the dashboard renderer ignores an authored axis \`field\` — \`axisPresentation\` ` +
+              `strips it — so the y-axis bindings stay derived from this widget's values ` +
+              `(${list(values)}) and the key re-points nothing`;
+          const fixHint = declaredButUnselected
+            ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
+            : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
+              `base column.${suggestName(field, selectedValues.size > 0 ? selectedValues : measures.keys())}`;
+          const shapeHint = kind === 'series'
+            ? `\`series[].name\` selects WHICH derived series the presentation lands on; it ` +
+              `cannot add, remove or re-point one.`
+            : `\`yAxis[]\` carries presentation only (title, min/max, position); the bindings ` +
+              `come from \`values\`.`;
           push({
-            severity: 'error',
+            severity: 'warning',
             rule: CHART_FIELD_UNKNOWN,
-            message: declaredButUnselected
-              ? `chartConfig.${label} "${field}" is a measure of dataset "${dsName}" ` +
-                `but is not selected in the widget's values (${list(values)}), so the ` +
-                `query result will not contain it.`
-              : `chartConfig.${label} "${field}" does not resolve to a measure of ` +
-                `dataset "${dsName}" (declared measures: ${list(measures.keys())}).`,
-            hint: declaredButUnselected
-              ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
-              : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
-                `base column.${suggestName(field, selectedValues.size > 0 ? selectedValues : measures.keys())}`,
+            message: `${nameClause} — ${consequence}. It is a silent no-op, not a query that fails.`,
+            hint: `${fixHint} ${shapeHint} ${suppressHint}`,
           });
         };
 
         const yAxes = Array.isArray(chartConfig.yAxis) ? (chartConfig.yAxis as AnyRec[]) : [];
         for (let k = 0; k < yAxes.length; k++) {
           const field = yAxes[k]?.field;
-          if (typeof field === 'string') measureField(`yAxis[${k}].field`, field);
+          if (typeof field === 'string') measureField(`yAxis[${k}].field`, field, 'axis');
         }
         const series = Array.isArray(chartConfig.series) ? (chartConfig.series as AnyRec[]) : [];
         for (let k = 0; k < series.length; k++) {
           const name = series[k]?.name;
-          if (typeof name === 'string') measureField(`series[${k}].name`, name);
+          if (typeof name === 'string') measureField(`series[${k}].name`, name, 'series');
         }
       } else if (isMarkMixing) {
         push({
@@ -1108,7 +1259,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         });
       }
 
-      // ── (d1) a chart-family widget with an empty selection (#15462) ──
+      // ── (d1) a dataset widget with an empty selection (#15462, #15508) ──
       // Neither shape is about `chartConfig` — the renderer degrades before it
       // is ever consulted — so both are their own ids rather than arms of
       // `chart-config-missing` (which would then misname its own condition).
@@ -1116,13 +1267,23 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       // does not resolve is rules (b)/(c)'s finding, and emptiness is a
       // different question from resolvability.
       //
-      // Mutually exclusive, in the pin's own order: `values.length === 0`
-      // returns the placeholder at `DatasetWidget.tsx:683`, above every family
-      // branch, so a measureless widget never reaches the `isMetric` test the
-      // second id describes. Reporting both would attribute to one widget two
-      // consequences it cannot have at once.
-      if (isChartFamilyWidgetType(w.type)) {
-        if (values.length === 0) {
+      // Mutually exclusive, in the pin's own order, and the ORDER IS THE
+      // CONTROL FLOW below: `values.length === 0` returns the placeholder at
+      // `DatasetWidget.tsx:683`, above every family branch, so a measureless
+      // widget never reaches the `isMetric` test the dimensions id describes.
+      // Reporting both would attribute to one widget two consequences it
+      // cannot have at once. Rule (e) below keeps the same discipline for
+      // `table`/`pivot` — it `continue`s on `values.length === 0` — so a
+      // measureless table reports once, here.
+      //
+      // [#15508] The measures shape is judged on EVERY declared widget type
+      // (the `:683` return is type-independent); the dimensions shape stays
+      // chart-family, because a dimensionless single-value or tabular widget is
+      // what that family is for. Two ids for the one measures shape, split on
+      // the same family line: see the module docblock for why the chart-family
+      // id was kept rather than renamed.
+      if (values.length === 0) {
+        if (isChartFamilyWidgetType(w.type)) {
           push({
             severity: 'warning',
             rule: CHART_MEASURES_MISSING,
@@ -1141,7 +1302,31 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               ` If the widget is deliberately still being authored, suppress with: ` +
               `suppressWarnings: ['${CHART_MEASURES_MISSING}']`,
           });
-        } else if (dims.length === 0) {
+        } else if (isNonChartDatasetWidgetType(w.type)) {
+          // The consequence is stated per family, because it differs: the
+          // single-value families lose the NUMBER the tile exists to show, the
+          // tabular ones lose the grid. The placeholder is the same one, and
+          // it is quoted from the pin rather than paraphrased.
+          const drawn = METRIC_WIDGET_TYPES.has(w.type as string)
+            ? 'the single KPI number this tile is for is not drawn at all'
+            : 'no table is rendered at all';
+          push({
+            severity: 'warning',
+            rule: WIDGET_MEASURES_MISSING,
+            message:
+              `'${w.type}' widget selects no measures (\`values\` is empty), so the ` +
+              `renderer short-circuits to the authoring placeholder "Pick measures ` +
+              `(values) for this dataset widget." before any query runs — ${drawn}.`,
+            hint:
+              `Select at least one measure of dataset "${dsName}" BY NAME — ` +
+              `values: ['<measure>'] (declared measures: ${list(measures.keys())}). ` +
+              `A '${w.type}' widget needs no \`dimensions\`, so measures are the whole ` +
+              `fix. If the widget is deliberately still being authored, suppress with: ` +
+              `suppressWarnings: ['${WIDGET_MEASURES_MISSING}']`,
+          });
+        }
+      } else if (dims.length === 0) {
+        if (isChartFamilyWidgetType(w.type)) {
           push({
             severity: 'warning',
             rule: CHART_DIMENSIONS_MISSING,

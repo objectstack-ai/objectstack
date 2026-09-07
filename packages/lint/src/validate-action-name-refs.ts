@@ -42,7 +42,7 @@
  * miss; it is called out in the hint rather than guessed at.
  */
 
-import { suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 
 export const ACTION_NAME_UNDEFINED = 'action-name-undefined';
@@ -66,14 +66,6 @@ export interface ActionNameRefFinding {
 
 type AnyRec = Record<string, unknown>;
 
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
@@ -85,13 +77,13 @@ function strList(v: unknown): string[] {
 /** Every action name defined in the stack (global + object-embedded). */
 function collectActionNames(stack: AnyRec): Set<string> {
   const names = new Set<string>();
-  for (const action of asArray(stack.actions)) {
+  for (const action of recordsOf(stack.actions)) {
     const n = strName(action?.name);
     if (n) names.add(n);
   }
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     if (!obj || typeof obj !== 'object') continue;
-    for (const action of asArray(obj.actions)) {
+    for (const action of recordsOf(obj.actions)) {
       const n = strName(action?.name);
       if (n) names.add(n);
     }
@@ -207,7 +199,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
   };
 
   // ── List views: `list` + each `listViews.<key>`, on views AND on objects ──
-  const views = asArray(stack.views);
+  const views = recordsOf(stack.views);
   for (let vi = 0; vi < views.length; vi++) {
     const view = views[vi];
     if (!view || typeof view !== 'object') continue;
@@ -227,7 +219,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
   // reference there is as dead as one in a standalone view — it was simply
   // never walked. Object-EMBEDDED actions were already collected as
   // definitions above; this is the consuming half.
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let oi = 0; oi < objects.length; oi++) {
     const obj = objects[oi];
     if (!obj || typeof obj !== 'object') continue;
@@ -240,7 +232,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
   }
 
   // ── Page components: record:quick_actions → properties.actionNames ──
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     if (!page || typeof page !== 'object') continue;
@@ -266,14 +258,14 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
   }
 
   // ── App navigation: { type: 'action', actionDef: { actionName } } ──
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
   for (let ai = 0; ai < apps.length; ai++) {
     const app = apps[ai];
     if (!app || typeof app !== 'object') continue;
     const appName = strName(app.name) ?? `#${ai}`;
 
     const walkNav = (items: unknown, basePath: string) => {
-      const navItems = asArray(items);
+      const navItems = recordsOf(items);
       for (let ni = 0; ni < navItems.length; ni++) {
         const nav = navItems[ni];
         if (!nav || typeof nav !== 'object') continue;
@@ -307,7 +299,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
     };
 
     walkNav(app.navigation, `apps[${ai}].navigation`);
-    const areas = asArray(app.areas);
+    const areas = recordsOf(app.areas);
     for (let ri = 0; ri < areas.length; ri++) {
       walkNav(areas[ri]?.navigation, `apps[${ai}].areas[${ri}].navigation`);
     }

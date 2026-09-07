@@ -35,19 +35,24 @@
  * both, and the matrix's verdict is the EFFECTIVE one — refused at authoring
  * means the module cannot be written, whatever the registry would have done.
  *
- * ## ⚠️ The authoring gate throws a BARE `Error` — there is no ADR-0112 envelope
+ * ## ✅ The authoring gate carries an ADR-0112 envelope (#14552)
  *
- * `defineStack` aggregates its cross-reference errors into `new Error(...)`.
- * There is no `code` and no `status` to assert, so these rows assert the
- * message — which IS the contract here, since the message is the only thing
- * that distinguishes one refusal from another — and then assert the ABSENCE of
- * the envelope explicitly, in one place, so the gap is pinned rather than
- * merely unmentioned. Same shape of gap as #14367 (`registerObject`'s bare
- * `Error`), one door over.
+ * `defineStack` aggregates its cross-reference errors and — since #14552 —
+ * raises them as `StackCrossReferenceError`: `code:
+ * 'STACK_CROSS_REFERENCE_INVALID'`, `status: 422`, one entry per finding in
+ * `issues`, with the message text byte-for-byte unchanged. The rows below
+ * still assert the MESSAGE, because the message is what distinguishes one item
+ * class from another (the code names the rule FAMILY — there is one raise site
+ * for all of them, and a single refusal can carry findings from several
+ * classes at once). `ENVELOPE PRESENCE` then asserts the envelope itself, in
+ * one place. Repaired the same way as #14367 (`registerObject`'s bare `Error`)
+ * and #14474 (`NamespaceConflictError`), one door over.
  *
- * ⛔ If `ENVELOPE ABSENCE` below goes red, an envelope has ARRIVED. That is an
- * improvement: update this pin and the #14122 §4 matrix row. Do not delete the
- * assertion to make it green.
+ * ⛔ If `ENVELOPE PRESENCE` below goes red, the envelope has been REMOVED or
+ * its code renamed — a regression, not a cleanup. Restore it rather than
+ * relaxing the assertion; five message-substring pins in this tree read the
+ * prose it fences, and the #14122 §4 matrix row records the envelope as
+ * present.
  *
  * ## This file measures. It does not prescribe.
  *
@@ -248,14 +253,17 @@ describe('#14122 §4 continuity — the method reproduces an already-measured ru
     expect(authoringVerdict(hookItem, true)).toBeUndefined();
   });
 
-  it('ENVELOPE ABSENCE — the authoring gate carries no ADR-0112 `code` / `status`', () => {
+  it('ENVELOPE PRESENCE — the authoring gate carries the ADR-0112 `code` / `status` (#14552)', () => {
     // Pinned once, here, rather than repeated on every refusing row. See the
-    // file header: red here means an envelope ARRIVED (good) — update the pin
-    // and the §4 matrix, do not delete the assertion.
+    // file header: red here means the envelope was REMOVED or renamed — a
+    // regression. Restore it, do not relax the assertion.
     const refused = authoringVerdict(hookItem);
     expect(refused).toBeInstanceOf(Error);
-    expect(refused?.code).toBeUndefined();
-    expect(refused?.status).toBeUndefined();
+    expect(refused?.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+    expect(refused?.status).toBe(422);
+    // The message text is unchanged by the envelope — this pin fences both
+    // halves at once, which is what makes it a regression detector for the
+    // five message-substring pins elsewhere in the tree.
     expect(refused?.message).toContain('defineStack cross-reference validation failed');
   });
 });

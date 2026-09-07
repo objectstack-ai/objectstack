@@ -64,6 +64,9 @@ describe('resilientFetch', () => {
         const fetchImpl = scripted([[429, { 'retry-after': '2' }], 200]);
         const sleep = vi.fn(noSleep);
         await resilientFetch('http://x', {}, { fetchImpl, sleep, retries: 3 });
+        // One 429 ⇒ exactly ONE backoff. This is a retry path, where a doubled sleep
+        // is a real defect and `toHaveBeenCalledWith(2000)` cannot see it (#15607).
+        expect(sleep).toHaveBeenCalledTimes(1);
         expect(sleep).toHaveBeenCalledWith(2000);
     });
 

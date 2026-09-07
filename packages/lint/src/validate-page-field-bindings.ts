@@ -115,14 +115,7 @@ import {
   sectionGroupRefs,
   type SectionGroupRef,
 } from './object-field-groups.js';
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
+import { recordsOf } from './object-graph.js';
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -354,11 +347,11 @@ export function relatedListFieldRefs(
 export function indexObjectFields(stack: AnyRec): Map<string, Set<string>> {
   const objectFields = new Map<string, Set<string>>();
   if (!isRec(stack)) return objectFields;
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = strName(obj.name);
     if (!name) continue;
     const names = new Set<string>();
-    for (const f of asArray(obj.fields)) {
+    for (const f of recordsOf(obj.fields)) {
       const fn = strName(f.name);
       if (fn) names.add(fn);
     }
@@ -477,7 +470,7 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   const findings: PageFieldFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  // object name → its declared field names. Built with `asArray` so BOTH
+  // object name → its declared field names. Built with `recordsOf` so BOTH
   // `fields` shapes (array of `{name}` and name-keyed map) resolve.
   const objectFields = indexObjectFields(stack);
   // [#8340] The provenance index alongside the existence one — same keying,
@@ -486,7 +479,7 @@ export function validatePageFieldBindings(stack: AnyRec): PageFieldFinding[] {
   // [#13855] object name → its declared field-group keys, for `section.group`.
   const objectFieldGroups = indexObjectFieldGroups(stack);
 
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     if (!page || typeof page !== 'object') continue;

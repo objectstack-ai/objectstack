@@ -884,6 +884,286 @@ function metaDeleteHeaders(options?: DeleteMetaItemOptions): Record<string, stri
     return { 'If-Match': String(options.ifMatch) };
 }
 
+/**
+ * An OAuth client application exactly as `@better-auth/oauth-provider` puts it
+ * on the wire: RFC 7591 §2 client metadata, snake_case, served BARE — these
+ * routes carry no ObjectStack envelope (`auth-route-ledger.ts` records all six
+ * `oauth2/*` client routes as `source: 'better-auth'`).
+ *
+ * ⚠️ **The two timestamps are RFC 7591 numbers — Unix epoch SECONDS — not
+ * `Date` and not ISO-8601 strings.** The provider converts its stored `Date`
+ * to seconds before serialising, so a `Date` never reaches the wire and there
+ * is nothing here to revive. `new Date(client_id_issued_at * 1000)` is the
+ * caller's own step.
+ *
+ * Only `client_id` and `redirect_uris` are always present: the serialiser
+ * emits every other column as `undefined` when the row does not carry it, and
+ * `JSON.stringify` then drops the key. `redirect_uris` is unconditional
+ * because the serialiser defaults it to `[]`.
+ *
+ * ⚠️ A row that carries provider `metadata` spreads those keys at the TOP
+ * level alongside the members below. They are deliberately not declared: an
+ * index signature here would erase every precise member it sits beside.
+ */
+export interface OAuthApplication {
+    /** RFC 7591 `client_id`. Always present. */
+    client_id: string;
+    /**
+     * Returned by registration ONLY. `get` strips it, and it is never on the
+     * public projection — store it at creation time or lose it.
+     */
+    client_secret?: string;
+    /**
+     * Unix epoch **seconds** at which the secret expires; `0` is RFC 7591's
+     * "never expires". Present whenever the client has a secret.
+     */
+    client_secret_expires_at?: number;
+    /** Unix epoch **seconds** at which the client was registered. */
+    client_id_issued_at?: number;
+    /** Space-delimited scope list (RFC 7591 §2), not an array. */
+    scope?: string;
+    /**
+     * Owning user. Declared `string` and not `string | null`: the serialiser
+     * folds a null column to `undefined`, so `null` is not reachable here even
+     * though the provider's own type admits it.
+     */
+    user_id?: string;
+    client_name?: string;
+    client_uri?: string;
+    logo_uri?: string;
+    contacts?: string[];
+    tos_uri?: string;
+    policy_uri?: string;
+    /** RFC 7517 JWK Set, already parsed out of its stored JSON text. */
+    jwks?: { keys: Record<string, unknown>[] };
+    jwks_uri?: string;
+    software_id?: string;
+    software_version?: string;
+    software_statement?: string;
+    /** Always present; the public projection answers an empty array. */
+    redirect_uris: string[];
+    post_logout_redirect_uris?: string[];
+    backchannel_logout_uri?: string;
+    backchannel_logout_session_required?: boolean;
+    /** Open union, as the provider declares it — the listed values autocomplete. */
+    token_endpoint_auth_method?: 'none' | 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt' | (string & {});
+    /** Open union, as the provider declares it — the listed values autocomplete. */
+    grant_types?: ('authorization_code' | 'client_credentials' | 'refresh_token' | (string & {}))[];
+    response_types?: 'code'[];
+    /** Not `| null`: the serialiser folds a null column to `undefined`. */
+    application_type?: 'web' | 'native';
+    disabled?: boolean;
+    skip_consent?: boolean;
+    enable_end_session?: boolean;
+    require_pkce?: boolean;
+    dpop_bound_access_tokens?: boolean;
+    subject_type?: 'public' | 'pairwise';
+    reference_id?: string;
+}
+
+/**
+ * What dynamic registration answers (HTTP **201**): an {@link OAuthApplication}
+ * plus the server-owned resources linked to the new client, when there are any.
+ *
+ * This is the one shape that carries `client_secret`.
+ */
+export interface OAuthApplicationRegistration extends OAuthApplication {
+    /** Server-owned resources linked to the registered client, when present. */
+    resources?: string[];
+}
+
+/**
+ * The PUBLIC projection of an OAuth application — what the consent screen may
+ * read about a client before the user has agreed to anything.
+ *
+ * Deliberately derived from {@link OAuthApplication} rather than restated, so
+ * the two cannot drift, and deliberately NOT `OAuthApplication` itself: the
+ * provider hand-picks these seven columns, so every other member is provably
+ * absent rather than merely optional.
+ *
+ * ⚠️ `redirect_uris` is always `[]` here. The projection does not pass the
+ * stored redirect URIs through, and the serialiser defaults the missing value
+ * to an empty array — so this member carries no information on this route and
+ * must not be read as "the client has no redirect URIs".
+ */
+export type OAuthApplicationPublic = Pick<
+    OAuthApplication,
+    | 'client_id'
+    | 'client_name'
+    | 'client_uri'
+    | 'logo_uri'
+    | 'contacts'
+    | 'tos_uri'
+    | 'policy_uri'
+    | 'redirect_uris'
+>;
+
+/**
+ * What submitting a consent decision answers — for BOTH decisions.
+ *
+ * Accepting and denying return the same shape and the same HTTP 200; the
+ * outcome is carried inside `url`, which on a denial is the client's
+ * `redirect_uri` with RFC 6749 §4.1.2.1 `error=access_denied` appended. So
+ * `redirect` is `true` on every success and is not the accept/deny signal —
+ * read `url`.
+ */
+export interface OAuthConsentResult {
+    /** Always `true`; the provider's own type declares the literal. */
+    redirect: true;
+    /** Absolute URL the caller must navigate the user agent to. */
+    url: string;
+}
+
+/**
+ * The user object better-auth puts on the wire from the `auth.*` routes that
+ * echo one — `changePassword`, `verifyEmail` (on a change-email verification),
+ * `twoFactor.verifyTotp` and `twoFactor.verifyBackupCode`. Served BARE by
+ * better-auth (no `{ success, data }` envelope), camelCase, and exactly the
+ * columns better-auth's own user schema declares: the serialiser
+ * (`parseUserOutput`) walks that schema and nothing else, so ObjectStack's
+ * extra `sys_user` columns (`locale`, `must_change_password`, …) never appear
+ * here even though they sit on the same row.
+ *
+ * ⚠️ **Timestamps are ISO-8601 strings, never `Date`** (maintainer ruling on
+ * #12104). The adapter is declared `supportsDates: false`, better-auth revives
+ * the stored string into a `Date` server-side, and `JSON.stringify` puts an
+ * ISO string back on the wire — measured `"createdAt":"2026-09-07T07:02:20.593Z"`
+ * on a real SQL driver. There is no revival layer in this SDK; `new Date(x)`
+ * is the caller's own step.
+ *
+ * A nullable column arrives as `null` on the SQL drivers (measured on
+ * better-sqlite3: `"image":null`, `"banReason":null`) and as an ABSENT key on
+ * a store that does not materialise an unset column (measured on the
+ * in-memory engine) — hence `?: … | null` on every one of them.
+ *
+ * The plugin-conditional members below are on the wire only when the server
+ * enables the better-auth plugin that declares them; each was measured both
+ * with and without its plugin. No index signature: one would erase every
+ * precise member beside it.
+ */
+export interface AuthWireUser {
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    /** Avatar URL — `null` (SQL) or absent (document store) when unset. */
+    image?: string | null;
+    /** ISO-8601. */
+    createdAt: string;
+    /** ISO-8601. */
+    updatedAt: string;
+    /**
+     * `twoFactor` plugin only. ⚠️ On the enrolment lane of `verifyTotp` this
+     * is echoed from the pre-flip snapshot — see
+     * {@link AuthTwoFactorVerificationResult}.
+     */
+    twoFactorEnabled?: boolean;
+    /**
+     * `admin` plugin only. An open string: the vocabulary is the deployment's
+     * (`'user'` is the plugin's default), so no union is declared.
+     */
+    role?: string | null;
+    /** `admin` plugin only; the plugin defaults it to `false`. */
+    banned?: boolean | null;
+    /** `admin` plugin only. */
+    banReason?: string | null;
+    /** `admin` plugin only. ISO-8601 when set. */
+    banExpires?: string | null;
+    /** `phoneNumber` plugin only. */
+    phoneNumber?: string | null;
+    /** `phoneNumber` plugin only; the plugin defaults it to `false`. */
+    phoneNumberVerified?: boolean | null;
+}
+
+/**
+ * `{ status: true }` — better-auth's receipt on the routes of the `auth.*`
+ * family that carry no payload: `updateUser`, `changeEmail`,
+ * `sendVerificationEmail`, `sessions.revoke` / `revokeOthers` / `revokeAll`,
+ * `twoFactor.disable` and `accounts.unlink`. Every one of those handlers ends
+ * `ctx.json({ status: true })` — read in the vendor's source and measured on
+ * all eight against a real server — so the literal IS the wire fact: the
+ * value never carries `false`. A refusal is a 4xx, which `this.fetch` raises
+ * as a throw before any receipt exists.
+ *
+ * ⚠️ `updateUser` does NOT echo the updated user, whatever its OpenAPI stub
+ * says: the handler answers this receipt and puts the new fields into the
+ * session cookie. Re-read `me()` for the new values.
+ */
+export interface AuthStatusReceipt {
+    status: true;
+}
+
+/**
+ * What `POST /change-password` answers.
+ */
+export interface AuthPasswordChangeResult {
+    /**
+     * ⚠️ SECRET — an unsigned session token. When `revokeOtherSessions: true`
+     * made the server rotate the caller's session this is the NEW session's
+     * token (every other session is gone and the cookie the caller held is
+     * dead); `null` otherwise. A bearer-mode caller has to store it itself —
+     * this SDK does not.
+     */
+    token: string | null;
+    /** The caller, as better-auth's session held it when the write ran. */
+    user: AuthWireUser;
+}
+
+/**
+ * What `GET /verify-email` answers when it answers JSON — i.e. when the call
+ * carries no `callbackURL`. With one, the route answers a 302 to that URL with
+ * an EMPTY body (measured), and what `res.json()` then parses is whatever the
+ * callback target serves — so a caller that wants this receipt omits
+ * `callbackURL`.
+ */
+export interface AuthEmailVerificationResult {
+    /** Always `true`; a bad or expired token is a 401 raised by `this.fetch`. */
+    status: true;
+    /**
+     * The updated user when the token was minted by `changeEmail` (the address
+     * has changed and `emailVerified` is `true`); `null` when the token
+     * verified the CURRENT address — on the first verification and on every
+     * repeat of it alike.
+     */
+    user: AuthWireUser | null;
+}
+
+/**
+ * What `POST /two-factor/verify-totp` and `POST /two-factor/verify-backup-code`
+ * answer on success, on both lanes (a signed-in user confirming a factor, and
+ * a sign-in challenge being completed).
+ */
+export interface AuthTwoFactorVerificationResult {
+    /**
+     * ⚠️ SECRET — the unsigned token of the session the caller now holds,
+     * accepted as a bearer. On the enrolment lane the vendor rotates the
+     * session mid-request; the value here is the LIVE one (plugin-auth's
+     * `two-factor-rotated-token-echo` repairs the vendor's stale echo).
+     * Through this SDK `verifyBackupCode` cannot send `disableSession`, so
+     * the token is always present.
+     */
+    token: string;
+    /**
+     * ⚠️ On the ENROLMENT lane of `verifyTotp` the vendor echoes the user from
+     * its pre-rotation snapshot, so `twoFactorEnabled` reads `false` here
+     * although the flag has just flipped server-side (measured on a real SQL
+     * driver). Re-read the session for the live value.
+     */
+    user: AuthWireUser;
+}
+
+/**
+ * What ObjectStack's own `POST /set-initial-password` mount answers on success
+ * — the platform envelope, not better-auth's `{ status }` receipt, because the
+ * route is an ObjectStack wrapper around the vendor's server-only
+ * `auth.api.setPassword`. Its refusals (`409 PASSWORD_ALREADY_SET`, `400`,
+ * `401`) carry `{ success: false, error: { code, message } }` and are raised
+ * by `this.fetch`, so `success` is never `false` here.
+ */
+export interface AuthSetInitialPasswordResult {
+    success: true;
+}
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -3033,7 +3313,7 @@ export class ObjectStackClient {
         tos_uri?: string;
         policy_uri?: string;
         metadata?: Record<string, unknown>;
-      }) => {
+      }): Promise<OAuthApplicationRegistration> => {
         const route = this.getRoute('auth');
         // The new oauth-provider package exposes `/oauth2/create-client`
         // (authenticated dynamic registration). The legacy `/oauth2/register`
@@ -3051,7 +3331,7 @@ export class ObjectStackClient {
        * Get a single OAuth application by its `client_id`.
        * GET /api/v1/auth/oauth2/get-client?client_id=...
        */
-      get: async (clientId: string) => {
+      get: async (clientId: string): Promise<OAuthApplication> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(
           `${this.baseUrl}${route}/oauth2/get-client?client_id=${encodeURIComponent(clientId)}`,
@@ -3064,7 +3344,7 @@ export class ObjectStackClient {
        * once the user has signed in). Used by the consent screen.
        * GET /api/v1/auth/oauth2/public-client?client_id=...
        */
-      getPublic: async (clientId: string) => {
+      getPublic: async (clientId: string): Promise<OAuthApplicationPublic> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(
           `${this.baseUrl}${route}/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
@@ -3093,14 +3373,61 @@ export class ObjectStackClient {
        *
        * Tokens and consents referencing the client cascade-delete via the
        * better-auth schema's `onDelete: cascade` foreign keys.
+       *
+       * ## Why this method does not call `res.json()` (#15451)
+       *
+       * Measured against a real server — real `betterAuth` + real
+       * `oauthProvider` over the real ObjectQL adapter, driven through this
+       * very client with only the socket stood in for:
+       *
+       *     POST /oauth2/delete-client -> 200 · 0 bytes
+       *                                   content-type: application/json
+       *                                   content-length: (absent)
+       *
+       * The handler returns nothing and the vendor declares the endpoint
+       * `void` (`StrictEndpoint<'/oauth2/delete-client', …, void>`). A
+       * `res.json()` on that body therefore rejected with `SyntaxError:
+       * Unexpected end of JSON input` on EVERY successful delete, while the
+       * row was already gone server-side — so the method had no success path
+       * a caller could observe, and the obvious recovery (retry) failed
+       * DIFFERENTLY, with the route's 404 `not_found`.
+       *
+       * ⛔ Emptiness is detected by READING the body, not from the status and
+       * not from `content-length`. Both were measured and both are unusable
+       * here: the status is `200`, not the `204` the `{ deleted: true }`
+       * shortcut elsewhere in this file keys off, and the response carries NO
+       * `content-length` header at all. Only the body itself answers.
+       *
+       * ⛔ The parse below is NOT decoration and must not be deleted as dead
+       * code on the grounds that nothing reads its value. It is what keeps
+       * this method LOUD on a malformed non-empty body: a body that is
+       * present but unparseable still rejects exactly as it did before, so
+       * the ONLY behaviour this method changed is the zero-byte case — the
+       * defect itself. Pinned by `oauth-applications-delete.test.ts`.
+       *
+       * ## Why `void`, and not `{ deleted: boolean }`
+       *
+       * "Deleted" and "was already gone" are distinguished by the route, but
+       * on the ERROR channel, not in the success value: a client that is not
+       * there answers 404 `{ error: 'not_found' }`, which `this.fetch` has
+       * already turned into a throw before this line runs. The 200 answer
+       * carries zero bytes and therefore zero information, so a synthesised
+       * `{ deleted: true }` would be a value the wire cannot support and
+       * strictly less informative than the 404 the caller already gets.
        */
-      delete: async (clientId: string) => {
+      delete: async (clientId: string): Promise<void> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/oauth2/delete-client`, {
           method: 'POST',
           body: JSON.stringify({ client_id: clientId }),
         });
-        return res.json();
+        const body = await res.text();
+        if (body === '') return;
+        // Present but unread: validated so a malformed body still speaks, and
+        // discarded because the declared contract is `void`. The day this
+        // route starts answering a payload, widening the return type is a
+        // deliberate, reviewable edit here — never a silent change of shape.
+        JSON.parse(body);
       },
     },
 
@@ -3113,7 +3440,7 @@ export class ObjectStackClient {
      * carries the signed authorization request that the consent endpoint
      * verifies before issuing the authorization code.
      */
-    consent: async (req: { accept: boolean; scope?: string; oauth_query?: string }) => {
+    consent: async (req: { accept: boolean; scope?: string; oauth_query?: string }): Promise<OAuthConsentResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/oauth2/consent`, {
         method: 'POST',
@@ -3332,10 +3659,14 @@ export class ObjectStackClient {
      * Update the current user's profile.
      *
      * better-auth: POST /update-user — accepts `{ name?, image?, ... }`
-     * (any custom user fields configured on the server). Returns the
-     * updated user.
+     * (any custom user fields configured on the server).
+     *
+     * Answers `{ status: true }` and NOT the updated user — the handler puts
+     * the new fields into the session cookie and echoes only the receipt
+     * (measured; the vendor's OpenAPI stub, which promises `{ user }`, is
+     * wrong). Re-read `me()` for the new values.
      */
-    updateUser: async (data: { name?: string; image?: string | null; [key: string]: unknown }) => {
+    updateUser: async (data: { name?: string; image?: string | null; [key: string]: unknown }): Promise<AuthStatusReceipt> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/update-user`, {
         method: 'POST',
@@ -3349,13 +3680,15 @@ export class ObjectStackClient {
      *
      * better-auth: POST /change-password.
      * Set `revokeOtherSessions: true` to invalidate every other session
-     * after the change.
+     * after the change — the server then ROTATES the caller's session too and
+     * answers the new token in `token`; this SDK does not store it, so a
+     * bearer-mode caller must.
      */
     changePassword: async (req: {
       currentPassword: string;
       newPassword: string;
       revokeOtherSessions?: boolean;
-    }) => {
+    }): Promise<AuthPasswordChangeResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/change-password`, {
         method: 'POST',
@@ -3377,7 +3710,7 @@ export class ObjectStackClient {
      *
      * ObjectStack mount: POST /set-initial-password — `{ newPassword }`.
      */
-    setInitialPassword: async (req: { newPassword: string }) => {
+    setInitialPassword: async (req: { newPassword: string }): Promise<AuthSetInitialPasswordResult> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/set-initial-password`, {
         method: 'POST',
@@ -3393,7 +3726,7 @@ export class ObjectStackClient {
      *
      * better-auth: POST /change-email — `{ newEmail, callbackURL? }`.
      */
-    changeEmail: async (req: { newEmail: string; callbackURL?: string }) => {
+    changeEmail: async (req: { newEmail: string; callbackURL?: string }): Promise<AuthStatusReceipt> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/change-email`, {
         method: 'POST',
@@ -3406,7 +3739,7 @@ export class ObjectStackClient {
      * Re-send the email-verification link to the current user (or any
      * address when called as an admin). better-auth: POST /send-verification-email.
      */
-    sendVerificationEmail: async (req: { email: string; callbackURL?: string }) => {
+    sendVerificationEmail: async (req: { email: string; callbackURL?: string }): Promise<AuthStatusReceipt> => {
       const route = this.getRoute('auth');
       const res = await this.fetch(`${this.baseUrl}${route}/send-verification-email`, {
         method: 'POST',
@@ -3419,8 +3752,13 @@ export class ObjectStackClient {
      * Verify an email-verification token (the link target).
      *
      * better-auth: GET /verify-email?token=…&callbackURL=…
+     *
+     * The declared result is what the route answers WITHOUT `callbackURL`.
+     * With one, the route answers a 302 to that URL with an empty body
+     * (measured); `fetch` follows it and `res.json()` then parses whatever
+     * the callback target serves. Omit `callbackURL` to receive the receipt.
      */
-    verifyEmail: async (params: { token: string; callbackURL?: string }) => {
+    verifyEmail: async (params: { token: string; callbackURL?: string }): Promise<AuthEmailVerificationResult> => {
       const route = this.getRoute('auth');
       const url = new URL(`${this.baseUrl}${route}/verify-email`);
       url.searchParams.set('token', params.token);
@@ -3437,6 +3775,24 @@ export class ObjectStackClient {
      *      typically following an out-of-band confirmation step.
      *
      * Server policy decides which is required; pass whichever you have.
+     *
+     * ⚠️ NOT BOUND, and deliberately so — the one member of the `auth.*`
+     * family #14313 left at `Promise<any>`, with its
+     * `exported-any-returns.json` entry still open.
+     *
+     * The maintainer's ruling of 2026-08-12 on #7735 keeps better-auth's
+     * `user.deleteUser` deliberately unconfigured (self-service deletion in a
+     * B2B tenancy needs a design first), and `auth-route-ledger.ts` books the
+     * route `disabled`. Measured against a real server: the vendor's handler
+     * refuses with **HTTP 404 and a ZERO-BYTE body** (once the
+     * last-local-credential guard is satisfied; before it, 409
+     * `LAST_LOCAL_CREDENTIAL`), so `this.fetch` throws before the
+     * `res.json()` below ever runs — this method has no success path a
+     * caller can observe. No declared return type can be honest for a value
+     * the runtime never delivers; the vendor's success shape
+     * (`{ success: true, message }`) becomes bindable the day the route is
+     * switched on, and binding it before then would declare a capability the
+     * runtime does not have.
      */
     deleteUser: async (req: { password?: string; token?: string; callbackURL?: string }) => {
       const route = this.getRoute('auth');
@@ -3474,7 +3830,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /revoke-session — revoke a single session by token. */
-      revoke: async (token: string) => {
+      revoke: async (token: string): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/revoke-session`, {
           method: 'POST',
@@ -3484,7 +3840,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /revoke-other-sessions — keep current, kill the rest. */
-      revokeOthers: async () => {
+      revokeOthers: async (): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/revoke-other-sessions`, {
           method: 'POST',
@@ -3494,7 +3850,7 @@ export class ObjectStackClient {
       },
 
       /** better-auth: POST /revoke-sessions — kill every session for this user. */
-      revokeAll: async () => {
+      revokeAll: async (): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/revoke-sessions`, {
           method: 'POST',
@@ -3532,8 +3888,12 @@ export class ObjectStackClient {
        * or to step up an existing 2FA-enabled session. `trustDevice` (when
        * supported by the server config) suppresses the 2FA challenge on
        * this browser for the configured trust period.
+       *
+       * On the enrolment lane the server rotates the session and answers the
+       * LIVE token in `token`; this SDK does not store it — a bearer-mode
+       * caller must, or its next call answers 401.
        */
-      verifyTotp: async (req: { code: string; trustDevice?: boolean }) => {
+      verifyTotp: async (req: { code: string; trustDevice?: boolean }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/two-factor/verify-totp`, {
           method: 'POST',
@@ -3542,8 +3902,15 @@ export class ObjectStackClient {
         return res.json();
       },
 
-      /** Disable 2FA for the current user. Requires the password again. */
-      disable: async (req: { password: string }) => {
+      /**
+       * Disable 2FA for the current user. Requires the password again.
+       *
+       * ⚠️ The server ROTATES the caller's session on success and echoes only
+       * the receipt (the new token rides the `Set-Cookie` and the bearer
+       * plugin's `set-auth-token` header, neither of which this SDK reads), so
+       * a bearer-mode caller's stored token is dead after this call.
+       */
+      disable: async (req: { password: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/two-factor/disable`, {
           method: 'POST',
@@ -3570,7 +3937,7 @@ export class ObjectStackClient {
        * Verify a 2FA backup code in lieu of a TOTP. Useful as a recovery
        * affordance when the user has lost their authenticator app.
        */
-      verifyBackupCode: async (req: { code: string }) => {
+      verifyBackupCode: async (req: { code: string }): Promise<AuthTwoFactorVerificationResult> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/two-factor/verify-backup-code`, {
           method: 'POST',
@@ -3615,7 +3982,7 @@ export class ObjectStackClient {
        * id at the provider. 1.7 narrowed the body from the old
        * `{ providerId, accountId? }` pair; the row id implies the provider.
        */
-      unlink: async (req: { accountId: string }) => {
+      unlink: async (req: { accountId: string }): Promise<AuthStatusReceipt> => {
         const route = this.getRoute('auth');
         const res = await this.fetch(`${this.baseUrl}${route}/unlink-account`, {
           method: 'POST',

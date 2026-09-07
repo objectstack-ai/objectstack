@@ -20,6 +20,12 @@
  * defineStack(a)   (a lone built input)  : REFUSED  'a_item:dup_x' is declared twice   ← #14686's landed pin
  * ```
  *
+ * The three-stack `merge` row above is a refusal since #14848: `'merge'` no
+ * longer hands `actions` to the later object when both declare it differently
+ * (the lost `emb1` / `emb2` were exactly that), so that arm pins the refusal
+ * and the echo-once reading stays on `'override'`, whose semantics did not
+ * move.
+ *
  * The discriminator is IDENTITY against the standalone list, not equality
  * (the triage ruling on the card): the only way an entry of `stack.actions` is
  * the very same object as an entry of `object.actions` is that a previous merge
@@ -116,18 +122,30 @@ describe('composeStacks - a bound standalone action appears once in the composed
       actions: [act(`b${n}`, { objectName: 'shared' })],
     });
 
-  it.each(['override', 'merge'] as const)(
-    "with three stacks under objectConflict: '%s', the surviving object carries the surviving stack's declared actions plus each concatenated standalone once",
-    (objectConflict) => {
-      const out = composeStacks([s(1), s(2), s(3)], { objectConflict });
-      expect(keysOf(out).top).toEqual(['shared:b1', 'shared:b2', 'shared:b3']);
-      // s3's object survives with its built array as-is (embedded `emb3`, then
-      // the echo of its own `b3`); s1's and s2's bound actions join it once
-      // each, in concatenation order. The lost `emb1` / `emb2` are the object
-      // strategy's own semantics, not this merge's. Before: `b3/BOUND` twice.
-      expect(keysOf(out).embedded).toEqual({ shared: ['emb3/EMB', 'b3/BOUND', 'b1/BOUND', 'b2/BOUND'] });
-    },
-  );
+  it("with three stacks under objectConflict: 'override', the surviving object carries the surviving stack's declared actions plus each concatenated standalone once", () => {
+    const out = composeStacks([s(1), s(2), s(3)], { objectConflict: 'override' });
+    expect(keysOf(out).top).toEqual(['shared:b1', 'shared:b2', 'shared:b3']);
+    // s3's object survives with its built array as-is (embedded `emb3`, then
+    // the echo of its own `b3`); s1's and s2's bound actions join it once
+    // each, in concatenation order. The lost `emb1` / `emb2` are the object
+    // strategy's own semantics, not this merge's. Before: `b3/BOUND` twice.
+    expect(keysOf(out).embedded).toEqual({ shared: ['emb3/EMB', 'b3/BOUND', 'b1/BOUND', 'b2/BOUND'] });
+  });
+
+  it("with three stacks under objectConflict: 'merge', the composition is refused at the object merge — each built object carries a different `actions` array (#14848)", () => {
+    // s1's `shared` carries [emb1, b1/BOUND], s2's [emb2, b2/BOUND]: two
+    // declarations `'merge'` used to resolve by replacement, dropping `emb1`.
+    let msg: string | null = null;
+    try {
+      composeStacks([s(1), s(2), s(3)], { objectConflict: 'merge' });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain(
+      "composeStacks conflict: object 'shared' is defined in multiple stacks and its 'actions' is declared " +
+        "with different values by 'com.example.s1' (stack #0) and 'com.example.s2' (stack #1).",
+    );
+  });
 
   it("still binds another stack's standalone to an object it does not own — the add-on shape — once", () => {
     const core = defineStack({ manifest: mf('com.example.core'), objects: [obj('core_item', [act('archive')])] });

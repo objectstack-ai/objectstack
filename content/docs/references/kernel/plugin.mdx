@@ -28,9 +28,9 @@ const result = PluginSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Unique Plugin ID (e.g. com.example.crm) |
 | **type** | `Enum<'standard' \| 'ui' \| 'driver' \| 'server' \| 'app' \| 'theme' \| 'agent' \| 'objectql'>` | optional (default: `"standard"`) | Plugin Type categorization for runtime behavior |
-| **staticPath** | `string` | optional | Absolute path to static assets (Required for type="ui-plugin") |
-| **slug** | `string` | optional | URL path segment (Required for type="ui-plugin") |
-| **default** | `boolean` | optional | Serve at root path (Only one "ui-plugin" can be default) |
+| **staticPath** | `string` | optional | Absolute path to static assets (Required for type="ui") |
+| **slug** | `string` | optional | URL path segment (Required for type="ui") |
+| **default** | `boolean` | optional | Serve at root path (Only one "ui" plugin can be default) |
 | **version** | `string` | optional | Semantic Version |
 | **description** | `string` | optional |  |
 | **author** | `string` | optional |  |

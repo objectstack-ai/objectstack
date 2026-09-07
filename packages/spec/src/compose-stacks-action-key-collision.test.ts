@@ -21,6 +21,16 @@
  * P3 embedded(A on shared) + embedded(B on shared)   : merge/override ACCEPTED — B's array REPLACES A's
  * ```
  *
+ * Since #14848 `objectConflict: 'merge'` refuses two objects that declare
+ * DIFFERENT `actions` (any object-level collection) at `mergeObjects`, before
+ * this check runs — so the `'merge'` rows above that relied on B's array
+ * replacing A's (P3, P5b with A last, and its reverse) are refusals of THAT
+ * rule now, pinned here as such and in full in
+ * `compose-stacks-merge-collection-refusal.test.ts`; only `'override'` still
+ * hands the object wholesale to the later stack. IDENTICAL arrays — the built
+ * copies two stacks each binding one standalone to the same object carry (P4)
+ * — pass the object merge and reach this check as before.
+ *
  * Every refusal case pins the full line — the key, both manifest ids, and
  * where each declaration sits — rather than `toThrow()` alone: a bare throw
  * cannot tell "refused for the right reason" from "refused because the fixture
@@ -160,9 +170,11 @@ describe('composeStacks - two stacks declaring one global action key', () => {
 
 describe('composeStacks - object-scoped keys across stacks, judged on what the composition carries', () => {
   // Both stacks declare object `shared` and bind a standalone `dup_s` to it.
-  // `objectConflict: 'merge'` / `'override'` keep the later stack's object
-  // (whose built copy of its own bound action is the echo in `objects[...]`),
-  // and both standalone declarations concatenate — two stacks, one key.
+  // `'override'` keeps the later stack's object (whose built copy of its own
+  // bound action is the echo in `objects[...]`); under `'merge'` the two built
+  // copies are IDENTICAL, so the object merge passes them (#14848) and the
+  // composed object carries one. Both standalone declarations concatenate
+  // either way — two stacks, one key, and this check is what refuses.
   const boundA = () => defineStack({ manifest: mf('com.example.a'), objects: [obj('shared')], actions: [act('dup_s', { objectName: 'shared' })] });
   const boundB = () => defineStack({ manifest: mf('com.example.b'), objects: [obj('shared')], actions: [act('dup_s', { objectName: 'shared' })] });
 
@@ -189,42 +201,75 @@ describe('composeStacks - object-scoped keys across stacks, judged on what the c
   const embeddedA = () => defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', [act('dup_m')])] });
   const boundToSharedB = () => defineStack({ manifest: mf('com.example.b'), objects: [obj('shared')], actions: [act('dup_m', { objectName: 'shared' })] });
 
-  it.each(['merge', 'override'] as const)(
-    "refuses an embedded action the composed object carries from one stack beside the other stack's standalone bound to it (objectConflict: %s, embedding stack last)",
-    (objectConflict) => {
-      // B first, A last: A's object wins the merge / override, so the composed
-      // `shared` carries A's embedded `dup_m` (B's built copy of its own bound
-      // action is NOT carried — B's object lost); B's standalone joins it at
-      // `mergeActionsIntoObjects` — two handlers, one key.
-      const msg = refusal(() => composeStacks([boundToSharedB(), embeddedA()], { objectConflict }));
-      expect(msg).toContain(ENVELOPE_ONE);
+  it("refuses an embedded action the composed object carries from one stack beside the other stack's standalone bound to it (objectConflict: 'override', embedding stack last)", () => {
+    // B first, A last: A's object wins the override, so the composed `shared`
+    // carries A's embedded `dup_m` (B's built copy of its own bound action is
+    // NOT carried — B's object lost); B's standalone joins it at
+    // `mergeActionsIntoObjects` — two handlers, one key.
+    const msg = refusal(() => composeStacks([boundToSharedB(), embeddedA()], { objectConflict: 'override' }));
+    expect(msg).toContain(ENVELOPE_ONE);
+    expect(msg).toContain(
+      "  ✗ Action key 'shared:dup_m' is declared by 2 stacks: " +
+        "'com.example.b' (stack #0) at stack.actions[0] and " +
+        "'com.example.a' (stack #1) at objects['shared'].actions[0].",
+    );
+  });
+
+  it.each([
+    ['embedding stack last', () => [boundToSharedB(), embeddedA()], "'com.example.b' (stack #0)", "'com.example.a' (stack #1)"],
+    ['embedding stack first', () => [embeddedA(), boundToSharedB()], "'com.example.a' (stack #0)", "'com.example.b' (stack #1)"],
+  ] as const)(
+    "under 'merge' the same pair is refused one step earlier, at the object merge: both objects declare a DIFFERENT `actions` (%s) — #14848, not a collision",
+    (_order, stacks, holder, later) => {
+      // B's built object carries its bound copy (`dup_m/BOUND`), A's carries
+      // the embedded declaration (`dup_m/EMB`): two different arrays on one
+      // object, which `'merge'` no longer resolves by replacement.
+      const msg = refusal(() => composeStacks(stacks(), { objectConflict: 'merge' }));
       expect(msg).toContain(
-        "  ✗ Action key 'shared:dup_m' is declared by 2 stacks: " +
-          "'com.example.b' (stack #0) at stack.actions[0] and " +
-          "'com.example.a' (stack #1) at objects['shared'].actions[0].",
+        "composeStacks conflict: object 'shared' is defined in multiple stacks and its 'actions' is declared " +
+          `with different values by ${holder} and ${later}.`,
       );
+      expect(msg).not.toContain('action key');
     },
   );
 
-  it.each(['merge', 'override'] as const)(
-    "accepts the same pair the other way round: the strategy hands `shared` to B, A's embedded action is not carried, one handler remains (objectConflict: %s)",
-    (objectConflict) => {
-      // A first, B last: B's built object carries `actions` (the echo of its
-      // own bound action), so both `'override'` and the `'merge'` spread hand
-      // the composed object's `actions` to B. A's embedded `dup_m` is not in
-      // the artifact — the object strategy's own loss, not a collision — so
-      // only B's handler reaches the runtime key.
-      const out = composeStacks([embeddedA(), boundToSharedB()], { objectConflict });
-      const shared = (out.objects ?? []).find((o) => o.name === 'shared');
-      expect(keysOf(out).top).toEqual(['shared:dup_m']);
-      // No embedded (object-less) entry survives: every carried declaration is B's bound one.
-      expect((shared?.actions ?? []).every((a) => a.objectName === 'shared')).toBe(true);
-      expect((shared?.actions ?? []).length).toBeGreaterThan(0);
-    },
-  );
+  it("accepts the same pair the other way round under 'override': the strategy hands `shared` to B, A's embedded action is not carried, one handler remains", () => {
+    // A first, B last: B's built object carries `actions` (the echo of its
+    // own bound action), so `'override'` hands the composed object's `actions`
+    // to B. A's embedded `dup_m` is not in the artifact — the object
+    // strategy's own loss, not a collision — so only B's handler reaches the
+    // runtime key. (`'merge'` refuses this pair — pinned above.)
+    const out = composeStacks([embeddedA(), boundToSharedB()], { objectConflict: 'override' });
+    const shared = (out.objects ?? []).find((o) => o.name === 'shared');
+    expect(keysOf(out).top).toEqual(['shared:dup_m']);
+    // No embedded (object-less) entry survives: every carried declaration is B's bound one.
+    expect((shared?.actions ?? []).every((a) => a.objectName === 'shared')).toBe(true);
+    expect((shared?.actions ?? []).length).toBeGreaterThan(0);
+  });
+
+  // P3 — two stacks each EMBEDDING the same name on one object, as two
+  // DIFFERENT declarations (the labels differ).
+  const embedA = () => defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', [act('dup_e', { label: 'Dup E (a)' })])] });
+  const embedB = () => defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', [act('dup_e', { label: 'Dup E (b)' })])] });
+
+  it("accepts two stacks each EMBEDDING the same name on one object under 'override' — the later object's array replaces the earlier (measured), one handler reaches the artifact", () => {
+    const out = composeStacks([embedA(), embedB()], { objectConflict: 'override' });
+    expect(keysOf(out).embedded).toEqual({ shared: ['dup_e/EMB'] });
+    expect(keysOf(out).top).toEqual([]);
+    expect((out.objects ?? []).find((o) => o.name === 'shared')?.actions?.[0]?.label).toBe('Dup E (b)');
+  });
+
+  it("refuses the same pair under 'merge' — two different `actions` arrays on one object are no longer resolved by replacement (#14848; formerly the P3 acceptance pin)", () => {
+    const msg = refusal(() => composeStacks([embedA(), embedB()], { objectConflict: 'merge' }));
+    expect(msg).toContain(
+      "composeStacks conflict: object 'shared' is defined in multiple stacks and its 'actions' is declared " +
+        "with different values by 'com.example.a' (stack #0) and 'com.example.b' (stack #1).",
+    );
+    expect(msg).not.toContain('action key');
+  });
 
   it.each(['merge', 'override'] as const)(
-    "accepts two stacks each EMBEDDING the same name on one object — the later object's array replaces the earlier (measured), one handler reaches the artifact (objectConflict: %s)",
+    "accepts two stacks embedding the IDENTICAL declaration on one object — one declaration, carried once, one handler (objectConflict: %s)",
     (objectConflict) => {
       const a = defineStack({ manifest: mf('com.example.a'), objects: [obj('shared', [act('dup_e')])] });
       const b = defineStack({ manifest: mf('com.example.b'), objects: [obj('shared', [act('dup_e')])] });

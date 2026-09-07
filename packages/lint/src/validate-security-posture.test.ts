@@ -877,7 +877,16 @@ describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)',
 const RULE_SOURCE = readFileSync(new URL('./validate-security-posture.ts', import.meta.url), 'utf8');
 
 /** The rule's CODE — comments stripped, since the guards scan reads, not prose. */
-const RULE_CODE = RULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+const RULE_CODE = RULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\/\/[^\n]*/g, '')
+  // #15552: an import SPECIFIER is a module path, not a metadata receiver. The
+  // receiver-coverage scan below reads `<word>.<word>` out of this text, so
+  // `'./object-graph.js'` presents as a receiver `graph` reading a key `js` —
+  // and the only way to silence that would be to file a module path under
+  // PLUMBING as though it were a local variable, which is a lie the next
+  // author would have to re-derive. Strip the import block instead; nothing in
+  // it is a read off a metadata record.
+  .replace(/^import[\s\S]*?from '[^']*';$/gm, '');
 
 /** Distinct property names read off `receiver` in the rule's code. */
 function keysReadOff(receiver: string): string[] {

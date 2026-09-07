@@ -22,6 +22,7 @@
  */
 
 import { parseAutonumberFormat, referencedFields } from '@objectstack/spec/data';
+import { recordsOf } from './object-graph.js';
 
 export interface AutonumberLintFinding {
   where: string;
@@ -38,23 +39,15 @@ export const AUTONUMBER_OPTIONAL_FIELD = 'autonumber-references-optional-field';
 export const AUTONUMBER_SELF_REFERENCE = 'autonumber-references-self';
 export const AUTONUMBER_LITERAL_TOKEN = 'autonumber-unrecognized-token';
 
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 /**
  * Lint every `autonumber` field's format for unresolvable / fragile `{field}`
  * interpolation. Returns a (possibly empty) list of findings; never throws.
  */
 export function lintAutonumberFormats(stack: AnyRec): AutonumberLintFinding[] {
   const findings: AutonumberLintFinding[] = [];
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const objectName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
-    const fields = asArray(obj.fields);
+    const fields = recordsOf(obj.fields);
     // name → required?, for schema-aware reference checks.
     const fieldMeta = new Map<string, { required: boolean }>();
     for (const f of fields) {

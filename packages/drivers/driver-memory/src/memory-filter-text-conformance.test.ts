@@ -94,8 +94,11 @@ describe('[#6682] InMemoryDriver — text-operator conformance, the query path',
 
   it('the fixture is all nine rows, stored verbatim', async () => {
     const rows = await driver.find(TABLE, { orderBy: [{ field: 'id', order: 'asc' }] });
-    expect((rows as any[]).map((r) => [String(r.id), r.name]))
-      .toEqual(FILTER_TEXT_ROWS.map((r) => [r.id, r.name]));
+    expect((rows as any[]).map((r) => [String(r.id), r.name, r.score]))
+      .toEqual(FILTER_TEXT_ROWS.map((r) => [r.id, r.name, r.score]));
+    // [#14079] The premise of the non-string rows: `score` is stored as a
+    // NUMBER on this driver, not stringified on the way in.
+    for (const r of rows as any[]) expect(typeof r.score, `row ${r.id}`).toBe('number');
   });
 
   for (const c of rowCases) {
@@ -137,7 +140,17 @@ describe('[#5374] the two general-purpose faces agree, case by case', () => {
    * this card are about.
    */
   it('no case answers every row — a dropped predicate WIDENS', async () => {
+    // [#14079] ONE case legitimately selects the whole fixture: `$notContains`
+    // over the non-string column, whose declared answer IS every row (a number
+    // never contains the substring, so every number "does not contain" it).
+    // It is named here so the property stays a property, not a loophole — a
+    // second whole-set answer is the widening this pin exists to catch, and a
+    // dropped predicate on THAT case is caught by its positive twins (whose
+    // declared answer is NO rows) and by the face-agreement row above.
+    const WHOLE_SET = '$notContains is satisfied by every stored value that is not a string — complementarity holds';
+    expect(rowCases.filter((c) => c.expected.length === ROWS.length).map((c) => c.name)).toEqual([WHOLE_SET]);
     for (const c of rowCases) {
+      if (c.name === WHOLE_SET) continue;
       expect((await queryIds(driver, c.filter)).length, c.name).toBeLessThan(ROWS.length);
       expect(matcherIds(c.filter).length, c.name).toBeLessThan(ROWS.length);
     }
@@ -207,6 +220,9 @@ describe('[#6682] the analytics face answers the same text rules', () => {
     dimensions: {
       id: { name: 'id', label: 'Id', type: 'string', sql: 'id' },
       name: { name: 'name', label: 'Name', type: 'string', sql: 'name' },
+      // [#14079] The fixture's non-string column, declared as the number it is
+      // so the `score` rows reach this face through its own vocabulary.
+      score: { name: 'score', label: 'Score', type: 'number', sql: 'score' },
     },
   } as unknown as Cube;
 
@@ -247,12 +263,15 @@ describe('[#6682] the analytics face answers the same text rules', () => {
       .every((ops) => Object.keys(ops).every((op) => EXPRESSIBLE.includes(op))),
   );
 
-  it('covers the whole expressible subset — twelve cases, not an accidental one', () => {
+  it('covers the whole expressible subset — fifteen cases, not an accidental one', () => {
     // Twelve since #8934: the infix `icontains` spelling's `%`-literal case is
     // computed through `parseFilterAST` and lands as `$icontains`, so it joins
     // this face's expressible subset automatically — exactly the mechanism the
-    // selection note above promises.
-    expect(analyticsCases.length).toBe(12);
+    // selection note above promises. Fifteen since #14079: three of the five
+    // non-string rows (`$contains` / `$icontains` / `$notContains` over
+    // `score`) are in this face's vocabulary and join the same way; the
+    // `$startsWith` / `$endsWith` pair stays outside it, refused loudly.
+    expect(analyticsCases.length).toBe(15);
   });
 
   for (const c of analyticsCases) {
@@ -273,5 +292,53 @@ describe('[#6682] the analytics face answers the same text rules', () => {
     expect(await analyticsIds({ name: { $icontains: 'acme' } })).toEqual(['1', '2']);
     expect(await analyticsIds({ name: { $icontains: 'café' } })).toEqual(['4']);
     expect(await analyticsIds({ name: { $icontains: 'CAFÉ' } })).toEqual(['3']);
+  });
+});
+
+/**
+ * [#14079] `$like` / `$ilike` over a stored value that is not a string.
+ *
+ * The ruling names all six positive operators, but the shared table cannot
+ * carry `$like` rows — a driver's enrolment is the whole table (rule 2 of its
+ * header) and `driver-mongodb` refuses those two operators — so the pair is
+ * pinned per face that answers it. Same shape as the table's `score` rows:
+ * the positive pattern matches NOTHING, its `$not` matches EVERYTHING, on
+ * both faces, and the two faces agree before either is checked against the
+ * answer. Under coercion `'%5%'` would match seven rows and `'%0'` every row
+ * on a REAL column (`5` renders `'5.0'`), which is the wrong answer the
+ * assertion keeps out.
+ */
+describe('[#14079] $like / $ilike over a stored non-string value, on both faces', () => {
+  let driver: InMemoryDriver;
+  beforeEach(async () => { driver = await seed(); });
+
+  const ALL = FILTER_TEXT_ROWS.map((r) => r.id);
+  const CASES: Array<[string, unknown, string[]]> = [
+    ['$like never matches a stored number', { score: { $like: '%5%' } }, []],
+    ['$like with a trailing wildcard never matches a stored number', { score: { $like: '%0' } }, []],
+    ['$ilike never matches a stored number', { score: { $ilike: '%5%' } }, []],
+    ['$not over $like admits every stored number — complementarity', { $not: { score: { $like: '%5%' } } }, ALL],
+    ['$not over $ilike admits every stored number', { $not: { score: { $ilike: '%5%' } } }, ALL],
+  ];
+
+  for (const [name, filter, expected] of CASES) {
+    it(name, async () => {
+      const fromQuery = await queryIds(driver, filter);
+      const fromMatcher = matcherIds(filter);
+      expect(fromMatcher, 'the reference matcher disagrees with the query path').toEqual(fromQuery);
+      expect(fromQuery).toEqual(expected);
+    });
+  }
+
+  it('the reference matcher answers BOTH polarities for a valued non-string row — the #14079 cell itself', () => {
+    // The measured defect: `{ n: 5 }` failed `$contains: '5'` AND
+    // `$notContains: '5'`. A type test in place of the predicate says NO to an
+    // operator and to its negation; the predicate says NO to one and YES to
+    // the other.
+    const row = { id: 'x', n: 5 };
+    expect(match(row, { n: { $contains: '5' } })).toBe(false);
+    expect(match(row, { n: { $notContains: '5' } })).toBe(true);
+    expect(match({ id: 'y', n: 0 }, { n: { $notContains: '0' } })).toBe(true);
+    expect(match({ id: 'z', n: true }, { n: { $notContains: 'true' } })).toBe(true);
   });
 });

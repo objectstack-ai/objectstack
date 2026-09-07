@@ -33,6 +33,12 @@ import {
   UnknownKeyError,
   UnknownNamespaceError,
 } from './settings-service.types.js';
+// The published field-message catalog (ADR-0114). Rendered for the
+// `value_domain` refusal so the settings door and the record write path say
+// one thing about one domain; every other refusal here still carries its own
+// hand-written sentence, unchanged.
+import { renderValidationMessage } from '@objectstack/spec/system';
+import { SETTINGS_SECRET_MASK } from './settings-secret-redaction.js';
 import {
   firstRejectedDomainMember,
   knownValueDomain,
@@ -1810,7 +1816,7 @@ export class SettingsService {
    *   the declared table → rejected (`invalid_option`) — unless the specifier
    *   declares a `valueDomain`, which moves the boundary (next bullet).
    * - `valueDomain` (#5712) + non-empty value that is not a member of the
-   *   declared standard → rejected (`invalid_value`). The domain REPLACES the
+   *   declared standard → rejected (`value_domain`). The domain REPLACES the
    *   option table as the membership boundary: `options` degrades to a UI
    *   convenience list, so a value outside `options` but inside the domain is
    *   accepted. Judged AFTER `pattern` — shape and membership narrow
@@ -2050,27 +2056,50 @@ export class SettingsService {
       // shape-valid, and the question is purely whether the standard's
       // membership admits it (`Mars/Olympus` is a shape-valid time zone that
       // does not exist; `ZZ` matches `^[A-Za-z]{2}$` and is assigned to
-      // nobody). No `FieldErrorCode` member names a standard-domain breach, so
-      // it takes `invalid_value` — the catalog's declared slot for "rejected
-      // for a reason no other member names" (ADR-0114), the same verdict the
-      // step grid reached in #6199. `invalid_option` would be a lie about
-      // which set was consulted: the declared options are exactly the list a
-      // domain-bearing value may legitimately be outside of.
+      // nobody).
+      //
+      // The refusal code is `value_domain` — ADR-0114's rule is that the code
+      // is the constraint's OWN name, the way `max_length` names the bound it
+      // breached. Until the field-level card's spec half landed (maintainer
+      // ruling 2026-09-02) no `FieldErrorCode` member named a standard-domain
+      // breach, so this branch took `invalid_value`, the catalog's declared
+      // slot for "rejected for a reason no other member names"; that slot was
+      // right only while no member named this one, and now one does. The
+      // change is wire-visible on `PUT /api/settings/:namespace` and is pinned
+      // as such (`settings-routes.test.ts`, `settings-service.test.ts`).
+      // `invalid_option` would still be a lie about which set was consulted:
+      // the declared options are exactly the list a domain-bearing value may
+      // legitimately be outside of.
       if (!empty && domain) {
         const rejected = firstRejectedDomainMember(domain, value);
         if (rejected) {
           const offending = rejected.value;
-          const { member, example } = valueDomainPhrasing(domain);
           // Same redaction rule as `invalid_option`, same reason: a domain
           // member is not a secret, but `encrypted` is authorable on any
           // specifier and this message travels back through the API and into
-          // logs.
+          // logs. The catalog templates always interpolate the offending
+          // value, so a secret key is rendered with the mask the REST boundary
+          // already uses for a withheld value — a redacted sentence rather
+          // than a truncated one.
           const secret = reg.encryptedKeys.has(key);
-          const got = secret ? '' : ` Received '${String(offending)}'.`;
           errors.push({
             field: key,
-            code: 'invalid_value',
-            message: `${label} must be a valid ${member} (e.g. '${example}').${got}`,
+            code: 'value_domain',
+            // The published catalog template for this code, rendered in `en`
+            // (ADR-0114) — the same catalog the record write path renders, so
+            // the two doors under one ruling describe one domain in one set of
+            // words. The per-domain variant spells the standard out for a
+            // human; the machine-readable half is `code` + `constraint`, which
+            // is what a localized client re-renders from.
+            message: renderValidationMessage({
+              messageKey: `value_domain_${domain}`,
+              label,
+              field: key,
+              params: {
+                valueDomain: domain,
+                value: secret ? SETTINGS_SECRET_MASK : String(offending),
+              },
+            }),
             label,
             // The declared domain, spelled by the property it comes from
             // (`FieldError.constraint`, ADR-0114), so a client can branch on
@@ -2275,8 +2304,14 @@ export class SettingsService {
    * `readonly: true` (`packages/platform-objects/src/system/sys-setting.object.ts`),
    * and the engine STRIPS author-declared read-only columns from a
    * **non-system** caller's UPDATE payload (`stripReadonlyFields`, gated on
-   * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). The
-   * INSERT path is deliberately exempt from that strip (#3413) — which is
+   * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). On
+   * THIS object the INSERT path is outside that strip — not by the 2026-07-24
+   * "INSERT exempt" row (superseded by the 2026-09-03 ruling, #14147:
+   * `engine.insert` runs the same strip for a non-system caller) but because
+   * `sys_setting` is `sys_`-prefixed and `managedBy: 'engine-owned'`, which
+   * `staticReadonlyInsertSubject` (`packages/objectql/src/validation/rule-validator.ts`)
+   * leaves to the platform object's own guards while the UPDATE path applies no
+   * such carve-out (#15719) — which is
    * exactly why the FIRST write of a secret landed correctly and every later
    * one silently did not: a rotation inserted a fresh `sys_secret` row, got its
    * 200 with a redacted echo and an advanced `updated_at`, and left

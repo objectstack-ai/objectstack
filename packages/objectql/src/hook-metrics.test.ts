@@ -63,7 +63,7 @@ describe('hook metrics', () => {
             object: 'account',
             events: ['beforeInsert'],
             priority: 100,
-            timeout: 10,
+            timeoutMs: 10,
             handler: async () => new Promise((r) => setTimeout(r, 100)),
         };
         bindHooksToEngine(engine, [hook], { packageId: 'p', metrics });

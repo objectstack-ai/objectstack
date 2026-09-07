@@ -1119,6 +1119,8 @@ describe('SeedLoaderService', () => {
 
       expect(result.success).toBe(true);
       expect(result.summary.totalErrored).toBe(0);
+      // One record ⇒ one write; a repeat here would be a double seed (#15607).
+      expect(engine.insert).toHaveBeenCalledTimes(1);
       expect(engine.insert).toHaveBeenCalledWith(
         'note',
         expect.objectContaining({ name: 'N1', author: 'usr_system' }),
@@ -1152,6 +1154,8 @@ describe('SeedLoaderService', () => {
 
       expect(result.success).toBe(true);
       expect(result.summary.totalErrored).toBe(0);
+      // One record ⇒ one write; a repeat here would be a double seed (#15607).
+      expect(engine.insert).toHaveBeenCalledTimes(1);
       expect(engine.insert).toHaveBeenCalledWith(
         'note',
         expect.objectContaining({ name: 'N1', author: null }),
@@ -1180,6 +1184,10 @@ describe('SeedLoaderService', () => {
       });
 
       expect(result.success).toBe(true);
+      // One record, mode 'insert' ⇒ exactly ONE engine write. Seed application is
+      // the very path where a doubled collect writes twice and stays green under
+      // `toHaveBeenCalledWith` (#15607).
+      expect(engine.insert).toHaveBeenCalledTimes(1);
       expect(engine.insert).toHaveBeenCalledWith(
         'note',
         expect.objectContaining({ org_label: 'org_123' }),

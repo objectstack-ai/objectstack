@@ -278,13 +278,13 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:966` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `00d3f09c5`. Re-derived at that pin
-// 2026-09-04: `containers.tsx` DID change across the move off `67dadd602`
-// (117 insertions, 63 deletions), and this time both anchors moved by exactly
-// one line — the icon block `918-924` to `919-925` and the registration input
-// `965` to `966` — each re-READ there with the cited text unchanged. Every
-// anchor was re-READ at the new pin, never inferred, because identity
-// preserves a wrong anchor as faithfully as a right one (#10274).
+// builds against — `.objectui-sha` = `a472b0716`. Re-derived at that pin
+// 2026-09-04: `containers.tsx` is byte-identical to the one at `00d3f09c5`,
+// the hop on which both anchors moved by exactly one line (`918-924` to
+// `919-925`, `965` to `966`), so NO anchor moved here — the icon block still
+// spans `919-925` and the registration input still lands on `:966`. Both were
+// re-READ at the new pin rather than inferred from that identity, because
+// identity preserves a wrong anchor as faithfully as a right one (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -367,12 +367,12 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:789` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `00d3f09c5`. Re-derived
-// at that pin 2026-09-04: `containers.tsx` DID change across the move off
-// `67dadd602` (117 insertions, 63 deletions), and both anchors moved by
-// exactly one line — the icon block `729-735` to `730-736` and the
-// registration input `788` to `789` — each re-READ there with the cited text
-// unchanged. Both were re-READ at the new pin, never inferred (#10274).
+// the pin this repo builds against — `.objectui-sha` = `a472b0716`. Re-derived
+// at that pin 2026-09-04: `containers.tsx` is byte-identical to the one at
+// `00d3f09c5`, the hop on which both anchors moved by exactly one line
+// (`729-735` to `730-736`, `788` to `789`), so NO anchor moved here — the icon
+// block still spans `730-736` and the registration input still lands on
+// `:789`. Both were re-READ at the new pin, never inferred (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -2780,16 +2780,18 @@ describe('#7751 — object-* block props schemas', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `00d3f09c5`, re-derived there 2026-09-04. This hop is the
-// first that changed the record's SUBSTANCE and not merely its line numbers:
-// `resolve-icon.ts` was restructured (110 insertions), so `resolveIcon` no
-// longer PascalCases and maps inline — it delegates to the new
-// `describeIconLookup` seam (`:117-120`), and the tokeniser now splits on
-// hyphen, underscore AND whitespace (`/[-_\s]+/`), where this record used to
-// say "splits on `-` only". That sentence was true when written and is false
-// now, which is exactly why a citation refresh re-READS instead of moving
-// numbers (#10274). `button.tsx` also changed (18 insertions): its anchors
-// moved rather than died.
+// `.objectui-sha` = `a472b0716`, re-derived there 2026-09-04. Both files in
+// this chain, `resolve-icon.ts` and `button.tsx`, are byte-identical to the
+// ones at `00d3f09c5`, so no anchor moved; every one below was still re-READ
+// at the new pin rather than inferred from that identity (#10274). The hop
+// onto `00d3f09c5` was the one that changed this record's SUBSTANCE and not
+// merely its line numbers: `resolve-icon.ts` was restructured (110
+// insertions), so `resolveIcon` no longer PascalCases and maps inline — it
+// delegates to the `describeIconLookup` seam (`:117-120`), and the tokeniser
+// splits on hyphen, underscore AND whitespace (`/[-_\s]+/`), where this record
+// used to say "splits on `-` only". That sentence was true when written and
+// was false by then, which is exactly why a citation refresh re-READS instead
+// of moving numbers (#10274).
 // The one move that changed the button READ POINT and not merely its line
 // numbers was the one onto `9602dc820`: objectui#5993 deleted `button.tsx`'s
 // file-local `toPascalCase` + `iconNameMap` + `icons` index and routed the
@@ -2853,7 +2855,11 @@ describe('ObjectMetricPropsSchema icon liveness (#10053)', () => {
   const metric = ComponentPropsMap['object-metric'];
 
   it('accepts an icon on the metric tile — the value objectui resolves via getLazyIcon', () => {
-    // objectui `plugin-dashboard/src/index.tsx:161` publishes the input;
+    // objectui `plugin-dashboard/src/index.tsx:204` publishes the input
+    // (this read `:161` until the `a472b0716` re-measure: wrong since written,
+    // not shifted — that line is a sentence in the registry shell's docblock,
+    // not the `object-metric` registration's `icon` input, and the file is
+    // byte-identical at both pins, so only a re-READ could find it);
     // `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to
     // `MetricWidget`, which resolves it at `MetricWidget.tsx:312-321` and draws
     // it at `:373-382` in the `colorVariant`-tinted square.

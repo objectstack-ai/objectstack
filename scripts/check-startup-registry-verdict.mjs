@@ -141,6 +141,8 @@
  * Deliberately no optional-root flag — see `assertRootsResolvable`.
  */
 
+// dispatch-gates: wide-population -- the scan root is join(ROOT, 'packages') and the walk admits every non-test .ts source under it -- 2182 of 5837 tracked files (37.4%, base 2aa8456cf), recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE in scripts/pm/bare-root-worklist.mjs. The population is every source in that root, so the only true subtree spelling is the bare root and it would name this gate on every card touching a package. (--packages-dir retargets that walk for the self-test fixture; the CI invocation walks the repo's own packages root.)
+
 import {
     existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync,
     writeFileSync,

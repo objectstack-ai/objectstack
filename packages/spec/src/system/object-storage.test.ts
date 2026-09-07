@@ -295,12 +295,12 @@ describe('AccessControlConfigSchema', () => {
       allowedMethods: ['GET', 'PUT', 'POST'],
       allowedHeaders: ['Content-Type', 'Authorization'],
       exposeHeaders: ['ETag', 'Content-Length'],
-      maxAge: 3600,
+      maxAgeSeconds: 3600,
     });
 
     expect(config.corsEnabled).toBe(true);
     expect(config.allowedOrigins).toHaveLength(2);
-    expect(config.maxAge).toBe(3600);
+    expect(config.maxAgeSeconds).toBe(3600);
   });
 
   it('should accept public access configuration', () => {
@@ -629,11 +629,11 @@ describe('StorageConnectionSchema', () => {
     const connection = StorageConnectionSchema.parse({
       endpoint: 'https://custom.storage.example.com',
       useSSL: true,
-      timeout: 30000,
+      timeoutMs: 30000,
     });
 
     expect(connection.useSSL).toBe(true);
-    expect(connection.timeout).toBe(30000);
+    expect(connection.timeoutMs).toBe(30000);
   });
 
   it('should default useSSL to true', () => {
@@ -846,5 +846,54 @@ describe('ObjectStorageConfigSchema', () => {
     });
 
     expect(storage.enabled).toBe(false);
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B. Both old spellings are
+// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`.
+//
+// ⚠️ `AccessControlConfig.maxAge` is a RENAME and its twin
+// `shared/CorsConfig.maxAge` is a DECLARED `externalVocabulary` mirror that keeps
+// its bare name. The asymmetry is deliberate: every bucket-CORS standard spells
+// the field with its unit (S3 `MaxAgeSeconds`, GCS `maxAgeSeconds`, Azure
+// `MaxAgeInSeconds`), while the Fetch header `Access-Control-Max-Age` that the
+// twin mirrors carries no unit token. No gate can catch the twin being renamed
+// along with this one — the marker exempts it either way — so a find-and-replace
+// that harmonised the two would land silently. The pin below is the only guard.
+describe('object-storage durations carry their unit (#15679)', () => {
+  it('REFUSES the retired `AccessControlConfig.maxAge` with the rename in the message', () => {
+    const result = AccessControlConfigSchema.safeParse({ corsEnabled: true, maxAge: 3600 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'maxAge');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`AccessControlConfig.maxAge` was renamed to `maxAgeSeconds`');
+  });
+
+  it('REFUSES the retired `StorageConnection.timeout` with the rename in the message', () => {
+    const result = StorageConnectionSchema.safeParse({ endpoint: 'https://s.example.com', timeout: 30000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`StorageConnection.timeout` was renamed to `timeoutMs`');
+  });
+
+  it('accepts both renamed keys at the same magnitude', () => {
+    expect(AccessControlConfigSchema.parse({ corsEnabled: true, maxAgeSeconds: 3600 }).maxAgeSeconds).toBe(3600);
+    expect(StorageConnectionSchema.parse({ endpoint: 'https://s.example.com', timeoutMs: 30000 }).timeoutMs).toBe(30000);
+  });
+
+  it('leaves `FileMetadata.size` alone — it is bytes, not a duration', () => {
+    const parsed = FileMetadataSchema.parse({
+      path: '/uploads/file.txt',
+      name: 'file.txt',
+      size: 1024,
+      mimeType: 'text/plain',
+      lastModified: '2024-01-15T10:30:00.000Z',
+      created: '2024-01-15T10:00:00.000Z',
+    });
+    expect(parsed.size).toBe(1024);
   });
 });

@@ -131,8 +131,8 @@ in `coalesce(..., '')`.
 
 Registered automatically by `@objectstack/formula`, which ships `dist` only —
 there is no `src/` to read in an installed app. Its exported
-`CEL_STDLIB_FUNCTIONS` is the canonical list, pinned by two tests: every entry
-resolves at runtime, and this table documents them all.
+`CEL_STDLIB_FUNCTIONS` is the advertised bare-callable subset, pinned by two
+tests: every entry resolves at runtime, and this table documents them all.
 
 **Dates**
 
@@ -194,10 +194,15 @@ Plus CEL built-ins: `has(x)`, `size(x)`, `int(x)`, `string(x)`, `bool(x)`,
 If you need a helper that doesn't exist, prefer adding it to the stdlib
 (small, pure, dependency-free) over inlining a complex CEL expression.
 
-> **Only the functions above are callable.** An UNKNOWN function — `PRIOR()`, a
-> legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails `os build`** with a
-> "no matching overload" type error, rather than silently no-op'ing the
-> predicate at run time. Use `previous.x` (not `PRIOR()`), `isBlank()` (not `ISBLANK()`).
+> **The list above is `CEL_STDLIB_FUNCTIONS` — the bare-callable public subset:**
+> the names you may write as `fn(x)`. Receiver methods (`s.split(',')`,
+> `list.map(...)`) are called on a value, never bare, and are not in this table;
+> four bare primitives (`bytes`, `dyn`, `type`, `uint`) resolve but are withheld
+> from the catalogue by an authoring decision — don't reach for them. An UNKNOWN
+> function — `PRIOR()`, a legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails
+> `os build`** with a "no matching overload" type error, rather than silently
+> no-op'ing the predicate at run time. Use `previous.x` (not `PRIOR()`),
+> `isBlank()` (not `ISBLANK()`).
 
 ---
 

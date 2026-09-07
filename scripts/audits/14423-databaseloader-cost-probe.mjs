@@ -2,9 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // #14423 step 1 (census) — empirical confirmation that `DatabaseLoader.loadManyKeyed()`
-// costs NOTHING extra over `loadMany()` (same query, same cache — `readTypeRows()`,
-// `packages/metadata/src/loaders/database-loader.ts:936`), while a `listNames()` +
-// per-name `load()` read costs a SEPARATE query (`list()`, `:1062`) plus one query
+// costs NOTHING extra over `loadMany()` (same query, same cache —
+// `packages/metadata/src/loaders/database-loader.ts#readTypeRows`, `#list`), while
+// a `listNames()` + per-name `load()` read costs a SEPARATE query plus one query
 // PER NAME (`load()`'s `_findOne`, via `baseFilter(type,name)`) — a real N+1 against
 // `loadMany`'s single query. MEASUREMENT ONLY — ships nothing.
 

@@ -105,14 +105,19 @@
  *  - **`objectui` is a RECORDED constant, not a live scan.** A test in this
  *    repo cannot read that checkout. `OBJECTUI_CENSUS` carries the revision it
  *    was measured at and the command that reproduces it.
- *  - **The ratchet in section 3 is only as live as turbo's cache.** This suite
- *    walks the whole workspace, but `@objectstack/client#test` declares as
- *    inputs its own package plus the named cross-package files — NOT every
- *    tree it reads. So a new call site added in ANOTHER package can leave this
- *    suite cached-green until something else invalidates it. Declaring
- *    `packages/**` here would re-run the client suite on virtually every
- *    commit, which is why it is recorded as a known bound rather than bought
- *    at that price: on a cold cache and in CI's full run the count is exact,
+ *  - **The ratchet in section 3 is only as live as turbo's cache — for the
+ *    trees still undeclared.** This suite walks the whole workspace, while
+ *    `@objectstack/client#test` declares as inputs its own package plus the
+ *    named cross-package globs — NOT every tree it reads. [#15608] `scripts/**`
+ *    is now one of those globs, declared in
+ *    `scripts/cross-package-test-inputs.mjs` and mirrored into `turbo.json`, so
+ *    a diff under that root both pulls this package into CI's PR-side affected
+ *    set (Layer A, the `--union-into` step) and moves this task's cache hash
+ *    (Layer B). ⛔ `packages/**` is still NOT declared: it would re-run the
+ *    client suite on virtually every commit, so it stays a recorded bound
+ *    rather than one bought at that price — a new call site added in another
+ *    PACKAGE can still leave this suite cached-green until something else
+ *    invalidates it. On a cold cache and in CI's full run the count is exact,
  *    and a call site added inside `packages/client` — where every site lives
  *    today — invalidates normally.
  */
@@ -269,9 +274,16 @@ const CENSUS = scanCallSites(REPO_ROOT);
  * What made that expensive was never the count. It was the FAILURE TEXT. It
  * read `expected 21 to be 19` and said nothing about strings, masking or gate
  * scripts — in a package the author had not edited, naming a ledger the author
- * had never read, at the most expensive point in the pipeline, and invisible
- * to every local gate a `scripts/**` edit derives. So the count stands exactly
- * as it was, and the message explains itself.
+ * had never read, and at the most expensive point in the pipeline. So the
+ * count stands exactly as it was, and the message explains itself.
+ *
+ * [#15608] ⭐ The LAST clause of that sentence used to read "and invisible to
+ * every local gate a `scripts/**` edit derives", and it is no longer true: this
+ * package now declares `scripts/**` as a cross-package test input, so such a
+ * diff selects this suite on the PR-side run instead of first reporting from
+ * the merge queue. That is the WHEN-it-runs axis only — what the census COUNTS
+ * is untouched, and #13874's suspension of the literal/context distinction
+ * stands exactly as written above.
  *
  * ## Three properties this note must have, and what buys each
  *

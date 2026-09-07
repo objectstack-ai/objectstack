@@ -87,6 +87,9 @@
     "DeleteRecordConfig (type)",
     "DeleteRecordConfigParsed (type)",
     "DeleteRecordConfigSchema (const)",
+    "EndConfig (type)",
+    "EndConfigParsed (type)",
+    "EndConfigSchema (const)",
     "ExecutionError (type)",
     "ExecutionErrorParsed (type)",
     "ExecutionErrorSchema (const)",
@@ -178,6 +181,7 @@
     "ORG_MEMBERSHIP_LEVELS (const)",
     "OS_CONSTRUCT_EXT (const)",
     "PARALLEL_NODE_TYPE (const)",
+    "PREDICATE_SLOT_STRING_REFUSAL (const)",
     "ParallelBranch (type)",
     "ParallelBranchParsed (type)",
     "ParallelBranchSchema (const)",
@@ -191,6 +195,7 @@
     "RetryPolicyParsed (type)",
     "RetryPolicySchema (const)",
     "SCHEMALESS_NODE_CONFIG_SCHEMAS (const)",
+    "STRUCTURAL_CONDITION_SHAPE_REFUSAL (const)",
     "ScheduleState (type)",
     "ScheduleStateParsed (type)",
     "ScheduleStateSchema (const)",
@@ -259,8 +264,10 @@
     "normalizeDecisionOutputs (function)",
     "normalizeFlowFunctionEntry (function)",
     "parseFlowNodeRegions (function)",
+    "predicateSlotRefusal (function)",
     "resolveFlowNodeExpressions (function)",
     "resolveFlowTriggerKind (function)",
+    "structuralConditionRefusal (function)",
     "validateControlFlow (function)"
   ]
 }

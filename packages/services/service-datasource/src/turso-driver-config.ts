@@ -71,7 +71,12 @@ export interface TursoDriverConfigInput {
   syncUrl?: string;
   /** Embedded-replica sync settings (requires `syncUrl`). */
   sync?: { intervalSeconds?: number; onConnect?: boolean };
-  /** Operation timeout in ms for remote operations. */
+  /**
+   * Operation timeout in ms for remote operations.
+   *
+   * The DRIVER's key name. The datasource authors it as `config.timeoutMs`
+   * (#15680); this one keeps the bare spelling on purpose (#16024).
+   */
   timeout?: number;
   /** Force a transport mode instead of detecting it from the url. */
   mode?: 'local' | 'replica' | 'remote';
@@ -108,7 +113,7 @@ interface TursoConfigSource {
  * The type-tests are the open-core arm's — including the truthiness check on the
  * string keys (an empty `authToken` / `syncUrl` / `encryptionKey` is an unset one,
  * never a credential of length zero) and its absence on the number keys
- * (`concurrency: 0` and `timeout: 0` are meaningful values the driver reads).
+ * (`concurrency: 0` and `timeoutMs: 0` are meaningful values the driver reads).
  *
  * A reader is not obliged to read only `config`: `schemaMode` and `authToken`
  * both consult the spec itself. `authToken`'s reason is a credential route, and
@@ -167,7 +172,36 @@ const TURSO_CONFIG_READERS: {
     config.sync && typeof config.sync === 'object'
       ? (config.sync as TursoDriverConfigInput['sync'])
       : undefined,
-  timeout: ({ config }) => (typeof config.timeout === 'number' ? config.timeout : undefined),
+  /**
+   * The AUTHORED key is `timeoutMs`; the DRIVER key is `timeout`.
+   *
+   * This is the one reader whose two spellings differ, and the split is
+   * deliberate on both sides. `TursoConfig.timeout` was renamed to `timeoutMs`
+   * (#15680, ruling B on #14478) because the unit of a duration-shaped number
+   * belongs in the key name; `TursoDriverConfig.timeout` was NOT renamed with
+   * it, because renaming a published-but-inert driver key would ratify it as
+   * real (#16024) — which is the outcome ADR-0049 exists to prevent.
+   *
+   * ⚠️ NO fallback arm for the retired `config.timeout`, and that is the
+   * precedent rather than a new rule. Both sibling arms in
+   * `default-datasource-driver-factory.ts` say it in the same words: sqlite's
+   * "`filename` is the whole contract … so no `??` tolerance survives here",
+   * mongo's "`url` is the one spelling". Each renamed key reaches a reader
+   * ALREADY canonical, from two directions — authoring refuses the retired
+   * spelling at the door (`retiredKey()`, tsc `never` + a parse-time
+   * prescription), and a stored `sys_metadata` row replays the full ADR-0087
+   * chain, retired entries included, at `loadDatasourceRows` /
+   * `loadDatasourceRow` in `datasource-admin-plugin.ts` — so the D2 conversion
+   * `turso-config-timeout-to-timeout-ms` has already rewritten the key before
+   * this table ever sees it. A `??` arm here would be a consumer-side dialect
+   * (Prime Directive #12) reintroducing the spelling both doors just closed.
+   *
+   * `authToken`'s legacy arm above is NOT a counter-precedent: it is kept for a
+   * LIVE route (host boot translating `OS_DATABASE_AUTH_TOKEN` into a config it
+   * constructs itself, which never meets the authoring schema), not for a
+   * retired spelling.
+   */
+  timeout: ({ config }) => (typeof config.timeoutMs === 'number' ? config.timeoutMs : undefined),
   mode: ({ config }) =>
     typeof config.mode === 'string' ? (config.mode as TursoDriverConfigInput['mode']) : undefined,
   schemaMode: ({ spec }) => resolveDatasourceSchemaMode(spec),

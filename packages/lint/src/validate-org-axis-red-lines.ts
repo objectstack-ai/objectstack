@@ -87,6 +87,8 @@
  * that passed `safeParse`.
  */
 
+import { recordsOf } from './object-graph.js';
+
 export const ORG_AXIS_PERMISSION_INHERITANCE = 'org-axis-permission-inheritance';
 export const ORG_AXIS_CROSS_ORG_BU_GRANT = 'org-axis-cross-org-bu-grant';
 
@@ -148,15 +150,6 @@ const ORG_PARENT_FIELD = 'parent_organization_id';
  */
 const BU_TREE_RECIPIENT_TYPES = new Set(['business_unit', 'unit_and_subordinates']);
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
@@ -214,9 +207,9 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   // the one place `ObjectSchema` does not offer and `PermissionSetSchema` does.
   // See the `## Scope` table above for the object-level surface that looked
   // like a second home for them and never was (#5009).
-  const permissionSets = asArray(cfg.permissions);
+  const permissionSets = recordsOf(cfg.permissions);
   permissionSets.forEach((ps, psIndex) => {
-    asArray(ps.rowLevelSecurity).forEach((policy, pIndex) => {
+    recordsOf(ps.rowLevelSecurity).forEach((policy, pIndex) => {
       for (const clause of ['using', 'check'] as const) {
         if (!str(policy[clause]).includes(ORG_PARENT_FIELD)) continue;
         findings.push({
@@ -246,7 +239,7 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   // belongs at the schema's refusal, not in a consumer (Prime Directive #12).
   // The collection itself is `sharingRules`; `sharing` was the same mistake one
   // level up, and is gone with the rest of them (#5009).
-  asArray(cfg.sharingRules).forEach((rule, rIndex) => {
+  recordsOf(cfg.sharingRules).forEach((rule, rIndex) => {
     const slots: Array<{ key: string; text: string }> = [
       { key: 'condition', text: expressionText(rule.condition) },
       { key: 'sharedWith', text: JSON.stringify(rule.sharedWith ?? '') ?? '' },
@@ -273,9 +266,9 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   // Both BU recipients count — see `BU_TREE_RECIPIENT_TYPES` for why that word
   // list is two long and which three of `ShareRecipientType` it lets past.
   const tenancyDisabledObjects = new Set(
-    asArray(cfg.objects).filter((o) => isTenancyDisabled(o)).map((o) => str(o.name)).filter(Boolean),
+    recordsOf(cfg.objects).filter((o) => isTenancyDisabled(o)).map((o) => str(o.name)).filter(Boolean),
   );
-  asArray(cfg.sharingRules).forEach((rule, rIndex) => {
+  recordsOf(cfg.sharingRules).forEach((rule, rIndex) => {
     // `object` is REQUIRED by `SharingRuleSchema`, so a rule that parsed always
     // has it; `objectName` is not a spelling the schema accepts (#5009).
     const target = str(rule.object);

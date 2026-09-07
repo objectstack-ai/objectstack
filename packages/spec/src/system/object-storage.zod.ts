@@ -26,6 +26,7 @@ import { SystemIdentifierSchema } from '../shared/identifiers.zod';
  * Defines the lifecycle and persistence guarantee of the storage area.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const StorageScopeSchema = lazySchema(() => z.enum([
   'global',     // Global application-wide storage
   'tenant',     // Tenant-scoped storage (multi-tenant apps)
@@ -194,7 +195,10 @@ export type ObjectMetadata = z.input<typeof ObjectMetadataSchema>;
  */
 export const PresignedUrlConfigSchema = lazySchema(() => z.object({
   operation: z.enum(['get', 'put', 'delete', 'head']).describe('Allowed operation'),
-  expiresIn: z.number().min(1).max(604800).describe('Expiration time in seconds (max 7 days)'),
+  // `externalVocabulary` mirror (#14478 ruling B): the AWS SDK presigner option
+  // name, and the `.max(604800)` above is that standard's own 7-day ceiling.
+  expiresIn: z.number().min(1).max(604800).describe('Expiration time in seconds (max 7 days)')
+    .meta({ externalVocabulary: 'AWS S3 presigned URL `expiresIn` (@aws-sdk/s3-request-presigner)' }),
   contentType: z.string().optional().describe('Required content type for PUT operations'),
   maxSize: z.number().min(0).optional().describe('Maximum file size in bytes for PUT operations'),
   responseContentType: z.string().optional().describe('Override content-type for GET operations'),
@@ -249,13 +253,40 @@ export type MultipartUploadConfigParsed = z.infer<typeof MultipartUploadConfigSc
  *   }
  * }
  */
+const ACCESS_CONTROL_MAX_AGE_RETIRED =
+  '`AccessControlConfig.maxAge` was renamed to `maxAgeSeconds` in @objectstack/spec 17 — '
+  + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+  + 'prose. Every bucket-CORS standard this value is forwarded to already spells the unit '
+  + '(S3 MaxAgeSeconds, GCS maxAgeSeconds, Azure MaxAgeInSeconds), so the bare name was a '
+  + 'deviation from them rather than a mirror of them. Rename the key to `maxAgeSeconds`; '
+  + 'the value (seconds) is unchanged. The unrelated `CorsConfig.maxAge` on the shared '
+  + 'HTTP surface keeps its name — that one mirrors the Access-Control-Max-Age response '
+  + 'header, which carries no unit token.';
+
+const STORAGE_CONNECTION_TIMEOUT_RETIRED =
+  '`StorageConnection.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the '
+  + 'unit of a duration-shaped number lives in the key name, not only in the describe prose. '
+  + 'Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.';
+
 export const AccessControlConfigSchema = lazySchema(() => z.object({
   acl: StorageAclSchema.default('private').describe('Default access control level'),
   allowedOrigins: z.array(z.string()).optional().describe('CORS allowed origins'),
   allowedMethods: z.array(z.enum(['GET', 'PUT', 'POST', 'DELETE', 'HEAD'])).optional().describe('CORS allowed HTTP methods'),
   allowedHeaders: z.array(z.string()).optional().describe('CORS allowed headers'),
   exposeHeaders: z.array(z.string()).optional().describe('CORS exposed headers'),
-  maxAge: z.number().min(0).optional().describe('CORS preflight cache duration in seconds'),
+  // Renamed from `maxAge` (#15679, #14478 ruling B): the unit lived only in the
+  // describe prose. ⚠️ Deliberately NOT an `externalVocabulary` mirror, unlike its
+  // twin `shared/CorsConfig.maxAge`: every bucket-CORS standard this key is
+  // forwarded to spells the field WITH its unit (S3 `MaxAgeSeconds`, GCS
+  // `maxAgeSeconds`, Azure `MaxAgeInSeconds`), so the bare spelling was a
+  // DEVIATION from the cited standard, not a mirror of it. The Fetch response
+  // header `Access-Control-Max-Age` that `CorsConfig.maxAge` mirrors genuinely
+  // carries no unit token, which is why that twin keeps its marker and this one
+  // is renamed. Preserve the asymmetry.
+  maxAgeSeconds: z.number().min(0).optional().describe('CORS preflight cache duration in seconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  maxAge: retiredKey(ACCESS_CONTROL_MAX_AGE_RETIRED),
   corsEnabled: z.boolean().default(false).describe('Enable CORS configuration'),
   publicAccess: z.object({
     allowPublicRead: z.boolean().default(false).describe('Allow public read access'),
@@ -444,7 +475,12 @@ export const StorageConnectionSchema = lazySchema(() => z.object({
   endpoint: z.string().optional().describe('Custom endpoint URL'),
   region: z.string().optional().describe('Default region'),
   useSSL: z.boolean().default(true).describe('Use SSL/TLS for connections'),
-  timeout: z.number().min(0).optional().describe('Connection timeout in milliseconds'),
+  // Renamed from `timeout` (#15679, #14478 ruling B): the unit lived only in the
+  // describe prose.
+  timeoutMs: z.number().min(0).optional().describe('Connection timeout in milliseconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  timeout: retiredKey(STORAGE_CONNECTION_TIMEOUT_RETIRED),
 }));
 
 export type StorageConnection = z.input<typeof StorageConnectionSchema>;

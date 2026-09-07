@@ -540,9 +540,14 @@ export interface ApprovalDecisionInput {
   outputs?: Record<string, unknown>;
 }
 
-/** Input for recalling (withdrawing) a pending request. */
+/** Input for recalling (withdrawing) an undecided request. */
 export interface ApprovalRecallInput {
-  /** Must be the request's submitter (or a system context). */
+  /**
+   * The actor the recall is recorded against. On a `pending` request: the
+   * submitter, a system context, or a #3424 override actor. On a `returned`
+   * request the submitter alone — see {@link IApprovalService.recall} for why
+   * the two sets differ.
+   */
   actorId: string;
   comment?: string;
 }
@@ -709,14 +714,24 @@ export interface IApprovalService {
   decide(requestId: string, input: ApprovalDecisionInput, context: ExecutionContext): Promise<ApprovalDecisionResult>;
 
   /**
-   * Withdraw a pending request. Only the submitter (or a system context) may
-   * recall. Finalises the request as `recalled` and resumes the owning flow
-   * run down the `reject` branch with `output.decision = 'recall'`.
+   * Withdraw a request that has not been decided. Finalises it as `recalled`
+   * and resumes the owning flow run down the `reject` branch with
+   * `output.decision = 'recall'`.
    *
-   * ADR-0044: also valid on the LATEST `returned` request of its (run, node)
-   * — the submitter abandons the revision window instead of resubmitting; the
-   * request flips `returned → recalled` and the run resumes down `reject` the
-   * same way.
+   * Who may recall is scoped BY STATUS, and the two sets are not the same —
+   * the ADR-0044 widening below is the submitter's alone, never a widening of
+   * who may act:
+   *
+   * - `pending` — the submitter, a system context, or a #3424 override actor
+   *   (the stuck-request recovery path: the same privilege carried by
+   *   {@link ApprovalRequestRow}'s `viewer.can_override`, and scoped to
+   *   `pending` for the same reason).
+   * - `returned` (ADR-0044) — the submitter ALONE, and only on the LATEST
+   *   `returned` request of its (run, node): they abandon the revision window
+   *   instead of resubmitting, the request flips `returned → recalled`, and
+   *   the run resumes down `reject` the same way. Neither the override nor the
+   *   system arm reaches a `returned` request (#12775); an override actor is
+   *   refused there exactly as any other non-submitter.
    */
   recall(requestId: string, input: ApprovalRecallInput, context: ExecutionContext): Promise<ApprovalRecallResult>;
 

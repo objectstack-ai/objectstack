@@ -2,10 +2,11 @@
 
 import type { PluginContext } from '@objectstack/core';
 import { defineActionDescriptor, TryCatchConfigSchema } from '@objectstack/spec/automation';
-import type { TryCatchConfigParsed } from '@objectstack/spec/automation';
+import type { TryCatchConfigParsed, TryCatchErrorValue } from '@objectstack/spec/automation';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
 import { parseNodeConfig } from './parse-config.js';
+import { currentLoopIteration } from './loop-frame.js';
 
 /**
  * `try_catch` built-in node — **structured try/catch/retry** (ADR-0031 §Decision 3).
@@ -17,7 +18,9 @@ import { parseNodeConfig } from './parse-config.js';
  * message }`, plus `code` (#14419) when the failing node's own result set a
  * platform-classified one (e.g. `create_record`'s `DUPLICATE_RECORD`), so the
  * catch region can branch on `{$error.code}` instead of only ever seeing a
- * string. Both regions are self-contained single-entry/single-exit sub-graphs
+ * string, plus `iteration` and `item` (#14456) when the container is running
+ * inside a `loop` body, so a caught per-row failure names the ROW it lost and
+ * not merely that one was lost. Both regions are self-contained single-entry/single-exit sub-graphs
  * validated at `registerFlow()`, executed in the **enclosing variable scope**
  * via {@link AutomationEngine.runRegion}.
  *
@@ -67,7 +70,7 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             description: 'Handler region run when the try region fails',
             properties: { nodes: { type: 'array' }, edges: { type: 'array' } },
           },
-          errorVariable: { type: 'string', description: 'Variable holding the caught error in the catch region' },
+          errorVariable: { type: 'string', description: 'Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, and `iteration` / `item` when the failure happened inside a loop body' },
           retry: {
             type: 'object',
             properties: {
@@ -101,6 +104,14 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       const retry = cfg.retry;
 
       const ctxOrEmpty = context ?? ({} as AutomationContext);
+      // #14456 — the enclosing loop's row identity, when this container is a
+      // loop body's containment wrapper. `undefined` outside a loop, and that
+      // absence is the contract's own answer ("not in a loop"), not a gap:
+      // `TryCatchErrorValueSchema` declares `iteration` / `item` present only
+      // for a failure that happened inside a loop body. Read ONCE here rather
+      // than per region: the frame cannot change while this node executes, and
+      // one read is one place for the next reader to look.
+      const loopFrame = currentLoopIteration(variables);
       const maxRetries = retry?.maxRetries ?? 0;
       const baseDelay = retry?.backoffMs ?? 0;
       const multiplier = retry?.backoffMultiplier ?? 1;
@@ -147,18 +158,25 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         // Sink for THIS attempt's partial steps, filled by `runRegion` only if
         // the attempt throws (#7546).
         const attemptSteps: StepLogEntry[] = [];
-        // #14948 review — the run-wide `$error` this attempt STARTS with. The
-        // engine rewrites `$error` (a fresh object, see engine.ts's
-        // `executeNode`) only when a failing node RETURNS `{ success: false }`,
-        // or when it THROWS through a node that has its OWN `fault` edge — and
-        // a node inside this region's synthetic sub-flow never has one (the
-        // sub-flow carries only the region's own edges). So a node that FAILS
-        // BY THROWING (a `timeoutMs` firing, a dying nested container, a
-        // thrown guard) leaves `$error` exactly as an EARLIER failure left it.
-        // Without this identity check, that earlier failure's `code` (e.g. a
-        // sibling row's `DUPLICATE_RECORD`) leaks onto an unrelated later
-        // failure's binding — a store failure misread as a duplicate through
-        // the very door this card exists to close.
+        // #14948 review — the run-wide `$error` this attempt STARTS with, kept
+        // as the outer bound on what this attempt is allowed to claim as its
+        // own failure.
+        //
+        // It was load-bearing on its own until #14955: the engine's throw arm
+        // used to rewrite `$error` only for a node with its OWN `fault` edge,
+        // and a node inside this region's synthetic sub-flow never has one (the
+        // sub-flow carries only the region's own edges), so a node that FAILED
+        // BY THROWING left `$error` exactly as an EARLIER failure had left it —
+        // and that earlier failure's `code` (a sibling row's
+        // `DUPLICATE_RECORD`, say) leaked onto an unrelated later failure's
+        // binding, a store failure misread as a duplicate. #14955 made the
+        // throw arm publish unconditionally, so a thrown node failure now names
+        // itself here and carries no `code` of its own.
+        //
+        // The check stays because a throw is not always a NODE failure: a
+        // durable pause refused inside a region, a missing region entry, or
+        // anything else `runRegion` raises before reaching a node never touches
+        // `$error` at all, and the stale value must not be claimed then either.
         const errorBefore = variables.get('$error');
         try {
           // #1479: surface the successful try region's steps.
@@ -169,6 +187,20 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             {
               parentNodeId: node.id,
               regionKind: 'try',
+              // #14456 — forward the ENCLOSING loop's iteration so a step this
+              // region ran says which region ran it AND which row it ran for.
+              // A try/catch region has no index of its own, so `iteration` is
+              // free to carry the row.
+              //
+              // #15230 made `runRegion`'s tagger carry `iteration` THROUGH
+              // nesting, so an enclosing loop would now reach a try/catch step
+              // on its own and this forwarding is no longer the only route.
+              // It stays, and stays FIRST: the value is identical (both are the
+              // loop's row index), it is what `$error.iteration` is bound from
+              // twenty lines below, and it keeps the row on these steps even
+              // when the run unwinds through a path that never gives the loop's
+              // tagger a pass over them.
+              ...(loopFrame ? { iteration: loopFrame.iteration } : {}),
               // Only tag the attempt index when a retry ladder is actually
               // declared: on a plain `try_catch` every step would carry a
               // constant `retryAttempt: 0`, which is noise rather than signal.
@@ -198,11 +230,27 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
 
       // The try region (and any retries) failed. Run the catch handler if present.
       if (catchRegion != null) {
-        variables.set(errorVariable, {
+        // #14456 — the caught error is a `TryCatchErrorValue` (declared in
+        // `packages/spec`, PR #14452): `nodeId` + `message`, plus the ROW
+        // IDENTITY when the failure happened inside a loop body. Without
+        // `iteration` / `item` a caught per-row failure is attributable to no
+        // row — the catch region can record THAT something failed and never
+        // WHICH thing, and `message` names one only when it happens to echo
+        // the template.
+        //
+        // `code` (#14419) is bound alongside but is NOT declared on
+        // `TryCatchErrorValueSchema`, so it is spelled as an explicit widening
+        // of the declared type rather than dropped — dropping it would regress
+        // a catch region's ability to branch on `{$error.code}`. The
+        // divergence is filed as #14954 against the spec lane; this file is
+        // not the place to change the contract.
+        const errorValue: TryCatchErrorValue & { code?: string } = {
           nodeId: node.id,
           message: lastError,
           ...(lastErrorCode ? { code: lastErrorCode } : {}),
-        });
+          ...(loopFrame ? { iteration: loopFrame.iteration, item: loopFrame.item } : {}),
+        };
+        variables.set(errorVariable, errorValue);
         // #14222: sink for the catch region's OWN partial steps, filled by
         // `runRegion` only if the handler itself throws. Without it the catch
         // region's completed steps unwound with the stack exactly as the try
@@ -217,6 +265,10 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
             {
               parentNodeId: node.id,
               regionKind: 'catch',
+              // #14456 — same forwarding as the try region above: the handler's
+              // steps carry the row they handled, with `regionKind` still
+              // naming the region.
+              ...(loopFrame ? { iteration: loopFrame.iteration } : {}),
             },
             catchAttemptSteps,
           );

@@ -420,16 +420,23 @@ Filtering uses the canonical Query DSL `where` object (the same MongoDB-style `F
 ```
 
 <Callout type="info">
-**`fields[]` describes columns, not presentation.** Each entry carries exactly `name` and
-`type` — that is the whole descriptor `AnalyticsResultResponseSchema` declares, and every
-strategy answering this endpoint emits those two keys and nothing else.
+**`fields[]` is the resolved presentation surface — read it first.** Each entry carries
+`name` and `type` and, when the producer declares them, `label`, `format`, `currency`,
+`percentScale` and `builtinAggregate`: the optional members
+`AnalyticsResultResponseSchema` declares (`packages/spec/src/api/analytics.zod.ts`),
+mirrored member for member by `IAnalyticsService.query`'s `AnalyticsResult` and bound to
+it at compile time. Optional means a given column may omit them — read them defensively,
+never as guaranteed present.
 
-Display name and number format live one layer up, in the **cube's metric/dimension
-definition** (`MetricSchema.label` / `MetricSchema.format`, `DimensionSchema.label`), and
-are read from cube metadata — `GET /analytics/meta` below reports each measure's and
-dimension's declared label as `title`. Reading `data.fields[i].label` or
-`data.fields[i].format` off a query result yields `undefined`; a client that renders table
-headers or formats amounts reads them from the cube metadata instead.
+The **cube's metric/dimension definition** (`MetricSchema.label` / `MetricSchema.format`,
+`DimensionSchema.label`) is the *declaration* surface, not a substitute for this one.
+`GET /analytics/meta` below publishes a deliberately narrow projection of it — `name`,
+`type` and `title` (the definition's `label`) only, with `format` dropped
+([#6442](https://github.com/objectstack-ai/objectstack/issues/6442)). So a client that
+renders table headers or formats amounts takes `label` / `format` / `currency` /
+`percentScale` off the query result's `fields[]`: those are resolved server-side (the
+ADR-0053 currency chain, the percent-scale chain), and `format` is not reachable through
+the metadata endpoint at all.
 </Callout>
 
 ### `GET /analytics/meta`
@@ -444,7 +451,10 @@ Pass `?cube=<name>` to filter the listing to a single cube (this is what
 
 **Response**: `{ success: true, data: [...] }` where `data` is an array of cube
 definitions with measures and dimensions (time-based dimensions are `dimensions`
-entries with `type: "time"`).
+entries with `type: "time"`). That envelope is the wire shape only — the SDK
+unwraps it, so `client.analytics.meta(cube)` resolves to the cube array itself
+and a caller reads `cubes[0].name`. The same holds for the other analytics and
+automation calls; see the [Client SDK](/docs/api/client-sdk) page.
 
 ### `POST /analytics/sql`
 

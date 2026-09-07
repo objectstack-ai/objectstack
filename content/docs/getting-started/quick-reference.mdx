@@ -85,7 +85,7 @@ Plugin architecture, manifests, and kernel runtime.
 | **[Metadata Loader](/docs/references/kernel/metadata-loader)** | `metadata-loader.zod.ts` | MetadataLoaderContract | Metadata loading |
 | **[Package Registry](/docs/references/kernel/package-registry)** | `package-registry.zod.ts` | InstalledPackage, InstallPackageRequest | Package resolution |
 
-## System Protocol (17 of 36 schemas)
+## System Protocol (16 of 33 schemas)
 
 Runtime environment, logging, jobs, caching, and observability.
 
@@ -93,7 +93,6 @@ Runtime environment, logging, jobs, caching, and observability.
 |:---------|:-----------|:------------|:--------|
 | **[Auth Config](/docs/references/system/auth-config)** | `auth-config.zod.ts` | AuthConfig | Authentication configuration |
 | **[Cache](/docs/references/system/cache)** | `cache.zod.ts` | CacheConfig | Caching layer |
-| **[Change Management](/docs/references/system/change-management)** | `change-management.zod.ts` | ChangeRequest, RollbackPlan | Change tracking |
 | **[Collaboration](/docs/references/system/collaboration)** | `collaboration.zod.ts` | Collaboration | Real-time collab |
 | **[Encryption](/docs/references/system/encryption)** | `encryption.zod.ts` | Encryption | Encryption & keys |
 | **[HTTP Server](/docs/references/system/http-server)** | `http-server.zod.ts` | RouteHandlerMetadata, MiddlewareConfig | Route + middleware metadata |
@@ -206,7 +205,7 @@ from the provider itself, not from hand-written spec files.
 |:---------|:-----------|:------------|:--------|
 | **[Connector](/docs/references/integration/connector)** | `connector.zod.ts` | Connector | The connector protocol — auth, sync, webhooks, rate limiting |
 
-## Shared Protocol (5 of 8 schemas)
+## Shared Protocol (5 of 9 schemas)
 
 Common utilities used across all protocols.
 
@@ -310,7 +309,7 @@ is gated at publish and, once it passes, serves real traffic. Full contract:
 | **Types that execute** | `object_operation` (needs `objectParams.object` + `.operation`) and `flow` (needs `target`). `script` / `proxy` are rejected at publish |
 | **`authRequired`** | defaults to `true` — **omitting it is safe**. An explicit `false` is the only thing that opens anonymous access |
 | **`authRequired: false`** | REQUIRES an armed budget, `rateLimit: { enabled: true, windowMs, maxRequests }` (ADR-0121 D6) — `enabled` itself defaults to `false`, so a budget without it meters nothing |
-| **`cacheTtl`** | seconds, GET-only, applied to successful answers only (`Cache-Control: private, max-age=<ttl>`) |
+| **`cacheTtlSeconds`** | GET-only, applied to successful answers only (`Cache-Control: private, max-age=<ttl>`) |
 
 {/* os:check */}
 ```typescript
@@ -326,7 +325,7 @@ export const leadFeed: ApiEndpoint = {
   // `target` is required (at publish) only for `type: 'flow'`.
   objectParams: { object: 'acme_lead', operation: 'find' },
   // `authRequired` omitted → defaults to true (a session is required).
-  cacheTtl: 30,
+  cacheTtlSeconds: 30,
 };
 ```
 

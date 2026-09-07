@@ -24,6 +24,12 @@ export {
   // number instead of the declared family).
   CHART_MEASURES_MISSING,
   CHART_DIMENSIONS_MISSING,
+  // [#15508] The measures half of that pair, for the families the pin routes
+  // through the SAME placeholder without drawing a chart: `metric`/`kpi`/
+  // `gauge`/`solid-gauge`/`bullet` and `table`/`pivot`. A separate id because
+  // "chart" does not name their condition; the chart-family id above is
+  // unchanged, so a board suppressing it keeps working.
+  WIDGET_MEASURES_MISSING,
   TABLE_COUNT_ONLY,
   MEASURE_AGGREGATE_INCOHERENT,
   WIDGET_LEGACY_ANALYTICS_SHAPE,
@@ -622,6 +628,20 @@ export type {
 
 export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
 export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';
+// [#15922] A declared field with zero consumers across the registered
+// metadata roots — advisory, object-aware, one rule id with the verdict
+// carried on the finding (see the module note for the taxonomy decision).
+export {
+  validateFieldConsumers,
+  FIELD_NO_CONSUMERS,
+  CONSUMER_ROOTS as FIELD_CONSUMER_ROOTS,
+  CARRIER_ROOTS as FIELD_CARRIER_ROOTS,
+} from './validate-field-consumers.js';
+export type {
+  FieldConsumerFinding,
+  FieldConsumerSeverity,
+  FieldConsumerVerdict,
+} from './validate-field-consumers.js';
 
 export {
   validateTranslationReferences,

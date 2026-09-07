@@ -411,6 +411,60 @@ describe('TryCatchErrorValueSchema', () => {
     expect(TryCatchErrorValueSchema.safeParse({ nodeId: 'guard', message: 'x', iteration: -1 }).success).toBe(false);
     expect(TryCatchErrorValueSchema.safeParse({ nodeId: 'guard', message: 'x', iteration: 1.5 }).success).toBe(false);
   });
+
+  // #14954 — `code` (#14419): the engine binds the failing node's
+  // platform-classified error code beside `nodeId` / `message`, so a catch
+  // region can DISCRIMINATE ("the row is already there" vs "the store is
+  // down") by branching on `$error.code` instead of parsing `message`. This
+  // schema is a plain `z.object`, so an undeclared key is STRIPPED on any
+  // round-trip through it — which is exactly what happened while the engine
+  // bound a key the ONE shared shape did not declare. These pins hold the
+  // declaration equal to the binding.
+  it('preserves `code` on a round-trip — the key the engine binds is declared, not stripped', () => {
+    const input = { nodeId: 'create', message: 'create_record(order) failed: duplicate', code: 'DUPLICATE_RECORD' };
+    const value = TryCatchErrorValueSchema.parse(input);
+    expect(value.code).toBe('DUPLICATE_RECORD');
+    // The WHOLE object, not one key: a plain `z.object` strips silently, so
+    // only equality of the parsed value with its input proves nothing was lost.
+    expect(value).toEqual(input);
+  });
+
+  it('`code` is optional — absent means "no classified code", and the key is absent, not `undefined`', () => {
+    const value = TryCatchErrorValueSchema.parse({ nodeId: 'guard', message: 'card declined' });
+    expect(value.code).toBeUndefined();
+    expect(Object.keys(value)).not.toContain('code');
+    // Row identity and code compose: a loop-bound duplicate carries both.
+    const both = { nodeId: 'create', message: 'dup', code: 'DUPLICATE_RECORD', iteration: 1, item: { id: 'r2' } };
+    expect(TryCatchErrorValueSchema.parse(both)).toEqual(both);
+  });
+
+  it('`code` is an OPEN string, not a closed enum — a third-party or tenant-authored code parses (ADR-0112 D3/D4 + #9106)', () => {
+    // `NodeExecutor` is third-party-registrable and the code vocabulary is
+    // `StandardErrorCode` ∪ registered ledger codes ∪ tenant-authored codes,
+    // so a closed type would be false the moment anyone registers an executor.
+    // Narrowing this key to `StandardErrorCode` is the documented wrong move.
+    expect(TryCatchErrorValueSchema.parse({ nodeId: 'acme', message: 'x', code: 'ACME_RATE_LIMITED' }).code).toBe('ACME_RATE_LIMITED');
+    expect(TryCatchErrorValueSchema.parse({ nodeId: 'acme', message: 'x', code: 'DUPLICATE' }).code).toBe('DUPLICATE');
+    // Open in VALUE, not in TYPE: a non-string `code` is refused AT the key.
+    const refused = TryCatchErrorValueSchema.safeParse({ nodeId: 'guard', message: 'x', code: 42 });
+    expect(refused.success).toBe(false);
+    expect(refused.error!.issues[0]!.path).toEqual(['code']);
+    expect(refused.error!.issues[0]!.code).toBe('invalid_type');
+  });
+
+  it('the describe text documents `code` — on the value and on `errorVariable` — so the reference page renders it', () => {
+    // `content/docs/references/automation/control-flow.mdx` is generated from
+    // these descriptions; this pins the prose the page renders rather than the
+    // page (which `check:docs` holds equal to the schema).
+    const opts = { target: 'draft-2020-12', io: 'input', unrepresentable: 'any' } as const;
+    const value = z.toJSONSchema(TryCatchErrorValueSchema, opts) as { properties?: Record<string, { description?: string }> };
+    expect(value.properties?.code?.description).toContain('ADR-0112');
+    expect(value.properties?.code?.description).toContain('not a closed enum');
+    expect(value.properties?.code?.description).toContain('"nothing failed"');
+    const config = z.toJSONSchema(TryCatchConfigSchema, opts) as { properties?: Record<string, { description?: string }> };
+    expect(config.properties?.errorVariable?.description).toContain('`code`');
+    expect(config.properties?.errorVariable?.description).toContain('$error.code');
+  });
 });
 
 // The sibling-guard question the batch was dispatched to answer: does closing

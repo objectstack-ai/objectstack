@@ -18,36 +18,15 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/kernel/plugin-loading.zod.ts` — Plugin Loading Protocol
 - `node_modules/@objectstack/spec/src/kernel/plugin.zod.ts` — Exports: PluginContextSchema, PluginSchema
 - `node_modules/@objectstack/spec/src/kernel/service-registry.zod.ts` — Service Registry Protocol
+- `node_modules/@objectstack/spec/src/stack.zod.ts` — Exports: DatasourceMappingRuleSchema, ArtifactPackageEntrySchema, AssembledPackageBodySchema, ArtifactPackageSchema, ObjectStackDefinitionSchema
 
 ## Transitive dependencies
 
-- `node_modules/@objectstack/spec/src/api/errors.zod.ts` — Standardized Error Codes Protocol
-- `node_modules/@objectstack/spec/src/data/driver/common.zod.ts` — Shared building blocks for the per-driver `datasource.config` shapes.
-- `node_modules/@objectstack/spec/src/data/driver/config-registry.zod.ts` — The driver-id → `datasource.config` shape registry.
-- `node_modules/@objectstack/spec/src/data/driver/memory.zod.ts` — Memory Driver Configuration Schema
-- `node_modules/@objectstack/spec/src/data/driver/mongo.zod.ts` — MongoDB Standard Driver Protocol
-- `node_modules/@objectstack/spec/src/data/driver/mysql.zod.ts` — MySQL / MariaDB driver configuration — the `config` slot of a `datasource`
-- `node_modules/@objectstack/spec/src/data/driver/postgres.zod.ts` — PostgreSQL driver configuration — the `config` slot of a `datasource` whose
-- `node_modules/@objectstack/spec/src/data/driver/sqlite.zod.ts` — SQLite driver configuration — the `config` slot of a `datasource` whose
-- `node_modules/@objectstack/spec/src/data/driver/turso.zod.ts` — Turso / libSQL Driver Protocol.
-- `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
 - `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, CurrencyValueSchema
-- `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
-- `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
-- `node_modules/@objectstack/spec/src/kernel/cluster.zod.ts` — Cluster Protocol
-- `node_modules/@objectstack/spec/src/kernel/metadata-loader.zod.ts` — Metadata Manager Configuration
-- `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
-- `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema
-- `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Exports: MetadataFormatSchema, BaseMetadataRecordSchema
-- `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
-- `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
-- `node_modules/@objectstack/spec/src/shared/value-domain.zod.ts` — Standard value domains: one closed vocabulary and one membership predicate for settings and fields.
-- `node_modules/@objectstack/spec/src/system/tenant.zod.ts` — Tenant Schema (Multi-Tenant Architecture)
-- `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionSchema
+- `node_modules/@objectstack/spec/src/data/hook.zod.ts` — Exports: HookEvent, HookSchema, HookContextSchema
+- `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
+- `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol
 - `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Exports: ObjectNavItemSchema, DashboardNavItemSchema, PageNavItemSchema, UrlNavItemSchema, ReportNavItemSchema
-- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.
 
 ## How to read these
 

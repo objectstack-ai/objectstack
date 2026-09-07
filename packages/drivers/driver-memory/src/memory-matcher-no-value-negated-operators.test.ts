@@ -102,12 +102,21 @@ describe('[#13166] no-value rows and the negation-carrying operators', () => {
       expect(ids(MISSING, { name: { $contains: 'one' } })).toEqual(['1']);
     });
 
-    it('a present non-string value still fails $notContains on the type test', () => {
-      // Out of scope for this card, and stated so a later reader does not read
-      // the fix above as "any non-string satisfies the negation". Only the
-      // no-value readings moved; a value that is there and is not a string
-      // keeps the answer it had.
-      expect(ids([{ id: '9', name: 42 }], { name: { $notContains: 'one' } })).toEqual([]);
+    it('[#14079] a present non-string value SATISFIES $notContains — the predicate, not the type test', () => {
+      // This pin used to assert the opposite (`toEqual([])`), stated as out of
+      // #13166's scope: "a value that is there and is not a string keeps the
+      // answer it had". That answer was NO to `$notContains` AND to
+      // `$contains` for the same row — a type test standing in for the
+      // predicate — and it disagreed with this package's own live mingo path.
+      // The maintainer ruled the cell on 2026-09-05 (option A, type-gate):
+      // a stored value that is not a string never satisfies a positive text
+      // operator and always satisfies `$notContains`. Flipped here in its new
+      // direction, and asserted with substance: the row IS in the negation,
+      // is NOT in the positive twin, and the two still partition the rows.
+      const rows = [{ id: '1', name: 'alpha-one' }, { id: '9', name: 42 }];
+      expect(ids(rows, { name: { $notContains: 'one' } })).toEqual(['9']);
+      expect(ids(rows, { name: { $contains: 'one' } })).toEqual(['1']);
+      expect(ids([{ id: '0', name: 0 }, { id: 'f', name: false }], { name: { $notContains: 'one' } })).toEqual(['0', 'f']);
     });
   });
 

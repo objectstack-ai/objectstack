@@ -352,8 +352,13 @@ const REPO_ROOT = resolve(HERE, '..');
  * wrong file is worse than a vague one, because the dev follows it and finds
  * nothing to edit. Computing it from the module URL also keeps the string out
  * of this module body: `extractWatchHints` strips a leading `./` and then
- * refuses what is left for having no separator, so an import specifier scores
- * as no population while a repo-relative spelling would score as one.
+ * refuses what is left for having no separator -- with one exception, so that
+ * a reader reasoning from this sentence about some OTHER literal gets the
+ * right answer: a stripped literal that RESOLVES to a tracked DIRECTORY is
+ * re-admitted (`moduleRelativeDirectoryHint`), and that predicate refuses a
+ * tracked FILE explicitly. An import specifier resolves to a file, so it
+ * scores as no population structurally rather than by luck, while a
+ * repo-relative spelling would score as one.
  */
 const DECLARATION_FILE = relative(REPO_ROOT, fileURLToPath(new URL('./cross-package-test-inputs.mjs', import.meta.url)));
 

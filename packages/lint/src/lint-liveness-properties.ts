@@ -27,6 +27,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { recordsOf } from './object-graph.js';
 
 export interface LivenessLintFinding {
   where: string;
@@ -55,12 +56,6 @@ type WarnMap = Map<string, LedgerEntry>;
 
 function isRecord(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  return [];
 }
 
 /** Locate `@objectstack/spec`'s shipped `liveness/` dir (workspace src or published files). */
@@ -489,14 +484,14 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
 
   const objectWarn = loadWarnMap(dir, 'object');
   const fieldWarn = loadWarnMap(dir, 'field');
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     // Malformed collection item — same "never throws" contract as the flat
     // TYPE_COLLECTIONS loop and the translation bundle walk below (#11385).
     if (!isRecord(obj)) continue;
     const objName = typeof obj.name === 'string' ? obj.name : '(unnamed object)';
     if (objectWarn.size > 0) checkItem('object', obj, `object '${objName}'`, objectWarn, findings);
     if (fieldWarn.size > 0) {
-      for (const field of asArray(obj.fields)) {
+      for (const field of recordsOf(obj.fields)) {
         if (!isRecord(field)) continue;
         const fieldName = typeof field.name === 'string' ? field.name : '(unnamed field)';
         checkItem('field', field, `object '${objName}' · field '${fieldName}'`, fieldWarn, findings);
@@ -523,13 +518,13 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   // vocabulary, not the container; only the file-authored one is lintable.
   const translationWarn = loadWarnMap(dir, 'translation');
   if (translationWarn.size > 0) {
-    const bundles = asArray(stack.translations);
+    const bundles = recordsOf(stack.translations);
     for (let i = 0; i < bundles.length; i++) {
       const bundle = bundles[i];
       if (!isRecord(bundle)) continue;
       for (const [locale, data] of Object.entries(bundle)) {
         // Only a locale entry holds `TranslationData`. Anything else is either a
-        // malformed bundle or the `name` key `asArray` injects for a map-shaped
+        // malformed bundle or the `name` key `recordsOf` injects for a map-shaped
         // collection — skipping both keeps the "never throws" contract.
         if (!isRecord(data)) continue;
         checkItem('translation', data, `translation bundle #${i} · locale '${locale}'`, translationWarn, findings);
@@ -540,7 +535,7 @@ export function lintLivenessProperties(stack: AnyRec): LivenessLintFinding[] {
   for (const { type, key } of TYPE_COLLECTIONS) {
     const warnMap = loadWarnMap(dir, type);
     if (warnMap.size === 0) continue;
-    for (const item of asArray(stack[key])) {
+    for (const item of recordsOf(stack[key])) {
       // Malformed collection item — "never throws" contract (#11385).
       if (!isRecord(item)) continue;
       // view containers bind via `object`, not `name`

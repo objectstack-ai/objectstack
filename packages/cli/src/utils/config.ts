@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
 import type { Plugin } from 'esbuild';
-import { printError } from './format.js';
+import { printErrorToStderr } from './format.js';
 
 export interface LoadedConfig {
   config: any;
@@ -43,15 +43,47 @@ export const BUNDLE_REQUIRE_EXTERNALS: (string | RegExp)[] = [
  * Resolve the config file path. Supports:
  * - explicit path (objectstack.config.ts)
  * - auto-detection (searches for objectstack.config.{ts,js,mjs})
+ *
+ * ## Both refusals go to STDERR, and that is not cosmetic (#15547)
+ *
+ * This helper is reached by ten published `--json` faces — `os validate`,
+ * `info`, `diff`, `lint`, `compile`, `build` (a subclass of `compile`),
+ * `verify`, `migrate meta`, `i18n check`, `i18n extract` — and it has no way
+ * to know which run is a `--json` run: the flag is parsed in the command, and
+ * `loadConfig()` passes it nothing. It used to print through `printError` and
+ * `console.log`, **both of which write to stdout**, and then call
+ * `process.exit(1)`.
+ *
+ * That put human text on the one stream `--json` reserves for the machine
+ * (`utils/json-stdout.ts`). Measured on the published entry `bin/run.js` with
+ * `NO_COLOR=1` and the streams captured separately: every one of the ten faces
+ * answered a missing config with **exit 1, an unparseable stdout and an empty
+ * stderr**, on both branches below. And because the exit is called directly,
+ * nothing throws — so every command's catch-all `--json` error exit, which
+ * sits downstream of a throw, never ran.
+ *
+ * ⚠️ Moving the bytes is the whole change. The exit code stays 1, the wording
+ * stays identical, and no payload is invented here: what a `--json` consumer
+ * should receive on this path is an envelope question that touches ten
+ * published faces at once, and it is deliberately left open (see
+ * {@link printErrorToStderr} and the PR for #15547). What is settled is that
+ * the machine's channel no longer carries prose.
+ *
+ * ⛔ Do not "fix" this by making the helper throw without settling that
+ * question first. Measured on the callers: `os verify` has no `try` around its
+ * `loadConfig()` at all, so a throw becomes an oclif crash dump rather than a
+ * payload; and `errorCodeFields()` deliberately mints no `code` for a plain
+ * `Error`, so the other nine would emit a bare `{ error }` — the exact shape
+ * #15549 is an open card about.
  */
 export function resolveConfigPath(source?: string): string {
   if (source) {
     const abs = path.resolve(process.cwd(), source);
     if (!fs.existsSync(abs)) {
-      printError(`Config file not found: ${chalk.white(abs)}`);
-      console.log('');
-      console.log(chalk.dim('  Hint: Run this command from a directory with objectstack.config.ts'));
-      console.log(chalk.dim('  Or specify the path: objectstack <command> path/to/config.ts'));
+      printErrorToStderr(`Config file not found: ${chalk.white(abs)}`);
+      console.error('');
+      console.error(chalk.dim('  Hint: Run this command from a directory with objectstack.config.ts'));
+      console.error(chalk.dim('  Or specify the path: objectstack <command> path/to/config.ts'));
       process.exit(1);
     }
     return abs;
@@ -69,9 +101,9 @@ export function resolveConfigPath(source?: string): string {
     if (fs.existsSync(abs)) return abs;
   }
 
-  printError('No objectstack.config.{ts,js,mjs} found in current directory');
-  console.log('');
-  console.log(chalk.dim('  Hint: Run `objectstack init` to create a new project'));
+  printErrorToStderr('No objectstack.config.{ts,js,mjs} found in current directory');
+  console.error('');
+  console.error(chalk.dim('  Hint: Run `objectstack init` to create a new project'));
   process.exit(1);
 }
 

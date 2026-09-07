@@ -146,7 +146,7 @@ Compatibility level between versions
 | **maxConcurrentVersions** | `integer` | optional (default: `2`) | How many versions can run at the same time |
 | **selectionStrategy** | `Enum<'latest' \| 'stable' \| 'compatible' \| 'pinned' \| 'canary' \| 'custom'>` | optional (default: `"latest"`) |  |
 | **routing** | `{ condition: string \| object; version: string; priority?: integer }[]` | optional |  |
-| **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; duration?: integer }` | optional |  |
+| **rollout** | `{ enabled?: boolean; strategy: Enum<'percentage' \| 'blue-green' \| 'canary'>; percentage?: number; durationMs?: integer }` | optional |  |
 
 ### Nested Shape: `MultiVersionSupport.routing[number]`
 
@@ -163,7 +163,8 @@ Compatibility level between versions
 | **enabled** | `boolean` | optional (default: `false`) |  |
 | **strategy** | `Enum<'percentage' \| 'blue-green' \| 'canary'>` | ✅ |  |
 | **percentage** | `number` | optional | Percentage of traffic to new version |
-| **duration** | `integer` | optional | Rollout duration in milliseconds |
+| **durationMs** | `integer` | optional | Rollout duration in milliseconds |
+| **duration** | `never` | optional | [REMOVED] `MultiVersionSupport.rollout.duration` was renamed to `durationMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged. |
 
 
 ---

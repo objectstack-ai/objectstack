@@ -535,12 +535,22 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // a `page` section to `view.form.ts` — the surface block for the new `page`
     // view type, gated by `visibleWhen: "data.type == 'page'"` exactly as every
     // other surface block is — so the walk has one more predicate to reach.
-    // It is 51 today: objectui#6140 (maintainer ruling 2026-08-25, Option A)
+    // It was 51 after objectui#6140 (maintainer ruling 2026-08-25, Option A)
     // declared `rows` on the multiline editor types, adding one
     // `data.type in […]`-gated row to the field form AND one to the object
     // form's fields repeater — two more predicates for the walk to reach.
-    // Earlier measurements stay what they were: history, not the census.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(51);
+    // It is 53 today, and for the same shape: the maintainer ruling 2026-09-02
+    // (option A on the field-level `valueDomain`) put a `valueDomain` row in
+    // both authoring forms, each gated `data.type in ['text']` — the applicable
+    // type set, mirrored from the schema's own `VALUE_DOMAIN_FIELD_TYPES`.
+    // Measured rather than inferred from the delta: the corpus was enumerated
+    // on this tree and on the merge base, and differenced by
+    // `<form>::<field>::<source>` rather than by array index (inserting a row
+    // shifts every later sibling's index, which is churn, not corpus change).
+    // Exactly two entries were added — `field :: valueDomain` and
+    // `object :: valueDomain`, both `data.type in ['text']` — and NONE was
+    // removed. Earlier measurements stay what they were: history, not the census.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(53);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -640,9 +650,14 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // no longer offered a `set_null` the schema refuses. It is 18 today:
     // objectui#6140 added a `rows` row to the object form's fields repeater,
     // gated by `data.type in ['textarea','markdown','html','richtext']` — one
-    // more `data.type`-rooted predicate for the debare walk to restore. #6254's
-    // own measurement was 16 and stays 16 — that number is history, this one
-    // is a census.
+    // more `data.type`-rooted predicate for the debare walk to restore. It is 19
+    // today: the maintainer ruling 2026-09-02 (option A on the field-level
+    // `valueDomain`) added a `valueDomain` row to the same repeater, gated
+    // `data.type in ['text']`. That row is the ONLY object-form predicate this
+    // tree adds over its merge base — the two corpora were enumerated and
+    // differenced by `<form>::<field>::<source>`, and the object-form half of
+    // the two-entry delta is exactly it. #6254's own measurement was 16 and
+    // stays 16 — that number is history, this one is a census.
     const objectForm = structuredClone(METADATA_FORM_REGISTRY.object) as Record<string, unknown>;
     let restored = 0;
     const debare = (node: unknown): void => {
@@ -672,10 +687,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     expect(
       restored,
       "the object form's `data.type`-rooted predicates are no longer where this test looks",
-    ).toBe(18);
+    ).toBe(19);
 
     const findings = validatePredicatePathRefs({ views: [objectForm] });
-    expect(findings).toHaveLength(18);
+    expect(findings).toHaveLength(19);
     expect(new Set(findings.map((f) => f.rule))).toEqual(new Set([PREDICATE_PATH_UNROOTED]));
     expect(findings[0].message).toContain('`type`');
   });

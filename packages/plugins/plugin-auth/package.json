@@ -42,6 +42,7 @@
   },
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
+    "@objectstack/formula": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-hono-server": "workspace:*",
     "@objectstack/plugin-security": "workspace:*",

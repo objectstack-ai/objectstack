@@ -109,7 +109,12 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
    * a type change invisible to key-level gates, #4666; pinned by the
    * parse tests next to this file).
    */
-  checksum: Sha256DigestSchema,
+  checksum: Sha256DigestSchema.describe(
+    'SHA-256 digest of the canonical JSON serialization of the `metadata` block (stable key '
+    + 'ordering), computed by the control plane when assembling the GET response. Coverage stops '
+    + 'at that block: nothing else on the envelope — `grantedPermissions` included — is under '
+    + 'this digest, so a matching checksum attests the compiled metadata and nothing more.',
+  ),
 
   /** Build timestamp (ISO 8601). */
   builtAt: z.string().datetime().optional(),
@@ -170,13 +175,19 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
    * silently. Sits beside `metadata`, outside the `checksum` digest (which
    * covers the `metadata` block only).
    */
+  // Internal anchor for the digest-coverage boundary stated in the describe below: it was
+  // recorded as accepted on the premise that the carrier is trusted end-to-end (#14993).
   grantedPermissions: z.record(z.string(), PluginPermissionsSchema).optional()
     .describe(
       'Install-time GRANTED permission set per plugin, keyed by the plugin manifest `id` '
       + '(not the control-plane `package_id`). Written by the cloud control plane at consent-compile '
       + 'time from `sys_package_installation.granted_permissions`; consumed by the materialize-time '
       + 'loader via `PluginPermissionEnforcer.registerGrantedPermissions`. Absent = no consent record; '
-      + '`{}` = consent-bearing and consented to nothing — the two are never collapsed.',
+      + '`{}` = consent-bearing and consented to nothing — the two are never collapsed. '
+      + 'Sits beside `metadata`, outside the `checksum` digest, which covers the `metadata` block '
+      + 'only: integrity of the granted set rests on the carrier — the artifact is '
+      + 'environment-local and control-plane served (ADR-0003 / cloud ADR-0007) — an accepted '
+      + 'boundary of this envelope, not an oversight.',
     ),
 
   // ── Retired v0 keys (#4740, ADR-0049) ──────────────────────────────

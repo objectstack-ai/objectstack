@@ -74,6 +74,8 @@
     "TENANCY_POSTURES": "src/security/tenancy-posture.ts#TENANCY_POSTURES (const)",
     "TenancyPosture": "src/security/tenancy-posture.ts#TenancyPosture (type)",
     "TenancyPostureSchema": "src/security/tenancy-posture.ts#TenancyPostureSchema (const)",
+    "TenantLayer0Verdict": "src/security/tenant-layer0-verdict.ts#TenantLayer0Verdict (type)",
+    "TenantLayer0VerdictSchema": "src/security/tenant-layer0-verdict.ts#TenantLayer0VerdictSchema (const)",
     "defineCapability": "src/security/capabilities.ts#defineCapability (function)",
     "definePermissionSet": "src/security/permission.zod.ts#definePermissionSet (function)",
     "defineSharingRule": "src/security/sharing.zod.ts#defineSharingRule (function)",

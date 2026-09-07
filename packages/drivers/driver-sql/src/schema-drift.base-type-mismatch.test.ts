@@ -51,6 +51,7 @@ import { SqlDriver } from './sql-driver.js';
 import {
   diffManagedTable,
   manualJsonConversionSql,
+  JSON_COLUMN_FIELD_TYPES,
   MULTI_VALUE_COLUMN_REMEDY_COMMAND,
   type PhysicalColumn,
   type SqlDialectName,
@@ -294,6 +295,172 @@ describe('diffManagedTable — multi-value field over a stale textual column (#1
     // restart, i.e. the report of the corruption would become the outage.
     expect(entry.category).toBe('needs_confirm');
     expect(entry.category).not.toBe('destructive');
+  });
+});
+
+// ── #15771: the SINGLE-VALUE half of the same fork ─────────────────────────
+//
+// The writer asks `JSON_COLUMN_TYPES.has(type) || !!field.multiple`; the
+// detector above asked only `multiple`. So a single-value JSON-class field on a
+// `varchar`/`text` column was written as JSON and reported by NOTHING — and, as
+// with #11535, the defect's shape is SILENCE, so "a finding was produced" is
+// again the weak assertion. Every case below pins the finding on the right
+// column with the right diagnosis, and the shapes that must stay silent are
+// pinned as silent in the same breath.
+
+describe('diffManagedTable — a SINGLE-VALUE JSON-class field over a stale textual column (#15771)', () => {
+  /** The card's two, named rather than swept, because these are the ones a deployment meets. */
+  const SINGLE_VALUE_JSON = ['file', 'location'] as const;
+
+  it('reports single-value `file` and `location` on a varchar column, on BOTH enforcing dialects', () => {
+    // Measured on the pre-fix tree: every one of these four returned `[]`.
+    for (const type of SINGLE_VALUE_JSON) {
+      for (const dialect of ['postgres', 'mysql'] as const) {
+        const out = diffTags({ type }, staleColumn('character varying', 2048), dialect);
+        expect(out, `${type}/${dialect}`).toHaveLength(1);
+        expect(out[0]).toMatchObject({
+          kind: 'type_mismatch',
+          table: 'proj_task',
+          column: 'tags',
+          expected: 'json',
+          actual: 'character varying',
+          severity: 'error',
+          // ⛔ NOT `destructive`, for the reason the multi-value case's category
+          // pin argues in full: the boot gate reads CATEGORY, every database
+          // this describes is already serving, and reporting the corruption
+          // must not be the thing that takes the app down.
+          category: 'needs_confirm',
+          op: { type: 'manual_column_type_change', table: 'proj_task', column: 'tags', to: 'json', from: 'character varying' },
+        });
+      }
+    }
+  });
+
+  it('SQLITE stays silent — the reverse control that proves the pin discriminates', () => {
+    // ⛔ Do not drop this leg. Without it every assertion above is equally
+    // satisfied by a detector that reports unconditionally. And the silence is
+    // MEASURED rather than scoped away: on an in-memory cell a single-value
+    // `file` id round-trips through the stale `varchar(2048)` column and
+    // through the driver's own `text` column with byte-identical stored bytes
+    // (`"file_01HXYZ"` in both), because SQLite's read path `JSON.parse`s a
+    // textual column regardless of what it calls itself.
+    for (const type of SINGLE_VALUE_JSON) {
+      expect(diffTags({ type }, staleColumn('varchar', 2048), 'sqlite'), type).toEqual([]);
+    }
+  });
+
+  it('says nothing once the column IS json — the repaired database', () => {
+    for (const type of SINGLE_VALUE_JSON) {
+      expect(diffTags({ type }, staleColumn('json'), 'postgres'), type).toEqual([]);
+      expect(diffTags({ type }, staleColumn('json'), 'mysql'), type).toEqual([]);
+    }
+  });
+
+  it('closes the blind spot for EVERY JSON-class type the spec declares, not just the file family', () => {
+    // The card's scope, asserted rather than described: the fork applies to
+    // every single-value member of the writer's set, whichever way the
+    // `VARCHAR(2048)`-vs-json generator divergence (#15041) is ruled.
+    const jsonClassTypes = [...JSON_COLUMN_FIELD_TYPES].filter((t) => t !== 'object' && t !== 'array');
+    expect(jsonClassTypes.length).toBeGreaterThan(10);
+
+    const blind = jsonClassTypes.filter(
+      (type) => diffTags({ type }, staleColumn('character varying', 2048), 'postgres').length === 0,
+    );
+    expect(blind).toEqual([]);
+
+    // Non-vacuity: a type OUTSIDE the set is still silent in the same run, so
+    // the zero above is a discriminating measurement, not an always-report.
+    expect(diffTags({ type: 'string' }, staleColumn('character varying', 2048), 'postgres')).toEqual([]);
+    expect(diffTags({ type: 'integer' }, staleColumn('character varying', 2048), 'postgres')).toEqual([]);
+  });
+
+  // ── the remedy split: the message a broken remedy must NOT carry ──────────
+  //
+  // ⚠️ MEASURED before this branch shipped, with the command's own planner:
+  // `planStaleColumnTargets` accepted a single-value finding carrying the
+  // MULTI-VALUE message as a target and planned
+  // `... ELSE json_build_array("doc") END`. That wraps the stored value in a
+  // ONE-ELEMENT ARRAY — right for a field declaring `multiple: true`, wrong for
+  // a field whose value is a scalar or an object. So the finding is emitted for
+  // both populations and the remedy is offered to ONE.
+
+  it('the single-value message names NEITHER the command NOR its statement, so the command refuses it', () => {
+    for (const type of SINGLE_VALUE_JSON) {
+      for (const dialect of ['postgres', 'mysql'] as const) {
+        const [entry] = diffTags({ type }, staleColumn('character varying', 2048), dialect);
+        expect(entry.message, `${type}/${dialect}`).not.toContain(MULTI_VALUE_COLUMN_REMEDY_COMMAND);
+        // This is the CLI's dialect probe, reproduced: no dialect's statement
+        // is present, so `planStaleColumnTargets` recovers no dialect and
+        // refuses the entry (`remedy_not_recognized`) instead of running array
+        // SQL over scalar rows. Pinned from the consumer side too, in
+        // `packages/cli/.../multi-value-columns.dialect-probe.test.ts`.
+        for (const d of ['postgres', 'mysql'] as const) {
+          expect(entry.message).not.toContain(manualJsonConversionSql(d, 'proj_task', 'tags'));
+        }
+      }
+    }
+  });
+
+  it('the single-value message still carries the whole diagnosis an operator acts on', () => {
+    // A finding with no remedy is still a finding: the operator has to be able
+    // to act from the one line a restart prints.
+    const [entry] = diffTags({ type: 'file' }, staleColumn('character varying', 2048), 'postgres');
+    expect(entry.message).toContain('proj_task.tags');
+    expect(entry.message).toContain('`file`');
+    expect(entry.message).toContain('character varying');
+    expect(entry.message).toContain('json');
+    // ⛔ NOT the issue id — `check:doc-authoring` refuses a tracker id in
+    // runtime prose (maintainer ruling 2026-08-12: an operator can resolve
+    // neither the number nor the tracker). The anchor lives in the `//`
+    // comment beside the emission and in git history. What the operator DOES
+    // need is the cause, in words:
+    expect(entry.message).toMatch(/JSON-ENCODED/);
+    expect(entry.message).toMatch(/backup/i);
+    expect(entry.message).toMatch(/btree/i);
+    // And it says WHY the automated route is withheld, rather than leaving the
+    // operator to discover the refusal by running it.
+    expect(entry.message).toMatch(/ONE-ELEMENT JSON ARRAY/);
+  });
+
+  it('an INHERENTLY-MULTI option type keeps the array remedy — the split is by value shape, not by `multiple`', () => {
+    // `multiselect` / `checkboxes` / `tags` hold a list with or without the
+    // flag, so the wrapping remedy is the right repair for them and the
+    // message that names it is the right message. Getting this leg wrong in
+    // either direction is a real cost: withheld, an operator loses a working
+    // command; offered to a scalar field, it corrupts.
+    for (const type of ['multiselect', 'checkboxes', 'tags'] as const) {
+      const [entry] = diffTags({ type }, staleColumn('character varying', 255), 'postgres');
+      expect(entry.message, type).toContain(MULTI_VALUE_COLUMN_REMEDY_COMMAND);
+      expect(entry.message, type).toContain(manualJsonConversionSql('postgres', 'proj_task', 'tags'));
+    }
+  });
+
+  it('leaves the MULTI-VALUE message byte-identical — the CLI recovers the dialect from it', () => {
+    // ⚠️ The contract this card was most able to break. Widening the finding's
+    // population must not move one character of the message the array half
+    // emits, because `planStaleColumnTargets` reads the dialect by containment.
+    // (Proven against `origin/main` itself while the change was written: the
+    // whole entry — message included — compared equal for `lookup`, `string`
+    // and `file` with `multiple: true`, on both dialects.)
+    for (const dialect of ['postgres', 'mysql'] as const) {
+      const [entry] = diffTags({ type: 'lookup', multiple: true }, staleColumn('character varying', 255), dialect);
+      expect(entry.message).toContain(manualJsonConversionSql(dialect, 'proj_task', 'tags'));
+      expect(entry.message).toContain(MULTI_VALUE_COLUMN_REMEDY_COMMAND);
+      expect(entry.message).toContain('metadata declares a multi-value field (stored as `json`)');
+    }
+  });
+
+  it('a single-value JSON-class field with a maxLength reports the base type ONCE, never `narrow_varchar`', () => {
+    // The same trap the multi-value case fell into, one population to the left:
+    // before this change `{ type: 'file', maxLength: 50 }` over a
+    // `varchar(255)` column reported `narrow_varchar` at category
+    // **destructive** — inviting `os migrate apply --allow-destructive` to
+    // rewrite the column to `varchar(50)`, the exact opposite of the repair it
+    // needs. `createColumn` never sizes a JSON-class column from `maxLength`.
+    for (const dialect of ['postgres', 'mysql'] as const) {
+      const out = diffTags({ type: 'file', maxLength: 50 }, staleColumn('character varying', 255), dialect);
+      expect(out.map((d) => d.op.type)).toEqual(['manual_column_type_change']);
+    }
   });
 });
 

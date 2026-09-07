@@ -118,6 +118,7 @@ import { validateCapabilityReferences } from './validate-capability-references.j
 import { validateFlowTriggerReadiness } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle } from './validate-record-title.js';
+import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
@@ -547,8 +548,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // hold a forward reference; publishing refuses it with the key path named.
   // The snapshot carries `datasets` for exactly this rule (`RuntimeStackContext`
   // — without it every legitimate board reads as dangling, the 3-phantom
-  // measurement). `surfaces` is per-RULE, so this flip puts all SIX of the
-  // rule's error ids on the publish gate, not just `widget-dataset-unknown` —
+  // measurement). `surfaces` is per-RULE, so this flip puts the rule's error
+  // ids on the publish gate, not just `widget-dataset-unknown` —
   // ruled 2026-08-15: they are one coherent "this board cannot render"
   // reference-integrity class, and the ~6× wider accept-set narrowing was
   // accepted knowingly rather than splitting the dataset limb into its own
@@ -556,6 +557,13 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // filter (registry machinery that weakens "delete a rule from the table and
   // enforcement stops in the same commit"). Warning-tier ids ride along on the
   // advisory channel and never block (#4463 P1).
+  //
+  // [#15463] That accepted class was SIX ids and is now FIVE:
+  // `chart-field-unknown` dropped to `warning`, because the pinned `@object-ui`
+  // renderer refuses its three `chartConfig` binding keys outright — the board
+  // renders identically with or without them, so the id describes an ignored
+  // key rather than a binding the analytics service cannot satisfy. It still
+  // runs at the door and still reaches the author, on the advisory channel.
   {
     name: 'validateWidgetBindings',
     tier: 'gating',
@@ -600,13 +608,17 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // no layer: the engine refuses it on a declared temporal field at query time
   // (INVALID_FILTER / 400, PR #8808), and anywhere else it compares as a
   // literal string. This is the authoring-time refusal the ruling shipped
-  // alongside the engine door, judging the filter literal in isolation —
-  // ordering positions only, all three authored filter shapes. Like
-  // `validateEmptyCombinators` it needs NO resolution context, so
-  // RUNTIME_NEEDS_FULL_SNAPSHOT does not apply and the runtime gate runs it
-  // for every filter-carrying type the gate already maps: the write path is
-  // the one door an AI author uses, and dashboards/views are where the preset
-  // vocabulary is near enough to reach for.
+  // alongside the engine door. Two arms (the rule's header is the authority):
+  // arm 1 judges the filter literal in isolation — ordering positions only,
+  // all three authored filter shapes, no resolution context; arm 2 (#16106,
+  // maintainer-ruled 1′) judges equality / membership positions WITH the field
+  // type in hand, read from the stack's own `objects` (and `datasets`, to bind
+  // a widget or report) — both collections the per-write snapshot carries —
+  // and stays silent wherever they are absent. So RUNTIME_NEEDS_FULL_SNAPSHOT
+  // still does not apply and the runtime gate runs it for every
+  // filter-carrying type the gate already maps: the write path is the one door
+  // an AI author uses, and dashboards/views are where the preset vocabulary is
+  // near enough to reach for.
   {
     name: 'validatePresetComparands',
     tier: 'gating',
@@ -920,6 +932,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateRecordTitle(stack),
+  },
+  // [#15922] A declared field that nothing in the stack reads or displays —
+  // the field-level remainder of #4698's "declared but never read" class,
+  // landed here under the hotcrm#1543 ruling. Object-aware (the same name on
+  // two objects gets two verdicts) and advisory: a consumer can live outside
+  // the stack (an API client, another package's hook, a Studio-authored view),
+  // so the ceiling for a static check is a warning — a refusal would narrow
+  // the authorable surface and is the maintainer's call. `normalized` because
+  // it needs no parsed stack (it resolves names, not shapes), so `os lint`
+  // runs it too.
+  //
+  // CLI-only for the FULL-SNAPSHOT reason, and it is the sharpest instance of
+  // that reason in the table: the rule's whole verdict is the ABSENCE of a
+  // reference across views / pages / flows / datasets, none of which the
+  // per-write snapshot carries, so on an object write it would report every
+  // field of the written object as inert.
+  {
+    name: 'validateFieldConsumers',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-field-consumers.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateFieldConsumers(stack),
   },
   // ADR-0085 — `stageField` / `highlightFields` / `Field.group` are pointers
   // into the object's field map; a dangling one is Zod-valid and silently inert

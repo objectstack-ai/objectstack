@@ -282,7 +282,7 @@ describe('family ordering agrees between doors: options → pattern → valueDom
     svc.registerManifest(orderingManifest);
     await expect(svc.setMany('pattern_order', { country_like: 'ZZ' })).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
-      fields: [{ field: 'country_like', code: 'invalid_value', constraint: { valueDomain: 'iso_3166_alpha2' } }],
+      fields: [{ field: 'country_like', code: 'value_domain', constraint: { valueDomain: 'iso_3166_alpha2' } }],
     });
 
     const { errors, logger: envLogger } = spyLogger();

@@ -512,6 +512,19 @@ both. The same-table rule applies to the offset column too: `addDays: { $field:
 'duty.grace_days' }` (a relation path) is resolved by the memory evaluator and refused
 by SQL push-down with `INVALID_FILTER`, exactly as a dotted `$field` is.
 
+**A dataset's `include` does not widen this.** A dataset compiles a `LEFT JOIN` for every
+relation it `include`s (ADR-0071, up to three hops), and on the native-SQL path those joins
+serve dimensions, measures and filter *members* — a `where` on `duty.grace_days` reads the
+joined column. A `{ $field }` *comparand* takes a different road: the native-SQL strategy
+declines it so that the driver, which alone holds the declared field set, the column types
+and the tenant column the cross-field rules check, compiles it (#7598) — and the driver
+compiles single-table statements, with no join in scope. So
+`completed_on <= due_on + duty.grace_days` is refused with `INVALID_FILTER` even when `duty`
+is in the dataset's `include`; measured and pinned in
+`packages/services/service-analytics/src/__tests__/include-relation-cross-field-boundary.test.ts`
+(#15103). The spelling that answers on both paths is the same-table one — every column the
+reference names, offset included, is a column of the object the filter runs over.
+
 ### Date, Datetime, and Time Filters
 
 Before a comparison is built, the driver puts the comparand into the **same canonical

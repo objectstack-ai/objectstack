@@ -49,7 +49,7 @@ describe('describeRegisteredDriver', () => {
 
     expect(describeRegisteredDriver(fakeKernel({
       'driver.sql': { config: { client: 'better-sqlite3', connection: { filename: './data.db' } } },
-    }))).toEqual({ label: 'SqlDriver(better-sqlite3)', url: './data.db' });
+    }))).toEqual({ label: 'SqlDriver(better-sqlite3)', url: './data.db', sqliteFile: './data.db' });
 
     expect(describeRegisteredDriver(fakeKernel({
       'driver.sql': { config: { client: 'pg', connection: { host: 'db.example.com', port: 5432, database: 'app' } } },
@@ -133,10 +133,42 @@ describe('describeRegisteredDriver', () => {
     expect(describeRegisteredDriver(kernel)).toEqual({
       label: 'SqliteWasmDriver',
       url: './app.wasm.db',
+      sqliteFile: './app.wasm.db',
     });
   });
 
   it('returns null when no known driver is registered', () => {
     expect(describeRegisteredDriver(fakeKernel({}))).toBeNull();
+  });
+
+  // `sqliteFile` is the SAME probe read a second time asking a different
+  // question: not "what do I print" but "which file on this filesystem", so
+  // the boot can `stat` it and notice later that the file it opened is no
+  // longer the file at that path. It is the plumbing between the driver and
+  // that watch, and nothing else pins it — a probe that stopped answering it
+  // would leave the watch silently un-armed on every boot, which is
+  // byte-identical to a deployment where nothing ever went wrong.
+  describe('sqliteFile — the on-disk file the boot is serving', () => {
+    it('answers the sqlite connection filename', () => {
+      expect(describeRegisteredDriver(fakeKernel({
+        'driver.com.objectstack.driver.sql': {
+          config: { client: 'better-sqlite3', connection: { filename: '/app/.objectstack/data/objectstack.db' } },
+        },
+      }))?.sqliteFile).toBe('/app/.objectstack/data/objectstack.db');
+    });
+
+    it('is absent for every driver that serves no file on disk', () => {
+      expect(describeRegisteredDriver(fakeKernel({
+        'driver.sql': { config: { client: 'better-sqlite3', connection: { filename: ':memory:' } } },
+      }))?.sqliteFile).toBeUndefined();
+
+      expect(describeRegisteredDriver(fakeKernel({
+        'driver.sql': { config: { client: 'pg', connection: { host: 'db.example.com', port: 5432, database: 'app' } } },
+      }))?.sqliteFile).toBeUndefined();
+
+      expect(describeRegisteredDriver(fakeKernel({
+        'driver.memory': { constructor: { name: 'InMemoryDriver' }, config: {} },
+      }))?.sqliteFile).toBeUndefined();
+    });
   });
 });

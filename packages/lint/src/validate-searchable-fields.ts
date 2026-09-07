@@ -127,7 +127,7 @@ import {
   SEARCH_AUTO_EXCLUDED_FIELDS,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
-import { suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -172,15 +172,6 @@ export type SearchableFieldRole = 'canonical' | 'narrowing';
 
 type AnyRec = Record<string, unknown>;
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
@@ -216,7 +207,7 @@ function declaredFieldTarget(obj: AnyRec): ObjectSearchTarget | null {
   if (!fields || typeof fields !== 'object') return null;
   const names = new Set<string>();
   const metas: Record<string, SearchFieldMeta> = {};
-  for (const f of asArray(fields)) {
+  for (const f of recordsOf(fields)) {
     const n = strName(f.name);
     if (!n) continue;
     names.add(n);
@@ -283,7 +274,7 @@ export function indexObjectSearchTargets(
 ): Map<string, ObjectSearchTarget | null> {
   const fieldsByObject = new Map<string, ObjectSearchTarget | null>();
   if (!isRec(stack)) return fieldsByObject;
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = strName(obj.name);
     if (name) fieldsByObject.set(name, declaredFieldTarget(obj));
   }
@@ -514,7 +505,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
   const findings: SearchableFieldFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   const fieldsByObject = indexObjectSearchTargets(stack);
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
 
@@ -574,7 +565,7 @@ export function validateSearchableFields(stack: AnyRec): SearchableFieldFinding[
   }
 
   // ── `defineView` aggregates: the default `list` + named `listViews` ──
-  const views = asArray(stack.views);
+  const views = recordsOf(stack.views);
   for (let vi = 0; vi < views.length; vi++) {
     const view = views[vi];
     if (!isRec(view)) continue;

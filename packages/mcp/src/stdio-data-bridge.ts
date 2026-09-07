@@ -47,8 +47,12 @@
  *
  * `callData` prefers the `protocol` service (metadata-protocol) and falls back
  * to the engine; this bridge is engine-only. So the HTTP tools additionally get
- * that layer's ingress `readonly` strip, its existence probes, its spec-shaped
- * receipts and `expand`/`select`. None of those is the authorization boundary
+ * that layer's existence probes, its spec-shaped receipts and `expand`/`select`.
+ * (That layer's create-side `readonly` strip used to head this list; since the
+ * maintainer ruling of 2026-09-03 — option C, #14147 — the static `readonly`
+ * strip runs inside `engine.insert` for every non-system caller and the
+ * ingress copy is deleted, so on that point the two transports no longer
+ * differ.) None of those is the authorization boundary
  * — every call here still passes the engine's CRUD/FLS/RLS — but the two
  * transports should not differ at all, and unifying them behind one
  * transport-neutral data seam is filed as follow-up work rather than forked

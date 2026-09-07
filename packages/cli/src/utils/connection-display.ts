@@ -98,3 +98,30 @@ export function describeDriverConnection(config: unknown): string | undefined {
   return readTarget(conn && typeof conn === 'object' ? conn as Record<string, unknown> : undefined)
     ?? readTarget(cfg);
 }
+
+/**
+ * The on-disk SQLite file a driver config names, or `undefined` when it names
+ * none.
+ *
+ * A SECOND question over the same shapes {@link describeDriverConnection}
+ * already knows — and deliberately not a re-read of that function's output.
+ * That one renders a string for a human and is free to redact, abbreviate or
+ * label (`(in-memory)`, `(unknown)`); this one answers "which file on this
+ * filesystem", which is an identity, and an identity parsed back out of a
+ * display string is one redaction rule away from being wrong.
+ *
+ * `:memory:` and the empty name (SQLite's private temporary database) are not
+ * files on disk and are refused here, so a caller can hand the result straight
+ * to `stat` without re-deciding.
+ */
+export function describeDriverSqliteFile(config: unknown): string | undefined {
+  if (!config || typeof config !== 'object') return undefined;
+  const cfg = config as Record<string, unknown>;
+  const conn = cfg.connection;
+  const bag = conn && typeof conn === 'object' ? conn as Record<string, unknown> : cfg;
+  const filename = bag.filename ?? cfg.filename;
+  if (typeof filename !== 'string') return undefined;
+  const trimmed = filename.trim();
+  if (!trimmed || trimmed === ':memory:') return undefined;
+  return trimmed;
+}

@@ -697,9 +697,14 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
 // a runtime-gated type, so the gate returned empty before building a snapshot.
 // Ruled 2026-08-12 (option B): a DRAFT may hold a forward reference;
 // publishing refuses with the key path named. Ruled 2026-08-15: `surfaces` is
-// per-RULE, so the flip puts all SIX of the rule's error ids on the door as
-// one "this board cannot render" reference-integrity class — pinned below as
-// reachable, not merely declared.
+// per-RULE, so the flip puts the rule's error ids on the door as one "this
+// board cannot render" reference-integrity class — pinned below as reachable,
+// not merely declared. That class was SIX ids until #15463 demoted
+// `chart-field-unknown` to `warning` (the pinned renderer refuses those three
+// `chartConfig` binding keys outright, so the board renders correctly either
+// way); it is FIVE now, and the demoted id is pinned on the advisory channel
+// immediately after, so leaving the accept-set is a measured departure rather
+// than an absence.
 // ─────────────────────────────────────────────────────────────────────
 
 /** A resolution universe with one real object and one real dataset. */
@@ -824,13 +829,19 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
     expect(dangling.errors).toHaveLength(1);
   });
 
-  it('ALL SIX error ids are reachable at the door — the class the 2026-08-15 ruling accepted', () => {
+  it('ALL FIVE error ids are reachable at the door — the class the 2026-08-15 ruling accepted', () => {
     // `surfaces` is per-rule, so the flip enforces the rule's whole error set,
-    // not just `widget-dataset-unknown`. The ruling accepted the six as one
-    // coherent "this board cannot render" class — this test makes that
+    // not just `widget-dataset-unknown`. The ruling accepted the class as one
+    // coherent "this board cannot render" set — this test makes that
     // acceptance REACHABLE rather than declared, and its exact error sets keep
     // the boundary honest: a case gaining or losing an id is a scope change
     // that must go through this line rather than around it.
+    //
+    // [#15463] It went through this line: the set was SIX until
+    // `chart-field-unknown` dropped to `warning`. Its case moves to the
+    // advisory test below rather than being deleted — an id that leaves the
+    // accept-set must still be shown to REACH the door, or "no longer gating"
+    // and "no longer running" become indistinguishable here.
     const cases: Array<[string, unknown, string[]]> = [
       [
         'dangling dataset',
@@ -846,11 +857,6 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
         'unknown measure',
         dashboard([cleanWidget({ values: ['no_such_measure'], chartConfig: { xAxis: { field: 'status' } } })]),
         ['widget-measure-unknown'],
-      ],
-      [
-        'chartConfig field off the selection',
-        dashboard([cleanWidget({ chartConfig: { xAxis: { field: 'not_a_dim' } } })]),
-        ['chart-field-unknown'],
       ],
       [
         'legacy analytics shape as the only (dead) data wiring',
@@ -876,15 +882,35 @@ describe('dashboard widget dataset bindings at the runtime publish gate (#7529)'
       for (const e of errors) seen.add(e.rule);
     }
 
-    // Non-vacuous, and the ruling's whole accept-set: exactly the six.
+    // Non-vacuous, and the ruling's whole accept-set as #15463 left it:
+    // exactly the five. `chart-field-unknown` is deliberately absent.
     expect([...seen].sort()).toEqual([
-      'chart-field-unknown',
       'dashboard-filter-field-unknown',
       'widget-dataset-unknown',
       'widget-dimension-unknown',
       'widget-legacy-analytics-unrenderable',
       'widget-measure-unknown',
     ]);
+    expect(seen.has('chart-field-unknown')).toBe(false);
+  });
+
+  it('the demoted `chart-field-unknown` still RUNS at the door — on the advisory channel (#15463)', () => {
+    // The other half of the accept-set narrowing: the exact body that used to
+    // 422 now publishes, and the finding reaches the author on the 2xx response
+    // instead. Pinned as one case so "demoted" cannot decay into "dropped".
+    const board = dashboard([cleanWidget({ chartConfig: { xAxis: { field: 'not_a_dim' } } })]);
+    const result = gateDashboard(board);
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    const f = result.advisories.find((a) => a.rule === 'chart-field-unknown');
+    expect(f, 'the advisory must still reach the author').toBeDefined();
+    expect(f!.severity).toBe('warning');
+    expect(f!.path).toBe('dashboards[0].widgets[0]');
+    expect(f!.message).toMatch(/not_a_dim/);
+    // The message names the refusal, not a query that never runs.
+    expect(f!.message).toContain('ignores an authored axis `field`');
+    expect(f!.message).not.toContain('will not contain');
+    // And the rule genuinely ran, rather than the door skipping the type.
+    expect(result.rulesRun).toContain('validateWidgetBindings');
   });
 
   it('warning-tier ids ride the ADVISORY channel and never block (#4463 P1)', () => {

@@ -13,7 +13,7 @@
 // integration test.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { bootStack } from './harness';
+import { bootStack } from './harness.js';
 
 class FakeOrganizationsPlugin {
   readonly name = 'fake-organizations';

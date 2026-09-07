@@ -30,6 +30,7 @@
  */
 
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
+import { recordsOf } from './object-graph.js';
 
 export const CAPABILITY_REFERENCE_UNKNOWN = 'capability-reference-unknown';
 
@@ -51,15 +52,6 @@ export interface CapabilityRefFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 /** The capability strings in a `string[]` value. */
 function asCapArray(v: unknown): string[] {
@@ -95,13 +87,13 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
   // ── Build the author-time "known capability" set ──
   const known = new Set<string>(PLATFORM_CAPABILITY_NAMES);
   // [ADR-0066 D1] Capabilities the stack explicitly DECLARES via defineCapability.
-  for (const cap of asArray(stack.capabilities)) {
+  for (const cap of recordsOf(stack.capabilities)) {
     if (typeof cap.name === 'string' && cap.name.length > 0) known.add(cap.name);
   }
-  for (const ps of asArray(stack.permissions)) {
+  for (const ps of recordsOf(stack.permissions)) {
     for (const cap of asCapArray(ps.systemPermissions)) known.add(cap);
   }
-  for (const seed of asArray(stack.data)) {
+  for (const seed of recordsOf(stack.data)) {
     if (seed.object !== 'sys_capability') continue;
     for (const rec of Array.isArray(seed.records) ? seed.records : []) {
       const name = (rec as AnyRec | null)?.name;
@@ -131,7 +123,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
   };
 
   // ── Objects (D3) + their fields (D3) + embedded actions (D4) ──
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
     if (!obj || typeof obj !== 'object') continue;
@@ -142,7 +134,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
       flag(cap, `object "${objName}"`, `${objPath}.requiredPermissions${key ? `.${key}` : ''}`);
     }
 
-    const fields = asArray(obj.fields);
+    const fields = recordsOf(obj.fields);
     for (const f of fields) {
       const fname = typeof f.name === 'string' ? f.name : '(field)';
       for (const cap of asCapArray(f.requiredPermissions)) {
@@ -150,7 +142,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
       }
     }
 
-    for (const [ai, action] of asArray(obj.actions).entries()) {
+    for (const [ai, action] of recordsOf(obj.actions).entries()) {
       const aName = typeof action.name === 'string' ? action.name : `(action ${ai})`;
       for (const cap of asCapArray(action.requiredPermissions)) {
         flag(cap, `action "${objName}.${aName}"`, `${objPath}.actions[${ai}].requiredPermissions`);
@@ -159,7 +151,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
   }
 
   // ── Top-level actions (D4) ──
-  for (const [i, action] of asArray(stack.actions).entries()) {
+  for (const [i, action] of recordsOf(stack.actions).entries()) {
     const aName = typeof action.name === 'string' ? action.name : `(action ${i})`;
     for (const cap of asCapArray(action.requiredPermissions)) {
       flag(cap, `action "${aName}"`, `actions[${i}].requiredPermissions`);
@@ -173,7 +165,7 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
   //    was a fail-open gate nothing enforced), so the generic check below no
   //    longer fires on an area node. Dropping the traversal would strand every
   //    area-nested item. ──
-  const apps = asArray(stack.apps);
+  const apps = recordsOf(stack.apps);
   for (let i = 0; i < apps.length; i++) {
     const app = apps[i];
     if (!app || typeof app !== 'object') continue;

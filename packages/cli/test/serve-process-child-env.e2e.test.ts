@@ -119,6 +119,7 @@ import {
   childEnv,
   holdPort,
   portDriftError,
+  probeThroughChild,
   randomPort,
   VITEST_WORKER_ENV_KEYS,
 } from './helpers/serve-process.js';
@@ -299,24 +300,45 @@ async function probeOrigin(
       });
     });
 
+    // Everything the child said, for a failure message that can be attributed
+    // without a second run. Read at THROW time, so it carries the crash the child
+    // printed on its way down rather than the buffer as it stood at ready.
+    const transcript = () => `\n--- child stdout ---\n${out}\n--- child stderr ---\n${err}`;
+
+    // ⭐ The `exit` handler above feeds the READINESS promise ONLY, so a death
+    // AFTER readiness is invisible to it and used to reach vitest as a bare
+    // `TypeError: fetch failed` — no exit code, no stdout, no stderr (#15653).
+    // `probeThroughChild()` is where that is now read; its own section in
+    // `helpers/serve-process.ts` carries the measurement and the fences.
+    //
     // ⭐ `bound`, not `requestedPort`. They are provably the same number on this
     // line — a mismatch was REFUSED above rather than reaching it — and
     // addressing the child's own announced port is what keeps that true if the
     // gate is ever loosened.
-    const res = await fetch(`http://localhost:${bound}/api/v1/auth/sign-in/email`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        // Not localhost, so untrusted under every branch of serve.ts's
-        // trusted-origin assembly. No cookie and no Sec-Fetch-* header: that is
-        // the shape validateFormCsrf forces an origin check for.
-        origin: 'https://evil.example.com',
+    return await probeThroughChild(
+      {
+        child,
+        transcript,
+        label: 'serve-process-child-env',
+        what: `the origin probe on port ${bound}`,
       },
-      body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
-    });
-    let body: any = null;
-    try { body = await res.json(); } catch { /* non-JSON body, fall through */ }
-    return { status: res.status, code: body?.code };
+      async () => {
+        const res = await fetch(`http://localhost:${bound}/api/v1/auth/sign-in/email`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            // Not localhost, so untrusted under every branch of serve.ts's
+            // trusted-origin assembly. No cookie and no Sec-Fetch-* header: that is
+            // the shape validateFormCsrf forces an origin check for.
+            origin: 'https://evil.example.com',
+          },
+          body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
+        });
+        let body: any = null;
+        try { body = await res.json(); } catch { /* non-JSON body, fall through */ }
+        return { status: res.status, code: body?.code };
+      },
+    );
   } finally {
     await stop(child);
   }

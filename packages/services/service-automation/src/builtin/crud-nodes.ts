@@ -318,11 +318,17 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 const dataCtx = resolveRunDataContext(context);
                 stampSystemInsertOwner(fields, dataCtx, data, objectName);
                 try {
-                    // #3407 — symmetric with update_record. Today the engine's
-                    // insert path strips nothing (INSERT is readonly-exempt and
-                    // FLS write denial throws), so this listener never fires;
-                    // wired anyway so a future insert-side strip surfaces here
-                    // automatically instead of going silent.
+                    // #3407 — symmetric with update_record, and LIVE since
+                    // #14147. It was wired in #3407 against an insert path that
+                    // stripped nothing (INSERT was readonly-exempt; FLS write
+                    // denial throws), i.e. for a signal it could not then
+                    // receive — the maintainer ruling of 2026-09-03 put the
+                    // static-`readonly` strip inside `engine.insert` under an
+                    // `isSystem` gate, so a flow WITHOUT `runAs: 'system'` that
+                    // seeds a readonly column now lands here: `output.dropped-
+                    // Fields` plus a node warning, instead of a clean success
+                    // over a column that never landed. Driven end to end in
+                    // `create-record-readonly-drop.test.ts`.
                     const dropped: DroppedFieldsEvent[] = [];
                     const created = await data.insert(objectName, fields, {
                         context: dataCtx,

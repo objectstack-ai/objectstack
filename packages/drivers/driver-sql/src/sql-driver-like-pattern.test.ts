@@ -95,8 +95,15 @@ describe('[#7536] SqlDriver — $like / $ilike run the caller\'s pattern', () =>
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    await driver.initObjects([{ name: 'txt', fields: { name: { type: 'string' } } }]);
+    await driver.initObjects([
+      { name: 'txt', fields: { name: { type: 'string' } } },
+      // [#14079] A declared numeric column, for the type-gate cases below.
+      { name: 'nums', fields: { n: { type: 'number' } } },
+    ]);
     for (const row of ROWS) await driver.create('txt', { ...row }, BYPASS);
+    for (const [id, n] of [['1', 5], ['2', 50], ['3', 0], ['4', 105]] as const) {
+      await driver.create('nums', { id, n }, BYPASS);
+    }
   });
 
   afterAll(async () => {
@@ -122,6 +129,38 @@ describe('[#7536] SqlDriver — $like / $ilike run the caller\'s pattern', () =>
 
   it('seeded the fixture (the premise)', async () => {
     expect(await ids({})).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9']);
+  });
+
+  // ── [#14079] A pattern over a stored value that is not a string ───────────
+  //
+  // The `$like` half of the #14079 ruling, pinned on the SQL family's own
+  // `likePatternPredicate` arm: `$like` / `$ilike` read the column as text like
+  // their `$contains` siblings, so a declared numeric column compiles them to
+  // the contract's constant too. Before this, `"n" GLOB '*5*'` COERCED the REAL
+  // in the storage class's spelling — `5` as `'5.0'` — so `'%0'` matched every
+  // row and `'%5'` matched none, answers to a query nobody wrote.
+
+  const numIds = async (where: FilterCondition): Promise<string[]> => {
+    const rows = await driver.find('nums', { where }, BYPASS);
+    return rows.map((r) => String(r.id)).sort((a, b) => a.localeCompare(b));
+  };
+
+  it('[#14079] $like / $ilike never match a stored number, whatever the pattern', async () => {
+    expect(await numIds({ n: { $like: '%5%' } })).toEqual([]);
+    expect(await numIds({ n: { $like: '%0' } })).toEqual([]);
+    expect(await numIds({ n: { $like: '5' } })).toEqual([]);
+    expect(await numIds({ n: { $ilike: '%5%' } })).toEqual([]);
+  });
+
+  it('[#14079] $not over the pattern admits every stored number — complementarity', async () => {
+    expect(await numIds({ $not: { n: { $like: '%5%' } } })).toEqual(['1', '2', '3', '4']);
+    expect(await numIds({ $not: { n: { $ilike: '%0' } } })).toEqual(['1', '2', '3', '4']);
+  });
+
+  it('[#14079] a malformed pattern is still REFUSED ahead of the constant', async () => {
+    const err = await refusalOf({ n: { $like: 'a\\' } });
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
   });
 
   // ── The card's repro table, end to end over the wire ──────────────────────

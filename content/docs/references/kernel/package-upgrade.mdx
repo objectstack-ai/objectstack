@@ -198,7 +198,8 @@ Upgrade package response
 | **requiresMigration** | `boolean` | optional (default: `false`) | Whether data migration scripts are needed |
 | **migrationScripts** | `string[]` | optional | Paths to migration scripts |
 | **dependencyUpgrades** | `{ packageId: string; fromVersion: string; toVersion: string }[]` | optional | Dependent packages that also need upgrading |
-| **estimatedDuration** | `integer` | optional | Estimated upgrade duration in seconds |
+| **estimatedDurationSeconds** | `integer` | optional | Estimated upgrade duration in seconds |
+| **estimatedDuration** | `never` | optional | [REMOVED] `UpgradePlan.estimatedDuration` was renamed to `estimatedDurationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `estimatedDurationSeconds`; the value (seconds) is unchanged. |
 | **summary** | `string` | optional | Human-readable upgrade summary |
 
 
@@ -241,7 +242,8 @@ Upgrade analysis plan generated before execution
 | **requiresMigration** | `boolean` | optional (default: `false`) | Whether data migration scripts are needed |
 | **migrationScripts** | `string[]` | optional | Paths to migration scripts |
 | **dependencyUpgrades** | `{ packageId: string; fromVersion: string; toVersion: string }[]` | optional | Dependent packages that also need upgrading |
-| **estimatedDuration** | `integer` | optional | Estimated upgrade duration in seconds |
+| **estimatedDurationSeconds** | `integer` | optional | Estimated upgrade duration in seconds |
+| **estimatedDuration** | `never` | optional | [REMOVED] `UpgradePlan.estimatedDuration` was renamed to `estimatedDurationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `estimatedDurationSeconds`; the value (seconds) is unchanged. |
 | **summary** | `string` | optional | Human-readable upgrade summary |
 
 ### Nested Shape: `UpgradePlan.changes[number]`

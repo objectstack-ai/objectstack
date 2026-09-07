@@ -144,7 +144,7 @@
 // held a raw `eslint.lintFiles([file])` since #10449:
 //
 //   $ checkGuardAdoption(repoRoot)             → []
-//   scripts/eslint-stack-headroom.mjs:212      → eslint.lintFiles([file])
+//   `scripts/eslint-stack-headroom.mjs`        → eslint.lintFiles([file])
 //   imported by  check-slot-lookup-ratchet.mjs, check-query-options-…-mjs
 //
 // Nothing was mis-measured by it — `canaryParseFailures()` hands its results

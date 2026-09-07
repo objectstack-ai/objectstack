@@ -23,6 +23,7 @@ import { retiredKey } from '../shared/retired-key';
 import { retryPolicyShape } from '../shared/retry-policy.zod';
 import { strictObject } from '../shared/strict-object';
 import { parseFlowNodeRegions } from './control-flow.zod';
+import { EndConfigSchema } from './builtin-node-config.zod';
 export const FlowNodeAction = z.enum([
   'start',              // Trigger
   'end',                // Return/Stop
@@ -106,7 +107,11 @@ export const FLOW_STRUCTURAL_NODE_TYPES: readonly string[] = ['start', 'end'];
  * Deliberately still open, both re-confirmed here rather than left to be
  * rediscovered: the node `config` slot (above), and
  * {@link FlowVersionHistorySchema} at the foot of this file (wire — see its own
- * note).
+ * note). One type-specific exception to the open slot (#14945): the structural
+ * `end` node has no executor and no descriptor, so the flow parse is the ONLY
+ * door its config passes through — {@link parseEndNodeConfig} applies
+ * {@link EndConfigSchema} to it. Every other type's `config` stays the
+ * executor's to close.
  */
 
 /**
@@ -229,7 +234,43 @@ export const FlowVariableSchema = lazySchema(() => strictObject(
  * any test runs. `flow-region-cycle.test.ts` pins both import orders in eager
  * mode so that failure can never come back silently.
  */
-export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(parseFlowNodeRegions));
+export const FlowNodeSchema = lazySchema(() => flowNodeObject().transform(
+  (node, ctx) => parseEndNodeConfig(parseFlowNodeRegions(node), ctx),
+));
+
+/**
+ * Parse a structural `end` node's `config` against {@link EndConfigSchema}
+ * (#14945), the second half of the node transform above.
+ *
+ * Why here and not at an executor: `end` is in `FLOW_STRUCTURAL_NODE_TYPES` —
+ * the engine terminates the run on reaching it without dispatching to any
+ * executor, so neither of the two doors every other builtin's config passes
+ * through exists for it (no descriptor `configSchema` at `registerFlow()`, no
+ * execute-time `parse()`). Without this pass an `end` node carrying
+ * `{ outcome: 'refused' }` and no `message`, or a `message` no outcome would
+ * ever render, parsed clean and ran as a plain completion. Applied at the NODE
+ * level so an `end` nested in a region is checked exactly like a top-level
+ * one, and the parsed (defaulted) config is written back — `parsed` means
+ * parsed, as for regions. A node with no `config` is left without one: the
+ * default `outcome` is `completed` either way, and materialising a config
+ * block on every plain terminal would be a shape change nobody asked for.
+ *
+ * Issues are re-raised under `['config', …]`, so a flow-level parse reports
+ * them at `nodes[i].config.message` — the same address `formatZodError`
+ * prints for any other node key. A hoisted `function` for the same reason
+ * {@link flowNodeObject} is one (trap 2 above).
+ */
+function parseEndNodeConfig<T extends { type: string; config?: unknown }>(node: T, ctx: z.RefinementCtx): T {
+  if (node.type !== 'end' || node.config === undefined) return node;
+  const parsed = EndConfigSchema.safeParse(node.config);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({ ...issue, path: ['config', ...issue.path] });
+    }
+    return node;
+  }
+  return { ...node, config: parsed.data };
+}
 
 /**
  * The plain `ZodObject` half of {@link FlowNodeSchema} — its declared keys,
@@ -880,6 +921,62 @@ export const FlowSchema = lazySchema(() => strictObject(
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
 
+}).superRefine((flow, ctx) => {
+  // Two hand-authored id spaces, one rule each, one shape — a later occurrence
+  // of an already-declared id raises one `custom` issue anchored on the LATER
+  // element and naming BOTH positions, so the formatted error points at the
+  // one to rename.
+  //
+  // Nodes (#15713): every edge's `source` / `target` names a node by id and
+  // the engine picks out-edges by `source`, so two top-level nodes sharing an
+  // id make every edge from that id ambiguous — whichever node wins is decided
+  // by array order, silently. Only region bodies were checked (`analyzeRegion`
+  // in `control-flow.zod.ts`, at `registerFlow()`); the flow's own top-level
+  // `nodes[]` parsed with the collision intact. This pass judges the top-level
+  // array ALONE: a region's nodes are judged by `analyzeRegion`, and whether the
+  // two spaces are one is a separate decision (#16134), not taken here.
+  const firstNodeIndexById = new Map<string, number>();
+  flow.nodes.forEach((node, index) => {
+    const first = firstNodeIndexById.get(node.id);
+    if (first === undefined) {
+      firstNodeIndexById.set(node.id, index);
+      return;
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: ['nodes', index, 'id'],
+      message:
+        `Duplicate node id \`${node.id}\` — \`nodes[${index}]\` reuses the id already declared by ` +
+        `\`nodes[${first}]\`; every node id in a flow must be unique. Rename one of them: a ` +
+        "node id is the handle every edge's `source`/`target` resolves and a designer, a BPMN " +
+        'export or a flow diff keys on, so a collision routes edges by array order silently ' +
+        'rather than failing loudly.',
+    });
+  });
+
+  // Edges (#14964): every reader of `edges[].id` assumes the ids are unique —
+  // a designer, a BPMN export, a flow diff, any traversal that dedupes by id —
+  // while nothing enforced it: two edges carrying one id parsed, shipped
+  // through green CI twice, and were inert only because the engine keys
+  // out-edges by `source`. The id space is hand-authored, so the next author
+  // picking a "free" id from the sequence cannot tell it is taken.
+  const firstIndexById = new Map<string, number>();
+  flow.edges.forEach((edge, index) => {
+    const first = firstIndexById.get(edge.id);
+    if (first === undefined) {
+      firstIndexById.set(edge.id, index);
+      return;
+    }
+    ctx.addIssue({
+      code: 'custom',
+      path: ['edges', index, 'id'],
+      message:
+        `Duplicate edge id \`${edge.id}\` — \`edges[${index}]\` reuses the id already declared by ` +
+        `\`edges[${first}]\`; every edge id in a flow must be unique. Renumber one of them: an ` +
+        'edge id is the handle a designer, a BPMN export or a flow diff keys on, so a collision ' +
+        'is silently wrong there rather than loudly broken.',
+    });
+  });
 }));
 
 /**

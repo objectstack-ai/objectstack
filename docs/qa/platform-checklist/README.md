@@ -193,7 +193,8 @@ Why this shape:
   census and not a verdict). Adding anchors never reds; ⛔ lowering a floor is
   MAINTAINER-ONLY. ⚠️ Note what a red here reaches: `check:platform-checklist` is not
   CI-wired (see "Operating cadence"), so it reaches whoever runs the gate — **not every
-  PR**. #11730 holds that gap.
+  PR** — plus the daily `platform-checklist-watchdog` workflow, which files or refreshes
+  one issue when the gate is red.
 - **`why` is the debt marker.** A recipe exists because stock fixtures cannot demonstrate
   something — the same discipline as a coverage waiver. Landing the fixture in the
   showcase seeds proper retires the recipe; until then `why` says what is missing and
@@ -351,6 +352,12 @@ checklist drift. It runs on a **manual / periodic cadence** instead. Run
 - **whenever you touch the checklist** — the structural + coverage check catches a
   dangling id or a forgotten `revision` bump in your own edit;
 - **alongside a `checklist-author`** (find gaps) **or `checklist-test`** (execute items).
+
+A red gate does have a reporting channel, and it is not this cadence:
+[`.github/workflows/platform-checklist-watchdog.yml`](../../../.github/workflows/platform-checklist-watchdog.yml)
+runs `pnpm check:platform-checklist` on `main` daily and files or refreshes one issue when
+it is red (⛔ and does nothing when it is green). That closes the visibility half only —
+the cadence above is still how the gate gets run *before* a red can matter.
 
 The trade-off of staying out of CI: a new capability kind or enum value that lands on
 `main` between runs is caught at the **next** manual run, not the moment it merged. The

@@ -189,7 +189,9 @@ installed where" goes through Packages → version history → installations.
 1. `sys_package_version.published_from_project_id` (introduced in v3) is
    removed as a field — provenance lives in `sys_package_version.metadata`
    if needed.
-2. `ProjectArtifactSchema` (`packages/spec/src/cloud/project-artifact.zod.ts`)
+2. `ProjectArtifactSchema` (`packages/spec/src/cloud/project-artifact.zod.ts` — *Path note, 2026-09:
+   the follow-up rename this paragraph anticipates happened; the file is
+   `packages/spec/src/cloud/environment-artifact.zod.ts` today, renamed by `944f18758`, 2026-05-24*)
    is the envelope returned by `GET /cloud/projects/:id/artifact`. The
    route name is kept for BC; the response shape continues to wrap the
    compiled `ObjectStackDefinitionSchema`. The "Project" in the schema
@@ -202,7 +204,7 @@ installed where" goes through Packages → version history → installations.
 
 | Phase | Scope | Status |
 |:---|:---|:---|
-| **A — Drop Project from the protocol** | Remove `packages/spec/src/cloud/project.zod.ts`; update `index.ts`; trim Project tests from `environment.test.ts`; mark `sys_environment_revision` as `@deprecated transitional` | ✅ This commit |
+| **A — Drop Project from the protocol** | Remove `packages/spec/src/cloud/project.zod.ts` (since removed, as this phase prescribes — `d4eed33ab`); update `index.ts`; trim Project tests from `environment.test.ts`; mark `sys_environment_revision` as `@deprecated transitional` | ✅ This commit |
 | **B — Rewire CLI publish onto Package** | `objectstack publish` resolves implicit `sys_package`; calls `POST /cloud/packages/:id/versions`; upserts `sys_package_installation`. Old `/cloud/projects/:envId/metadata` becomes a thin BC shim that internally walks the new path. | Next |
 | **C — Split CLI commands** | `objectstack push` (version only) + `objectstack deploy` (installation upsert) + `objectstack promote` + `objectstack rollback`. `publish` stays as a `push && deploy` alias. | Next+1 |
 | **D — Remove transitional revision table** | After Phase B is shipping and verified: drop `sys_environment_revision` schema, delete `_DEPRECATED` route handlers, wipe table from any seeded control planes. | After C |

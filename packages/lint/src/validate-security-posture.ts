@@ -9,10 +9,10 @@
  * | Rule                                    | Origin                          |
  * |-----------------------------------------|---------------------------------|
  * | security-owd-unset            (error)   | objectui#2348 leave_request 事故 |
- * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum      |
+ * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum — UNPARSED intakes only, see § Intake |
  * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
- * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors          |
+ * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
@@ -26,6 +26,14 @@
  * BUT ONE mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
  * zod enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave)
  * — the lint moves the failure from runtime-deny to author-time fix-it.
+ * `security-anchor-high-privilege` mirrors that gate for the one suggestion a
+ * package can actually declare (`isDefault: true` → the `everyone` anchor,
+ * `suggested-audience-bindings.ts`'s "the only declarable suggestion"); a set
+ * an operator binds to `guest` at install time is a decision ADR-0090 D9
+ * ("a package may suggest bindings … the admin confirms each individually")
+ * puts past authoring, so this rule is not — and cannot be — coverage for an
+ * app-authored anchor set bound to `guest` (#16110). That binding is held by
+ * the runtime's own `describeAnchorForbiddenBits(set, 'guest')` gate instead.
  *
  * The exception INVERTS that argument rather than weakening it.
  * `security-cbp-ambiguous-relation` has no runtime refusal to mirror precisely
@@ -67,9 +75,48 @@
  * Directive #12). Here it also silently downgraded a NAMED rejection into an
  * inert branch — and an inert branch in a security linter reads, to the next
  * author, as a gate that is watching (#4984, #5009, #5017).
+ *
+ * ## Intake — which doors can reach `security-owd-alias` at all (#16109)
+ *
+ * `sharingModel` and `externalSharingModel` are CLOSED enums on `ObjectSchema`
+ * (ADR-0090 D4 / D11): every value `OWD_ALIAS_FIX` names, and every
+ * non-canonical string, is refused by the schema with `invalid_value`. So on
+ * any door that PARSES before the registry runs, this rule's alias branches
+ * are unreachable by construction — the object never arrives. Measured on
+ * this package's dist (the pins live in `authoring-rule-input-tier.test.ts`,
+ * "security-owd-alias reaches the rule only through the unparsed doors"):
+ *
+ * | door                                                        | alias reaches the rule? |
+ * |-------------------------------------------------------------|-------------------------|
+ * | `defineStack(x)` (strict default) — every TS config that     | no — refused at load    |
+ * |   `os init` scaffolds, hence `os validate`/`os build`/       |                         |
+ * |   `os lint` on such a config                                 |                         |
+ * | `os validate` / `os compile` schema step on a RAW config     | no — stops before rules |
+ * | `saveMetaItem` (Studio / REST `/meta` / MCP) — the runtime   | no — 422 before the gate|
+ * |   publish gate runs AFTER `getMetadataTypeSchema('object')`   |                         |
+ * | a pre-D4 stored `sys_metadata` sibling in the gate's universe | no — cancels in the diff|
+ * | **`os lint` on a RAW object-literal config** (never parses;   | **yes — fires**         |
+ * |   `loadConfig` returns the default export as authored, and   |                         |
+ * |   `owd-legacy-read-aliases` is `retiredFromLoadPath`, so      |                         |
+ * |   `normalizeStackInput` leaves the alias intact)              |                         |
+ * | **`defineStack(x, { strict: false })`**                        | **yes — fires**         |
+ * | **`check:doc-security-posture`** (docs gate: statically        | **yes — fires**; its    |
+ * |   evaluated `ObjectSchema.create({...})` literals, no parse)   | self-test asserts it    |
+ * | **`runRuntimeAuthoringRules` / `validateSecurityPosture`      | **yes — fires**         |
+ * |   called directly with an unparsed item** (exported API)      |                         |
+ *
+ * Read the two alias branches below accordingly: they are NOT a second
+ * opinion on the enum, and they are dead on the parsed doors on purpose. They
+ * exist so the UNPARSED doors — `os lint` first, the docs gate second — name
+ * the canonical replacement instead of letting a retired spelling ride to
+ * `os build`, where the enum's generic `invalid_value` is the only message. A
+ * consumer crediting this rule id as live `error` coverage on a
+ * `defineStack`-authored app is crediting the wrong gate: on that door the
+ * credit belongs to the schema's closed enum.
  */
 
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
+import { recordsOf } from './object-graph.js';
 
 export const SECURITY_OWD_UNSET = 'security-owd-unset';
 export const SECURITY_OWD_ALIAS = 'security-owd-alias';
@@ -118,15 +165,6 @@ const OWD_WIDTH: Record<string, number> = {
   public_read: 1,
   public_read_write: 2,
 };
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 /**
  * The object's org-wide default.
@@ -188,11 +226,11 @@ function refOf(def: AnyRec): string | undefined {
 /**
  * The first `master_detail` field on an object, if any — its presence is what
  * makes the object a DETAIL (the child side of a master-detail; ADR-0055).
- * Works for both the array and name-keyed-map field forms (`asArray` folds the
+ * Works for both the array and name-keyed-map field forms (`recordsOf` folds the
  * map key into `name`).
  */
 function firstMasterDetailField(obj: AnyRec): { name: string; parent?: string } | undefined {
-  for (const f of asArray(obj.fields)) {
+  for (const f of recordsOf(obj.fields)) {
     if (f.type === 'master_detail') {
       return { name: String(f.name ?? '?'), parent: refOf(f) };
     }
@@ -259,7 +297,7 @@ const CBP_TIERS: ReadonlyArray<{ label: string; pred: (f: AnyRec) => boolean }> 
  * nothing, and reporting it would be reporting a non-defect.
  */
 function cbpMasterCandidates(obj: AnyRec): { tier: string; candidates: CbpRelation[] } | undefined {
-  const entries = asArray(obj.fields);
+  const entries = recordsOf(obj.fields);
   for (const { label, pred } of CBP_TIERS) {
     const matched = entries.filter((f) => pred(f) && refOf(f));
     if (matched.length > 0) {
@@ -318,8 +356,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   const findings: SecurityFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const objects = asArray(stack.objects);
-  const permissionSets = asArray(stack.permissions);
+  const objects = recordsOf(stack.objects);
+  const permissionSets = recordsOf(stack.permissions);
 
   // ── D1/D4/D11: per-object OWD posture ────────────────────────────────
   for (let i = 0; i < objects.length; i++) {
@@ -346,6 +384,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
             `'public_read', 'public_read_write', or 'controlled_by_parent' (master-detail children).`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
+        // Reachable ONLY through the unparsed doors (`os lint` on a raw
+        // config, `strict: false`, the docs gate, a direct call) — the D4 enum
+        // refuses this value on every parsed door before the registry runs.
+        // See "## Intake" in this module's docblock (#16109).
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_ALIAS,
@@ -462,6 +504,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // external ≤ internal. controlled_by_parent inherits the master's pair.
     if (typeof external === 'string') {
       if (OWD_ALIAS_FIX[external]) {
+        // Same intake note as the `sharingModel` alias branch above: the D11
+        // enum is closed, so only the unparsed doors can deliver this value.
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_ALIAS,
@@ -539,6 +583,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // D5: an isDefault set is a SUGGESTED binding to the `everyone` anchor —
     // hold it to the anchor tier at author time (the runtime gate enforces the
     // same predicate at bind time; this moves the failure to the author).
+    // Scope: `isDefault: true` is the only declarable suggestion today — a set
+    // an operator binds to `guest` at install carries no author-time flag for
+    // this rule to key off, so that binding is outside what a package-time
+    // linter can see and is judged by the bind-time gate alone (#16110).
     if (ps.isDefault === true) {
       const offending = describeAnchorForbiddenBits(ps, 'everyone');
       if (offending) {
@@ -583,7 +631,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
       .map((ps) => (typeof ps.name === 'string' ? ps.name : undefined))
       .filter((n): n is string => !!n),
   );
-  for (const [i, book] of asArray(stack.books).entries()) {
+  for (const [i, book] of recordsOf(stack.books).entries()) {
     const audience = (book as AnyRec).audience;
     if (!audience || typeof audience !== 'object') continue;
     const setName = (audience as AnyRec).permissionSet;
@@ -725,7 +773,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   const GRANT_SEED_OBJECTS = new Set(['sys_user_position', 'sys_user_permission_set']);
   const DELEGATION_SEED_OBJECTS = new Set(['sys_user_position']);
   const nowMs = opts?.nowMs ?? Date.now();
-  for (const [i, seed] of asArray(stack.data).entries()) {
+  for (const [i, seed] of recordsOf(stack.data).entries()) {
     const seedObject = typeof seed.object === 'string' ? seed.object : '';
     if (!GRANT_SEED_OBJECTS.has(seedObject)) continue;
     const records = Array.isArray(seed.records) ? (seed.records as AnyRec[]) : [];
@@ -821,8 +869,8 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
   if (!stack || typeof stack !== 'object') return findings;
 
-  const objects = asArray(stack.objects);
-  const permissionSets = asArray(stack.permissions);
+  const objects = recordsOf(stack.objects);
+  const permissionSets = recordsOf(stack.permissions);
 
   const flagRole = (kind: string, name: unknown, label: unknown, where: string, path: string) => {
     if (identifierHasRoleToken(name)) {
@@ -853,10 +901,10 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
     if (!obj || typeof obj !== 'object' || isSystemObject(obj)) continue;
     const objName = typeof obj.name === 'string' ? obj.name : `(object ${i})`;
     flagRole('object', obj.name, obj.label, `object "${objName}"`, `objects[${i}].name`);
-    for (const f of asArray(obj.fields)) {
+    for (const f of recordsOf(obj.fields)) {
       flagRole('field', f.name, f.label, `field "${objName}.${String(f.name ?? '?')}"`, `objects[${i}].fields.${String(f.name ?? '?')}.name`);
     }
-    for (const [ai, action] of asArray(obj.actions).entries()) {
+    for (const [ai, action] of recordsOf(obj.actions).entries()) {
       flagRole('action', action.name, action.label, `action "${objName}.${String(action.name ?? '?')}"`, `objects[${i}].actions[${ai}].name`);
     }
   }
@@ -865,13 +913,13 @@ export function validateSecurityRoleWord(stack: AnyRec): SecurityFinding[] {
     if (!ps || typeof ps !== 'object') continue;
     flagRole('permission set', ps.name, ps.label, `permission set "${String(ps.name ?? i)}"`, `permissions[${i}].name`);
   }
-  for (const [i, pos] of asArray(stack.positions).entries()) {
+  for (const [i, pos] of recordsOf(stack.positions).entries()) {
     flagRole('position', pos.name, pos.label, `position "${String(pos.name ?? i)}"`, `positions[${i}].name`);
   }
-  for (const [i, app] of asArray(stack.apps).entries()) {
+  for (const [i, app] of recordsOf(stack.apps).entries()) {
     flagRole('app', app.name, app.label, `app "${String(app.name ?? i)}"`, `apps[${i}].name`);
   }
-  for (const [i, book] of asArray(stack.books).entries()) {
+  for (const [i, book] of recordsOf(stack.books).entries()) {
     flagRole('book', book.name, book.label, `book "${String(book.name ?? i)}"`, `books[${i}].name`);
   }
 

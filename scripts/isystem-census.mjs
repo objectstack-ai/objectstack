@@ -75,7 +75,8 @@ import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { parseSourceFile } from './ts-parse.mjs';

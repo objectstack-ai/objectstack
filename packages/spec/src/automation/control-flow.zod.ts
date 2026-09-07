@@ -314,7 +314,7 @@ export const TryCatchConfigSchema = lazySchema(() => strictObject(
     try: FlowRegionSchema.describe('Protected region'),
     catch: FlowRegionSchema.optional().describe('Handler region run when the try region fails'),
     /** Variable the caught error is bound to inside the catch region. */
-    errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, and `iteration` / `item` when the failure happened inside a loop body'),
+    errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, `code` when the failing node carried a platform-classified error code (ADR-0112 — branch on `$error.code` to tell "the row is already there" from "the store is down"), and `iteration` / `item` when the failure happened inside a loop body'),
     retry: RetryPolicySchema.optional().describe('Optional retry policy for the try region'),
   },
 ));
@@ -336,6 +336,21 @@ export type TryCatchConfigParsed = z.infer<typeof TryCatchConfigSchema>;
  * try/catch outside any loop binds neither, so their absence means "not in a
  * loop", never "row unknown".
  *
+ * `code` (#14419 / #14954) is the platform-classified error code (ADR-0112)
+ * the failing node's own result carried — `create_record`'s `DUPLICATE_RECORD`
+ * is the founding case — bound so a catch region can tell "the row is already
+ * there" from "the store is down" by branching on `$error.code` instead of
+ * parsing `message`. Present only when a classified code was carried, so its
+ * absence means "no classified code", never "nothing failed". It is
+ * deliberately an OPEN `string`, not `StandardErrorCode` and not the ledger
+ * union: ADR-0112 D3/D4 with the #9106 amendment make the code vocabulary
+ * `StandardErrorCode` ∪ registered ledger codes ∪ tenant-authored codes, and
+ * `NodeExecutor` is third-party-registrable, so a closed type here would be
+ * false the moment anyone registers an executor that throws its own code.
+ * The closed-at-every-door rule governs `ApiErrorSchema.code` at an HTTP
+ * door; this value never crosses one — it is bound in-process, before any
+ * demotion to `declaredCode` could apply.
+ *
  * A plain `z.object`, closed by convention rather than `strictObject`: this is
  * a value the engine assembles, not a surface an author writes, so the
  * unknown-key prescription an authoring surface owes has nobody to address.
@@ -345,6 +360,8 @@ export type TryCatchConfigParsed = z.infer<typeof TryCatchConfigSchema>;
 export const TryCatchErrorValueSchema = lazySchema(() => z.object({
   nodeId: z.string().describe('Node the failure is attributed to'),
   message: z.string().describe('Message of the error that ended the try region, after any retries'),
+  code: z.string().optional()
+    .describe('Platform-classified error code (ADR-0112) of the failure that ended the try region, e.g. `create_record`\'s `DUPLICATE_RECORD`; present only when the failing node\'s own result carried one, so a catch region branching on `$error.code` treats "unset" as "no classified code", never as "nothing failed". An open `string`, not a closed enum: the vocabulary is `StandardErrorCode` plus registered ledger codes plus tenant-authored codes, and third-party node executors bind their own'),
   iteration: z.number().int().min(0).optional()
     .describe('Zero-based iteration of the enclosing loop when the failure happened inside a loop body; absent outside a loop'),
   item: z.unknown().optional()

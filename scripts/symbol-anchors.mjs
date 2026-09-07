@@ -32,7 +32,9 @@
  * 16,000-line file has an expected lifetime measured in days.
  *
  * ⭐ And the rot can hide a SEMANTIC INVERSION. ADR-0113 cited
- * `sql-driver.ts:4901` for `if (field.required) col.notNullable()`; the
+ * `packages/drivers/driver-sql/src/sql-driver.ts` (line 4901 as the ADR wrote
+ * it -- a dated reading, ⛔ not a pointer) for `if (field.required)
+ * col.notNullable()`; the
  * mechanism moved and now keys off `storage.notNull` -- the opposite predicate.
  * With the anchor rotted, the ADR's pre-decision Context row reads to a fresh
  * reader as a description of today. That is carded separately as #14193 and is
@@ -70,15 +72,21 @@
  *
  * An anchor is written inside a markdown code span. Three forms, and no others:
  *
- *     `path/to/file.ts#symbolName`     SYMBOL anchor    -- the default
- *     `path/to/file.ts`                FILE-LEVEL anchor
- *     `repo:path/to/file.ts#symbol`    CROSS-REPO anchor (e.g. `objectui:...`)
+ *     `<dir>/<file>.ts#<symbol>`       SYMBOL anchor    -- the default
+ *     `<dir>/<file>.ts`                FILE-LEVEL anchor
+ *     `<repo>:<dir>/<file>.ts#<sym>`   CROSS-REPO anchor (e.g. `objectui:...`)
+ *
+ * ⚠️ Those placeholders are deliberately NOT path-shaped, and that is the same
+ * discipline the `dispatch-gates: no-path-population` note further down states
+ * for `ANCHOR_GRAMMAR`: an illustration written as a real-looking path is read
+ * by a resolver as an anchor, and then reported as pointing at a file this tree
+ * does not have. A gate header that teaches the grammar must not fail it.
  *
  * plus a continuation form, so a sentence naming several symbols in one file
  * does not repeat the path -- it inherits the path from the anchor before it on
- * the SAME line:
+ * the SAME line. This module's own exports, so the example is itself checked:
  *
- *     (`packages/objectql/src/engine.ts#registerApp`, `#installPackage`)
+ *     (`scripts/symbol-anchors.mjs#extractAnchors`, `#defineCorpus`)
  *
  * Rules the forms exist to satisfy:
  *
@@ -90,8 +98,11 @@
  *   (c) READS NATURALLY. `#symbol` is the fragment syntax a reader already
  *       knows from URLs, and it survives copy-paste into a GitHub link.
  *
- * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `file.ts:4901`, `file.ts:341-400`,
- * `file.ts:459–463` (en dash) and a bare continuation `:2933` are all findings.
+ * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `<file>.ts:4901`, `<file>.ts:341-400`,
+ * `<file>.ts:459–463` (en dash) and a bare continuation -- a backticked `:`
+ * followed by a line spec, `2933` -- are all findings. ⚠️ The angle brackets
+ * are deliberate: this file is itself inside the `scripts/**` corpus, so an
+ * illustration written path-shaped would be a citation of its own.
  *
  * ### The one escape hatch, and who may use it
  *
@@ -160,6 +171,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { blank, scanSource } from './js-comment-mask.mjs';
 
 /* The grammar, as a string, so a gate can print it in its own failure text
  * instead of restating it and drifting from this file. */
@@ -202,10 +214,10 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
 /* ⛔ The forms the migration deleted. Matched on the SAME text the anchor
  * extractor sees, so a line number cannot hide behind a spelling the extractor
  * normalises away. Both the full form and the bare continuation. */
-/* ⭐ A LINE SPEC is not just `:123`, and assuming it was is how a gate
- * false-greens. The #13556 corpus spells one position NINE ways, and the
- * census's own extractor missed the comma forms exactly as a naive rule here
- * would:
+/* ⭐ A LINE SPEC is not just a colon and one run of digits, and assuming it was
+ * is how a gate false-greens. The #13556 corpus spells one position NINE ways,
+ * and the census's own extractor missed the comma forms exactly as a naive rule
+ * here would:
  *
  *     :4901        :341-400      :459–463 (en dash)     :2214+
  *     :610,1028    :13,346-389   :29-39,147-152         :2956/2991
@@ -217,18 +229,19 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
  * version matched only a span that was EXACTLY an anchor, and it called a
  * corpus still carrying rot clean — three ways at once: a bare anchor in
  * running prose, an anchor sharing a span with other text
- * (`` `Builder.io SDK: packages/sdks/src/types/builder-block.ts:42` ``), and
+ * (`` `Builder.io SDK: <dir>/<file>.ts:42` ``), and
  * that slash list. A line number is rot wherever it is written; the only thing
  * excluded is a FENCED block, which is quoted material, not an anchor. */
 const LINE_SPEC = '\\d+(?:\\s*[-–—]\\s*\\d+)?(?:\\s*[,/]\\s*\\d+(?:\\s*[-–—]\\s*\\d+)?)*\\+?';
 const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + '):(' + LINE_SPEC + ')(?![\\w-])', 'g');
 const LINE_CONTINUATION = new RegExp('`\\s*[:,]\\s*(' + LINE_SPEC + ')`', 'g');
 
-/* `// packages/foo/bar.ts:378` — a comment that is nothing but a path. */
+/* `// <dir>/<file>.ts:378` — a comment that is nothing but a path. */
 const FENCED_HEADER = new RegExp('^\\s*(?://|#|\\*|/\\*)\\s*' + PATHISH + ':\\d');
 
 /* ⭐ A ninth spelling, and the census counted none of them: a bare backticked
- * number, tilde-prefixed — `` ~`326` `` for "about line 326". It carries no
+ * number, tilde-prefixed — a `~` then a backticked line number, `` ~`NNN` ``,
+ * written for "about line 326". It carries no
  * path, so it cannot be resolved to anything; ADR-0056 alone held 13.
  *
  * ⚠️ Only the TILDE form is judged. A bare `` `403` `` or `` `4096` `` is an
@@ -363,7 +376,7 @@ export function extractAnchors(markdown) {
      * and the census counted those among its 343 — so skipping fences wholesale
      * would leave five rotted anchors behind. Everything else in a fence is
      * quoted material (sample code, CI output) and is NOT judged: an example
-     * that happens to contain `foo.ts:12` is not an anchor. */
+     * that happens to contain `<file>.ts:12` is not an anchor. */
     if (inFence) {
       if (!FENCED_HEADER.test(text)) return;
       for (const m of text.matchAll(LINE_ANCHOR)) {
@@ -427,6 +440,45 @@ export function extractAnchors(markdown) {
   return { anchors, lineAnchors };
 }
 
+/* ──────────────────── document-side: the doc PROJECTION ────────────────── */
+
+/**
+ * The COMMENT PROSE of a JavaScript-shaped source, with every other character
+ * blanked to a space and every newline kept -- so a finding's LINE NUMBER is
+ * still the line number in the real file.
+ *
+ * ## Why a corpus needs this at all (#15765, measured)
+ *
+ * `extractAnchors` is line-based and knows nothing about syntax: hand it a
+ * `.mjs` file and it reads comment prose EXACTLY as it reads a paragraph of an
+ * ADR -- that half needed no change and the self-test pins it per comment form.
+ * What it also reads is the CODE, and that is the half that made a raw `.mjs`
+ * corpus unusable. Measured over the 216 tracked `scripts/**` `.mjs` files on
+ * `5315098df`: 251 live line citations raw against 128 through this projection.
+ * The 123 that vanish are not rot -- they are a gate's own self-test FIXTURES,
+ * string literals like `'<file>.ts:2'` and `'<dir>/<file>.mdx:1'` written to
+ * provoke that gate's own line-reporting. Judging those would red a gate for
+ * testing itself, which is the fabrication direction
+ * `scripts/js-comment-mask.mjs` exists to close.
+ *
+ * So the separator is the shared one, never a private stripper: this asks
+ * `scripts/js-comment-mask.mjs#scanSource` the same question every other
+ * source-scanning gate asks it, and projects the answer the other way round
+ * from `scripts/js-comment-mask.mjs#maskComments` -- that one keeps the code
+ * and blanks the prose; a doc corpus wants the prose and blanks the code.
+ *
+ * ⚠️ BLANK, NEVER DELETE, and it is `scripts/js-comment-mask.mjs#blank` that
+ * guarantees it: a projection that dropped the code lines would report every
+ * finding against a line number that does not exist in the file the author
+ * opens.
+ */
+export function commentProse(source) {
+  const { comment } = scanSource(source);
+  const code = new Uint8Array(comment.length);
+  for (let i = 0; i < comment.length; i += 1) code[i] = comment[i] ? 0 : 1;
+  return blank(source, code);
+}
+
 /* ───────────────────────── corpus registration ─────────────────────────── */
 
 /**
@@ -436,10 +488,19 @@ export function extractAnchors(markdown) {
  * lives above and is shared.
  */
 export function defineCorpus(spec) {
-  const { id, label, docRoots, docPattern = /\.mdx?$/, crossRepos = {}, checkBarePaths = false } = spec;
+  const {
+    id, label, docRoots, docPattern = /\.mdx?$/, crossRepos = {}, checkBarePaths = false,
+    docProjection = null, judgeUntrackedLineAnchors = true,
+  } = spec;
   if (!id || !label) throw new Error('defineCorpus: `id` and `label` are required');
   if (!Array.isArray(docRoots) || docRoots.length === 0) throw new Error('defineCorpus: `docRoots` must be a non-empty array');
-  return { id, label, docRoots, docPattern, crossRepos, checkBarePaths };
+  /* A projection that is present but not callable would be silently skipped by
+   * an `if (corpus.docProjection)` guard, and the corpus would sweep raw source
+   * while its registration reads as though it did not. Refused loudly instead. */
+  if (docProjection !== null && typeof docProjection !== 'function') {
+    throw new Error('defineCorpus: `docProjection` must be a function or null');
+  }
+  return { id, label, docRoots, docPattern, crossRepos, checkBarePaths, docProjection, judgeUntrackedLineAnchors };
 }
 
 function walk(dir, pattern, out = []) {
@@ -468,7 +529,26 @@ function trackedFiles(root) {
 }
 
 /**
- * Sweep one corpus. Returns findings and the counts a report needs.
+ * The SHAPE of a declined citation -- why no resolver could bind it. Kept here
+ * rather than in a corpus so every corpus that waives citations reports the
+ * same four words, and a residual list can be grouped without re-deriving the
+ * classification from the raw text.
+ *
+ * Order is load-bearing: a continuation and a tilde form BOTH inherit whatever
+ * path preceded them on the line, so they must be named by how they were
+ * written, never by the path they borrowed.
+ */
+export function declinedShape(la) {
+  if (la.tilde) return 'tilde';
+  if (la.continuation) return 'continuation';
+  if (la.path?.includes('/')) return 'directory-qualified';
+  return 'bare-filename';
+}
+
+/**
+ * Sweep one corpus. Returns findings, the counts a report needs, and the
+ * citations a corpus declined to judge (`declined`, empty unless the corpus
+ * sets `judgeUntrackedLineAnchors: false`).
  *
  * Finding kinds:
  *   line-anchor        a `path:NNN` survived the migration                (RED)
@@ -480,7 +560,8 @@ function trackedFiles(root) {
 export function sweepCorpus(corpus, root = process.cwd()) {
   const tracked = trackedFiles(root);
   const findings = [];
-  const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0 };
+  const declined = [];
+  const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0, unresolvableLineCitation: 0 };
   const sourceCache = new Map();
   const readTarget = (p) => {
     if (!sourceCache.has(p)) sourceCache.set(p, readFileSync(join(root, p), 'utf8'));
@@ -491,10 +572,42 @@ export function sweepCorpus(corpus, root = process.cwd()) {
   for (const abs of docs) {
     const rel = relative(root, abs);
     counts.docs += 1;
-    const { anchors, lineAnchors } = extractAnchors(readFileSync(abs, 'utf8'));
+    const rawDoc = readFileSync(abs, 'utf8');
+    const { anchors, lineAnchors } = extractAnchors(corpus.docProjection ? corpus.docProjection(rawDoc) : rawDoc);
 
     for (const la of lineAnchors) {
       if (la.exempt && EXEMPT_CLASSES.includes(la.exempt)) { counts.exempt += 1; continue; }
+      /* A corpus may decline to judge a citation that names NO FILE IN THIS
+       * TREE, and `docs/adr/**` leaves this ON while a `scripts/**` gate-header
+       * corpus turns it OFF. That is the same call `checkBarePaths` makes one
+       * paragraph down, on the same evidence shape, and it is a SCOPE
+       * declaration, never a softening of the grammar: a citation this gate
+       * cannot resolve either way is one it cannot tell an author how to fix,
+       * and a gate whose only remedy is "stop writing that" is the
+       * permanently-red gate this repo retired.
+       *
+       * Measured on `scripts/symbol-anchors.mjs` over `scripts/**` `.mjs`
+       * comment prose, on the date recorded in `check-scripts-symbol-anchors`'s
+       * own census constant: 128 live citations in all, of which 32 named a
+       * tracked file and 96 did not -- bare filenames (an abbreviation inside a
+       * census table that no resolver can bind to one of this tree's several
+       * files of that name), continuations inheriting no path of their own,
+       * directory-qualified paths that are illustrations or sibling-repo files,
+       * and one tilde form. That population is a real defect class and was
+       * recorded as a follow-up (#15809), exactly as the 1,056 bare paths under
+       * `checkBarePaths` were -- but it is not the cross-file rot #15765
+       * measured, and folding it in would bury this gate's signal under a
+       * cleanup nobody ruled on.
+       *
+       * ⭐ Declining to JUDGE is not declining to SEE. Every declined citation
+       * is counted AND recorded in `declined`, so a corpus can enumerate what
+       * it waived (`--list-unresolvable`) and the residual stays a list rather
+       * than a number nobody can act on. */
+      if (!corpus.judgeUntrackedLineAnchors && !tracked.has(la.path ?? '')) {
+        counts.unresolvableLineCitation += 1;
+        declined.push({ doc: rel, line: la.line, raw: la.raw, path: la.path ?? null, shape: declinedShape(la) });
+        continue;
+      }
       /* A marker whose CLASS is unrecognised is its own finding, never a
        * silent pass and never an ordinary line anchor: a typo in the class
        * must not be a quiet way to switch this gate off, and it must not be
@@ -565,7 +678,7 @@ export function sweepCorpus(corpus, root = process.cwd()) {
       counts[cls] += 1;
     }
   }
-  return { findings, counts };
+  return { findings, counts, declined };
 }
 
 export function formatFindings(findings) {
@@ -598,8 +711,9 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+// 63 → 67 when `declinedShape` gained a case per arm (#15809).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 51,
+  'symbol-anchors self-test': 67,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -756,6 +870,66 @@ export function selfTest() {
   let threw = false;
   try { defineCorpus({ id: 'x', label: 'x', docRoots: [] }); } catch { threw = true; }
   check(threw, 'defineCorpus must refuse an empty docRoots');
+
+  // 9. ⭐ The doc PROJECTION (#15765). A `.mjs` corpus hands `extractAnchors`
+  //    comment prose and nothing else, so each comment FORM is provoked by
+  //    name, and the negative -- a citation living in a STRING LITERAL, which
+  //    is a gate's own test fixture and not a doc citation -- is provoked
+  //    beside them. A projection that kept the code would red a gate for
+  //    testing itself; one that dropped the code lines would report every
+  //    finding against a line number the author cannot open.
+  const mjs = [
+    'import { x } from "y";',                                   // 1  code
+    '// A line comment cites packages/a/line.ts:11 here.',      // 2  `//`
+    '/* A block comment cites packages/a/block.ts:22 here. */', // 3  `/* */`
+    '/**',                                                      // 4  docblock
+    ' * A docblock cites packages/a/doc.ts:33 and anchors',     // 5
+    ' * `packages/a/doc.ts#realThing` properly.',               // 6
+    ' */',                                                      // 7
+    "const fixture = 'packages/a/string.ts:44';",               // 8  ⛔ negative
+    'const tpl = `packages/a/template.ts:55`;',                 // 9  ⛔ negative
+  ].join('\n');
+  const projected = commentProse(mjs);
+  const pj = extractAnchors(projected);
+  const pjRaw = pj.lineAnchors.map((l) => l.raw).join(' ');
+  check(pj.lineAnchors.some((l) => l.raw === 'packages/a/line.ts:11'), `a citation in a \`//\` comment must be read, got: ${pjRaw}`);
+  check(pj.lineAnchors.some((l) => l.raw === 'packages/a/block.ts:22'), `a citation in a \`/* */\` block comment must be read, got: ${pjRaw}`);
+  check(pj.lineAnchors.some((l) => l.raw === 'packages/a/doc.ts:33'), `a citation in a docblock must be read, got: ${pjRaw}`);
+  check(pj.anchors.some((a) => a.symbol === 'realThing' && a.path === 'packages/a/doc.ts'), 'a SYMBOL anchor written in a comment must be extracted, not only the rot');
+  // ⛔ The negatives, one per literal form. A gate's fixtures are code.
+  check(!pj.lineAnchors.some((l) => l.raw.includes('string.ts')), `a citation inside a STRING LITERAL is not a doc citation, got: ${pjRaw}`);
+  check(!pj.lineAnchors.some((l) => l.raw.includes('template.ts')), `a citation inside a TEMPLATE literal is not a doc citation, got: ${pjRaw}`);
+  // ...and the raw source proves the projection is what makes the difference:
+  // without it the extractor reads the fixtures too, which is the whole reason
+  // a `.mjs` corpus needs one.
+  const unprojected = extractAnchors(mjs).lineAnchors.map((l) => l.raw);
+  check(unprojected.some((r) => r.includes('string.ts')) && unprojected.some((r) => r.includes('template.ts')),
+    'without the projection the extractor DOES read string fixtures — the control that makes the two negatives above mean something');
+  // LINE NUMBERS SURVIVE. Blanking, not deleting: the docblock citation is on
+  // source line 5 and must be reported there.
+  check(pj.lineAnchors.find((l) => l.raw === 'packages/a/doc.ts:33')?.line === 5,
+    'the projection must preserve line numbers — a finding is reported against the line the author opens');
+  check(projected.split('\n').length === mjs.split('\n').length, 'the projection must preserve the line COUNT');
+
+  // 10. The corpus knobs the projection comes with.
+  check(defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).judgeUntrackedLineAnchors === true,
+    'judging every line citation is the DEFAULT — an existing corpus must not be narrowed by adding this option');
+  check(defineCorpus({ id: 'x', label: 'x', docRoots: ['a'] }).docProjection === null, 'no projection is the default');
+  let projThrew = false;
+  try { defineCorpus({ id: 'x', label: 'x', docRoots: ['a'], docProjection: 'commentProse' }); } catch { projThrew = true; }
+  check(projThrew, 'defineCorpus must refuse a docProjection that is not callable — a skipped projection sweeps raw source while reading as though it did not');
+
+  // 11. ⭐ The declined SHAPE, whose ordering is the whole rule (#15809): a
+  //     continuation and a tilde form inherit whatever path preceded them on
+  //     the line, so classifying by the path first would file them under the
+  //     borrowed path and a residual list would name a file the author never
+  //     wrote. All four arms, in one case each.
+  check(declinedShape({ tilde: true, path: 'a/b.ts' }) === 'tilde',
+    'a tilde form is a TILDE even when a path preceded it on the line — it borrowed that path, it did not cite it');
+  check(declinedShape({ continuation: true, path: 'a/b.ts' }) === 'continuation',
+    'a continuation is a CONTINUATION even when a path preceded it on the line');
+  check(declinedShape({ path: 'a/b.ts' }) === 'directory-qualified', 'a path with a slash is directory-qualified');
+  check(declinedShape({ path: 'b.ts' }) === 'bare-filename', 'a path with no slash is a bare filename — the shape no resolver can bind');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //

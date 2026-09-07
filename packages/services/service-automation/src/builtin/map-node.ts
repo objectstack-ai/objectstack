@@ -24,7 +24,12 @@ const MAX_MAP_ITEMS = 10_000;
  * turn, then continue.*
  *
  * Mechanism (no token tree — one program counter, ADR-0037):
- *  - The node tracks its progress in flow variables (`${nodeId}.$mapState`).
+ *  - The node tracks its progress in flow variables (`${nodeId}.$mapState`),
+ *    for the duration of ONE execution of the collection. The key is written
+ *    when an item pauses (the durable-pause path re-reads it on re-entry) and
+ *    removed once the collection is exhausted — a region runs in the
+ *    ENCLOSING scope, so state that outlived the node was read back as
+ *    progress by the next entry to it (#15616).
  *  - For item *k* it invokes `config.flowName` via `engine.execute`, tagging the
  *    child run with `$parentRunId` + `$parentMapNode` so the engine knows to
  *    bubble the child's completion **back into this node** (not past it).
@@ -208,8 +213,29 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         if (child.summary?.unmeasured) unmeasured = true;
       }
 
-      // All items done.
-      variables.set(stateKey, state);
+      // All items done — the collection is exhausted, so this is the node's
+      // LAST entry for it. Drop the progress state: its lifetime is one
+      // execution of the collection, not the enclosing scope's (#15616).
+      //
+      // A structured region — a `loop` body, a `try_catch` / `parallel` branch —
+      // runs in the ENCLOSING variable scope by construction (`runRegion` is
+      // handed the caller's map, so the iterator variable and body mutations
+      // stay visible). State left behind here therefore outlived this node's own
+      // execution and was read back as progress by the NEXT entry to it: a `map`
+      // in a `loop` body ran its collection on iteration 1 and found
+      // `started === collection.length` on every iteration after — 5 iterations
+      // x 2 items produced 2 child runs, every map step reported `success`, and
+      // the run finished `completed` with `failed = 0`. Silent partial work,
+      // invisible to the very counter built to expose the class (#14456).
+      //
+      // ⛔ NOT the `set` in the suspend arm above, and ⛔ not an unconditional
+      // delete on entry. That write IS the durable-pause mechanism:
+      // `resumeInternal` rebuilds the scope with
+      // `new Map(Object.entries(run.variables))` from the snapshot taken at the
+      // suspend, so it is the ONLY write to this key a resume can ever read.
+      // Remove it and a resumed map restarts at item 0, re-running every item
+      // that already ran. Two writes, two lifetimes — only this one is terminal.
+      variables.delete(stateKey);
       if (outVar) variables.set(outVar, state.results);
       return {
         success: true,

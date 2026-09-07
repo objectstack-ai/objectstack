@@ -306,8 +306,36 @@ export function printWarning(msg: string) {
   console.log(chalk.yellow(`  ⚠ ${msg}`));
 }
 
+/** The `  ✗ <msg>` line both error printers render — one glyph, one source. */
+function errorLine(msg: string): string {
+  return chalk.red(`  ✗ ${msg}`);
+}
+
 export function printError(msg: string) {
-  console.log(chalk.red(`  ✗ ${msg}`));
+  console.log(errorLine(msg));
+}
+
+/**
+ * `printError`'s line, on **stderr**.
+ *
+ * For a diagnostic printed by code that CANNOT see whether the run is a
+ * `--json` run. `printError` writes to stdout, which is correct for a command
+ * rendering its own text face and wrong for a shared helper: stdout is what
+ * `--json` reserves for the machine (`utils/json-stdout.ts`), and a helper
+ * called by both faces has no flag to branch on.
+ *
+ * `resolveConfigPath()` is the measured case (#15547). It printed this line
+ * plus two hints to stdout and then `process.exit(1)`, so ten `--json` faces
+ * answered a missing config file with human text on the machine's channel and
+ * an empty stderr — bytes that `JSON.parse` rejects, and no `catch` anywhere
+ * downstream could intervene because nothing was thrown.
+ *
+ * ⚠️ Not a general replacement for `printError`. A command that has already
+ * decided it is rendering the text face should keep writing to stdout; this is
+ * for the shared paths that cannot make that decision.
+ */
+export function printErrorToStderr(msg: string) {
+  console.error(errorLine(msg));
 }
 
 export function printInfo(msg: string) {

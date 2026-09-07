@@ -150,7 +150,10 @@ describe('formatRunSummaryLine', () => {
         expect(line).not.toContain('\n');
         expect(line).toBe(
             '[automation] run flow=stalled_deal_sweep run=run_1 status=completed durationMs=42 ' +
-            'selected=30 acted=0 skipped=30 gate=gate->nudge:30',
+            // `failed=0` rides between `skipped` and the optional tokens
+            // (#14456): a summary this fold produced always carries the count,
+            // so the always-present prefix stays greppable as one unit.
+            'selected=30 acted=0 skipped=30 failed=0 gate=gate->nudge:30',
         );
     });
 });
@@ -891,7 +894,7 @@ describe('uncountable effects (#4354 follow-up)', () => {
         );
         // The line an operator greps for `acted=0` must carry the qualifier that
         // says the zero is incomplete.
-        expect(murky).toContain('selected=9 acted=0 skipped=0 unmeasured=1');
+        expect(murky).toContain('selected=9 acted=0 skipped=0 failed=0 unmeasured=1');
     });
 
     it('an http node reports by METHOD — the one case the platform CAN count', async () => {
@@ -1019,7 +1022,14 @@ describe('uncountable effects (#4354 follow-up)', () => {
         expect(res.summary).toMatchObject({ acted: 0, unmeasured: 1 });
     });
 
-    it('persists as a queryable column, null when never tracked', async () => {
+    /**
+     * ONE engine double for the three `recordTerminal` pins in this describe,
+     * rather than one apiece. `check:engine-double-contract` counts unguarded
+     * doubles PER FILE against a shrink-only baseline, so three copies of the
+     * same four members would have been three new ledger rows for one fact —
+     * and the gate's own advice is to reuse the double the file already has.
+     */
+    function recordingRunStore(): { store: ObjectStoreSuspendedRunStore; rows: any[] } {
         const rows: any[] = [];
         const engine: any = {
             async find() { return []; },
@@ -1027,7 +1037,11 @@ describe('uncountable effects (#4354 follow-up)', () => {
             async update() { return 1; },
             async delete() { return 1; },
         };
-        const store = new ObjectStoreSuspendedRunStore(engine);
+        return { store: new ObjectStoreSuspendedRunStore(engine), rows };
+    }
+
+    it('persists as a queryable column, null when never tracked', async () => {
+        const { store, rows } = recordingRunStore();
         await store.recordTerminal({
             runId: 'r1', flowName: 'f', status: 'completed', startedAt: AT,
             summary: { selected: 9, acted: 0, skipped: 0, unmeasured: 3, nodes: [], gates: [] },
@@ -1036,6 +1050,50 @@ describe('uncountable effects (#4354 follow-up)', () => {
 
         expect(rows[0].unmeasured_count).toBe(3);
         expect(rows[1].unmeasured_count).toBeNull(); // not measured ≠ measured zero
+    });
+
+    // #14456 — the run-level failure count rides in `summary_json` with the
+    // rest of the fold. It gets no column of its own here: `selected/acted/
+    // skipped/unmeasured` are columns because the broken-sweep FILTER queries
+    // them, and a contained failure is read from the run row, not alerted on
+    // by that filter.
+    it('carries the #14456 failure count through the persisted summary, absent when never tracked', async () => {
+        const { store, rows } = recordingRunStore();
+        await store.recordTerminal({
+            runId: 'r1', flowName: 'f', status: 'completed', startedAt: AT,
+            summary: summarizeRun([
+                step({ nodeId: 'q', nodeType: 'get_record', metrics: { selected: 5 } }),
+                step({ nodeId: 'notify', nodeType: 'notify', status: 'failure' }),
+            ]),
+        });
+        // A row written before the count existed — no `failed`, and nothing
+        // may invent one for it.
+        await store.recordTerminal({
+            runId: 'r2', flowName: 'f', status: 'completed', startedAt: AT,
+            summary: { selected: 5, acted: 9, skipped: 0, unmeasured: 0, nodes: [], gates: [] },
+        });
+
+        expect(JSON.parse(rows[0].summary_json).failed).toBe(1);
+        expect('failed' in JSON.parse(rows[1].summary_json)).toBe(false);
+    });
+
+    it('keeps the failure count when the detail is dropped for size', async () => {
+        const { store, rows } = recordingRunStore();
+        // A pathological flow: enough nodes to blow the 16 KiB summary cap, so
+        // the per-node `failures` this count folds is exactly what gets
+        // dropped. The total has to survive the drop or the compacted row goes
+        // from "some rows failed" to silence.
+        const many = Array.from({ length: 600 }, (_, i) =>
+            step({ nodeId: `n_${i}_padding_to_blow_the_summary_cap`, nodeType: 'assignment', status: i % 3 === 0 ? 'failure' : 'success' }),
+        );
+        await store.recordTerminal({
+            runId: 'r3', flowName: 'f', status: 'completed', startedAt: AT, summary: summarizeRun(many),
+        });
+
+        const stored = JSON.parse(rows[0].summary_json);
+        expect(stored.detailOmitted).toBe(true);
+        expect(stored.nodes).toEqual([]);
+        expect(stored.failed).toBe(200);
     });
 });
 

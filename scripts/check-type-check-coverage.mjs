@@ -350,8 +350,10 @@
 //               about what that costs in practice.
 //
 //               What drifts is not only the NUMBER but the note's COMPOSITION:
-//               service-automation's note named `engine.test.ts:2547/2577` as
-//               the whole debt while three TS2341 in a different file, from an
+//               service-automation's note named its
+//               `packages/services/service-automation/src/engine.test.ts`
+//               (lines 2547/2577 as measured) as the whole debt while three
+//               TS2341 in a different file, from an
 //               unrelated PR, had joined it. So when this invariant makes you
 //               raise a count, rewrite the note to match what the pile is now
 //               made of -- and when the delta cannot be attributed, say so in
@@ -522,7 +524,7 @@
 // the exclusion from tsconfig.json and delete the entry here in the same PR.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix, resolve } from 'node:path';
 import { getHeapStatistics } from 'node:v8';
@@ -1033,6 +1035,59 @@ const EXEMPT = {
 // So the shrink-only guarantee did not loosen here; it moved to a strictly
 // sharper instrument, one that also reddens on a wholesale substitution of
 // error IDENTITY at a constant total, which a per-package integer cannot see.
+//
+// ── #15145: `@objectstack/verify` GRADUATED — and this one WAS paid down ───
+//
+// `verify` (3) left this ledger on 2026-09-04. ⛔ Do NOT read it through the
+// blocks above it: those all warn that a deleted entry left its population
+// undiminished, and this one is the other case (`plugin-security` is the
+// nearest precedent, and even it ledgered nothing only because its 9 residual
+// errors were repaired by hand). Here the entry recorded
+// TS2835 x3 for three extension-less `./harness` imports, all three were given
+// their `.js`, and the re-measure then read the entry at ZERO before anything
+// was wired -- this gate's own line, quoted: "@objectstack/verify: TEST_DEBT
+// records 3, and tsc now reports 0 -- graduation candidate". So there is no
+// `packages/verify/test-typecheck-debt.json`: at zero residue a bare
+// `tsc --noEmit -p tsconfig.test.json` is the stronger gate, the call
+// `plugin-security`, `metadata-core`, `metadata-fs` and `trigger-record-change`
+// made before it, and every error any of the package's 10 test files ever gains
+// is red on arrival with no ledger to be added to.
+//
+// ⚠️ MEASURED IN THAT ORDER ON PURPOSE, because the entry's own note predicted
+// the outcome ("the same one-line fix graduates this entry") and a prediction is
+// not a licence. Collapsing a TS2835 cascade EXPOSES errors as well as removing
+// them -- the #8612 lesson this ledger carries twice above -- and the card that
+// filed this had itself watched the entry drift 3 -> 5 (+2 TS7006) the moment
+// two `.then` callbacks were added behind that same unresolved specifier. The
+// honest move on an upward count is to RE-TALLY, not to delete. Here it went
+// down, and only the measurement could say which.
+//
+// THE WIRING IS THE OTHER HALF, and it is what the entry's disappearance now
+// rests on: `packages/verify/tsconfig.test.json` compiles `src/**/*` with
+// vitest-matching module semantics and `package.json`'s `typecheck` NAMES it,
+// so `hidesTests` is false. Measured with the closure built: the build config
+// puts 0 of the package's 10 `src/*.test.ts` in its program (and all 9 non-test
+// `src/**` files); the test config puts 10 of 10. The package's own advertised
+// `typecheck` was green over a layer it had never read -- which is the defect
+// the card was about, and which deleting a ledger entry alone would have left
+// exactly where it was.
+//
+// ⚠️ The pin half reported nothing here in either direction and still does not:
+// this package's test layer holds ZERO `@ts-expect-error` directives (grepped
+// with a positive control -- the same grep hits `packages/spec/src`), so
+// PINS_CHECKED had no subject. The card's sharpest line -- that a
+// `ts-expect-error` in those files is a phantom check -- is a statement about
+// what WOULD happen, not about an existing dead pin, exactly as `cli`'s
+// graduation recorded for its own 115 files.
+//
+// ⚠️ ROUTE (b) WAS AVAILABLE HERE and was still not taken. The #11491 note
+// above names `verify` as one of the 4 entries whose exclusion could be dropped
+// with `check:type-source-resolution` staying green, and that split was
+// re-measured on 2026-09-04 under a trap-restored mutation and still holds for
+// this package (exit 0; 124 programs across 78 packages). It was declined on
+// module semantics: `tsconfig.json` inherits NodeNext from the repo root and
+// would hold the test layer to a resolver vitest never runs it under. Onboard
+// by WIRING, not by widening the build config.
 const TEST_DEBT = {
 // ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
 //
@@ -1112,60 +1167,97 @@ const TEST_DEBT = {
 // still does not: measured on the way out, its test layer holds ZERO
 // `@ts-expect-error` directives, so that half had no subject here either.
 
-  '@objectstack/mcp': {
-    errors: 53,
-    note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
-      + 'files (23 in mcp-server-runtime.http.test.ts, 14 in mcp-action-tools.test.ts, 8 in '
-      + 'mcp-http-tools.scopes.test.ts, 6 in mcp-validate-expression.test.ts); TS6133 x1; TS2352 x1. '
-      + 'RE-TALLIED from tsc at the 53 below (62b2655d8) and unchanged class for class, which is why the '
-      + 'composition above is kept rather than rewritten: the 51 TS18046 sit in exactly those four files '
-      + 'in exactly those counts. The two singletons the old tally named by class without saying where '
-      + 'are src/skill-prompts.test.ts(185,23) for the TS2352 and '
-      + 'src/__tests__/mcp-server-runtime.test.ts(7,1) for the TS6133 (`MCPServerRuntimeConfig` declared, '
-      + 'never read). '
-      + 'Measured 52 at 5ab08428 -> 53 at 34558c2cc. This entry WAS the fifth bootstrap margin and the '
-      + 'one the ratchet found on its OWN introducing PR: #5278 reached the merge queue and was kicked '
-      + 'at 03:25:18Z on this single +1, which is not #6077\'s doing (that PR\'s own queue generation '
-      + 'was green) but a pre-existing drift no gate in this repo could see until the ledger was '
-      + 're-measured against a moving base. The +1 is fully attributed: '
-      + 'src/skill-prompts.test.ts(185,23), a TS2352 casting `SkillPrompt | null` to `Record< string, '
-      + 'unknown >` -- the file #3905 / PR #6077 added when it projected skill `instructions` as MCP '
-      + 'prompt primitives, which is also why this package\'s hidden test-file count moved up by one '
-      + '(the count itself is derived by this gate, not recorded here -- #5826). The old note\'s composition '
-      + 'was misleading in the way the top of this ledger warns about: it read "`error` is of type '
-      + 'unknown, one catch-block idiom", while all 51 are the response-body `json` binding, not a '
-      + 'catch block. packages/mcp took a feature landing the same day, so it is an actively-moving '
-      + 'package and an exact number here would very likely lose the same race that killed option D '
-      + 'five times over. THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 63 -> 53 onto '
-      + 'the exact measurement; RECORDED 63 was that margin (+10 over 53 measured at 34558c2cc) and this '
-      + 'sentence is its history, not this entry\'s present state. RECORDED now equals what tsc reports, '
-      + 're-confirmed at 53 at 62b2655d8, so the next new error in this package goes red on arrival -- '
-      + 're-establishing a margin deliberately remains a maintainer call (#5278 option A).',
-  },
-  '@objectstack/formula': {
-    errors: 17,
-    note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1. Re-measured 17 '
-      + 'at 5ab08428, up from 12; the TS2591 half doubled, which is the missing `types:["node"]` again '
-      + 'rather than five new defects. The TS2739 was inside that 17 from the start and simply went '
-      + 'UNLISTED, so this tally read 16 over a field of 17 until #13631 re-measured 17 at cc837dbfec '
-      + 'and restored it -- COMPOSITION reads tier itemisations and does not sum per-code tallies, so '
-      + 'nothing mechanical read the gap. It is the only one of the 17 in `src/cel-to-filter.test.ts` '
-      + '(173,52), where the local `ok()` helper pins its second argument to the exact shape of the '
-      + 'module-level `VARS` and a partial context cannot satisfy it; the same file already carries a '
-      + 'hand-widened copy of that helper (`filterOf`) written for exactly that reason.',
-  },
-  '@objectstack/verify': {
-    errors: 3,
-    note: 'TS2835 x3 -- `harness.host-resolution`, `harness.posture-only` and `harness.posture` each '
-      + 'import `./harness` without the `.js` extension. Re-tallied from the 8 measured at 5ab08428 '
-      + '(TS2835 x4, TS7006 x4) when `derive.test.ts` gained its own extension: that ONE unresolved '
-      + 'import was carrying 1 x TS2835 plus every TS7006 in the file, because a specifier that does '
-      + 'not resolve under NodeNext makes every symbol it names `any` and so every callback parameter '
-      + 'implicitly any. The remainder is the same NodeNext pair from the top-of-ledger note, and the '
-      + 'same one-line fix graduates this entry.',
-  },
-  '@objectstack/connector-mcp': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
-  '@objectstack/connector-openapi': { errors: 5, note: 'TS2339 x5. Re-measured 5 at 5ab08428, exact.' },
+// ── #12511: SEVEN packages GRADUATED at once, and not one of them was paid down
+//
+// `mcp` (53), `formula` (17), `platform-objects` (3), `connector-mcp` (5),
+// `connector-openapi` (5), `connector-rest` (1) and `service-sms` (1) left this
+// ledger on 2026-09-06, by the same route as `runtime`, `cli`, `lint`,
+// `driver-mongodb`, `verify` and the three plugins: each now has a
+// `tsconfig.test.json` its own `typecheck` script NAMES, so `hidesTests` is
+// false for it and this gate's per-PACKAGE approximation has nothing left to
+// approximate. ⛔ Read that first — a deleted TEST_DEBT entry normally means the
+// errors are gone, and here it does not. This change repairs no test file and
+// edits none.
+//
+// ⚠️ SEVEN IN ONE CHANGE IS NOT A BLANKET EDIT, and that distinction is the
+// whole reason the card ordering this refused one. Each sibling config was
+// written against its OWN measured hole and states its own reading in its own
+// header; the judgement genuinely diverged on both axes that matter here:
+//
+//   - MODULE SEMANTICS. `mcp` is `"type": "module"`, so NodeNext already reads
+//     its tests as ESM and is the STRICTER of the two readings — its sibling
+//     therefore changes module semantics NOT AT ALL, which is
+//     `packages/metadata-core`'s precedent rather than `packages/rest`'s. The
+//     other six are not `"type": "module"`, so NodeNext compiles as CJS what
+//     vitest executes as ESM, and their siblings carry `module: esnext` /
+//     `moduleResolution: bundler` for fidelity to the runtime.
+//   - THE MEASURED SUBTRACTION, which is ZERO for six of the seven. The
+//     remedy that "obviously" dissolves a config-tier pile dissolved one only
+//     where the pile was actually there, and 8 mechanical copies of any one of
+//     these configs would have been 8 configs nobody measured.
+//
+// The attribution has no remainder in either direction. RAW is re-measured on
+// the way out through this gate's own `remeasureProject` shape (extends the
+// package's `tsconfig.json`, drops ONLY the test glob) at 6a1e38244 with the
+// dependency closure built; LEDGER is what `tsconfig.test.json` reports at
+// 52a5a14e7 on that same closure. An error count taken against an unbuilt
+// closure is not a reading — unresolved-import cascades inflate it.
+//
+//   package             RECORDED  RAW  dissolve  exposed  LEDGER
+//   mcp                       53   53         0        0      53
+//   formula                   17   17        -2        0      15
+//   platform-objects           3    3         0        0       3
+//   connector-mcp              5    5         0        0       5
+//   connector-openapi          5    5         0        0       5
+//   connector-rest             1    1         0        0       1
+//   service-sms                1    1         0        0       1
+//
+// RECORDED equalled RAW for all seven, class for class and file for file, so
+// every number this ledger held was exact and stayed exact to the end. The
+// identical populations are now held one level finer, per FILE and per
+// SIGNATURE, in each package's own `test-typecheck-debt.json`.
+//
+// The single dissolution is `formula`'s TS1470 x2 ("`import.meta` is not
+// allowed in files which will build into CommonJS output",
+// `src/rls-predicate.test.ts` and `src/skill-catalog-sync.test.ts`), which goes
+// away under `module: esnext` because it was the CHECK being misconfigured and
+// never the tests. NOTHING was exposed behind it: there was no unresolved-import
+// cascade to collapse in any of the seven, so there is no `+n` term anywhere in
+// the table.
+//
+// ⚠️ ONE COMPOSITION CORRECTION, recorded because the next reader would
+// otherwise go looking for the wrong thing: `formula`'s deleted note attributed
+// its TS2591 x6 to «`process`». Measured here, all six are the bare module
+// specifiers of node builtins — `node:fs` x2, `node:path` x2, `node:url` x2, in
+// those same two files — and the TS2339 x2 beside them are `Property 'url' does
+// not exist on type 'ImportMeta'`. Both classes SURVIVE the move and are
+// ledgered: this package declares no `@types/node` and its tsconfig names no
+// `types`, so the node typings never reach its program. That is real debt with a
+// real repair, and ⛔ it is deliberately NOT repaired here — seeding the ledger
+// is the deliverable, and turning an onboarding into a cleanup is how it stops
+// landing at all.
+//
+// ⚠️ PINS_CHECKED reported nothing for any of the seven in either direction and
+// still does not: their test layers hold ZERO `@ts-expect-error` directives
+// (grepped with a positive control — the same grep hits `packages/spec/src`), so
+// that half had no subject here. What the gap cost was the other half: 83
+// diagnostics that no gate this repo runs had ever reported.
+//
+// ⛔ WHAT DID NOT GRADUATE, and why it is still below: `@objectstack/http-conformance`.
+// Its 2 recorded errors reproduce exactly (TS2307 x1, TS2304 x1) and its own
+// note already says what they are — both inside `node_modules` `.d.ts` files, so
+// the entry moves with the lockfile rather than with this package's code. The
+// reason it cannot take the sibling route unchanged is one this file did not
+// record before: `packages/qa/http-conformance/tsconfig.json` is one of the six
+// package configs that do NOT extend the repo root config, and it is the only
+// one of those that also declares no `skipLibCheck` — which is the sole reason
+// those two third-party declarations are checked at all. Ledgering them per FILE
+// would key a shrink-only ratchet on `.pnpm` content-hash paths that move on any
+// unrelated dependency bump, and turning `skipLibCheck` on in a test program has
+// no precedent among the 31 sibling configs (none declares it). That is a
+// judgement about this repo's config policy rather than about this package, so
+// it is left to the card.
+
   '@objectstack/http-conformance': {
     errors: 2,
     note: 'TS2307 x1, TS2304 x1, and BOTH are reported inside node_modules `.d.ts` files '
@@ -1185,9 +1277,6 @@ const TEST_DEBT = {
       + 'gate refreshes and refuses on -- the number dropped because the program became well-defined, '
       + 'not because anything was suppressed.',
   },
-  '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
-  '@objectstack/connector-rest': { errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
 
 // Repo-relative path -> why this test file's `@ts-expect-error` directives are
@@ -1618,6 +1707,136 @@ function gitIgnoredPaths(rels) {
 }
 
 /**
+ * Every repo-relative path this tree's own ignore rules exclude, in the two
+ * shapes a directory walk needs: whole directories to skip, and single files
+ * to drop.
+ *
+ * This is SOURCES_COVERED's (and TESTS_COVERED's, and PINS_CHECKED's) population
+ * filter since #15731. The rule those invariants apply is unchanged -- what
+ * changed is who they apply it to. A gate run while `pnpm --filter
+ * @objectstack/cli exec vitest run` was in flight reported `packages/cli/tmp: 1
+ * non-test source file(s) here sit outside every tsc program`, with the ledger's
+ * "closed to new entries" line beside it, over a scratch file a test wrote and
+ * removed again: the same text a real ratchet break produces, naming a repair
+ * (add a `tsconfig.scripts.json`, or widen `include`) that would have widened a
+ * config to cover a scratch directory. `.gitignore:53` excludes `tmp/`, and a
+ * path the repo excludes is by the repo's own declaration not a source of the
+ * package -- never committed, never published, and never seen at all by the
+ * clean checkout CI type-checks. The gate has no claim on it.
+ *
+ * ONE `ls-files` for the whole repo, memoised across the two walk sites
+ * (`workspacePackages` for the 79, `observed` for the root), for the reason
+ * `gitIgnoredPaths` gives above: the structural pass is the sub-second half of
+ * this gate, and a spawn per package -- let alone per file -- would end that.
+ * Measured on main @ 2dec9576d: 41ms for the whole repo.
+ *
+ * `--exclude-per-directory=.gitignore` rather than `--exclude-standard` is the
+ * load-bearing flag, and it draws the line `exposedScratchDirs` in
+ * `scripts/pm/dispatch-gates.mjs` already draws for this repo: a rule that lives
+ * only in `.git/info/exclude` -- or in a developer's `core.excludesFile`,
+ * emptied here as it is emptied ten lines up -- covers the clone it lives in and
+ * nothing else. What licenses dropping a path from this gate's subject is the
+ * REPO's declaration that the path is not part of the tree; a per-clone rule is
+ * one machine's opinion, and honouring it would let a developer quietly shrink
+ * the gate's population locally while CI, whose checkout has no such file, still
+ * judges the directory. A gate must conclude the same thing in both places.
+ *
+ * Two further properties come from the instrument rather than from a flag:
+ *
+ *   * TRACKED paths are never listed (`--others` is the whole point), so a
+ *     force-added file under an ignored directory keeps being judged -- it IS
+ *     present in a clean checkout. That is the same answer `gitIgnoredPaths`
+ *     reaches by consulting the index.
+ *   * `--directory` collapses a wholly-ignored directory to its own name, so
+ *     `node_modules/` costs one entry rather than a hundred thousand, while a
+ *     directory that still holds tracked files stays open and only its ignored
+ *     files are listed.
+ *
+ * A git that cannot answer is a THROW, never an empty set: reading a failed
+ * spawn as "this tree ignores nothing" would silently restore the phantom
+ * findings this filter exists to remove, which is the posture `gitIgnoredPaths`
+ * takes for its own question.
+ *
+ * @param {string} cwd repository to ask about -- ROOT in production, a fixture
+ *   repo in the self-test, which is the only way the tracked-vs-per-clone line
+ *   above can be pinned by an assertion rather than by this paragraph.
+ * @returns {{dirs: Set<string>, files: Set<string>}}
+ */
+function readIgnoredPaths(cwd) {
+  const res = spawnSync(
+    'git',
+    [
+      '-c',
+      'core.excludesFile=',
+      'ls-files',
+      '--others',
+      '--ignored',
+      '--exclude-per-directory=.gitignore',
+      '--directory',
+      '-z',
+    ],
+    { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (res.error) {
+    refusePrerequisite(
+      `git ls-files could not run, so the ignored paths cannot be told from source: ${res.error.message}`,
+    );
+  }
+  if (res.status !== 0) {
+    refusePrerequisite(
+      `git ls-files exited ${res.status}, so the ignored paths cannot be told from source: `
+        + String(res.stderr).trim(),
+    );
+  }
+  return ignoreIndex(res.stdout);
+}
+
+/**
+ * The `-z` listing above, split into the two lookups the walk performs.
+ *
+ * A trailing `/` is git's mark for a directory it collapsed whole; everything
+ * else is a single file. Parsed by a named function rather than inline so the
+ * self-test asserts the shape this gate actually reads out of git, and so the
+ * `--directory` contract above is stated in one place instead of two.
+ *
+ * @param {string} stdout NUL-separated `ls-files -z` output
+ * @returns {{dirs: Set<string>, files: Set<string>}}
+ */
+function ignoreIndex(stdout) {
+  const dirs = new Set();
+  const files = new Set();
+  for (const entry of stdout.split('\0')) {
+    if (entry === '') continue;
+    if (entry.endsWith('/')) dirs.add(entry.slice(0, -1));
+    else files.add(entry);
+  }
+  return { dirs, files };
+}
+
+/** ROOT's index, read once per run and shared by both walk sites. */
+let ignoredPathsMemo = null;
+function workspaceIgnoredPaths() {
+  ignoredPathsMemo ??= readIgnoredPaths(ROOT);
+  return ignoredPathsMemo;
+}
+
+/**
+ * Does the walk step over this path?
+ *
+ * Named rather than inlined for `isBuildSource`'s reason: the self-test then
+ * asserts the predicate the walk applies instead of a copy of it. Asked of
+ * directories and files alike -- a wholly-ignored directory is one entry, and
+ * skipping it there is what keeps this cheap.
+ *
+ * @param {{dirs: Set<string>, files: Set<string>}} index
+ * @param {string} rel REPO-relative posix path (the walk's package-relative
+ *   path joined onto the package directory), naming a file or a directory
+ */
+function isIgnoredPath(index, rel) {
+  return index.dirs.has(rel) || index.files.has(rel);
+}
+
+/**
  * Which tsc programs ACCOUNT for a package's test files -- the ones whose error
  * count somebody actually reads.
  *
@@ -1722,6 +1941,62 @@ function isUncheckedSourceCandidate(name, depth) {
 }
 
 /**
+ * One walk of a whole package: its test files, its non-test source files, and
+ * which of the tests carry a `@ts-expect-error` in directive position.
+ *
+ * Both halves need the same list: the hidden-file count is no longer confined
+ * to the include roots, because a file outside them is precisely the case
+ * TESTS_COVERED had been missing (#7353).
+ *
+ * Extracted from `testCoverage` and given the ignore index as an ARGUMENT
+ * (#15731) so the self-test drives the walk this gate runs -- over a fixture
+ * tree, against a stated index -- instead of asserting a copy of it. That is
+ * the whole of the population question: the same fixture walked with an empty
+ * index yields the file, and walked with the index git produces does not.
+ *
+ * @param {string} absDir absolute path of the package directory
+ * @param {string} dir the same directory, repo-relative posix (`.` for the root)
+ * @param {{dirs: Set<string>, files: Set<string>}} ignored `readIgnoredPaths`
+ * @returns {{testRels: string[], sourceRels: string[], pinned: Set<string>}}
+ *   package-relative posix paths, in walk order
+ */
+function walkPackageFiles(absDir, dir, ignored) {
+  const testRels = [];
+  const sourceRels = [];
+  const pinned = new Set();
+  const walk = (abs, rel, depth) => {
+    let entries = [];
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      return; // no such root, or unreadable -- nothing to hide either way
+    }
+    for (const entry of entries) {
+      const child = join(abs, entry.name);
+      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+      // #15731. A path this repo IGNORES is not this package's source by the
+      // repo's own declaration, so no invariant below has a claim on it --
+      // asked before the `isDirectory` fork, because a wholly-ignored
+      // directory is a single entry in the index and stepping over it there
+      // is what keeps one git call per run enough.
+      if (isIgnoredPath(ignored, posix.join(dir, childRel))) continue;
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
+        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
+        walk(child, childRel, depth + 1);
+      } else if (TEST_FILE.test(entry.name)) {
+        testRels.push(childRel);
+        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
+      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
+        sourceRels.push(childRel);
+      }
+    }
+  };
+  walk(absDir, '', 0);
+  return { testRels, sourceRels, pinned };
+}
+
+/**
  * What this package's tsc programs read, and what they leave out.
  *
  * `hidesTests` is the TESTS_COVERED trigger and means "at least one of this
@@ -1752,35 +2027,13 @@ function testCoverage(dir, scripts) {
   const named = configsNamedByTypecheck(scripts);
   const invoked = configs.filter((c) => named.has(c.file));
 
-  // One walk of the whole package. Both halves need the same list now: the
-  // hidden-file count is no longer confined to the include roots, because a
-  // file outside them is precisely the case this invariant had been missing.
-  const testRels = [];
-  const sourceRels = [];
-  const pinned = new Set();
-  const walk = (abs, rel, depth) => {
-    let entries = [];
-    try {
-      entries = readdirSync(abs, { withFileTypes: true });
-    } catch {
-      return; // no such root, or unreadable -- nothing to hide either way
-    }
-    for (const entry of entries) {
-      const child = join(abs, entry.name);
-      const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue;
-        if (depth > 0 && existsSync(join(child, 'package.json'))) continue; // another package's problem
-        walk(child, childRel, depth + 1);
-      } else if (TEST_FILE.test(entry.name)) {
-        testRels.push(childRel);
-        if (PIN_DIRECTIVE.test(readFileSync(child, 'utf8'))) pinned.add(childRel);
-      } else if (isUncheckedSourceCandidate(entry.name, depth)) {
-        sourceRels.push(childRel);
-      }
-    }
-  };
-  walk(join(ROOT, dir), '', 0);
+  // One walk of the whole package, minus whatever this repo declares is not
+  // in it (#15731 -- `walkPackageFiles` above carries both halves).
+  const { testRels, sourceRels, pinned } = walkPackageFiles(
+    join(ROOT, dir),
+    dir,
+    workspaceIgnoredPaths(),
+  );
 
   const hiddenTests = unreadFiles(testRels, accountedPrograms(configs, invoked));
   // PINS_CHECKED stays anchored to the INVOKED programs, not the accounted
@@ -4265,10 +4518,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'an ungenerated `include` root at the workspace ROOT fails GENERATED_COVERED (#15483)': 1,
   'a PHANTOM_PIN_DEBT row for a ROOT pin is covered, not reported stale (#15483)': 1,
   // The five families the green line names, one battery each, at their measured
-  // counts. ⚠️ `observation cases` is 64 here and 75 on the printed line: the
+  // counts. ⚠️ `observation cases` is 86 here and 97 on the printed line: the
   // line adds `typecheck-configs`' 11 folded-in cases, which are floored in that
-  // module and register nowhere in this one.
-  'observation cases': 64,
+  // module and register nowhere in this one. The 22 that #15731 added are the
+  // population filter's four batteries -- how git's listing is read, the
+  // predicate the walk applies, the walk's own output, and what git is asked of
+  // a real repository.
+  'observation cases': 86,
   're-measure cases': 45,
   'built-closure cases': 28,
   'auto-lowering cases': 19,
@@ -5113,6 +5369,194 @@ function selfTest() {
     if (got !== c.expect) {
       failures.push(`isUncheckedSourceCandidate — ${c.label}: expected ${c.expect}, got ${got}`);
     }
+  }
+
+  // #15731. The population filter -- which paths this gate declines to judge
+  // because the repo itself declares they are not in the tree. Four batteries,
+  // one per joint: how git's answer is READ, the predicate the walk APPLIES,
+  // the walk's own OUTPUT, and what git is actually ASKED. A wrong answer at
+  // any of them is silent in both directions: too wide and a scratch file
+  // manufactures a ratchet finding (the card), too narrow and a real unread
+  // source directory stops being counted at all.
+  const ignoreIndexCases = [
+    {
+      label: 'a collapsed directory lands in `dirs`, stripped of the trailing slash git marks it with',
+      stdout: 'packages/cli/tmp/\0',
+      dirs: ['packages/cli/tmp'],
+      files: [],
+    },
+    {
+      label: 'an ignored file inside an otherwise tracked directory lands in `files`',
+      stdout: 'packages/cli/src/schema.gen.ts\0',
+      dirs: [],
+      files: ['packages/cli/src/schema.gen.ts'],
+    },
+    {
+      label: 'both shapes arrive in one listing and stay apart',
+      stdout: 'node_modules/\0packages/cli/src/schema.gen.ts\0',
+      dirs: ['node_modules'],
+      files: ['packages/cli/src/schema.gen.ts'],
+    },
+    {
+      // The empty listing is the common case (a tree with nothing ignored but
+      // node_modules), and it must be an index that answers "no" -- reading it
+      // as a missing index is the failure mode `readIgnoredPaths` refuses.
+      label: 'a listing with nothing in it is an EMPTY index, not a missing one',
+      stdout: '',
+      dirs: [],
+      files: [],
+    },
+  ];
+  for (const c of ignoreIndexCases) {
+    registerCase('observation cases');
+    const got = ignoreIndex(c.stdout);
+    const want = JSON.stringify({ dirs: c.dirs, files: c.files });
+    const have = JSON.stringify({ dirs: [...got.dirs], files: [...got.files] });
+    if (have !== want) failures.push(`ignoreIndex — ${c.label}: expected ${want}, got ${have}`);
+  }
+
+  const ignoreFixture = ignoreIndex('packages/cli/tmp/\0packages/cli/src/schema.gen.ts\0');
+  const ignoredPathCases = [
+    { label: 'the ignored scratch directory itself is stepped over', rel: 'packages/cli/tmp', expect: true },
+    { label: 'the tracked source directory beside it is NOT (the positive control)', rel: 'packages/cli/src', expect: false },
+    { label: 'a single ignored file is stepped over by name', rel: 'packages/cli/src/schema.gen.ts', expect: true },
+    { label: 'the tracked file beside THAT one is not', rel: 'packages/cli/src/schema.ts', expect: false },
+    // A prefix match here would take a whole tracked directory out of the
+    // gate's subject on the strength of a scratch directory's name.
+    { label: 'a path matches WHOLE -- `tmp` does not swallow the sibling `tmpl`', rel: 'packages/cli/tmpl', expect: false },
+    { label: 'and it is repo-relative -- the same basename under another package is a different path', rel: 'packages/spec/tmp', expect: false },
+  ];
+  for (const c of ignoredPathCases) {
+    registerCase('observation cases');
+    const got = isIgnoredPath(ignoreFixture, c.rel);
+    if (got !== c.expect) failures.push(`isIgnoredPath — ${c.label}: expected ${c.expect}, got ${got}`);
+  }
+
+  // The walk itself, over a fixture package -- the same tree walked twice, once
+  // with an index that ignores nothing (which is what this gate did before
+  // #15731, and reproduces the card's finding) and once with the index the real
+  // tree produces. This is the red and the green of that card as an assertion.
+  const walkFixture = mkdtempSync(join(tmpdir(), 'objectstack-type-check-walk-'));
+  let ignoreWalkCases = [];
+  try {
+    mkdirSync(join(walkFixture, 'src'), { recursive: true });
+    mkdirSync(join(walkFixture, 'tmp'), { recursive: true });
+    writeFileSync(join(walkFixture, 'src', 'engine.ts'), 'export const engine = 1;\n');
+    writeFileSync(join(walkFixture, 'src', 'engine.test.ts'), '// @ts-expect-error a real pin\nexport {};\n');
+    writeFileSync(join(walkFixture, 'tmp', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(walkFixture, 'tmp', 'probe.test.ts'), '// @ts-expect-error a scratch pin\nexport {};\n');
+    const counted = walkPackageFiles(walkFixture, 'packages/cli', ignoreIndex(''));
+    const filtered = walkPackageFiles(walkFixture, 'packages/cli', ignoreIndex('packages/cli/tmp/\0'));
+    ignoreWalkCases = [
+      {
+        label: 'CONTROL: with nothing ignored, the scratch file IS counted as source -- the finding the card reported',
+        got: counted.sourceRels,
+        expect: ['src/engine.ts', 'tmp/probe.ts'],
+      },
+      {
+        label: 'with the scratch directory ignored, only the tracked source survives',
+        got: filtered.sourceRels,
+        expect: ['src/engine.ts'],
+      },
+      {
+        label: 'CONTROL: a scratch TEST file is counted too, so TESTS_COVERED had the same exposure',
+        got: counted.testRels,
+        expect: ['src/engine.test.ts', 'tmp/probe.test.ts'],
+      },
+      {
+        label: 'and it goes with the directory, leaving the package\'s own tests judged as before',
+        got: filtered.testRels,
+        expect: ['src/engine.test.ts'],
+      },
+      {
+        label: 'CONTROL: a `@ts-expect-error` in a scratch file was a phantom pin PINS_CHECKED would report',
+        got: [...counted.pinned].sort(),
+        expect: ['src/engine.test.ts', 'tmp/probe.test.ts'],
+      },
+      {
+        label: 'the real pin in the tracked tree is untouched by the filter',
+        got: [...filtered.pinned].sort(),
+        expect: ['src/engine.test.ts'],
+      },
+    ];
+  } finally {
+    rmSync(walkFixture, { recursive: true, force: true });
+  }
+  for (const c of ignoreWalkCases) {
+    registerCase('observation cases');
+    const want = JSON.stringify(c.expect);
+    const have = JSON.stringify(c.got);
+    if (have !== want) failures.push(`walkPackageFiles — ${c.label}: expected ${want}, got ${have}`);
+  }
+
+  // What git is ASKED, against a real repository -- the one battery here that
+  // spawns, because the distinction it pins cannot be observed any other way:
+  // `git check-ignore` answers the same for a tracked `.gitignore` and for a
+  // `.git/info/exclude`, and this gate must not. `exposedScratchDirs` in
+  // scripts/pm/dispatch-gates.mjs draws the same line for the same reason and
+  // pins it the same way.
+  const ignoreRepo = mkdtempSync(join(tmpdir(), 'objectstack-type-check-ignore-'));
+  let ignoreSourceCases = [];
+  try {
+    const g = (args) => spawnSync('git', args, { cwd: ignoreRepo, encoding: 'utf8' });
+    g(['init', '-q', '.']);
+    g(['config', 'user.email', 'self-test@objectstack.invalid']);
+    g(['config', 'user.name', 'check-type-check-coverage self-test']);
+    mkdirSync(join(ignoreRepo, 'pkg', 'src'), { recursive: true });
+    mkdirSync(join(ignoreRepo, 'pkg', 'tmp'), { recursive: true });
+    mkdirSync(join(ignoreRepo, 'pkg', 'scratch'), { recursive: true });
+    writeFileSync(join(ignoreRepo, '.gitignore'), 'tmp/\n');
+    writeFileSync(join(ignoreRepo, 'pkg', 'src', 'engine.ts'), 'export const engine = 1;\n');
+    g(['add', '-A']);
+    g(['commit', '-qm', 'the fixture tree, with tmp/ ignored by a TRACKED rule']);
+    writeFileSync(join(ignoreRepo, 'pkg', 'tmp', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(ignoreRepo, 'pkg', 'scratch', 'probe.ts'), 'export const probe = 1;\n');
+    writeFileSync(join(ignoreRepo, '.git', 'info', 'exclude'), 'scratch/\n');
+    const index = readIgnoredPaths(ignoreRepo);
+    // ... and now force-add a file INTO the ignored directory, which is what
+    // makes that directory present in a clean checkout after all.
+    writeFileSync(join(ignoreRepo, 'pkg', 'tmp', 'kept.ts'), 'export const kept = 1;\n');
+    g(['add', '-f', 'pkg/tmp/kept.ts']);
+    g(['commit', '-qm', 'force-add a file inside the ignored directory']);
+    const forced = readIgnoredPaths(ignoreRepo);
+    ignoreSourceCases = [
+      {
+        label: 'a directory a TRACKED .gitignore covers is out of the gate\'s subject -- the scratch tree of the card',
+        got: isIgnoredPath(index, 'pkg/tmp'),
+        expect: true,
+      },
+      {
+        label: 'the tracked source directory beside it is judged exactly as before (the positive control)',
+        got: isIgnoredPath(index, 'pkg/src'),
+        expect: false,
+      },
+      {
+        label: 'a rule living ONLY in .git/info/exclude declares nothing about the repo -- CI\'s checkout has no such file',
+        got: isIgnoredPath(index, 'pkg/scratch'),
+        expect: false,
+      },
+      {
+        label: 'force-adding a file re-opens the directory: it IS in a clean checkout, so the gate judges it again',
+        got: isIgnoredPath(forced, 'pkg/tmp'),
+        expect: false,
+      },
+      {
+        label: 'the tracked file inside it is source like any other',
+        got: isIgnoredPath(forced, 'pkg/tmp/kept.ts'),
+        expect: false,
+      },
+      {
+        label: 'while the untracked file beside THAT one is still stepped over, by name this time',
+        got: isIgnoredPath(forced, 'pkg/tmp/probe.ts'),
+        expect: true,
+      },
+    ];
+  } finally {
+    rmSync(ignoreRepo, { recursive: true, force: true });
+  }
+  for (const c of ignoreSourceCases) {
+    registerCase('observation cases');
+    if (c.got !== c.expect) failures.push(`readIgnoredPaths — ${c.label}: expected ${c.expect}, got ${c.got}`);
   }
 
   const accountedCases = [
@@ -6459,7 +6903,8 @@ function selfTest() {
   console.log(
     `✓ check:type-check-coverage --self-test — ${cases.length} semantic case(s) + ` +
       `${TYPECHECK_CONFIGS_CASES + coverCases.length + unreadCases.length + accountedCases.length
-        + derivedCases.length + sourceCandidateCases.length + includeRootCases.length
+        + derivedCases.length + sourceCandidateCases.length + ignoreIndexCases.length
+        + ignoredPathCases.length + ignoreWalkCases.length + ignoreSourceCases.length + includeRootCases.length
         + chainCases.length + generatorCases.length + layerCases.length + scopeCases.length
         + scopeLineCases.length} observation case(s) + ` +
       `${driftCases.length + countCases.length + projectCases.length + setupErrorCases.length

@@ -66,19 +66,25 @@ export default defineStack({
 | Field labels, help text, placeholders | `objects.<name>.fields.<field>.label` / `help` / `placeholder` |
 | Picklist option labels | `objects.<name>.fields.<field>.options.<value>` |
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
+| Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
 | Action labels, confirm text, success messages | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
+| Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
 | App navigation | `apps.<app>.navigation.<id>.label` |
 | Dashboard label / description | `dashboards.<name>.label` / `description` |
 | Dashboard widget title / description / sub-caption | `dashboards.<name>.widgets.<widgetId>.title` / `description` / `subCaption` |
+| Analytics dataset label / description | `datasets.<name>.label` / `description` |
+| Dataset dimension and measure labels | `datasets.<name>.dimensions.<dimension>.label` / `datasets.<name>.measures.<measure>.label` |
 | Page labels and `page:header` copy | `pages.<name>.label` / `description` / `title` / `subtitle` |
 | Screen-flow wizards (flow label, screen headings, screen field copy) | `flows.<flow>.label` / `flows.<flow>.screens.<node_id>.title` / `.fields.<field>.label` / `.placeholder` — see the boundary note below |
 | Global actions, settings, messages | `globalActions`, `settings`, `messages` |
+| A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
 
 The metadata types resolved per request are **object, view, action, app,
-dashboard, and page** — a field's labels are translated as part of its object
-document, and so are the labels of any actions the object declares inline
+dashboard, dataset, and page** — a field's labels are translated as part of
+its object document, and so are the labels of any actions the object declares
+inline
 (#3370). Before that, an object document went out with its authored action
 labels untouched: `sys_approval_request`'s Approve / Reject rendered in English
 in a zh-CN workspace for every consumer except the Console, which happened to
@@ -92,6 +98,21 @@ authored field from `widget.description` (the copy under the card header).
 Two authored fields get two keys (「两个作者字段两个 key」): `description`
 translates `widget.description`, `subCaption` translates
 `widget.options.description`, and neither reaches the other's field.
+</Callout>
+
+<Callout type="info">
+**Dataset copy is keyed at the top level, not under the dashboard
+(#14253).** A dataset is the analytics definition — its dimensions and its
+measures — that widgets bind to by reference, and a measure's label is drawn
+*on the dashboard*: under every metric tile and on every chart axis. It gets
+its own `datasets.<name>` group rather than a slot under `dashboards.<name>`
+because the same measure is drawn by many widgets across many dashboards —
+keying it per presentation would ask for the same string once per widget, and
+would leave a dataset no dashboard references unaddressable. Below the
+dataset the copy is `label` and nothing else: a dimension and a measure each
+declare exactly one display string, so `description` belongs to the dataset
+itself and writing one on a dimension or measure is rejected with a message
+saying so.
 </Callout>
 
 <Callout type="info">
@@ -127,9 +148,23 @@ Per request, in this order:
 
 Within the bundle, matching walks: exact (`zh-CN`) → case-insensitive →
 **base language** (`zh-CN` → `zh`) → variant expansion (`zh` → `zh-CN`). If
-nothing matches, the chain falls back to `en`, and finally to the literal label
-on the metadata. **Translation lookup never throws** — a missing string
-degrades to the next best text.
+nothing matches, the request walks the stack's **declared** fallback locale
+(`fallbackLocale`, else `defaultLocale`), and finally the literal label on the
+metadata. **Translation lookup never throws** — a missing string degrades to
+the next best text.
+
+Two rules keep the declaration honest (#14882, #15711):
+
+- **The authored label is the default locale's text.** A request for
+  `defaultLocale` consults that locale's own bundle and then answers with the
+  inline `label:` — it never walks the fallback chain. A stack declaring
+  `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` and only an `en` bundle
+  serves its authored Chinese to a `zh-CN` request, and its `en` bundle to
+  everyone else. Shipping a `zh-CN` bundle (`os i18n extract --locales=zh-CN`)
+  still works and still wins; it is optional.
+- **Nothing falls to `en` unless it was declared.** The chain is what the
+  stack declares; a caller of the `@objectstack/spec/system` resolvers that
+  declares no `fallbackChain` gets "requested locale, then the authored label".
 
 Resolved labels are served straight from the REST metadata endpoints (the
 locale is part of the ETag), so the Console and any SDUI client get translated
@@ -220,7 +255,10 @@ reports nothing.** No `i18n` block and no bundles means one active locale, the
 default one, and your inline `label:` is already that locale's text — so there
 is no gap to report and no need to reach for `--skip-i18n`. The same holds if
 your source language isn't English: declare `defaultLocale: 'zh-CN'` and the
-tooling stops asking for English you never promised.
+tooling stops asking for English you never promised. The runtime reads the
+declaration the same way (#15711): a request for the default locale answers
+with the authored label, so what the gate counts as covered is what gets
+served.
 
 Translating is therefore opt-in, but once you opt in it covers the **whole**
 declared surface — every row of the table above, including action labels
@@ -245,11 +283,47 @@ up-to-date bundle re-extracts byte-identically.
 
 Honest limits worth knowing before you plan around them:
 
-- **Validation messages are not translated through bundles.** The
-  `validationMessages` group was removed in 17.0.0 (#4667): it had no runtime
-  consumer, so a translated rule message was stored and never shown. Author the
-  message on the rule itself (`object.validations[].message`), which the engine
-  returns on every rejected write.
+- **Both forms of a label are authorized — and an inline locale map is
+  rendered but never extracted.** A label may be a plain string, translated in
+  a bundle under the key from the table above, or an **inline locale map** —
+  `label: { en: 'Members', 'zh-CN': '成员' }` — written out on the metadata and
+  resolved at render time (`pickLocalized` in the UI, `resolveI18nLabel` on the
+  server). The map is the localisation route for the props that have no bundle
+  key at all, and a page localised that way is fully localised. But it never
+  reaches the bundle: `os i18n extract` scaffolds no row for it, so a
+  translator working from your bundles will not find those strings — every
+  locale a map is to carry is one you write in the map itself.
+
+  **Coverage still counts it (#14749).** `os lint` reads the map's own
+  locales: the ones it carries count as covered, the ones it omits are
+  reported against `supportedLocales`. A map written `{ en, 'zh-CN' }` under
+  `supportedLocales: ['en', 'zh-CN', 'ja-JP']` therefore produces a real
+  `missing translation for locale "ja-JP"` finding — close it by adding the
+  locale to the map. Two tools treat the same prop differently and both are
+  right: the gate reports what the author did and did not write, while the
+  extractor refuses to invent a key that a later reordering of two sibling
+  components would silently reassign.
+
+  **No bundle key exists for a map, and none is synthesised from a node's
+  position in the component tree.** That is a settled refusal (maintainer
+  ruling 2026-09-03, #14749) — not a gap awaiting a fix, and not something to
+  plan around.
+- **Validation messages are translatable, but substituted whole — there is no
+  interpolation.** Author the message on the rule
+  (`object.validations[].message`), which the engine returns on every rejected
+  write, and translate it under `objects.<name>._validations.<rule>.message`
+  (the row in the table above) — live since 17.3.0. The write path swaps the
+  whole sentence for the bundle's, so only the language changes: an authored
+  message has no parameter contract, so `{variable}` placeholders in it are not
+  filled, and a key the bundle does not carry falls back to the authored
+  literal.
+
+  The retired top-level `validationMessages` group is **not** what came back.
+  It was removed in 17.0.0 (#4667) because nothing read it — a translated rule
+  message was stored and never shown — and that retirement stands. It was keyed
+  by rule name alone and so could not tell two objects' rules apart; the route
+  above is object-scoped and shipped with its reader. ADR-0049's 2026-09-04
+  amendment carries that record.
 - **The `flows` group is declared, not yet applied.** A screen flow's copy has
   somewhere to live (#7646) and the keys are addressed the way the runner
   resolves them — flow name, screen node id, screen field name — but no shipped

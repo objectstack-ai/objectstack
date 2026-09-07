@@ -375,6 +375,19 @@ export class TursoDriver extends SqlDriver {
         this.temporalFilterColumnSql(object, field, columnSql),
       );
 
+      // [#14079] The declared-type half of the text-operator contract, handed
+      // down for the same reason the temporal rule is: the transport keeps no
+      // schema, and `registerRemoteFieldMetadata` → `registerExternalObject`
+      // fills the SAME `numericFields` / `booleanFields` registries the local
+      // compiler reads, keyed by object name. So `isNonTextColumn` answers in
+      // remote mode exactly what it answers in local mode, and a text operator
+      // over a `Field.number` compiles to the contract's constant on both
+      // transports (`turso-local-remote-text-parity` holds them to one row set)
+      // instead of a `GLOB` over the number's storage-class spelling.
+      this.remoteTransport.setNonTextColumnResolver((object, field) =>
+        this.isNonTextColumn(object, field),
+      );
+
       // [#7929] The server-side half of a REDACTED filter refusal. The remote
       // compiler withholds the operands of a cross-field comparison for the
       // same reason the inherited local one does — an RLS rule's columns are

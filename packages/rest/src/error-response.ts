@@ -397,8 +397,14 @@ function armSentence(error: any): unknown {
  * `statusCode` rather than blocking it, which is what makes better-auth's
  * `APIError` (`{ statusCode: 403, status: 'FORBIDDEN' }` — the status field is a
  * STRING there) resolve to the status it meant instead of to nothing.
+ *
+ * [#15685] Exported so the `/meta/:type/:name/references` door can ask THIS
+ * question — "did the producer declare a status, in either spelling" — instead
+ * of re-deriving it beside its own refusal arm. A read, not a policy: the
+ * export moves no wire byte, and `error-response.ts` is not part of
+ * `@objectstack/rest`'s package entry, so nothing published changes either.
  */
-function declaredHttpStatus(error: any): number | undefined {
+export function declaredHttpStatus(error: any): number | undefined {
     const declared =
         (typeof error?.status === 'number' ? error.status : undefined) ??
         (typeof error?.statusCode === 'number' ? error.statusCode : undefined);
@@ -2199,12 +2205,53 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
                 ? 'Request failed'
                 : truncateClientMessage(authored);
         // [#9232] Narrowed, same as the three arms above.
+        //
+        // [#14725] …and the body names the OBJECT the door was called with,
+        // the limb {@link classifyDataError}'s generic declared-status
+        // passthrough has always ended on. Without it the two copies of one
+        // passthrough differed by exactly one key, which is the residue
+        // #14541 left behind: after that card the doors agree for every code
+        // a BESPOKE arm classifies, and disagree for every code that reaches
+        // the GENERIC passthrough. Measured on `main` @ `a12b15e394`, one
+        // error object, both doors:
+        //
+        //     { code: 'DUPLICATE_RECORD', status: 409 }   // no `name`, no arm
+        //       mapDataError(err, 'duly_note')
+        //         409 {"error":"…","code":"DUPLICATE_RECORD","object":"duly_note"}
+        //       sendThrownError(res, err, 'duly_note')
+        //         409 {"error":"…","code":"DUPLICATE_RECORD"}
+        //
+        // One refusal, two bodies, decided by which route caught it — the
+        // #14541 shape one arm over. It also closes that card's second
+        // residue: `recordNotFoundError` (`@objectstack/core`) declares
+        // `code`, `status = 404` AND `object`, so its declared status carries
+        // it past the `RECORD_NOT_FOUND` arm below into THIS passthrough on
+        // every route reporting through {@link handleRouteError} /
+        // {@link sendThrownError}, while the single-record `/data` door
+        // reached the same generic arm in `classifyDataError` and shipped the
+        // name.
+        //
+        // ⛔ The 5xx arm above deliberately does NOT gain this limb. Its
+        // sibling there is {@link declaredServerFaultAnswer}, which names no
+        // object either, so the two doors already agree in that band — adding
+        // it would CREATE the disagreement this limb removes, and would put a
+        // caller-supplied name into a body whose whole rule (#5437 / #5582) is
+        // that a declared server fault says nothing beyond status and code.
+        //
+        // Appended LAST, so every key an existing body already carried keeps
+        // the position it had: this widens the body by one optional key and
+        // moves nothing. The name comes from the door's `object` ARGUMENT, not
+        // from `error.object` — the same read every sibling arm makes, so a
+        // route that passes nothing still answers exactly the bytes it answers
+        // today (`classifiedRefusalAnswer` calls this door with no object at
+        // all, and its families' key sets are unmoved).
         return withDeclaredUserMessage(error, {
             status: error.status,
             body: {
                 error: safeMsg,
                 ...thrownCodeFields(error, error.status),
                 ...(Array.isArray(error.issues) ? { issues: error.issues } : {}),
+                ...(object ? { object } : {}),
             },
         });
     }

@@ -194,3 +194,43 @@ describe('filter-walk — walkFilterFieldKeys across the three authored shapes',
     expect(keys('a string')).toEqual([]);
   });
 });
+
+describe('object-graph — a non-record entry in `stack.objects` (#15494)', () => {
+  // The seam is the FIRST statement of every rule that resolves a field path,
+  // so an unguarded read here threw before any member's own `if (!isRec(obj))
+  // continue` could run — on the runtime publish door that is an exception on
+  // a write path, not a skipped finding. Measured on `origin/main` at
+  // 615fac3a0, `validateObjectFieldRefs({ objects: [null] })`:
+  //   TypeError: Cannot read properties of null (reading 'name')
+  //     at indexObjectGraph (src/object-graph.ts:159:30)
+  // The entry is SKIPPED rather than reported: this module decides no
+  // severities by contract, and a junk member is a shape defect the schema
+  // owns — see `asArray`'s note for the three reasons and the measurement.
+
+  it('drops a null entry instead of throwing, and still indexes the rest', () => {
+    const valid = { name: 'crm_lead', fields: { name: { type: 'text' } } };
+    expect(() => indexObjectGraph({ objects: [null] })).not.toThrow();
+    const g = indexObjectGraph({ objects: [null, valid, undefined, 'junk', 42, []] });
+    expect([...g.keys()]).toEqual(['crm_lead']);
+    expect(resolveFieldPath(g, 'crm_lead', 'name')).toMatchObject({ kind: 'ok' });
+  });
+
+  it('drops a non-record FIELD entry too — the same read, one level down', () => {
+    // `graphObjectOf` walks `obj.fields` through the identical helper, so
+    // `fields: [null]` crashed at the same statement for the same reason.
+    const g = indexObjectGraph({
+      objects: [{ name: 'crm_lead', fields: [null, { name: 'amount', type: 'currency' }] }],
+    });
+    expect(resolveFieldPath(g, 'crm_lead', 'amount')).toMatchObject({ kind: 'ok' });
+  });
+
+  it('reads a name-keyed map whose VALUE is not a record as a nameless object', () => {
+    // `{ a: 'junk' }` used to spread the string's indices into the record; the
+    // verdict was already `no-field-map`, and it still is — the entry keeps
+    // its key so an object declaring nothing stays distinguishable from one
+    // this stack never defined (skip 2 vs. skip 1).
+    const g = indexObjectGraph({ objects: { a: 'junk', b: { fields: { n: { type: 'text' } } } } });
+    expect(resolveFieldPath(g, 'a', 'n')).toMatchObject({ kind: 'unknowable', reason: 'no-field-map' });
+    expect(resolveFieldPath(g, 'b', 'n')).toMatchObject({ kind: 'ok' });
+  });
+});

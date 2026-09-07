@@ -47,6 +47,7 @@ import { isEmailTransportProvider, emailProviderRequiresApiKey, unsupportedProvi
 // bare `import()` resolved against this CLI's own realpath, so its bundled
 // copy wins, never the host's (#10909).
 import { isSmsTransportProvider, SMS_TRANSPORT_PROVIDERS } from '@objectstack/service-sms';
+import { createHash } from 'node:crypto';
 import { resolveObjectStackHome } from '@objectstack/runtime';
 import { LOG_LEVELS, resolveLogLevel, readLogLevelEnv } from '../utils/log-level.js';
 // The ONE port contract — range, reader and refusal prose — shared with the two
@@ -74,7 +75,8 @@ import {
   stackDeclaresMetadata,
   bundleDeclaresTranslations,
 } from '../utils/stack-collections.js';
-import { redactConnectionUrl, describeDriverConnection } from '../utils/connection-display.js';
+import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from '../utils/connection-display.js';
+import { captureServedDatabaseFile, watchServedDatabaseFile } from '../utils/served-database-file.js';
 // The posture prose `os serve` and `os doctor` BOTH print, declared once
 // (#12492) — and, since #12579, the multi-org runtime SPELLING those two
 // commands put in front of the same operator, declared once with it.
@@ -390,9 +392,9 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
  * `serve` used to publish the port it was ASKED for on all three of the
  * channels that ANNOUNCE an address — the `objectstack:listening` IPC message,
  * the ready banner's `API:` row (through {@link resolveAuthBaseUrl}), and
- * `runtime.<environment>.json`. For every port but one the requested and the
- * bound value coincide, which is why it stayed invisible; for `0` they CANNOT
- * coincide. `MIN_PORT = 0` is legal on purpose — `utils/port-contract.ts` says
+ * `runtime.<environment>.<project>.json`. For every port but one the requested
+ * and the bound value coincide, which is why it stayed invisible; for `0` they
+ * CANNOT coincide. `MIN_PORT = 0` is legal on purpose — `utils/port-contract.ts` says
  * so in its own words, from its own measurement, that 0 is "a REQUEST, not an
  * error", and `listen(0)` binds a kernel-assigned port. So `os serve --port 0`
  * announced `{ port: 0 }`, printed `API: http://localhost:0/` and wrote
@@ -458,8 +460,8 @@ export interface ListeningMessage {
  */
 export interface BoundPortChannels {
   /**
-   * Writes `runtime.<environment>.json`. ⛔ Must COMPLETE before either
-   * announcement below: it is the file both of them send a consumer to.
+   * Writes `runtime.<environment>.<project>.json`. ⛔ Must COMPLETE before
+   * either announcement below: it is the file both of them send a consumer to.
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
   /** Sends {@link ListeningMessage}, when an IPC channel is open. */
@@ -474,14 +476,14 @@ export interface BoundPortChannels {
  * ## The bug this shape exists to make impossible
  *
  * `os serve` announces its address on three channels: the runtime state file
- * `runtime.<environment>.json`, the `objectstack:listening` IPC message, and
- * the ready banner. Two of those are ANNOUNCEMENTS a consumer reacts to; the
- * third is the FILE those consumers then open. Published in the order they
+ * `runtime.<environment>.<project>.json`, the `objectstack:listening` IPC
+ * message, and the ready banner. Two of those are ANNOUNCEMENTS a consumer
+ * reacts to; the third is the FILE those consumers then open. Published in the order they
  * happened to be written — banner, IPC, file — every consumer that believes an
  * announcement races a file that is not there yet:
  *
  * ```text
- * banner  ─▶ a supervisor sees "ready" and opens runtime.env_local.json
+ * banner  ─▶ a supervisor sees "ready" and opens runtime.env_local.<project>.json
  * IPC     ─▶ the `os dev` parent sees the port
  * file    ─────────────────────────▶ ...written here. The ENOENT already happened.
  * ```
@@ -490,10 +492,11 @@ export interface BoundPortChannels {
  * claim (`serve-publishes-bound-port.e2e.test.ts`) is an ORDINARY consumer — it
  * waits for the banner AND the IPC message, then reads the file — and it
  * ejected 14 PRs from the shared merge queue in a rolling 24 hours (10
- * independent hits, #13158) with `ENOENT: ... runtime.env_local.json`. A real
- * supervisor written the same way loses the same race; all a loaded machine
- * does is deschedule the child between the announcement and the write, which is
- * why it read as a flake for a day.
+ * independent hits, #13158) with `ENOENT: ... runtime.env_local.json` — the
+ * name that file carried then, before {@link runtimeStateFileName} keyed it by
+ * project as well. A real supervisor written the same way loses the same race;
+ * all a loaded machine does is deschedule the child between the announcement
+ * and the write, which is why it read as a flake for a day.
  *
  * ⛔ The repair is NOT to make the reader poll. A consumer that must poll after
  * being told "ready" was told "ready" too early — polling spreads the defect
@@ -521,6 +524,92 @@ export function publishBoundPort(boundPort: number, channels: BoundPortChannels)
 }
 
 /**
+ * The identity a runtime state file is keyed by: the ROOT OF THE PROJECT this
+ * process is serving, folded into one filename-safe component.
+ *
+ * ## The collision this ends, DRIVEN rather than reasoned (#15733)
+ *
+ * The state file used to be `runtime.<environment>.json`, and both halves of
+ * that name are machine-global. {@link resolveObjectStackHome} takes NO
+ * arguments — it reads `OS_HOME`, else `~/.objectstack` — and an environment
+ * id is not a project identity, so two different projects on one machine, both
+ * in the ordinary `local` environment, wrote ONE file. Two real boots, two
+ * project roots, one home:
+ *
+ * ```text
+ * project A boots  → runtime.env_local.json = { pid 9301, port 42693 }
+ * project B boots  → runtime.env_local.json = { pid 9345, port 46175 }
+ * A asks "is my server running, and where?"
+ *                  → answered pid 9345 on :46175 — which is B — while A's own
+ *                    server is still alive and still listening on 42693.
+ * A shuts down     → its exit handler deletes the file that by then described
+ *                    B, so B serves on with no supervision record at all.
+ * ```
+ *
+ * Those are one defect seen twice: the NAME carried no answer to *whose*
+ * server this is, so every project addressed the same file. Keying it by the
+ * served app's root gives each project its own — a reader that finds a file
+ * has found its own, and a process cleaning up on exit removes only its own.
+ *
+ * ⛔ NOT repaired by putting an identity in the PAYLOAD instead. #15374 ruled
+ * that one deliberately: the identity of the file a process is serving is a
+ * property of THAT PROCESS, and a payload key would turn a best-effort
+ * supervision file into an identity contract while STILL leaving two projects
+ * overwriting and deleting each other's records. The key is the defect; the
+ * payload is unchanged here.
+ *
+ * ## Why the name carries a readable half as well as a digest
+ *
+ * The digest is what makes the name unique; the slug is what makes a home
+ * directory legible to whoever is standing in front of it. A directory
+ * answering `runtime.env_local.<12 hex>.json` twice tells a reader nothing
+ * about which one is theirs, and answering that question is this file's whole
+ * job. The slug is DERIVED, never trusted: uniqueness rests on the digest
+ * alone, so a project root whose basename sanitises away to nothing is still
+ * keyed correctly — it just reads as the digest.
+ *
+ * ⚠️ Boundary, stated rather than fixed: the key is the resolved path, not the
+ * realpath, so two symlinked spellings of ONE project key differently (each
+ * spelling gets its own file, and each is internally consistent). Two boots of
+ * the SAME project also still share a file — that is the same-project case,
+ * which is #15374's in-process watch, not this one.
+ *
+ * ⚠️ Second boundary, and the one an OUT-OF-TREE reader has to replicate to
+ * find the record: WHICH root this is handed is {@link servedAppRootOrCwd},
+ * which {@link anchorServedApp} sets to the CONFIG'S OWN DIRECTORY only when
+ * that config exists and that directory carries a `package.json`, and to
+ * `process.cwd()` otherwise. So one app served from two working directories
+ * with no manifest beside its config keys TWO files, and a supervisor that
+ * reconstructs the name out of tree has to apply that same rule rather than
+ * assume the config's directory. That fallback is #11185's and is deliberate:
+ * a directory that declares nothing is not anchored at, because anchoring
+ * there could only turn a working boot into an `undeclared` refusal.
+ */
+export function projectStateKey(servedAppRoot: string): string {
+  const absolute = path.resolve(servedAppRoot);
+  const digest = createHash('sha256').update(absolute).digest('hex').slice(0, 12);
+  const slug = path.basename(absolute).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+  return slug.length > 0 ? `${slug}-${digest}` : digest;
+}
+
+/**
+ * The runtime state file's name: `runtime.<environment>.<project>.json`.
+ *
+ * Both components are identities the file has to carry, and neither is
+ * sufficient alone — the environment id keeps a staging boot from answering
+ * for a local one, and {@link projectStateKey} keeps ANOTHER PROJECT's local
+ * boot from answering for this one.
+ *
+ * ⚠️ A reader that hard-codes the old `runtime.<environment>.json` now gets
+ * ENOENT rather than a stale or foreign record. That is the intended trade: a
+ * missing file is a loud, correct answer to "is my server running", where the
+ * name it replaces could only give a confident wrong one.
+ */
+export function runtimeStateFileName(environmentId: string, servedAppRoot: string): string {
+  return `runtime.${environmentId}.${projectStateKey(servedAppRoot)}.json`;
+}
+
+/**
  * The real channels: the same three writes this command has always done, with
  * their failure handling unchanged.
  *
@@ -533,7 +622,15 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
     writeRuntimeState: ({ port, url }) => {
       try {
         const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
-        const runtimeFile = path.join(resolveObjectStackHome(), `runtime.${environmentId}.json`);
+        // Keyed by the SERVED APP'S ROOT as well as the environment, so two
+        // projects on one machine stop addressing one file (#15733). The root
+        // is the one this command already anchored for host resolution; a
+        // caller reaching these channels outside a boot gets the CWD, which is
+        // what every path in that situation already resolves against.
+        const runtimeFile = path.join(
+          resolveObjectStackHome(),
+          runtimeStateFileName(environmentId, servedAppRootOrCwd()),
+        );
         fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
         fs.writeFileSync(runtimeFile, JSON.stringify({
           pid: process.pid,
@@ -2099,6 +2196,11 @@ export default class Serve extends Command {
     // is idempotent, so the second pass over an already-clean URL is a no-op.
     let resolvedDriverLabel: string | undefined;
     let resolvedDatabaseUrl: string | undefined;
+    // The on-disk SQLite file this boot serves, when it serves one. Kept apart
+    // from `resolvedDatabaseUrl` on purpose: that value is a string for a
+    // human and may be redacted or labelled, while this one is handed to
+    // `stat` — see `describeDriverSqliteFile`.
+    let servedSqliteFilePath: string | undefined;
 
     // Resolve the kernel logger level up front. It decides more than the
     // logger's own threshold: it decides whether the boot-quiet window below
@@ -2718,6 +2820,7 @@ export default class Serve extends Command {
              trackPlugin(resolution.trackName);
              resolvedDriverLabel = resolution.label;
              resolvedDatabaseUrl = resolution.displayUrl;
+             servedSqliteFilePath = resolution.sqliteFilePath;
 
              // ADR-0057 §3.6 (#2834 ②): provision the dedicated `telemetry`
              // datasource — a sibling SQLite file the engine routes every
@@ -4588,6 +4691,7 @@ export default class Serve extends Command {
           if (probe) {
             resolvedDriverLabel = probe.label;
             resolvedDatabaseUrl = probe.url;
+            servedSqliteFilePath = probe.sqliteFile;
           }
         } catch {
           // best-effort only
@@ -4649,9 +4753,9 @@ export default class Serve extends Command {
       // ── The port this process ACTUALLY bound (#13062) ─────────────
       // Read ONCE, here, and handed to every channel that announces an address:
       // the ready banner below, the `objectstack:listening` IPC message and
-      // `runtime.<environment>.json`. Those three were three outputs of ONE
-      // number, and that number was the port that had been REQUESTED — equal to
-      // the bound one for every value except the one where it can never be
+      // `runtime.<environment>.<project>.json`. Those three were three outputs
+      // of ONE number, and that number was the port that had been REQUESTED
+      // — equal to the bound one for every value except the one where it can never be
       // (`--port 0`), which is how all three came to announce `localhost:0`
       // with nothing erroring.
       //
@@ -4755,6 +4859,35 @@ export default class Serve extends Command {
       // sends a consumer to it. {@link publishBoundPort} carries the race the
       // old order lost, and the reason the repair is not reader-side polling.
       publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner));
+
+      // ── Watch the served database file's identity ──────────────────
+      // Deleting the data directory under a running server (`rm -rf
+      // .objectstack/data`, what `demo:reset` does) unlinks the inode without
+      // touching this process: SQLite keeps serving the now-invisible file,
+      // health keeps answering 200, and a later boot creates a brand-new
+      // database at the same path. From then on every filesystem inspection of
+      // that path describes a DIFFERENT file than this server answers from —
+      // which is how "the row I edited had no effect" and "the user who just
+      // authenticated is not in the database" become simultaneously true
+      // readings of a healthy deployment.
+      //
+      // Started only once the boot is otherwise complete, so a failure here
+      // can never be mistaken for a boot problem, and only when an on-disk
+      // SQLite file is actually being served. It refuses nothing and reports
+      // once — see `served-database-file.ts` for why both.
+      if (servedSqliteFilePath) {
+        const openedDatabaseFile = captureServedDatabaseFile(servedSqliteFilePath);
+        if (openedDatabaseFile) {
+          watchServedDatabaseFile({
+            opened: openedDatabaseFile,
+            // `error`, and to stderr: by the degradation-log-level rule this is
+            // the durability/consistency class — the system keeps looking
+            // normal while what it claims is persisted is not at the path it
+            // names.
+            onDiverged: (message) => { console.error(chalk.red(message)); },
+          });
+        }
+      }
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.
@@ -6121,7 +6254,9 @@ function emitMultiNodeCapTelemetry(
  * arrives in, so a DSN-declared datasource no longer falls through to
  * `(unknown)`, and no shape prints credentials.
  */
-export function describeRegisteredDriver(kernel: any): { label: string; url: string } | null {
+export function describeRegisteredDriver(
+  kernel: any,
+): { label: string; url: string; sqliteFile?: string } | null {
   const candidates = [
     'driver.com.objectstack.driver.sql',
     'driver.com.objectstack.driver.mongodb',
@@ -6153,7 +6288,16 @@ export function describeRegisteredDriver(kernel: any): { label: string; url: str
 
     // A memory driver has no address to show — say so, rather than
     // `(unknown)`, which reads as "we looked for one and failed".
-    return { label, url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)') };
+    //
+    // `sqliteFile` is the same config read a second time asking a DIFFERENT
+    // question: not "what do I print" but "which file on this filesystem", so
+    // a caller can `stat` it. Absent for every driver that serves no on-disk
+    // SQLite file, which is the majority of them.
+    return {
+      label,
+      url: url ?? (name.endsWith('.memory') ? '(in-memory)' : '(unknown)'),
+      sqliteFile: describeDriverSqliteFile(cfg),
+    };
   }
   return null;
 }

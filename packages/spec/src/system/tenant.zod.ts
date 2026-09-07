@@ -20,6 +20,7 @@ import { z } from 'zod';
  * Defines how tenant data is separated in the system
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const TenantIsolationLevel = z.enum([
   'shared_schema',    // Shared DB, shared schema, row-level isolation (most economical)
   'isolated_schema',  // Shared DB, separate schema per tenant (balanced)
@@ -547,9 +548,20 @@ export const DatabaseLevelIsolationStrategySchema = lazySchema(() => z.object({
     maxActivePools: z.number().int().positive().default(100).describe('Max active pools'),
     
     /**
-     * Idle pool timeout in seconds
+     * Idle pool timeout in seconds.
+     *
+     * Renamed from `idleTimeout` (#14478 / #14519): the unit lived in this
+     * JSDoc only, and `.describe()` — the text the reference pages publish —
+     * carried none. Tombstoned rather than deleted because this nested object
+     * is not `.strict()`.
      */
-    idleTimeout: z.number().int().positive().default(300).describe('Idle pool timeout'),
+    idleTimeoutSeconds: z.number().int().positive().default(300).describe('Idle pool timeout in seconds'),
+    idleTimeout: retiredKey(
+      '`connectionPool.idleTimeout` was removed from `DatabaseLevelIsolationStrategy` in ' +
+      '@objectstack/spec 17 — its unit (seconds) lived in a source comment only and the ' +
+      'published description named none, so a reader of the reference page could not tell 300 seconds ' +
+      'from 300 milliseconds. Rename the key to `idleTimeoutSeconds`; the value (seconds) is unchanged.',
+    ),
     
     /**
      * Whether to use connection pooler (PgBouncer, etc.)
@@ -667,9 +679,20 @@ export const TenantSecurityPolicySchema = lazySchema(() => z.object({
     ipWhitelist: z.array(z.string()).optional().describe('Allowed IP addresses'),
     
     /**
-     * Session timeout in seconds
+     * Session timeout in seconds.
+     *
+     * Renamed from `sessionTimeout` (#14478 / #14519): the unit lived in this
+     * JSDoc only, and `.describe()` — the text the reference pages publish —
+     * carried none. Tombstoned rather than deleted because this nested object
+     * is not `.strict()`.
      */
-    sessionTimeout: z.number().int().positive().default(3600).describe('Session timeout'),
+    sessionTimeoutSeconds: z.number().int().positive().default(3600).describe('Session timeout in seconds'),
+    sessionTimeout: retiredKey(
+      '`accessControl.sessionTimeout` was removed from `TenantSecurityPolicy` in @objectstack/spec 17 ' +
+      '— its unit (seconds) lived in a source comment only and the published description ' +
+      'named none, so a reader of the reference page could not tell 3600 seconds from 3600 ' +
+      'milliseconds. Rename the key to `sessionTimeoutSeconds`; the value (seconds) is unchanged.',
+    ),
   }).optional().describe('Access control requirements'),
   
   /**

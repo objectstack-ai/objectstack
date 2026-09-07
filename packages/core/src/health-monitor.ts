@@ -345,7 +345,7 @@ export class PluginHealthMonitor {
       timestamp: new Date().toISOString(),
       message,
       metrics: {
-        uptime: Date.now() - startTime,
+        uptimeMs: Date.now() - startTime,
       },
       checks: checks.length > 0 ? checks : undefined,
     };

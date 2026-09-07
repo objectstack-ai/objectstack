@@ -309,8 +309,24 @@ function checkCondition(value: any, condition: any): boolean {
         // ⚠️ `$eq` ONLY, deliberately. The exemption is written over the
         // OPERATOR and not over "the comparand is null", because the latter
         // spelling would have moved `$in: [null]` / `$nin: [null]` with it —
-        // and those are #13357's cells, `needs-user-decision`, held for the
-        // maintainer. They are measured byte-identical across this change.
+        // and those were #13357's cells, `needs-user-decision`, held for the
+        // maintainer when this landed. They are measured byte-identical
+        // across this change.
+        //
+        // ⛔ They are NOT held any more, and a reader arriving here must not
+        // escalate them a second time: the maintainer ruled them on 2026-08-31
+        // (option C, #13357) and the shapes are REFUSED at the contract's
+        // validation entrance (`assertListComparandShapes`) — the same door the
+        // `$gte: null` note below records for the ordering position — with the
+        // negative pin `memory-null-list-member-unreachable.test.ts`, and the
+        // sibling header in `memory-matcher-null-value-and-comparand.test.ts`
+        // already says so in the past tense.
+        //
+        // ⛔ That ruling is NOT a reason to re-spell this exemption over "the
+        // comparand is null". The reason above is unchanged: a rule written
+        // over the VALUE would still reach arms whose no-value answer is ruled
+        // elsewhere. Only the cells' STATE moved — refused at the door, rather
+        // than held for a ruling.
         if (value === undefined && op !== '$exists' && op !== '$null' && op !== '$eq'
             && !noValueSatisfiesNegation(op)) {
             return false; 
@@ -426,14 +442,30 @@ function checkCondition(value: any, condition: any): boolean {
                 // `typeof value !== 'string'` — the TYPE test, not the
                 // predicate. Answering it from {@link noValueSatisfiesNegation}
                 // states which question is being answered.
-                //
-                // A present, non-string value keeps the answer it had: the
-                // ruling moved the no-value cells, and only those.
                 if (value == null) {
                     if (noValueSatisfiesNegation(op)) break;
                     return false;
                 }
-                if (typeof value !== 'string' || value.includes(target)) return false;
+                // [#14079] A present value that is NOT a string satisfies this
+                // too. This line used to read `typeof value !== 'string' ||
+                // value.includes(target)` — a TYPE test standing in for the
+                // predicate, so `{ n: 5 }` failed `$contains: '5'` (correct:
+                // a number cannot contain a substring) AND `$notContains:
+                // '5'` (wrong: for the very same reason it cannot, it does not).
+                // Measured: this face answered `['3','4']` where this
+                // package's own live mingo path, `formula`, `having`,
+                // `driver-mongodb` and the analytics face answered all four
+                // rows. #13166's note that a non-string value "keeps the
+                // answer it had" recorded what that ruling chose to leave
+                // alone; the maintainer ruled the cell itself on 2026-09-05
+                // (option A, type-gate): a stored value that is not a string
+                // never satisfies a positive text operator and always
+                // satisfies `$notContains`. `FILTER_TEXT_CASES`' `score` rows
+                // are the pin, on every face. Now the arm answers the
+                // PREDICATE — "contains" is false of a non-string, so "does
+                // not contain" is true — which is `formula`'s shape
+                // (`!(typeof actual === 'string' && actual.includes(v))`).
+                if (typeof value === 'string' && value.includes(target)) return false;
                 break;
             case '$startsWith': 
                 if (typeof value !== 'string' || !value.startsWith(target)) return false; 

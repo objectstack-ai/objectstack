@@ -357,7 +357,7 @@ Self-referential hierarchy (e.g., categories, org chart).
 
 | Property | Type | Default | Description |
 |:---|:---|:---|:---|
-| `reference` | `string` | **required** | Same object (self-reference) |
+| `reference` | `string` | — | Optional. If given, must be this object (self-reference) — any other object is refused at parse |
 
 ```typescript
 { name: 'parent_category', label: 'Parent Category', type: 'tree', reference: 'category' }

@@ -23,7 +23,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { SqlDriver, type SqlDialectName } from './index.js';
 
 class FakePostgresDriver extends SqlDriver {
-  protected get dialectName(): SqlDialectName {
+  // [#15684] `public`, tracking the base: TypeScript refuses an override that
+  // NARROWS visibility, so a `protected` one here would be a compile error the
+  // moment the base getter became readable from outside the driver.
+  public override get dialectName(): SqlDialectName {
     return 'postgres';
   }
 }

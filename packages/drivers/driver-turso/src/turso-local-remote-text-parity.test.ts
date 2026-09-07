@@ -56,10 +56,18 @@ import { FILTER_TEXT_CASES, FILTER_TEXT_ROWS } from '@objectstack/spec/data';
 import { TursoDriver } from './turso-driver.js';
 import { asLibsqlClient, makeLibsqlSqliteStub, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
-/** The shared nine-row fixture, so a verdict here is comparable to one anywhere. */
+/**
+ * The shared nine-row fixture, so a verdict here is comparable to one anywhere.
+ *
+ * [#14079] `score` is the fixture's non-string column, declared as the number
+ * it is — REAL on both transports. The remote transport keeps no schema, so
+ * the declared type reaches its compiler through the resolver `TursoDriver`
+ * injects (`setNonTextColumnResolver`), and the table's non-string rows are
+ * what hold that injection to the local compiler's answer.
+ */
 const TEXT_OBJECT = {
   name: 'text_conformance',
-  fields: { name: { type: 'string' } },
+  fields: { name: { type: 'string' }, score: { type: 'number' } },
 };
 
 /** The error a refused filter produced — never a bare `toThrow()`. */
@@ -120,8 +128,33 @@ describe('[#6518] TursoDriver LOCAL and REMOTE answer FILTER_TEXT_CASES identica
       expect(byId.get('2')).toBe('acme corp');
       expect(byId.get('3')).toBe('CAFÉ');
       expect(byId.get('4')).toBe('café');
+      // [#14079] The premise of the non-string rows, on both transports: the
+      // stored `score` reads back as a NUMBER, so a coercing `GLOB` would have
+      // had a `'5.0'` to match and the type-gated compile has nothing to.
+      for (const r of rows) expect(typeof r.score, `${driver.transportMode} row ${String(r.id)}`).toBe('number');
     }
   });
+
+  /**
+   * [#14079] `$like` / `$ilike` over the non-string column, on both transports.
+   * Pinned here rather than in the shared table for the reason the table's
+   * header gives (a driver's enrolment is the whole table, and `driver-mongodb`
+   * refuses these two operators). Under coercion `'%0'` matches every row of
+   * a REAL column (`5` renders `'5.0'`); the contract answers none.
+   */
+  for (const [label, where, expected] of [
+    ['$like never matches a stored number', { score: { $like: '%5%' } }, []],
+    ['$like with a trailing wildcard never matches a stored number', { score: { $like: '%0' } }, []],
+    ['$ilike never matches a stored number', { score: { $ilike: '%5%' } }, []],
+    ['$not over $like admits every stored number', { $not: { score: { $like: '%5%' } } }, ['1', '2', '3', '4', '5', '6', '7', '8', '9']],
+  ] as const) {
+    it(label, async () => {
+      const localIds = ids(await local.find(TEXT_OBJECT.name, { where } as DriverQuery));
+      const remoteIds = ids(await remote.find(TEXT_OBJECT.name, { where } as DriverQuery));
+      expect(remoteIds, `${label} — LOCAL vs REMOTE`).toEqual(localIds);
+      expect(localIds).toEqual([...expected]);
+    });
+  }
 
   for (const testCase of FILTER_TEXT_CASES) {
     it(testCase.name, async () => {

@@ -188,8 +188,39 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
   field: z.string().optional().describe('Aggregated field; optional for count(*)'),
   /** Measure-scoped filter (e.g. only won deals for "won_amount"). */
   filter: FilterConditionSchema.optional(),
-  /** Display format, e.g. "$0,0.00", "0.0%". */
-  format: z.string().optional(),
+  /**
+   * Display format — a NUMERAL pattern controlling grouping, decimals and
+   * percent: `"0,0.00"`, `"0.0%"`. A `$` in the pattern is still honoured as a
+   * legacy literal, but a real amount takes its symbol from `currency` below,
+   * never from the pattern — see that field's note.
+   *
+   * A DATE-valued measure (`min` / `max` over a date field) never reads a date
+   * PATTERN here: `"YYYY-MM-DD"` is accepted by this schema, reaches the
+   * renderer, and produces the locale default. The shared date path takes a
+   * named STYLE instead, so a date-only value reads `format` as `short`
+   * (`Jul 4, '24`) or `relative` (`3 days ago` inside a ±7-day window, the
+   * absolute locale form outside it) — the same two words `DateCellRenderer`
+   * honours from `field.format` — while a DATETIME value ignores `format`
+   * altogether.
+   *
+   * Measured at the pin this repo builds against (`.objectui-sha` =
+   * `a472b0716`; re-derived at that pin 2026-09-07) in objectui
+   * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
+   * non-numeric value through `formatMeasureDate` (`:184-197`), whose
+   * date-only arm threads `format` into the STYLE parameter of `formatDate`
+   * (`utils/date-display.ts:104-137`, whose `relative` branch falls back to
+   * the absolute form beyond ±7 days at `:90`), while its datetime arm calls
+   * `formatDateTime(v, { locale })` with no style at all (`:194`). Teaching
+   * the shared path a pattern grammar would change every list cell that reads
+   * it, so the gap is DOCUMENTED here rather than closed (objectui#7178 ruled
+   * A; the datetime half is objectui#7443).
+   */
+  format: z.string().optional().describe(
+    'Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". '
+    + 'An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued '
+    + 'measure never reads a date pattern: `"YYYY-MM-DD"` renders the locale default. A date-only '
+    + 'value reads `format` as a display style (`short`, `relative`); a datetime value ignores it.',
+  ),
   /**
    * Display currency (ISO 4217, e.g. "USD", "CNY"). Carried onto the result
    * field so presentations render a locale-correct symbol via `Intl` rather

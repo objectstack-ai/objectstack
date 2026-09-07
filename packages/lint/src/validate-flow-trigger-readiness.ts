@@ -104,6 +104,7 @@
 // on the CLI surface, a package build whose stack contains one.
 
 import { TimeRelativeTriggerSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
+import { recordsOf } from './object-graph.js';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
 
@@ -186,18 +187,6 @@ type AnyRec = Record<string, unknown>;
  */
 const VALID_RECORD_TRIGGER = /^record-(?:before|after)-(?:create|insert|update|delete|write)$/;
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({
-      name,
-      ...(def as AnyRec),
-    }));
-  }
-  return [];
-}
-
 /**
  * Render a non-object `config.timeRelative` for the 1e message: the value AND
  * its type, because both halves of the mistake are informative — `'daily'` shows
@@ -249,11 +238,11 @@ function startNodeOf(flow: AnyRec): { node: AnyRec; index: number } | undefined 
  */
 export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadinessFinding[] {
   const findings: FlowTriggerReadinessFinding[] = [];
-  const flows = asArray(stack.flows);
+  const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
   const objectNames = new Set(
-    asArray(stack.objects)
+    recordsOf(stack.objects)
       .map((o) => (typeof o.name === 'string' ? o.name : undefined))
       .filter((n): n is string => !!n),
   );

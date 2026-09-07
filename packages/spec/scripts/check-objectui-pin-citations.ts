@@ -127,6 +127,69 @@ const REPO = path.resolve(SPEC, '../..');
 const SRC = path.join(SPEC, 'src');
 const PIN_FILE = path.join(REPO, '.objectui-sha');
 
+/**
+ * ## The dispatch-gates declaration — the root-FILE idiom
+ *
+ * `scripts/pm/dispatch-gates.mjs` derives the gate families a card must run
+ * from the paths it touches, and it learns a gate's population by scanning the
+ * gate's own SOURCE TEXT for path-shaped literals (`extractWatchHints`). Every
+ * path this gate reads is COMPUTED — `PIN_FILE` from `REPO`, `SRC` from
+ * `SPEC` — so the extractor found nothing here and this gate had no population
+ * at all. Measured on `7bf96cfd0`, before this declaration existed:
+ *
+ *     node scripts/pm/dispatch-gates.mjs --commands .objectui-sha --repo objectstack-ai/objectstack
+ *     -> 12 commands (5 matched by path), 0 of them naming check:objectui-pin-citations
+ *
+ * and on the same specimen with it, 13 commands (6 matched by path), the new
+ * one being `pnpm --filter @objectstack/spec run check:objectui-pin-citations`.
+ *
+ * A change set consisting only of the pin file is EXACTLY the class this gate
+ * exists for — a pin bump is the one event that invalidates an asserting
+ * citation — and it was the class that never derived it. The measured cost was
+ * a full CI cycle: a pin bump ran 47 derived commands green and then redded
+ * here on 8 stale citations, discovered a cycle late.
+ *
+ * ⛔ The declaration is the POPULATION, never a hand list of the citing files.
+ * They are discovered by regex on purpose (`sourceFiles(SRC)` + `scanFile`), so
+ * a list of today's citers is stale the moment a record is written or moved —
+ * the same reason `check:merge-driver` refuses a hand list of generator names.
+ *
+ * A bare `.objectui-sha` carries no path separator and reaches the extractor as
+ * a bare word; the trailing `/` + `**` suffix is the sanctioned escape for a
+ * repo-ROOT file — `collapseHint` reduces it back to the literal filename, so
+ * it claims the root file and no same-named file inside a directory. Nothing in
+ * this tree lives under `.objectui-sha/`, so it claims no directory either.
+ * Measured through `hintCovers`, the sole predicate:
+ *
+ *     hintCovers('.objectui-sha/**', '.objectui-sha')  -> true
+ *     collapseHint('.objectui-sha/**')                 -> '.objectui-sha'
+ *
+ * `check-doc-anchors.mjs` declares `README.md`/`ARCHITECTURE.md` this way and
+ * `git-merge-regen.mjs` declares `package.json` this way; the sibling package-
+ * scoped gate `check-llms-txt.ts` proves the idiom reaches a gate invoked
+ * through a pnpm filter — dispatch-gates resolves the `--filter` script back to
+ * this file and reads it as `gate source`, exactly as it does for that one.
+ *
+ * ⚠️ Provenance, NOT a lookup key. Nothing here is joined with `REPO` and
+ * stat'd: `PIN_FILE` and `SRC` remain the paths this gate opens. The glob form
+ * used as a path would resolve to nothing and `existsSync` would drop it
+ * SILENTLY — the "checked nothing, reported green" disease this gate's own
+ * vacuous-green guard exists to refuse. `selfTest` pins both halves.
+ */
+const ROOT_FILE_WATCH_HINTS = ['.objectui-sha/**'];
+
+/**
+ * The other half of the population: the SUBTREE this gate walks for citations.
+ *
+ * A pin bump is not the only way a citation goes stale — writing a new record,
+ * or moving one, changes what this gate has to say about the SAME pin. The
+ * glob sits in the FINAL segment, so `hintCovers` reaches every source beneath
+ * `packages/spec/src` and nothing outside it, which is precisely the scope
+ * `sourceFiles(SRC)` walks (the header's "everything outside `packages/spec/src`"
+ * exclusion is the same boundary, stated from the other side).
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/spec/src/**'];
+
 const LIST = process.argv.includes('--list');
 
 /** How far past a `.objectui-sha` mention a citation may reach. */
@@ -379,6 +442,51 @@ function selfTest(): never {
     check(found > 0, 'discovery: found zero citations in the real tree — the matcher or the scope has moved');
   }
 
+  // ── the dispatch-gates declaration ──────────────────────────────────────
+  // Enforcement cannot hold any of this: the declaration is read by ANOTHER
+  // tool entirely (`extractWatchHints` in scripts/pm/dispatch-gates.mjs, off
+  // source text), so a wrong, reworded or deleted entry runs perfectly green
+  // here and shows up only as a dev dispatched on a `.objectui-sha` pin bump
+  // who is never told this gate reads it — which is the failure that bought
+  // this declaration, measured as a full CI cycle after 47 green commands.
+  {
+    const declared = [...ROOT_FILE_WATCH_HINTS, ...ROOT_DIR_WATCH_HINTS];
+    const collapse = (h: string): string => h.replace(/\/\*+$/, '');
+
+    // The population the declaration CLAIMS is the population this gate READS.
+    check(
+      ROOT_FILE_WATCH_HINTS.length === 1 && collapse(ROOT_FILE_WATCH_HINTS[0]!) === path.relative(REPO, PIN_FILE),
+      `the declared root file is the pin file this gate opens: ${ROOT_FILE_WATCH_HINTS.join(', ')} vs ${path.relative(REPO, PIN_FILE)}`,
+    );
+    check(
+      ROOT_DIR_WATCH_HINTS.length === 1 && collapse(ROOT_DIR_WATCH_HINTS[0]!) === path.relative(REPO, SRC),
+      `the declared subtree is the tree this gate walks: ${ROOT_DIR_WATCH_HINTS.join(', ')} vs ${path.relative(REPO, SRC)}`,
+    );
+
+    // The separator is what makes `hintCovers` admit the entry at all — a bare
+    // filename reaches it as a bare word. A reword back to `.objectui-sha`
+    // leaves every other signal this gate emits green.
+    check(
+      declared.every((h) => h.includes('/')),
+      `every declared entry carries a path separator: ${declared.join(', ')}`,
+    );
+
+    // Provenance, never a lookup key: joined with REPO these resolve to
+    // nothing, and `existsSync` would drop them SILENTLY.
+    check(
+      declared.every((h) => !existsSync(path.join(REPO, h))),
+      `the declared spellings are provenance, not paths: ${declared.join(', ')}`,
+    );
+
+    // …and the declared subtree really covers the live population, so a
+    // narrowing of either side cannot pass unnoticed.
+    const declaredSrc = path.join(REPO, collapse(ROOT_DIR_WATCH_HINTS[0] ?? ''));
+    check(
+      sourceFiles(SRC).every((f) => f.startsWith(declaredSrc + path.sep)),
+      'every source this gate scans lies under the declared subtree',
+    );
+  }
+
   if (failures.length) {
     for (const f of failures) console.error(`✗ self-test: ${f}`);
     console.error(`\ncheck-objectui-pin-citations --self-test: ${failures.length} failure(s).\n`);
@@ -388,7 +496,9 @@ function selfTest(): never {
     '✅  self-test: asserting citations are checked against the pin and historical ones are not;\n' +
       '    a citation wrapped across comment lines is still found (both wrap positions); a sha in\n' +
       '    neither spelling and a sha missing its backticks both FAIL; a mention naming no sha is\n' +
-      '    skipped; hex-looking prose without a digit is not a sha; a missing pin file throws.',
+      '    skipped; hex-looking prose without a digit is not a sha; a missing pin file throws; and\n' +
+      '    the dispatch-gates watch-hint declaration names the pin file and the subtree this gate\n' +
+      '    really reads, in the separator-carrying spelling `hintCovers` admits.',
   );
   process.exit(0);
 }

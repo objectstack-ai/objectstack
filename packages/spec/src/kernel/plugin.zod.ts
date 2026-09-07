@@ -123,9 +123,9 @@ export const PluginSchema = lazySchema(() => z.object({
     ...CORE_PLUGIN_TYPES
   ]).default('standard').optional().describe('Plugin Type categorization for runtime behavior'),
   
-  staticPath: z.string().optional().describe('Absolute path to static assets (Required for type="ui-plugin")'),
-  slug: z.string().regex(/^[a-z0-9-_]+$/).optional().describe('URL path segment (Required for type="ui-plugin")'),
-  default: z.boolean().optional().describe('Serve at root path (Only one "ui-plugin" can be default)'),
+  staticPath: z.string().optional().describe('Absolute path to static assets (Required for type="ui")'),
+  slug: z.string().regex(/^[a-z0-9-_]+$/).optional().describe('URL path segment (Required for type="ui")'),
+  default: z.boolean().optional().describe('Serve at root path (Only one "ui" plugin can be default)'),
   
   version: z.string().regex(/^\d+\.\d+\.\d+$/).optional().describe('Semantic Version'),
   description: z.string().optional(),

@@ -117,11 +117,12 @@
 
 import { walkFilterFieldKeys } from './filter-walk.js';
 import {
-  RELATIONSHIP_FIELD_TYPES,
   describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
   joinablePrefixes,
+  recordsOf,
+  RELATIONSHIP_FIELD_TYPES,
   resolveFieldPath,
   type ObjectGraph,
 } from './object-graph.js';
@@ -162,15 +163,6 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 /** The shared consequence sentence — why an unresolved path is not merely inert. */
 const SILENT_EMPTY =
   'The path is compiled into the analytics query as written, so it addresses a column ' +
@@ -187,7 +179,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
   const findings: DatasetRefFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const datasets = asArray(stack.datasets);
+  const datasets = recordsOf(stack.datasets);
   if (datasets.length === 0) return findings;
 
   const graph: ObjectGraph = indexObjectGraph(stack);
@@ -315,7 +307,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
     };
 
     // ── (2) `dimensions[].field` ──
-    asArray(ds.dimensions).forEach((dim, i) => {
+    recordsOf(ds.dimensions).forEach((dim, i) => {
       const name = strName(dim.name) ?? `#${i}`;
       checkFieldPath(
         dim.field,
@@ -333,7 +325,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
     // `DatasetSchema.superRefine` owns that graph, and `field` is legitimately
     // absent on a plain `count`. Both fall out of `checkFieldPath`'s own
     // "nothing written, nothing to resolve" guard.
-    asArray(ds.measures).forEach((measure, i) => {
+    recordsOf(ds.measures).forEach((measure, i) => {
       const name = strName(measure.name) ?? `#${i}`;
       checkFieldPath(
         measure.field,
@@ -368,7 +360,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
     };
 
     checkFilter(ds.filter, `${where} › filter`, `${dsPath}.filter`);
-    asArray(ds.measures).forEach((measure, i) => {
+    recordsOf(ds.measures).forEach((measure, i) => {
       const name = strName(measure.name) ?? `#${i}`;
       checkFilter(
         measure.filter,

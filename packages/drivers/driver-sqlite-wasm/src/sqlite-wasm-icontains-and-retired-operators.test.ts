@@ -54,7 +54,10 @@ describe('[#5702] driver-sqlite-wasm — $icontains and the retired $regex, on s
 
   beforeAll(async () => {
     driver = new SqliteWasmDriver({ filename: ':memory:' });
-    await driver.initObjects([{ name: 'txt', fields: { name: { type: 'string' } } }]);
+    // [#14079] `score` is the shared fixture's non-string column; declared as
+    // the number it is so the table's non-string rows run against a REAL column
+    // on sql.js — a separately compiled engine whose `glob()` never sees it now.
+    await driver.initObjects([{ name: 'txt', fields: { name: { type: 'string' }, score: { type: 'number' } } }]);
     for (const row of FILTER_TEXT_ROWS) {
       await driver.create('txt', { ...row }, BYPASS);
     }

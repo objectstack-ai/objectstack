@@ -237,9 +237,14 @@ export const PLATFORM_PLUGIN_WIRED_RUNTIMES: Readonly<Record<string, PlatformPlu
     '@objectstack/organizations': {
       edition: 'enterprise',
       note:
-        'closed-source multi-org runtime (ADR-0105); `serve` loads it from the host app ' +
-        'when the resolved tenancy posture is `group`/`isolated` — no `requires` token; ' +
-        'not on the public npm registry, distributed with an enterprise/cloud subscription',
+        'multi-org runtime (ADR-0105 D12, amended by ADR-0132); `serve` loads it from the ' +
+        'host app when the resolved tenancy posture is `group`/`isolated` — no `requires` ' +
+        'token. ⚠️ ONE NAME, TWO PACKAGES, and the row stays `enterprise` because it ' +
+        'records the ENTITLED variant: the framework publishes an Apache-2.0 package of ' +
+        'this name (`packages/plugins/organizations`), and an enterprise/cloud deployment ' +
+        'resolves the same name to a private licence-gated subclass through its own ' +
+        '`workspace:*` declaration. Which one is mounted is decided by the manifest that ' +
+        'declares the name, never by the framework',
     },
     '@objectstack/security-enterprise': {
       edition: 'enterprise',

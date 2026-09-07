@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { defineConfig, type Options } from 'tsup';
 import type { Plugin } from 'esbuild';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 /**
  * [#10031] Annotate deferred schema construction as pure IN THE EMITTED
  * BUNDLES, so a CONSUMER's bundler may drop the schema consts its entry never
@@ -192,6 +194,7 @@ const mainConfig: Options = {
   target: 'es2020',
   treeshake: true,
   esbuildPlugins: [pureSchemaConstruction],
+  esbuildOptions: dropSourcesContent,
 };
 
 /**
@@ -213,6 +216,7 @@ const browserConfig: Options = {
   target: 'es2020',
   treeshake: true,
   esbuildPlugins: [pureSchemaConstruction, swapServerOnlyGrammarArm],
+  esbuildOptions: dropSourcesContent,
 };
 
 // The DTS pass re-runs only the main config (declarations once, per entry);

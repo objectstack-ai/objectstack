@@ -2,6 +2,7 @@
 
 import { objectTitleCompleteness } from '@objectstack/spec/data';
 import type { DisplayNameObjectMeta } from '@objectstack/spec/data';
+import { recordsOf } from './object-graph.js';
 
 /**
  * Build-time record-title diagnostics (ADR-0079).
@@ -51,15 +52,6 @@ export interface RecordTitleFinding {
 
 type AnyRec = Record<string, unknown>;
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 /**
  * Validate every object's record-title declaration. Returns the list of
  * findings (empty = clean). Both rules are advisory (`warning`): the caller
@@ -69,7 +61,7 @@ function asArray(v: unknown): AnyRec[] {
 export function validateRecordTitle(stack: AnyRec): RecordTitleFinding[] {
   const findings: RecordTitleFinding[] = [];
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let i = 0; i < objects.length; i++) {
     const obj = objects[i];
     const objName = typeof obj.name === 'string' ? obj.name : `(object ${i})`;

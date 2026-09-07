@@ -309,7 +309,38 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('76 invocation sites, 97 mentions — the thread\'s two control numbers hold', () => {
+    it('77 invocation sites, 99 mentions — the thread\'s two control numbers hold', () => {
+        // [#15866] 77 sites UNCHANGED / 98 → 99 mentions — the fourth pattern,
+        // and the first entry here that moves the mention count while adding no
+        // consumer at all. That card retired the `as any` casts on this file's
+        // protocol-dispatch sites, so each data door's request literal is now
+        // compiled against the declared spec contract through a typed envelope
+        // (`ServerScopedDataRequest`). The envelope's doc-comment has to say
+        // where its `context` member comes from — it is the SERVER-DERIVED
+        // execution context, which is the whole reason it may not join the
+        // published request schema — and naming {@link RestServer.resolveExecCtx}
+        // is how it says so. ⚠️ No call site was added, moved or removed: the
+        // repair is a type annotation, and `SITES.length` staying at 77 across
+        // it is the assertion that says so. A reader who sees only the mention
+        // count move should read it as documentation about the consumers, never
+        // as a consumer.
+        //
+        // [#13753, the `/references` half] 76 → 77 sites / 97 → 98 mentions.
+        // `GET /meta/:type/:name/references` resolved NO identity, so the
+        // reference sweep behind the admin "Used by" panel read the env
+        // partition only and rendered "Nothing in the metadata graph points at
+        // this item. Safe to delete." over an organization it never read. It
+        // joins as a LOCALLY CAUGHT site in the continuation-line spelling, for
+        // the same reason as its siblings: this door does not sit behind the
+        // shared anonymous floor either.
+        //
+        // ⚠️ Here the two numbers moved by the SAME amount (+1 and +1), which
+        // is the third pattern this block has recorded and is not a mistake:
+        // the door's new comment states the memoised resolution in prose
+        // WITHOUT naming the symbol, so the call is the only new mention. A
+        // reader checking the +1/+2 shape of the entries below should read this
+        // as the mention count tracking mentions, not as a lost site.
+        //
         // [#13753] 75 → 76 sites / 95 → 97 mentions. `GET /meta/diagnostics`
         // resolved NO identity, so the Studio governance sweep could not state
         // which organization's partition it was reading and reported clean
@@ -361,11 +392,20 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // `enforceAuth` was measured NOT to be the repair). A mention count
         // that tracked the site count exactly would be measuring one thing
         // twice.
-        expect(SITES.length).toBe(76);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(97);
+        //
+        // [#15685] 77 → 77 sites / 99 → 100 mentions. The `/references` door's
+        // refusal arm added ONE prose mention and NO call site: its comment
+        // records that the arm's catch is scoped to the protocol call alone, so
+        // the `resolveExecCtx` seam above it cannot reach the arm whatever that
+        // seam declares. That is the safety claim the narrow catch rests on, so
+        // naming the seam is the point of the sentence — and the sentence
+        // moving only the mention count is this control working: a site was not
+        // added, and the number that tracks sites did not move.
+        expect(SITES.length).toBe(77);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(100);
     });
 
-    it('the split is 23 locally caught / 53 bare — NOT 16 / 53, which does not add to 76', () => {
+    it('the split is 24 locally caught / 53 bare — NOT 16 / 53, which does not add to 77', () => {
         // 16 sites spell the catch on the invocation line; 4 more spell it on
         // the continuation line. A single-line grep sees 16 and the arithmetic
         // silently loses four sites.
@@ -375,12 +415,12 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(16);
-        expect(CAUGHT.length).toBe(23);
+        expect(CAUGHT.length).toBe(24);
         expect(BARE.length).toBe(53);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 23 caught ones is', () => {
+    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 24 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the

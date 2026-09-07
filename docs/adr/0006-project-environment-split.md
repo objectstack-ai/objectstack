@@ -177,6 +177,8 @@ The toggle is sticky per user; once on, it stays on across sessions.
    later (different semantics) when Builder UX ships. SDK consumers
    (none in production yet) must rename calls.
 3. **`apps/cloud/server/index.ts` and `worker.ts` change** their hostname
+   *(Path note, 2026-09: historical and deliberately unlinked — `apps/cloud/` split out to
+   `objectstack-ai/cloud` on 2026-05-21, `2a1fc869a`.)*
    resolution from `sys_project` to `sys_environment`.
 
 ### Neutral

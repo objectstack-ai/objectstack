@@ -893,7 +893,18 @@ describe('flow-error-label-not-fault (#3863)', () => {
   it.each(['decision', 'approval'])(
     "does NOT flag label:'error' out of a %s node — the label IS the branch selector",
     (sourceType) => {
-      expect(lintFlowPatterns(edgeFlow({ label: 'error' }, sourceType))).toHaveLength(0);
+      // Scoped to THIS rule since #16093. The assertion was a global zero,
+      // which held only because the fully-inert decision was invisible: the
+      // `decision` half of this fixture declares no `conditions[]` and no edge
+      // is guarded, so it now (correctly) draws a `flow-decision-unconditional-
+      // branch` warning of its own. A bare `label` is not a guard in either
+      // half of that rule — the mixed branch has always counted a labelled
+      // edge the decision cannot select as ungated — so exempting it here to
+      // keep the zero would make one rule id answer two ways. What this case
+      // tests is unchanged: an error-ish label out of a branching node is not
+      // the #3863 footgun.
+      const fnds = lintFlowPatterns(edgeFlow({ label: 'error' }, sourceType));
+      expect(fnds.filter((f) => f.rule === FLOW_ERROR_LABEL_NOT_FAULT)).toHaveLength(0);
     },
   );
 });
@@ -1013,8 +1024,15 @@ describe('flow-decision-unconditional-branch (#4414)', () => {
     })).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH)).toHaveLength(0);
   });
 
-  it('does NOT flag a decision with no guarded edge at all — nothing to undercut', () => {
-    expect(lintFlowPatterns({
+  // #16093 — the fully-inert gateway, the shape the rule could not see. Until
+  // this case landed, `if (gated.length === 0) continue` dropped exactly the
+  // node whose declared branching is worst: a `decision` with NO edge
+  // `condition`, NO `isDefault` and NO `config.conditions[]`. The mixed case
+  // (one guarded edge, one not) was at least partially routed; this one was not
+  // routed at all, and it is the harder one to spot, because the node still
+  // says `type: 'decision'`.
+  it('flags a decision that gates on NOTHING — no edge guard, no conditions[]', () => {
+    const fnds = lintFlowPatterns({
       flows: [{
         name: 'plain',
         nodes: [{ id: 'start', type: 'start', config: {} }, { id: 'check', type: 'decision' }, { id: 'a', type: 'screen', config: {} }],
@@ -1023,8 +1041,151 @@ describe('flow-decision-unconditional-branch (#4414)', () => {
           { id: 'e2', source: 'check', target: 'a' },
         ],
       }],
+    }).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH);
+
+    expect(fnds).toHaveLength(1);
+    // Advisory, like the mixed shape: an unconditional fan-out is legal — the
+    // node is merely typed `decision` while behaving as a plain step. See the
+    // severity policy at the top of the rule module.
+    expect(fnds[0].severity).toBeUndefined();
+    expect(fnds[0].where).toContain("decision 'check'");
+    // Names the node's out-edge targets and what the decision gates on.
+    expect(fnds[0].message).toContain('gates on NOTHING');
+    expect(fnds[0].message).toContain("'a'");
+    expect(fnds[0].message).toContain('EVERY pass');
+    expect(fnds[0].hint).toContain('conditions');
+  });
+
+  // The wording is the whole point of keeping this under the SAME rule id: the
+  // fully-inert shape must NOT read as the mixed "guarded alongside unguarded"
+  // sentence, which would send the author looking for a guard that is not there.
+  it('does not describe the inert decision with the mixed-branch wording', () => {
+    const inert = lintFlowPatterns({
+      flows: [{
+        name: 'plain',
+        nodes: [{ id: 'start', type: 'start', config: {} }, { id: 'check', type: 'decision' }, { id: 'a', type: 'screen', config: {} }],
+        edges: [
+          { id: 'e1', source: 'start', target: 'check' },
+          { id: 'e2', source: 'check', target: 'a' },
+        ],
+      }],
+    }).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH);
+    expect(inert[0].message).not.toContain('alongside');
+
+    const mixed = lintFlowPatterns(guardFlow()).filter(
+      (f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH,
+    );
+    expect(mixed[0].message).toContain('alongside');
+    // One finding each — the inert branch must not double-report the mixed one.
+    expect(mixed).toHaveLength(1);
+  });
+
+  it('flags EVERY out-edge of an inert decision in one finding, not one each', () => {
+    const fnds = lintFlowPatterns({
+      flows: [{
+        name: 'plain',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'check', type: 'decision' },
+          { id: 'a', type: 'screen', config: {} },
+          { id: 'b', type: 'screen', config: {} },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'check' },
+          { id: 'e2', source: 'check', target: 'a' },
+          { id: 'e3', source: 'check', target: 'b' },
+        ],
+      }],
+    }).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].message).toContain("'a'");
+    expect(fnds[0].message).toContain("'b'");
+  });
+
+  // As measured on the reporting app: the inert decision sat inside a `loop`
+  // body, so the finding has to survive region descent (#5383) too.
+  it('flags a nested inert decision inside a loop body', () => {
+    const fnds = lintFlowPatterns(loopBodyFlow({
+      nodes: [
+        { id: 'gate', type: 'decision' },
+        { id: 'nudge', type: 'create_record', config: { objectName: 'touch_log' } },
+      ],
+      edges: [{ id: 'b1', source: 'gate', target: 'nudge' }],
+    })).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH);
+    expect(fnds).toHaveLength(1);
+    expect(fnds[0].where).toBe("flow 'campaign_enrollment' · loop 'loop_leads' body · decision 'gate'");
+    expect(fnds[0].message).toContain("'nudge'");
+  });
+
+  // ⛔ NEGATIVE CONTROL — the ordinary gateway. Guarded edges AND a matching
+  // `config.conditions[]`: the shape every correct flow has, and the one a new
+  // positive case is most likely to break. It must stay silent.
+  it('does NOT flag a normal decision — guarded edges plus matching conditions[]', () => {
+    expect(lintFlowPatterns(guardFlow({
+      proceed: { isDefault: true },
+      conditions: [{ label: 'Yes', expression: "lead.status == 'converted'" }],
+    }))).toHaveLength(0);
+  });
+
+  // ⛔ NEGATIVE CONTROL — routing by `config.conditions[]` alone. The edges
+  // carry no `condition` and no `isDefault`, so `gated` is empty, but the
+  // decision DOES declare its branching: the labels select the path. Not inert.
+  it('does NOT flag a decision that routes by conditions[] alone', () => {
+    expect(lintFlowPatterns({
+      flows: [{
+        name: 'by_label',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          {
+            id: 'check', type: 'decision',
+            config: { conditions: [{ label: 'Yes', expression: 'lead.score > 50' }, { label: 'No', expression: 'true' }] },
+          },
+          { id: 'a', type: 'screen', config: {} },
+          { id: 'b', type: 'screen', config: {} },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'check' },
+          { id: 'e2', source: 'check', target: 'a', label: 'Yes' },
+          { id: 'e3', source: 'check', target: 'b', label: 'No' },
+        ],
+      }],
     })).toHaveLength(0);
   });
+
+  // ⛔ NO DOUBLE REPORT — a decision that declares `conditions[]` no out-edge
+  // claims is already the GATING `flow-branch-label-unmatched`; the inert branch
+  // must not pile a second, contradictory finding on the same node.
+  it('leaves an unmatched-label decision to flow-branch-label-unmatched alone', () => {
+    const fnds = lintFlowPatterns({
+      flows: [{
+        name: 'unmatched',
+        nodes: [
+          { id: 'start', type: 'start', config: {} },
+          { id: 'check', type: 'decision', config: { conditions: [{ label: 'Yes', expression: 'true' }] } },
+          { id: 'a', type: 'screen', config: {} },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'check' },
+          { id: 'e2', source: 'check', target: 'a' },
+        ],
+      }],
+    });
+    expect(fnds.filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH)).toHaveLength(0);
+    expect(fnds.filter((f) => f.rule === FLOW_BRANCH_LABEL_UNMATCHED)).toHaveLength(1);
+  });
+
+  // A decision with no out-edge at all is a different defect and is skipped
+  // before any of this (`outs.length === 0`); the inert branch must not claim it.
+  it('does NOT flag a decision with no out-edge at all', () => {
+    expect(lintFlowPatterns({
+      flows: [{
+        name: 'dead_end',
+        nodes: [{ id: 'start', type: 'start', config: {} }, { id: 'check', type: 'decision' }],
+        edges: [{ id: 'e1', source: 'start', target: 'check' }],
+      }],
+    }).filter((f) => f.rule === FLOW_DECISION_UNCONDITIONAL_BRANCH)).toHaveLength(0);
+  });
+
 
   it('does NOT flag a fault edge — error routing is not branch selection', () => {
     expect(lintFlowPatterns(guardFlow({

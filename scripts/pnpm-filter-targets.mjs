@@ -531,6 +531,15 @@ function cliPreflight(command) {
   return 0;
 }
 
+// Set by `selfTest()` only after a verdict is printed -- either verdict -- and
+// read at the dispatch below: a `return` that leaves the function above those
+// lines prints nothing and still exits 0, so a self-test that never finished
+// reports as one that passed. The self-test's own exit code stays load-bearing,
+// so the handshake is a flag rather than a returned sentinel. The failure path
+// sets it too: the refusal below must fire only when NEITHER verdict was
+// printed, never on a genuine red that already said what failed.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -683,17 +692,29 @@ export async function selfTest() {
       `✓ pnpm-filter-targets --self-test: ${checked} assertions over ${names.length} real workspace packages `
         + '(match rule pinned against measured pnpm behaviour; preflight observed both REFUSING and SILENT).',
     );
+    selfTestReachedVerdict = true;
     return 0;
   }
   console.error(`✗ pnpm-filter-targets --self-test -- ${failures.length} failure(s)\n`);
   for (const failure of failures) console.error(`  • ${failure}`);
+  selfTestReachedVerdict = true;
   return 1;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const [flag, argument] = process.argv.slice(2);
-  if (flag === '--self-test') process.exit(await selfTest());
-  else if (flag === '--list') process.exit(cliList());
+  if (flag === '--self-test') {
+    const code = await selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ pnpm-filter-targets self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(code);
+  } else if (flag === '--list') process.exit(cliList());
   else if (flag === '--preflight') process.exit(cliPreflight(argument ?? ''));
   else {
     console.error('usage: pnpm-filter-targets.mjs [--list | --preflight <command> | --self-test]');

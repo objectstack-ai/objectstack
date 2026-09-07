@@ -9,10 +9,13 @@
   ],
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
+    "rootDir": "../..",
     "types": [
       "node",
       "js-yaml"
-    ]
+    ],
+    "paths": {
+      "@objectstack/platform-objects/system": ["../platform-objects/src/system/index.ts"]
+    }
   }
 }

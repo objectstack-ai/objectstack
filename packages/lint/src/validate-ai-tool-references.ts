@@ -34,7 +34,7 @@
 
 import { PLATFORM_PROVIDED_TOOL_NAMES, PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 
-import { suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 
 export const AI_SKILL_TOOL_UNRESOLVED = 'ai-skill-tool-unresolved';
 
@@ -56,14 +56,6 @@ export interface AiToolRefFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => !!x && typeof x === 'object');
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -90,6 +82,20 @@ function suggest(target: string, known: Set<string>): string {
 const HEADLESS_ACTION_TYPES = new Set(['script', 'api', 'flow']);
 
 /**
+ * [#15444] The one row-level `operation` the spec admits (`ActionSchema.
+ * operation`, `z.enum(['update'])` — #14092). Deliberately NOT a member of
+ * {@link HEADLESS_ACTION_TYPES}: `operation` is not a type, and adding
+ * `'update'` there would be the member spelling the ruling rejected. What
+ * learns `operation` is the READER below. Spelled locally rather than imported
+ * from `@objectstack/runtime`'s `DECLARATIVE_UPDATE_OPERATION`: this package is
+ * authoring-time (`spec`, `formula`, `sdui-parser`) and does not depend on the
+ * runtime at all — taking that dependency to reach one string would invert the
+ * layering. The coupling that matters is behavioural, and it is pinned: the
+ * predicate below must keep answering what the runtime's listing door answers.
+ */
+const DECLARATIVE_UPDATE_OPERATION = 'update';
+
+/**
  * Would the runtime materialise an `action_<name>` tool for this action?
  *
  * Mirrors the STATIC half of the runtime's `actionSkipReason` (ADR-0011
@@ -113,6 +119,16 @@ function materialisesAsTool(action: AnyRec): boolean {
   if (aiRec.exposed !== true) return false;
   if (!strName(aiRec.description)) return false;
 
+  // [#15444] `operation` before `type`, the precedence the runtime door reads
+  // (`isDeclarativeUpdateAction` — #15079, ruling #14092). The declarative
+  // single-record field write materialises a tool with NEITHER a `target` nor
+  // a `body`: `ActionSchema` refuses both beside `operation: 'update'` because
+  // the platform action route performs the write. The `script` arm below
+  // therefore answers `false` for it — the exact divergence #15079 closed on
+  // the runtime side, which lists it — and this rule would then report a
+  // resolvable `action_<name>` reference as fictional, and name the action in
+  // the near-miss hint as one that "never materialises".
+  if (action.operation === DECLARATIVE_UPDATE_OPERATION) return true;
   const type = strName(action.type);
   if (!type || !HEADLESS_ACTION_TYPES.has(type)) return false;
   // `script` can carry either a named handler or an inline body; `api` and
@@ -128,19 +144,19 @@ function materialisesAsTool(action: AnyRec): boolean {
 function collectToolUniverse(stack: AnyRec): Set<string> {
   const universe = new Set<string>(PLATFORM_PROVIDED_TOOL_NAMES);
 
-  for (const tool of asArray(stack.tools)) {
+  for (const tool of recordsOf(stack.tools)) {
     const n = strName(tool.name);
     if (n) universe.add(n);
   }
 
   const addActionFamily = (actions: unknown) => {
-    for (const action of asArray(actions)) {
+    for (const action of recordsOf(actions)) {
       const n = strName(action.name);
       if (n && materialisesAsTool(action)) universe.add(`action_${n}`);
     }
   };
   addActionFamily(stack.actions);
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     addActionFamily(obj.actions);
   }
 
@@ -155,13 +171,13 @@ function collectToolUniverse(stack: AnyRec): Set<string> {
 function collectUnexposedActionNames(stack: AnyRec): Set<string> {
   const names = new Set<string>();
   const scan = (actions: unknown) => {
-    for (const action of asArray(actions)) {
+    for (const action of recordsOf(actions)) {
       const n = strName(action.name);
       if (n && !materialisesAsTool(action)) names.add(n);
     }
   };
   scan(stack.actions);
-  for (const obj of asArray(stack.objects)) scan(obj.actions);
+  for (const obj of recordsOf(stack.objects)) scan(obj.actions);
   return names;
 }
 
@@ -187,7 +203,7 @@ export function validateAiToolReferences(stack: AnyRec): AiToolRefFinding[] {
     return universe.has(ref);
   };
 
-  const skills = asArray(stack.skills);
+  const skills = recordsOf(stack.skills);
   for (let si = 0; si < skills.length; si++) {
     const skill = skills[si];
     const skillName = strName(skill.name) ?? `#${si}`;

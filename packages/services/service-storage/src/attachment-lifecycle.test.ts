@@ -418,6 +418,10 @@ describe('createSysFileReapGuard', () => {
       { id: 'f1', key: 'attachments/f1.bin', status: 'deleted', scope: 'attachments' },
     ]);
 
+    // ONE tombstoned row in ⇒ exactly ONE irreversible byte delete: the count IS
+    // the contract for a sweep that re-runs, and `toHaveBeenCalledWith` alone is
+    // satisfied by a repeat just as well as by a single call (#15607).
+    expect(s.delete).toHaveBeenCalledTimes(1);
     expect(s.delete).toHaveBeenCalledWith('attachments/f1.bin');
     expect(confirmed).toEqual(['f1']);
   });
@@ -467,6 +471,9 @@ describe('createSysFileReapGuard', () => {
       { id: 'f1', key: 'user/f1.png', status: 'deleted', scope: 'user', ref_object: null, ref_id: null },
     ]);
 
+    // One released field file, one open gate ⇒ exactly one byte delete; a second
+    // call would be a re-reap of a key already gone (#15607).
+    expect(s.delete).toHaveBeenCalledTimes(1);
     expect(s.delete).toHaveBeenCalledWith('user/f1.png');
     expect(confirmed).toEqual(['f1']);
   });
@@ -566,6 +573,8 @@ describe('createSysFileReapGuard', () => {
       { id: 'p1', key: 'user/p1.bin', status: 'pending' },
     ]);
 
+    // Best-effort cleanup of ONE abandoned upload — exactly one delete (#15607).
+    expect(s.delete).toHaveBeenCalledTimes(1);
     expect(s.delete).toHaveBeenCalledWith('user/p1.bin');
     expect(confirmed).toEqual(['p1']);
   });

@@ -312,7 +312,10 @@ A command that enumerates with git ls-tree is never blocked here, however it the
 Either half alone is fine too — this fires only on the two together.
 
 Deliberate exception (the working tree really is the population you mean — e.g. asking
-what YOUR branch changed): re-run with OS_ALLOW_TREE_ENUM=1.
+what YOUR branch changed): set OS_ALLOW_TREE_ENUM=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
   exit 2
 fi

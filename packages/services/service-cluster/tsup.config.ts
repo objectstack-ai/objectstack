@@ -2,6 +2,8 @@
 
 import { defineConfig, type Options } from 'tsup';
 
+import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.mjs';
+
 // Everything both halves below share. Spelled once so the two cannot drift in
 // anything except the two properties they exist to differ in: `entry`/`format`.
 //
@@ -22,6 +24,7 @@ const shared: Options = {
   dts: !process.env.OS_SKIP_DTS,
   target: 'es2020',
   external: ['vitest'],
+  esbuildOptions: dropSourcesContent,
 };
 
 // [#13013] The split is by FORMAT, never by ENTRY.

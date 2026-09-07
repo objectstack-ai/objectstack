@@ -50,6 +50,8 @@
  * `lintLivenessProperties`), it is high-signal and never fatal.
  */
 
+import { recordsOf } from './object-graph.js';
+
 export const ACTION_NO_PLACEMENT = 'action-no-placement';
 
 export type ActionLocationsSeverity = 'error' | 'warning';
@@ -70,14 +72,6 @@ export interface ActionLocationsFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -107,7 +101,7 @@ function collectNamePlacedActions(stack: AnyRec): Set<string> {
     // dispatches. Inline field-patch defs (`operation: 'update'`) carry a name
     // that matches no action — harmless here, since an unmatched name simply
     // never exempts anything.
-    for (const def of asArray(list.bulkActionDefs)) {
+    for (const def of recordsOf(list.bulkActionDefs)) {
       const n = strName(def?.name);
       if (n) placed.add(n);
     }
@@ -118,12 +112,12 @@ function collectNamePlacedActions(stack: AnyRec): Set<string> {
     for (const lv of Object.values(listViews as AnyRec)) harvest(lv);
   };
 
-  for (const view of asArray(stack.views)) {
+  for (const view of recordsOf(stack.views)) {
     if (!view || typeof view !== 'object') continue;
     harvest(view.list);
     harvestListViews(view.listViews);
   }
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     if (!obj || typeof obj !== 'object') continue;
     harvestListViews(obj.listViews);
   }
@@ -167,14 +161,14 @@ export function validateActionLocations(stack: AnyRec): ActionLocationsFinding[]
     });
   };
 
-  const actions = asArray(stack.actions);
+  const actions = recordsOf(stack.actions);
   for (let i = 0; i < actions.length; i++) check(actions[i], `actions[${i}]`);
 
-  const objects = asArray(stack.objects);
+  const objects = recordsOf(stack.objects);
   for (let oi = 0; oi < objects.length; oi++) {
     const obj = objects[oi];
     if (!obj || typeof obj !== 'object') continue;
-    const own = asArray(obj.actions);
+    const own = recordsOf(obj.actions);
     for (let ai = 0; ai < own.length; ai++) check(own[ai], `objects[${oi}].actions[${ai}]`);
   }
 

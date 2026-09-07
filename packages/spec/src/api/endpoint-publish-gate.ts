@@ -28,7 +28,7 @@
  * |---|---|
  * | unsupported target (`script` / `proxy` / incomplete `object_operation` / empty flow `target`) | `planEndpointTarget` — `packages/runtime/src/endpoint-executor.ts` |
  * | mapping (`transform`, unusable path, colliding `target`) | `mappingDeclarationRejection` — `packages/runtime/src/api-mapping.ts` |
- * | policy (armed-but-unusable `rateLimit`, negative `cacheTtl`, `cacheTtl` off GET) | `createEndpointRateLimiterRegistry` / `computeCacheControl` — `packages/runtime/src/endpoint-policy.ts` |
+ * | policy (armed-but-unusable `rateLimit`, negative `cacheTtlSeconds`, `cacheTtlSeconds` off GET) | `createEndpointRateLimiterRegistry` / `computeCacheControl` — `packages/runtime/src/endpoint-policy.ts` |
  * | namespace + uniqueness | ADR-0121 D1/D2, and `normalizeEndpointPath` (`packages/metadata/src/endpoint-matcher.ts`) for the path form |
  *
  * The runtime keeps its refusals: a declaration can still reach the store
@@ -103,7 +103,7 @@ type MappingKey = (typeof MAPPING_KEYS)[number];
  * root) and what the author must read.
  */
 export interface EndpointGateIssue {
-    /** Zod issue path — e.g. `['apis', 2, 'cacheTtl']`. */
+    /** Zod issue path — e.g. `['apis', 2, 'cacheTtlSeconds']`. */
     path: (string | number)[];
     message: string;
 }
@@ -461,7 +461,7 @@ function mappingKeyGate(
 /**
  * `inputMapping` on an operation that never reads a request body.
  *
- * PM ruling on #5111 (2026-08-04), same category as `cacheTtl` on a non-GET
+ * PM ruling on #5111 (2026-08-04), same category as `cacheTtlSeconds` on a non-GET
  * method: the declaration is legal to parse and provably inert, because
  * `inputMapping` maps the REQUEST BODY (its own `.describe()`) and `find` /
  * `get` / `delete` are served from `query` alone. "Declared, parsed, does
@@ -487,7 +487,7 @@ function inertInputMappingGate(
             + 'REQUEST BODY to internal params (its own vocabulary text); `find` takes its criteria from '
             + 'the query string and `get` / `delete` take the record id from `query.id`. Remove the key, '
             + 'or move the endpoint to an operation that carries a body (`create` / `update`). '
-            + 'Same rule, same reason as `cacheTtl` on a non-GET endpoint: a declaration that cannot '
+            + 'Same rule, same reason as `cacheTtlSeconds` on a non-GET endpoint: a declaration that cannot '
             + 'take effect is rejected instead of silently ignored.',
     };
 }
@@ -549,28 +549,28 @@ function policyGate(
         }
     }
 
-    const cacheTtl = endpoint.cacheTtl;
-    if (typeof cacheTtl === 'number' && cacheTtl < 0) {
+    const cacheTtlSeconds = endpoint.cacheTtlSeconds;
+    if (typeof cacheTtlSeconds === 'number' && cacheTtlSeconds < 0) {
         return {
-            path: at('cacheTtl'),
+            path: at('cacheTtlSeconds'),
             message:
-                `${named} declares \`cacheTtl: ${cacheTtl}\`. A response cache lifetime cannot be negative — `
+                `${named} declares \`cacheTtlSeconds: ${cacheTtlSeconds}\`. A response cache lifetime cannot be negative — `
                 + 'seconds only, 0 or more. Use a positive number of seconds for a cacheable answer, or '
-                + '`cacheTtl: 0` to say explicitly "never store this response" (it emits '
+                + '`cacheTtlSeconds: 0` to say explicitly "never store this response" (it emits '
                 + '`Cache-Control: no-store`); omit the key to send no caching header at all.',
         };
     }
 
-    if (cacheTtl !== undefined && endpoint.method !== 'GET') {
+    if (cacheTtlSeconds !== undefined && endpoint.method !== 'GET') {
         // Internal anchor for the GET-only rule: #5040 §3.3. Kept out of the
         // message, which is printed to a customer with no tracker access.
         return {
-            path: at('cacheTtl'),
+            path: at('cacheTtlSeconds'),
             message:
-                `${named} declares \`cacheTtl\` on a ${endpoint.method} endpoint. \`cacheTtl\` is GET-only: `
+                `${named} declares \`cacheTtlSeconds\` on a ${endpoint.method} endpoint. \`cacheTtlSeconds\` is GET-only: `
                 + 'it becomes a `Cache-Control` header on a successful response, and a '
                 + 'non-GET answer is not a cacheable representation, so the key would be parsed and never '
-                + 'take effect. Remove `cacheTtl`, or declare the endpoint as GET if it really is a read.',
+                + 'take effect. Remove `cacheTtlSeconds`, or declare the endpoint as GET if it really is a read.',
         };
     }
 

@@ -183,8 +183,7 @@ async function findRows(
 ): Promise<any[]> {
   if (!engine || typeof engine.find !== 'function') return [];
   try {
-    const rows = await engine.find(object, { where, limit }, { context: SYSTEM_CTX });
-    return Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : [];
+    return await engine.find(object, { where, limit }, { context: SYSTEM_CTX });
   } catch {
     return [];
   }

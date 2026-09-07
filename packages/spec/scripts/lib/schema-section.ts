@@ -230,6 +230,36 @@ function carriesDescription(shape: NestedShape): boolean {
 }
 
 /**
+ * The published half of the `externalVocabulary` exemption (#15676, ruling B on
+ * #14478).
+ *
+ * A key that mirrors a name fixed outside this repo — `max-age` from HTTP
+ * Cache-Control, `statement_timeout` from PostgreSQL, better-auth's option
+ * names — keeps its bare name instead of gaining a `Seconds` / `Ms` suffix, and
+ * declares WHY on the schema with `.meta({ externalVocabulary: '<standard>' })`.
+ * That marker rides `z.toJSONSchema` verbatim, the same channel `xRef` /
+ * `xExpression` / `xEnumDeprecated` use, so it arrives here as a property of
+ * the JSON-Schema node.
+ *
+ * Printing it is what makes the exemption honest for the ONE reader who cannot
+ * see the source. `check:duration-unit-keys` exists because a bare `maxAge`
+ * publishes a naked number to the reference page and the reader has to guess
+ * whether it is seconds or milliseconds; exempting the key without publishing
+ * its reason would leave that reader exactly where the gate found them. With
+ * the standard named, the unit IS stated — by reference rather than by suffix,
+ * which is the whole claim the exemption rests on.
+ *
+ * Appended to the description cell rather than given a column of its own: it
+ * qualifies the prose already in that cell (which still states the unit), and
+ * eleven keys do not earn a fifth column on every table in the reference.
+ */
+function externalVocabularyNote(prop: any): string {
+  const standard = prop?.externalVocabulary;
+  if (typeof standard !== 'string' || standard.trim() === '') return '';
+  return ` (unit per ${standard.trim()})`;
+}
+
+/**
  * Render one schema's section, heading included.
  *
  * `category` is not a parameter: everything category-scoped reaches this
@@ -434,7 +464,9 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
           // `\|` in a description can't decay into an escaped backslash + live
           // pipe), then pipes — an unescaped `|` (even inside a code span)
           // splits the cell.
-          const desc = escapeMdxDescription((prop.description || '').replace(/\n/g, ' '))
+          const desc = escapeMdxDescription(
+            ((prop.description || '') + externalVocabularyNote(prop)).replace(/\n/g, ' '),
+          )
             .replace(/\\/g, '\\\\')
             .replace(/\|/g, '\\|');
           t += `| **${key}** | \`${typeStr}\` | ${isReq} | ${desc} |\n`;

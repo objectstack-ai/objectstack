@@ -54,7 +54,9 @@
     "SharingRuleSchema": "security/SharingRule",
     "SharingRuleType": "security/SharingRuleType",
     "TenancyPosture": "security/TenancyPosture",
-    "TenancyPostureSchema": "security/TenancyPosture"
+    "TenancyPostureSchema": "security/TenancyPosture",
+    "TenantLayer0Verdict": "security/TenantLayer0Verdict",
+    "TenantLayer0VerdictSchema": "security/TenantLayer0Verdict"
   },
   "collisions": [
     "BaseSharingRuleSchema"

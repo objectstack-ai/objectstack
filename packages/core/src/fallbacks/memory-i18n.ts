@@ -93,6 +93,12 @@ export function createMemoryI18n() {
   // platform plugins push their bundles at `kernel:ready`, after the app
   // plugin has run, so anything pruned once would grow back.
   let supportedLocales: string[] | undefined;
+  // [#15694] The app's DECLARED `i18n.fallbackLocale`, injected by
+  // `AppPlugin.loadTranslations` the same way `defaultLocale` and
+  // `supportedLocales` are. `undefined` means the app declared nothing, which
+  // must leave `t()` answering exactly as it did before this existed — an app
+  // that never wrote a `fallbackLocale` is not opting into a longer chain.
+  let fallbackLocale: string | undefined;
 
   /**
    * Resolve a dot-notation key from a nested object.
@@ -145,7 +151,24 @@ export function createMemoryI18n() {
 
     t(key: string, locale: string, params?: Record<string, unknown>): string {
       const data = resolveTranslations(locale) ?? mergedLocale(defaultLocale);
-      const value = data ? resolveKey(data, key) : undefined;
+      let value = data ? resolveKey(data, key) : undefined;
+
+      // [#15694] The DECLARED fallback (`i18n.fallbackLocale`), consulted per
+      // KEY after the requested locale — the same second leg
+      // `FileI18nAdapter.t()` has taken all along, so ONE declaration gets ONE
+      // answer whichever provider is serving. Per key, not per bundle: the
+      // line above swaps whole bundles and only when the requested locale has
+      // none, so a `zh-CN` bundle that simply lacks the key never reached
+      // anything else and `t()` returned the key itself.
+      //
+      // Guarded on `fallbackLocale` being set, so a stack that declared none
+      // keeps today's chain exactly; `!== locale` skips the re-lookup that
+      // just failed, matching the adapter.
+      if (value === undefined && fallbackLocale && fallbackLocale !== locale) {
+        const fallbackData = resolveTranslations(fallbackLocale);
+        value = fallbackData ? resolveKey(fallbackData, key) : undefined;
+      }
+
       if (value == null) return key;
       if (!params) return value;
       // Interpolation format: {{paramName}} — matches FileI18nAdapter convention
@@ -210,6 +233,22 @@ export function createMemoryI18n() {
 
     setDefaultLocale(locale: string): void {
       defaultLocale = locale;
+    },
+
+    /**
+     * @see II18nService.setFallbackLocale — [#15694]
+     *
+     * ⛔ There is deliberately NO `getFallbackLocale()` beside this. The two
+     * are different questions: this one is what the provider was TOLD, the
+     * accessor is what the serving layer ASKS it in order to build the
+     * metadata-document translators' fallback chain (#14882). Answering the
+     * second from `defaultLocale` — the only value that was always available
+     * here — would settle the default-locale contract question #14882 leaves
+     * deliberately open, from a degraded provider. Without the accessor those
+     * reads keep the resolvers' own default, which is known and intentional.
+     */
+    setFallbackLocale(locale: string): void {
+      fallbackLocale = locale;
     },
   };
 }

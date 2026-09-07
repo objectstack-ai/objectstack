@@ -761,7 +761,7 @@ export const NavigationContributionSchema = lazySchema(() => strictObject(
   },
   {
   app: SnakeCaseIdentifierSchema.describe('Target app name to contribute navigation into (e.g. "setup")'),
-  group: SnakeCaseIdentifierSchema.optional().describe('Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level'),
+  group: SnakeCaseIdentifierSchema.optional().describe('Target group nav-item id to append into (e.g. "group_integrations"); omit to append at the app top level. Naming a group the target app does not declare is not refused: the items are appended at the app top level anyway and a `nav_contribution_group_missing` diagnostic is emitted — by the runtime at `warn`, and by `os build` and `os validate` at compile time.'),
   priority: z.number().int().min(0).default(200).describe('Merge priority within the target group — lower applied first (matches object extender priority)'),
   items: z.array(NavigationItemSchema).describe('Navigation items contributed into the target app/group'),
 }).describe('A navigation contribution: a package injecting nav items into an app it does not own (ADR-0029 D7)'));

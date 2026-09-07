@@ -12,7 +12,7 @@
 // shape leaks the credentials the DSN carries.
 
 import { describe, it, expect } from 'vitest';
-import { redactConnectionUrl, describeDriverConnection } from './connection-display.js';
+import { redactConnectionUrl, describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 
 describe('redactConnectionUrl', () => {
   it('drops the userinfo segment from a DSN', () => {
@@ -122,5 +122,38 @@ describe('describeDriverConnection', () => {
     // knex lets a host hand back a fresh connection per pool checkout — there
     // is no address to read until it is called, so don't invent one.
     expect(describeDriverConnection({ client: 'pg', connection: () => ({ host: 'h' }) })).toBeUndefined();
+  });
+});
+
+describe('describeDriverSqliteFile', () => {
+  // A SECOND question over the same config shapes: not "what do I print" but
+  // "which file on this filesystem", so the answer can be handed to `stat`.
+  it('reads the knex sqlite connection filename', () => {
+    expect(describeDriverSqliteFile({
+      client: 'better-sqlite3',
+      connection: { filename: '/app/.objectstack/data/objectstack.db' },
+    })).toBe('/app/.objectstack/data/objectstack.db');
+  });
+
+  it('reads a filename kept at the top level', () => {
+    expect(describeDriverSqliteFile({ filename: '/app/data.db' })).toBe('/app/data.db');
+  });
+
+  it('refuses the in-memory database, which is not a file on disk', () => {
+    expect(describeDriverSqliteFile({ connection: { filename: ':memory:' } })).toBeUndefined();
+  });
+
+  it('refuses the empty name, SQLite\'s private temporary database', () => {
+    expect(describeDriverSqliteFile({ connection: { filename: '  ' } })).toBeUndefined();
+  });
+
+  it('answers undefined for a driver that serves no file', () => {
+    expect(describeDriverSqliteFile({ url: 'mongodb://db.example.com/app' })).toBeUndefined();
+    expect(describeDriverSqliteFile({
+      client: 'pg',
+      connection: { host: 'db.example.com', port: 5432, database: 'app' },
+    })).toBeUndefined();
+    expect(describeDriverSqliteFile(undefined)).toBeUndefined();
+    expect(describeDriverSqliteFile('postgres://db.example.com/app')).toBeUndefined();
   });
 });

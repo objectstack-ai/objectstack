@@ -361,7 +361,7 @@ export type FieldError = z.input<typeof FieldErrorSchema>;
  *   "httpStatus": 429,
  *   "retryable": true,
  *   "retryStrategy": "retry_after",
- *   "retryAfter": 60,
+ *   "retryAfterSeconds": 60,
  *   "details": {
  *     "limit": 1000,
  *     "remaining": 0,
@@ -391,7 +391,29 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
   httpStatus: z.number().optional().describe('HTTP status code'),
   retryable: z.boolean().default(false).describe('Whether the request can be retried'),
   retryStrategy: RetryStrategy.optional().describe('Recommended retry strategy'),
-  retryAfter: z.number().optional().describe('Seconds to wait before retrying'),
+  /**
+   * Renamed from `retryAfter` (#15677, #14478 ruling B).
+   *
+   * ⚠️ BREAKING on the ADR-0112 wire envelope. Ruling B put this key
+   * explicitly IN scope: it is read by humans and agents off the wire even
+   * though nobody authors it, and `retryAfter` bare next to a `Retry-After`
+   * header that may carry either a delta-seconds OR an HTTP-date is the exact
+   * ambiguity the rule exists to remove.
+   *
+   * The HTTP `Retry-After` RESPONSE HEADER is a separate, UNCHANGED surface
+   * (RFC 9110 §10.2.3) — its name is fixed outside this repo and no part of
+   * this rename touches it. Do not "fix" the header to match.
+   */
+  retryAfterSeconds: z.number().optional().describe('Seconds to wait before retrying'),
+
+  /** Tombstone for the rename above (#15677, ruling B on #14478). */
+  retryAfter: retiredKey(
+    '`EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is '
+    + 'unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response '
+    + 'header — that header keeps its RFC 9110 name and is untouched.',
+  ),
   details: z.unknown().optional().describe('Additional error context'),
   /**
    * One entry per offending value.

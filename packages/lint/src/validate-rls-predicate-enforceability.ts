@@ -158,6 +158,7 @@ import {
   sqlPredicateToCel,
 } from '@objectstack/formula';
 import type { CelBoundsOverrun } from '@objectstack/formula';
+import { recordsOf } from './object-graph.js';
 
 /** A predicate outside the pushdown subset — the policy enforces nothing. */
 export const RLS_PREDICATE_UNENFORCEABLE = 'rls-predicate-unenforceable';
@@ -183,15 +184,6 @@ export interface RlsPredicateFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
@@ -261,8 +253,8 @@ export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicate
   const findings: RlsPredicateFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
 
-  asArray(cfg.permissions).forEach((ps, psIndex) => {
-    asArray(ps.rowLevelSecurity).forEach((policy, pIndex) => {
+  recordsOf(cfg.permissions).forEach((ps, psIndex) => {
+    recordsOf(ps.rowLevelSecurity).forEach((policy, pIndex) => {
       for (const clause of ['using', 'check'] as const) {
         const source = str(policy[clause]);
         // Absent / blank is Zod's to judge (`using` is required on the schema);

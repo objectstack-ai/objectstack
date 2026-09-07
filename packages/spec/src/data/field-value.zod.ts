@@ -69,6 +69,33 @@ export const BOOLEAN_VALUE_TYPES: ReadonlySet<string> = new Set([
   'boolean', 'toggle',
 ] as const satisfies readonly FieldType[]);
 
+/**
+ * [#14079] Field types whose STORED value is never text on any backend — the
+ * numeric and boolean value classes, i.e. the columns a text operator can only
+ * ever be aimed at by mistake.
+ *
+ * `FILTER_TEXT_CASES` (`filter-text-conformance.ts`) declares what that mistake
+ * answers (maintainer ruling 2026-09-05, recorded on #14079): a stored value
+ * that is not a string never satisfies a positive text operator and always
+ * satisfies `$notContains`. The JS faces read that off the value itself
+ * (`typeof value !== 'string'`). A SQL compiler cannot read the value at
+ * compile time and reads the DECLARED type instead — this set is what it
+ * consults, so `driver-sql`, `driver-turso`'s remote transport and
+ * `service-analytics`' SQL lowerings classify a column by one list rather
+ * than three.
+ *
+ * Deliberately NOT here: the temporal classes (`date`, `datetime`, `time`).
+ * Their stored form is a dialect question (ADR-0053: ISO TEXT on SQLite, a
+ * native type on Postgres), so "is the stored value a string" has no
+ * backend-independent answer for them and the contract does not declare one.
+ * Driver-internal aliases (`integer`, `int`, `float`) stay layered in their
+ * drivers, as this section's header says.
+ */
+export const NON_TEXT_STORED_VALUE_TYPES: ReadonlySet<string> = new Set([
+  ...NUMERIC_VALUE_TYPES,
+  ...BOOLEAN_VALUE_TYPES,
+]);
+
 /** Naive calendar day, stored `YYYY-MM-DD` — NOT an instant (ADR-0053). */
 export const CALENDAR_DATE_TYPES: ReadonlySet<string> = new Set([
   'date',

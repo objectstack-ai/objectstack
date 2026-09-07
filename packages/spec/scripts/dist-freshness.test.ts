@@ -32,6 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { inspectDistFreshness, packageDirLabel } from './lib/dist-freshness';
+import { declarationStamp } from '../../../scripts/check-regen-pending.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, '..');
@@ -55,6 +56,27 @@ function write(rel: string, content: string, mtimeEpochSeconds: number): string 
 // that races them is a test that gets `.skip`ped later.
 const OLD = Math.floor(Date.now() / 1000) - 3600;
 const NEW = Math.floor(Date.now() / 1000) - 60;
+
+/**
+ * The digest `--stamp` would write for `sandbox` as it stands right now.
+ *
+ * Asked of the rule's own reader rather than hardcoded, deliberately: the input
+ * set includes turbo.json's `globalDependencies` and the repo-relative path of
+ * every file, so a literal here would be a fixture that rots on the next
+ * unrelated edit to either — and a rotted literal fails as `mismatch`, which
+ * reads exactly like the refusal these cases are trying to distinguish from.
+ *
+ * Two steps, because `declarationStamp` computes `actual` only when there is a
+ * recorded digest to compare it against (the ~30ms hash stays off the path where
+ * no stamp exists): seed a syntactically valid placeholder, read what the
+ * sources really hash to, then let the caller write that.
+ */
+function currentDigest(): string {
+  write('dist/.build-input-hash-dts', `${'0'.repeat(64)}\n`, OLD);
+  const { actual } = declarationStamp(sandbox);
+  if (!actual) throw new Error('the sandbox digest could not be computed — the fixture is wrong');
+  return actual;
+}
 
 // The caller's own re-run command. Passed rather than assumed since #7181: the
 // wording used to name `api-surface` by hand, so the three gates that adopted
@@ -210,15 +232,85 @@ describe('inspectDistFreshness — the dist precondition gen:api-surface never e
     //
     // Fresh JS, fresh stamp, stale declarations: a stamp-based guard is GREEN
     // here. This one is red.
+    //
+    // Since #14985 the guard DOES consult a digest, so the fixture writes the
+    // REAL one rather than a placeholder: `dist/.build-input-hash` holding the
+    // exact hash of these sources is the strongest possible form of the shape,
+    // and it must still be refused. What acquits is the sibling file an
+    // OS_SKIP_DTS=1 build never writes, and this fixture deliberately has none.
     write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
     write('dist/contracts/index.d.ts', 'export {};', OLD);
     write('dist/contracts/index.js', 'export {};', NEW);
-    write('dist/.build-input-hash', `${'a'.repeat(64)}\n`, NEW);
+    write('dist/.build-input-hash', `${currentDigest()}\n`, NEW);
 
     const verdict = inspectDistFreshness(sandbox, 'generate', GEN_RERUN);
     expect(verdict.fresh).toBe(false);
     if (verdict.fresh) return;
     expect(verdict.state).toBe('stale');
+  });
+
+  it('ACQUITS an mtime-stale tree whose declaration stamp matches the sources (#14985)', () => {
+    // The false refusal this card was filed for, in miniature. A `git merge`
+    // re-checks-out an UNCHANGED `src/**` file — bytes identical, mtime bumped —
+    // and the build that follows is a turbo cache hit that rewrites nothing, so
+    // every `dist/` mtime stays where the previous build left it. The mtime rule
+    // alone calls that stale and prescribes a multi-minute rebuild of a dist
+    // that is already exactly right.
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+    write('dist/.build-input-hash-dts', `${currentDigest()}\n`, OLD);
+
+    expect(inspectDistFreshness(sandbox, 'generate', GEN_RERUN)).toEqual({ fresh: true });
+    expect(inspectDistFreshness(sandbox, 'check', CHECK_RERUN)).toEqual({ fresh: true });
+  });
+
+  it('and CONVICTS the same tree the moment a source byte actually changes', () => {
+    // The half that makes the case above non-vacuous. If the acquittal were
+    // keyed on the stamp's mere PRESENCE rather than on the digest, this would
+    // stay green — and that is #7122's false green restored, one file over. The
+    // stamp is written first and the source edited after, so the recorded digest
+    // is genuinely stale rather than never-valid.
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+    write('dist/.build-input-hash-dts', `${currentDigest()}\n`, OLD);
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean; at: number }', NEW);
+
+    const verdict = inspectDistFreshness(sandbox, 'check', CHECK_RERUN);
+    expect(verdict.fresh).toBe(false);
+    if (verdict.fresh) return;
+    expect(verdict.state).toBe('stale');
+    // and it names the cause it actually measured, rather than sending the
+    // reader after OS_SKIP_DTS — the wrong-cause half of #14985.
+    expect(verdict.message).toContain('describe DIFFERENT sources');
+    expect(verdict.message).toContain('now hashes to');
+    expect(verdict.message).not.toContain('is absent or unreadable');
+  });
+
+  it('reports a stale dist with NO declaration stamp as exactly that — no evidence, not a diagnosis', () => {
+    // The state every tree built before this stamp existed is in, and the one an
+    // OS_SKIP_DTS=1 build leaves behind. The mtime verdict stands, but the
+    // message may not claim a content change it never measured: `unstamped` is
+    // "cannot tell", and saying so is what stops the next reader spending a
+    // round on the wrong cause.
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+
+    const verdict = inspectDistFreshness(sandbox, 'check', CHECK_RERUN);
+    expect(verdict.fresh).toBe(false);
+    if (verdict.fresh) return;
+    expect(verdict.message).toContain('is absent or unreadable');
+    expect(verdict.message).not.toContain('describe DIFFERENT sources');
+  });
+
+  it('ignores a declaration stamp that is not a digest at all', () => {
+    // Absence of the freshness input is not licence to acquit (#4690), and
+    // neither is a truncated write or a half-flushed file. Anything that is not
+    // 64 hex characters is `unstamped`, which leaves the refusal standing.
+    write('src/contracts/job-service.ts', 'export interface JobRunOutcome { ok: boolean }', NEW);
+    write('dist/contracts/index.d.ts', 'export {};', OLD);
+    write('dist/.build-input-hash-dts', 'not-a-digest\n', OLD);
+
+    expect(inspectDistFreshness(sandbox, 'check', CHECK_RERUN).fresh).toBe(false);
   });
 
   it('finds the newest source at ANY depth, not just the top level', () => {

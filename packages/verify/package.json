@@ -22,7 +22,8 @@
     "build": "tsup --config ../../tsup.config.ts && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/verify --project tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",

@@ -1,6 +1,6 @@
 # ADR-0049: Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate)
 
-**Status**: Accepted (2026-06-15) — implemented: fail-closed `DESTRUCTIVE_OPERATIONS` (`packages/plugins/plugin-security/src/permission-evaluator.ts#DESTRUCTIVE_OPERATIONS`), lifecycle bits RBAC-gated, `apiEnabled` enforced (`runtime/src/api-exposure.ts`), `PolicySchema` removed, EXPERIMENTAL tag convention live. Two gate-valid disposition deviations: agent access-control shipped experimental-tagged (not enforced), `flow.runAs` kept + enforced (not removed). `action.disabled` CEL enforcement to confirm in objectui.
+**Status**: Accepted (2026-06-15) — implemented: fail-closed `DESTRUCTIVE_OPERATIONS` (`packages/plugins/plugin-security/src/permission-evaluator.ts#DESTRUCTIVE_OPERATIONS`), lifecycle bits RBAC-gated, `apiEnabled` enforced (`runtime/src/api-exposure.ts`), `PolicySchema` removed, EXPERIMENTAL tag convention live. Two gate-valid disposition deviations: agent access-control shipped experimental-tagged (not enforced), `flow.runAs` kept + enforced (not removed). `action.disabled` CEL enforcement to confirm in objectui. **Amended 2026-09-04** (#14402) — recording that an author-written validation rule's `message` became translatable in 17.3.0 (#14381) under the object-scoped bundle key `objects.<object_name>._validations.<rule_name>.message`. That is this gate being **enforced, not reversed**: the 17.0.0 retirement of the top-level `validationMessages` group stands, and the two are not the same route. See **"Amendment (2026-09-04): validation-rule messages are translatable again — enforced, not reversed"** at the end.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay), [ADR-0010](./0010-metadata-protection-model.md) (package provenance), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (authoring lifecycle)
 **Consumers**: `@objectstack/spec` (security/identity schemas), `@objectstack/plugin-security` (`PermissionEvaluator`, `SecurityPlugin`), spec authors, the metadata-property liveness audit follow-ups (#1878 P0 cluster).
@@ -114,3 +114,55 @@ property — a smaller spec surface is the stronger default pre-MVP.
   their respective issues.
 - The P1 (ADR-0021 analytics migration) and P2 (spec hygiene) clusters of
   #1878 — non-security, governed separately.
+
+---
+
+## Amendment (2026-09-04): validation-rule messages are translatable again — enforced, not reversed
+
+**This records a fact, it does not change the decision.** As of **17.3.0**
+(#14381, merged 2026-09-02 — `@objectstack/spec@17.3.0`,
+`@objectstack/objectql@17.3.0`), an author-written validation rule's `message`
+is translatable through the object-scoped bundle key
+`objects.<object_name>._validations.<rule_name>.message`. **The 17.0.0
+retirement of the top-level `validationMessages` group (#4667) stands, and the
+two are not the same route.**
+
+It is recorded because Prime Directive #13 makes reversing a recorded decision a
+decision in its own right, and until now the 17.0.0 retirement lived only in a
+retired-key tombstone (the ADR-0087 conversion
+`translation-validation-messages-removed`) and a changeset — precisely the shape
+#13 warns is easy to miss. It is recorded *here*, as an amendment rather than a
+new ADR, because the reader who would be misled is the one already reading this
+gate.
+
+### Why this is the gate being enforced, not reversed
+
+- **The policy is enforce-or-remove.** `validationMessages` was removed because
+  **nothing read it** — a translated rule message was stored and never shown.
+  Removal was the correct disposition then and is not revisited now.
+- **The new key ships with its reader in the same change** — the other half of
+  the same policy, not an exception to it.
+  `packages/objectql/src/validation/rule-validator.ts#authoredRuleMessage`
+  resolves the key as the violation is built, over the existing
+  `ValidationMessageContext.translate` hook (#3957) that already localizes
+  built-in messages and field labels. No second i18n path into objectql.
+- **It is not the same key.** The retired group was keyed by rule name at the
+  **top level** and so could not tell two objects' rules apart. The new one is
+  **object-scoped**, spelled by
+  `packages/spec/src/system/i18n-resolver.ts#objectValidationMessageKey`, and
+  sits beside `_views` / `_actions` / `_tabs`.
+- **The ADR-0087 conversion is untouched.** The stored-bundle rehydration seam
+  still strips the old key. Nothing migrates from the retired group into the new
+  one; an author who wants the new route writes it.
+
+### Scope note
+
+`validationMessages` is a translation key, not a security property, so its
+retirement was never part of this ADR's original P0 cluster — the Non-goals
+above place the non-security clusters elsewhere. The record lands here because
+the repo cites this ADR as the enforce-or-remove policy for spec-property
+retirement generally, including in the prescription an author sees on writing
+the retired key
+(`packages/spec/src/system/translation.zod.ts#TRANSLATION_KEY_GUIDANCE`). **No
+new scope is claimed for this ADR by this amendment**; the decision above is
+unchanged in every respect.

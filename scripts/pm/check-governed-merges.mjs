@@ -702,11 +702,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the #11705 generator-owned rows inside `skills/**`': 23,
   '#11705 end to end, against the REAL generator': 7,
   "the live battery's prerequisite, and the floor it was misread as": 17,
+  '⭐ #15406: the sweep row names the register it does not recompute': 10,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 23;
+const SELF_TEST_BATTERY_FLOOR = 24;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1172,7 +1173,18 @@ export function renderExceptionLines(verdict) {
 
 /** The words a seat reads before flipping ready. Pure, so --self-test pins them. */
 export function renderTestVerdict(verdict) {
-  const head = `governed-surface predicate: ${verdict.hitPaths.length} of ${verdict.checked} path(s) hit the register (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
+  // `hitPaths` is the POST-lift set, so on a diff whose only register hit was a
+  // certified regeneration this counted 0 — printed directly above the exception
+  // line naming that very path as a register hit (#15406, measured on PR #15284:
+  // "0 of 11 path(s) hit the register" over one lifted hit). The count keeps its
+  // meaning — what is STILL governed — and now says when the register lifted the
+  // difference. ⛔ Byte-identical when nothing was lifted: the clause appears only
+  // when there is a lift to name.
+  const liftedCount = (verdict.exceptions ?? []).filter((e) => e.pureRegeneration).length;
+  const head =
+    `governed-surface predicate: ${verdict.hitPaths.length} of ${verdict.checked} path(s) hit the register` +
+    (liftedCount > 0 ? ` after ${liftedCount} generated-artifact lift(s)` : '') +
+    ` (${verdict.surfacesChecked} surfaces, repo-agnostic).`;
   if (!verdict.governed) {
     return (
       `${head}\n` +
@@ -2115,6 +2127,49 @@ export function attributionCell(entry) {
 }
 
 /**
+ * The register reading a row carries, or `''` — report-only, and pure so
+ * `--self-test` pins the words.
+ *
+ * ⚠️ WHY A ROW SAYS THIS AT ALL (#15406). This sweep classifies with
+ * `governedPathsIn` and nothing else: it never consults the exception register,
+ * because provenance is a recompute against the tree a commit landed on and
+ * this sweep holds no such tree. That conservatism is right — the row is listed
+ * either way — but it left the row silent about a fact its reader needs.
+ * Measured on PR #15284: its one `skills/**` path was the register's
+ * `spec-react-blocks` row, the queue leg recomputed it on that tree, certified
+ * it byte-exact and LIFTED it, and the landing cleared exactly as the
+ * 2026-09-01 ruling provides for — while this report rendered a row identical
+ * in every visible way to a hand-authored governed merge.
+ *
+ * ⛔ This cell LIFTS NOTHING and excuses nothing, and it is not a second
+ * membership mechanism: it calls the register's own `generatedExceptionFor`,
+ * and it repeats that function's own doctrine rather than softening it — a
+ * candidate earns the QUESTION, never the answer. Certification, if any, is in
+ * that landing's own queue-guard log, and this cell says so and says where.
+ */
+export function registerCell(entry) {
+  const governed = (entry?.surfaces ?? []).flatMap((s) => s.files);
+  const rows = governed.map((path) => ({ path, row: generatedExceptionFor(path) })).filter((x) => x.row !== null);
+  if (rows.length === 0) return '';
+  const named = rows.slice(0, 4).map((x) => `${x.path} → ${x.row.id} (${x.row.ruling})`);
+  const all = rows.length === governed.length;
+  return (
+    `\n      ℹ️  REGISTER: ${all ? 'every' : `${rows.length} of ${governed.length}`} governed path(s) on this row ` +
+    `${all ? 'is' : 'are'} a generated-artifact CANDIDATE:\n` +
+    named.map((n) => `            ${n}`).join('\n') +
+    (rows.length > named.length ? `\n            … and ${rows.length - named.length} more` : '') +
+    '\n          A candidate earns the QUESTION, never the answer: this sweep does NOT recompute provenance' +
+    '\n          (it holds no tree to recompute against), so whether the queue leg certified it byte-exact and' +
+    '\n          LIFTED it is recorded in the Governed Surface Queue Guard log of that landing. A hand edit to' +
+    '\n          the same path is never lifted.' +
+    (all
+      ? ''
+      : '\n          The other governed path(s) on this row are on no register row at all, so this row is governed' +
+        '\n          regardless of any recompute.')
+  );
+}
+
+/**
  * The window, in the words the operator reads — pure, and the half of route A
  * the #12633 ruling names explicitly: the back-off has to be SAID, or a
  * re-listed boundary entry reads as noise instead of as re-recognition.
@@ -2205,7 +2260,7 @@ export function renderReport({ window, repos, scanned, entries, lookups, sweepCo
     const who = attributionCell(e);
     const prName = e.pr != null ? `PR #${e.pr}` : '⚠️  NO PR NUMBER IN SUBJECT — direct push to main? investigate';
     const files = e.surfaces.flatMap((s) => s.files.slice(0, 6)).slice(0, 8);
-    return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}\n      surfaces: ${surfaces}\n${files.map((f) => `        - ${f}`).join('\n')}`;
+    return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}\n      surfaces: ${surfaces}\n${files.map((f) => `        - ${f}`).join('\n')}${registerCell(e)}`;
   });
 
   const notes = summariseAttributionFailures(entries).map((l) => `  ${l}`);
@@ -3856,6 +3911,116 @@ async function selfTest() {
     }
   }
 
+  // ── ⭐ #15406: the sweep row names the register it does not recompute ─────
+  //
+  // Replays objectstack PR #15284, the landing filed as "the mixed-diff
+  // diversion did not fire". The diversion had fired and found nothing to fork:
+  // the diff's one governed path was this register's `spec-react-blocks` row,
+  // the queue leg recomputed it on that tree, certified it byte-exact and
+  // LIFTED it. Two report-side readings made a compliant landing read as a
+  // mechanism failure, and both are pinned here:
+  //
+  //   1. the `--test` head counted the POST-lift set, printing "0 of 11 path(s)
+  //      hit the register" immediately above the exception line naming the hit;
+  //   2. this sweep classifies with `governedPathsIn` alone — deliberately, it
+  //      holds no tree to recompute against — so the row it renders for a
+  //      certified regeneration is indistinguishable from one for a
+  //      hand-authored governed merge.
+  //
+  // ⛔ Neither the predicate nor what gets LISTED changes: (2) is still listed,
+  // still governed, still the director's to read. Only the words change.
+  battery('⭐ #15406: the sweep row names the register it does not recompute');
+  const pr15284Files = [
+    '.changeset/list-view-grouping-server-side-contract.md',
+    'content/docs/references/ui/view.mdx',
+    'packages/spec/src/ui/view.zod.ts',
+    'skills/objectstack-ui/references/react-blocks.md',
+  ];
+  const pr15284ReactBlocks = 'skills/objectstack-ui/references/react-blocks.md';
+  // The audit leg, unchanged and asserted to be unchanged: this sweep still
+  // classifies that commit as a governed merge. The register is NOT consulted
+  // here, and this case is what stops a later reader from "fixing" that.
+  const pr15284Entry = classifyCommit(
+    { sha: 'f502898a49530a1c85e58f3c4d2b340c0e1cb909', date: '2026-09-04T13:08:11Z', subject: 'feat(spec): list-view grouping is server-side (#15284)' },
+    pr15284Files,
+    GOVERNED_REPOS[0],
+  );
+  assert(
+    '⭐ the-sweep-still-CLASSIFIES-a-certified-regeneration-as-a-governed-merge',
+    pr15284Entry !== null && pr15284Entry.pr === 15284 && pr15284Entry.surfaces.flatMap((s) => s.files).join() === pr15284ReactBlocks,
+    JSON.stringify(pr15284Entry),
+  );
+  const cell15284 = registerCell(pr15284Entry);
+  assert('the-row-names-the-register-row-and-its-ruling', cell15284.includes(`${pr15284ReactBlocks} → spec-react-blocks (#11705)`), cell15284);
+  assert('the-row-says-EVERY-governed-path-on-it-is-a-candidate', /REGISTER: every governed path\(s\) on this row is a generated-artifact CANDIDATE/.test(cell15284), cell15284);
+  assert(
+    '⭐ the-row-states-that-this-sweep-does-NOT-recompute-and-says-where-certification-is-recorded',
+    /does NOT recompute provenance/.test(cell15284) && /Governed Surface Queue Guard log/.test(cell15284),
+    cell15284,
+  );
+  assert(
+    '⭐ the-row-repeats-the-registers-doctrine-rather-than-softening-it-a-candidate-is-a-QUESTION',
+    /A candidate earns the QUESTION, never the answer/.test(cell15284) && /A hand edit to\n          the same path is never lifted\./.test(cell15284),
+    cell15284,
+  );
+  // A row with no registered path renders EXACTLY as before — the cell is empty
+  // string, so every ordinary governed merge keeps its pre-#15406 rendering.
+  const handAuthoredEntry = classifyCommit(
+    { sha: 'e'.repeat(40), date: '2026-09-04T00:00:00Z', subject: 'docs: rewrite a skill (#15285)' },
+    ['skills/objectstack-ui/SKILL.md'],
+    GOVERNED_REPOS[0],
+  );
+  assert('a-row-with-no-registered-path-renders-byte-identically-the-cell-is-empty', registerCell(handAuthoredEntry) === '', JSON.stringify(registerCell(handAuthoredEntry)));
+  // Mixed: one registered path beside a hand-authored one. The row is governed
+  // regardless of any recompute, and must say so rather than reading as partly
+  // excused.
+  const mixedEntry = classifyCommit(
+    { sha: 'b'.repeat(40), date: '2026-09-04T00:00:00Z', subject: 'chore: regenerate and edit (#15286)' },
+    [pr15284ReactBlocks, 'skills/objectstack-ui/SKILL.md'],
+    GOVERNED_REPOS[0],
+  );
+  const mixedCell = registerCell(mixedEntry);
+  assert(
+    'a-mixed-row-counts-the-candidates-and-says-it-is-governed-regardless',
+    /REGISTER: 1 of 2 governed path\(s\) on this row are a generated-artifact CANDIDATE/.test(mixedCell) &&
+      /governed\n          regardless of any recompute/.test(mixedCell),
+    mixedCell,
+  );
+  // End to end in the report an operator actually reads: the row is still
+  // listed, still carries its attribution cell, and now carries the register
+  // reading beneath it.
+  const swept15284 = renderReport({
+    window: dateWindowFor('2026-09-04T00:00:00Z'),
+    repos: allAudited,
+    scanned: 40,
+    entries: [{ ...pr15284Entry, attribution: { mergedBy: 'os-justin', mergedAt: '2026-09-04T13:08:11Z', title: 'x' }, attributionChannel: 'rest' }],
+    lookups: 1,
+  });
+  assert(
+    'the-rendered-sweep-still-LISTS-the-row-and-now-carries-the-register-reading',
+    swept15284.includes('PR #15284') && swept15284.includes('merged_by os-justin') && swept15284.includes('spec-react-blocks (#11705)'),
+    swept15284,
+  );
+  assert('and-the-sweep-never-suppresses-such-a-row-it-still-counts-as-a-governed-merge', swept15284.includes('governed-merges sweep: 1 governed merge(s)'), swept15284);
+  // The `--test` head line, both directions. `hitPaths` is the post-lift set,
+  // so the count itself is right; what was missing is the reason it moved.
+  const liftedTest = applyGeneratedExceptions(
+    testVerdict(pr15284Files),
+    new Map([[pr15284ReactBlocks, { pureRegeneration: true, reason: 'byte-equal (fixture)' }]]),
+  );
+  const liftedHead = renderTestVerdict(liftedTest).split('\n')[0];
+  assert(
+    '⭐ the-test-head-no-longer-reports-a-post-lift-zero-as-if-nothing-had-hit-the-register',
+    liftedHead === 'governed-surface predicate: 0 of 4 path(s) hit the register after 1 generated-artifact lift(s) (5 surfaces, repo-agnostic).',
+    liftedHead,
+  );
+  const plainHead = renderTestVerdict(testVerdict(['packages/spec/src/ui/view.zod.ts'])).split('\n')[0];
+  assert(
+    'and-a-verdict-with-no-lift-keeps-its-head-line-byte-for-byte',
+    plainHead === 'governed-surface predicate: 0 of 1 path(s) hit the register (5 surfaces, repo-agnostic).',
+    plainHead,
+  );
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -3869,7 +4034,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes — and the live battery's own PREREQUISITE, asked before a single case runs: an uninstalled checkout refuses with the repo-wide NOT-MEASURED code end to end instead of reporting a shrunken battery, while the floor still names the battery, by itself, for a case that genuinely stopped registering) — and the #15406 replay of PR #15284: the sweep still CLASSIFIES a certified regeneration as a governed merge and still lists it, its row now names the register row it does not recompute and where certification is recorded, and the --test head no longer reports a post-lift zero as if nothing had hit the register.\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }

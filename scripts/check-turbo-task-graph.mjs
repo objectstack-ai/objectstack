@@ -14,8 +14,8 @@
  * before this gate NOTHING in the repo judged it structurally except one narrow
  * limb: `check:cross-package-test-inputs`' Layer B, which asks only whether
  * `<pkg>#test` exists and carries the globs for the packages listed in
- * `scripts/cross-package-test-inputs.mjs`. Any other task -- `#typecheck`,
- * `#build`, a package the table does not name -- was read by no gate at all.
+ * `scripts/cross-package-test-inputs.mjs`. Any other task -- `<pkg>#typecheck`,
+ * `<pkg>#build`, a package the table does not name -- was read by no gate at all.
  *
  * That would be tolerable if turbo refused a wrong entry. It does not. Measured
  * on turbo 2.10.10, on a three-file fixture workspace, each case run to a real

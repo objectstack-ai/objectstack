@@ -1,0 +1,50 @@
+{
+  "$comment": {
+    "purpose": [
+      "The bare specifiers that OUT-OF-REPO consumers import from this repo's published packages,",
+      "held against each package's `exports` map by test/consumer-specifier-ledger.test.ts.",
+      "An `exports` map is a PACKAGING contract, and inside this monorepo nothing is sealed: every",
+      "in-repo consumer reaches any file through a relative import, a vitest alias or a `paths` entry.",
+      "So the repo cannot observe a sealing regression at all, by construction — twice now a seal was",
+      "found after publish, by the consumer, during an upgrade (#13662, #15325). This file is the",
+      "knowledge those two incidents left behind, written down where a PR can be red against it."
+    ],
+    "owner": "OWNER: the `domain:devx` seat. A ledger with no owner rots — an entry here is a claim about a repository this one cannot see, so it is only as true as the person who keeps it.",
+    "shrinkOnly": [
+      "SHRINK-ONLY. An entry LEAVES only with a recorded consumer-side migration, CITED in `note`:",
+      "the consumer repo has stopped importing the specifier, and there is a link that says so.",
+      "⛔ Deleting an entry to make a red test green is the defect this file exists to make visible.",
+      "The remedy for a red is to re-open the subpath, or to migrate the consumer and cite it here."
+    ],
+    "entryShape": {
+      "specifier": "the bare specifier as the consumer writes it — never a `dist/` deep path",
+      "consumer": "repo + the file or harness that imports it",
+      "since": "ISO date this repo first recorded the consumer's need",
+      "ratifiedBy": "the card or PR that recorded it",
+      "note": "optional — and the required place to cite a migration when an entry leaves"
+    }
+  },
+  "entries": [
+    {
+      "specifier": "@objectstack/cli/console",
+      "consumer": "objectstack-ai/cloud — the `objectos-runtime` node server, which mounts the Console SPA through resolveConsolePath / hasConsoleDist / createConsoleStaticPlugin",
+      "since": "2026-08-31",
+      "ratifiedBy": "#13662",
+      "note": "Reached as `@objectstack/cli/dist/utils/console.js` until #13123 sealed the package in 17.3.0. #13662 ratified the subpath rather than re-opening `dist/`, which is the remedy #13123's own body prescribes."
+    },
+    {
+      "specifier": "@objectstack/cli/hook-body",
+      "consumer": "objectstack-ai/hotcrm — test/helpers/action-sandbox.ts, the hook-body fidelity harness that lowers a body with the platform's own extractor so a test runs what `os build` ships",
+      "since": "2026-09-04",
+      "ratifiedBy": "#15325, ratified by PR #15611",
+      "note": "The same 17.3.0 seal, second consumer: `@objectstack/cli/dist/utils/extract-hook-body.js` went dead at type level (TS2307) and at run time (ERR_PACKAGE_PATH_NOT_EXPORTED) while the file still shipped in the tarball. Only the door was gone. PR #15611 opened `./hook-body` and landed while this ledger was being written — the entry stays, because what is ledgered is the CONSUMER'S NEED, which does not end when the door opens. That is the whole point: an open door with nothing recording who walks through it is what got sealed twice."
+    },
+    {
+      "specifier": "@objectstack/cli/package.json",
+      "consumer": "objectstack-ai/hotcrm — the same action-sandbox harness, reading the dependency's own manifest to assert the pinned CLI version the lowering came from",
+      "since": "2026-09-04",
+      "ratifiedBy": "#15325, ratified by PR #15611",
+      "note": "Sealed by the same map, measured in #15325 as `require.resolve('@objectstack/cli/package.json') -> ERR_PACKAGE_PATH_NOT_EXPORTED`, and re-opened by PR #15611 as `\"./package.json\": \"./package.json\"`. ⚠️ hotcrm is the only CITED consumer: #15589's dispatch attributes this specifier to cloud as well, and no reading of #13123 / #13662 / #15325 records that, so it is NOT claimed here — an uncited row would make this ledger exactly as trustworthy as the memory it replaces."
+    }
+  ]
+}

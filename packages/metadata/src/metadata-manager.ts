@@ -68,6 +68,7 @@ import type { MetadataSerializer } from './serializers/serializer-interface.js';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loaders/loader-interface.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
+import { isAmbiguousMetadataStemError } from './loaders/ambiguous-metadata-stem.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 import type {
   MetadataRepository,
@@ -1173,6 +1174,15 @@ export class MetadataManager implements IMetadataService {
         await this.admitLoaderItems(loader, type, items);
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
+        // [#14921] Same discrimination as `listNames`, and needed for the same
+        // reason: `admitLoaderItems` refuses an ambiguous stem BEFORE it
+        // contributes anything, so absorbing it here would drop every item
+        // this loader holds into a `degraded` partial set — an authoring error
+        // rendered as a storage outage, which is the one reading it must never
+        // get. A real outage still degrades exactly as before.
+        if (isAmbiguousMetadataStemError(e)) {
+          throw e;
+        }
         degraded = true;
         errors.push(`${loader.contract.name}: ${e instanceof Error ? e.message : String(e)}`);
         this.reportLoaderReadFailure(loader.contract.name, type, e);
@@ -1620,6 +1630,14 @@ export class MetadataManager implements IMetadataService {
         result.forEach(item => names.add(item));
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
+        // [#14921] PROPAGATE, never absorb: an ambiguous metadata stem is an
+        // authoring error, not an outage. Degrading it here would answer with
+        // a set that silently omits every name this loader holds while the
+        // server keeps reporting healthy — precisely the silence the refusal
+        // exists to end, moved one layer up. Everything else still degrades.
+        if (isAmbiguousMetadataStemError(e)) {
+          throw e;
+        }
         // [#14423] Parity with `loadMany` and `list()` — see this method's
         // docblock. Same seam, same verdict, same helper.
         this.reportLoaderReadFailure(loader.contract.name, type, e);

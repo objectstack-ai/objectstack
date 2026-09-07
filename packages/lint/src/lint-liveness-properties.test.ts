@@ -756,7 +756,14 @@ describe('lintLivenessProperties', () => {
       const findings = lintLivenessProperties({
         translations: [null, { 'zh-CN': null }, { en: { flows: flowsGroup } }],
       });
-      expect(findings.map((f) => f.where)).toEqual(["translation bundle #2 · locale 'en'"]);
+      // The bundle is the third list item the author wrote and is reported as
+      // `#1`: since #15636 this walk reads through `recordsOf`, which drops the
+      // two unreadable members before numbering. #15552 settled that trade —
+      // the positional index counts the entries a rule can READ, and what the
+      // contract pins is that the readable bundle is still judged, not where it
+      // sits. (Where a suite pins the author-file position instead, it keeps
+      // its raw walk: see `reference-integrity-suite.test.ts`.)
+      expect(findings.map((f) => f.where)).toEqual(["translation bundle #1 · locale 'en'"]);
     });
   });
 

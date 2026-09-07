@@ -55,6 +55,8 @@
 // `--self-test`, and a live file whose DDL it cannot parse at all is reported,
 // never skipped.
 
+// dispatch-gates: wide-population -- ROOTS is packages, apps and examples, each walked recursively for every .ts/.mts source that is not a .d.ts -- 5269 of 5837 tracked packages/ files (90.3%, base 2aa8456cf), recorded REFUSE-WIDE in CENSUS_REFUSE_WIDE in scripts/pm/bare-root-worklist.mjs. Whole-tree-adjacent across three top-level roots at once: the only spelling true of it is each bare root, which would name this gate on every card touching packages, apps or examples.
+
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -212,8 +214,8 @@ const SOLE_INTERPOLATION = /^\$\{\s*([A-Za-z_$][\w$]*)\s*\}$/;
  * Source with block and line comments BLANKED -- replaced space-for-space
  * rather than deleted, so prose is never a hit and the line numbers this gate
  * reports are still the line numbers in the real file. Deleting the comments
- * was the first spelling and it reported `…live-mysql.test.ts:45` for a
- * statement that lives on line 81; a gate that points at the wrong line is a
+ * was the first spelling and it reported the live-mysql isolation test at line
+ * 45 for a statement that lives on line 81; a gate that points at the wrong line is a
  * gate the next author stops believing.
  */
 export function codeOf(source) {

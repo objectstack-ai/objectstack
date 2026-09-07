@@ -183,7 +183,7 @@ describe('SpanSchema', () => {
       kind: 'server',
       startTime: '2024-01-15T10:30:00.000Z',
       endTime: '2024-01-15T10:30:00.150Z',
-      duration: 150,
+      durationMs: 150,
       status: {
         code: 'ok',
       },
@@ -513,5 +513,40 @@ describe('TracingConfigSchema', () => {
       name: longName,
       label: 'Test',
     })).toThrow();
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. A span is runtime-emitted, so the silent-strip
+// alternative is the real hazard here: an exporter still writing `duration`
+// would have lost the measurement without any error at all.
+describe('Span.duration carries its unit (#15679)', () => {
+  const base = {
+    context: { traceId: '0123456789abcdef0123456789abcdef', spanId: '0123456789abcdef' },
+    name: 'GET /api/users',
+    startTime: '2024-01-15T10:30:00.000Z',
+  };
+
+  it('REFUSES the retired `duration` with the rename in the message', () => {
+    const result = SpanSchema.safeParse({ ...base, duration: 150 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`Span.duration` was renamed to `durationMs`');
+  });
+
+  it('accepts `durationMs` at the same magnitude and still refuses a negative one', () => {
+    expect(SpanSchema.parse({ ...base, durationMs: 150 }).durationMs).toBe(150);
+    expect(SpanSchema.safeParse({ ...base, durationMs: -1 }).success).toBe(false);
+  });
+
+  it('leaves the OTel exporter `timeout` alone — its describe names no unit, so it is outside the population', () => {
+    const config = OpenTelemetryCompatibilitySchema.parse({
+      exporter: { type: 'console' },
+      resource: { serviceName: 'test' },
+    });
+    expect(config.exporter.timeout).toBe(10000);
   });
 });

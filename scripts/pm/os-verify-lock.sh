@@ -64,9 +64,46 @@
 #
 #   - Every entry-point call drops a ticket file named by arrival time into
 #     `<lock>.q/`. Only the ticket at the HEAD of the live queue ever calls
-#     `flock`; everyone else polls. Head-only means no thundering herd, and
-#     headship is stable — tickets sort by arrival and the ones ahead of you can
-#     only disappear.
+#     `flock`; everyone else polls. Head-only means no thundering herd.
+#
+#     ⚠️ HEADSHIP IS STABLE AMONG ENTRY-POINT CALLERS WITH EXACTLY ONE MEASURED
+#     EXCEPTION — A RESUMING SLOT. This bullet used to end "headship is stable
+#     — tickets sort by arrival and the ones ahead of you can only disappear."
+#     That sentence was TRUE WHEN WRITTEN (47c1021b4, #9921) and was overtaken
+#     six days later by the slot mechanism (c312a562e, #12335), which had no
+#     reason to come back here and re-read it. A parked slot keeps its ORIGINAL
+#     arrival stamp and re-enters the live queue at that stamp on resume ⇒
+#     ⭐ A TICKET AHEAD OF YOU CAN APPEAR, not only disappear (#15581).
+#
+#     ⭐ AND THE EXCEPTION IS BOUNDED — the half that keeps this from being a
+#     starvation mechanism. A resuming slot cannot DISPLACE an incumbent head:
+#     once a caller leaves the queue loop at `pos == 1` it is blocked inside
+#     `flock` and never re-reads its position, so the ordering layer has nothing
+#     left to ask it to yield with. The resumed place is delivered against every
+#     caller that is merely POLLING, and against nobody else. ⇒ The slip is
+#     EXACTLY ONE POSITION, and only ever to the caller already inside `flock`;
+#     FIFO among entry-point callers is otherwise intact. Measured three-party
+#     trace (#15581): acquisition went newcomer A (already in `flock`), then the
+#     returner, then newcomer B — though the returner's stamp was older than
+#     both. `--self-test` pins both halves.
+#
+#     ⛔ THAT ONE-POSITION SLIP IS ACCEPTED, NOT UNNOTICED, and the cost is
+#     written down so a later reader knows it was measured rather than missed.
+#     The price is one holder's hold: on the ledger AS READ FOR #14944, p50 95s,
+#     p90 418s, max 643s — a reading of that ledger at that time, not a constant,
+#     and not something this script measures. On a deep queue that is enough to
+#     turn a would-be acquisition into an exit 99, on precisely the population
+#     the slot exists to protect: the caller that obeyed the cap, left, and
+#     came back.
+#
+#     ⛔ THE OBVIOUS REPAIR DOES NOT CLOSE THE WINDOW, which is why none is
+#     attempted here. Having the incumbent head re-check headship after each
+#     failed `flock` slice still loses: `SLICE_S` is 30s, so a slot resuming
+#     inside the last slice before a release arrives after the check it would
+#     have had to win. Tightening further means abandoning blocking `flock` for
+#     `flock -n` plus polling — a CONTRACT CHANGE to the ordering layer, which
+#     is the maintainer's and not a fix on sight. Known, unfixed boundary,
+#     recorded rather than closed (#15581).
 #
 #   - A LEGACY free-hand `flock` user (an agent still on the old line, or any
 #     script that locks this file directly) contends on the same file with the
@@ -3770,6 +3807,51 @@ FAKEDATE
     "$(queue_live | wc -l | tr -d ' ')" 0
   st_case 'but --status still shows it, with the fact that it blocks nobody' \
     "$(bash "$SELF" --status 2>&1 | grep -c 'blocks nobody')" 1
+  rm -rf "$sq"
+
+  # ⭐ THE ONE MEASURED EXCEPTION TO HEADSHIP (#15581) — pinned from both sides,
+  # because only the pair is the claim the ordering block at the top of this
+  # file now makes. That block used to say the tickets ahead of you "can only
+  # disappear"; a resuming slot makes one APPEAR. What keeps that from being a
+  # starvation mechanism is the second half: the ticket that appears cannot take
+  # the place of a caller ALREADY BLOCKED INSIDE `flock`, because that caller
+  # left the queue loop and never re-reads its position. So the slip is exactly
+  # one position, and it is spent only against callers that are merely polling.
+  #
+  # Three parties behind one holder. Everything here runs on the PRIVATE lock
+  # this suite exports (OS_VERIFY_LOCK_FILE="$L"), from which the queue, holder,
+  # ledger and boots paths are all derived — the shared /tmp lock is never named
+  # in this file's tests and is not touched by this case.
+  local ord3="${tmp}/order3" qsnap="${tmp}/qsnap" ord3s
+  : > "$ord3"
+  bash "$SELF" -c 'sleep 8' > /dev/null 2>&1 &
+  local h3=$!
+  sleep 1.2
+  # The polite caller: obeys a small budget, times out, and PARKS its place.
+  OS_VERIFY_LOCK_SLOT=polite OS_VERIFY_LOCK_WAIT=2 bash "$SELF" -c true > /dev/null 2>&1
+  # Newcomer A: the only live ticket, so it takes the head and blocks in `flock`.
+  bash "$SELF" -c "printf '%s' A >> '$ord3'" > /dev/null 2>&1 &
+  sleep 0.5
+  # Newcomer B: position 2, polling — it never reaches `flock` while A is there.
+  bash "$SELF" -c "printf '%s' B >> '$ord3'" > /dev/null 2>&1 &
+  sleep 0.5
+  # The returner: resumes the parked place, whose stamp is older than either
+  # newcomer's, so it re-enters the live queue AHEAD of both.
+  OS_VERIFY_LOCK_SLOT=polite bash "$SELF" -c "printf '%s' R >> '$ord3'" > /dev/null 2>&1 &
+  sleep 0.5
+  # Read the live queue while A is still inside `flock` and the holder still holds.
+  ls "$sq" 2> /dev/null | sort | head -1 > "$qsnap"
+  wait "$h3" 2> /dev/null
+  wait
+  ord3s="$(< "$ord3")"
+  st_case 'a resumed slot re-enters AHEAD of newcomers that arrived while it was parked' \
+    "$([[ "$(< "$qsnap")" == *-spolite ]] && echo yes || echo no)" yes
+  st_case 'so the resumed place is delivered against a caller that is merely polling' \
+    "$([[ "$ord3s" == *R*B* ]] && echo yes || echo no)" yes
+  st_case 'but a resuming slot does NOT displace the incumbent head inside flock' \
+    "${ord3s:0:1}" A
+  st_case 'so the slip is exactly one position — three parties, one overtake' \
+    "$ord3s" ARB
   rm -rf "$sq"
 
   QUEUE_DIR="${tmp}/q"

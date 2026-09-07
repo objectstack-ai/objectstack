@@ -674,12 +674,12 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 —
-     * `containers.tsx` DID change across the move off `67dadd602` (117
-     * insertions, 63 deletions) and both anchors moved by exactly one line:
-     * the icon block from `729-735` and the registration input from `788`,
-     * each re-READ at the new pin with the cited text unchanged, never
-     * inferred): `containers.tsx:730-736`
+     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
+     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
+     * which both anchors moved by exactly one line (the icon block from
+     * `729-735`, the registration input from `788`), so NO anchor moved here;
+     * both were re-READ at the new pin with the cited text unchanged rather
+     * than inferred from that identity): `containers.tsx:730-736`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
@@ -1733,12 +1733,12 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 —
-     * `containers.tsx` DID change across the move off `67dadd602` (117
-     * insertions, 63 deletions) and both anchors moved by exactly one line:
-     * the icon block from `918-924` and the registration input from `965`,
-     * each re-READ at the new pin with the cited text unchanged, never
-     * inferred): `containers.tsx:919-925`
+     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
+     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
+     * which both anchors moved by exactly one line (the icon block from
+     * `918-924`, the registration input from `965`), so NO anchor moved here;
+     * both were re-READ at the new pin with the cited text unchanged rather
+     * than inferred from that identity): `containers.tsx:919-925`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
@@ -1940,16 +1940,19 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 — BOTH
-   * files changed across the move off `67dadd602`, and this is the first hop
-   * that moved the record's SUBSTANCE rather than only its line numbers:
-   * `resolve-icon.ts` was restructured (110 insertions) so the resolution now
-   * runs through a named `describeIconLookup` seam, and its tokeniser accepts
-   * more spellings than this record used to claim — see the corrected
-   * breakdown below. `button.tsx` changed by 18 insertions and its anchors
-   * moved. Every anchor below was re-READ at the new pin, never carried
-   * (#10274); the read point first MOVED rather than died on the earlier hop
-   * onto `9602dc820`, which is why the anchors span a second file):
+   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — both
+   * files, `resolve-icon.ts` and `button.tsx`, are byte-identical to the ones
+   * at `00d3f09c5`, so no anchor MOVED; the re-READ still corrected two that
+   * had been wrong since they were written — the registration's input list and
+   * its `defaultProps`, see the last paragraph of this block. The hop onto
+   * `00d3f09c5` was the one that moved this record's SUBSTANCE rather than
+   * only its line numbers: `resolve-icon.ts` was restructured (110 insertions)
+   * so the resolution runs through a named `describeIconLookup` seam, and its
+   * tokeniser accepts more spellings than this record used to claim — see the
+   * corrected breakdown below. Every anchor below was re-READ at the new pin,
+   * never carried (#10274); the read point first MOVED rather than died on the
+   * earlier hop onto `9602dc820`, which is why the anchors span a second
+   * file):
    * `components/src/renderers/form/
    * button.tsx:43` resolves `schema.icon` through the shared `resolveIcon`,
    * and `:72` / `:74` render it on either side of the label per
@@ -1985,9 +1988,12 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * behaviour promised above is the same on both sides of that move.
    *
    * Also measured at the same pin: the renderer's registration publishes no
-   * `icon` input (`button.tsx:70-87` lists `label`, `variant`, `size`,
-   * `className`; `:88-92` is `defaultProps`), so the Studio block designer
-   * does not offer the key. Unpublished is not unread — the header `icon`
+   * `icon` input (`button.tsx:85-102` lists `label`, `variant`, `size`,
+   * `className`; `:103-107` is `defaultProps`), so the Studio block designer
+   * does not offer the key. Those two anchors read `70-87` / `88-92` until the
+   * `a472b0716` re-measure: wrong since written rather than shifted —
+   * `button.tsx` is byte-identical at `00d3f09c5` and `a472b0716`, so only a
+   * re-READ could find them and a line-number refresh never would (#10274). Unpublished is not unread — the header `icon`
    * above is refused for the second, not the first, and this docblock exists
    * to hold them apart.
    */
@@ -2575,14 +2581,14 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `00d3f09c5`; re-derived at that pin 2026-09-04 — all
+   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — all
    * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
    * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
-   * byte-identical to the ones at `67dadd602`, so NO anchor moved — the
-   * `object-metric` registration still begins at `:194` and the icon input
-   * still lands on `:204`. Every anchor below was re-READ at the new pin
-   * rather than inferred from that identity), and the chain runs
-   * three files:
+   * byte-identical to the ones at `00d3f09c5` and at `67dadd602` before it, so
+   * NO anchor moved — the `object-metric` registration still begins at `:194`
+   * and the icon input still lands on `:204`. Every anchor below was re-READ
+   * at the new pin rather than inferred from that identity), and the chain
+   * runs three files:
    * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
    * `ObjectMetricWidget.tsx:142` destructures it and forwards it at `:474` to

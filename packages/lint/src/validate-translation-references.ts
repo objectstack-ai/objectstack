@@ -102,7 +102,7 @@
 import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
-import { suggestName } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
@@ -142,15 +142,6 @@ type AnyRec = Record<string, unknown>;
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-
-/** Coerce a collection (array or name-keyed map) to an array of records,
- *  injecting `name` from the map key — mirrors the sibling authoring lints so
- *  the rule works on both the parsed (array) and normalized (map) stack shapes. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v as AnyRec[];
-  if (isRec(v)) return Object.entries(v).map(([name, def]) => ({ name, ...(isRec(def) ? def : {}) }));
-  return [];
 }
 
 function strName(v: unknown): string | undefined {
@@ -351,7 +342,7 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
    */
   const addSections = (container: AnyRec, binding: string | undefined) => {
     if (!binding) return;
-    for (const section of asArray(container.sections)) {
+    for (const section of recordsOf(container.sections)) {
       const sectionName = strName(section.name);
       if (sectionName) factsFor(binding).sections.add(sectionName);
     }
@@ -445,7 +436,7 @@ function collectPageTabs(page: AnyRec, factsFor: (objectName: string) => ObjectF
   const objectName = strName(cfg.source) ?? strName(page.object);
   if (!objectName) return;
 
-  for (const tab of asArray(userFilters.tabs)) {
+  for (const tab of recordsOf(userFilters.tabs)) {
     const tabName = strName(tab.name);
     if (tabName) factsFor(objectName).tabs.add(tabName);
   }
@@ -594,16 +585,16 @@ function buildUniverse(stack: AnyRec): Universe {
   };
 
   // ── Objects: fields, embedded actions/views, fieldGroups (the `_sections` anchor) ──
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const objectName = strName(obj.name);
     if (!objectName) continue;
     const facts = factsFor(objectName);
 
-    for (const field of asArray(obj.fields)) {
+    for (const field of recordsOf(obj.fields)) {
       const fieldName = strName(field.name);
       if (fieldName) facts.fields.set(fieldName, field);
     }
-    for (const action of asArray(obj.actions)) {
+    for (const action of recordsOf(obj.actions)) {
       const actionName = strName(action.name);
       if (actionName) facts.actions.set(actionName, action);
     }
@@ -611,12 +602,12 @@ function buildUniverse(stack: AnyRec): Universe {
     // container the chart rule also walks. `{ ...view, object: objectName }`
     // pins the binding: an embedded view inherits its owner, and nothing here
     // depends on the container repeating it.
-    for (const view of asArray(obj.views)) {
+    for (const view of recordsOf(obj.views)) {
       collectViewRecord({ ...view, object: strName(view.object) ?? objectName }, factsFor);
     }
     collectViewRecord({ object: objectName, listViews: obj.listViews }, factsFor);
     // ADR-0085: `fieldGroups[].key` is the i18n anchor for `_sections`.
-    for (const group of asArray(obj.fieldGroups)) {
+    for (const group of recordsOf(obj.fieldGroups)) {
       const key = strName(group.key) ?? strName(group.name);
       if (key) facts.sections.add(key);
     }
@@ -634,19 +625,19 @@ function buildUniverse(stack: AnyRec): Universe {
     // name stays in the universe too — its message is structurally
     // unreachable at runtime, but #14518 keeps a bundle entry for it
     // deliberately so the bundle mirrors the declared rule set 1:1.
-    for (const rule of asArray(obj.validations)) {
+    for (const rule of recordsOf(obj.validations)) {
       collectValidationRuleNames(rule, facts.validations);
     }
   }
 
   // ── Stack-level views: `_views` names + form-section names ──
-  for (const view of asArray(stack.views)) {
+  for (const view of recordsOf(stack.views)) {
     collectViewRecord(view, factsFor);
   }
 
   // ── Pages: `record:details` sections are the other `_sections` anchor, and
   //    `interfaceConfig.userFilters.tabs` is the ONE `_tabs` anchor ──
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     // Read off the page ROOT, before the component walk and independent of it:
     // `interfaceConfig` is not a component, and unlike `regions` it is authored
@@ -656,7 +647,7 @@ function buildUniverse(stack: AnyRec): Universe {
       if (!walked.objectName) continue;
       const props = isRec(walked.component.properties) ? walked.component.properties : undefined;
       if (!props) continue;
-      for (const section of asArray(props.sections)) {
+      for (const section of recordsOf(props.sections)) {
         const sectionName = strName(section.name);
         if (sectionName) factsFor(walked.objectName).sections.add(sectionName);
       }
@@ -666,7 +657,7 @@ function buildUniverse(stack: AnyRec): Universe {
   // ── Actions: object-bound ones join their object; the rest are global ──
   const globalActions = new Map<string, AnyRec>();
   const actionOwners = new Map<string, string>();
-  for (const action of asArray(stack.actions)) {
+  for (const action of recordsOf(stack.actions)) {
     const actionName = strName(action.name);
     if (!actionName) continue;
     const owner = strName(action.objectName) ?? strName(action.object);
@@ -685,19 +676,19 @@ function buildUniverse(stack: AnyRec): Universe {
 
   // ── Apps: navigation item ids (`apps.<app>.navigation.<id>.label`) ──
   const apps = new Map<string, Set<string>>();
-  for (const app of asArray(stack.apps)) {
+  for (const app of recordsOf(stack.apps)) {
     const appName = strName(app.name);
     if (!appName) continue;
     const navIds = apps.get(appName) ?? new Set<string>();
     const walkNav = (items: unknown) => {
-      for (const item of asArray(items)) {
+      for (const item of recordsOf(items)) {
         const id = strName(item.id);
         if (id) navIds.add(id);
         if (item.children) walkNav(item.children);
       }
     };
     walkNav(app.navigation);
-    for (const area of asArray(app.areas)) {
+    for (const area of recordsOf(app.areas)) {
       const areaId = strName(area.id);
       if (areaId) navIds.add(areaId);
       walkNav(area.navigation);
@@ -707,18 +698,18 @@ function buildUniverse(stack: AnyRec): Universe {
 
   // ── Dashboards: widget ids + header action urls ──
   const dashboards = new Map<string, { widgets: Set<string>; actions: Set<string> }>();
-  for (const dash of asArray(stack.dashboards)) {
+  for (const dash of recordsOf(stack.dashboards)) {
     const dashName = strName(dash.name);
     if (!dashName) continue;
     const widgets = new Set<string>();
-    for (const widget of asArray(dash.widgets)) {
+    for (const widget of recordsOf(dash.widgets)) {
       const id = strName(widget.id) ?? strName(widget.name);
       if (id) widgets.add(id);
     }
     const actions = new Set<string>();
     const headerActions = [
-      ...asArray(isRec(dash.header) ? dash.header.actions : undefined),
-      ...asArray(dash.actions),
+      ...recordsOf(isRec(dash.header) ? dash.header.actions : undefined),
+      ...recordsOf(dash.actions),
     ];
     for (const action of headerActions) {
       const key = strName(action.actionUrl) ?? strName(action.url) ?? strName(action.name);
@@ -738,7 +729,7 @@ function buildUniverse(stack: AnyRec): Universe {
   // orphan — a warning-severity false positive, which is exactly the
   // over-stating ADR-0072 D1 forbids.
   const flows = new Map<string, FlowFacts>();
-  for (const flow of asArray(stack.flows)) {
+  for (const flow of recordsOf(stack.flows)) {
     const flowName = strName(flow.name);
     if (!flowName) continue;
     const screens = new Map<string, ScreenFacts>();
@@ -753,7 +744,7 @@ function buildUniverse(stack: AnyRec): Universe {
       }
       const config = isRec(node.config) ? node.config : undefined;
       const fields = new Set<string>();
-      for (const field of asArray(config?.fields)) {
+      for (const field of recordsOf(config?.fields)) {
         const name = strName(field.name);
         if (name) fields.add(name);
       }
@@ -1224,7 +1215,7 @@ function checkActionParams(
   if (rawParams.length === 0) return;
 
   const declared = new Set<string>();
-  for (const param of asArray(ctx.action.params)) {
+  for (const param of recordsOf(ctx.action.params)) {
     const name = strName(param.name) ?? strName(param.field);
     if (name) declared.add(name);
   }

@@ -165,7 +165,7 @@ new MetadataManager({
 `DatabaseLoader` wraps `load` / `loadMany` / `list` / `stat` results in a
 generic LRU cache (see `src/utils/lru-cache.ts`). Writes invalidate the
 affected entries, so reads always observe writes made through the same loader
-instance; out-of-band SQL writes are honored within `ttl` milliseconds.
+instance; out-of-band SQL writes are honored within `ttlMs` milliseconds.
 
 Configuration lives under `cache.databaseLoader`:
 
@@ -177,7 +177,7 @@ new MetadataManager({
     databaseLoader: {
       enabled: true,
       maxSize: 500,        // Max cached (type, name) entries
-      ttl: 60_000,          // Cache TTL in milliseconds
+      ttlMs: 60_000,        // Cache TTL in milliseconds
     },
   },
 });

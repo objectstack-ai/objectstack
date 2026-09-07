@@ -125,7 +125,13 @@ const SKILL_MAP: Record<string, string[]> = {
     'api/endpoint.zod.ts',
     'api/auth.zod.ts',
     'api/realtime.zod.ts',
-    'api/rest-server.zod.ts',
+    // `api/rest-server.zod.ts` left this list: the SKILL.md never teaches it.
+    // Nothing in the skill's authored markdown names the file, `RestServerConfig`
+    // or any of its sub-configs, or the words "rest server", while every other
+    // core entry here is reachable from the body by at least one exported name.
+    // An index entry is a POINTER, and pointing at a schema the body cannot help
+    // with sends an agent into `node_modules` for a lesson that does not exist.
+    // The schema keeps existing and stays importable; only the false promise goes.
     'api/websocket.zod.ts',
     'api/errors.zod.ts',
     'api/batch.zod.ts',
@@ -169,6 +175,12 @@ const SKILL_MAP: Record<string, string[]> = {
   ],
   'objectstack-platform': [
     // project setup (was objectstack-quickstart)
+    // The body's main subject: it teaches `defineStack()` and names
+    // `ObjectStackDefinitionSchema`, `ObjectStackDefinition`,
+    // `ObjectStackDefinitionInput` and `ObjectStack` in its own prose, while the
+    // catalog had no pointer to the file that declares them. Taught, never
+    // advertised -- the other direction of the same rule.
+    'stack.zod.ts',
     'kernel/manifest.zod.ts',
     'data/datasource.zod.ts',
     'data/seed.zod.ts',

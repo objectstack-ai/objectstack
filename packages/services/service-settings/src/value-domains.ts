@@ -1,129 +1,50 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Standard value-domain membership — the enforcement half of
- * `Specifier.valueDomain` (#5712; the declaration half is #5933,
- * `SpecifierValueDomainSchema` in `@objectstack/spec/system`).
+ * Standard value-domain enforcement for settings specifiers — the settings
+ * door's adapter over the ONE shared predicate.
  *
  * A specifier that declares `valueDomain` says: the legal values for this key
  * are the members of this published standard, and that membership — not the
- * curated `options` table — is the enforcement boundary. The spec deliberately
- * only DECLARES the domains (Prime Directive #2 — no business logic, no data
- * tables in `packages/spec`); each domain's definition of membership is pinned
- * in `SpecifierValueDomainSchema`'s TSDoc and implemented here, on the
- * enforcing side. Keep the two in sync — the spec-side TSDoc names the traps
- * each definition was measured against, and `value-domains.test.ts` re-measures
- * them so drift goes red rather than rotting.
- */
-
-import type { SpecifierValueDomain } from '@objectstack/spec/system';
-
-/**
- * `iana_time_zone` membership — the `Intl.DateTimeFormat` probe.
+ * curated `options` table — is the enforcement boundary.
  *
- * NOT `Intl.supportedValuesOf('timeZone')`: measured on the repo's Node 22
- * baseline it returns 418 CLDR *canonical* names and omits `UTC` (the
- * localization manifest's own declared default), `Asia/Kolkata` (a curated
- * option shipped today), `Europe/Kyiv`, `US/Eastern` and `GMT` — ICU keeps the
- * old spellings (`Asia/Calcutta`, `Europe/Kiev`) as its canonical names, so
- * testing membership against that list rejects values every runtime accepts
- * (#5712's own env repro, re-measured in #5933). The probe is the definition
- * the platform's consumers already use: `isValidTimeZone` in
- * `packages/core/src/security/resolve-authz-context.ts` (module-private there,
- * hence re-stated rather than imported) and the IANA assertion in
- * `localization.manifest.test.ts`. Note the probe is case-insensitive
- * (`europe/zurich` constructs fine) — that IS the pinned definition: the
- * accepted domain equals what every `Intl`-based consumer downstream accepts.
- */
-function isIanaTimeZone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * `iso_4217_currency` membership — `Intl.supportedValuesOf('currency')`.
+ * ## Where the definitions live now (and why not here)
  *
- * Here the enumeration IS usable (measured 162 entries on the Node 22
- * baseline: admits `CHF` and all nine curated localization options, rejects
- * `XYZ`). Known gaps are the recently assigned `VED` and the metal/fund codes
- * (`XAU`, `XDR`, …) — widen deliberately if a deployment needs one, never by
- * falling back to a regex. Membership is exact (uppercase, as ISO 4217 spells
- * codes); computed once and cached, since the set is a property of the runtime
- * and `validatePatch` runs per write.
+ * Maintainer ruling 2026-09-02 on the field-level card: **one closed vocabulary
+ * and one membership predicate shared by settings specifiers and object
+ * fields**. Both now live in `@objectstack/spec/shared`
+ * (`shared/value-domain.zod.ts`) — {@link ValueDomainSchema} is the vocabulary
+ * (`SpecifierValueDomainSchema` is an alias of it, not a copy) and
+ * `isValueDomainMember` is the predicate, with every definition's traps argued
+ * and re-measured in that module's own header and test.
+ *
+ * Until that ruling this module carried its own second copy of all three
+ * definitions: the `Intl.DateTimeFormat` probe, a run-time
+ * `Intl.supportedValuesOf('currency')` set, and the 249 ISO 3166-1 alpha-2
+ * codes. The copies are gone. What is left here is what is genuinely the
+ * DOOR's: which declarations it agrees to enforce
+ * ({@link knownValueDomain}), how a multi-value carrier is walked
+ * ({@link firstRejectedDomainMember}), and the prose fragments the env-override
+ * log line needs ({@link valueDomainPhrasing}). Nothing in this file decides
+ * membership; a membership question that is not `isValueDomainMember` is a
+ * third copy re-appearing, and `value-domains.shared-predicate.pin.test.ts` is
+ * the ratchet that reddens when one does.
+ *
+ * ⚠️ One definition MOVED with the re-point, in a direction the shared module
+ * argues for: `iso_4217_currency` was a run-time probe of
+ * `Intl.supportedValuesOf('currency')` and is now the key set of the
+ * checked-in CLDR snapshot `CURRENCY_FRACTION_DIGITS`. Measured on the repo's
+ * Node 22 baseline (v22.22.2) the two sets are identical — 162 codes each,
+ * symmetric difference 0 in both directions — so no value changes verdict on
+ * this runtime; what changes is that the verdict no longer varies with the
+ * host's ICU build.
  */
-let iso4217Cache: ReadonlySet<string> | undefined;
-function iso4217Codes(): ReadonlySet<string> {
-  // The cast exists because the repo's root tsconfig `lib` is ES2020 while
-  // `Intl.supportedValuesOf` is typed in lib.es2022.intl — the RUNTIME is
-  // guaranteed (engines >= 22; the spec's own vocabulary test calls it bare).
-  // Delete the cast when the root `lib` moves to ES2022+; do not widen it.
-  const intl = Intl as typeof Intl & { supportedValuesOf(key: 'currency'): string[] };
-  iso4217Cache ??= new Set(intl.supportedValuesOf('currency'));
-  return iso4217Cache;
-}
 
-/**
- * `iso_3166_alpha2` — the officially assigned ISO 3166-1 alpha-2 codes,
- * carried explicitly because there is NO standard-library oracle for this
- * domain (measured in #5933): `Intl.DisplayNames(…, { type: 'region' })`
- * returns a distinct display name for `ZZ` ("Unknown Region" — the exact value
- * this domain exists to reject) and for `UK` (a CLDR alias that is not an
- * ISO 3166-1 code), so "the name differs from the input" is not a membership
- * test. The spec's TSDoc says the enforcing side must carry the list; this is
- * that list — the 249 officially assigned codes. User-assigned and reserved
- * elements (`ZZ`, `XX`, `UK`, `AA`, `QM`–`QZ`, …) are deliberately absent.
- * Membership is exact uppercase, as the standard spells the codes; nothing in
- * this repo writes lowercase country values, and one strict spelling is the
- * shape AI-authored metadata cannot get subtly wrong.
- */
-const ISO_3166_ALPHA2 = new Set(
-  (
-    'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ ' +
-    'BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ ' +
-    'CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ ' +
-    'DE DJ DK DM DO DZ ' +
-    'EC EE EG EH ER ES ET ' +
-    'FI FJ FK FM FO FR ' +
-    'GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY ' +
-    'HK HM HN HR HT HU ' +
-    'ID IE IL IM IN IO IQ IR IS IT ' +
-    'JE JM JO JP ' +
-    'KE KG KH KI KM KN KP KR KW KY KZ ' +
-    'LA LB LC LI LK LR LS LT LU LV LY ' +
-    'MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ ' +
-    'NA NC NE NF NG NI NL NO NP NR NU NZ ' +
-    'OM ' +
-    'PA PE PF PG PH PK PL PM PN PR PS PT PW PY ' +
-    'QA ' +
-    'RE RO RS RU RW ' +
-    'SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ ' +
-    'TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ ' +
-    'UA UG UM US UY UZ ' +
-    'VA VC VE VG VI VN VU ' +
-    'WF WS ' +
-    'YE YT ' +
-    'ZA ZM ZW'
-  ).split(' '),
-);
-
-/** Exported for the structural pins in `value-domains.test.ts` only. */
-export const ISO_3166_ALPHA2_CODES: ReadonlySet<string> = ISO_3166_ALPHA2;
-
-/**
- * The closed set of domains this side knows how to enforce — kept equal to
- * `SpecifierValueDomainSchema`'s members (`value-domains.test.ts` pins the
- * equality, so a spec-side vocabulary change goes red here instead of becoming
- * a declared-but-unenforced member, the Prime Directive #10 shape).
- */
-const DOMAIN_MEMBERSHIP: Record<SpecifierValueDomain, (value: string) => boolean> = {
-  iana_time_zone: isIanaTimeZone,
-  iso_4217_currency: (value) => iso4217Codes().has(value),
-  iso_3166_alpha2: (value) => ISO_3166_ALPHA2.has(value),
-};
+import {
+  isValueDomainMember,
+  ValueDomainSchema,
+  type ValueDomain,
+} from '@objectstack/spec/shared';
 
 /**
  * The declared `valueDomain`, when it is one this side can enforce; else null.
@@ -136,17 +57,18 @@ const DOMAIN_MEMBERSHIP: Record<SpecifierValueDomain, (value: string) => boolean
  * check stays in force — which is the same "record nothing rather than an empty
  * table" leniency the option-table registration takes, and strictly safer than
  * accepting everything on the strength of a typo.
+ *
+ * The vocabulary's own `safeParse` is the filter. It admits the three declared
+ * members and nothing else — in particular no inherited property name
+ * (`'toString'`, `'constructor'`), which the previous implementation had to
+ * exclude by hand because it looked the domain up in an object literal and
+ * `'toString' in DOMAIN_MEMBERSHIP` is true through the prototype chain. A
+ * closed `z.enum` matches literal members only, so the guard is now structural
+ * rather than remembered; `value-domains.test.ts` keeps pinning both names.
  */
-export function knownValueDomain(declared: unknown): SpecifierValueDomain | null {
-  // Own-property, not `in`: the record is an object literal, so `'toString' in
-  // DOMAIN_MEMBERSHIP` is true via the prototype chain and would hand a
-  // hand-built manifest a "domain" whose enforcer is not a membership test.
-  // (`hasOwnProperty.call` rather than `Object.hasOwn` only because the root
-  // tsconfig `lib` is ES2020 — same story as the `supportedValuesOf` cast.)
-  return typeof declared === 'string' &&
-    Object.prototype.hasOwnProperty.call(DOMAIN_MEMBERSHIP, declared)
-    ? (declared as SpecifierValueDomain)
-    : null;
+export function knownValueDomain(declared: unknown): ValueDomain | null {
+  const parsed = ValueDomainSchema.safeParse(declared);
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -159,24 +81,36 @@ export function knownValueDomain(declared: unknown): SpecifierValueDomain | null
  * string form (a stored value has been through JSON and a form post), and
  * returning a wrapper so "nothing rejected" and "the rejected member WAS
  * `undefined`" stay distinguishable.
+ *
+ * The membership question itself is `isValueDomainMember` — the same call the
+ * record write path makes, so a value accepted in Settings is the same value
+ * accepted in a field and vice versa.
  */
 export function firstRejectedDomainMember(
-  domain: SpecifierValueDomain,
+  domain: ValueDomain,
   value: unknown,
 ): { value: unknown } | null {
-  const member = DOMAIN_MEMBERSHIP[domain];
   const picked = Array.isArray(value) ? value : [value];
-  const at = picked.findIndex((v) => !member(String(v)));
+  const at = picked.findIndex((v) => !isValueDomainMember(domain, String(v)));
   return at === -1 ? null : { value: picked[at] };
 }
 
 /**
- * The three prose fragments a rejection message needs, per domain — one
- * definition feeding BOTH doors (`validatePatch`'s `FieldError.message` and
- * `reportRejectedEnvOverride`'s log line), so the two never describe the same
- * domain in different words.
+ * The two prose fragments the ENV-OVERRIDE log line needs, per domain.
+ *
+ * Scope narrowed with the re-point: the save path's `FieldError` no longer
+ * builds its sentence here — it renders the published catalog template
+ * `value_domain_<domain>` (`@objectstack/spec/system`), the same catalog the
+ * record write path renders, so the two doors cannot describe one domain in
+ * different words. `reportRejectedEnvOverride` writes a LOG line, not a
+ * `FieldError`: it has no error code, no locale and no `{{label}}`, and its
+ * one sentence template wants fragments ("is not a valid X for", "any X (e.g.
+ * 'Y')") rather than a finished sentence. So the fragments stay here, and
+ * `value-domains.test.ts` pins each one against the catalog template for the
+ * same domain — drift between the log line and the wire message goes red
+ * instead of rotting.
  */
-export function valueDomainPhrasing(domain: SpecifierValueDomain): {
+export function valueDomainPhrasing(domain: ValueDomain): {
   /** What a legal member is called, e.g. "IANA time zone identifier". */
   member: string;
   /** A representative legal value that is NOT in the curated options today. */
