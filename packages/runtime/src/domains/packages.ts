@@ -303,8 +303,7 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * running registry listing. One API call took platform functionality out of a
  * live deployment; `DELETE` came back on restart (the packages are code-loaded),
  * `disable` did NOT — {@link setPackageDisabled} persists the disable to
- * `<OS_HOME>/package-state/<env>.<project>.json`, which the registry re-reads at
- * boot, so
+ * `<OS_HOME>/package-state/<env>.<project>.json`, which the registry re-reads at boot, so
  * a disabled platform package stays disabled across restarts.
  *
  * The predicate is {@link isWritablePackage} from `@objectstack/metadata-protocol`
