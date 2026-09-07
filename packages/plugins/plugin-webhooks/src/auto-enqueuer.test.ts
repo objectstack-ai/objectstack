@@ -841,7 +841,7 @@ describe('AutoEnqueuer — organization dimension (#13566)', () => {
                 expect.stringContaining('belongs to NO organization'),
                 expect.objectContaining({ id: 'wh-1', type: 'data.record.created', object: 'contact' }),
             );
-            expect(String(warn.mock.calls[0][0])).toContain('#13566');
+            expect(String(warn.mock.calls[0][0])).toContain('refusing to fan out');
 
             // Said once per subscription: the next refused event, from another
             // organization even, is debug-level.

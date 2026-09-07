@@ -895,7 +895,7 @@ export class AutoEnqueuer {
             this.logger?.warn?.(
                 '[webhook-auto-enqueuer] dropping off-contract data event: `organizationId` is present but ' +
                     'not a non-empty string (DataEventSchema refuses that at the publish site) — fix the ' +
-                    'producer; never coerced and never read as "no organization" (#13566)',
+                    'producer; never coerced and never read as "no organization"',
                 { type: event.type, object: event.object },
             );
             return;
@@ -1030,7 +1030,7 @@ export class AutoEnqueuer {
             this.logger?.warn?.(
                 '[webhook-auto-enqueuer] dropping off-contract bulk data event: `organizationId` is present ' +
                     'but not a non-empty string (BulkDataEventSchema refuses that at the publish site) — fix ' +
-                    'the producer; never coerced and never read as "not asserted" (#13566)',
+                    'the producer; never coerced and never read as "not asserted"',
                 { type: event.type, object: event.object },
             );
             return;
@@ -1156,7 +1156,7 @@ export class AutoEnqueuer {
         if (this.organizationRefusalReported.has(sub.id)) {
             this.logger?.debug?.(
                 `[webhook-auto-enqueuer] webhook '${sub.name}' still refused on the organization ` +
-                    'dimension (#13566)',
+                    'dimension',
                 meta,
             );
             return false;
@@ -1165,13 +1165,13 @@ export class AutoEnqueuer {
         const message = orgless
             ? `[webhook-auto-enqueuer] webhook '${sub.name}' belongs to NO organization, but this ` +
               `${event.type} event on '${event.object}' is organization-walled (the producer stamped ` +
-              'organizationId) — refusing to fan out (#13566): a subscription with no organization ' +
+              'organizationId) — refusing to fan out: a subscription with no organization ' +
               "ownership does not receive an organization's records. It will receive NO " +
               'organization-walled event while reading active:true in Setup; author the webhook ' +
               'inside the organization that should receive these events. Said once per subscription.'
             : `[webhook-auto-enqueuer] webhook '${sub.name}' belongs to organization ` +
               `'${sub.organizationId}', but this ${event.type} event on '${event.object}' names no ` +
-              'organization — refusing to deliver it inside an organization wall (#13566): on the ' +
+              'organization — refusing to deliver it inside an organization wall: on the ' +
               'per-record path an absent organizationId is an environment-wide row or an object outside ' +
               'the wall; on the bulk path it is a batch the producer could not attribute to one ' +
               'organization (a system or cross-membership predicate write). A tenant-scoped ' +
