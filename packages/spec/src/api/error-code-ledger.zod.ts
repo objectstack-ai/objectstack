@@ -303,6 +303,28 @@ export const ERROR_CODE_LEDGER = {
     'VALIDATION_FAILED',          // record-level validation; carries `fields[]` (#3977)
   ],
   '@objectstack/runtime': [
+    // [#16041] `POST /analytics/query` / `/analytics/sql` refused a
+    // `timeDimensions[].dateRange` string outside the closed date-range
+    // vocabulary (`AnalyticsDateRangeSchema` in `data/analytics.zod.ts`,
+    // derived from `DATE_RANGE_PRESETS`), or a value that is neither a
+    // preset name nor a `[start, end]` array. Answered 400 by the runtime
+    // door (`domains/analytics.ts` lifts the schema's own `invalid_union`
+    // issue via `isAnalyticsDateRangeRefusalIssue`). Maintainer ruling,
+    // decision batch #57 (option A, contract first): the arm used to be a
+    // bare `z.string()` and an unparseable spelling silently matched EVERY
+    // `Date`-typed row in driver-memory while reading as a single day on SQL.
+    //
+    // Not a VALIDATION_ERROR synonym, for the FLOW_* reason: the code names
+    // the CONDITION — a window spelled outside the platform's one date-range
+    // vocabulary — which is reported at two moments: here, at the schema
+    // door, and by the drivers (#16322) when a host calls
+    // `AnalyticsService.query` in-process past the schema. One condition,
+    // one code, one wording (`analyticsDateRangeRefusalMessage`, the #5240
+    // convention); `VALIDATION_FAILED` would say "malformed body" at one
+    // moment and nothing a driver could speak at the other. Registered under
+    // the door that names the wire vocabulary; each driver adds its own
+    // provenance row when its refusal lands.
+    'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
     // [#16293] The AI-facing action doors refuse a call against an action
     // whose AUTHOR declared `ai.requiresConfirmation: true` when the request
     // does not carry the confirmation member as `true` — 428, the standard

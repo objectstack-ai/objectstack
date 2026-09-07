@@ -282,16 +282,31 @@ export const SCAFFOLD_PNPM_RANGE = '>=10.15';
 // changes is the floor each project DECLARES — and a floor is a support
 // promise, so the one that survives is the one the docs already make.
 //
-// ⛔ `create-objectstack`'s `^6.0.0` is deliberately NOT unified here. That
-// package cannot import from `@objectstack/cli`: the dependency edge already
-// runs the other way (`create-objectstack` is a `workspace:*` dependency of
-// this package, and this file imports its `created-summary` renderer), so a
-// reverse import is a cycle — and it publishes as a two-dependency `npx`
-// package that must not pull the CLI's ~50-package closure. Its emission is
-// also a committed template file copied byte-for-byte, with no renderer to
-// route through a constant. Unifying it would move a scaffolded project from
-// TypeScript 6.0.3 to 5.9.3, which is a user-visible change and a support
-// decision, not a refactor.
+// `create-objectstack` — the third scaffolder, and the one that CANNOT reach
+// these constants by import. The dependency edge already runs the other way
+// (`create-objectstack` is a `workspace:*` dependency of this package, and this
+// file imports its `created-summary` renderer), so a reverse import is a cycle
+// — and it publishes as a two-dependency `npx` package that must not pull the
+// CLI's ~50-package closure. Its emission is a committed template file copied
+// byte-for-byte, with no renderer to route through a constant. That is the
+// whole reason its `typescript` line drifted to `^6.0.0` while these two held.
+//
+// It is unified anyway, by GENERATION rather than by import:
+// `scripts/sync-scaffold-emission-policy.mjs` reads the `SCAFFOLD_*` constants
+// out of THIS file and stamps them into every bundled template's
+// `package.json`; `create-objectstack`'s `build` runs it, and
+// `pnpm check:scaffold-emission-policy` reddens the moment the inlined values
+// disagree with the source. ⛔ So a value below is read by a script as well as
+// by a compiler: keep the `export const NAME = '<value>';` spelling on one
+// line, and add the row to that script's `POLICY_STAMPS` if a new constant has
+// to reach the templates too.
+//
+// ⚠️ Unifying it moved a scaffolded project's DECLARED floor from `^6.0.0` to
+// `^5.3.0` (both resolve to typescript 5.9.3 or later at install time; the
+// floor is the support promise). The repo's own devDependency is `^6.0.3`, and
+// that is deliberately NOT this value: `content/docs/getting-started/index.mdx`
+// states both halves in one sentence — "ObjectStack works with TypeScript 5.3+,
+// but the project itself is built and tested against TypeScript 6.x".
 
 /** The TypeScript range every scaffolded project declares. */
 export const SCAFFOLD_TYPESCRIPT_RANGE = '^5.3.0';

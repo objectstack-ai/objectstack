@@ -276,6 +276,40 @@ function isRec(v: unknown): v is AnyRec {
  * Validate L2 hook-body `ctx.api` writes against target-object readonly
  * declarations. Pure `(stack) => Finding[]` (ADR-0019); safe on pre- or
  * post-parse stacks.
+ *
+ * ## Which intakes reach a hook authored as an inline `handler` (#16095)
+ *
+ * This rule opens on `body.language === 'js'`. A hook written as
+ * `handler: async (ctx) => { … }` carries no `body`, so whether it is judged
+ * is a property of the DOOR — what each caller hands this function — not of
+ * the rule. Measured (`packages/cli/test/lint-hook-rules-reach-handler-hooks*`):
+ *
+ * Every leg below was measured with the body-authored control beside it, so a
+ * silent leg is a reading about that door and never about this rule. The doors
+ * are the call sites of `runAuthoringRules`, enumerated — not the three `os *`
+ * commands, which are fewer than the doors:
+ *
+ *   `os build` union        `compile.ts` lowers every inline handler to a
+ *                           metadata body BEFORE its parse (`lowerCallables`)
+ *                           and judges the parsed result — REACHED, always was.
+ *   `os build` per-package  same lowered `result.data`, re-entered one package
+ *                           manifest at a time — REACHED, always was.
+ *   `os lint`               hands the registry's `parsed` tier that same
+ *                           lowered view — REACHED since #16095.
+ *   scaffold validate       `runScaffoldAuthoringRules` (`os init` / `dev` over
+ *                           a rendered template) lowers before it parses too —
+ *                           REACHED, always was, and pinned since #16095.
+ *   `os validate`           parses the normalized stack WITHOUT lowering — NOT
+ *                           reached; the body-authored control fires there.
+ *                           Changing that changes what `os validate` refuses
+ *                           and is its own decision, not this card's.
+ *   direct call             judges exactly the stack it is given — NOT reached
+ *                           unless the caller lowers first; measured both ways.
+ *
+ * A handler the extractor refuses (forbidden token, free identifier,
+ * unparseable) is left with no `body` on every door, so this rule stays silent
+ * on it; the refusal itself is reported by `os lint`'s `hook-body/*` rules and
+ * by `os build`'s warn-and-bundle line, never guessed at here.
  */
 export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFinding[] {
   const findings: ReadonlyHookWriteFinding[] = [];

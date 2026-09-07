@@ -117,7 +117,7 @@ describe('#4001 batch D — the doors the cube family is reachable through', () 
       ...QUERY,
       dimensions: ['stage'],
       where: { is_active: true },
-      timeDimensions: [{ dimension: 'created', granularity: 'day', dateRange: 'Last 7 days' }],
+      timeDimensions: [{ dimension: 'created', granularity: 'day', dateRange: 'last_7_days' }],
       order: { stage: 'asc' },
       limit: 10,
       offset: 0,

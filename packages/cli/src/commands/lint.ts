@@ -13,6 +13,7 @@ import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
 import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
+import { lowerCallables } from '../utils/lower-callables.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -481,7 +482,40 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
   // give), so the registry runs both stack tiers against the normalized input —
   // which is what this command already did for the reference-integrity suite
   // and the security linter.
-  for (const f of runAuthoringRules('lint', { normalized: config, sduiManifest: opts.sduiManifest })) {
+  //
+  // ── The `parsed` tier is handed the LOWERED view (#16095) ──
+  // A hook authored as an inline `handler` function carries no `body`, and the
+  // `hook-body-*` / `hook-api-update-readonly-*` family opens on
+  // `body.language === 'js'` — so on the un-lowered stack the whole family
+  // returned before reading anything, while the reference app authors 39 of
+  // 39 hooks that way. `os build` never had that gap: it runs `lowerCallables`
+  // BEFORE its parse and judges the lowered stack, so the same rules fire
+  // there. This is the same call on the same normalized input, so what the
+  // family sees here cannot drift from what `os build` sees (the parity
+  // `checkHookBodyLowering` above already claims for the refusal side).
+  //
+  // What this changes and what it does not:
+  //   - `parsed`-tier rules see `body: { language: 'js', source }` on every
+  //     hook/action whose handler extracts, and `handler: '<ref>'` in place of
+  //     the function — exactly the stack `os build` parses. Still unparsed:
+  //     no defaults are filled, which is the standing condition of this tier
+  //     under `os lint` and one every rule already tolerates.
+  //   - `normalized`-tier rules keep the un-lowered input, as they do in `os
+  //     build` (which hands them `normalized`, not `lowering.lowered`).
+  //   - `lowerCallables` returns a NEW top-level object and re-maps the slots
+  //     it touches (`hooks`, `objects[*].actions`, `actions`, `functions`,
+  //     `packages[*].manifest`); the caller's stack is never mutated, so the
+  //     function-reading rule above and `scoreMetadata` keep their live
+  //     callables. A handler the extractor refuses is left with no `body` —
+  //     the family stays silent on it and `checkHookBodyLowering` is what
+  //     reports it, so no verdict is ever given about a body that was not
+  //     produced. Nothing here touches what `os build` accepts (#13838).
+  const { lowered } = lowerCallables(config as Record<string, unknown>);
+  for (const f of runAuthoringRules('lint', {
+    normalized: config,
+    parsed: lowered,
+    sduiManifest: opts.sduiManifest,
+  })) {
     issues.push({
       severity: f.severity === 'info' ? 'suggestion' : f.severity,
       rule: f.rule,
