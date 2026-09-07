@@ -8,11 +8,25 @@
  *
  * For the builtin audit columns (`created_at`, `updated_at`) and every declared
  * `Field.datetime` column, `@objectstack/driver-sql`'s record read doors —
- * `find()`, `findOne()`, and the rows `create()` / `update()` return — hand out
- * the canonical instant text `YYYY-MM-DDTHH:MM:SS.sssZ`; `aggregate()` (`min` /
- * `max`, and a raw temporal group key) and `distinct()` present the same two
- * column classes the same way. A read door never hands out a JS `Date` for
- * those columns, on SQLite, Postgres or MySQL.
+ * `find()`, `findOne()`, and the rows `create()`, `update()`, `upsert()`,
+ * `bulkCreate()` and `bulkUpdate()` return — hand out the canonical instant
+ * text `YYYY-MM-DDTHH:MM:SS.sssZ`; `aggregate()` (`min` / `max`, and a raw
+ * temporal group key) and `distinct()` present the same two column classes
+ * the same way. None of those doors hands out a JS `Date` for those columns,
+ * on SQLite, Postgres or MySQL — with the one exception ADR-0053 D-F3 names:
+ * an Invalid `Date`, which has no canonical text and passes through as the
+ * `Date` it is (pinned by `sql-driver-14078-invalid-date-materialisation.test.ts`;
+ * never met here, because this fixture writes only valid instants).
+ * `findWithWindowFunctions` is not one of those doors: it applies no read
+ * presentation of any kind, D-F1 records it as not covered, and #16609 holds
+ * it.
+ *
+ * §A1–§A3 measure the four row doors on the fixture table; §A5–§A7 the three
+ * write doors whose return is a row, on a second table so their writes cannot
+ * move what §B/§C compare against. §D, on the SQLite cell alone, pins that
+ * `aggregate()` / `distinct()` present the audit columns through the SAME
+ * presenter `find()` uses — its own note says why SQLite is the whole
+ * coverage there and not a shortfall.
  *
  * ## Why this file exists next to #13567
  *
@@ -61,6 +75,14 @@ import {
 const OPTS = { bypassTenantAudit: true } as any;
 
 const TABLE = 'os13973_read_door';
+
+/**
+ * The table the write-door cells (§A5–§A7) write to. Separate from `TABLE` so
+ * an upsert, a bulk update and a bulk insert cannot move the `updated_at`
+ * values and the row count §B1/§B3 compare `aggregate()` / `distinct()`
+ * against — the cells stay order-independent.
+ */
+const TABLE_RETURNS = 'os13973_read_door_returns';
 
 /** The canonical instant text — the ONE shape every read door presents. */
 const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -111,22 +133,31 @@ function measure(cell: DialectCell): void {
       // the same guard every other matrix consumer runs.
       if (cell.live) assertThreeWayZoneSkew(cell, await readServerZone(cell, driver));
       await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
+      await driver.execute(`drop table if exists ${TABLE_RETURNS}`).catch(() => {});
       // The DDL path, so the audit columns are the ones
       // `createAuditTimestampColumn` produces (`timestamptz` on Postgres,
       // `DATETIME(3)` on MySQL, TEXT on SQLite) and `closed_at` is a declared
       // `Field.datetime` (`timestamptz` / `DATETIME(3)` / TEXT).
+      const fields = {
+        id: { type: 'text' },
+        title: { type: 'string' },
+        closed_at: { type: 'datetime' },
+        due_on: { type: 'date' },
+        amount: { type: 'number' },
+      };
       await driver.initObjects([
-        {
-          name: TABLE,
-          fields: {
-            id: { type: 'text' },
-            title: { type: 'string' },
-            closed_at: { type: 'datetime' },
-            due_on: { type: 'date' },
-            amount: { type: 'number' },
-          },
-        },
+        { name: TABLE, fields },
+        { name: TABLE_RETURNS, fields },
       ] as any);
+      // Two rows for the write doors that operate on an EXISTING row (§A5's
+      // merge, §A6); the doors that insert (§A5's insert, §A7) bring their own.
+      for (const i of [0, 1]) {
+        await driver.create(
+          TABLE_RETURNS,
+          { id: `w${i}`, title: `write row ${i}`, closed_at: CLOSED_AT[i], due_on: DUE_ON[i], amount: 100 + i },
+          OPTS,
+        );
+      }
       for (const [i, iso] of CLOSED_AT.entries()) {
         // Alternate the WRITE shape — a JS `Date` and the canonical text — so
         // the read shape is shown to be independent of how the row was written.
@@ -145,6 +176,7 @@ function measure(cell: DialectCell): void {
 
     afterAll(async () => {
       await driver?.execute(`drop table if exists ${TABLE}`).catch(() => {});
+      await driver?.execute(`drop table if exists ${TABLE_RETURNS}`).catch(() => {});
       await driver?.disconnect();
     });
 
@@ -214,6 +246,105 @@ function measure(cell: DialectCell): void {
     it('§A4 the Field.date control is untouched — a calendar day stays YYYY-MM-DD', () => {
       for (const [i, row] of rows.entries()) {
         expect(row.due_on, `${row.id}.due_on`).toBe(DUE_ON[i]);
+      }
+    });
+
+    // §A5–§A7: the three remaining row doors D-F1 lists. Each is covered by
+    // construction — the same `formatOutput` call — and is measured here anyway,
+    // because "declared = enforced" is a statement about cells, not about call
+    // graphs. `expectCanonicalInstant` carries §0's guard (defined, non-null)
+    // inside it, so a door that returned a row WITHOUT its audit columns fails
+    // here rather than passing over nothing.
+
+    it('§A5 upsert(): the row it hands back presents the same shape — merged onto an existing row, and inserted', async () => {
+      // `upsert()` reads the row back after its statement on every dialect
+      // (`readback.first()` → `formatOutput`), so its return is a whole row and
+      // the guard applies unqualified.
+      const before = await driver.findOne(TABLE_RETURNS, { where: { id: 'w0' } }, OPTS);
+      expect(before, 'the seed row is missing').toBeTruthy();
+      const merged = await driver.upsert(TABLE_RETURNS, { id: 'w0', title: 'write row 0 (merged)' }, undefined, OPTS);
+      const inserted = await driver.upsert(
+        TABLE_RETURNS,
+        { id: 'u0', title: 'upserted row', closed_at: CLOSED_AT[2], due_on: DUE_ON[2], amount: 200 },
+        undefined,
+        OPTS,
+      );
+      for (const [label, ret, closedAt] of [
+        ['merged w0', merged, CLOSED_AT[0]],
+        ['inserted u0', inserted, CLOSED_AT[2]],
+      ] as const) {
+        expect(ret, `upsert() ${label} returned nothing`).toBeTruthy();
+        expect(ret.id, `upsert() ${label} returned a row that is not the one written`).toBe(label.split(' ')[1]);
+        for (const col of INSTANT_COLUMNS) expectCanonicalInstant(ret[col], `upsert() ${label} ${col}`);
+        expect(ret.closed_at, `upsert() ${label} closed_at`).toBe(closedAt);
+      }
+      // `created_at` is insert-only under a merge (ADR-0074 §2): the merged
+      // return names the instant the row was created at, in the same spelling.
+      expect(merged.created_at).toBe(before.created_at);
+    });
+
+    it('§A6 bulkUpdate(): every row it hands back presents the same shape', async () => {
+      // Loops `update()`, which reads each row back after its statement — a
+      // whole row per entry on every dialect, so the guard applies unqualified.
+      const ret = await driver.bulkUpdate(
+        TABLE_RETURNS,
+        [
+          { id: 'w0', data: { title: 'write row 0 (bulk)' } },
+          { id: 'w1', data: { title: 'write row 1 (bulk)' } },
+        ],
+        OPTS,
+      );
+      expect(ret, 'bulkUpdate() did not return one row per update').toHaveLength(2);
+      for (const [i, r] of ret.entries()) {
+        expect(r.id, `bulkUpdate() return ${i}`).toBe(`w${i}`);
+        for (const col of INSTANT_COLUMNS) expectCanonicalInstant(r[col], `bulkUpdate() return w${i} ${col}`);
+        expect(r.closed_at, `bulkUpdate() return w${i} closed_at`).toBe(CLOSED_AT[i]);
+        // A fresh stamp, in UTC — the same recency bound §A1 puts on `find()`.
+        expect(Math.abs(Date.now() - Date.parse(r.updated_at)), `w${i}.updated_at is not the instant of the update`).toBeLessThan(10 * 60_000);
+      }
+    });
+
+    it('§A7 bulkCreate(): whatever rows its return carries present the same shape, and the batch lands canonical', async () => {
+      const batch = [
+        { id: 'b0', title: 'batch row 0', closed_at: new Date(CLOSED_AT[0]), due_on: DUE_ON[0], amount: 300 },
+        { id: 'b1', title: 'batch row 1', closed_at: CLOSED_AT[3], due_on: DUE_ON[3], amount: 301 },
+      ];
+      const expectedClosedAt: Record<string, string> = { b0: CLOSED_AT[0], b1: CLOSED_AT[3] };
+      const ret = await driver.bulkCreate(TABLE_RETURNS, batch, OPTS);
+      expect(Array.isArray(ret), `bulkCreate() answered ${JSON.stringify(ret)}`).toBe(true);
+      // `insert(rows).returning('*')` hands back a whole row per element where
+      // the dialect has RETURNING (Postgres, SQLite) and knex's insert-id
+      // placeholder where it has not (MySQL) — the same fact §A3 records for
+      // `create()`. Which of the two a dialect answers is its business and is
+      // not pinned. What IS pinned: an element that is a row carries every
+      // instant column, presents it canonically, and names a row of THIS
+      // batch; and the return is all rows or none, so a door that dropped part
+      // of a batch could not pass as "the dialect has no RETURNING".
+      const rowReturns: any[] = ret.filter((r: unknown) => !!r && typeof r === 'object');
+      expect(
+        rowReturns.length === 0 || rowReturns.length === batch.length,
+        `bulkCreate() returned ${rowReturns.length} row(s) for a batch of ${batch.length}`,
+      ).toBe(true);
+      for (const r of rowReturns) {
+        expect(Object.keys(expectedClosedAt), `bulkCreate() returned a row outside the batch: ${r.id}`).toContain(r.id);
+        for (const col of INSTANT_COLUMNS) expectCanonicalInstant(r[col], `bulkCreate() return ${r.id} ${col}`);
+        expect(r.closed_at, `bulkCreate() return ${r.id} closed_at`).toBe(expectedClosedAt[r.id]);
+      }
+      // The leg that measures something on EVERY dialect, RETURNING or not:
+      // the batch landed, its rows read back canonical through `find()`, and —
+      // where the return carried a row — the return and the row agree value
+      // for value, so the return door presents what the read door presents.
+      const landed = (await driver.find(TABLE_RETURNS, { orderBy: [{ field: 'id', order: 'asc' }] }, OPTS)).filter(
+        (row: any) => row.id in expectedClosedAt,
+      );
+      expect(landed, 'the batch did not land').toHaveLength(batch.length);
+      for (const row of landed) {
+        for (const col of INSTANT_COLUMNS) expectCanonicalInstant(row[col], `find() after bulkCreate ${row.id} ${col}`);
+        expect(row.closed_at).toBe(expectedClosedAt[row.id]);
+      }
+      for (const r of rowReturns) {
+        const row = landed.find((l: any) => l.id === r.id);
+        for (const col of INSTANT_COLUMNS) expect(r[col], `bulkCreate() return vs find() ${r.id}.${col}`).toBe(row[col]);
       }
     });
 
@@ -310,3 +441,123 @@ function measure(cell: DialectCell): void {
 for (const cell of DIALECT_CELLS) {
   declareDialectCell(cell, 'canonical ISO read door (#13973)', measure);
 }
+
+/**
+ * §D — `find()`, `distinct()` and `aggregate()` share ONE presenter for the
+ * audit columns.
+ *
+ * `readPresentationKind` routes `created_at` / `updated_at` to the same
+ * `presentAuditTimestampOutput` that `formatOutput` applies to a `find()` row —
+ * not to `normalizeSqliteDatetimeOutput`. The two presenters differ on exactly
+ * one input class, a NUMBER: the audit presenter passes it through (ADR-0074
+ * §3), the datetime fold turns it into ISO text. #13973's first cut routed the
+ * audit columns to the datetime fold, and the contract review of PR #16619
+ * reproduced the divergence that made: an author-declared `created_at: number`
+ * read `1700000000000` off `find()` and `"2023-11-14T22:13:20.000Z"` off
+ * `distinct()` and `max()`. Two reachable shapes carry a number there:
+ *
+ *   D1 an author-declared non-temporal `created_at` — `applySystemFields` lets
+ *      the declaration win (objectql `registry.ts`, "Author-declared fields
+ *      win") and `AUDIT_FIELD_GOVERNANCE` forces only `readonly` / `system`,
+ *      never `type` — holding the number the author wrote;
+ *   D2 an epoch-ms INTEGER raw-written into the builtin, undeclared audit
+ *      column, the pre-ADR-0074 shape a raw insert leaves, which ADR-0074 §3
+ *      declares `find()` hands through untouched.
+ *
+ * ## Why the SQLite cell is the whole coverage, not a shortfall
+ *
+ * The driver's DDL never types the audit column from the declaration: a
+ * declared `created_at` is skipped (`builtinColumns`) and
+ * `createAuditTimestampColumn` runs, so on Postgres the column is a
+ * `timestamptz` and on MySQL a `DATETIME(3)` — neither can hold a number, and
+ * the write that would put one there is refused by the server. SQLite's type
+ * affinity is what lets a number sit in that column at all, so SQLite is the
+ * only dialect on which the three doors CAN disagree, and the only one on
+ * which this pin measures anything; a live cell would exercise the D-F1 shape
+ * §B1/§B3 already cover and nothing of §D. Firing control: route the audit
+ * columns back to the `datetime` kind in `readPresentationKind` and §D1/§D2 go
+ * red on their `distinct()` and `aggregate()` legs — ISO text where `find()`
+ * answers the number — while every §A/§B/§C cell stays green.
+ */
+describe('#13973 §D — find(), distinct() and aggregate() present the audit columns through one presenter (sqlite)', () => {
+  const SQLITE = DIALECT_CELLS.find((c) => c.id === 'sqlite');
+  const T_DECLARED = 'os13973_declared_audit';
+  const T_RAW = 'os13973_raw_audit';
+  /** 2023-11-14T22:13:20.000Z as epoch ms — the review's own value. */
+  const EPOCH = 1_700_000_000_000;
+  let driver: SqlDriver;
+
+  beforeAll(async () => {
+    expect(SQLITE, 'the matrix lost its SQLite cell').toBeDefined();
+    driver = new SqlDriver(SQLITE!.config());
+    for (const t of [T_DECLARED, T_RAW]) await driver.execute(`drop table if exists ${t}`).catch(() => {});
+    await driver.initObjects([
+      // D1: the author declares the audit column non-temporal.
+      { name: T_DECLARED, fields: { id: { type: 'text' }, created_at: { type: 'number' }, n: { type: 'number' } } },
+      // D2: the audit column is the builtin, undeclared one.
+      { name: T_RAW, fields: { id: { type: 'text' }, n: { type: 'number' } } },
+    ] as any);
+    await driver.create(T_DECLARED, { id: 'd0', created_at: EPOCH, n: 1 }, OPTS);
+    await driver.create(T_DECLARED, { id: 'd1', created_at: EPOCH + 1, n: 2 }, OPTS);
+    await driver.create(T_RAW, { id: 'x0', n: 1 }, OPTS);
+    // Past the driver's write door, as a raw insert would leave it: an epoch
+    // INTEGER in both builtin audit columns.
+    await (driver as any).knex(T_RAW).where('id', 'x0').update({ created_at: EPOCH, updated_at: EPOCH });
+  });
+
+  afterAll(async () => {
+    for (const t of [T_DECLARED, T_RAW]) await driver?.execute(`drop table if exists ${t}`).catch(() => {});
+    await driver?.disconnect();
+  });
+
+  /** The three doors' answers for one column, in the shape each door hands out. */
+  async function threeDoors(table: string, col: 'created_at' | 'updated_at') {
+    const query: DriverQuery = { aggregations: [{ function: 'max', field: col, alias: 'newest' }] };
+    const [rows, distinct, agg] = await Promise.all([
+      driver.find(table, { orderBy: [{ field: 'id', order: 'asc' }] }, OPTS),
+      driver.distinct(table, col, undefined, OPTS),
+      driver.aggregate(table, query, OPTS) as Promise<any[]>,
+    ]);
+    return { find: rows.map((r: any) => r[col]), distinct: [...distinct].sort(), max: agg[0]?.newest };
+  }
+
+  it('§D1 an author-declared non-temporal created_at: the number find() presents is what distinct() and max() present', async () => {
+    const doors = await threeDoors(T_DECLARED, 'created_at');
+    // The `find()` side, stated rather than assumed: the declared type wins
+    // (the numeric repair is a no-op on a number, the audit presenter passes
+    // it through), so the row carries the number the author wrote.
+    expect(doors.find, 'find()').toEqual([EPOCH, EPOCH + 1]);
+    // `toEqual` is type-strict: "2023-11-14T22:13:20.000Z" is not 1700000000000.
+    expect(doors.distinct, 'distinct(created_at) disagrees with find()').toEqual([EPOCH, EPOCH + 1]);
+    expect(doors.max, 'max(created_at) disagrees with find()').toBe(EPOCH + 1);
+    expect(typeof doors.max).toBe('number');
+  });
+
+  it('§D2 an epoch INTEGER raw-written into the builtin audit columns: the three doors agree, on both columns', async () => {
+    for (const col of ['created_at', 'updated_at'] as const) {
+      const doors = await threeDoors(T_RAW, col);
+      // ADR-0074 §3: a number passes the audit presenter untouched on `find()`.
+      expect(doors.find, `find() ${col}`).toEqual([EPOCH]);
+      expect(doors.distinct, `distinct(${col}) disagrees with find()`).toEqual([EPOCH]);
+      expect(doors.max, `max(${col}) disagrees with find()`).toBe(EPOCH);
+    }
+  });
+
+  it('§D3 the control: the same two doors still fold a Field.datetime number and a legacy naive audit string to ISO text, as find() does', async () => {
+    // A raw zone-naive `CURRENT_TIMESTAMP` string in the undeclared audit
+    // column is the shape ADR-0074 repairs on `find()`; §D must not have
+    // bought the number agreement by losing that repair at these doors.
+    await driver.create(T_RAW, { id: 'x1', n: 2 }, OPTS);
+    await (driver as any).knex(T_RAW).where('id', 'x1').update({ updated_at: '2026-01-10 09:00:00' });
+    const legacy = await driver.findOne(T_RAW, { where: { id: 'x1' } }, OPTS);
+    expect(legacy.updated_at).toBe('2026-01-10T09:00:00.000Z');
+    const distinct = await driver.distinct(T_RAW, 'updated_at', undefined, OPTS);
+    expect(distinct).toContain('2026-01-10T09:00:00.000Z');
+    expect(distinct).toContain(EPOCH);
+    const query: DriverQuery = { aggregations: [{ function: 'max', field: 'updated_at', alias: 'newest' }] };
+    const agg: any[] = await driver.aggregate(T_RAW, query, OPTS);
+    // SQLite `max()` over mixed INTEGER/TEXT storage orders TEXT above INTEGER,
+    // so the newest is the legacy string — presented through the same repair.
+    expect(agg[0].newest).toBe('2026-01-10T09:00:00.000Z');
+  });
+});

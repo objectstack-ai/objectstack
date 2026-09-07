@@ -4137,8 +4137,15 @@ export type SqlWindowFunctionQuery = Omit<DriverQuery, 'windowFunctions'> & {
  * presents. One entry per rule `formatOutput` applies to a scalar column; the
  * read paths that bypass `formatOutput` (`aggregate`, `distinct`) name the rule
  * per column instead. See {@link SqlDriver.readPresentationKind}.
+ *
+ * `audit_timestamp` is the builtin `created_at` / `updated_at` rule —
+ * {@link presentAuditTimestampOutput}, the presenter `formatOutput` applies to
+ * those two columns — kept apart from `datetime` because the two presenters
+ * differ on a number: the datetime fold turns an epoch INTEGER into ISO text,
+ * the audit presenter passes it through (ADR-0074 §3), and a `find()` row
+ * takes the latter ([ADR-0053 D-F1], #13973).
  */
-export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'number';
+export type ReadPresentationKind = 'datetime' | 'date' | 'time' | 'boolean' | 'number' | 'audit_timestamp';
 
 /**
  * Journal modes the driver knows how to ask a file-backed SQLite database for.
@@ -12828,11 +12835,24 @@ export class SqlDriver implements IDataDriver {
    * The temporal kinds run on every dialect. For `datetime` that is [ADR-0053
    * D-F1] (#13973): the fold was SQLite-only before, so `aggregate()` and
    * `distinct()` handed Postgres' and MySQL's `Date` through here exactly as
-   * `find()` did. The builtin audit columns take the `datetime` rule too —
-   * they are not in `datetimeFields` (builtin, not declared), and before
-   * #13973 this function had NO arm for them on ANY dialect, so
-   * `max(updated_at)` and `distinct('created_at')` diverged from `find()`
-   * even on SQLite, where they missed ADR-0074's legacy-row repair.
+   * `find()` did. The builtin audit columns take their OWN rule,
+   * `audit_timestamp` — the same `presentAuditTimestampOutput` `formatOutput`
+   * applies to them — unless the author declared the column temporal (the
+   * engine's `applySystemFields` declares both as `Field.datetime`), in which
+   * case the temporal rule wins here exactly as `formatOutput`'s datetime fold
+   * runs after its audit fold there. They are not in `datetimeFields` by
+   * themselves (builtin, not declared), and before #13973 this function had
+   * NO arm for them on ANY dialect, so `max(updated_at)` and
+   * `distinct('created_at')` diverged from `find()` even on SQLite, where they
+   * missed ADR-0074's legacy-row repair. The arm is the audit presenter and
+   * not the `datetime` one because the two differ on a NUMBER: ADR-0074 §3
+   * passes an epoch INTEGER through on a `find()` row, and a `created_at` the
+   * author declared non-temporal (`applySystemFields` lets the declaration
+   * win; `AUDIT_FIELD_GOVERNANCE` forces only `readonly` / `system`, never
+   * `type`) leaves `find()` as the number it is — routed to the datetime fold,
+   * both became ISO text at this door and nowhere else (the #16619 contract
+   * review's finding; `sql-driver-13973-canonical-iso-read-door.test.ts` §D
+   * pins the agreement).
    *
    * The boolean rule runs on SQLite AND MySQL — the two dialects that store a
    * declared boolean as a number (INTEGER 0/1, `tinyint(1)`) — because
@@ -12849,7 +12869,7 @@ export class SqlDriver implements IDataDriver {
     if (!table) return null;
     const temporal = this.temporalFieldKind(table, field);
     if (temporal) return temporal;
-    if ((AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(field)) return 'datetime';
+    if ((AUDIT_TIMESTAMP_COLUMNS as readonly string[]).includes(field)) return 'audit_timestamp';
     if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
       return 'boolean';
     }
@@ -12859,17 +12879,32 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Present one value exactly the way `formatOutput` presents it on a `find()`
-   * row, for the read paths that return raw builder output instead
-   * (`aggregate`, `distinct` — #3797 for instants, #3849 for scalars).
+   * Present one value through the presenter `formatOutput` applies to that
+   * column class on a `find()` row, for the read paths that return raw builder
+   * output instead (`aggregate`, `distinct` — #3797 for instants, #3849 for
+   * scalars): one presenter per kind, and it is the function `formatOutput`
+   * itself calls, never a re-derivation of it.
    *
-   * The dialect gating mirrors `formatOutput`: the three temporal folds run
-   * everywhere (`datetime` since #13973, [ADR-0053 D-F1] — SQLite-only before,
-   * which handed the two live dialects' `Date` through), the numeric coercion
-   * is SQLite-only, and the boolean coercion runs on SQLite and MySQL (#11782
-   * — the two dialects whose stored boolean is a number).
+   * The dialect gating mirrors `formatOutput`: the three temporal folds and
+   * the audit-stamp fold run everywhere (`datetime` and `audit_timestamp`
+   * since #13973, [ADR-0053 D-F1] — the former SQLite-only and the latter
+   * absent before, which handed the two live dialects' `Date` through), the
+   * numeric coercion is SQLite-only, and the boolean coercion runs on SQLite
+   * and MySQL (#11782 — the two dialects whose stored boolean is a number).
    * {@link readPresentationKind} does the dialect gating for the scalar kinds,
    * so by the time one arrives here the dialect is settled.
+   *
+   * Where this is NOT `formatOutput` to the letter: a row walk COMPOSES. A
+   * `created_at` an author declared `number` takes the SQLite numeric repair
+   * and then the audit presenter there, while here it takes the audit
+   * presenter alone (`readPresentationKind` answers one kind per column). The
+   * two agree on every value the driver's own DDL can store in that column —
+   * SQLite's NUMERIC affinity folds a numeric-looking string to INTEGER before
+   * it is ever read back, and a number passes both presenters untouched — and
+   * differ only on a numeric-looking TEXT in a hand-made TEXT-affinity audit
+   * column, which `find()` reads as a number and this door as the string.
+   * `sql-driver-13973-canonical-iso-read-door.test.ts` §D pins the agreement
+   * on the shapes that are reachable.
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
@@ -12883,10 +12918,22 @@ export class SqlDriver implements IDataDriver {
         return this.toTimeOnly(value);
       case 'datetime':
         // Every dialect ([ADR-0053 D-F1]): the same fold `formatOutput` applies
-        // to a `find()` row, so `min`/`max`/`distinct` over an instant — a
-        // declared `Field.datetime` or a builtin audit column — present the
-        // canonical text and never the client's `Date`.
+        // to a `find()` row, so `min`/`max`/`distinct` over a declared
+        // `Field.datetime` (the audit columns too, when the engine declares
+        // them so) present the canonical text and never the client's `Date`.
         return normalizeSqliteDatetimeOutput(value);
+      case 'audit_timestamp':
+        // Every dialect ([ADR-0053 D-F1]): the ONE presenter `formatOutput`
+        // applies to `created_at` / `updated_at` — a `Date` folds to the
+        // canonical text, a zone-naive legacy string is repaired (ADR-0074),
+        // and a number passes through as it does on a `find()` row (ADR-0074
+        // §3) — so `max(created_at)` and `distinct('updated_at')` answer the
+        // value `find()` answers, type for type. `normalizeSqliteDatetimeOutput`
+        // would fold the number too, and did between #13973's first cut and
+        // its contract review: an author-declared `created_at: number` read
+        // `1700000000000` off `find()` and `"2023-11-14T22:13:20.000Z"` off
+        // `distinct()` — the divergence the conformance file's §D pins closed.
+        return presentAuditTimestampOutput(value);
       case 'boolean':
         return Boolean(value);
       case 'number': {

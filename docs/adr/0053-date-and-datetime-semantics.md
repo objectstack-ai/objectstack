@@ -1,6 +1,6 @@
 # ADR-0053: `date` is a timezone-naive calendar day; `datetime` is an instant rendered in a reference timezone
 
-**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` read door presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; a read door never hands out a JS `Date` for those columns (#13973, maintainer ruling B1 narrow, 2026-09-02).
+**Status**: Accepted (2026-06-16) — Phase 1 + addendum D-A1 implemented (`sql-driver.ts` `toDateOnly` write/read/filter normalization; analytics `coerceTemporalFilterValue`), Phase 2 landing incrementally; D-A2 resolved 2026-07-30: `temporalFilterValue` + `temporalFilterColumnSql` are optional `IDataDriver` contract members with identity semantics, and analytics types its driver seam from the contract. **Partly superseded (2026-07-29, addendum D-B1..D-B4):** Phase 1's "`Field.datetime` stays stored as UTC epoch ms" is replaced by one canonical UTC instant per dialect — `YYYY-MM-DDTHH:MM:SS.sssZ` text on SQLite, `timestamptz` on Postgres, `DATETIME(3)` on MySQL — applied on write and to filter comparands alike (#3912, #3942). **Extended (2026-07-30, addendum D-C1..D-C3):** `Field.time` takes the same construction — canonical `HH:MM:SS[.fff]` wall-clock text, one function on write/filter/read, `TIME(3)` on MySQL, UTC `NOW()` defaults on every dialect (#3994). **Extended (2026-09-07, addendum D-F1..D-F3):** the READ side takes the same canon — every `@objectstack/driver-sql` record read door but `findWithWindowFunctions` (#16609) presents `Field.datetime` values and the builtin `created_at` / `updated_at` audit stamps as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text on every dialect, folded at the driver's read boundary with the client parsers untouched; those doors never hand out a JS `Date` for those columns, save an Invalid `Date`, which has no canonical text and passes through unchanged (#13973, maintainer ruling B1 narrow, 2026-09-02).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0032](./0032-unified-expression-layer.md) (unified expression layer — CEL dialect, `today()`/`daysFromNow()`), [ADR-0014](./0014-record-form-field-type.md) (field types)
 **Consumers**: `@objectstack/spec` (`Field.date`/`Field.datetime`), `@objectstack/driver-sql` (`coerceFilterValue`, `formatInput`/`formatOutput`, `dateFields`/`datetimeFields`), `@objectstack/formula` (`stdlib` time functions, `cel-engine` hydration), `@objectstack/objectql` (`applyFormulaPlan`), schedule/cron executors, report/analytics date bucketing, `sys-user-preference.timezone`.
@@ -1061,8 +1061,8 @@ not hold: nothing on the read path consumed the `Date`.
 
 For the builtin audit columns (`created_at`, `updated_at`) and every declared
 `Field.datetime` column, every record read door of `@objectstack/driver-sql`
-presents the value as `YYYY-MM-DDTHH:MM:SS.sssZ` text — on SQLite, Postgres and
-MySQL alike, exactly as SQLite always did:
+listed here presents the value as `YYYY-MM-DDTHH:MM:SS.sssZ` text — on SQLite,
+Postgres and MySQL alike, exactly as SQLite always did:
 
 - `find()`, `findOne()`, and the rows `create()`, `update()`, `upsert()`,
   `bulkCreate()` and `bulkUpdate()` return (all through `formatOutput`, whose two
@@ -1070,15 +1070,30 @@ MySQL alike, exactly as SQLite always did:
 - `aggregate()` for `min` / `max` over such a column and for a raw temporal
   group key, and `distinct()` over such a column (`presentReadValue`, whose
   `datetime` arm is now unconditional, and `readPresentationKind`, which now
-  answers `datetime` for the two audit columns).
+  routes the two audit columns to the same `presentAuditTimestampOutput`
+  `formatOutput` applies — one presenter per column class, shared by every
+  door, so a value `find()` passes through as a number — ADR-0074 §3's epoch
+  INTEGER, or an author-declared non-temporal `created_at` — is that same
+  number here, never ISO text at this door alone).
 
-A read door never hands out a JS `Date` for these columns. Declared = enforced:
+None of these doors hands out a JS `Date` for these columns, save the one
+shape D-F3 names: an Invalid `Date`, which has no canonical text and passes
+through unchanged. `findWithWindowFunctions` is not one of these doors (see
+Consequences; #16609). Declared = enforced:
 `sql-driver-13973-canonical-iso-read-door.test.ts` asserts it per cell of the
-D-A3 driver axis — the SQLite cell everywhere, the Postgres and MySQL cells
-under `Temporal Conformance (live PG + MySQL)`, with the three-way zone skew
-guard so a `Z` that only survived because every clock agreed cannot pass —
-and `sql-driver-13567-audit-stamp-materialisation.test.ts` re-pins the audit
-column at the OCC seam's door.
+D-A3 driver axis for every door listed — `bulkCreate()` over the rows a
+dialect's bulk insert returns (MySQL, with no `RETURNING`, returns none, and
+that cell reads the batch back through `find()` instead) — the SQLite cell
+everywhere, the Postgres and MySQL cells under `Temporal Conformance (live PG
++ MySQL)`, with the three-way zone skew guard so a `Z` that only survived
+because every clock agreed cannot pass — and
+`sql-driver-13567-audit-stamp-materialisation.test.ts` re-pins the audit
+column at the OCC seam's door. The same file's §D pins, on SQLite, that
+`aggregate()` / `distinct()` present the audit columns through the presenter
+`find()` uses, on the two shapes where a different one would show (an
+author-declared non-temporal `created_at`; a raw-written epoch INTEGER) —
+SQLite because its type affinity is what lets a number sit in that column at
+all; the `timestamptz` / `DATETIME(3)` the DDL types it as elsewhere cannot.
 
 Why text rather than "everything a `Date`" (the maintainer asked exactly this:
 「为什么不能都用日期类型」): every platform with a metadata layer decides the
