@@ -107,7 +107,7 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     }
   });
 
-  it('refuses arithmetic over the divergence class (booleans) and over the computed / text / structured types', () => {
+  it('refuses arithmetic over booleans (row as ruled; membership referred, see module TSDoc) and over the computed / text / structured types', () => {
     for (const fn of ['sum', 'avg', 'min', 'max'] as const) {
       for (const t of ['boolean', 'toggle', 'formula', 'autonumber', 'text', 'select', 'lookup', 'json', 'vector', 'file']) {
         expect(isAggregateCompatibleWithFieldType(fn, t)).toBe(false);
@@ -140,5 +140,38 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     expect(isAggregateCompatibleWithFieldType('countDistinct', 'text')).toBe(false);
     expect(isAggregateCompatibleWithFieldType('toString', 'text')).toBe(false);
     expect(isAggregateCompatibleWithFieldType('', '')).toBe(false);
+  });
+
+  it('fails closed on SHAPE — a non-string that would coerce to a member spelling is refused, not looked up', () => {
+    // `hasOwnProperty.call` applies ToPropertyKey, so without the typeof guard
+    // `['count']` reads as 'count' and an object with a toString reads as
+    // 'sum'. A refusal gate must not be talked past by coercion.
+    const loose = isAggregateCompatibleWithFieldType as unknown as (a: unknown, f: unknown) => boolean;
+    expect(loose(['count'], 'number')).toBe(false);
+    expect(loose({ toString: () => 'sum' }, 'currency')).toBe(false);
+    expect(loose('sum', ['currency'])).toBe(false);
+    expect(loose('min', { toString: () => 'date' })).toBe(false);
+    expect(loose(undefined, 'number')).toBe(false);
+    expect(loose(null, 'number')).toBe(false);
+    expect(loose('count', undefined)).toBe(false);
+    expect(loose('count', null)).toBe(false);
+    expect(loose(1, 'number')).toBe(false);
+    expect(loose('count', 1)).toBe(false);
+    expect(loose(Symbol('count'), 'number')).toBe(false);
+  });
+
+  it('records the two overrides of existing opinions without changing the rows: booleans and the string classes', () => {
+    // Booleans: refused here by the ruling's default; #11152 / AGGREGATION_CASES
+    // answer them as numbers on every face. Row kept as ruled, question referred.
+    for (const fn of ['sum', 'avg', 'min', 'max']) {
+      expect(isAggregateCompatibleWithFieldType(fn, 'boolean')).toBe(false);
+      expect(isAggregateCompatibleWithFieldType(fn, 'toggle')).toBe(false);
+    }
+    // String classes: min/max refused here; measureResultType (#15768) types
+    // min/max over them as a supported 'string' result. Override recorded.
+    for (const t of ['text', 'select', 'lookup', 'autonumber']) {
+      expect(isAggregateCompatibleWithFieldType('min', t)).toBe(false);
+      expect(isAggregateCompatibleWithFieldType('max', t)).toBe(false);
+    }
   });
 });

@@ -46,18 +46,45 @@
  *   as REAL columns beside `number`. `summary` is a roll-up persisted as a
  *   numeric column.
  * - **temporal** = `CALENDAR_DATE_TYPES` ∪ `INSTANT_TYPES` ∪ `CLOCK_TIME_TYPES`:
- *   `date`, `datetime`, `time`. `time` is a native TIME column on every SQL
- *   dialect the driver emits DDL for, and `AnalyticsResult.fields[].type`
- *   already describes `min` / `max` over it as temporal (#15768), so it sits
- *   beside the two members the ruling named.
+ *   `date`, `datetime`, `time`. The ruling named the first two; `time` is the
+ *   third temporal class and takes the same treatment: its stored form is a
+ *   dialect question exactly like the other two (native TIME on Postgres and
+ *   MySQL `TIME(3)`, canonical `HH:MM:SS[.fff]` TEXT on SQLite — #3994), the
+ *   canonical form orders chronologically on every one of them, and
+ *   `AnalyticsResult.fields[].type` already describes `min` / `max` over it as
+ *   temporal (#15768, `TEMPORAL_SOURCE_FIELD_TYPES`). So it sits beside the
+ *   two members the ruling named.
  * - **everything else** — the text family, booleans, option types, references,
  *   files, structured JSON, `vector`, and the computed `formula` /
- *   `autonumber` — is refused for `sum` / `avg` / `min` / `max`. `formula`
- *   carries a declared `returnType`, but it is VIRTUAL in SQL storage (no
- *   column is emitted), so no arithmetic aggregate can be lowered to it
- *   whatever that type says; `autonumber` is a formatted string. Booleans are
- *   the divergence class exactly: one dialect sums 0/1, another has no
- *   `sum(boolean)` at all.
+ *   `autonumber` — is refused for `sum` / `avg` / `min` / `max`, the ruling's
+ *   "every other pair: refused". `formula` carries a declared `returnType`,
+ *   but it is VIRTUAL in SQL storage (no column is emitted), so no arithmetic
+ *   aggregate can be lowered to it whatever that type says; `autonumber` is a
+ *   formatted string.
+ *
+ * Two rows the ruling's default covers are recorded here as OVERRIDES of
+ * existing opinions, not as settled ground — the row stands as ruled, the
+ * text says only what this tree can defend:
+ *
+ * - **Booleans** (`boolean`, `toggle`) are refused for the four arithmetic /
+ *   order aggregates by the ruling's default, yet the runtime already ANSWERS
+ *   them: maintainer ruling #11152 pins that booleans aggregate as numbers on
+ *   every face with no per-aggregate exception (`AGGREGATION_CASES` in
+ *   `aggregation-conformance.ts`: `sum(flag)=3`, `avg(flag)=0.5`,
+ *   `min(flag)=0`, `max(flag)=1`, six backends), and `driver-sql` casts a
+ *   boolean aggregand to `int` on Postgres to make that hold (#11635). So the
+ *   refusal is NOT grounded in backend divergence — the backends agree. Whether
+ *   booleans belong in these rows is a collision between two rulings (batch
+ *   #59 and #11152) and is referred to the maintainer as its own decision; the
+ *   row is left exactly as batch #59 stated it until that decision lands.
+ * - **The string classes** (`STRING_VALUE_TYPES`, `SINGLE_OPTION_TYPES`,
+ *   `REFERENCE_VALUE_TYPES`, `autonumber`) are refused for `min` / `max` here,
+ *   while `service-analytics`' `measureResultType` (#15768,
+ *   `STRING_SOURCE_FIELD_TYPES`) already types `min` / `max` over them as a
+ *   supported `'string'` result. The refusal is defensible — the ORDER of
+ *   strings is collation-dependent, so two backends can return two different
+ *   "smallest" values — but it overrides that existing opinion, and is
+ *   recorded as such rather than presented as agreement.
  *
  * ## Relation to `isIncoherentAggregate`
  *
@@ -126,13 +153,18 @@ export const AGGREGATE_FIELD_TYPE_COMPATIBILITY: Readonly<Record<AggregationFunc
  * both consumer legs call, so one pair cannot be accepted at authoring and
  * refused at compile time.
  *
- * Fail-closed on vocabulary: a value outside `AggregationFunction` or outside
- * `FieldType` answers `false`. The parameters are typed as `string` because
- * the lint leg judges metadata BEFORE it is parsed; that is a convenience of
- * the signature, not a tolerance — off-vocabulary input is refused, never
- * mapped.
+ * Fail-closed on vocabulary AND on shape: a value outside `AggregationFunction`
+ * or outside `FieldType` answers `false`, and so does anything that is not a
+ * string at all. The second half is load-bearing for a refusal gate: the lint
+ * leg judges metadata BEFORE it is parsed, so the value it hands in may be an
+ * array or an object, and a property-key lookup alone would coerce
+ * `['count']` or `{ toString: () => 'sum' }` to a member spelling and let the
+ * pair through. The `string` parameter types are a convenience of the
+ * signature, not a tolerance — off-vocabulary or off-shape input is refused,
+ * never mapped.
  */
 export function isAggregateCompatibleWithFieldType(aggregate: string, fieldType: string): boolean {
+  if (typeof aggregate !== 'string' || typeof fieldType !== 'string') return false;
   if (!Object.prototype.hasOwnProperty.call(AGGREGATE_FIELD_TYPE_COMPATIBILITY, aggregate)) return false;
   const row: readonly string[] = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate as AggregationFunction];
   return row.includes(fieldType);
