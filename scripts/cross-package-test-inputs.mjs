@@ -299,6 +299,35 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // in ci.yml's `crosspkg:` filter. Its own header records that trade.
     globs: ['packages/**/*.ts'],
   },
+  '@objectstack/organizations': {
+    // src/no-framework-dependents.pin.test.ts is ADR-0132 D3's mechanical half.
+    // This package and the commercial multi-org runtime share ONE package name;
+    // which class a deployment mounts is decided by the manifest that declares
+    // that name, and the one thing that would break it is a FRAMEWORK package
+    // taking `@objectstack/organizations` as its own dependency — which would
+    // put the ungated copy inside the tree a commercial app links, reachable by
+    // a bare import that never consults the app's manifest. So the pin reads
+    // every workspace package manifest and fails on any such declaration.
+    //
+    // The radius is the MANIFESTS and nothing else: the pin parses
+    // `package.json` and never opens a source file, so a glob over
+    // `packages/**` would put this suite on every source edit in the repo for a
+    // read it does not make. It stays inside `packages/` on purpose — `apps/`
+    // and `examples/` are HOSTS, and a host declaring the runtime it wants to
+    // mount is the supported wiring rather than the hazard — so this entry adds
+    // no new top-level root for `check-ci-filter-parity.mjs` to want in ci.yml.
+    globs: ['packages/**/package.json'],
+    heldBy: {
+      // The pin seeds a recognised `findUp(pnpm-workspace.yaml)` expression and
+      // then descends with `readdirSync(dir)` on a LOOP VARIABLE, so the escape
+      // verdict resolves and the NAME does not — the trade `pathExpression`
+      // documents. Measured: no literal path on this package's roster matches
+      // this glob, so the pin is all that holds it.
+      'packages/**/package.json': [
+        'packages/plugins/organizations/src/no-framework-dependents.pin.test.ts',
+      ],
+    },
+  },
   '@objectstack/cli': {
     // src/commands/serve-verify-security-parity.contract.test.ts diffs
     // cli's serve.ts against verify's harness.ts.

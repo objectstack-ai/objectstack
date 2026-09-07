@@ -2415,7 +2415,7 @@ function selfTest() {
         '⭐ ABLATION: one row inserted above row 34 turns the gate RED, naming the falsified page ' +
           'references -- this is the exact edit #15687 made under a green gate',
         falsifiedRefs.some((p) => p.includes('`Row 34`') && p.includes('is row 35')) &&
-          falsifiedRefs.some((p) => p.includes('`rows 1–61`')),
+          falsifiedRefs.some((p) => p.includes('`rows 1–62`')),
         ablated.problems.join(' | ')
       );
       t(

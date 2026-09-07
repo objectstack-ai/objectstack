@@ -1,6 +1,6 @@
 # ADR-0105: Group Tenancy Posture — Organization Scope as a First-Class Authorization Dimension
 
-**Status**: Accepted (2026-07-27; proposed 2026-07-25) — Phase 0/1 implemented (#3559). Amended 2026-07-27: **D12 correction** — `group` posture activation is entitled, not open (#3570; see the D12 Amendment). Phase 2 **D8** and **D9** implemented 2026-07-28 — D8: #3645 (host seam) → #3663 (placement engine) → #3674 (`/security/my-delegable-scope`) → #3695 (issuer-grant resolution) → #3722 (`delegated_admin` + invitation role cap, #3697) → #3767 (`sys_member` governed), console objectui#2868/#2891, e2e cloud#886; the membership-role channel D8's placement replaces is closed by [ADR-0108](./0108-membership-grade-is-not-a-capability-channel.md). D9: #3824 + #3873 (see the D9 amendment below). D10 **withdrawn** 2026-09-04 by maintainer ruling (「不考虑集团级模板行，作废相关需求」「不考虑 分层主数据」; recorded in [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D12 — see the note under D10); D13 not started
+**Status**: Accepted (2026-07-27; proposed 2026-07-25) — Phase 0/1 implemented (#3559). Amended 2026-07-27: **D12 correction** — `group` posture activation is entitled, not open (#3570; see the D12 Amendment). Phase 2 **D8** and **D9** implemented 2026-07-28 — D8: #3645 (host seam) → #3663 (placement engine) → #3674 (`/security/my-delegable-scope`) → #3695 (issuer-grant resolution) → #3722 (`delegated_admin` + invitation role cap, #3697) → #3767 (`sys_member` governed), console objectui#2868/#2891, e2e cloud#886; the membership-role channel D8's placement replaces is closed by [ADR-0108](./0108-membership-grade-is-not-a-capability-channel.md). D9: #3824 + #3873 (see the D9 amendment below). **D12 amended 2026-09-06** by [ADR-0132](./0132-multi-organization-runtime-is-open-core.md) — the multi-org runtime moves to open core; the entitlement stays commercial. D10 **withdrawn** 2026-09-04 by maintainer ruling (「不考虑集团级模板行，作废相关需求」「不考虑 分层主数据」; recorded in [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D12 — see the note under D10); D13 not started
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (business units + scope depth), [ADR-0066](./0066-unified-authorization-model.md) (unified authz, superuser bypass), [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set / position / business unit), [ADR-0091](./0091-grant-lifecycle-and-recertification.md) (validity windows), [ADR-0092](./0092-sys-user-profile-field-delegation.md) (identity write guard + field whitelist), [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (tenancy service), [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) (tenant Layer 0, posture ladder), [ADR-0103](./0103-managedby-write-policy-and-engine-write-guard.md); cloud ADR-0016 (open/paid boundary: 强制免费、治理收费), cloud ADR-0081 (`@objectstack/organizations`)
 **Tracking**: #3541 (P0 findings F1/F2 became #3539/#3540, closed by #3559); cloud-side tracking cloud #874
@@ -324,7 +324,10 @@ reserves the concept and its place in Phase 2.
 
 **D12 — Edition split, per the cloud ADR-0016 iron rule (强制免费、治理收费).**
 *(As amended 2026-07-27, #3570 — see the Amendment below for the original
-text and why it was wrong.)* The split is **code vs. activation**, not code
+text and why it was wrong; and again 2026-09-06 by
+[ADR-0132](./0132-multi-organization-runtime-is-open-core.md), which moves the
+multi-org RUNTIME to open core and leaves only the entitlement commercial — see
+the ADR-0132 Amendment at the end of this section.)* The split is **code vs. activation**, not code
 vs. code. The wall's *implementation* ships open — D3/D4 correctness, the
 Layer 0 predicates, D5 stamping/validation, `accessible_org_ids` resolution,
 the D6 red-line lints — exactly as `isolated`'s wall has always lived in
@@ -341,6 +344,29 @@ are `@objectstack/organizations` capability. Commercial surface (unchanged):
 org lifecycle management, grouping/registry UI, scoped invitations UX,
 cross-org approval templates, master-data distribution management, per-org
 seed/config replay, org analytics, and the D13 promotion tooling.
+
+> **Amendment (2026-09-06, [ADR-0132](./0132-multi-organization-runtime-is-open-core.md)).**
+> The *split itself* stands: it is still code vs. activation, and enabling
+> multi-organization operation is still an entitlement on the commercial side.
+> What ADR-0132 changes is **where the code lives**. The multi-org runtime
+> `@objectstack/organizations` now ships from this repository under Apache-2.0;
+> the commercial repository keeps a private package of the same name whose class
+> subclasses the open one and calls its licence gate in its own constructor, and
+> every commercial host resolves that name through a `workspace:*` declaration
+> that can only reach the local package. So this section's sentences about the
+> runtime being closed-source read as history: the paragraph below still
+> describes how activation is gated, on the commercial side, and no longer
+> describes who may read the source.
+>
+> Two consequences for this section specifically. **The `supportedPostures`
+> declaration**: D12's argument that "which shapes of multi-org" is a packaging
+> decision belonging in the commercial runtime does not carry to the open
+> package, which entitles both walled postures by construction (ADR-0132 D4) —
+> the commercial runtime may still narrow what it entitles. **The
+> boot refusal**: ADR-0093 D5 still refuses a walled posture with no runtime
+> present, but "absent" stops being the normal state for an open install once
+> #16137 wires `serve` to the open registrar. ⛔ ADR-0132 does not itself
+> deliver that; it ships the registrar.
 
 > **Citation note (2026-08-16) — hygiene, not a decision.** Code and tests
 > carried this entitlement as **"ADR-0081 D2"**, a label inherited from a
