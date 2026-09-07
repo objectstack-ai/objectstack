@@ -104,40 +104,60 @@ function shellToken(token: string): string {
  * An assembled command is wrong in exactly one way and it is unbounded — every
  * flag that exists now, and every flag added later, has to be remembered at
  * this print site or it silently goes missing. So this does not enumerate
- * flags at all. It takes the argv oclif was handed and removes one token from
- * it, which makes the echo correct for flags this file has never heard of.
+ * flags at all. It takes the argv oclif was handed and removes the tokens that
+ * make a run WRITE NOTHING, which keeps the echo correct for flags this file
+ * has never heard of.
  *
- * ⛔ It also never GUESSES. If `--check` is not in the argv the flag was not
- * spelled there, this function cannot point at what it removed, and the caller
- * prints "re-run the same command without `--check`" instead — the degraded
- * line the report itself asked for, on the grounds that a correct vague
- * sentence beats a complete-looking wrong command. Today's flag surface has no
- * other way to set `--check` (no `env`, no default, no `allowNo`), so that is
- * defence rather than a path a user can reach; it is what keeps "assemble an
+ * ## Which tokens, and why it is not just `--check` (#16600)
+ *
+ * There are exactly two, and both are "write nothing" spellings:
+ *
+ *   - `--check` — the mode being escaped. Removing it is the whole point.
+ *   - `--json` — "output JSON instead of writing files", so a run carrying it
+ *     regenerates nothing either. It became reachable here the moment the
+ *     machine face started reporting drift, and until it was dropped this
+ *     function named a command that emits a payload, writes zero files, and
+ *     leaves the next `--check --json` failing with the same advice: the
+ *     #14895 loop above, reproduced one face over. A remedy that cannot heal
+ *     the failure it is printed under is worse than none, because it looks
+ *     like one.
+ *
+ * ⛔ It never GUESSES. If `--check` is not in the argv the flag was not spelled
+ * there, this function cannot point at what it removed, and the caller prints a
+ * degraded sentence instead — on the grounds that a correct vague sentence
+ * beats a complete-looking wrong command. `--json`'s absence is NOT such a
+ * signal: it is dropped when present and its absence means only that the run
+ * was on the console face. Today's flag surface has no other way to set
+ * `--check` (no `env`, no default, no `allowNo`), so the guard is defence
+ * rather than a path a user can reach; it is what keeps "assemble an
  * approximation" from ever becoming the fallback.
  *
  * `--` is honoured because it changes what a token MEANS: after it, `--check`
  * is a positional argument and removing it would rewrite the invocation rather
- * than trim it.
+ * than trim it. The same holds for `--json`.
  *
  * @param bin  `config.bin` — `os`, the name the command is installed under
  * @param id   `this.id` — `i18n:extract`, oclif's colon spelling of the path
  * @param argv `this.argv` — the arguments as typed, the command id stripped
  * @returns the command to print, or `undefined` when it cannot be built
  */
-function rerunWithoutCheck(bin: string, id: string | undefined, argv: readonly string[]): string | undefined {
+function rerunThatRegenerates(bin: string, id: string | undefined, argv: readonly string[]): string | undefined {
   const kept: string[] = [];
-  let dropped = 0;
+  let droppedCheck = 0;
   let afterTerminator = false;
   for (const token of argv) {
     if (!afterTerminator && token === '--') afterTerminator = true;
     else if (!afterTerminator && (token === '--check' || token.startsWith('--check='))) {
-      dropped += 1;
+      droppedCheck += 1;
+      continue;
+    } else if (!afterTerminator && (token === '--json' || token.startsWith('--json='))) {
+      // Dropped without being counted: only `--check`'s absence means "this
+      // function cannot say what it removed".
       continue;
     }
     kept.push(token);
   }
-  if (dropped === 0) return undefined;
+  if (droppedCheck === 0) return undefined;
   return [bin, ...(id ?? 'i18n:extract').split(':'), ...kept.map(shellToken)].join(' ');
 }
 
@@ -494,14 +514,23 @@ export default class I18nExtract extends Command {
 
       /**
        * The sentence a drifted `--check` ends on, built once so both faces end
-       * on the same words. {@link rerunWithoutCheck} says why the command it
-       * names is spelled as a deletion and what the degraded line is for.
+       * on the same words. {@link rerunThatRegenerates} says which tokens the
+       * command it names has had deleted and why it is spelled as a deletion.
+       *
+       * ⭐ The degraded line names the SAME tokens the built command would have
+       * removed, so the two spellings of this advice cannot prescribe different
+       * things: under `--json` a run without `--check` still writes nothing, and
+       * a fallback that said only "without `--check`" would send an operator
+       * round the #14895 loop exactly as a built command carrying `--json` did.
        */
       const driftMessage = (): string => {
-        const rerun = rerunWithoutCheck(this.config.bin, this.id, this.argv);
+        const rerun = rerunThatRegenerates(this.config.bin, this.id, this.argv);
+        const degraded = flags.json
+          ? '  re-run the same command without `--check` and without `--json` — neither of them writes files'
+          : '  re-run the same command without `--check`';
         return (
           'Translation bundles have drifted from the schema. Regenerate and commit:\n' +
-          (rerun ? `  ${rerun}` : '  re-run the same command without `--check`')
+          (rerun ? `  ${rerun}` : degraded)
         );
       };
 

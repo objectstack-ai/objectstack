@@ -51,6 +51,14 @@
  *     then an error envelope would pass an "exit 1 and the word drifted"
  *     reading while producing output that is neither one document nor JSONL —
  *     the two-document defect `isExitSignal` records in `utils/format.ts`;
+ *   - the REMEDY is pinned as well as the sentence, on its own two booleans.
+ *     The drift envelope is two lines and the second one is a command; an
+ *     earlier revision of this file read only the first, and a remedy that
+ *     named a `--json` run — which emits a payload and writes zero files —
+ *     sat green under it. Running exactly what the failure prints then heals
+ *     nothing and the next `--check --json` fails identically: the #14895
+ *     loop, one face over. So the remedy must name an `--out` and must not
+ *     carry `--json`;
  *   - the needs-`--out` refusal is pinned because it is the OTHER thing the
  *     early return skipped: `--check --json` with no `--out` used to exit 0
  *     with a payload, having been asked for a comparison it could not make;
@@ -158,12 +166,26 @@ function runCli(args: readonly string[]): Run {
  * `documents` is the count stdout parses into — 1 for a well-formed run, and
  * the reading that catches the payload-then-error-envelope shape, which is
  * unparseable as one document and would otherwise look like a repair.
+ *
+ * ⭐ The drift envelope is TWO lines — a sentence and the command that heals
+ * it — and both are read, because the second one is where this face can go
+ * wrong on its own. Reading only the first line is what let a remedy naming a
+ * `--json` run (which emits a payload and writes zero files) sit green: an
+ * operator or CI log reader who runs exactly what the failure prints gets
+ * nothing written and the identical failure next time. That is the #14895
+ * loop — "the failure is self-healable and the advice is what stops it
+ * healing" — so the remedy's two load-bearing properties are pinned as their
+ * own booleans rather than left to a substring check on line one.
  */
 function jsonVerdict(run: Run): {
   status: number | null;
   documents: number;
   /** The `error` sentence's first line, or `null` when the run carried no envelope. */
   error: string | null;
+  /** Whether the remedy line names an `--out`, i.e. whether it writes anywhere. */
+  remedyNamesOut: boolean;
+  /** Whether the remedy line still carries `--json`, which writes nothing. */
+  remedyCarriesJson: boolean;
   /** Whether the ordinary extract payload was emitted (its `bundles` member). */
   payload: boolean;
 } {
@@ -177,10 +199,14 @@ function jsonVerdict(run: Run): {
     documents = run.stdout.trim() === '' ? 0 : 2;
   }
   const doc = (parsed ?? {}) as { error?: unknown; bundles?: unknown };
+  const lines = typeof doc.error === 'string' ? doc.error.split('\n') : [];
+  const remedy = lines[1] ?? '';
   return {
     status: run.status,
     documents,
-    error: typeof doc.error === 'string' ? (doc.error.split('\n')[0] as string) : null,
+    error: lines.length > 0 ? (lines[0] as string) : null,
+    remedyNamesOut: remedy.includes('--out='),
+    remedyCarriesJson: remedy.includes('--json'),
     payload: typeof doc.bundles === 'object' && doc.bundles !== null,
   };
 }
@@ -259,6 +285,10 @@ describe('os i18n extract --check --json — compares, and reports what it found
       status: 1,
       documents: 1,
       error: DRIFTED + ' Regenerate and commit:',
+      // The remedy has to be a command that actually regenerates: it keeps the
+      // `--out` it was given and sheds the `--json` that writes nothing.
+      remedyNamesOut: true,
+      remedyCarriesJson: false,
       payload: false,
     });
     // The card's acceptance, stated as the equality it is.
@@ -284,6 +314,8 @@ describe('os i18n extract --check --json — compares, and reports what it found
       status: 1,
       documents: 1,
       error: DRIFTED + ' Regenerate and commit:',
+      remedyNamesOut: true,
+      remedyCarriesJson: false,
       payload: false,
     });
     expect(readFileSync(bundle, 'utf8')).toBe(stale);
@@ -305,7 +337,14 @@ describe('os i18n extract --check --json — compares, and reports what it found
     const json = runCli([...args, '--json']);
 
     expect(consoleVerdict(control)).toEqual({ status: 0, drift: [], drifted: false, inSync: true });
-    expect(jsonVerdict(json)).toEqual({ status: 0, documents: 1, error: null, payload: true });
+    expect(jsonVerdict(json)).toEqual({
+      status: 0,
+      documents: 1,
+      error: null,
+      remedyNamesOut: false,
+      remedyCarriesJson: false,
+      payload: true,
+    });
     expect(json.status).toBe(control.status);
     expect(readdirSync(out)).toEqual([BUNDLE]);
   });
@@ -334,7 +373,14 @@ describe('os i18n extract --check --json — compares, and reports what it found
     const out = outDir('no-check');
     const json = runCli([CONFIG, ...FLAGS, `--out=${out}`, '--json']);
 
-    expect(jsonVerdict(json)).toEqual({ status: 0, documents: 1, error: null, payload: true });
+    expect(jsonVerdict(json)).toEqual({
+      status: 0,
+      documents: 1,
+      error: null,
+      remedyNamesOut: false,
+      remedyCarriesJson: false,
+      payload: true,
+    });
     // `--json` is "output JSON instead of writing files", so the directory the
     // drift cases found empty is still empty.
     expect(readdirSync(out)).toEqual([]);
