@@ -8,6 +8,7 @@
 // read back before an operator replay.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { AutomationEngine } from './engine.js';
 import { InMemoryFlowDispatchStore, ObjectStoreFlowDispatchStore } from './flow-dispatch-store.js';
 import type { FlowDispatchStoreEngine } from './flow-dispatch-store.js';
@@ -48,11 +49,21 @@ function fakeQl() {
             rows.set(id, data as Record<string, unknown>);
             return data;
         },
-        async update(_table, id, data) {
-            const row = rows.get(String(id));
-            if (!row) throw new Error(`fake driver: no row ${String(id)}`);
-            rows.set(String(id), { ...row, ...(data as Record<string, unknown>) });
-            return rows.get(String(id));
+        async update(_table, data, options) {
+            // Routed through ObjectQL's OWN dispatch predicate, so this fake
+            // cannot be looser than the engine it stands in for — the gate is
+            // `pnpm check:engine-double-contract`, and a fake that accepted a
+            // shape the engine rejects is how a dead write path ships green.
+            const dispatch = assertEngineUpdateDispatch(data, options);
+            if (dispatch.kind !== 'by-id') {
+                throw new Error(`fake driver: the ledger only ever writes by id, got ${dispatch.kind}`);
+            }
+            const id = String(dispatch.id);
+            const row = rows.get(id);
+            if (!row) throw new Error(`fake driver: no row ${id}`);
+            const { id: _ignored, ...fields } = data as Record<string, unknown>;
+            rows.set(id, { ...row, ...fields });
+            return rows.get(id);
         },
     };
     return { engine, rows };
@@ -91,7 +102,10 @@ describe('ObjectStoreFlowDispatchStore', () => {
             async insert() {
                 throw new Error('UNIQUE constraint failed: sys_flow_dispatch.id');
             },
-            async update() { throw new Error('not reached'); },
+            async update(_t: string, data: any, options?: any) {
+                assertEngineUpdateDispatch(data, options);
+                throw new Error('not reached');
+            },
         };
         const store = new ObjectStoreFlowDispatchStore(engine);
         await expect(store.claim('k1')).resolves.toBe(false);
@@ -101,7 +115,10 @@ describe('ObjectStoreFlowDispatchStore', () => {
         const engine: FlowDispatchStoreEngine = {
             async find() { return []; },
             async insert() { throw new Error('no such table: sys_flow_dispatch'); },
-            async update() { throw new Error('not reached'); },
+            async update(_t: string, data: any, options?: any) {
+                assertEngineUpdateDispatch(data, options);
+                throw new Error('not reached');
+            },
         };
         const store = new ObjectStoreFlowDispatchStore(engine);
         await expect(store.claim('k1')).rejects.toThrow('no such table');
@@ -226,7 +243,7 @@ describe('the claim OUTCOME half (#14501)', () => {
         await expect(engine.readDispatch('k1')).resolves.toBeNull();
         await expect(engine.readDispatch('k2')).resolves.toBeNull();
         const degradations = warn.mock.calls.filter(
-            (c) => typeof c[0] === 'string' && (c[0] as string).includes('predates #14501'),
+            (c) => typeof c[0] === 'string' && (c[0] as string).includes('has no read()/settle()'),
         );
         expect(degradations).toHaveLength(1);
     });

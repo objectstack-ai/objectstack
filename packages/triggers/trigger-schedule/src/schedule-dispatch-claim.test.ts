@@ -8,20 +8,29 @@
 // RESOURCE_CONFLICT / 409 naming the window and the claim; `{ force: true }` →
 // send anyway).
 //
-// The five pins the ruling names are exercised END TO END — the real
-// `ScheduleTrigger`, the real `AutomationEngine` claim ledger, and the real
-// `DbJobAdapter.replay` — because each of them is a statement about how those
-// three compose, and a fake on either side of the seam would pin the fake.
+// The pins run against the real `ScheduleTrigger` and the real
+// `AutomationEngine` claim ledger. The seam to the job service — the
+// `ReplayGuard` this trigger registers — is exercised by CALLING the guard the
+// trigger actually installed, and then observing what the next fire does with
+// the pass it left behind. ⛔ Not by importing `DbJobAdapter`: this package's
+// entry in `scripts/check-test-source-alias.mjs` is shrink-only, its tsconfig
+// pins `rootDir: ./src` so the `paths` route reports TS6059 for the
+// dependency's whole file graph, and the gate's own instruction for that case
+// is to reach the subject through in-package source instead. The other side of
+// this seam — the ADR-0112 refusal, the `force` door, and what a guard verdict
+// does to `replay()` — is pinned in
+// `packages/services/service-job/src/db-job-adapter.replay-guard.test.ts`,
+// where `DbJobAdapter` IS in-package source.
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine, InMemoryFlowDispatchStore } from '@objectstack/service-automation';
-import { DbJobAdapter } from '@objectstack/service-job';
 import {
     ScheduleTrigger,
     computeTickWindow,
     scheduleDispatchKey,
     type FlowTriggerBinding,
     type JobServiceSurface,
+    type ReplayGuard,
     type ScheduleDispatchLedger,
     type TriggerLogger,
 } from './schedule-trigger.js';
@@ -46,29 +55,45 @@ function recordingLogger() {
     return { logger, warn };
 }
 
-/** Minimal ObjectQL slice for `DbJobAdapter`'s `sys_job` bookkeeping. */
-function fakeJobEngine() {
-    const rows = new Map<string, Record<string, unknown>>();
+/**
+ * A job service that records what the trigger registers and fires it on
+ * demand — the same slice `DbJobAdapter` exposes, with no timers, so every
+ * "tick" in these tests is an explicit, deterministic call.
+ */
+function captureJobService() {
+    const jobs = new Map<string, JobHandlerLike>();
+    const guards = new Map<string, ReplayGuard | null>();
+    const service: JobServiceSurface = {
+        async schedule(name, _schedule, handler) { jobs.set(name, handler as JobHandlerLike); },
+        async cancel(name) { jobs.delete(name); },
+        setReplayGuard(name, guard) { guards.set(name, guard); },
+    };
     return {
-        async find() { return []; },
-        async insert(_t: string, data: any) { rows.set(String(data.id ?? data.name), data); return data; },
-        async update(_t: string, _id: any, _data?: any) { return {}; },
+        service,
+        jobs,
+        guards,
+        guard: () => guards.get(JOB) ?? null,
+        fire: (jobId = 'j1') => jobs.get(JOB)!({ jobId }),
+        /** What `DbJobAdapter.replay()` does with a guard, in miniature: ask,
+         *  refuse on `allow: false`, otherwise run. The envelope itself is
+         *  pinned on the adapter, not here. */
+        async replay(force = false) {
+            const guard = guards.get(JOB);
+            if (guard) {
+                const decision = await guard({ force });
+                if (decision.allow === false) {
+                    const err = new Error(`refused: ${decision.window}`) as Error & { window?: string; claimedAt?: string | null };
+                    err.window = decision.window;
+                    err.claimedAt = decision.claimedAt;
+                    throw err;
+                }
+            }
+            await jobs.get(JOB)!({ jobId: 'replay' });
+        },
     };
 }
 
-const adapters: DbJobAdapter[] = [];
-
-/** A real DbJobAdapter with no cron engine: nothing fires on its own, so every
- *  "tick" in these tests is an explicit, deterministic call. */
-function realJobService() {
-    const adapter = new DbJobAdapter({
-        engine: fakeJobEngine() as any,
-        logger: { info: () => {}, warn: () => {}, error: () => {} },
-        options: { recordRuns: false },
-    });
-    adapters.push(adapter);
-    return adapter;
-}
+type JobHandlerLike = (ctx: { jobId: string }) => Promise<void>;
 
 /** The claim ledger, exactly as the automation service exposes it. */
 function realLedger(store = new InMemoryFlowDispatchStore()) {
@@ -80,33 +105,16 @@ function realLedger(store = new InMemoryFlowDispatchStore()) {
     return { ledger: engine as unknown as ScheduleDispatchLedger, store, engine };
 }
 
-interface Rig {
-    trigger: ScheduleTrigger;
-    job: DbJobAdapter;
-    ledger: ScheduleDispatchLedger;
-    store: InMemoryFlowDispatchStore;
-    runs: string[];
-    /** Simulate one scheduled fire of the bound job. */
-    tick: () => Promise<void>;
-    warn: ReturnType<typeof vi.fn>;
-    setNow: (d: Date) => void;
-}
-
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
-async function rig(opts: {
-    now?: Date;
-    store?: InMemoryFlowDispatchStore;
-    job?: JobServiceSurface & { trigger(name: string, data?: unknown): Promise<void> };
-    throws?: boolean;
-} = {}): Promise<Rig> {
+async function rig(opts: { now?: Date; store?: InMemoryFlowDispatchStore; throws?: boolean } = {}) {
     let now = opts.now ?? IN_WINDOW;
     const { ledger, store } = realLedger(opts.store);
-    const job = (opts.job ?? realJobService()) as DbJobAdapter;
+    const job = captureJobService();
     const { logger, warn } = recordingLogger();
     const runs: string[] = [];
 
-    const trigger = new ScheduleTrigger(() => job as unknown as JobServiceSurface, logger, () => ledger, () => now);
+    const trigger = new ScheduleTrigger(() => job.service, logger, () => ledger, () => now);
     trigger.start(CRON, async (ctx) => {
         runs.push(String((ctx.params as Record<string, unknown>)?.jobId ?? 'run'));
         if (opts.throws) throw new Error('digest render blew up');
@@ -116,13 +124,10 @@ async function rig(opts: {
     return {
         trigger, job, ledger, store, runs, warn,
         setNow: (d: Date) => { now = d; },
-        tick: async () => { await job.trigger(JOB); },
+        tick: () => job.fire(),
+        replayThroughGuard: (force = false) => job.replay(force),
     };
 }
-
-afterEach(async () => {
-    while (adapters.length) await adapters.pop()!.destroy();
-});
 
 // ─── The window key ─────────────────────────────────────────────────
 
@@ -225,46 +230,61 @@ describe('PIN: a second tick in the same window is a no-op with a claim hit', ()
 
 // ─── PIN 2/3 — replay refuses a delivered window unless forced ──────
 
-describe('PIN: replay() on a succeeded window refuses with the ADR-0112 envelope', () => {
-    it('rejects with RESOURCE_CONFLICT / 409 naming the window and the claim', async () => {
+describe('PIN: replay() on a succeeded window is REFUSED by the guard the trigger registers', () => {
+    it('the guard answers allow:false and names the window and the claim', async () => {
         const r = await rig();
         await r.tick();
         expect(r.runs).toHaveLength(1);
 
-        // The consumer assertion the contract prescribes is on `code` and
-        // `status` — never on `toThrow()` alone, which a bare Error passes.
-        const err = await r.job.replay(JOB).then(
-            () => { throw new Error('replay resolved — the refusal did not fire'); },
-            (e: any) => e,
-        );
-        expect(err.code).toBe('RESOURCE_CONFLICT');
-        expect(err.status).toBe(409);
-        expect(err.message).toContain("cron '0 1 * * *' window starting 2026-09-07T01:00:00.000Z");
-        expect(err.message).toMatch(/claimed at /);
-
-        // Refused means REFUSED: the flow did not run a second time.
-        expect(r.runs).toHaveLength(1);
+        const decision = await r.job.guard()!({ force: false });
+        expect(decision.allow).toBe(false);
+        if (decision.allow === false) {
+            expect(decision.window).toBe("cron '0 1 * * *' window starting 2026-09-07T01:00:00.000Z");
+            expect(decision.claimedAt).toEqual(expect.any(String));
+        }
     });
 
-    it('the refusal REJECTS rather than resolving having done nothing', async () => {
+    it('a job service that honours the verdict does not deliver the window again', async () => {
         const r = await rig();
         await r.tick();
-        await expect(r.job.replay(JOB)).rejects.toThrow(/already delivered/);
+        await expect(r.replayThroughGuard()).rejects.toThrow(/refused: cron '0 1 \* \* \*' window/);
+        expect(r.runs).toHaveLength(1);
     });
 });
 
-describe('PIN: replay(name, data, { force: true }) sends', () => {
-    it('re-runs the delivered window and the duplicate is the operator\'s', async () => {
+describe('PIN: a FORCED replay sends', () => {
+    it('the guard allows it, and the fire it authorises actually re-runs the delivered window', async () => {
         const r = await rig();
         await r.tick();
         expect(r.runs).toHaveLength(1);
 
-        await expect(r.job.replay(JOB, undefined, { force: true })).resolves.toBeUndefined();
+        await expect(r.replayThroughGuard(true)).resolves.toBeUndefined();
         expect(r.runs).toHaveLength(2);
 
         // The window is still recorded delivered, so an UNFORCED replay after a
         // forced one is refused exactly as before.
-        await expect(r.job.replay(JOB)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        await expect(r.replayThroughGuard()).rejects.toThrow(/refused:/);
+    });
+
+    it('force never consults the ledger at all — a read outage cannot block the operator door', async () => {
+        const store = new InMemoryFlowDispatchStore();
+        let reads = 0;
+        const counting: ScheduleDispatchLedger = {
+            claim: (k) => store.claim(k),
+            settleDispatch: (k, o) => store.settle(k, o),
+            async readDispatch(k) { reads++; return store.read(k); },
+        };
+        const job = captureJobService();
+        const { logger } = recordingLogger();
+        const runs: string[] = [];
+        const trigger = new ScheduleTrigger(() => job.service, logger, () => counting, () => IN_WINDOW);
+        trigger.start(CRON, async () => { runs.push('r'); });
+        await flush();
+
+        await job.fire();
+        const before = reads;
+        await job.guard()!({ force: true });
+        expect(reads).toBe(before);
     });
 });
 
@@ -284,7 +304,7 @@ describe('PIN: a throwing run leaves a FAILED claim that a plain replay() re-run
         await r.tick();
         expect(r.runs).toHaveLength(1);
 
-        await expect(r.job.replay(JOB)).resolves.toBeUndefined();
+        await expect(r.replayThroughGuard()).resolves.toBeUndefined();
         expect(r.runs).toHaveLength(2);
     });
 
@@ -295,7 +315,7 @@ describe('PIN: a throwing run leaves a FAILED claim that a plain replay() re-run
         await store.claim(key);
 
         const r = await rig({ store });
-        await expect(r.job.replay(JOB)).resolves.toBeUndefined();
+        await expect(r.replayThroughGuard()).resolves.toBeUndefined();
         expect(r.runs).toHaveLength(1);
     });
 });
@@ -353,15 +373,13 @@ describe('PIN: the ticker survives the throw — the error isolation must NOT re
             async readDispatch() { return null; },
         };
         const { logger, warn } = recordingLogger();
-        const job = realJobService();
+        const job = captureJobService();
         const runs: string[] = [];
-        const trigger = new ScheduleTrigger(
-            () => job as unknown as JobServiceSurface, logger, () => hostile, () => IN_WINDOW,
-        );
+        const trigger = new ScheduleTrigger(() => job.service, logger, () => hostile, () => IN_WINDOW);
         trigger.start(CRON, async () => { runs.push('r'); });
         await flush();
 
-        await expect(job.trigger(JOB)).resolves.toBeUndefined();
+        await expect(job.fire()).resolves.toBeUndefined();
         expect(runs).toHaveLength(1);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not record dispatch outcome'));
     });
@@ -371,17 +389,15 @@ describe('PIN: the ticker survives the throw — the error isolation must NOT re
 
 describe('declared degradations', () => {
     it('no ledger at all: every tick fires, and the lost guarantee is said exactly once', async () => {
-        const job = realJobService();
+        const job = captureJobService();
         const { logger, warn } = recordingLogger();
         const runs: string[] = [];
-        const trigger = new ScheduleTrigger(
-            () => job as unknown as JobServiceSurface, logger, () => null, () => IN_WINDOW,
-        );
+        const trigger = new ScheduleTrigger(() => job.service, logger, () => null, () => IN_WINDOW);
         trigger.start(CRON, async () => { runs.push('r'); });
         await flush();
 
-        await job.trigger(JOB);
-        await job.trigger(JOB);
+        await job.fire();
+        await job.fire();
         expect(runs).toHaveLength(2);
         const said = warn.mock.calls.filter(
             (c) => typeof c[0] === 'string' && c[0].includes('NOT deduplicated'),
@@ -415,41 +431,26 @@ describe('declared degradations', () => {
         const hostile: ScheduleDispatchLedger = {
             async claim() { throw new Error('ledger unreachable'); },
         };
-        const job = realJobService();
+        const job = captureJobService();
         const { logger, warn } = recordingLogger();
         const runs: string[] = [];
-        const trigger = new ScheduleTrigger(
-            () => job as unknown as JobServiceSurface, logger, () => hostile, () => IN_WINDOW,
-        );
+        const trigger = new ScheduleTrigger(() => job.service, logger, () => hostile, () => IN_WINDOW);
         trigger.start(CRON, async () => { runs.push('r'); });
         await flush();
 
-        await job.trigger(JOB);
-        await job.trigger(JOB);
+        await job.fire();
+        await job.fire();
         expect(runs).toHaveLength(2);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('dispatching anyway'));
-    });
-
-    it('a job with NO guard registered replays exactly as it always did', async () => {
-        const job = realJobService();
-        const runs: string[] = [];
-        await job.schedule('plain_job', { type: 'interval', intervalMs: 3_600_000 }, async () => {
-            runs.push('r');
-        });
-        await expect(job.replay('plain_job')).resolves.toBeUndefined();
-        await expect(job.replay('plain_job')).resolves.toBeUndefined();
-        expect(runs).toHaveLength(2);
     });
 
     it('stop() withdraws the replay guard, so a re-registered job is not judged by a dead one', async () => {
         const r = await rig();
         await r.tick();
-        await expect(r.job.replay(JOB)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(await r.job.guard()!({ force: false })).toMatchObject({ allow: false });
 
         r.trigger.stop(FLOW);
         await flush();
-        // The job is cancelled too, so replay can no longer find it — the point
-        // is that it is NOT the stale conflict.
-        await expect(r.job.replay(JOB)).rejects.toThrow(/not found/);
+        expect(r.job.guard()).toBeNull();
     });
 });

@@ -2886,9 +2886,6 @@ importers:
       '@objectstack/service-automation':
         specifier: workspace:*
         version: link:../../services/service-automation
-      '@objectstack/service-job':
-        specifier: workspace:*
-        version: link:../../services/service-job
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0

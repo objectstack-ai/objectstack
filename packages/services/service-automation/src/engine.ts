@@ -2149,8 +2149,9 @@ export class AutomationEngine implements IAutomationService {
         }
         if (store && !this.dispatchOutcomeDegradationWarned) {
             this.dispatchOutcomeDegradationWarned = true;
+            // The ledger predates the outcome half of the claim contract.
             this.logger.warn(
-                '[automation] the attached flow-dispatch ledger has no read()/settle() (it predates #14501) — ' +
+                '[automation] the attached flow-dispatch ledger has no read()/settle() — ' +
                     'dispatch claims are still deduplicated, but no claim records an OUTCOME, so a scheduled ' +
                     "flow's replay refusal can never fire: every replay is allowed through.",
             );

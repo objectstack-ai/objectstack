@@ -45,7 +45,7 @@ const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 export interface FlowDispatchStoreEngine {
   find(object: string, options?: any): Promise<any[]>;
   insert(object: string, data: any, options?: any): Promise<any>;
-  update(object: string, idOrData: any, dataOrOptions?: any, options?: any): Promise<any>;
+  update(object: string, data: any, options?: any): Promise<any>;
 }
 
 /** Shape both stores write and read back — see {@link FlowDispatchClaim}. */
@@ -132,10 +132,14 @@ export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
    * which reads as "not delivered" and lets an operator replay through.
    */
   async settle(key: string, outcome: FlowDispatchOutcome): Promise<void> {
+    // `update(object, { id, …fields }, options)` — the id rides in the PAYLOAD,
+    // which is the by-id dispatch shape the ObjectQL engine actually takes.
+    // ⛔ Not a 4-argument `update(object, id, data, options)`: no engine here
+    // dispatches on that, and a double loose enough to accept it is exactly
+    // what `pnpm check:engine-double-contract` exists to catch.
     await this.engine.update(
       TABLE,
-      key,
-      { outcome, settled_at: new Date().toISOString() },
+      { id: key, outcome, settled_at: new Date().toISOString() },
       { context: SYSTEM_CTX },
     );
   }
