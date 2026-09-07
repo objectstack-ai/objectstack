@@ -32,12 +32,20 @@
 // to see pre-parse evidence".
 
 import { describe, expect, it, vi } from 'vitest';
-import { defineStack, normalizeStackInput } from '@objectstack/spec';
+import {
+  ObjectStackSchema,
+  applyConversionsToStoredItem,
+  defineStack,
+  normalizeStackInput,
+} from '@objectstack/spec';
+import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 
 import { validateListViewMode } from './validate-list-view-mode.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { runAuthoringRules } from './authoring-rules.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
+import { SECURITY_OWD_ALIAS } from './validate-security-posture.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -372,5 +380,110 @@ describe('what `normalized` DOES buy: findings survive a schema error that stops
     const rules = new Set(findings.map((f) => f.rule));
     expect(rules.has('list-view-filters-in-views-mode')).toBe(true);
     expect(rules.has('view-container-shape')).toBe(true);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// #16109 — `security-owd-alias` reaches the rule ONLY through the unparsed doors.
+//
+// `ObjectSchema.sharingModel` / `externalSharingModel` are closed enums
+// (ADR-0090 D4 / D11): every alias the rule names is refused with
+// `invalid_value` on any door that parses before the registry runs, so on a
+// `defineStack`-authored app the rule is dead by construction — the card's own
+// hotcrm measurement. It is NOT dead: `os lint` never parses, `loadConfig`
+// hands a raw object-literal config on as authored, and the ADR-0087 stored-row
+// conversion for these aliases is `retiredFromLoadPath`, so the alias survives
+// `normalizeStackInput` and the rule is the only diagnostic that door gets.
+// Each leg below is paired with the parsed-door control taken in the same run;
+// the module docblock's "## Intake" table in `validate-security-posture.ts`
+// is the prose form of these pins.
+describe('security-owd-alias reaches the rule only through the unparsed doors (#16109)', () => {
+  const owdObject = (sharingModel: string) => ({
+    name: 'tier_owd',
+    label: 'OWD',
+    sharingModel,
+    fields: { title: { type: 'text', label: 'Title' } },
+  });
+  const rawStack = (sharingModel: string) => ({ manifest, objects: [owdObject(sharingModel)] });
+  const aliasFindings = (findings: readonly { rule: string; path: string }[]) =>
+    findings.filter((f) => f.rule === SECURITY_OWD_ALIAS).map((f) => f.path);
+  /** Every key of the rule's `OWD_ALIAS_FIX` map. */
+  const ALIASES = ['read', 'read_write', 'full', 'public'] as const;
+
+  it.each(ALIASES)('CONTROL — defineStack (strict default) refuses %s at load, before any rule runs', (alias) => {
+    const { error } = quietly(() => defineStack(rawStack(alias) as never));
+    expect(error).toBeDefined();
+    expect(error!.message).toContain('objects.0.sharingModel');
+  });
+
+  it.each(ALIASES)('CONTROL — the os validate / os compile schema step refuses %s on a raw config', (alias) => {
+    const parsed = ObjectStackSchema.safeParse(normalizeStackInput(rawStack(alias)));
+    expect(parsed.success).toBe(false);
+    const issue = parsed.success ? undefined : parsed.error.issues.find((i) => i.path.join('.') === 'objects.0.sharingModel');
+    expect(issue?.code).toBe('invalid_value');
+  });
+
+  it.each(ALIASES)('INTAKE — os lint on a raw object-literal config hands %s to the rule intact, and the rule fires', (alias) => {
+    // Exactly the call `lint.ts` makes: `loadConfig` (no parse) → `normalizeStackInput`
+    // → `runAuthoringRules('lint', { normalized })`. No conversion notice fires:
+    // `owd-legacy-read-aliases` is retired from the load path, and `full` /
+    // `public` never had one.
+    const notices: string[] = [];
+    const normalized = normalizeStackInput(rawStack(alias), {
+      onConversionNotice: (n) => notices.push(n.conversionId),
+    }) as AnyRec;
+    expect((normalized.objects as AnyRec[])[0].sharingModel).toBe(alias);
+    expect(notices).toEqual([]);
+    expect(aliasFindings(runAuthoringRules('lint', { normalized }))).toEqual(['objects[0].sharingModel']);
+  });
+
+  it('INTAKE — defineStack(x, { strict: false }) skips the parse, so the alias reaches os lint too', () => {
+    const loose = quietly(() => defineStack(rawStack('read_write') as never, { strict: false })).value as AnyRec;
+    expect((loose.objects as AnyRec[])[0].sharingModel).toBe('read_write');
+    expect(aliasFindings(runAuthoringRules('lint', { normalized: normalizeStackInput(loose) as AnyRec }))).toEqual([
+      'objects[0].sharingModel',
+    ]);
+  });
+
+  it('CONTROL — the rule is silent on a canonical value through the same unparsed door', () => {
+    const normalized = normalizeStackInput(rawStack('public_read')) as AnyRec;
+    expect(aliasFindings(runAuthoringRules('lint', { normalized }))).toEqual([]);
+  });
+
+  it.each(ALIASES)('CONTROL — the runtime publish door refuses %s with the object schema before the gate runs', (alias) => {
+    // `saveMetaItem` runs `getMetadataTypeSchema('object').safeParse` and 422s
+    // BEFORE `runRuntimeAuthoringRules`; the gate never sees this item.
+    const schema = getMetadataTypeSchema('object');
+    expect(schema).toBeDefined();
+    const parsed = schema!.safeParse(owdObject(alias));
+    expect(parsed.success).toBe(false);
+    expect(parsed.success ? undefined : parsed.error.issues.find((i) => i.path.join('.') === 'sharingModel')?.code).toBe('invalid_value');
+  });
+
+  it('INTAKE — runRuntimeAuthoringRules called directly with an unparsed item fires (the exported API is a door)', () => {
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: owdObject('full'),
+      context: { objects: [], permissions: [], books: [], datasets: [], pages: [] },
+    });
+    expect(aliasFindings(result.errors)).toEqual(['objects.tier_owd.sharingModel']);
+  });
+
+  it('CONTROL — a pre-D4 stored sibling does not surface: read/read_write fold on rehydration, and the gate diff cancels the rest', () => {
+    // The stored-row chain replays retired conversions, so `read` / `read_write`
+    // come back canonical…
+    expect((applyConversionsToStoredItem('object', owdObject('read')) as AnyRec).sharingModel).toBe('public_read');
+    expect((applyConversionsToStoredItem('object', owdObject('read_write')) as AnyRec).sharingModel).toBe('public_read_write');
+    // …`full` / `public` have no conversion and come back as authored…
+    const storedFull = applyConversionsToStoredItem('object', owdObject('full')) as AnyRec;
+    expect(storedFull.sharingModel).toBe('full');
+    // …and even so, a sibling in the gate's universe produces the finding in
+    // BOTH the baseline and the candidate pass, so it never leaves the gate.
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: { ...owdObject('private'), name: 'tier_other' },
+      context: { objects: [storedFull], permissions: [], books: [], datasets: [], pages: [] },
+    });
+    expect(aliasFindings(result.errors)).toEqual([]);
   });
 });
