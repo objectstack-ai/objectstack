@@ -24,7 +24,15 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-SCRIPT="$PWD/scripts/ci/select-shard-packages.sh"
+# The one repo path this self-test reads, spelled as a quoted repo-relative
+# literal on purpose: the dispatch derivation (scripts/pm/dispatch-gates.mjs)
+# reads a gate's quoted path literals as the population it watches, so a card
+# touching the script schedules this family. Every other path below is a
+# throwaway fixture under $TMPDIR, and none is spelled as a repo path -- a
+# quoted literal with a slash in it would read as a declared population that reaches
+# nothing (check:declared-population-live refuses exactly that).
+SCRIPT_REL='scripts/ci/select-shard-packages.sh'
+SCRIPT="$PWD/$SCRIPT_REL"
 FIX=$(mktemp -d "${TMPDIR:-/tmp}/os-select-shard-selftest.XXXXXX") || exit 1
 trap 'rm -rf "$FIX"' EXIT INT TERM
 
@@ -82,7 +90,7 @@ appendFileSync(FIX + '/union.log', 'changed ' + (files.join(',') || '(none)') + 
 const doc = JSON.parse(readFileSync(list, 'utf8'));
 const add = readFileSync(FIX + '/union-add', 'utf8').trim();
 if (add) {
-  doc.packages.items.push({ name: add, path: 'packages/' + add });
+  doc.packages.items.push({ name: add, path: add });
   doc.packages.count = doc.packages.items.length;
 }
 writeFileSync(list, JSON.stringify(doc));
@@ -91,7 +99,9 @@ EOF
 }
 
 # ── Control files ───────────────────────────────────────────────────────────
-full_json='{"packageManager":"pnpm@10.0.0","packages":{"count":3,"items":[{"name":"a","path":"packages/a"},{"name":"b","path":"packages/b"},{"name":"c","path":"packages/c"}]}}'
+# The `path` of a fake package is its bare name: the script under test never
+# reads it, and a slash here would spell a repo-path literal (see SCRIPT_REL).
+full_json='{"packageManager":"pnpm@10.0.0","packages":{"count":3,"items":[{"name":"a","path":"a"},{"name":"b","path":"b"},{"name":"c","path":"c"}]}}'
 printf '%s\n' "$full_json" > "$FIX/full.json"
 
 # set_affected <name>...  -- what the fake `turbo ls --affected` answers
@@ -99,7 +109,7 @@ set_affected() {
   local items='' name
   for name in "$@"; do
     [ -n "$items" ] && items="$items,"
-    items="$items{\"name\":\"$name\",\"path\":\"packages/$name\"}"
+    items="$items{\"name\":\"$name\",\"path\":\"$name\"}"
   done
   printf '{"packageManager":"pnpm@10.0.0","packages":{"count":%d,"items":[%s]}}\n' "$#" "$items" > "$FIX/affected.json"
 }
