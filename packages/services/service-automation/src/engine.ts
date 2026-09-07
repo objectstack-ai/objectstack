@@ -738,12 +738,39 @@ export interface StepLogEntry {
      * #1479: structured-region grouping. When a step ran inside a `loop` /
      * `parallel` / `try_catch` body region, these tag it with its **immediate**
      * container so run observability can distinguish per-iteration / per-branch
-     * body steps from top-level ones. Set by {@link AutomationEngine.runRegion}
-     * (innermost wins — never overwritten as steps bubble through nested regions).
+     * body steps from top-level ones. Set by {@link AutomationEngine.runRegion}.
+     *
+     * #15230: the innermost region wins the IDENTITY fields — `parentNodeId`,
+     * `regionKind`, `retryAttempt` name which region actually ran the step, and
+     * a step a nested region already claimed keeps them. The INDEX fields
+     * (`iteration`, `branch`) are instead carried THROUGH nesting: an enclosing
+     * region fills the one the inner region left undefined rather than having
+     * it discarded.
+     *
+     * ⚠️ This interface is NOT derived from the spec's `ExecutionStepLog`
+     * (`packages/spec/src/automation/execution.zod.ts`). The two are held in
+     * step by the type-level pin in `builtin/region-index-keys.test.ts` — by
+     * that assertion, not by this comment.
      */
     parentNodeId?: string;
-    /** Zero-based loop iteration or parallel branch index of the enclosing region. */
+    /**
+     * Zero-based iteration of the enclosing `loop`, carried through any
+     * nesting. **Single-valued** (#15230, maintainer ruling 2026-09-03): it no
+     * longer doubles as the parallel branch index — that lives on `branch`.
+     * A step inside a `try` / `catch` region nested in a loop body carries the
+     * enclosing loop's iteration here, because such a region has no index of
+     * its own.
+     */
     iteration?: number;
+    /**
+     * #15230: zero-based index of the enclosing `parallel` branch. Present only
+     * on a step inside a parallel branch, absent everywhere else. When the
+     * parallel node is itself inside a loop body the step carries BOTH — the
+     * row through `iteration`, the branch through here — which is what the
+     * overload could not express: the branch index won outright and no step of
+     * that branch recorded which row it ran for.
+     */
+    branch?: number;
     /** Which region kind the step ran in: `loop-body` | `parallel-branch` | `try` | `catch`. */
     regionKind?: string;
     /**
@@ -5481,6 +5508,47 @@ export class AutomationEngine implements IAutomationService {
             // it leaves behind is `restoreConsumedSuspension`, and the state
             // itself is named on the result (`status: 'stranded'`, below).
             const stepCountAtPause = run.steps.length;
+            // [#15660] …and the variables AT THE PAUSE, for the same reason and
+            // at the same moment, because `run.steps.length` is not the only
+            // thing the failed attempt can move under the journal.
+            //
+            // `journalConsumedSuspension` promises its snapshot VERBATIM — "the
+            // state at the pause, not the state the failed attempt was working
+            // from" — and delivered that only for the TOP-LEVEL keys. The scope
+            // the downstream nodes run against is built one line below as
+            // `new Map(Object.entries(run.variables))`, which copies the keys
+            // and SHARES every value object. A node that holds state in the
+            // scope and updates it in place — `map` keeps `<nodeId>.$mapState`
+            // and is, by a re-derived census, the only executor that does —
+            // therefore writes straight through into the object the journal
+            // later hands an operator as the pause.
+            //
+            // Measured, not read (`consumed-suspension-snapshot-aliasing.test.ts`):
+            // the durable row held `started: 1` at the pause and the restore put
+            // back `started: 99`. ⛔ And the two placements the card proposed
+            // are both refuted by that same measurement:
+            //   - "deep copy at SNAPSHOT time" — `InMemorySuspendedRunStore`
+            //     already JSON round-trips on save AND load, so this run's
+            //     variables ARE a private deep copy before a single downstream
+            //     node runs. It reproduces anyway: the aliasing that carries the
+            //     mutation is minted HERE, on the resume, not at the suspend.
+            //   - "copy at RESTORE time" — the mutation lands before the node
+            //     throws, so the journal is already corrupt when it is written;
+            //     anything copied at or after that point copies the corruption.
+            // The copy has to be taken before the failed attempt runs, which is
+            // this line.
+            //
+            // Cost, measured rather than assumed (the card flagged it NOT
+            // MEASURED): 5.8 µs for a typical scope, and one suspend+resume
+            // round trip against a configured store already performs FOUR full
+            // clones of this same payload (save ×1, load ×2, recordTerminal ×1),
+            // so this is a fifth on a path whose production cost is a durable
+            // round trip. ⛔ Deliberately NOT the JSON clone the journal's own
+            // docblock ruled out: that objection was that it would run INSIDE a
+            // catch arm already handling a failure, where a circular value would
+            // throw the operator's repair away. Here it is on the happy path,
+            // where a throw is just a value we decline to copy.
+            const variablesAtPause = this.cloneVariablesAtPause(run, runId);
 
             // Consume the suspension *before* running downstream work — a run
             // resumes exactly once per pause, and a duplicate resume after a
@@ -5733,7 +5801,12 @@ export class AutomationEngine implements IAutomationService {
                 // stays `failed`, no suspension exists after this line, and the
                 // ordering above is untouched. It is the evidence a repair
                 // needs, written at the only moment it still exists.
-                const consumed = this.journalConsumedSuspension(run, stepCountAtPause, errorMessage);
+                const consumed = this.journalConsumedSuspension(
+                    run,
+                    stepCountAtPause,
+                    errorMessage,
+                    variablesAtPause,
+                );
                 // [#15555] From the line above, "this run is repairable" is a
                 // FACT: a snapshot exists and `restoreConsumedSuspension` puts
                 // it back. Everything from here to the `status: 'stranded'`
@@ -6250,34 +6323,83 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#15660] The pause's variables, decoupled from the scope the resume is
+     * about to hand the downstream nodes.
+     *
+     * Called once per resume of a suspended run, BEFORE the failed attempt can
+     * run — see the call site for why no later placement works and for the
+     * measured cost. A JSON clone specifically, not `structuredClone`: the
+     * durable row for this same pause was written through `JSON` by the store,
+     * so this keeps the hot journal and the durable row the same shape. A
+     * `Date` that survived here as a `Date` while the row held a string would
+     * make `restoreConsumedSuspension`'s two sources disagree about the pause
+     * they both claim to describe.
+     *
+     * A value JSON cannot carry (a cycle) costs the copy, never the repair: the
+     * fallback is the aliased object this method exists to replace, which is
+     * exactly the behaviour that shipped before, so the operator exit is no
+     * worse than it was. It is reported at `warn` — the exit still works, and
+     * what it puts back may name post-resume state.
+     */
+    private cloneVariablesAtPause(run: SuspendedRun, runId: string): SuspendedRun['variables'] {
+        try {
+            return JSON.parse(JSON.stringify(run.variables)) as SuspendedRun['variables'];
+        } catch (err) {
+            // #6299 family — the thrown text is not ours to shape, so it rides
+            // the structured slot and never the message.
+            this.logger.warn(
+                `[automation] run '${runId}': could not copy the paused variables before resuming, so if this ` +
+                    `resume strands the run, the suspension an operator restores may carry state this attempt ` +
+                    `wrote rather than the state at the pause. The run resumes normally either way.`,
+                describeThrownForLog(err),
+            );
+            return run.variables;
+        }
+    }
+
+    /**
      * Record the suspension a resume consumed before its downstream node threw
      * (#13909) — the one and only producer of a {@link ConsumedSuspension}.
      *
      * VERBATIM, and that word is load-bearing:
      *
-     *  - `run.variables` is the pause's OWN snapshot. The resume's signal was
-     *    folded into a separate `Map` built from it, never into this object, so
-     *    what is journalled is the state at the pause, not the state the failed
-     *    attempt was working from. It is the same object the durable paused row
-     *    was written from at suspend time.
+     *  - `variablesAtPause` is the pause's OWN snapshot, deep-copied by
+     *    {@link cloneVariablesAtPause} before the failed attempt ran. The
+     *    resume's signal was folded into a separate `Map` built from
+     *    `run.variables`, never into this object, so what is journalled is the
+     *    state at the pause, not the state the failed attempt was working from.
+     *
+     *    ⚠️ [#15660] That last sentence used to be written against
+     *    `run.variables` itself, and was true only of its TOP-LEVEL keys. The
+     *    scope the downstream nodes run against is `new Map(Object.entries(
+     *    run.variables))` — the keys are copied, every value object is SHARED —
+     *    so an executor that keeps state in the scope and updates it in place
+     *    (`map`'s `<nodeId>.$mapState`) wrote through into this snapshot, and
+     *    the operator exit handed back post-resume state stamped as the pause.
+     *    Measured end to end in `consumed-suspension-snapshot-aliasing.test.ts`.
+     *    ⛔ Do not route the copy back to this method: by the time this runs the
+     *    mutation has already landed (the node mutates, THEN throws), so a copy
+     *    taken here copies the corruption. It has to be taken before the failed
+     *    attempt runs, which is where the caller takes it.
      *  - `run.steps` is the live array `traverseNext` appended to, so it is
      *    trimmed back to `stepCountAtPause` — the failed attempt's steps are
      *    NOT part of the thing an operator puts back.
      *  - Everything else (`nodeId`, `nodeType`, `context`, `correlation`,
      *    `screen`, `startedAt`, `startTime`) is carried across untouched.
      *
-     * Shallow by design, not lazily: a JSON clone here could throw on a
-     * circular value INSIDE a catch arm that is already handling a failure, and
-     * the fields it would deep-copy are exactly the ones the durable store
-     * already round-tripped through JSON at suspend time.
+     * Still shallow HERE, and for the reason it always was: a JSON clone in
+     * this method could throw on a circular value inside a catch arm that is
+     * already handling a failure. The one field that needed copying is copied
+     * by the caller instead, on the happy path, where a throw costs nothing.
      */
     private journalConsumedSuspension(
         run: SuspendedRun,
         stepCountAtPause: number,
         error: string,
+        variablesAtPause: SuspendedRun['variables'],
     ): ConsumedSuspension {
         const consumed: ConsumedSuspension = {
-            run: { ...run, steps: run.steps.slice(0, stepCountAtPause) },
+            run: { ...run, steps: run.steps.slice(0, stepCountAtPause), variables: variablesAtPause },
             consumedAt: new Date().toISOString(),
             error,
             // [#13937] `recordLog` settles this when its write settles.
@@ -8276,9 +8398,17 @@ export class AutomationEngine implements IAutomationService {
      *
      * #1479: the executed body steps are **returned** (tagged with `grouping`)
      * so the calling container node can fold them into the parent run log via
-     * `NodeExecutionResult.childSteps`. Tagging only fills fields left undefined,
-     * so when regions nest, each step keeps its **innermost** container's
-     * `parentNodeId` / `iteration` / `regionKind` / `retryAttempt`.
+     * `NodeExecutionResult.childSteps`. Tagging only ever fills fields left
+     * undefined, so when regions nest each step keeps its **innermost**
+     * container's IDENTITY — `parentNodeId` / `regionKind` / `retryAttempt`.
+     *
+     * #15230: the INDEX fields are the exception, and the reason this card
+     * exists. `iteration` and `branch` are carried THROUGH nesting: an
+     * enclosing region fills the index the inner region left undefined instead
+     * of being discarded because the step already had a `parentNodeId`. Before
+     * this, `loop { parallel }` recorded the branch index and nothing else, so
+     * a per-row failure inside a branch was attributable to a branch and never
+     * to the row.
      *
      * #7546: a region that FAILS still throws — the `try_catch` retry/throw
      * semantics are untouched — but its partial steps are no longer discarded.
@@ -8308,7 +8438,7 @@ export class AutomationEngine implements IAutomationService {
         region: FlowRegionParsed,
         variables: Map<string, unknown>,
         context: AutomationContext,
-        grouping?: { parentNodeId: string; iteration?: number; regionKind?: string; retryAttempt?: number },
+        grouping?: { parentNodeId: string; iteration?: number; branch?: number; regionKind?: string; retryAttempt?: number },
         partialSteps?: StepLogEntry[],
     ): Promise<StepLogEntry[]> {
         const entryId = findRegionEntry(region);
@@ -8319,19 +8449,43 @@ export class AutomationEngine implements IAutomationService {
         // A synthetic flow view — executeNode/traverseNext only read `nodes`/`edges`.
         const subFlow = { nodes: region.nodes, edges: region.edges ?? [] } as unknown as FlowParsed;
         const regionSteps: StepLogEntry[] = [];
-        // Tag this region's steps with their immediate container. Innermost wins:
-        // a step that already carries a `parentNodeId` (set by a nested region)
-        // is left untouched. Shared by the success and failure paths (#7546) so
-        // a failed attempt's steps are indistinguishable in SHAPE from a
-        // successful one's — they differ only in their own `status`.
+        // Tag this region's steps with their container. Shared by the success
+        // and failure paths (#7546) so a failed attempt's steps are
+        // indistinguishable in SHAPE from a successful one's — they differ only
+        // in their own `status`.
+        //
+        // #15230 splits what "innermost wins" governs, because the two halves
+        // answer different questions:
+        //
+        //   IDENTITY (`parentNodeId` / `regionKind` / `retryAttempt`) answers
+        //   WHICH REGION RAN THIS STEP. Innermost wins outright: a step a
+        //   nested region already claimed keeps naming that region, and an
+        //   enclosing region must never relabel it.
+        //
+        //   INDEX (`iteration` / `branch`) answers WHICH PASS OF WHICH REGION.
+        //   Nested regions contribute DIFFERENT indices — the loop's row and
+        //   the parallel's branch are both true of the same step — so an
+        //   enclosing region fills the index the inner one left undefined
+        //   instead of being skipped along with the identity fields. That skip
+        //   is the defect: `loop { parallel }` used to record the branch and
+        //   discard the row.
+        //
+        // Still "only fills what is undefined" in both halves, so an index a
+        // nested region DID set wins: for `loop { loop }` the inner loop's
+        // `iteration` stands, exactly as before.
         const tag = (): void => {
             if (!grouping) return;
             for (const step of regionSteps) {
                 if (step.parentNodeId === undefined) {
                     step.parentNodeId = grouping.parentNodeId;
-                    if (grouping.iteration !== undefined) step.iteration = grouping.iteration;
                     if (grouping.regionKind !== undefined) step.regionKind = grouping.regionKind;
                     if (grouping.retryAttempt !== undefined) step.retryAttempt = grouping.retryAttempt;
+                }
+                if (grouping.iteration !== undefined && step.iteration === undefined) {
+                    step.iteration = grouping.iteration;
+                }
+                if (grouping.branch !== undefined && step.branch === undefined) {
+                    step.branch = grouping.branch;
                 }
             }
         };

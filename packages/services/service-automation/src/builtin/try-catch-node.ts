@@ -189,12 +189,17 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
               regionKind: 'try',
               // #14456 — forward the ENCLOSING loop's iteration so a step this
               // region ran says which region ran it AND which row it ran for.
-              // `runRegion`'s tagger fills only fields the INNERMOST tagger
-              // left undefined, so a loop's own tagger can never reach past
-              // this one to a try/catch step; forwarding at this call site is
-              // what closes that, and it leaves both the tagger and `parallel`
-              // untouched (a branch step already carries its own `iteration`,
-              // and nothing here changes what `parallel` writes).
+              // A try/catch region has no index of its own, so `iteration` is
+              // free to carry the row.
+              //
+              // #15230 made `runRegion`'s tagger carry `iteration` THROUGH
+              // nesting, so an enclosing loop would now reach a try/catch step
+              // on its own and this forwarding is no longer the only route.
+              // It stays, and stays FIRST: the value is identical (both are the
+              // loop's row index), it is what `$error.iteration` is bound from
+              // twenty lines below, and it keeps the row on these steps even
+              // when the run unwinds through a path that never gives the loop's
+              // tagger a pass over them.
               ...(loopFrame ? { iteration: loopFrame.iteration } : {}),
               // Only tag the attempt index when a retry ladder is actually
               // declared: on a plain `try_catch` every step would carry a

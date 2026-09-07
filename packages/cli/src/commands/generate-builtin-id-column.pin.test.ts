@@ -226,7 +226,13 @@ describe('the builtin id column both migration generators emit (#15040)', () => 
     expect(sql.indexOf('"id"')).toBeLessThan(sql.indexOf('"title"'));
     const ts = generateMigrationTs(CONFIG as Record<string, unknown>);
     expect(ts).toContain("await db.schema.createTable('account'");
-    expect(ts.indexOf("table.string('id')")).toBeLessThan(ts.indexOf("table.string('title')"));
+    // #16091 — matched on the field NAME rather than on its column method. The
+    // assertion is about ORDER (the primary key comes first), and a reader keyed
+    // to `table.string` silently became `indexOf(…) === -1` the moment `title`,
+    // a `text` field, moved to `table.text` — which reads as a passing
+    // "less than" only until you notice what it is less than.
+    expect(ts.indexOf("table.string('id')")).toBeLessThan(ts.indexOf("('title')"));
+    expect(ts.indexOf("('title')"), 'the title column vanished from the output').toBeGreaterThan(0);
     // Each generator carries exactly ONE hardcoded id line — the shape that let
     // these two disagree with the driver in the first place, and the reason a
     // fix to one of them can silently leave the other behind. Counted over the

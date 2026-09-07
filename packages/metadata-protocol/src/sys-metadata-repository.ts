@@ -114,10 +114,41 @@ import { isWritablePackage } from './package-writability.js';
  *
  * Absent column -> `undefined`, so each caller's existing `?? <default>` chain
  * keeps exactly its current meaning.
+ *
+ * ## [#14078] The `Date` arm is TOTAL — an Invalid `Date` yields `undefined`
+ *
+ * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
+ * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
+ * because a guard on some arms and not others re-opens the drift the single
+ * spelling closed.
+ *
+ * Reachability is MEASURED, not assumed (#14409, landed `3ecb7dc1a`): mysql2
+ * 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero
+ * `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in
+ * 275760..294276 — years Postgres itself stores. Unguarded,
+ * `value.toISOString()` raises `RangeError: Invalid time value`, so a read
+ * endpoint answers **500** on a row the operator cannot identify from the
+ * error; the spelling this replaced (`String(value)`) served the visible text
+ * `"Invalid Date"` instead.
+ *
+ * The terminal value is chosen **per call site**, and this one's is
+ * `undefined`: both callers (`getByHash` and `rowToItem`) already end in
+ * `?? new Date(...).toISOString()`, the branch an absent column takes today.
+ * The ruling assigns `undefined` exactly where "the field is optional and the
+ * caller already carries a `?? default` chain". ⛔ NOT the visible text
+ * `"Invalid Date"` — the fields fed from here are read by machines
+ * (`MetadataItem.authoredAt`, whose one in-repo forwarding lands in a
+ * `z.string().datetime()` field), so that text would move the failure to a zod
+ * refusal at the consumer instead of removing it. ⛔ And NOT a blanket `''`: a silent blank is the shape that
+ * hides the producer's bug.
  */
 function canonicalIsoInstant(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
-  if (value instanceof Date) return value.toISOString();
+  // [#14078] Total `Date` arm: an Invalid `Date` is the ONE `Date` shape
+  // `toISOString()` refuses, and it is reachable from two live drivers. It
+  // leaves as `undefined` so the caller's `?? <default>` chain — the same one
+  // an absent column takes — keeps exactly its current meaning.
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
   if (typeof value === 'string') return value;
   return String(value);
 }
@@ -139,17 +170,24 @@ function canonicalIsoInstant(value: unknown): string | undefined {
  * — `MetadataManager.applyRepoEvent`, which forwards it to
  * `MetadataWatchEvent.timestamp` — is declared `z.string().datetime()`.
  *
- * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above, and the difference is
- * exactly one input shape. That spelling reaches `value.toISOString()` for ANY
- * `Date`, which raises `RangeError: Invalid time value` on an Invalid `Date`
- * — measured reachable on BOTH live dialects (a MySQL zero datetime; any
- * Postgres year in 275760..294276) and the open subject of #14078, which
- * #13973 is blocked on. Whether the shared spelling should throw there
- * (option A) or fall back to a rendering (option B) is a maintainer call over
- * four packages, so this repair imports NEITHER answer into a new call site:
- * an Invalid `Date` is returned unchanged, exactly as this cast passes it
- * through today. When #14078 rules, this helper collapses into the shared
- * spelling.
+ * ⚠️ Deliberately NOT {@link canonicalIsoInstant} above. That difference used
+ * to be exactly one input shape — the Invalid `Date` on which that spelling
+ * raised `RangeError: Invalid time value`, measured reachable on BOTH live
+ * dialects (a MySQL zero datetime; any Postgres year in 275760..294276).
+ * #14078 has since RULED it (option B, 2026-09-02): that arm is now total and
+ * answers `undefined` for the shape, so the two agree on it.
+ *
+ * ⛔ They are still not ONE spelling, which is why #14078 did not collapse
+ * this helper into it. `canonicalIsoInstant` returns `string | undefined` and
+ * rewrites the whole domain (nullish -> `undefined`; anything neither `Date`
+ * nor string -> `String(value)`), while this one returns `unknown` and hands
+ * every non-valid-`Date` shape back UNTOUCHED. The consolidation is its own
+ * decision — **#16422** — because it moves six call sites for `null`, for a
+ * `number` and for an opaque column, one of which (`MetadataHistoryRecord
+ * .recordedAt`, a REQUIRED `z.string().datetime()`) has no terminal value
+ * either half of the #14078 ruling supplies. §C of
+ * `sys-metadata-repository-14037-event-ts-canonicalisation.test.ts` pins the
+ * behaviour this paragraph describes.
  *
  * ⛔ NOT a tolerant fallback (#13973's standing prohibition): it teaches no
  * consumer to accept an off-spec shape; it converts one measured producer

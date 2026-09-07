@@ -657,6 +657,32 @@ function importJobUndoable(row: any): boolean {
  * declaration is right; the emitted value was wrong. This makes the value what
  * the declaration already says.
  *
+ * ## [#14078] The `Date` arm is TOTAL — an Invalid `Date` renders as text
+ *
+ * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
+ * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
+ * because a guard on some arms and not others re-opens the drift the single
+ * spelling closed. Reachability is MEASURED, not assumed (#14409, landed
+ * `3ecb7dc1a`): mysql2 3.23.1 returns a module constant literally named
+ * `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds
+ * `new Date(NaN)` for every year in 275760..294276 — years Postgres itself
+ * stores. Unguarded, `value.toISOString()` raises `RangeError: Invalid time
+ * value`, so `GET /api/v1/data/import/jobs/:jobId` answers **500** on a job
+ * row the operator cannot identify from the error.
+ *
+ * The terminal value is chosen **per call site**, and this one's is the
+ * VISIBLE TEXT `"Invalid Date"`, reached by letting the Invalid `Date` fall
+ * into the `String(value ?? '')` arm — the "rendered as before" branch this
+ * docblock already describes, and the spelling the #13994 repair replaced.
+ * Why not `undefined`, the answer the `metadata-protocol` / `metadata` copies
+ * take: this function returns `string` because its four call sites are the
+ * DTO's last step, `ImportJobProgressSchema.createdAt` is required, and all
+ * four fields are declared plain `z.string()` (`packages/spec/src/api/
+ * export.zod.ts`) rather than `z.string().datetime()` — so the text passes the
+ * contract and reaches the operator watching the import job, which is the
+ * ruling's "required and an operator reads it". ⛔ And NOT a blanket `''`: a
+ * silent blank is the shape that hides the producer's bug.
+ *
  * Same three branches as the two landed normalisers in
  * `@objectstack/metadata-protocol` — `auditMetaItem`'s `occurredAt` in
  * `protocol.ts` and `canonicalIsoInstant` in `sys-metadata-repository.ts`
@@ -670,7 +696,12 @@ function importJobUndoable(row: any): boolean {
  */
 function canonicalIsoStamp(value: unknown): string {
     if (typeof value === 'string') return value;
-    if (value instanceof Date) return value.toISOString();
+    // [#14078] The `Date` arm is TOTAL: an Invalid `Date` fails the guard and
+    // falls into the "rendered as before" arm below, which is `String(value)`
+    // — exactly the visible text `"Invalid Date"` this repair's predecessor
+    // served. See the docblock's Invalid-`Date` paragraph for why the text and
+    // not `undefined` here.
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
     return String(value ?? '');
 }
 
@@ -726,7 +757,15 @@ function formatCsvCell(value: any): string {
     let s: string;
     if (typeof value === 'string') s = value;
     else if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') s = String(value);
-    else if (value instanceof Date) s = value.toISOString();
+    // [#14078] Total `Date` arm. An Invalid `Date` renders as `String(value)`,
+    // which is exactly the visible text `Invalid Date` — the cell an operator
+    // reads and can report. ⛔ Not the `JSON.stringify` arm below: `toJSON()`
+    // answers `null` for an Invalid `Date`, so the bad row would arrive as the
+    // silent blank the ruling forbids. Both CSV paths land here: the formatted
+    // path's `formatDate` returns the value UNCHANGED when `toDate` rejects it
+    // (`export-format.ts`), so this arm is the terminal for the raw path and
+    // the field-metadata path alike.
+    else if (value instanceof Date) s = Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
     else { try { s = JSON.stringify(value); } catch { s = String(value); } }
     if (/[",\r\n]/.test(s)) {
         return `"${s.replace(/"/g, '""')}"`;
