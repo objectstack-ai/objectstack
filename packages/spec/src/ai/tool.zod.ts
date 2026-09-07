@@ -33,16 +33,6 @@ import { strictObject } from '../shared/strict-object';
  * `@objectstack/spec` is guaranteed to hit (pattern of `object.zod.ts`'s
  * `UNKNOWN_KEY_GUIDANCE`, ADR-0049 enforce-or-remove).
  */
-// The `requiresConfirmation` prescription below is deliberately
-// CONTRACT-REFERENTIAL: `packages/spec/src/contracts/ai-service.ts` declares the
-// confirmation member and `ACTION_CONFIRMATION_REQUIRED` names the refusal
-// (#16293), but the runtime door that performs it lands in #15942. Until then a
-// present-tense "the call is refused" here would send an author to test a
-// destructive operation without the member and watch it EXECUTE — the exact
-// declared-but-unenforced class ADR-0049 retired this key for. Tense follows
-// enforcement: this text may promote to the present in the change that lands
-// the door, and not before. (The ids stay in this comment: the prescription
-// itself is customer-facing text, where `check:doc-authoring` reds on one.)
 const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   permissions:
     '`tool.permissions` was removed in @objectstack/spec 17.0.0 (audit close-out) — it ' +
@@ -66,6 +56,16 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (audit close-out) — no ' +
     'runtime branches on it; it never affected registration, selection or execution. Delete ' +
     'the key.',
+  // This prescription is deliberately CONTRACT-REFERENTIAL.
+  // `contracts/ai-service.ts` declares the confirmation member and
+  // `ACTION_CONFIRMATION_REQUIRED` names the refusal (#16293), but the runtime
+  // door that performs it lands in #15942. Until then a present-tense "the call
+  // is refused" here would send an author to test a destructive operation
+  // without the member and watch it EXECUTE — the exact declared-but-unenforced
+  // class ADR-0049 retired this key for. Tense follows enforcement: promote it
+  // in the change that lands the door, not before. The ids stay in this comment
+  // and out of the string: `check:doc-authoring` reds on an internal tracker id
+  // inside a customer-facing prescription.
   requiresConfirmation:
     '`tool.requiresConfirmation` was removed from @objectstack/spec in the 16.x line ' +
     '(ADR-0033 §2) — it never had a consumer, and a SAFETY flag that is merely ' +
