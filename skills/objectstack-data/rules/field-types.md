@@ -88,7 +88,7 @@ options: [
 |:-----|:------------|:-----------|
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused) |
-| `tree` | Hierarchical self-reference | `reference` |
+| `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup is stored
@@ -105,9 +105,6 @@ options: [
 | `avatar` | User/profile picture | — |
 | `video` | Video files | — |
 | `audio` | Audio files | — |
-
-There is no per-field attachment config (size limits, allowed types, storage) —
-storage concerns live outside the field schema.
 
 ## Embedded (JSON sub-objects)
 
