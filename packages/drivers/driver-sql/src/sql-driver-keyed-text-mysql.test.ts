@@ -41,6 +41,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { SqlDriver } from '../src/index.js';
+import { isUniqueViolationError } from '@objectstack/types';
 import { MYSQL_CELL, dialectCell, declareDialectCell } from './live-dialect-matrix.testkit.js';
 
 /**
@@ -314,12 +315,23 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
         first,
       ] as any);
 
-      await expect(
-        driver.execute(`insert into os11374_prefix (id, token) values (?, ?)`, [
-          'r2',
-          second,
-        ] as any),
-      ).rejects.toThrow(/Duplicate entry/i);
+      // [#16019] `execute()` declares its fault: `DATABASE_ERROR` / 500 with a
+      // composed message, the dialect error whole under a non-enumerable
+      // `cause`. The measurement is unchanged — MySQL rejects the second value
+      // as a duplicate — and it is read where the dialect's text now lives:
+      // the cause-following `isUniqueViolationError`, and the cause's own
+      // `Duplicate entry` line. Reading `error.message` for it was what this
+      // pin did before, and it is the one raw-exec consumer in this package
+      // that did; the declared envelope is what every door reads.
+      const rejection: unknown = await driver
+        .execute(`insert into os11374_prefix (id, token) values (?, ?)`, ['r2', second] as any)
+        .then(() => undefined, (e: unknown) => e);
+      expect(rejection).toBeInstanceOf(Error);
+      expect((rejection as { code?: unknown }).code).toBe('DATABASE_ERROR');
+      expect((rejection as { status?: unknown }).status).toBe(500);
+      expect(isUniqueViolationError(rejection)).toBe(true);
+      const dialect = (rejection as { cause?: unknown }).cause as { message?: unknown } | undefined;
+      expect(String(dialect?.message)).toMatch(/Duplicate entry/i);
 
       // One row, from two distinct tokens: the second was lost to a constraint
       // the object never declared.

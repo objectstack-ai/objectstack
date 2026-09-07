@@ -258,6 +258,46 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       }
       if (result.result) {
         const res = result.result;
+        /**
+         * [#16383] A `result` that IS a `Response` is the answer — hand it on.
+         *
+         * `HttpDispatcherResult.result` is DECLARED for exactly this ("For
+         * flexible return types or direct response objects
+         * (Response/NextResponse)"), and the runtime really puts one there:
+         * `runtime/src/domains/auth.ts` returns `{ handled: true, result:
+         * response }` with whatever the auth service answered.
+         *
+         * This function had no arm for it. The two below test `res.type`, a
+         * `Response` never spells `'redirect'` or `'stream'` there, and the
+         * fall-through was `c.json(res, 200)` — so the real status was replaced
+         * by a literal `200` and the real body by `JSON.stringify` of a
+         * `Response`, which is `{}` because it has no own enumerable
+         * properties. Measured on a real boot through this adapter (a real
+         * kernel, the real dispatcher, `prefix: '/api/v1'`), an auth service
+         * answering an honest 404:
+         *
+         *     GET /api/v1/auth/me/permissions
+         *       the door answered : 404 {"message":"Not found","code":"NOT_FOUND"}
+         *       the caller read   : 200 {}                    <- manufactured here
+         *
+         * ⭐ That is not a missing answer, it is a WRONG one that reads as
+         * success, and it defeats fail-closed guards rather than missing them:
+         * objectui's `MePermissionsProvider.tsx` refuses on `if (!data) return
+         * false`, and `{}` is truthy. `res.ok`, `status === 200` and "nothing
+         * threw" all report a refusal as a completed operation.
+         *
+         * ⛔ Narrow on purpose — `instanceof Response`, not "looks like one".
+         * The arms below and the plain-object rendering after them are other
+         * producers' contracts and are unchanged; `hono.test.ts` and
+         * `hono-result-response-passthrough.test.ts` pin both sides of that
+         * line. Returning the object itself rather than rebuilding it is what
+         * keeps the body byte-identical (a CSV, an empty 404) and the
+         * producer's headers attached; the `stream` arms below already return a
+         * `Response` this way.
+         */
+        if (res instanceof Response) {
+          return res;
+        }
         if (res.type === 'redirect' && res.url) {
           return c.redirect(res.url);
         }
