@@ -9448,11 +9448,12 @@ export function h49PartialLandingUnreleased(issue, mergedPrs, openPrs, commentRo
 
 /**
  * The instant the `Thread-read:` field entered the claim template — the day
- * this row's PR was opened (the ruling's cutoff), at the minute it opened, so a
- * claim written earlier that same day predates the field exactly as an older
- * one does. A `Claim:` stamped before it is never a row.
+ * this row's PR was opened (the ruling's cutoff), pinned to the minute of the
+ * push that opened it, so a claim written earlier that same day predates the
+ * field exactly as an older one does. A `Claim:` stamped before it is never a
+ * row.
  */
-export const THREAD_READ_FIELD_SINCE = '2026-09-07T12:40:00Z';
+export const THREAD_READ_FIELD_SINCE = '2026-09-07T11:55:00Z';
 
 /** One comment page, and the quota backstop on the completing walk (H48's). */
 export const H50_COMMENTS_PAGE_SIZE = 100;
