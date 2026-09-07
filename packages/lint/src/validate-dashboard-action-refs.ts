@@ -60,12 +60,16 @@
  *       names the page `create_opportunity`, or it names nothing. Opening an
  *       object's form is `actionType: 'form'`. Otherwise → ERROR.
  *
- *   actionType 'url'    → a relative in-app path. WARN when a recognizable
- *       `<collection>/<name>` segment (objects/reports/dashboards/pages/views)
- *       names an entity that does not exist in this stack. External URLs
- *       (`http(s)://`, `//`), interpolated targets (`${…}`), and opaque routes
- *       (no recognized collection segment) are skipped — they cannot be resolved
- *       statically and may be host/app/plugin routes. → WARNING.
+ *   actionType 'url'    → a relative in-app path. WARN once per recognizable
+ *       `<collection>/<name>` segment (apps/objects/reports/dashboards/pages/
+ *       views) whose name does not exist in this stack — EVERY such segment in
+ *       the path, not only the first (#16169: a bad `apps/NAME` head used to
+ *       hide a bad `dashboard/NAME` tail, and a bad app name alone was never
+ *       checked at all, since `apps` was absent from the collection table).
+ *       External URLs (`http(s)://`, `//`), interpolated targets (`${…}`), and
+ *       opaque routes (no recognized collection segment anywhere in the path)
+ *       are skipped — they cannot be resolved statically and may be host/plugin
+ *       routes. → WARNING (one finding per unresolved segment).
  *
  *   actionType 'flow' | 'api' — not checked: flow targets resolve against the
  *       automation engine / other packages, and api targets are opaque endpoints.
@@ -111,9 +115,15 @@ function strName(v: unknown): string | undefined {
 
 /** URL path segments that name a metadata collection, mapped to the stack key
  *  whose members can appear after them in an in-app route
- *  (`/…/objects/crm_lead`, `/reports/forecast`, `/dashboards/exec`, …). Both the
- *  singular and plural spellings are accepted. */
-const URL_COLLECTION_TO_STACK_KEY: Record<string, 'objects' | 'reports' | 'dashboards' | 'pages' | 'views'> = {
+ *  (`/apps/crm_enterprise/objects/crm_lead`, `/reports/forecast`,
+ *  `/dashboards/exec`, …). Both the singular and plural spellings are
+ *  accepted. */
+const URL_COLLECTION_TO_STACK_KEY: Record<
+  string,
+  'apps' | 'objects' | 'reports' | 'dashboards' | 'pages' | 'views'
+> = {
+  app: 'apps',
+  apps: 'apps',
   object: 'objects',
   objects: 'objects',
   report: 'reports',
@@ -141,6 +151,10 @@ function viewContainerName(item: AnyRec): string | undefined {
 interface KnownTargets {
   /** Every action name defined in the stack (global + object-embedded). */
   actions: Set<string>;
+  /** App machine names (valid in `apps/<name>` routes) — the same `name`
+   *  identity the runtime resolves `/apps/:appName/…` against and REST's
+   *  `GET /meta/apps/:name` reads by. */
+  apps: Set<string>;
   /** Object names (valid in `objects/<name>` routes). */
   objects: Set<string>;
   reports: Set<string>;
@@ -153,6 +167,7 @@ interface KnownTargets {
 /** Build the author-time "known target" sets from a stack. */
 function collectKnownTargets(stack: AnyRec): KnownTargets {
   const actions = new Set<string>();
+  const apps = new Set<string>();
   const objects = new Set<string>();
   const reports = new Set<string>();
   const dashboards = new Set<string>();
@@ -168,6 +183,7 @@ function collectKnownTargets(stack: AnyRec): KnownTargets {
   };
 
   collectNames(stack.actions, actions, (a) => strName(a.name));
+  collectNames(stack.apps, apps, (a) => strName(a.name));
   for (const obj of recordsOf(stack.objects)) {
     if (!obj || typeof obj !== 'object') continue;
     const n = strName(obj.name);
@@ -181,7 +197,7 @@ function collectKnownTargets(stack: AnyRec): KnownTargets {
   // An object's default view is routable by the object's own name too.
   for (const o of objects) views.add(o);
 
-  return { actions, objects, reports, dashboards, pages, views };
+  return { actions, apps, objects, reports, dashboards, pages, views };
 }
 
 /** Does a `script`/`modal` `actionUrl` resolve? */
@@ -202,36 +218,39 @@ function resolveActionTarget(
 }
 
 /**
- * Resolve a relative `url` in-app route. Returns:
- *   - `null` when the target is not statically resolvable (external, interpolated,
- *     or carries no recognized `<collection>/<name>` segment) — SKIP, no finding.
- *   - `{ collection, name }` for a recognized `<collection>/<name>` pair that does
- *     NOT exist in the stack — WARN.
- *   - `undefined` when a recognized pair DID resolve — OK, no finding.
+ * Resolve a relative `url` in-app route. Scans EVERY segment of the path for a
+ * recognized `<collection>/<name>` pair (#16169 — a bad `apps/NAME` head used
+ * to hide a bad `dashboard/NAME` tail because the loop returned at the first
+ * recognized segment, resolved or not). Returns one entry per recognized pair
+ * whose name does NOT exist in the stack, in path order; an empty array means
+ * either the route is not statically resolvable (external, interpolated, no
+ * recognized segment anywhere) or every recognized pair resolved — either way,
+ * no finding.
  */
 function resolveUrlRoute(
   target: string,
   known: KnownTargets,
-): { collection: string; name: string } | null | undefined {
+): { collection: string; name: string }[] {
   // External / protocol-relative — leaves the app; not an in-app route.
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('//')) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('//')) return [];
   // Interpolated — resolved by the renderer at click time, not statically known.
-  if (target.includes('${')) return null;
+  if (target.includes('${')) return [];
   // Only relative in-app paths are considered.
-  if (!target.startsWith('/')) return null;
+  if (!target.startsWith('/')) return [];
 
   // Strip query + hash, then split into non-empty segments.
   const pathPart = target.split(/[?#]/, 1)[0];
   const segments = pathPart.split('/').filter(Boolean);
 
+  const unresolved: { collection: string; name: string }[] = [];
   for (let i = 0; i < segments.length - 1; i++) {
     const stackKey = URL_COLLECTION_TO_STACK_KEY[segments[i]];
     if (!stackKey) continue;
     const name = segments[i + 1];
-    if (known[stackKey].has(name)) return undefined; // resolved
-    return { collection: segments[i], name }; // recognized shape, unknown name
+    if (known[stackKey].has(name)) continue; // resolved — keep scanning later segments
+    unresolved.push({ collection: segments[i], name }); // recognized shape, unknown name
   }
-  return null; // no recognized collection segment — opaque route, skip
+  return unresolved; // empty — opaque route, or every recognized pair resolved
 }
 
 interface HeaderAction {
@@ -295,21 +314,25 @@ export function validateDashboardActionRefs(stack: AnyRec): DashboardActionRefFi
     }
 
     if (actionType === 'url') {
-      const route = resolveUrlRoute(target, known);
-      if (!route) return; // skip (external/interpolated/opaque) or resolved
-      findings.push({
-        severity: 'warning',
-        rule: DASHBOARD_ACTION_ROUTE_UNRESOLVED,
-        where,
-        path,
-        message:
-          `url action target "${target}" points at ${route.collection}/${route.name}, ` +
-          `but no ${route.collection.replace(/s$/, '')} named "${route.name}" is registered ` +
-          `in this stack — the button likely navigates to a dead route.`,
-        hint:
-          `Check the path for a typo, define the referenced ${route.collection.replace(/s$/, '')}, ` +
-          `or ignore this if the route is served by another installed package or a host/console route.`,
-      });
+      const unresolved = resolveUrlRoute(target, known);
+      // One finding per unresolved segment (#16169): a bad `apps/NAME` head and
+      // a bad `dashboard/NAME` tail on the SAME url are two distinct dead
+      // references, and each is reported on its own so neither hides the other.
+      for (const route of unresolved) {
+        findings.push({
+          severity: 'warning',
+          rule: DASHBOARD_ACTION_ROUTE_UNRESOLVED,
+          where,
+          path,
+          message:
+            `url action target "${target}" points at ${route.collection}/${route.name}, ` +
+            `but no ${route.collection.replace(/s$/, '')} named "${route.name}" is registered ` +
+            `in this stack — the button likely navigates to a dead route.`,
+          hint:
+            `Check the path for a typo, define the referenced ${route.collection.replace(/s$/, '')}, ` +
+            `or ignore this if the route is served by another installed package or a host/console route.`,
+        });
+      }
       return;
     }
     // 'flow' | 'api' | custom types are out of scope (see module header).
