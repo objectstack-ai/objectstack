@@ -338,28 +338,40 @@ describe.each(MIRRORED)('$name — parity between the exported checks and the sc
 // ---------------------------------------------------------------------------
 
 describe('each schema attaches its export BY IDENTIFIER — no inline copy', () => {
-  const read = (file: string) => fs.readFileSync(path.join(HERE, file), 'utf8');
+  // Comments are dropped before counting: the docblocks name the attachment
+  // spelling as guidance for a mirror, and a count is about CODE.
+  const stripComments = (src: string): string =>
+    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/[^\n]*/g, '$1');
+  const readCode = (file: string) => stripComments(fs.readFileSync(path.join(HERE, file), 'utf8'));
+  const attachments = (code: string, name: string): number =>
+    code.match(new RegExp(`\\.superRefine\\(${name}\\)`, 'g'))?.length ?? 0;
 
   it('view.zod.ts declares both exports and chains them onto ListViewShapeSchema for ListViewSchema', () => {
-    const src = read('view.zod.ts');
-    expect(src).toContain('export function checkListViewPageMount(');
-    expect(src).toContain('export function checkListViewCalendarVisualization(');
+    const code = readCode('view.zod.ts');
+    expect(code).toContain('export function checkListViewPageMount(');
+    expect(code).toContain('export function checkListViewCalendarVisualization(');
     // The mirrored door, exactly: shape → page-mount check → calendar check.
-    expect(src).toMatch(
+    expect(code).toMatch(
       /ListViewShapeSchema\s*\.superRefine\(checkListViewPageMount\)\s*\.superRefine\(checkListViewCalendarVisualization\)/,
     );
+    // Three doors (authoring terminal, `objects[].listViews.*`, the flattened
+    // overlay) attach each check — `viewDoorsCarryingPageMountCheck` in
+    // view.test.ts pins the behaviour; this pins that every attachment is the
+    // export, by name, and none is an inline copy.
+    expect(attachments(code, 'checkListViewPageMount')).toBe(3);
+    expect(attachments(code, 'checkListViewCalendarVisualization')).toBe(3);
   });
 
   it('page.zod.ts declares the export and attaches it to PageSchema', () => {
-    const src = read('page.zod.ts');
-    expect(src).toContain('export function checkPageSourceCompleteness(');
-    expect(src.match(/\.superRefine\(checkPageSourceCompleteness\)/g)?.length).toBe(1);
+    const code = readCode('page.zod.ts');
+    expect(code).toContain('export function checkPageSourceCompleteness(');
+    expect(attachments(code, 'checkPageSourceCompleteness')).toBe(1);
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
-    const src = read('dashboard.zod.ts');
-    expect(src).toContain('export function checkGlobalFilterDateDefaultValue(');
-    expect(src.match(/\.superRefine\(checkGlobalFilterDateDefaultValue\)/g)?.length).toBe(1);
+    const code = readCode('dashboard.zod.ts');
+    expect(code).toContain('export function checkGlobalFilterDateDefaultValue(');
+    expect(attachments(code, 'checkGlobalFilterDateDefaultValue')).toBe(1);
   });
 });
 
