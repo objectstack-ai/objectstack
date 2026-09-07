@@ -453,8 +453,8 @@ The body runs in an isolated QuickJS VM, **not** Node:
   hook as a bundled `handler`.
 
 > **A deadline stamped from an hours table is calendar hours** — nights, weekends and
-> holidays count. Name it `SLA_CALENDAR_HOURS` (or its camelCase) and add elapsed
-> milliseconds (`hours * 3_600_000`); never label it "business hours".
+> holidays count. Name it `*_CALENDAR_HOURS` (`SLA_CALENDAR_HOURS`, or its camelCase)
+> and add elapsed milliseconds (`hours * 3_600_000`); never label it "business hours".
 
 ### ⚠️ Gotcha 1 — `ctx.result` is a *partial* record on afterUpdate
 
