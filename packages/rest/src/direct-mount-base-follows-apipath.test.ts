@@ -45,7 +45,7 @@ import { toTemplatePath } from './openapi-builtin-paths.js';
 
 type Handler = (req: any, res: any) => any;
 
-/** The ledger's own list of the nine, as `VERB {base-relative}` suffixes. */
+/** The ledger's own list of the six, as `VERB {base-relative}` suffixes. */
 const DIRECT_MOUNT_SUFFIXES = REST_ROUTE_LEDGER
   .filter((e) => e.source === 'direct-mount')
   .map((e) => {
@@ -179,7 +179,7 @@ describe('#6306 — with `apiPath` set, the direct-mount routes follow it', () =
   const API_PATH = '/backend/api/v9';
   const config = { api: { api: { apiPath: API_PATH } } };
 
-  it('mounts all nine under {apiPath}, and leaves nothing behind at the convention prefix', async () => {
+  it('mounts all six under {apiPath}, and leaves nothing behind at the convention prefix', async () => {
     const { table, expectedBase } = await bootPlugin(config);
 
     // The base is the server's, not a second expression that happens to agree.
@@ -192,14 +192,14 @@ describe('#6306 — with `apiPath` set, the direct-mount routes follow it', () =
       ).toContain(`${method} ${expectedBase}${suffix}`);
     }
 
-    // The whole surface moved, not merely the nine: no route is left at the
+    // The whole surface moved, not merely the six: no route is left at the
     // `/api/v1` convention. This is the split itself — on `origin/main` this
     // set had exactly 9 members.
     const stragglers = mountedKeys(table).filter((k) => k.split(' ')[1].startsWith('/api/v1'));
     expect(stragglers, 'no route may stay at /api/v1 when apiPath moves the surface').toEqual([]);
   });
 
-  it('documents all nine in {apiPath}/openapi.json — the filter that made the split visible now includes them', async () => {
+  it('documents all six in {apiPath}/openapi.json — the filter that made the split visible now includes them', async () => {
     const { table, expectedBase } = await bootPlugin(config);
     const doc = await serveOpenApi(table, expectedBase);
 
@@ -224,9 +224,11 @@ describe('#6306 — with `apiPath` set, the direct-mount routes follow it', () =
     expect(discovery.routes.packages).toBe(`${expectedBase}/packages`);
     expect(discovery.routes.datasources).toBe(`${expectedBase}/datasources`);
 
-    const pkg = resolveRoute(table, 'GET', discovery.routes.packages);
-    expect(pkg, 'the advertised packages URL must be mounted').toBeDefined();
-    // [#7033 / #7023] `GET /packages` is now authz-gated, and this real plugin
+    // [#14503] The advertised base is the family base; this registrar's one
+    // route, `POST {base}/packages/publish`, is what must be mounted under it.
+    const pkg = resolveRoute(table, 'POST', `${discovery.routes.packages}/publish`);
+    expect(pkg, 'the advertised packages base must carry the mounted publish route').toBeDefined();
+    // [#7033 / #7023] `POST /packages/publish` is authz-gated, and this real plugin
     // boot wires the production caller resolver
     // (`RestServer.resolvePackageRouteExecutionContext`) with no auth service in
     // the ctx — so the anonymous discovery probe resolves to no identity and the
@@ -255,11 +257,11 @@ describe('#6306 — with `apiPath` set, the direct-mount routes follow it', () =
 // ---------------------------------------------------------------------------
 
 describe('#6306 — the base is READ, not rebuilt: `??` and `||` no longer disagree', () => {
-  it('an empty `basePath` puts the nine where the rest of the surface already was', async () => {
+  it('an empty `basePath` puts the six where the rest of the surface already was', async () => {
     // A second, independent way the two expressions differed: the plugin
     // defaulted with `||` (empty string ⇒ `/api`) while `RestServer`
     // normalizes with `??` (empty string kept). So `basePath: ''` mounted the
-    // RouteManager surface at `/v1` and the nine at `/api/v1` — the same
+    // RouteManager surface at `/v1` and the six at `/api/v1` — the same
     // split, reached without `apiPath` at all. Reading the base cannot
     // disagree with itself.
     const { table, expectedBase } = await bootPlugin({ api: { api: { basePath: '', version: 'v1' } } });
@@ -284,7 +286,7 @@ describe('#6306 — default and conventional configs are unchanged', () => {
   // pinning that single-sourcing moved nothing for deployments that never set
   // `apiPath` (measured: the default mount list is identical, 92 routes,
   // before and after).
-  it('default config keeps all nine at /api/v1, documented and advertised there', async () => {
+  it('default config keeps all six at /api/v1, documented and advertised there', async () => {
     const { table, expectedBase } = await bootPlugin(undefined);
     expect(expectedBase).toBe('/api/v1');
 

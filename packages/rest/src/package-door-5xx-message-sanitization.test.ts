@@ -424,12 +424,12 @@ describe('[#8086] a 4xx message is never withheld, even when it trips the predic
 
 describe('[#8086] the #8016 coded mapping still answers (non-regression)', () => {
   it('a coded 409 keeps its status, its code AND its message', async () => {
-    const { captured } = await SITES[3].run(
-      thrown('Uninstalling drops 3 tables', { status: 409, code: 'DESTRUCTIVE_CHANGE' }),
+    const { captured } = await SITES[0].run(
+      thrown('Publishing would drop 3 tables', { status: 409, code: 'DESTRUCTIVE_CHANGE' }),
     );
     expect(captured.status).toBe(409);
     expect(captured.body?.error?.code).toBe('DESTRUCTIVE_CHANGE');
-    expect(captured.body?.error?.message).toBe('Uninstalling drops 3 tables');
+    expect(captured.body?.error?.message).toBe('Publishing would drop 3 tables');
   });
 
   it('structured `details` survive the withhold on a leaky 5xx', async () => {

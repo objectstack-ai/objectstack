@@ -206,8 +206,9 @@ describe('[#12537] a swallowed resolution does not bypass the gate', () => {
     const publish = vi.fn(async () => ({ success: true }));
     const routes = new Map<string, RouteHandler>();
     const server = {
-      get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
-      post: () => {}, put: () => {}, delete: () => {}, patch: () => {},
+      get: () => {},
+      post: (p: string, h: RouteHandler) => { routes.set(`POST:${p}`, h); },
+      put: () => {}, delete: () => {}, patch: () => {},
       use: () => {}, listen: async () => {}, close: async () => {},
     } as any;
     registerPackageRoutes(server, () => ({ publish }) as any, '/api/v1', {
@@ -223,8 +224,9 @@ describe('[#12537] a swallowed resolution does not bypass the gate', () => {
     const publish = vi.fn(async () => ({ success: true }));
     const routes = new Map<string, RouteHandler>();
     const server = {
-      get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
-      post: () => {}, put: () => {}, delete: () => {}, patch: () => {},
+      get: () => {},
+      post: (p: string, h: RouteHandler) => { routes.set(`POST:${p}`, h); },
+      put: () => {}, delete: () => {}, patch: () => {},
       use: () => {}, listen: async () => {}, close: async () => {},
     } as any;
     registerPackageRoutes(server, () => ({ publish }) as any, '/api/v1', {
@@ -298,14 +300,16 @@ describe('[#12537] a resolver FAULT is indistinguishable from anonymity and from
     expect(JSON.stringify(faulted)).not.toBe(JSON.stringify(capable));
   });
 
-  it('every state-changing route reads the fault the same way', async () => {
+  it('the state-changing route reads the fault the same way with a body it would otherwise act on', async () => {
+    // [#14503] Used to compare `DELETE /:id` against publish; the delete route
+    // is the dispatcher domain's alone now, so the one state-changing route
+    // left is driven with a manifest it would publish if the gate let it.
     const routes = mount({ resolveExecutionContext: REJECTS });
-    const del = await drive(routes, 'DELETE', `${PKGS}/:id`, { params: { id: 'com.acme.crm' } });
     const pub = await drive(routes, 'POST', `${PKGS}/publish`, {
-      body: { manifest: { id: 'com.acme.crm', version: '1.0.0' } },
+      body: { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} },
     });
-    expect(del.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(pub.status).toBe(ANONYMOUS_DENY_STATUS);
+    expect(pub.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
   });
 });
 

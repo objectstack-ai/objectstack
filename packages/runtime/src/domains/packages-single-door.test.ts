@@ -194,7 +194,11 @@ describe('/packages — one implementation, and its 404 wording says which (#145
             expect(r.body?.data?.manifest?.id).toBe(PKG_ID);
             expect(r.body?.data?.package).toBeUndefined();
             expect('source' in (r.body?.data ?? {})).toBe(false);
-            expect(Object.keys(r.body).sort()).toEqual(['data', 'success']);
+            // The dispatcher envelope, measured: `data` + `meta` beside the flag.
+            // The retired REST door answered `{ data, success }` with the row
+            // one level down under `data.package` — the key set is part of
+            // "which door answered".
+            expect(Object.keys(r.body).sort()).toEqual(['data', 'meta', 'success']);
         });
 
         it(`${label} GET /packages answers { packages, total } and its rows carry no source stamp`, async () => {

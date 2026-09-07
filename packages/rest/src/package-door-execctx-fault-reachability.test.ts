@@ -697,13 +697,16 @@ describe('[#13255] a server-side fault is indistinguishable from the denial it i
     // be read as a permission verdict.
     expect(faulted.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
     expect(faulted.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
-    expect(faulted.body?.error?.message).not.toContain('studio.access');
+    expect(faulted.body?.error?.message).not.toContain('manage_metadata');
 
     // ⚠️ The other half of the ruling, and the half a one-sided fix would
     // break: a GENUINE capability denial is untouched. Making outages loud is
     // only correct if real denials still read as denials.
     expect(genuinelyEmpty.status).toBe(403);
-    expect(genuinelyEmpty.body?.error?.message).toContain('studio.access');
+    // [#14503] The one route left is the write cohort's: its denial names
+    // `manage_metadata` (the read cohort's `studio.access` wording went with
+    // the read routes to the dispatcher domain).
+    expect(genuinelyEmpty.body?.error?.message).toContain('manage_metadata');
 
     // The disguise is gone, stated on the same comparison that pinned it.
     expect(JSON.stringify(faulted)).not.toBe(JSON.stringify(genuinelyEmpty));

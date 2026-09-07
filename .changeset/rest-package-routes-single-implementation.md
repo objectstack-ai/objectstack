@@ -16,4 +16,6 @@ What changes on the wire, for a deployment whose composition really did reach th
 
 `POST /api/v1/packages/publish` is unchanged.
 
+`GET /discovery` on the REST server now advertises `routes.packages` on every boot — the family base under which its publish route is mounted — instead of only when its own copy of the list route had been mounted at start. On a stock `objectstack serve` boot that copy never was (the `package` service registers after the REST plugin starts), so discovery omitted `routes.packages` while the dispatcher served the family; the SDK's convention fallback covered it.
+
 The three removed REST rows are gone from `REST_ROUTE_LEDGER`; the runtime route ledger carries the surviving routes. The environment-scoped mount (`/environments/:environmentId/packages…`) is served by the same dispatcher domain through the `@objectstack/hono` catch-all.
