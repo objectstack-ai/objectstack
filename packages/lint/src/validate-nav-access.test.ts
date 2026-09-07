@@ -190,3 +190,61 @@ describe('validateNavAccess — exemptions (false-positive floor)', () => {
     expect(findings).toEqual([]);
   });
 });
+
+// #16065: the hint used to prescribe a third remedy — "gate the entry with
+// requiredPermissions/visible" — that this rule cannot honour: neither key is
+// read anywhere in this file, so a gated-but-ungranted entry kept warning
+// forever. The fix corrects the hint (and the doc-block) to the two remedies
+// the rule can actually prove; it does NOT make the rule start reading those
+// keys. These controls pin that: gating must not silence a genuinely
+// ungranted object, and must not spuriously flag a genuinely granted one.
+describe('validateNavAccess — gating keys are not read (#16065)', () => {
+  it('hint prescribes only the two remedies it can prove, not gating', () => {
+    const findings = validateNavAccess({
+      objects,
+      apps: navApp([objectNav('nav_forecast', 'crm_forecast')]),
+      permissions: [{ name: 'p', label: 'P', objects: { crm_lead: { allowRead: true } } }],
+    });
+    expect(findings).toHaveLength(1);
+    const { hint } = findings[0];
+    // The two remedies the rule can prove.
+    expect(hint).toContain('allowRead: true');
+    expect(hint).toContain('viewAllRecords');
+    // The retired third remedy must not return.
+    expect(hint).not.toContain('gate the entry');
+    expect(hint).not.toMatch(/requiredPermissions.*if it is meant for admins only/);
+  });
+
+  it('a requiredPermissions-gated but ungranted object still fires (gating is not a remedy)', () => {
+    const findings = validateNavAccess({
+      objects,
+      apps: navApp([
+        { ...objectNav('nav_forecast', 'crm_forecast'), requiredPermissions: ['view_forecast'] },
+      ]),
+      permissions: [{ name: 'p', label: 'P', objects: { crm_lead: { allowRead: true } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(NAV_OBJECT_UNGRANTED);
+  });
+
+  it('a visible:false but ungranted object still fires (gating is not a remedy)', () => {
+    const findings = validateNavAccess({
+      objects,
+      apps: navApp([{ ...objectNav('nav_forecast', 'crm_forecast'), visible: false }]),
+      permissions: [{ name: 'p', label: 'P', objects: { crm_lead: { allowRead: true } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(NAV_OBJECT_UNGRANTED);
+  });
+
+  it('a gated AND granted object stays silent — gating causes no false positive either', () => {
+    const findings = validateNavAccess({
+      objects,
+      apps: navApp([
+        { ...objectNav('nav_forecast', 'crm_forecast'), requiredPermissions: ['view_forecast'] },
+      ]),
+      permissions: [{ name: 'p', label: 'P', objects: { crm_forecast: { allowRead: true } } }],
+    });
+    expect(findings).toEqual([]);
+  });
+});
