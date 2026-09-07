@@ -3235,6 +3235,20 @@ jobs:
       - name: Shard attestation gate
         run: pnpm check:shard-attestation
 
+      # Test Core package selection self-test (#16453). ci.yml's "Compute this
+      # shard's package set" step is a thin call into
+      # scripts/ci/select-shard-packages.sh — environment in, turbo-ls.json
+      # out — so that the `merge_group` branch, which by construction cannot
+      # run before a PR is already in the queue, is proved here instead: the
+      # self-test drives every branch of every event (pull_request, merge_group,
+      # push) offline, against a throwaway upstream + clone and a fake `turbo`
+      # on PATH, and pins which `turbo ls` calls were made and with what base,
+      # whether the cross-package union ran, every `::warning::` fallback and
+      # the absence of the ones that must not fire (an empty docs-only merge
+      # group selects nothing WITHOUT the #10057 complaint). Offline; ~2s.
+      - name: Test Core package selection self-test
+        run: pnpm check:select-shard-packages
+
       # Aggregator roster gate (#10490). Three required contexts are aggregate
       # jobs standing in for a set of real jobs — `Test Core` and `Dogfood
       # Regression Gate` in ci.yml, `TypeScript Type Check` in this file — and
