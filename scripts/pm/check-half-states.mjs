@@ -9448,10 +9448,10 @@ export function h49PartialLandingUnreleased(issue, mergedPrs, openPrs, commentRo
 
 /**
  * The instant the `Thread-read:` field entered the claim template — the day
- * this row's PR was opened (the ruling's cutoff), pinned to the minute of the
- * push that opened it, so a claim written earlier that same day predates the
- * field exactly as an older one does. A `Claim:` stamped before it is never a
- * row.
+ * this row's PR was opened (the ruling's cutoff), pinned to a minute of that
+ * day after the last claim written under the old template and before the PR
+ * opened, so a claim written earlier that same day predates the field exactly
+ * as an older one does. A `Claim:` stamped before it is never a row.
  */
 export const THREAD_READ_FIELD_SINCE = '2026-09-07T11:55:00Z';
 
