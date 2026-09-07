@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir, TEMPLATE_FILE_ALIASES } from './template-copy.js';
 import { TEMPLATES } from './template-registry.js';
+import { SKILLS_CATALOG, SKILLS_INSTALL_COMMAND } from './skills-install.js';
 
 const pkgRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(pkgRoot, '..', '..');
@@ -365,6 +366,17 @@ describe('templates survive npm packing', () => {
     expect(rules).toContain('.env');
   });
 
+  // The first dot-DIRECTORY the template has ever carried (#16330). The set
+  // comparison above already covers it, but it names nothing: a strip of
+  // `.github` would read there as "some file went missing". Naming the path
+  // literally, the way the .dockerignore case below does, is what makes the
+  // answer to "do nested dot-directories survive `npm pack`?" readable.
+  it('carries the .github workflow directory through the tarball and the scaffold', () => {
+    expect(packed).toContain('blank/.github/workflows/ci.yml');
+    expect(scaffolded).toContain('.github/workflows/ci.yml');
+    expect(TEMPLATE_FILE_ALIASES.has('.github')).toBe(false);
+  });
+
   it('leaves a literal template dotfile that packs fine alone', () => {
     // .dockerignore is NOT stripped — verified against the published 15.1.1
     // tarball, which ships it while .gitignore is absent. It stays literal, so
@@ -575,9 +587,14 @@ describe('README template table', () => {
 
 // Skills catalog boundary (15.1 third-party eval): scaffolded projects once
 // received the repo-internal `dogfood-verification` skill because the
-// scaffolder installed with a repo-wide `skills add … --all`, whose discovery
+// scaffolder installed with a repo-wide `skills add …`, whose discovery
 // also walks `.claude/skills/`. The published catalog is exactly the root
 // `skills/` directory; everything else must stay repo-internal.
+//
+// The boundary is the `/skills` SUBPATH, and it did not move when the
+// scaffolder stopped passing `--all` — `--skill '*'` still selects every
+// entry discovery finds, `metadata.internal` ones included, so a root-scoped
+// install would leak them exactly as before.
 describe('skills catalog boundary', () => {
   const frontmatterOf = (file: string): string =>
     /^---\n([\s\S]*?)\n---/.exec(fs.readFileSync(file, 'utf8'))?.[1] ?? '';
@@ -622,19 +639,44 @@ describe('skills catalog boundary', () => {
     }
   });
 
+  // Asserted against the VALUE the scaffolder runs, not against the source
+  // text of the module that happens to hold it today: a `toContain` on source
+  // text goes vacuous the moment the literal is assembled from parts, and a
+  // vacuous half of this pair is the half that guards the leak.
   it('scaffolder installs from the curated skills/ subpath, not the repo root', () => {
-    expect(REGISTRY_SOURCE).toContain(
-      'skills add objectstack-ai/objectstack/skills --all',
-    );
-    expect(REGISTRY_SOURCE).not.toMatch(
+    expect(SKILLS_CATALOG).toBe('objectstack-ai/objectstack/skills');
+    expect(SKILLS_INSTALL_COMMAND).toContain(`skills add ${SKILLS_CATALOG} `);
+    expect(SKILLS_INSTALL_COMMAND).not.toMatch(
       /skills add objectstack-ai\/objectstack(?!\/skills)/,
     );
   });
 
-  // The /skills subpath is the hard boundary: the skills CLI's `--all`
-  // implies `--skill '*'`, which INCLUDES metadata.internal skills — so any
-  // customer-facing surface advertising a repo-root install would leak
-  // internal skills again.
+  // The source-text half survives as its own case, aimed at a DIFFERENT
+  // failure: a second, hand-written `skills add` invocation added to the
+  // scaffolder later, bypassing the shared constant above.
+  it('the scaffolder hard-codes no second skills invocation', () => {
+    const SKILLS_SOURCE = fs.readFileSync(
+      path.join(pkgRoot, 'src', 'skills-install.ts'),
+      'utf8',
+    );
+    for (const [name, src] of [
+      ['index.ts', REGISTRY_SOURCE],
+      ['skills-install.ts', SKILLS_SOURCE],
+    ] as const) {
+      expect(
+        src,
+        `${name} spells a repo-root skills install — discovery from the root ` +
+          'also walks .claude/skills/, so internal skills would ship.',
+      ).not.toMatch(/skills add objectstack-ai\/objectstack(?!\/skills)/);
+    }
+    // Exactly one place builds the command; index.ts imports it.
+    expect(REGISTRY_SOURCE).toContain("from './skills-install.js'");
+    expect(REGISTRY_SOURCE).not.toMatch(/execSync\(\s*['\`"]npx/);
+  });
+
+  // The /skills subpath is the hard boundary: `--skill '*'` (which `--all`
+  // also implies) INCLUDES metadata.internal skills — so any customer-facing
+  // surface advertising a repo-root install would leak internal skills again.
   it('no customer-facing surface advertises a repo-root skills install', () => {
     const surfaces = [
       'content/docs',

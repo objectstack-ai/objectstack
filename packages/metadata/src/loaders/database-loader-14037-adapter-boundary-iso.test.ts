@@ -51,11 +51,13 @@
  *
  * §D is the #14078 NEUTRALITY pin and is load-bearing for this card's scope:
  * an Invalid `Date` must reach the consumer UNCHANGED, exactly as these casts
- * pass it through today. The shared `canonicalIsoInstant` spelling would
- * instead raise `RangeError: Invalid time value` there — measured reachable on
- * both live dialects — and whether it should is the open subject of #14078,
- * which #13973 is blocked on. This card imports neither answer, and §D goes
- * red the moment someone swaps the contested spelling in.
+ * pass it through today. #14078 has since ruled (option B, 2026-09-02) and the
+ * shared `canonicalIsoInstant` spelling is now TOTAL — it answers `undefined`
+ * for that shape rather than raising `RangeError: Invalid time value`. The two
+ * helpers still differ across the REST of the input domain, so §D keeps its
+ * job unchanged: it goes red the moment someone swaps the other spelling in,
+ * which is now the separately-tracked consolidation decision #16422 rather
+ * than an open ruling.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

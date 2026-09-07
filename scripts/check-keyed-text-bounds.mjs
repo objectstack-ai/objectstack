@@ -171,7 +171,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { blank, maskComments, maskCommentsAndLiterals, scanSource } from './js-comment-mask.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -398,11 +398,13 @@ function unhintedFiles(relPaths) {
  * READ from. `struct` additionally has literal CONTENT blanked, delimiters
  * kept: it is what brackets are COUNTED on, so a `{` inside a string cannot
  * move the parse.
+ *
+ * Both are `js-comment-mask.mjs`'s own exports (#15776) rather than a
+ * composition re-derived here.
  */
 function project(source) {
-  const { comment, literal } = scanSource(source);
-  const masked = blank(source, comment);
-  return { masked, struct: blank(masked, literal) };
+  const masked = maskComments(source);
+  return { masked, struct: maskCommentsAndLiterals(source) };
 }
 
 const OPEN_TO_CLOSE = { '(': ')', '{': '}', '[': ']' };

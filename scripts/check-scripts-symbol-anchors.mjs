@@ -72,11 +72,17 @@
  * repointed; every number that was in an anchor is still on its page, as data.
  *
  * The residual when that landed was 15, and every one of them was a file
- * another lane held OPEN at that moment -- ⛔ not one was an ambiguity. That
- * count is a DATED reading; `--list-unresolvable` is the live one. ⚠️ It is why the
+ * another lane held OPEN at that moment -- ⛔ not one was an ambiguity. A
+ * second round (#15809, still) migrated the 7 of those 15 whose holders had
+ * by then merged -- `check-docs-section-name.mjs` and
+ * `docs-audit/affected-docs.mjs` (3 each) and `check-type-check-coverage.mjs`
+ * (1) -- leaving 8, again every one held OPEN and none an ambiguity: 4 in
+ * `check-system-context-census.mjs` and 3 in `cross-package-test-inputs.mjs`
+ * (PR #16215), 1 in `pm/check-half-states.mjs` (PR #16202). Both counts are
+ * DATED readings; `--list-unresolvable` is the live one. ⚠️ It is why the
  * flag is still `false`: the fence #15809 was dispatched under is that it flips
  * only when the residual is ZERO and a self-test pins the flip, and a residual
- * of 15 would make this gate permanently red for the length of somebody else's
+ * of 8 would make this gate permanently red for the length of somebody else's
  * pull request. `--list-unresolvable` prints the residual so the next author
  * inherits a worklist rather than a count; the day it prints nothing, the flag
  * is a one-line change with a case to pin it.

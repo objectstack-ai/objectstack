@@ -119,7 +119,7 @@ import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -179,10 +179,12 @@ const NON_DECLARED_MEMBERS = [
  *
  * Delimiters survive (the scanner flags literal content, not its quotes), so a
  * quoted object key and an array of string literals are both still locatable.
+ *
+ * `js-comment-mask.mjs`'s own `maskCommentsAndLiterals` (#15776), not a
+ * composition re-derived here.
  */
 export function structureMask(source) {
-  const flags = scanSource(source);
-  return blank(blank(source, flags.comment), flags.literal);
+  return maskCommentsAndLiterals(source);
 }
 
 /**

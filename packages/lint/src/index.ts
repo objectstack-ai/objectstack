@@ -628,6 +628,20 @@ export type {
 
 export { validateNavAccess, NAV_OBJECT_UNGRANTED } from './validate-nav-access.js';
 export type { NavAccessFinding, NavAccessSeverity } from './validate-nav-access.js';
+// [#15922] A declared field with zero consumers across the registered
+// metadata roots — advisory, object-aware, one rule id with the verdict
+// carried on the finding (see the module note for the taxonomy decision).
+export {
+  validateFieldConsumers,
+  FIELD_NO_CONSUMERS,
+  CONSUMER_ROOTS as FIELD_CONSUMER_ROOTS,
+  CARRIER_ROOTS as FIELD_CARRIER_ROOTS,
+} from './validate-field-consumers.js';
+export type {
+  FieldConsumerFinding,
+  FieldConsumerSeverity,
+  FieldConsumerVerdict,
+} from './validate-field-consumers.js';
 
 export {
   validateTranslationReferences,
