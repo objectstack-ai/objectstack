@@ -130,16 +130,25 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
     // artifact-emitted one may carry neither, so the path is the last resort.
     const viewName = strName(view.name) ?? strName(view.object) ?? viewPath;
     const containerObject = viewObjectName(view);
+    // [#16168] A container whose object lives on the LIST block
+    // (`list.data.object`, `list.object` or `list.objectName` — any anchor
+    // `viewObjectName` reads) has no `object` / `objectName` / `data.object` of
+    // its own, so `containerObject` above is `undefined` and every site under it
+    // — including the container's own default `form` — was unreferenceable.
+    // Same third rung `validate-translatable-sections.ts:178-179` already
+    // carries for its own sites.
+    const listBinding = isRec(view.list) ? viewObjectName(view.list) ?? containerObject : undefined;
 
     for (const site of formViewSites(view, viewPath)) {
       // A sub-container declares its own binding (`form.data.object`) and
-      // otherwise inherits the container's — the resolution order every other
+      // otherwise inherits the container's, then the container's list-bound
+      // object as a last resort (#16168) — the resolution order every other
       // view-walking rule in this package uses. The base rung is the shared
       // `viewObjectName` (#6662); this FALLBACK is deliberately NOT folded into
       // the shared walker, because the consumers compose it differently (see
       // `view-walk.ts`) and a refactor that changes a verdict is a failed
       // refactor.
-      const objName = viewObjectName(site.view) ?? containerObject;
+      const objName = viewObjectName(site.view) ?? containerObject ?? listBinding;
       // Only reference-check when the bound object resolves; otherwise we can't.
       const known = objName ? objectFields.get(objName) : undefined;
       const where = site.surface ? `view "${viewName}" · ${site.surface}` : `view "${viewName}"`;

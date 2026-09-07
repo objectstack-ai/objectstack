@@ -9579,6 +9579,13 @@ export const SWEEP_COUNT_KEYS = [
   // measurement nobody can act on, and this is the one number that separates
   // "everything closed since the 4th was judged" from "the pass was short".
   'closedReachedAt',
+  // H22's DIVISOR reading (#16393) — the closed-issue update rate this pass
+  // observed, which the census clause checks the pinned divisor against. It
+  // rides here for `closedReachedAt`'s reason: a quantity gathered in the pager
+  // and dropped on the way to the summary is a measurement nobody can act on,
+  // and this is the one that says whether the window's stated coverage in days
+  // still describes the board.
+  'closedRateObserved',
   'commitPages',
   'commitWindowTruncated',
   'openListingPages',
@@ -9759,6 +9766,13 @@ export function summaryLine(counts, findingCount) {
     `\`updated_at\` — the stream is consumed by closed-issue ACTIVITY (~${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY}/day, ` +
     `measured ${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT}), not by closures (~11/day), which is why the ` +
     'page cap it replaced covered a ragged 2.1 days of update-recency rather than the closure window it read as. ' +
+    // H22's DIVISOR alarm (#16393). Stated here, inside the clause that already
+    // quotes the pin, and stated on EVERY run in every state — for
+    // `renderRatePremise`'s reason: a check visible only when it fires is
+    // indistinguishable from a check that was deleted, which is the shape of
+    // the defect this leg closes. Report-only: it names the re-measure, it
+    // never performs one.
+    `${h22RatePremiseClause(counts.closedRateObserved)} ` +
     `H23 read ${commits} squash commit message(s) from the default branch, carrying ` +
     `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s). ` +
     `${describeWindowBound({
@@ -11750,6 +11764,10 @@ async function sweep(options = {}) {
     // ⛔ null, not a date: a sweep that throws before H22's pass reached
     // nowhere, and the clause must say so rather than render today.
     closedReachedAt: null,
+    // ⛔ null, not 0: a sweep that threw before H22's pass observed NO rate, and
+    // a zero would classify as a collapse of the board rather than as the
+    // absence of a reading (#16393).
+    closedRateObserved: null,
     commitPages: 0,
     commitWindowTruncated: false,
     openListingPages: 0,
@@ -12152,29 +12170,80 @@ export const RATE_PREMISE_BAND = 2;
 export const RATE_PREMISE_STALE_DAYS = 30;
 
 /**
- * The merge rate this sweep OBSERVED, derived from rows it already holds.
+ * The premise descriptors — what a pinned rate is ABOUT, carried as data so the
+ * classifier below can be SHARED by every pinned rate in this file (#16393).
+ *
+ * ## Why a descriptor rather than a second classifier
+ *
+ * H8's rate premise and H22's are the same object in two costumes: a
+ * hand-measured rate, the date it was measured on, a band, a re-measure
+ * horizon, and a rank of docblocks that state their own coverage by dividing by
+ * it. The only things that differ are the WORDS — which constant, which stamp,
+ * which quantity is counted per day, and what a stale divisor misdescribes.
+ * Copying the classifier to change four strings is how the two premises would
+ * come to disagree in the one dimension that matters: a report where one
+ * premise says EXPIRED and the other quietly says nothing is worse than either
+ * wording alone. That is the argument `describeWindowBound` already settled for
+ * the window disclosures, settled the same way.
+ *
+ * ⛔ `pinned` / `pinnedAt` ride here as DEFAULTS only. Both stay accepted as
+ * top-level inputs to `classifyRatePremise`, because the self-test drives
+ * synthetic pins through it and a descriptor that owned them outright would
+ * make those cases unwritable.
+ *
+ * @typedef {{ constant: string, noun: string, plural: string, stamp: string,
+ *   pinned: number, pinnedAt: string, consequence: string, expiredAct: string }} RatePremise
+ */
+
+/** H8's premise: merges per day, the divisor behind every merged-window reach. */
+export const MERGE_RATE_PREMISE = {
+  constant: 'MEASURED_MERGES_PER_DAY',
+  noun: 'merge',
+  plural: 'merges',
+  stamp: 'merged_at',
+  pinned: MEASURED_MERGES_PER_DAY,
+  pinnedAt: MEASURED_MERGES_PER_DAY_AT,
+  consequence:
+    'Every page-capped window below states its reach by dividing by that constant, so each of ' +
+    'those docblocks is now misdescribing its own coverage by the same factor.',
+  expiredAct:
+    'Re-measure and update the constant, its date, and the coverage numbers the page-capped ' +
+    'windows quote. A rate premise that outlives its measurement is how `~18/day` came to ' +
+    'justify a window covering a day and a half (#11118, #13499).',
+};
+
+/**
+ * The rate a sweep OBSERVED, derived from rows it already holds — ONE
+ * instrument for every pinned rate in this file (#13499 repair ②, #16393).
  *
  * This is repair ② of #13499 and the reason that card exists: the premise was a
  * number typed into a comment, so no reader and no run could ever disagree with
- * it. Now every sweep re-derives the quantity from its own merged-PR window and
- * compares. ⛔ The pinned constant is deliberately NOT overwritten from this —
- * a self-updating premise is a premise nobody reviews — it is CHECKED against
+ * it. Now every sweep re-derives the quantity from its own window and compares.
+ * ⛔ The pinned constant is deliberately NOT overwritten from this — a
+ * self-updating premise is a premise nobody reviews — it is CHECKED against
  * it, and a mismatch is reported.
  *
- * `null` when the rows cannot support a rate: fewer than two readable
- * `merged_at` stamps, or a degenerate span. An unmeasurable rate must not read
- * as agreement (#4690) — the classifier below reports it as unobserved.
+ * `field` is the stamp the rate is counted over, and it is the ONLY thing that
+ * differs between the premises this file carries: H8 counts `merged_at` on the
+ * merged PRs of its window, H22 counts `updated_at` on the rows its closed pass
+ * read. One function rather than two, because a copied instrument is how the
+ * two would come to disagree about what "per day" even means.
  *
- * ⚠️ Measured over the window's OWN merge span rather than back from `now`,
- * because the newest merge may be minutes old and dividing by a span that
- * includes an empty tail would understate the rate.
+ * `null` when the rows cannot support a rate: fewer than two readable stamps,
+ * or a degenerate span. An unmeasurable rate must not read as agreement
+ * (#4690) — the classifier below reports it as unobserved.
  *
- * @param {{ merged_at?: string }[]} mergedPrs
- * @returns {number|null} merges per day
+ * ⚠️ Measured over the rows' OWN span rather than back from `now`, because the
+ * newest row may be minutes old and dividing by a span that includes an empty
+ * tail would understate the rate.
+ *
+ * @param {any[]} rows
+ * @param {string} field — the timestamp each row carries.
+ * @returns {number|null} rows per day
  */
-export function observedMergeRatePerDay(mergedPrs) {
-  const stamps = (mergedPrs ?? [])
-    .map((pr) => Date.parse(pr?.merged_at ?? ''))
+export function observedRatePerDay(rows, field) {
+  const stamps = (rows ?? [])
+    .map((row) => Date.parse(row?.[field] ?? ''))
     .filter((n) => Number.isFinite(n))
     .sort((a, b) => a - b);
   if (stamps.length < 2) return null;
@@ -12184,23 +12253,43 @@ export function observedMergeRatePerDay(mergedPrs) {
 }
 
 /**
+ * H8's half of that instrument: merged PRs, counted over `merged_at`. Kept as a
+ * named function rather than inlined at the call site so H8's premise reads as
+ * a premise rather than as a field name passed in passing.
+ *
+ * @param {{ merged_at?: string }[]} mergedPrs
+ * @returns {number|null} merges per day
+ */
+export function observedMergeRatePerDay(mergedPrs) {
+  return observedRatePerDay(mergedPrs, 'merged_at');
+}
+
+/**
  * Is the pinned rate premise still good? Pure, three outcomes, and the third is
  * the one #4690 insists on.
  *
- * @param {{ observed: number|null, pinned?: number, pinnedAt?: string, nowMs?: number }} input
+ * `premise` selects WHICH pinned rate is being judged — H8's merges per day by
+ * default, H22's closed-issue updates per day when that descriptor is handed in
+ * (#16393). Every difference between the two lives in the descriptor, so the
+ * verdict logic, the band and the horizon are shared by construction rather
+ * than by two authors remembering to keep them equal.
+ *
+ * @param {{ observed: number|null, pinned?: number, pinnedAt?: string,
+ *   nowMs?: number, premise?: RatePremise }} input
  * @returns {{ state: 'ok'|'drifted'|'expired'|'unobserved', message: string,
  *   observed: number|null, pinned: number, ageDays: number|null, ratio: number|null }}
  */
 export function classifyRatePremise(input = {}) {
-  const pinned = Number.isFinite(input.pinned) ? input.pinned : MEASURED_MERGES_PER_DAY;
-  const pinnedAt = input.pinnedAt ?? MEASURED_MERGES_PER_DAY_AT;
+  const subject = input.premise ?? MERGE_RATE_PREMISE;
+  const pinned = Number.isFinite(input.pinned) ? input.pinned : subject.pinned;
+  const pinnedAt = input.pinnedAt ?? subject.pinnedAt;
   const nowMs = Number.isFinite(input.nowMs) ? input.nowMs : Date.now();
   const observed = Number.isFinite(input.observed) ? input.observed : null;
   const at = Date.parse(`${pinnedAt}T00:00:00Z`);
   const ageDays = Number.isFinite(at) ? (nowMs - at) / 86_400_000 : null;
   const ratio = observed !== null && pinned > 0 ? observed / pinned : null;
   const shared =
-    `pinned \`MEASURED_MERGES_PER_DAY\` = ${pinned}/day, measured ${pinnedAt}` +
+    `pinned \`${subject.constant}\` = ${pinned}/day, measured ${pinnedAt}` +
     (ageDays === null ? '' : ` (${ageDays.toFixed(0)}d ago)`);
 
   if (observed === null) {
@@ -12211,9 +12300,10 @@ export function classifyRatePremise(input = {}) {
       ageDays,
       ratio,
       message:
-        `RATE PREMISE UNOBSERVED — this sweep could not derive a merge rate from its own window ` +
-        `(fewer than two readable \`merged_at\` stamps), so ${shared} was not checked against ` +
-        `anything. ⚠️ This is not agreement: it is the one reading that says nothing.`,
+        `RATE PREMISE UNOBSERVED — this sweep could not derive a ${subject.noun} rate from its ` +
+        `own window (fewer than two readable \`${subject.stamp}\` stamps), so ${shared} was not ` +
+        `checked against anything. ⚠️ This is not agreement: it is the one reading that says ` +
+        `nothing.`,
     };
   }
   if (ageDays !== null && ageDays > RATE_PREMISE_STALE_DAYS) {
@@ -12225,10 +12315,7 @@ export function classifyRatePremise(input = {}) {
       ratio,
       message:
         `RATE PREMISE EXPIRED — ${shared}, past the ${RATE_PREMISE_STALE_DAYS}-day re-measure ` +
-        `horizon; this sweep observed ~${observed.toFixed(1)}/day. Re-measure and update the ` +
-        `constant, its date, and the coverage numbers the page-capped windows quote. A rate ` +
-        `premise that outlives its measurement is how \`~18/day\` came to justify a window ` +
-        `covering a day and a half (#11118, #13499).`,
+        `horizon; this sweep observed ~${observed.toFixed(1)}/day. ${subject.expiredAct}`,
     };
   }
   if (ratio !== null && (ratio > RATE_PREMISE_BAND || ratio < 1 / RATE_PREMISE_BAND)) {
@@ -12239,10 +12326,9 @@ export function classifyRatePremise(input = {}) {
       ageDays,
       ratio,
       message:
-        `RATE PREMISE DRIFTED — this sweep observed ~${observed.toFixed(1)} merges/day against a ` +
-        `${shared}: a factor of ${ratio.toFixed(2)}, outside the ${RATE_PREMISE_BAND}x band. Every ` +
-        `page-capped window below states its reach by dividing by that constant, so each of those ` +
-        `docblocks is now misdescribing its own coverage by the same factor. Re-measure.`,
+        `RATE PREMISE DRIFTED — this sweep observed ~${observed.toFixed(1)} ${subject.plural}/day ` +
+        `against a ${shared}: a factor of ${ratio.toFixed(2)}, outside the ${RATE_PREMISE_BAND}x ` +
+        `band. ${subject.consequence} Re-measure.`,
     };
   }
   return {
@@ -12506,12 +12592,13 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  * a card-only stream would need. ⚖️ The `~6 pages for 3 days` this note used to
  * quote was the pinned divisor's arithmetic and it never described this board:
  * measured 2026-09-06 the horizon sits at ~13 pages, because the LEADING rows
- * run at ~414 updates/day against the pinned 188.3 (the derivation is in
- * `CLOSED_ISSUE_WINDOW_PAGE_CEILING`, and it is why the old 12 bound).
+ * run at ~414 updates/day against the 188.3 pinned at the time (the derivation
+ * is in `CLOSED_ISSUE_WINDOW_PAGE_CEILING`, and it is why the old 12 bound).
  * Constants here are deliberately NOT self-updating (H8's rule): they are
- * CHECKED against what a sweep observes, never overwritten by it — which is
- * why the divisor below still reads 188.3 and this note states the disagreement
- * instead of quietly editing it.
+ * CHECKED against what a sweep observes, never overwritten by it — so that
+ * disagreement was closed the one way it can be, by a HAND re-measure and
+ * re-pin (#16419: the divisor below now reads 415.1), never by a sweep quietly
+ * editing it.
  */
 export const CLOSED_ISSUE_WINDOW_DAYS = 3;
 
@@ -12538,8 +12625,9 @@ export const CLOSED_ISSUE_WINDOW_DAYS = 3;
  *
  * The 3-day horizon that day sat at ~2026-09-03T16:5xZ — PAST page 12's oldest
  * row by about an hour. So the old ceiling missed the horizon by roughly one
- * page, and the leading 1,200 rows ran at ~414 updates/day against the pinned
- * 188.3: the divisor is a factor of ~2.2 light exactly where it is spent.
+ * page, and the leading 1,200 rows ran at ~414 updates/day against the 188.3
+ * pinned that day: the divisor WAS a factor of ~2.2 light exactly where it is
+ * spent, and #16419 re-pinned it by hand at 415.1 for that reason.
  *
  * ## 40, and the unit it is chosen in
  *
@@ -12572,15 +12660,79 @@ export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 40;
  * differ by ~17x on this board and confusing them is precisely the defect this
  * window carried (see the docblock above).
  *
- *   read    2026-08-31T03:36Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
- *   window  400 rows spanning 2.125 days
- *   rate    400 / 2.125 = ~188 closed-issue update events/day
- *   (re-read at depth: 800 rows / 4.209d = ~190/day, 1200 rows / 5.496d = ~218/day)
+ *   read    2026-09-06T21:59Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
+ *   window  400 rows spanning 0.964 days
+ *   rate    400 / 0.964 = ~415 closed-issue update events/day
+ *   (re-read at depth: 800 rows / 2.051d = ~390/day, 1200 rows / 3.092d = ~388/day)
  */
-export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 188.3;
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 415.1;
 
 /** WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured. */
-export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-08-31';
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-09-06';
+
+/**
+ * H22's premise, in the shape `classifyRatePremise` judges (#16393).
+ *
+ * ## The state this closes
+ *
+ * The divisor above was a hand measurement with a date on it and NOTHING
+ * watching it — the same artefact H8 carried until #13499, and it drifted the
+ * same way. Re-measured on 2026-09-06 the board ran ~312 closed-issue updates
+ * per day over 40 pages and ~414 over the leading 12, against a pin of 188.3
+ * that nothing had contradicted since it was typed: a factor of 1.66 to 2.2,
+ * accumulated in six days, announced by no run. H22's window states its reach
+ * in DAYS by dividing by this constant, so a drift of that size misstates the
+ * window's own coverage by the same factor — silently, four times a day, in
+ * the very sentence a reader trusts for it.
+ *
+ * ⛔ The alarm REPORTS; it never writes. H8's rule — a pinned premise is
+ * CHECKED against a sweep, never overwritten by one — is what keeps this
+ * constant a measurement somebody reviewed rather than whatever the last run
+ * happened to see, and it is why the act named below is "re-measure and re-pin
+ * by hand" rather than an assignment. A self-updating divisor would make every
+ * window's stated coverage true by construction and worth nothing.
+ *
+ * @type {RatePremise}
+ */
+export const CLOSED_UPDATE_RATE_PREMISE = {
+  constant: 'MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY',
+  noun: 'closed-issue update',
+  plural: 'closed-issue updates',
+  stamp: 'updated_at',
+  pinned: MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY,
+  pinnedAt: MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT,
+  consequence:
+    "H22's window states its reach in days by dividing by that constant, so the coverage this " +
+    'very line quotes is misdescribed by the same factor. ⛔ A sweep never overwrites the pin: ' +
+    'it is re-pinned by hand, from a fresh measurement.',
+  expiredAct:
+    'Re-measure and re-pin the constant and its date by hand; ⛔ a sweep never overwrites the ' +
+    "pin. H22's stated reach in days is a division by it, so every run past the horizon quotes " +
+    'a coverage nothing has checked.',
+};
+
+/**
+ * H22's rate-premise clause, as the summary line renders it (#16393).
+ *
+ * Rendered on EVERY run, in every state, for the reason `renderRatePremise`
+ * gives for H8's: a check that is only visible when it fires cannot be
+ * distinguished from a check that was removed — which is the shape of the
+ * defect this leg exists to close. It rides INSIDE H22's own window clause
+ * rather than as a line of its own, because the pinned divisor is already
+ * quoted there and a reader comparing the two numbers should not have to leave
+ * the sentence to find the second one.
+ *
+ * ⛔ Report-only, like every other reading this file prints: nothing here
+ * writes a constant, a label or a card.
+ *
+ * @param {number|null|undefined} observed — the rate this sweep measured.
+ * @param {{ nowMs?: number }} [options]
+ * @returns {string} one sentence, marked loud unless the premise holds.
+ */
+export function h22RatePremiseClause(observed, { nowMs } = {}) {
+  const premise = classifyRatePremise({ observed, premise: CLOSED_UPDATE_RATE_PREMISE, nowMs });
+  return premise.state === 'ok' ? premise.message : `⚠️ ${premise.message}`;
+}
 
 /** The instant at which H22's window ends. */
 export function closedWindowHorizonMs(nowMs = Date.now(), days = CLOSED_ISSUE_WINDOW_DAYS) {
@@ -12698,12 +12850,24 @@ async function listRecentlyClosedIssues(
   // (#16217). Tracked across pages rather than taken from the last one because
   // a final page of unreadable stamps must not erase a reach already proven.
   let reachedMs = null;
+  // Every row this pass READ, projected to the one stamp the observed update
+  // rate is counted over (#16393). ⛔ Deliberately the rows READ and not the
+  // rows ADMITTED: the pin this rate is checked against was measured over the
+  // RAW stream (400 rows / 0.964 days), while `out` holds only the in-window
+  // closures — a strictly smaller population over a strictly shorter span. Rate
+  // them against each other and the difference between two quantities reads as
+  // drift in one of them, which is the #4690 inversion with the numbers the
+  // right way up. Projected rather than retained whole because one field is all
+  // the instrument reads, and these pages are the largest thing this sweep
+  // holds.
+  const rateRows = [];
   let page = 1;
   for (; page <= CLOSED_ISSUE_WINDOW_PAGE_CEILING; page++) {
     const batch = await fetchPage(page);
     // Selection reads `closed_at`; paging (below) reads `updated_at`. They are
     // deliberately different fields — see `pageExhaustsWindow`.
     out.push(...batch.filter((i) => !i.pull_request && issueClosedWithinWindow(i, horizon)));
+    rateRows.push(...batch.map((row) => ({ updated_at: row?.updated_at })));
     const oldest = oldestPageStamp(batch, 'updated_at');
     if (oldest !== null && (reachedMs === null || oldest < reachedMs)) reachedMs = oldest;
     if (pageExhaustsWindow(batch, horizon, 'updated_at')) {
@@ -12717,6 +12881,11 @@ async function listRecentlyClosedIssues(
   // and a board whose first page is unreadable both reached NOWHERE, and a
   // clause that dated them would be the #4690 inversion in a new costume.
   stats.closedReachedAt = reachedDate(reachedMs);
+  // The divisor's staleness alarm (#16393) — the rate this pass OBSERVED, from
+  // the pages it read anyway, so the reading costs no request. ⛔ `null` when
+  // the pages cannot support a rate, which the classifier reports as
+  // unobserved rather than as agreement with the pin.
+  stats.closedRateObserved = observedRatePerDay(rateRows, 'updated_at');
   return out;
 }
 
@@ -17900,10 +18069,12 @@ async function selfTest() {
   t('windows: …and 2.73d at the rate measured 8 days later — same cap, 25% more window', Number(windowCoverageDays(300, MEASURED_COMMITS_PER_DAY).toFixed(2)), 2.73);
   t('windows: …which is why H23\'s cap became a TIME cap', COMMIT_WINDOW_DAYS, 3);
   // ⛔ H22's is the one whose DIVISOR was the surprise: its rows are consumed by
-  // closed-issue UPDATE activity, not by closures, and the two differ ~17x. The
-  // old 4-page cap read as a closure window and was nothing of the kind.
-  t('windows: H22\'s old 4-page cap bought only 2.12d of UPDATE recency', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 2.12);
-  t('windows: …and the honest divisor is ~17x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 17.6);
+  // closed-issue UPDATE activity, not by closures, and the two differ ~39x at
+  // the divisor re-pinned 2026-09-06, against the ~10.7 closures/day measured
+  // when the defect was found. The old 4-page cap read as a closure window and
+  // was nothing of the kind.
+  t('windows: H22\'s old 4-page cap bought only 0.96d of UPDATE recency at the 2026-09-06 rate', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 0.96);
+  t('windows: …and the honest divisor is ~39x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 38.8);
   t('windows: …which is why H22\'s cap became a CLOSURE-time cap', CLOSED_ISSUE_WINDOW_DAYS, 3);
   t('windows: …and its horizon is seen by 12 consecutive runs', sweepOverlap(CLOSED_ISSUE_WINDOW_DAYS), 12);
   // #13499 — H8's window is no longer a page cap at all, so the arithmetic that
@@ -18073,10 +18244,11 @@ async function selfTest() {
   // Direction 1 — the floor case: a recent closure is admitted.
   t('H22 window: a 1-day-old closure is inside', issueClosedWithinWindow(closed13606(1, 1), CH), true);
   // Direction 2 — the row the OLD 4-page cap structurally could not reach. The
-  // cap covered ~2.12d of UPDATE recency, so a card closed 2.5 days ago and
-  // untouched since fell out of it: not late, GONE. Measured cost at the time
-  // of the repair: 19 residue carriers closed within 3 days were missed.
-  t('H22 window: the old 4-page cap reached only ~2.1 days of update-recency', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 2.5, true);
+  // cap covered ~0.96d of UPDATE recency at the divisor pinned 2026-09-06
+  // (~2.12d at the one pinned when the repair landed), so a card closed 2.5
+  // days ago and untouched since fell out of it: not late, GONE. Measured cost
+  // at the time of the repair: 19 residue carriers closed within 3 days missed.
+  t('H22 window: the old 4-page cap reached only ~1.0 days of update-recency', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 2.5, true);
   t('H22 window: …but the 3-day closure horizon admits that card', issueClosedWithinWindow(closed13606(2, 2.5), CH), true);
   // …and the window still HAS an edge; a boundary that admits everything is none.
   t('H22 window: a 4-day-old closure is outside', issueClosedWithinWindow(closed13606(3, 4), CH), false);
@@ -18240,6 +18412,116 @@ async function selfTest() {
   t('H22 pager: …so the clause invents no date', saidBy('h22Window', win13606(emptyStats)).includes('reaching back to'), false);
   t('H22 pager: …and still discloses which bound ended it', saidBy('h22Window', win13606(emptyStats)).includes('boundary reached'), true);
   t('H22 pager: the reach rides the enumerated forwarding contract', SWEEP_COUNT_KEYS.includes('closedReachedAt'), true);
+
+  // ---- H22's DIVISOR STALENESS ALARM (#16393) -----------------------------
+  //
+  // The pin above is a hand-measured rate carrying its own date and nothing
+  // else: no run could disagree with it, so it drifted 1.66-2.2x in six days
+  // and announced nothing. H8 has carried an alarm for exactly this shape since
+  // #13499, and this leg is that alarm APPLIED to H22's divisor — the same
+  // classifier, the same band, the same horizon, reached through a descriptor —
+  // rather than a second copy of it that would drift from H8's the way the
+  // hand-copied window disclosures did before `describeWindowBound`.
+
+  // The instrument is SHARED, and that is pinned by driving H8's own reader and
+  // the generic one over the same rows and requiring one answer. A copy would
+  // pass every case below and still be a copy.
+  const rateRows16393 = [{ merged_at: ago13606(4) }, { merged_at: ago13606(2) }, { merged_at: ago13606(0) }];
+  t('#16393 instrument: H8\'s reader delegates to the generic one, unchanged', observedMergeRatePerDay(rateRows16393), observedRatePerDay(rateRows16393, 'merged_at'));
+  t('#16393 instrument: …and the generic one counts whichever stamp it is handed', Math.round(observedRatePerDay([{ updated_at: ago13606(4) }, { updated_at: ago13606(2) }, { updated_at: ago13606(0) }], 'updated_at') * 100) / 100, 0.75);
+  t('#16393 instrument: a stamp the rows do not carry cannot make a rate', observedRatePerDay([{ updated_at: ago13606(1) }, { updated_at: ago13606(0) }], 'closed_at'), null);
+  t('#16393 instrument: one readable stamp cannot make a rate', observedRatePerDay([{ updated_at: ago13606(1) }], 'updated_at'), null);
+  t('#16393 instrument: a zero span cannot make a rate', observedRatePerDay([{ updated_at: ago13606(1) }, { updated_at: ago13606(1) }], 'updated_at'), null);
+
+  // The classifier is shared too, and reaches H22 through its descriptor. Both
+  // directions: H22's premise names H22's constant and quantity, and H8's is
+  // untouched by the parameterisation.
+  const h22Premise = (observed, extra = {}) =>
+    classifyRatePremise({ observed, premise: CLOSED_UPDATE_RATE_PREMISE, nowMs: NOW13606, ...extra });
+  t('#16393 premise: H22\'s premise defaults to H22\'s pinned divisor', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).pinned, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY);
+  t('#16393 premise: …and names that constant in the message', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).message.includes('`MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY`'), true);
+  t('#16393 premise: ⛔ …and never H8\'s', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).message.includes('`MEASURED_MERGES_PER_DAY`'), false);
+  t('#16393 premise: …and counts what H22 counts, not merges', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY * 3).message.includes('closed-issue updates/day'), true);
+  t('#16393 premise: …reading the stamp H22 pages by', h22Premise(null).message.includes('`updated_at` stamps'), true);
+  t('#16393 premise: H8\'s premise still defaults to H8\'s constant', classifyRatePremise({ observed: MEASURED_MERGES_PER_DAY, nowMs: NOW13499 }).pinned, MEASURED_MERGES_PER_DAY);
+  t('#16393 premise: …and still says merges/day when it drifts', classifyRatePremise({ observed: MEASURED_MERGES_PER_DAY * 3, nowMs: NOW13499 }).message.includes('merges/day'), true);
+  t('#16393 premise: …and still reads `merged_at` when it observes nothing', classifyRatePremise({ observed: null, nowMs: NOW13499 }).message.includes('`merged_at` stamps'), true);
+
+  // The three verdicts, on H22's premise. The band and the horizon are H8's, so
+  // what is pinned here is that H22 is judged BY them rather than beside them.
+  t('#16393 premise: a rate at the pin is in band', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).state, 'ok');
+  t('#16393 premise: a doubling is outside it', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY * 2.1).state, 'drifted');
+  t('#16393 premise: …and a halving too', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 2.1).state, 'drifted');
+  t('#16393 premise: exactly at the band edge still holds', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY * RATE_PREMISE_BAND).state, 'ok');
+  t('#16393 premise: ⛔ an unobservable rate is NOT agreement', h22Premise(null).state, 'unobserved');
+  // The calendar leg — it fires REGARDLESS of drift, and it is the half that
+  // would have caught `~18/day` early.
+  const stale16393 = { pinnedAt: '2026-06-01' };
+  t('#16393 premise: a pin past the re-measure horizon EXPIRES even at 1x', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, stale16393).state, 'expired');
+  t('#16393 premise: …and at any other rate as well', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY * 1.2, stale16393).state, 'expired');
+  t('#16393 premise: …saying so loudly', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, stale16393).message.includes('EXPIRED'), true);
+  t('#16393 premise: …and naming the act as a HAND re-pin', h22Premise(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, stale16393).message.includes('never overwrites the pin'), true);
+
+  // ---- The alarm on a real stream, through the REAL pager. The rate is
+  // measured over the rows the pass READ, because that is the population the
+  // pin was measured over; measuring it over the rows ADMITTED would rate two
+  // different quantities against each other and report the difference as drift.
+  const ratePage16393 = (daysAgo) => Array.from({ length: 100 }, (_, i) => closed13606(i, daysAgo, daysAgo));
+  const rateStream16393 = (step) =>
+    closedStream(Array.from({ length: 30 }, (_, i) => ratePage16393(step * (i + 1))));
+
+  // 2x the pin: 0.11-day steps, so the horizon falls on page 28 — 2800 rows
+  // read across a 2.97-day span is ~942.8/day against a pin of 415.1.
+  const driftedStats16393 = {};
+  const driftedRows16393 = await listRecentlyClosedIssues(driftedStats16393, NOW13606, rateStream16393(0.11));
+  t('#16393 stream: the pass stops on the first page past the horizon', driftedStats16393.closedPages, 28);
+  t('#16393 stream: …and the rate is over the rows READ', Math.round(driftedStats16393.closedRateObserved * 100) / 100, 942.76);
+  t('#16393 stream: ⛔ …not over the rows ADMITTED, which is a different number', Math.round(observedRatePerDay(driftedRows16393, 'updated_at') * 100) / 100 === Math.round(driftedStats16393.closedRateObserved * 100) / 100, false);
+  t('#16393 stream: …a board running 2x the pin FIRES the alarm', h22Premise(driftedStats16393.closedRateObserved).state, 'drifted');
+  t('#16393 stream: …and the factor is stated so it can be acted on', h22Premise(driftedStats16393.closedRateObserved).message.includes('a factor of 2.27'), true);
+  t('#16393 stream: …with both rates beside it', h22Premise(driftedStats16393.closedRateObserved).message.includes('observed ~942.8 closed-issue updates/day') && h22Premise(driftedStats16393.closedRateObserved).message.includes('= 415.1/day'), true);
+  // ⛔ The rule that makes this an alarm rather than a self-healing constant.
+  t('#16393 stream: ⛔ a drifted sweep does NOT rewrite the pin', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY, 415.1);
+  t('#16393 stream: …nor its date', MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT, '2026-09-06');
+
+  // 1x the pin: 0.25-day steps, horizon on page 13 — 1300 rows over 3.0 days is
+  // ~433.3/day, a factor of 1.04, and the alarm stays silent. ⚖️ It is the very
+  // stream that ran 2x the pin until the 2026-09-06 re-measure: the board moved
+  // by that much in six days, and the fixture did not move at all.
+  const okStats16393 = {};
+  await listRecentlyClosedIssues(okStats16393, NOW13606, rateStream16393(0.25));
+  t('#16393 stream: an in-band board reaches its horizon in thirteen pages', okStats16393.closedPages, 13);
+  t('#16393 stream: …and observes a rate at the pin', Math.round(okStats16393.closedRateObserved * 100) / 100, 433.33);
+  t('#16393 stream: …which raises NO alarm', h22Premise(okStats16393.closedRateObserved).state, 'ok');
+  t('#16393 stream: a board with nothing dateable observes no rate at all', (await (async () => { const s = {}; await listRecentlyClosedIssues(s, NOW13606, closedStream([[{ number: 1, updated_at: 'nope' }]])); return s.closedRateObserved; })()), null);
+  t('#16393 stream: …and an empty board likewise', (await (async () => { const s = {}; await listRecentlyClosedIssues(s, NOW13606, closedStream([])); return s.closedRateObserved; })()), null);
+  t('#16393: the observed rate rides the enumerated forwarding contract', SWEEP_COUNT_KEYS.includes('closedRateObserved'), true);
+
+  // ---- The clause. Wording is pinned through the clause builder with a fixed
+  // `nowMs`, because the summary line reads the real clock and a case asserting
+  // a verdict through it would go red on a calendar date rather than on a
+  // defect — the permanently-red gate this repo retires.
+  const clause16393 = (observed, extra = {}) => h22RatePremiseClause(observed, { nowMs: NOW13606, ...extra });
+  t('#16393 clause: a drifted divisor is marked loud', clause16393(942.76).startsWith('⚠️ RATE PREMISE DRIFTED'), true);
+  t('#16393 clause: …and names the re-measure act', clause16393(942.76).includes('re-pinned by hand, from a fresh measurement'), true);
+  t('#16393 clause: an expired pin is marked loud too', clause16393(415.1, { nowMs: Date.parse('2026-11-01T00:00:00Z') }).startsWith('⚠️ RATE PREMISE EXPIRED'), true);
+  t('#16393 clause: an unobserved rate is marked loud, never silent', clause16393(null).startsWith('⚠️ RATE PREMISE UNOBSERVED'), true);
+  t('#16393 clause: an in-band divisor is NOT marked loud', clause16393(433.33).includes('⚠️'), false);
+  // ⛔ …but it still SPEAKS. A check that is only visible when it fires cannot
+  // be told apart from a check somebody deleted — `renderRatePremise`'s rule.
+  t('#16393 clause: …and still speaks, so a deleted check cannot pass for a healthy board', clause16393(433.33).startsWith('rate premise OK'), true);
+  t('#16393 clause: …naming both rates even when it agrees', clause16393(433.33).includes('observed ~433.3/day') && clause16393(433.33).includes('= 415.1/day'), true);
+
+  // ---- The clause on the summary line. Only time-INDEPENDENT properties are
+  // asserted here, for the reason above; the verdict wording is pinned by the
+  // builder cases.
+  t('#16393 summary: the clause rides inside H22\'s own window clause', saidBy('h22Window', win13606({ closedPages: 6, closedRateObserved: 942.76 })).includes('RATE PREMISE'), true);
+  t('#16393 summary: ⛔ …and not in a neighbour\'s', saidBy('h23Window', win13606({ closedPages: 6, closedRateObserved: 942.76 })).includes('RATE PREMISE'), false);
+  t('#16393 summary: it names the pinned constant beside the number already quoted', saidBy('h22Window', win13606({ closedPages: 6, closedRateObserved: 942.76 })).includes('`MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY`'), true);
+  // A sweep that never ran the pass says UNOBSERVED — which outranks every
+  // other verdict, so this case does not move with the calendar.
+  t('#16393 summary: a bare line reports the divisor UNCHECKED, not agreed with', saidBy('h22Window', summaryLine({}, 0)).includes('RATE PREMISE UNOBSERVED'), true);
+  t('#16393 summary: …and renders numbers, never `undefined`', saidBy('h22Window', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.
