@@ -407,8 +407,14 @@ describe('security-owd-alias reaches the rule only through the unparsed doors (#
   const rawStack = (sharingModel: string) => ({ manifest, objects: [owdObject(sharingModel)] });
   const aliasFindings = (findings: readonly { rule: string; path: string }[]) =>
     findings.filter((f) => f.rule === SECURITY_OWD_ALIAS).map((f) => f.path);
-  /** Every key of the rule's `OWD_ALIAS_FIX` map. */
-  const ALIASES = ['read', 'read_write', 'full', 'public'] as const;
+  /** Every key of the rule's `OWD_ALIAS_FIX` map, with the canonical value its fix-it names. */
+  const ALIAS_FIX = {
+    read: 'public_read',
+    read_write: 'public_read_write',
+    full: 'public_read_write',
+    public: 'public_read_write',
+  } as const;
+  const ALIASES = Object.keys(ALIAS_FIX) as (keyof typeof ALIAS_FIX)[];
 
   it.each(ALIASES)('CONTROL — defineStack (strict default) refuses %s at load, before any rule runs', (alias) => {
     const { error } = quietly(() => defineStack(rawStack(alias) as never));
@@ -434,7 +440,13 @@ describe('security-owd-alias reaches the rule only through the unparsed doors (#
     }) as AnyRec;
     expect((normalized.objects as AnyRec[])[0].sharingModel).toBe(alias);
     expect(notices).toEqual([]);
-    expect(aliasFindings(runAuthoringRules('lint', { normalized }))).toEqual(['objects[0].sharingModel']);
+    const findings = runAuthoringRules('lint', { normalized }).filter((f) => f.rule === SECURITY_OWD_ALIAS);
+    expect(findings.map((f) => f.path)).toEqual(['objects[0].sharingModel']);
+    // The fix-it is what this door gets that the enum's `invalid_value` does not
+    // — and it is the ALIAS branch's own contribution: the sibling
+    // "not canonical" branch names the same rule id at the same path but no
+    // replacement, so this line is what tells the two apart.
+    expect(findings[0].hint).toContain(`sharingModel: '${ALIAS_FIX[alias]}'`);
   });
 
   it('INTAKE — defineStack(x, { strict: false }) skips the parse, so the alias reaches os lint too', () => {
