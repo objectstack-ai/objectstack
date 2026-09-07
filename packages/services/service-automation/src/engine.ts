@@ -8709,8 +8709,45 @@ export class AutomationEngine implements IAutomationService {
      * throw: an explicit `dialect: 'cel'` is the author saying "this is CEL", and
      * `{…}` is a map literal there. The sniff only applies where the dialect was
      * never stated.
+     *
+     * ## The shape gate, shared with registration (#16038)
+     *
+     * The FIRST statement, above everything else, is `structuralConditionRefusal`
+     * — the same call `registerFlow` makes on the same slots, not a second
+     * hand-written envelope that would drift from it. #15662 closed the reject
+     * set at the producer; this closes it at the evaluator, so the two are one
+     * set by construction rather than by agreement. It matters because
+     * `evaluateCondition` is a public method on an exported class: a plugin
+     * reaches it directly regardless of what `registerFlow` admits, and a flow
+     * stored before that gate landed replays through here.
+     *
+     * It sits ABOVE the dialect check, not at the `exprStr` derivation, because
+     * the unguarded read has three arms and the derivation is only two of them:
+     * a non-string `source` threw a bare `TypeError: exprStr.trim is not a
+     * function` naming nothing; a value that is neither text nor envelope read
+     * as an EMPTY condition and answered `false` — on the same key a start
+     * node's trigger gate is read from; and a malformed envelope carrying a
+     * non-predicate dialect (`{ dialect: 'cron', source: 1 }`) answered `false`
+     * one statement earlier still, never reaching the derivation at all.
+     *
+     * What it does NOT refuse is what the constructor admits, and those are
+     * controls, not oversights: every string (a malformed one still earns the
+     * #1491 brace trap or the §1c CEL fault below), absent/`null`, and an
+     * envelope carrying a string `source` or an `ast` — the `ast`-only arm
+     * still falls through to `false`, since that population is #15430/#15807's
+     * and not this ruling's.
      */
     evaluateCondition(expression: string | { dialect?: string; source?: string; ast?: unknown }, variables: Map<string, unknown>): boolean {
+        const shapeRefusal = structuralConditionRefusal(expression);
+        if (shapeRefusal) {
+            // ADR-0032 §1d — the error carries its source. `structuralConditionRefusal`
+            // attributes an empty one for the shape it is refusing here (a non-string
+            // `source` cannot be the attribution), which is its documented choice.
+            throw new Error(
+                `condition evaluation error: ${shapeRefusal.message} — source: \`${shapeRefusal.source}\``,
+            );
+        }
+
         const isEnvelope = typeof expression === 'object' && expression != null && 'dialect' in expression;
         const dialect = isEnvelope ? (expression as { dialect?: string }).dialect : undefined;
         const exprStr = typeof expression === 'string' ? expression : ((expression as { source?: string })?.source ?? '');
