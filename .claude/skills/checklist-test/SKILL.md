@@ -225,10 +225,10 @@ QA-source: #运行记录号 · area.item · 条款
 - **不伪造覆盖。** 缺 fixture → `blocked(fixture)` 带理由;console 没构建 → 构建它
   或记 `blocked(environment)`;证到一半的项是 `partial`,不是 `pass`。带证据的
   blocked 判定是一次成功运行;伪造的 pass 不是。
-- **认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方** —— 不进运行 issue,不进跟
-  踪卡,不进评论。记下项 id、条款与 `detail withheld pending maintainer`,复现留在会
-  话里,停下等维护者。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是
-  对另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
+- **认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方** —— 不进运行 issue,不进跟踪
+  卡,不进评论。记下项 id、条款与 `detail withheld pending maintainer`,复现留在会话里,本轮以该报
+  告终局,⛔ 不等维护者。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是对
+  另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
 - **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
 - **一个选择器、一次运行、一张 issue。** release sweep 把 `since:vN` 与
   `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。
