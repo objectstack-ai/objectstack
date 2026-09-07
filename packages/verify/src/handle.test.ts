@@ -266,14 +266,19 @@ describe('seed / rows — real ObjectQL writes and reads', () => {
   it('seeds a batch through the engine and reads it back filtered', async () => {
     const prefix = uniq('seed');
     const written = await stack.seed('hnd_deal', [
-      { name: `${prefix}-a`, amount: 1, stage: 'prospecting' },
-      { name: `${prefix}-b`, amount: 2, stage: 'negotiation' },
-      { name: `${prefix}-c`, amount: 3, stage: 'closed_won' },
+      { name: `${prefix}-a`, amount: 1, stage: 'prospecting', note: prefix },
+      { name: `${prefix}-b`, amount: 2, stage: 'negotiation', note: prefix },
+      { name: `${prefix}-c`, amount: 3, stage: 'closed_won', note: prefix },
     ]);
     expect(written).toHaveLength(3);
     expect(written.every((r) => typeof r.id === 'string')).toBe(true);
     // The seed went through the real write: the hook derived the column.
     expect(written.map((r) => r.probability)).toEqual([10, 80, 100]);
+
+    // The whole batch reads back — a read that answers fewer rows than were
+    // written is the find door lying, not a fixture that forgot a row.
+    const batch = await stack.rows('hnd_deal', { note: prefix });
+    expect(batch.map((r) => r.name).sort()).toEqual([`${prefix}-a`, `${prefix}-b`, `${prefix}-c`]);
 
     const negotiating = await stack.rows('hnd_deal', { name: `${prefix}-b` });
     expect(negotiating).toHaveLength(1);
