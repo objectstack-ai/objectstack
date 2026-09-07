@@ -174,5 +174,10 @@ export const esES: TranslationData = {
         'Concede a cualquier cliente de IA compatible con MCP acceso controlado a este entorno: '
         + 'cada llamada se ejecuta con los permisos propios de quien la realiza y con seguridad a nivel de fila.',
     },
+
+    // Platform record pages (#15743) -- see `en.ts` for the key set.
+    sys_user_detail: { label: 'Usuario' },
+    sys_organization_detail: { label: 'Organización' },
+    sys_position_detail: { label: 'Posición' },
   },
 };

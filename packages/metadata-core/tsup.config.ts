@@ -2,6 +2,8 @@
 
 import { defineConfig, type Options } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 // Everything both halves below share. Spelled once so the two cannot drift in
 // anything except the two properties they exist to differ in: `entry`/`format`.
 //
@@ -49,6 +51,7 @@ const shared: Options = {
   // emitted before the split.
   shims: true,
   external: ['vitest'],
+  esbuildOptions: dropSourcesContent,
 };
 
 // [#13013] The split is by FORMAT, never by ENTRY — that distinction is the

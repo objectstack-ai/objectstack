@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
   entry: ['src/index.ts'],
   splitting: true,
@@ -31,4 +33,5 @@ export default defineConfig({
   // `__dirname`/`__filename`, so the ESM build's shim path is a no-op.
   shims: true,
   external: ['vitest'],
+  esbuildOptions: dropSourcesContent,
 });

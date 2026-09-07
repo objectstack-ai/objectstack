@@ -253,5 +253,14 @@ export const en: TranslationData = {
         'Give any MCP-capable AI client governed access to this environment — '
         + "every call runs under the caller's own permissions and row-level security.",
     },
+
+    // The platform's own record pages (`@objectstack/platform-objects/pages`,
+    // contributed by plugin-auth and plugin-security). Their page-level `label`
+    // is the only key the extractor reaches -- everything else on them is
+    // authored as an inline locale map under `slots.*` (#14817). English
+    // mirrors the literal in the page metadata, as above.
+    sys_user_detail: { label: 'User' },
+    sys_organization_detail: { label: 'Organization' },
+    sys_position_detail: { label: 'Position' },
   },
 };
