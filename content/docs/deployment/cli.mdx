@@ -225,6 +225,15 @@ os serve --preset minimal  # Skip auto-loaded auth/i18n/ui plugins
 - `--preset minimal | default | full` — Override the auto-registration
   tier (see below)
 
+**Probes.** A served process exposes `GET /api/v1/health` (liveness — process
+only, and deliberately blind to configuration and credentials, so a
+configuration fault never restarts the pod) and `GET /api/v1/ready` (readiness —
+the full request pipeline, answering `503` while booting, draining, or faulted).
+Wire the first to Kubernetes' `livenessProbe` and the second to
+`readinessProbe`, never the reverse — the field mapping and the reference
+manifest live in
+[Health checks & orchestration](/docs/deployment/self-hosting#health-checks--orchestration).
+
 **Tier presets**
 
 `os serve` decides which optional plugins to auto-register from a tier

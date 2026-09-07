@@ -19,7 +19,8 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
-    "test": "vitest run",
+    "test": "vitest run --project local",
+    "test:repo": "vitest run --project repo",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/objectql --project tsconfig.test.json",
     "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/objectql --project tsconfig.test.json"

@@ -265,6 +265,20 @@ questions:
   inconclusive — no data engine at all, or the probe itself errors — the replica
   stays ready rather than black-holing a working deployment.
 
+**A configuration fault never restarts the pod.** The split above is enforced
+one step earlier than the two handlers: `/health` is served *before* the request
+pipeline resolves an identity, so it evaluates nothing that depends on
+configuration or credentials — a misconfigured or unbuildable security service
+leaves it answering `200` for as long as the process can serve HTTP. `/ready`
+keeps the whole pipeline and answers `503` for exactly that class of fault, with
+the body it has always returned. So wire `path: /api/v1/health` to
+`livenessProbe` and `path: /api/v1/ready` to `readinessProbe` — **never the
+other way round, and never the same path to both**. Crossed over, a
+configuration fault makes the orchestrator kill and recreate the pod; the new
+one reads the same configuration and fails the same way, and the operator sees
+`CrashLoopBackOff` instead of the fault. Withholding traffic is the response
+that helps; restarting is not.
+
 ### Kubernetes
 
 The same image works unchanged. A minimal reference Deployment — secrets from

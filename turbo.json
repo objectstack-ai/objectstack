@@ -14,6 +14,11 @@
       "env": ["OS_TEST_TIERS"],
       "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
     },
+    "test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": ["$TURBO_DEFAULT$", "!dist/**", "!coverage/**", "!.turbo/**"]
+    },
     "typecheck": {
       "dependsOn": ["^build"],
       "outputs": [],
@@ -58,37 +63,7 @@
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.object.ts",
-        "$TURBO_ROOT$/packages/lint/src/**",
-        "$TURBO_ROOT$/content/docs/references/**",
-        "$TURBO_ROOT$/scripts/**",
-        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
-        "$TURBO_ROOT$/packages/runtime/src/**",
-        "$TURBO_ROOT$/packages/objectql/src/validation/**",
-        "$TURBO_ROOT$/packages/metadata-protocol/src/**",
-        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**",
-        "$TURBO_ROOT$/content/docs/api/error-catalog.mdx",
-        "$TURBO_ROOT$/docs/audits/2026-07-unknown-key-strictness-ledger.md",
-        "$TURBO_ROOT$/.claude/skills/spec-property-retirement/SKILL.md",
-        "$TURBO_ROOT$/skills/**",
-        "$TURBO_ROOT$/packages/**/*.ts",
-        "$TURBO_ROOT$/packages/**/*.mts",
-        "$TURBO_ROOT$/packages/**/*.cts",
-        "$TURBO_ROOT$/packages/**/*.js",
-        "$TURBO_ROOT$/packages/**/*.mjs",
-        "$TURBO_ROOT$/packages/**/*.cjs",
-        "$TURBO_ROOT$/packages/**/*.json",
-        "$TURBO_ROOT$/packages/**/*.md",
-        "$TURBO_ROOT$/packages/**/*.mdx",
-        "$TURBO_ROOT$/packages/**/*.yaml",
-        "$TURBO_ROOT$/packages/**/*.yml",
-        "$TURBO_ROOT$/examples/**/*.json",
-        "$TURBO_ROOT$/examples/**/*.md",
-        "$TURBO_ROOT$/examples/**/*.mdx",
-        "$TURBO_ROOT$/examples/**/*.yaml",
-        "$TURBO_ROOT$/examples/**/*.yml",
-        "$TURBO_ROOT$/content/**"
+        "!.turbo/**"
       ]
     },
     "@objectstack/core#test": {
@@ -99,8 +74,7 @@
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.ts"
+        "!.turbo/**"
       ]
     },
     "@objectstack/types#test": {
@@ -111,8 +85,7 @@
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.ts"
+        "!.turbo/**"
       ]
     },
     "@objectstack/organizations#test": {
@@ -286,11 +259,7 @@
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
-        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
-        "$TURBO_ROOT$/packages/**/*.ts",
-        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
+        "!.turbo/**"
       ]
     },
     "@objectstack/objectql#test": {
@@ -301,9 +270,7 @@
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/packages/**/*.ts",
-        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
+        "!.turbo/**"
       ]
     },
     "@objectstack/driver-sql#test": {
@@ -446,12 +413,7 @@
         "$TURBO_DEFAULT$",
         "!dist/**",
         "!coverage/**",
-        "!.turbo/**",
-        "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
-        "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
-        "$TURBO_ROOT$/content/**",
-        "$TURBO_ROOT$/docs/**",
-        "$TURBO_ROOT$/skills/**"
+        "!.turbo/**"
       ]
     },
     "@objectstack/formula#test": {
@@ -529,6 +491,109 @@
     },
     "gen:skill-refs": {
         "dependsOn": ["^build"]
+    },
+    "@objectstack/spec#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.object.ts",
+        "$TURBO_ROOT$/packages/lint/src/**",
+        "$TURBO_ROOT$/content/docs/references/**",
+        "$TURBO_ROOT$/scripts/**",
+        "$TURBO_ROOT$/packages/cli/src/commands/serve.ts",
+        "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/objectql/src/validation/**",
+        "$TURBO_ROOT$/packages/metadata-protocol/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/**",
+        "$TURBO_ROOT$/content/docs/api/error-catalog.mdx",
+        "$TURBO_ROOT$/docs/audits/2026-07-unknown-key-strictness-ledger.md",
+        "$TURBO_ROOT$/.claude/skills/spec-property-retirement/SKILL.md",
+        "$TURBO_ROOT$/skills/**",
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/packages/**/*.mts",
+        "$TURBO_ROOT$/packages/**/*.cts",
+        "$TURBO_ROOT$/packages/**/*.js",
+        "$TURBO_ROOT$/packages/**/*.mjs",
+        "$TURBO_ROOT$/packages/**/*.cjs",
+        "$TURBO_ROOT$/packages/**/*.json",
+        "$TURBO_ROOT$/packages/**/*.md",
+        "$TURBO_ROOT$/packages/**/*.mdx",
+        "$TURBO_ROOT$/packages/**/*.yaml",
+        "$TURBO_ROOT$/packages/**/*.yml",
+        "$TURBO_ROOT$/examples/**/*.json",
+        "$TURBO_ROOT$/examples/**/*.md",
+        "$TURBO_ROOT$/examples/**/*.mdx",
+        "$TURBO_ROOT$/examples/**/*.yaml",
+        "$TURBO_ROOT$/examples/**/*.yml",
+        "$TURBO_ROOT$/content/**"
+      ]
+    },
+    "@objectstack/core#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.ts"
+      ]
+    },
+    "@objectstack/types#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.ts"
+      ]
+    },
+    "@objectstack/runtime#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
+      ]
+    },
+    "@objectstack/objectql#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**/*.ts",
+        "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
+      ]
+    },
+    "@objectstack/rest#test:repo": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
+        "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
+        "$TURBO_ROOT$/content/**",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/skills/**"
+      ]
     }
   }
 }
