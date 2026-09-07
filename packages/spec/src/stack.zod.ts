@@ -1746,6 +1746,56 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
 }
 
 /**
+ * [ADR-0112 · #15963] The envelope every refusal `defineStack` raises shares:
+ * `status: 422` — an unprocessable authored entity, not a server fault, the
+ * reading {@link StackCrossReferenceError} took from its two precedents — ONE
+ * `code` per refusal site, and the findings that site collected in `issues`,
+ * one entry per finding. Until #15963 only the cross-reference refusal carried
+ * the envelope; its six siblings a few lines apart threw `new Error(message)`
+ * with `code` and `status` both `undefined`, so a consumer that had learned to
+ * branch on `error.code` read `undefined` from six of the seven and could not
+ * tell "not a refusal" from "a refusal with no code yet".
+ *
+ * ⭐ One code per site, never a shared `STACK_VALIDATION_FAILED` catch-all:
+ * the ledger's `boot-refusal` class is already at one-row-per-refusal
+ * granularity (14 rows on the tree this landed against), and
+ * `STACK_CROSS_REFERENCE_INVALID` is an instance of that granularity, not an
+ * exception to it. Each member's `code` is spelled `STACK_<subject>_<condition>`
+ * in the ledger's own suffix vocabulary.
+ *
+ * ⛔ Module-local, like its first member: `packages/spec/src/index.ts`
+ * re-exports this module with `export *`, and the ADR-0112 contract is the
+ * `code` / `status` pair, read structurally by every consumer.
+ *
+ * ⛔ Never name a member `ValidationError`: `validationFailureDetails`
+ * (`@objectstack/types`) duck-types a RECORD-validation failure on that `name`
+ * and would answer `400 VALIDATION_FAILED` + `fields[]` for it.
+ *
+ * ⛔ None of these is registered in the ADR-0112 ledger — no wire door raises
+ * them (see the first member's note). Each has its classification row in
+ * `packages/runtime/src/dispatcher-error-vocabulary.ts` as `door: 'none'` /
+ * `verdict: 'boot-refusal'`; `check:dispatcher-error-vocabulary` holds the two
+ * files equal in both directions.
+ *
+ * `issues` is HETEROGENEOUS across members, on purpose: the six semantic
+ * refusals carry one string per finding, the schema arm carries the zod issue
+ * objects — `TIssue` names which, and a reader branches on `code` before it
+ * reads `issues`, never on the element shape.
+ */
+abstract class StackRefusalError<TIssue = string> extends Error {
+  abstract readonly code: string;
+  readonly status = 422;
+  /** One entry per finding, in the order the validator collected them. */
+  readonly issues: readonly TIssue[];
+
+  protected constructor(name: string, message: string, issues: readonly TIssue[]) {
+    super(message);
+    this.name = name;
+    this.issues = issues;
+  }
+}
+
+/**
  * [ADR-0112] The cross-reference refusal `defineStack` raises when a stack's
  * items name objects the stack does not define — carried as an envelope
  * (`code` + `status`), never a bare `Error`.
@@ -1788,17 +1838,136 @@ function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[
  * configs and `DevPlugin`); no HTTP domain handler calls it. The classification
  * row lives in `packages/runtime/src/dispatcher-error-vocabulary.ts` as
  * `door: 'none'` / `verdict: 'boot-refusal'`.
+ *
+ * Since #15963 the envelope half (`status`, `issues`) lives on
+ * {@link StackRefusalError}, which every `defineStack` refusal now extends;
+ * this class keeps its `code`, its `name` and its message byte-for-byte.
  */
-class StackCrossReferenceError extends Error {
+class StackCrossReferenceError extends StackRefusalError {
   readonly code = 'STACK_CROSS_REFERENCE_INVALID';
-  readonly status = 422;
-  /** One entry per finding, in the order `validateCrossReferences` collected them. */
-  readonly issues: readonly string[];
 
   constructor(message: string, issues: readonly string[]) {
-    super(message);
-    this.name = 'StackCrossReferenceError';
-    this.issues = issues;
+    super('StackCrossReferenceError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #15963] The SCHEMA refusal — `ObjectStackDefinitionSchema.safeParse`
+ * itself failed. ⭐ Judged on its own rather than copied from the five semantic
+ * cross-checks below, because it is a different kind of failure: an aggregate
+ * of zod issues against the schema the stack declares, not a rule evaluated on
+ * an already-parsed stack. The reading that settled its shape, taken on the
+ * tree this landed against:
+ *
+ * - `packages/spec` has NO zod-failure envelope to reuse. `formatZodError` /
+ *   `safeParsePretty` are prose formatters (they return a string); every
+ *   `extends Error` in this package is a domain refusal and none wraps a
+ *   `ZodError`. So "reuse spec's existing zod-failure channel" names a
+ *   channel that does not exist — the only existing channel is the message.
+ * - The two zod-shaped refusals the ADR-0112 ledger DOES carry are both spelled
+ *   `*_SCHEMA_INVALID`: `METADATA_SCHEMA_INVALID` (`SchemaValidationError` in
+ *   `@objectstack/metadata-core` — "a put's spec fails Zod validation against
+ *   the canonical schema", carrying the zod `issues` structurally; its docstring
+ *   says 422 but nothing in the tree assigns it a status) and
+ *   `FLOW_INPUT_SCHEMA_INVALID` ("a node's config contradicts the schema the
+ *   definition itself declares", answered 422 by
+ *   `packages/runtime/src/flow-dispatch-status.ts`). The zod-shaped refusal
+ *   `metadata-protocol` actually stamps at 422 is `INVALID_METADATA`
+ *   (`protocol.ts`, `runtime-authoring-gate.ts`). An authored stack failing its
+ *   own schema is that class exactly: the `issues` shape from the first, the
+ *   422 from the other two.
+ * - The other two channels a zod failure travels on in this repo are both the
+ *   wrong vocabulary here. `400 VALIDATION_ERROR` is the REQUEST-syntax bucket
+ *   (`packages/rest` answers a malformed body with it, passing raw zod issue
+ *   codes through as field errors — ADR-0112 D6); `defineStack` serves no
+ *   request. `VALIDATION_FAILED` + `fields[]` is objectql's RECORD-validation
+ *   vocabulary, and `validationFailureDetails` (`@objectstack/types`)
+ *   recognises it by duck-typing on `code` OR `name === 'ValidationError'` —
+ *   reusing it would make "this stack is mis-authored" indistinguishable from
+ *   "this record write was refused" to every reader of the dispatcher's
+ *   envelope, the exact conflation an `error.code` exists to prevent.
+ *
+ * So: its own arm, `STACK_SCHEMA_INVALID`, `status: 422` like every other
+ * `defineStack` refusal, and `issues` carrying the zod issues STRUCTURALLY
+ * (path + code + message per entry — what `SchemaValidationError.issues`
+ * carries and what `zodIssuesToFields` consumes) rather than the formatted
+ * lines: the message already renders those, and the envelope's job is the
+ * machine-readable half. The issue COUNT the header states is `issues.length`
+ * either way. The message text is byte-for-byte what the bare `Error` carried.
+ */
+class StackSchemaInvalidError extends StackRefusalError<z.core.$ZodIssue> {
+  readonly code = 'STACK_SCHEMA_INVALID';
+
+  constructor(message: string, issues: readonly z.core.$ZodIssue[]) {
+    super('StackSchemaInvalidError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #15963] `requires` names a token no runtime provides —
+ * {@link validateKnownCapabilities}. One entry per DISTINCT unknown token, in
+ * declaration order.
+ */
+class StackCapabilityUnknownError extends StackRefusalError {
+  readonly code = 'STACK_CAPABILITY_UNKNOWN';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackCapabilityUnknownError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #15963] An object's name lacks the `manifest.namespace` prefix —
+ * {@link validateNamespacePrefix}. The writing-style hint the message appends
+ * stays in the message only; `issues` carries the per-object findings.
+ */
+class StackNamespacePrefixInvalidError extends StackRefusalError {
+  readonly code = 'STACK_NAMESPACE_PREFIX_INVALID';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackNamespacePrefixInvalidError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #15963] An `app` package declares more than one app — the banned
+ * "suite contains apps" shape, ADR-0019 D3 — {@link validateSingleApp}.
+ * Spelled `_VIOLATION` like the ledger's other rule-violation refusals
+ * (`UNIQUE_VIOLATION`, `EXTERNAL_SCHEMA_MODE_VIOLATION`).
+ */
+class StackSingleAppViolationError extends StackRefusalError {
+  readonly code = 'STACK_SINGLE_APP_VIOLATION';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackSingleAppViolationError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #15963] A permission grant uses a HIERARCHY scope while `requires`
+ * omits `hierarchy-security` — {@link validateHierarchyScopeCapability}, the
+ * declared-capability class that fails CLOSED. Spelled `_REQUIRED` like the
+ * ledger's other "a declaration is owed and absent" refusals
+ * (`TENANT_SCOPE_REQUIRED`, `WRITABLE_PACKAGE_REQUIRED`).
+ */
+class StackHierarchyScopeCapabilityRequiredError extends StackRefusalError {
+  readonly code = 'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackHierarchyScopeCapabilityRequiredError', message, issues);
+  }
+}
+
+/**
+ * [ADR-0112 · #15963] An auto-launched flow is declared while `requires` omits
+ * `triggers` — {@link validateTriggerCapability}, the declared-capability class
+ * that fails SILENT. Same `_REQUIRED` spelling as its hierarchy sibling.
+ */
+class StackTriggerCapabilityRequiredError extends StackRefusalError {
+  readonly code = 'STACK_TRIGGER_CAPABILITY_REQUIRED';
+
+  constructor(message: string, issues: readonly string[]) {
+    super('StackTriggerCapabilityRequiredError', message, issues);
   }
 }
 
@@ -2550,7 +2719,13 @@ export function defineStack(
   });
 
   if (!result.success) {
-    throw new Error(formatZodError(result.error, 'defineStack validation failed'));
+    // [ADR-0112 · #15963] The message is byte-for-byte what the bare `Error`
+    // carried; the zod issues ride `issues` structurally. See
+    // {@link StackSchemaInvalidError} for why this arm is its own code.
+    throw new StackSchemaInvalidError(
+      formatZodError(result.error, 'defineStack validation failed'),
+      result.error.issues,
+    );
   }
 
   // REJECT any unknown capability token (framework#3265/#3308): no runtime
@@ -2563,7 +2738,7 @@ export function defineStack(
   if (capErrors.length > 0) {
     const header = `defineStack capability validation failed (${capErrors.length} issue${capErrors.length === 1 ? '' : 's'}):`;
     const lines = capErrors.map((e) => `  ✗ ${e}`);
-    throw new Error(`${header}\n\n${lines.join('\n')}`);
+    throw new StackCapabilityUnknownError(`${header}\n\n${lines.join('\n')}`, capErrors);
   }
 
   const crossRefErrors = validateCrossReferences(data);
@@ -2581,28 +2756,29 @@ export function defineStack(
     const header = `defineStack namespace-prefix validation failed (${nsErrors.length} issue${nsErrors.length === 1 ? '' : 's'}):`;
     const lines = nsErrors.map((e) => `  ✗ ${e}`);
     const hint = `\n\nEvery object.name must be \`\${manifest.namespace}_\${shortName}\`. This is the only supported writing style — the platform does not provide ns() helpers or factory wrappers.`;
-    throw new Error(`${header}\n\n${lines.join('\n')}${hint}`);
+    // The hint stays in the message only; `issues` is the per-object findings.
+    throw new StackNamespacePrefixInvalidError(`${header}\n\n${lines.join('\n')}${hint}`, nsErrors);
   }
 
   const appErrors = validateSingleApp(data);
   if (appErrors.length > 0) {
     const header = `defineStack single-app validation failed (${appErrors.length} issue${appErrors.length === 1 ? '' : 's'}):`;
     const lines = appErrors.map((e) => `  ✗ ${e}`);
-    throw new Error(`${header}\n\n${lines.join('\n')}`);
+    throw new StackSingleAppViolationError(`${header}\n\n${lines.join('\n')}`, appErrors);
   }
 
   const hierErrors = validateHierarchyScopeCapability(data);
   if (hierErrors.length > 0) {
     const header = `defineStack hierarchy-scope capability validation failed (${hierErrors.length} issue${hierErrors.length === 1 ? '' : 's'}):`;
     const lines = hierErrors.map((e) => `  ✗ ${e}`);
-    throw new Error(`${header}\n\n${lines.join('\n')}`);
+    throw new StackHierarchyScopeCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, hierErrors);
   }
 
   const triggerErrors = validateTriggerCapability(data);
   if (triggerErrors.length > 0) {
     const header = `defineStack trigger capability validation failed (${triggerErrors.length} issue${triggerErrors.length === 1 ? '' : 's'}):`;
     const lines = triggerErrors.map((e) => `  ✗ ${e}`);
-    throw new Error(`${header}\n\n${lines.join('\n')}`);
+    throw new StackTriggerCapabilityRequiredError(`${header}\n\n${lines.join('\n')}`, triggerErrors);
   }
 
   return mergeActionsIntoObjects(data);
