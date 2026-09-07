@@ -205,18 +205,34 @@ export interface AIToolDefinition {
  * door hand-spelling its own `'confirm'` is precisely how two doors drift into
  * two dialects (Prime Directive #12). Every AI-facing action door reads this.
  *
- * It rides as a TOP-LEVEL member of the action request, beside `actionName` /
- * `objectName` / `recordId`. Two placements were rejected, and the reasons are
- * the contract:
+ * It rides as a TOP-LEVEL member of the action request. The two request
+ * shapes it is destined for are the MCP `run_action` tool input (`actionName`
+ * / `objectName` / `recordId` / `params`, `packages/mcp/src/mcp-http-tools.ts`)
+ * and the runtime action door's own request object — the `input` argument of
+ * `invokeBusinessAction` (`objectName` / `recordId` / `params`,
+ * `packages/runtime/src/action-execution.ts`), which the MCP bridge builds
+ * that object from. Each grows the member in the change that enforces it, so
+ * neither ever accepts-and-ignores it. Two placements were rejected, and the
+ * reasons are the contract:
  *
- * - NOT inside `params`. That object is the action author's own declared input
- *   vocabulary, so a platform member there is a name the author may already
- *   have used — a collision that silently reassigns one of the two meanings.
+ * - NOT inside `params`. That bag is not a free surface: it is CLOSED against
+ *   the action author's own declared input vocabulary. `enforceActionParams`
+ *   (ADR-0104 D2, strict by default since 17.0) rejects any key that is
+ *   neither a declared param nor one of the built-ins, so on an action that
+ *   declares params at all a platform `confirm` riding there is REFUSED as an
+ *   unknown action param — a 400 raised before the confirmation gate is ever
+ *   reached, not merely a collision with a name the author might already have
+ *   used. On an action declaring no params that check is a pass-through, so
+ *   the same member would be silently accepted there instead: one placement,
+ *   two opposite behaviours, which on its own disqualifies it for a safety
+ *   member.
  * - NOT a transport header. A header is invisible to the tool schema an agent
  *   reads, so the model cannot discover the retry it is being told to make;
- *   and the in-process doors (flow `call action` nodes, the action runner)
- *   have no header to carry it on at all. A free-form header would also be an
- *   OPEN channel, which is the one thing a safety member must not be.
+ *   and a header exists only at an HTTP edge, while the action door itself is
+ *   a plain function handed a request object rather than a transport envelope
+ *   — there is no header there for it to ride on. A free-form header would
+ *   also be an OPEN channel, which is the one thing a safety member must not
+ *   be.
  */
 export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
 
@@ -245,9 +261,11 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * The predicate is deliberately narrower than the one behind the
  * `requiresConfirmation` field of a tool/action LISTING (see
  * {@link AIToolDefinition.requiresConfirmation}). That field answers "should a
- * client ASK the human before calling?" and falls back to a destructiveness
- * heuristic — `mode: 'delete'` or `variant: 'danger'` — when the author
- * declared nothing. This one answers "will the server REFUSE without an
+ * client ASK the human before calling?" and falls back to the runtime's
+ * `actionLooksDestructive` heuristic (`packages/runtime/src/action-execution.ts`)
+ * when the author declared nothing — the signals that heuristic reads are
+ * named once, beside the authorable key in `ui/action.zod.ts`, and are not
+ * restated here. This one answers "will the server REFUSE without an
  * attestation?", and an author who declared nothing has asked for nothing:
  * gating the refusal on the heuristic would start refusing calls that work
  * today, on a guess the author never made.
@@ -259,7 +277,7 @@ export const AI_ACTION_CONFIRMATION_MEMBER = 'confirm';
  * - declared `ai.requiresConfirmation: true` → the door REFUSES without the
  *   member, and the listing reports `true` as well.
  * - declared `ai.requiresConfirmation: false` → no refusal, whatever the
- *   action's `mode` / `variant` look like. An explicit `false` is the author
+ *   action looks like to that heuristic. An explicit `false` is the author
  *   asserting the action is safe unattended, and it overrides the heuristic in
  *   that direction too.
  *
