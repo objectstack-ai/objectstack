@@ -8214,14 +8214,14 @@ export class RestServer {
                         // inventing org RESOLUTION here, and this reads
                         // `tenantId` off the execution context `resolveExecCtx`
                         // already resolves, exactly as #8803 did for the audit
-                        // read. The raw tenant is right for a READ (the write
-                        // doors run it through `organizationIdForMetaWrite`
-                        // instead): `getMetaItemLayered`'s overlay layer is
-                        // org-scoped-first, THEN env-wide, so this is fail-open
-                        // in the safe direction — an org-less caller reads
-                        // exactly what it reads today, and an org-scoped caller
-                        // still falls back to the env-wide row. Nothing that
-                        // resolves today stops resolving.
+                        // read. [#14907] The CALLEE gates: `getMetaItemLayered`
+                        // resolves `organizationIdForMetaRead` AFTER its canonical
+                        // fold, so the tenant goes over RAW. ⛔ Pre-gating HERE, on
+                        // the unfolded `:type`, would be the #10340 defect. ⛔ And
+                        // the old "fail-open in the safe direction" reading is the
+                        // argument the predicate refutes: an org named on a type
+                        // the registry does not declare overridable resurrects the
+                        // phantoms #6190 stopped minting.
                         //
                         // Environment scoping still holds: it comes from WHICH
                         // protocol `resolveProtocol` hands back, not from the

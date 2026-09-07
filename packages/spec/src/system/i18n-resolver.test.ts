@@ -1368,26 +1368,93 @@ describe('translatePage', () => {
       expect(byId(out, 'ai_briefing').properties.description).toBe('Open the assistant panel.');
     });
 
-    it('lets the id-addressed route win over the page-name route on a header that has an id', () => {
-      const doc = {
+    // Ruled 2026-09-06 (maintainer, verbatim 「同意」, decision batch #58,
+    // option 1): "The page-name route is canonical for a region-level
+    // `page:header`. `translatePage` stops reading the id route
+    // (`pages.PAGE.components.HEADERID.*`) for a `page:header` at region
+    // level; a `page:header` nested inside a container stays id-only, as its
+    // doc already says. One component, one address — `title` and `subtitle`
+    // now follow the same rule."
+    //
+    // The ruling has two halves, and one bundle cannot measure both — so two
+    // pins. `homeBundle` carries `pages.sales_home_page.label`, and the
+    // page-name overlay is applied AFTER the id route and wins for `title`
+    // whether or not the id route was read: against that bundle the header's
+    // `title` reads `销售看板` on a resolver that still reads the id route.
+    // That is a real invariant (precedence when both routes are present) and
+    // the first pin names it as exactly that — it is NOT evidence that the id
+    // route is closed. The second pin hands the resolver an id-ONLY bundle —
+    // no `pages.<name>.label`, no `pages.<name>.title` — so the page-name
+    // overlay has nothing to win with and only the id route could move the
+    // title. Measured with the gate reverted to `if (addressed)`: the first
+    // pin stays green, the second goes red.
+    //
+    // A region-level `page:header` that carries an id. `properties` is
+    // widened to the open bag it is: the overlay adds keys the literal does
+    // not spell out, and inferring it as `{title}` alone would make reading
+    // the result a type error.
+    const regionHeaderWithId = () => ({
+      name: 'sales_home_page',
+      regions: [{
+        name: 'header',
+        components: [{
+          type: 'page:header',
+          id: 'quick_create',
+          properties: { title: 'Sales Home' } as Record<string, string>,
+        }],
+      }],
+    });
+
+    // Previously this asserted the OPPOSITE (`title` resolving to `快速新建`,
+    // the id route beating the page-name one). Inverted, not deleted, because
+    // the inversion IS the behaviour change the ruling records: the id route
+    // was live for this component and preferred, and a bundle that used it
+    // now falls back to the page-name key.
+    it('prefers the page-name route over the id route for a region-level `page:header` when a bundle carries both (batch #58)', () => {
+      const out = translatePage(regionHeaderWithId(), homeBundle, { locale: 'zh-CN' });
+      // `components.quick_create.title` (`快速新建`) does not win here — the
+      // page-name route does, falling back to `pages.<name>.label` for `title`.
+      expect(out.regions[0].components[0].properties.title).toBe('销售看板');
+      expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+      // Control: the very same bundle entry still reaches the component that
+      // actually owns it, so the assertion above is about the header's route
+      // and not about a bundle that stopped resolving.
+      expect(byId(translatePage(homePage(), homeBundle, { locale: 'zh-CN' }), 'quick_create')
+        .properties.title).toBe('快速新建');
+    });
+
+    it('does not read the id route for a region-level `page:header` — an id-only bundle leaves its authored title alone (batch #58)', () => {
+      // No `pages.<name>.label` / `title` / `subtitle`: the page-name route
+      // resolves nothing for this page, so a translated title on the header
+      // could only have come from `components.quick_create.title`.
+      const idOnly: TranslationBundle = {
+        'zh-CN': { pages: { sales_home_page: { components: { quick_create: { title: '快速新建' } } } } },
+      };
+      const out = translatePage(regionHeaderWithId(), idOnly, { locale: 'zh-CN' });
+      expect(out.regions[0].components[0].properties.title).toBe('Sales Home');
+      // Control 1: the same id-only bundle DOES translate the component that
+      // owns the id, so the authored title above is the header's id route
+      // being closed and not a bundle nothing can resolve.
+      expect(byId(translatePage(homePage(), idOnly, { locale: 'zh-CN' }), 'quick_create')
+        .properties.title).toBe('快速新建');
+      // Control 2: a `page:header` NESTED in a container stays id-addressed —
+      // the ruling closes the id route at region level only, and the id route
+      // is the only one that reaches a nested header.
+      const nestedDoc = {
         name: 'sales_home_page',
         regions: [{
-          name: 'header',
-          // `properties` widened to the open bag it is: the overlay adds keys
-          // the literal does not spell out, and inferring it as `{title}` alone
-          // would make reading the result a type error.
+          name: 'main',
           components: [{
-            type: 'page:header',
-            id: 'quick_create',
-            properties: { title: 'Sales Home' } as Record<string, string>,
+            type: 'page:card',
+            id: 'wrapper',
+            properties: {
+              children: [{ type: 'page:header', id: 'quick_create', properties: { title: 'Sales Home' } as Record<string, string> }],
+            },
           }],
         }],
       };
-      const out = translatePage(doc, homeBundle, { locale: 'zh-CN' });
-      // `components.quick_create.title` is more specific than `pages.<name>.label`.
-      expect(out.regions[0].components[0].properties.title).toBe('快速新建');
-      // The page-name route still supplies what the id route did not.
-      expect(out.regions[0].components[0].properties.subtitle).toBe('欢迎回来');
+      const nested = translatePage(nestedDoc, idOnly, { locale: 'zh-CN' });
+      expect((nested.regions[0].components[0].properties.children as any[])[0].properties.title).toBe('快速新建');
     });
 
     it('does not mutate the input page', () => {

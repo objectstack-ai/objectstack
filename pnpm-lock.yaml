@@ -2879,6 +2879,9 @@ importers:
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
+      croner:
+        specifier: ^10.0.1
+        version: 10.0.1
     devDependencies:
       '@objectstack/service-automation':
         specifier: workspace:*
@@ -2886,9 +2889,6 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
-      croner:
-        specifier: ^10.0.1
-        version: 10.0.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
