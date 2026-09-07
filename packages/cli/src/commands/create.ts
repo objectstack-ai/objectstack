@@ -8,10 +8,20 @@
  * The `example` template emitted a SUBSET of what `os init` writes, plus one
  * README. #15531 rendered and hashed both command families' real emission: the
  * only template-level duplication left between them was this one template, and
- * the ruling (decision batch #66, option B) is that the template goes rather
- * than that the two families merge — they emit two different artifacts, and a
- * kernel code `Plugin` is not a declarative app. The maintainer ruled the same
- * week that it goes with NO alias and NO deprecation window.
+ * the ruling (#15531, decision batch #66, option B) is that the template goes
+ * rather than that the two families merge — they emit two different artifacts,
+ * and a kernel code `Plugin` is not a declarative app.
+ *
+ * ⚠️ That batch entry is the whole of what is verified here, and it settles the
+ * REMOVAL only. The terms this file implements on top of it — NO alias and NO
+ * deprecation window — are recorded on card #16483 and are PENDING MAINTAINER
+ * CONFIRMATION: a contract review could not locate the ruling they were
+ * attributed to, so the attribution is written as unverified with its source
+ * named rather than repeated. ⛔ Do not restate it as a settled ruling, and
+ * ⛔ do not go looking for a ruling to make it true — it is filed for the
+ * maintainer. The BEHAVIOUR is unaffected either way and is the shipped
+ * precedent (`os g agent`, `RETIRED_GENERATORS` in `generate.ts`): the command
+ * refuses rather than aliasing, which is what the message below says.
  *
  * ⛔ The template is not merely deleted. `os create example` still ANSWERS, and
  * the answer names `os init` — see {@link RETIRED_TEMPLATES}. Letting it fall
@@ -433,12 +443,12 @@ export const RETIRED_TEMPLATES: Record<string, {
       'command families were measured file by file and hashed: there was no',
       'shape this template produced that `os init` does not.',
       '',
-      'Use `os init` instead — it writes the same objectstack.config.ts and',
-      'tsconfig.json, and adds src/objects, a .gitignore and the dependency',
-      'install this template never had:',
+      'Use `os init` instead — it writes the same tsconfig.json and an',
+      'equivalent objectstack.config.ts, and adds src/objects, a .gitignore and',
+      'the dependency install this template never had:',
       '',
       '    os init <name>             ->  a full application project',
-      '    os init <name> -t empty    ->  objectstack.config.ts only',
+      '    os init <name> -t empty    ->  config only, no src/objects',
       '',
       'There is no alias and no deprecation window: `os create example` will not',
       'come back, so change the command rather than pinning an older CLI.',

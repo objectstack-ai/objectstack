@@ -7,10 +7,17 @@
  *
  * #15531 rendered and hashed the real emission of both scaffolder families and
  * found one template-level duplicate: `os create example` wrote a SUBSET of
- * what `os init` writes, plus one README. The director seat ruled (batch #66,
- * option B) that the template goes rather than that the two command families
- * merge, and the maintainer ruled the same week that it goes with no alias and
- * no deprecation window.
+ * what `os init` writes, plus one README. The director seat ruled (#15531,
+ * batch #66, option B) that the template goes rather than that the two command
+ * families merge.
+ *
+ * ⚠️ That entry settles the REMOVAL, and it is the only half verified. The
+ * terms asserted below — no alias, no deprecation window — are recorded on
+ * card #16483 and are PENDING MAINTAINER CONFIRMATION: a contract review could
+ * not locate the ruling they were attributed to. They are asserted here as
+ * SHIPPED BEHAVIOUR, which is what a pin can hold: whatever settles the
+ * provenance, these assertions describe what the command does today, and they
+ * go red if that changes. ⛔ Do not restate the attribution as settled.
  *
  * ⛔ So deleting the template is only half of it. A removal that let
  * `os create example` fall through to `Unknown type:` would print the surviving
