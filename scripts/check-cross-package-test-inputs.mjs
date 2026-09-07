@@ -220,7 +220,7 @@
 //   node scripts/check-cross-package-test-inputs.mjs --list-escapes
 //   node scripts/check-cross-package-test-inputs.mjs --self-test
 
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve, relative, dirname, sep, isAbsolute } from 'node:path';
@@ -263,11 +263,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the INTERPOLATING TEMPLATE argument, `NEW_URL_LITERAL` sibling (#12085) ─': 7,
   'the RESOLVER half (#10452)': 43,
   'the entry guard, driven for real': 2,
+  'the SPLIT test:repo task (#16466)': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 7;
+const SELF_TEST_BATTERY_FLOOR = 8;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1455,23 +1456,17 @@ function verify() {
     console.error(`FAIL: cannot read turbo.json: ${e.message}`);
     process.exit(1);
   }
+  // A split package (#16466, the header above `readSplit`) hashes the radius on
+  // `<pkg>#test:repo` and keeps `<pkg>#test` package-local; its `repo` project's
+  // include list is held equal to the scan here, in both directions.
+  let splitCount = 0;
   for (const [name, { globs }] of Object.entries(CROSS_PACKAGE_TEST_INPUTS)) {
-    const task = turbo.tasks?.[`${name}#test`];
-    if (!task) {
-      problems.push(
-        `turbo.json has no "${name}#test" task. Without it the package's test cache is\n` +
-          `    keyed on package-local files only, so a change to its declared globs replays\n` +
-          `    a stale green instead of re-running. Add it with inputs:\n` +
-          `      ${JSON.stringify(expectedInputs(globs))}`,
-      );
-      continue;
-    }
-    const missing = globs.filter((g) => !(task.inputs ?? []).includes(`$TURBO_ROOT$/${g}`));
-    if (missing.length) {
-      problems.push(
-        `turbo.json "${name}#test" inputs are missing the declared glob(s):\n` +
-          missing.map((g) => `      $TURBO_ROOT$/${g}`).join('\n'),
-      );
+    const info = escaping.get(name);
+    const { split, listed } = info ? readSplit(join(REPO_ROOT, info.dir)) : { split: false, listed: null };
+    if (split) splitCount++;
+    problems.push(...turboInputProblems(name, globs, turbo.tasks, split));
+    if (split && info) {
+      problems.push(...repoProjectProblems(name, info.tests.map((t) => relative(info.dir, t)), listed));
     }
   }
 
@@ -1502,8 +1497,138 @@ function verify() {
   }
   console.log(
     `OK: ${escaping.size} package(s) read outside themselves, all declared, ` +
-      `and turbo.json hashes every declared glob.`,
+      `and turbo.json hashes every declared glob` +
+      (splitCount ? ` (${splitCount} of them on a split "${REPO_TASK}" task).` : '.'),
   );
+}
+
+// ── The SPLIT (#16466): `<pkg>#test` and `<pkg>#test:repo` ───────────────────
+//
+// A heavy package that also carries repo-scanning tests paid its declared
+// radius on every change anywhere inside it: `packages/**/*.ts` on
+// `@objectstack/spec#test` re-ran 13,000 cases for a leaf `.ts` edit, and
+// `content/**` re-ran spec and rest (~640s of CI-median suite wall) for a
+// docs-only merge group. Moving the scanning files out was measured and
+// refused -- 20 of the 33 import private internals of their home package --
+// so such a package splits its TASK, never its files: two vitest projects in
+// one config,
+//
+//   `local`  every other test file    -> `<pkg>#test`        package-local inputs
+//   `repo`   the escaping tests       -> `<pkg>#test:repo`   the declared radius
+//
+// The split is declared by the manifest's `test:repo` script. The `repo`
+// project's include list is REPO_TESTS_FILE beside the config, and this gate
+// holds that list EQUAL to its own scan in both directions: an escaping test
+// missing from the list runs under `test`, whose hash never moves with its
+// reads -- #7802 again, one task over -- and a listed file that no longer
+// escapes is refused too, so the list cannot rot into "everything". Layer B
+// follows the split: the declared globs must hash on `<pkg>#test:repo`, and
+// `<pkg>#test` must carry NO `$TURBO_ROOT$` input at all, or the split gains
+// nothing while reading as done. A package without a `test:repo` script keeps
+// the radius on `<pkg>#test` exactly as before.
+export const REPO_TESTS_FILE = 'vitest.repo-tests.json';
+export const REPO_TASK = 'test:repo';
+
+/** `{ split, listed }` for a package directory: `listed` is the JSON array, or null when unreadable. */
+export function readSplit(pkgDir) {
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8'));
+  } catch {
+    return { split: false, listed: null };
+  }
+  if (typeof manifest?.scripts?.[REPO_TASK] !== 'string') return { split: false, listed: null };
+  let listed = null;
+  try {
+    const parsed = JSON.parse(readFileSync(join(pkgDir, REPO_TESTS_FILE), 'utf8'));
+    if (Array.isArray(parsed) && parsed.every((p) => typeof p === 'string')) listed = parsed;
+  } catch {
+    listed = null;
+  }
+  return { split: true, listed };
+}
+
+/**
+ * Layer B for one package: the task that must hash the declared globs, and --
+ * for a split package -- the task that must not. `tasks` is turbo.json's map.
+ */
+export function turboInputProblems(name, globs, tasks, split) {
+  const problems = [];
+  const owner = split ? `${name}#${REPO_TASK}` : `${name}#test`;
+  const task = tasks?.[owner];
+  if (!task) {
+    problems.push(
+      `turbo.json has no "${owner}" task. Without it the package's test cache is\n` +
+        `    keyed on package-local files only, so a change to its declared globs replays\n` +
+        `    a stale green instead of re-running. Add it with inputs:\n` +
+        `      ${JSON.stringify(expectedInputs(globs))}`,
+    );
+  } else {
+    const missing = globs.filter((g) => !(task.inputs ?? []).includes(`$TURBO_ROOT$/${g}`));
+    if (missing.length) {
+      problems.push(
+        `turbo.json "${owner}" inputs are missing the declared glob(s):\n` +
+          missing.map((g) => `      $TURBO_ROOT$/${g}`).join('\n'),
+      );
+    }
+  }
+  if (split) {
+    const wide = (tasks?.[`${name}#test`]?.inputs ?? []).filter((i) => i.startsWith('$TURBO_ROOT$/'));
+    if (wide.length) {
+      problems.push(
+        `turbo.json "${name}#test" still hashes repo-wide input(s) although the package splits its\n` +
+          `    escaping tests into "${owner}":\n` +
+          wide.map((i) => `      ${i}`).join('\n') +
+          `\n    Move them to "${owner}" -- left here, every change inside the radius re-runs the\n` +
+          `    whole suite and the split gains nothing while reading as done.`,
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * The `repo` project's include list against this gate's scan, both package-relative.
+ * `listed` null means the file could not be read as a JSON array of strings.
+ */
+export function repoProjectProblems(name, escapingTests, listed) {
+  if (listed === null) {
+    return [
+      `${name} declares a "${REPO_TASK}" script but has no readable ${REPO_TESTS_FILE} beside its\n` +
+        `    vitest config (a JSON array of package-relative test paths). Write it with the\n` +
+        `    escaping tests:\n` +
+        `      ${JSON.stringify([...escapingTests].sort())}`,
+    ];
+  }
+  const problems = [];
+  const listedSet = new Set(listed);
+  const escSet = new Set(escapingTests);
+  const missing = escapingTests.filter((t) => !listedSet.has(t));
+  if (missing.length) {
+    problems.push(
+      `${name} has escaping test(s) that are NOT in ${REPO_TESTS_FILE}, so they run under\n` +
+        `    "${name}#test", whose hash never moves with what they read:\n` +
+        missing.map((t) => `      ${t}`).join('\n') +
+        `\n    Add them to the list (it is the \`repo\` project's include).`,
+    );
+  }
+  const extra = listed.filter((t) => !escSet.has(t));
+  if (extra.length) {
+    problems.push(
+      `${name}'s ${REPO_TESTS_FILE} lists file(s) that do not read outside the package:\n` +
+        extra.map((t) => `      ${t}`).join('\n') +
+        `\n    Remove them -- they belong to "${name}#test", and a list wider than the scan is\n` +
+        `    one that rots into "everything".`,
+    );
+  }
+  const duplicated = listed.filter((t, i) => listed.indexOf(t) !== i);
+  if (duplicated.length) {
+    problems.push(
+      `${name}'s ${REPO_TESTS_FILE} has duplicated entr${duplicated.length === 1 ? 'y' : 'ies'}:\n` +
+        [...new Set(duplicated)].map((t) => `      ${t}`).join('\n'),
+    );
+  }
+  return problems;
 }
 
 function expectedInputs(globs) {
@@ -2428,6 +2553,42 @@ function selfTest() {
   // A spawned child is the only honest witness: the guard's answer depends on
   // what node puts in `process.argv[1]`, which cannot be modelled in-process.
   // Without this case the guard can be deleted as quietly as it was missing.
+  battery('the SPLIT test:repo task (#16466)');
+  {
+    const T = (inputs) => ({ inputs });
+    const G = ['content/**'];
+    const local = T(['$TURBO_DEFAULT$', '!dist/**']);
+    const wideOnTest = T(['$TURBO_DEFAULT$', '$TURBO_ROOT$/content/**']);
+    const repoTask = T(['$TURBO_DEFAULT$', '$TURBO_ROOT$/content/**']);
+    // Layer B, both shapes
+    ok('unsplit: the radius on <pkg>#test is green', turboInputProblems('p', G, { 'p#test': wideOnTest }, false).length === 0);
+    ok('unsplit: a glob missing from <pkg>#test reds', turboInputProblems('p', G, { 'p#test': local }, false).some((m) => m.includes('missing the declared glob')));
+    ok('split: the radius on <pkg>#test:repo and none on <pkg>#test is green', turboInputProblems('p', G, { 'p#test': local, 'p#test:repo': repoTask }, true).length === 0);
+    ok('split: a <pkg>#test:repo task without its wide input reds', turboInputProblems('p', G, { 'p#test': local, 'p#test:repo': local }, true).some((m) => m.includes('"p#test:repo" inputs are missing')));
+    ok('split: no <pkg>#test:repo task at all reds naming it', turboInputProblems('p', G, { 'p#test': local }, true).some((m) => m.includes('has no "p#test:repo" task')));
+    ok('split: a wide input LEFT on <pkg>#test reds even when test:repo is complete', turboInputProblems('p', G, { 'p#test': wideOnTest, 'p#test:repo': repoTask }, true).some((m) => m.includes('still hashes repo-wide input')));
+    ok('split: the pre-split shape (radius on <pkg>#test alone) reds twice', turboInputProblems('p', G, { 'p#test': wideOnTest }, true).length === 2);
+    // the include list against the scan, both directions
+    ok('split: an escaping file left out of the list (running under `test`) reds naming it', repoProjectProblems('p', ['src/a.test.ts', 'src/b.test.ts'], ['src/a.test.ts']).some((m) => m.includes('NOT in') && m.includes('src/b.test.ts')));
+    ok('split: a listed file that does not escape reds naming it', repoProjectProblems('p', ['src/a.test.ts'], ['src/a.test.ts', 'src/c.test.ts']).some((m) => m.includes('do not read outside') && m.includes('src/c.test.ts')));
+    ok('split: a list equal to the scan is green', repoProjectProblems('p', ['src/a.test.ts'], ['src/a.test.ts']).length === 0);
+    ok('split: order does not matter', repoProjectProblems('p', ['src/b.test.ts', 'src/a.test.ts'], ['src/a.test.ts', 'src/b.test.ts']).length === 0);
+    ok('split: an unreadable list reds once, prescribing the scan', repoProjectProblems('p', ['src/a.test.ts'], null).length === 1 && repoProjectProblems('p', ['src/a.test.ts'], null)[0].includes('src/a.test.ts'));
+    ok('split: a duplicated entry reds', repoProjectProblems('p', ['src/a.test.ts'], ['src/a.test.ts', 'src/a.test.ts']).some((m) => m.includes('duplicated')));
+    // readSplit, driven on disk
+    const dir = mkdtempSync(join(tmpdir(), 'crosspkg-split-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', scripts: { test: 'vitest run --project local' } }));
+      ok('readSplit: no test:repo script is not a split', readSplit(dir).split === false);
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', scripts: { test: 'vitest run --project local', 'test:repo': 'vitest run --project repo' } }));
+      ok('readSplit: a test:repo script with no list file is split with listed=null', readSplit(dir).split === true && readSplit(dir).listed === null);
+      writeFileSync(join(dir, REPO_TESTS_FILE), JSON.stringify(['src/a.test.ts']));
+      ok('readSplit: the list is read back as written', JSON.stringify(readSplit(dir).listed) === JSON.stringify(['src/a.test.ts']));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
   battery('the entry guard, driven for real');
   const importProbe = spawnSync(
     process.execPath,

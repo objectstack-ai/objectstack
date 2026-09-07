@@ -542,13 +542,23 @@ jobs:
           # a second full suite to a job that is already red and already inside a
           # 30-minute wall — turning an informative red into a killed job with no
           # attestation at all, which is the #16173 failure mode itself.
+          #
+          # `test test:repo` (#16466): six heavy packages split their suite into
+          # two turbo tasks -- `test` (package-local inputs) and `test:repo`
+          # (the repo-scanning tests, hashed on the wide `$TURBO_ROOT$` inputs
+          # that used to sit on `test`). Naming both runs a split package whole
+          # and is a no-op for every package without a `test:repo` script. The
+          # per-shard Turbo cache restored above (main-seeded) is what carries
+          # an unmoved `PKG#test` across a change outside the package; the
+          # completeness guard below reads both tasks' summaries. The cli slice
+          # leg stays `test`-only: cli is not split.
           STATUS=0
           LOGS=""
           for LEG in __whole__ $SLICES; do
             if [ "$LEG" = __whole__ ]; then
               [ -n "$FILTERS" ] || continue
               LOG="$RUNNER_TEMP/test-core-packages.log"
-              set -- pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+              set -- pnpm turbo run test test:repo $FILTERS --concurrency=4 --summarize --log-order=stream
             else
               PKG="${LEG%%=*}"
               SLICE="${LEG#*=}"
