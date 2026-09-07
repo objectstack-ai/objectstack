@@ -1141,11 +1141,20 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  * assembled stage overrides therefore has no expression in an assembled body —
  * write it in the package's own stack, where the collection form is read.
  *
- * NOT `strictObject`: `ManifestSchema` is an open object, and this schema is
- * that surface plus collections rather than a new door. The gate it enables is
- * the one #14242 asked for — a body whose collections are the wrong SHAPE is
- * refused, loudly, at the seam that registers it — not a new unknown-key
- * refusal on a manifest that has never had one.
+ * NO `strictObject` spelling appears here, and none is needed. This schema is
+ * `ManifestSchema.extend(...)`, and `.extend()` carries the base's unknown-key
+ * posture: #14192 closed `ManifestSchema`, so an assembled body is closed too,
+ * BY INHERITANCE — an undeclared key on one is REFUSED, by name and with the
+ * declared spelling offered for a near miss. ⛔ Do not read the absence of the
+ * `strictObject` spelling as a declined posture; it is an inherited one.
+ *
+ * Two gates therefore land at the seam that registers a body: that inherited
+ * unknown-key refusal, and the collection-SHAPE gate #14242 asked for — a body
+ * whose collections are the wrong shape (globs where definitions belong) is
+ * refused, loudly, there rather than registered and silently owning nothing.
+ * ⛔ Never re-open this surface with `.loose()` or a `.catchall()` to make an
+ * assembled body tolerant: that would leave this declaration the one door in
+ * the chain accepting what the manifest it extends refuses.
  */
 /*
  * ANNOTATED, not inferred — and annotated with a STRUCTURAL type, not a named
