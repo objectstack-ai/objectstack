@@ -67,6 +67,15 @@
  * So a fixture whose added line merely LOOKS like a schema key is refused, and
  * the remedy is one word in the claim comment — never a weakened rule here.
  *
+ * **An unread diff is not a narrow diff.** A file on a tell surface whose
+ * content this gate could not read is reported as a GAP (exit 2), never folded
+ * into the clean verdict — and the counting that decides it distinguishes a
+ * count that was TAKEN from a count that is MISSING (`addedNothing`). The
+ * failure this rule is written against is not hypothetical: the local diff
+ * splitter briefly stamped `additions: 0` on binary rows, which made a binary
+ * edit to a published-surface file read as clean through the very gate whose
+ * contract this is.
+ *
  * **It writes nothing and hangs no label.** Same call `check-clause2-carriers`
  * and `check-half-states` make: a checker that hung `needs:contract-review`
  * would be issuing the review verdict, which is 自查放行. ⛔ No new label and no
@@ -172,7 +181,8 @@ const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 // must not red. A battery BELOW its floor means cases stopped running.
 const SELF_TEST_BATTERIES = Object.freeze({
   'the patch reader: added lines, and the line numbers they carry': 17,
-  'the unified-diff splitter, for the local `git diff` path': 11,
+  'the unified-diff splitter, for the local `git diff` path': 15,
+  'the local path composed: an unread diff is not a narrow diff': 7,
   'the surfaces, imported rather than restated': 11,
   'T1 — a new key on a Zod object schema': 14,
   'T2 — a new member of a closed set': 13,
@@ -187,7 +197,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -357,6 +367,18 @@ export function addedLines(patch) {
 const DIFF_GIT = /^diff --git a\/(.+?) b\/(.+)$/;
 
 /**
+ * How `git diff` says "there is no text hunk because the content is BINARY".
+ *
+ * Both spellings, because both reach this reader: the default one-line
+ * `Binary files a/x and b/x differ`, and the `GIT binary patch` block a
+ * `--binary` diff emits instead. A file with neither marker AND no hunk is a
+ * mode-only change or a pure rename — those really do add nothing, and telling
+ * them apart from a binary is the whole point of reading the marker rather than
+ * inferring from the missing hunk.
+ */
+const BINARY_MARKER = /^(?:Binary files .* differ|GIT binary patch)$/m;
+
+/**
  * Split a whole `git diff` into the per-file rows this gate judges.
  *
  * This is the LOCAL read path — `git diff <merge-base>...HEAD` — and it exists
@@ -364,10 +386,27 @@ const DIFF_GIT = /^diff --git a\/(.+?) b\/(.+)$/;
  * The row shape is GitHub's (`filename`, `status`, `patch`) so nothing
  * downstream can tell the two paths apart, which is what stops them drifting.
  *
- * A file with a `diff --git` header and no hunk yields `patch: null` — a
- * binary or mode-only change, which is UNREAD rather than empty. The caller
- * decides whether an unread file on a tell surface is a gap; ⛔ this function
- * never turns one into a clean reading.
+ * A file with a `diff --git` header and no hunk yields `patch: null`. Whether
+ * that is UNREAD or genuinely EMPTY is read off the diff itself, never guessed:
+ * a `Binary files … differ` / `GIT binary patch` marker means git could not show
+ * the content, so `additions` is `null` (UNKNOWN) and the caller reports a gap
+ * on a tell surface; no marker and no hunk means a mode-only change or a pure
+ * rename, which really did add nothing, so `additions` is `0` and the row is
+ * clean. ⛔ This function never turns an unread file into a clean reading — and
+ * the way it used to was by stamping `addedLines(null).length` on every row,
+ * which wrote `0` for a binary change and let a binary edit to
+ * `api-surface/*.json` pass as narrow.
+ *
+ * ## Why the two input paths differ here, and why that is not drift
+ *
+ * On the API path GitHub sends `additions: 0` for a binary row, and this file
+ * KEEPS it: that zero is GitHub's own reading of its own object store, taken by
+ * something that can see the blob. The local path has strictly less
+ * information — `git diff` refused to show the content, and nothing downstream
+ * can recover it — so it answers `null`. Same field, two producers, two
+ * genuinely different states of knowledge; the asymmetry is *information
+ * available*, not two readers drifting apart. `addedNothing` is where both are
+ * interpreted, once.
  */
 export function splitUnifiedDiff(text) {
   const rows = [];
@@ -376,11 +415,28 @@ export function splitUnifiedDiff(text) {
   const flush = () => {
     if (!current) return;
     const body = current.body.join('\n');
-    const patch = HUNK_HEADER.test(body) || /\n@@ /.test(`\n${body}`) ? body : null;
+    const hasHunk = HUNK_HEADER.test(body) || /\n@@ /.test(`\n${body}`);
+    const patch = hasHunk ? body : null;
     // `additions` is carried so the local path answers "did this file add
     // anything" in the SAME field the API path answers it in — the gap
     // accounting below reads one field, not one per input path.
-    rows.push({ filename: current.filename, status: current.status, patch, additions: addedLines(patch).length });
+    //
+    // ⛔ And it is a COUNT THAT WAS TAKEN, never a default. `addedLines(null)`
+    // returns an empty array, so writing `addedLines(patch).length` for every
+    // row would stamp `0` on a BINARY file — a number nobody counted — and the
+    // gap accounting, which skips a row that added nothing, would then read a
+    // binary change to a tell surface as CLEAN. That is the exact
+    // declared-but-not-enforced shape this gate exists against, inside the gate
+    // itself. So the three cases are told apart by what the diff SAYS:
+    //
+    //   a hunk           -> the count, taken from the hunk
+    //   a binary marker  -> `null`, i.e. UNKNOWN — git did not show the content,
+    //                       so this reader cannot say whether anything was added
+    //   neither          -> `0`, a real reading: a mode-only change or a pure
+    //                       rename adds no line, and git says so by emitting
+    //                       no hunk AND no binary marker
+    const additions = hasHunk ? addedLines(patch).length : BINARY_MARKER.test(body) ? null : 0;
+    rows.push({ filename: current.filename, status: current.status, patch, additions });
     current = null;
   };
   for (const raw of text.split('\n')) {
@@ -498,30 +554,49 @@ export function tellsInFile(file, { repo = THIS_REPO } = {}) {
 }
 
 /**
+ * Did this row add NOTHING — as a fact this reader can point at?
+ *
+ * ⭐ The asymmetry is the safety property, and it is the same one the sibling's
+ * `--pair-json` reader has: a MISSING count is not a zero. `additions: 0` is a
+ * reading somebody took — GitHub's own on the API path, this file's hunk count
+ * on the local one — and a row that added nothing owes no patch, so skipping it
+ * keeps every rename and mode-only change out of the gap list. `null` or an
+ * absent field is the ABSENCE of that reading, and an absent reading can never
+ * be turned into "nothing was added" here.
+ *
+ * The one inference this function does make is narrow and named: a row whose
+ * status is `renamed`, which carries NO count at all and NO patch, is a pure
+ * rename. That shape only reaches this file from a hand-assembled document —
+ * both real input paths carry a count — and a pure rename genuinely adds
+ * nothing.
+ */
+export function addedNothing(file) {
+  if (typeof file?.additions === 'number') return file.additions === 0;
+  if (file?.additions != null) return false; // a non-number count is no count.
+  return file?.status === 'renamed' && (file?.patch == null || file.patch === '');
+}
+
+/**
  * A file this gate had to read and could not.
  *
  * Only a file ON a tell surface owes a patch: an unread `README.md` decides
  * nothing here, and reporting it would bury the readings that matter. A file
- * that IS on a surface and arrived with no patch is a gap, because "no added
- * line matched" and "no line was read" are the two states #4690 is about.
+ * that IS on a surface, added something (or might have), and arrived with no
+ * patch is a gap — because "no added line matched" and "no line was read" are
+ * the two states this whole family keeps apart.
  */
 export function unreadFiles(files, { repo = THIS_REPO } = {}) {
   const gaps = [];
   for (const file of files ?? []) {
     const filename = String(file?.filename ?? '');
     if (filename === '' || file?.status === 'removed') continue;
-    // A file that ADDED NOTHING owes no patch. `additions: 0` is how both
-    // input paths spell a pure rename and a mode-only change, and reporting
-    // those as unread would bury the gaps that are real (a truncated patch on
-    // a file that did add lines) under one every rename produces.
-    if (typeof file?.additions === 'number' && file.additions === 0) continue;
-    if (file?.status === 'renamed' && (file?.patch == null || file.patch === '')) continue;
+    if (addedNothing(file)) continue;
+    if (typeof file?.patch === 'string' && file.patch !== '') continue;
     const onSurface =
       (surfaceCovers(CONTRACT_SOURCE_SURFACES, filename, repo) && isContractSourceFile(filename)) ||
       surfaceCovers(PUBLISHED_SURFACES, filename, repo) ||
       surfaceCovers(REGISTRATION_SURFACES, filename, repo);
     if (!onSurface) continue;
-    if (typeof file?.patch === 'string' && file.patch !== '') continue;
     gaps.push(filename);
   }
   return gaps;
@@ -783,6 +858,31 @@ export function selfTest() {
   t('…and null is what `unreadFiles` counts as a gap when it is on a surface', unreadFiles([{ filename: 'packages/spec/api-surface/kernel.json', patch: null }]).length === 1);
   t('⛔ a file OFF every surface with no patch is not a gap — it decides nothing here', unreadFiles([{ filename: 'README.md', patch: null }]).length === 0);
   t('the local path and the API path produce the same verdict on the same bytes', JSON.stringify(wideningTells(splitUnifiedDiff(twoFiles)).map((r) => r.tell)) === '["T1"]');
+  // `additions` is a COUNT THAT WAS TAKEN. The three states below are told
+  // apart by what the diff SAYS, and conflating them is what let a binary
+  // change to a tell surface read as clean.
+  t('⛔ a binary row carries additions `null` — UNKNOWN, never a fabricated 0', splitUnifiedDiff('diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ')[0]?.additions === null);
+  t('…and the `GIT binary patch` spelling reads as UNKNOWN too', splitUnifiedDiff('diff --git a/i.png b/i.png\nGIT binary patch\nliteral 0\nHcmV?d00001')[0]?.additions === null);
+  t('a MODE-ONLY change carries a real 0 — no hunk AND no binary marker is git saying nothing was added', splitUnifiedDiff('diff --git a/x b/x\nold mode 100644\nnew mode 100755')[0]?.additions === 0);
+  t('a pure rename carries a real 0 for the same reason', splitUnifiedDiff('diff --git a/x b/y\nsimilarity index 100%\nrename from x\nrename to y')[0]?.additions === 0);
+
+  // -- the local path composed, end to end ----------------------------------
+  //
+  // The two halves below were each pinned separately before, and the defect
+  // lived exactly between them: `patch: null` was asserted on one fixture and
+  // "null is a gap" on a DIFFERENT, hand-built row that carried no `additions`
+  // at all — so nothing drove a real binary row through `unreadFiles`. These
+  // cases compose the actual functions, in the order a caller calls them.
+  battery('the local path composed: an unread diff is not a narrow diff');
+  const composed = (diff) => wideningRefusal({ declaration: 'no', files: splitUnifiedDiff(diff) });
+  const BINARY_ON_SURFACE = 'diff --git a/packages/spec/api-surface/kernel.json b/packages/spec/api-surface/kernel.json\nindex 111..222 100644\nBinary files a/packages/spec/api-surface/kernel.json and b/packages/spec/api-surface/kernel.json differ';
+  t('⭐ a BINARY change to a tell surface reads INCOMPLETE, never clean', composed(BINARY_ON_SURFACE).state === 'incomplete');
+  t('…and maps to exit 2, the one exit that must never be mistaken for 0', exitForRefusal(composed(BINARY_ON_SURFACE)) === EXIT_INCOMPLETE);
+  t('…naming the file whose content could not be read', composed(BINARY_ON_SURFACE).gaps[0] === 'packages/spec/api-surface/kernel.json');
+  t('⛔ but a binary change OFF every surface is clean — it decides nothing here', composed('diff --git a/docs/logo.png b/docs/logo.png\nBinary files a/docs/logo.png and b/docs/logo.png differ').state === 'clean');
+  t('a MODE-ONLY change to a tell surface is clean — it really did add nothing', composed('diff --git a/packages/spec/api-surface/kernel.json b/packages/spec/api-surface/kernel.json\nold mode 100644\nnew mode 100755').state === 'clean');
+  t('addedNothing: a MISSING count is never a zero', addedNothing({ filename: 'x', additions: null }) === false && addedNothing({ filename: 'x' }) === false);
+  t('…while a count that WAS taken is one', addedNothing({ filename: 'x', additions: 0 }) === true && addedNothing({ filename: 'x', additions: 3 }) === false);
 
   // -- the surfaces ---------------------------------------------------------
   battery('the surfaces, imported rather than restated');
@@ -964,7 +1064,8 @@ export function selfTest() {
     `✓ check-widening-tells self-test: ${cases.length} cases pass (the patch reader with its ` +
       'line-number directions, the unified-diff splitter, the three imported/declared surfaces, the ' +
       "four tells, #16448's four positive controls each with its file:line, its negative controls — " +
-      'the same diffs with `yes`, and a removal-only diff with `no` — and the exit register).',
+      'the same diffs with `yes`, and a removal-only diff with `no` — the local path composed end ' +
+      'to end so a binary change to a tell surface cannot read as clean — and the exit register).',
   );
 
   selfTestReachedVerdict = true;
