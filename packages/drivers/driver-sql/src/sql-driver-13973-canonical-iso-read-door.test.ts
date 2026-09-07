@@ -47,6 +47,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SqlDriver } from './index.js';
 import {
   DIALECT_CELLS,
@@ -217,19 +218,16 @@ function measure(cell: DialectCell): void {
     });
 
     it('§B1 aggregate(): min/max over a declared datetime AND over the audit columns are canonical ISO-Z text', async () => {
-      const res: any[] = await driver.aggregate(
-        TABLE,
-        {
-          aggregations: [
-            { function: 'min', field: 'closed_at', alias: 'earliest' },
-            { function: 'max', field: 'closed_at', alias: 'latest' },
-            { function: 'max', field: 'created_at', alias: 'newest_created' },
-            { function: 'max', field: 'updated_at', alias: 'newest_updated' },
-            { function: 'count', field: 'closed_at', alias: 'n' },
-          ],
-        } as any,
-        OPTS,
-      );
+      const query: DriverQuery = {
+        aggregations: [
+          { function: 'min', field: 'closed_at', alias: 'earliest' },
+          { function: 'max', field: 'closed_at', alias: 'latest' },
+          { function: 'max', field: 'created_at', alias: 'newest_created' },
+          { function: 'max', field: 'updated_at', alias: 'newest_updated' },
+          { function: 'count', field: 'closed_at', alias: 'n' },
+        ],
+      };
+      const res: any[] = await driver.aggregate(TABLE, query, OPTS);
       expect(Array.isArray(res) && res.length === 1, `aggregate() answered ${JSON.stringify(res)}`).toBe(true);
       const row = res[0];
       expectCanonicalInstant(row.earliest, 'min(closed_at)');
@@ -248,11 +246,11 @@ function measure(cell: DialectCell): void {
     });
 
     it('§B2 aggregate(): a raw temporal group key is the canonical text', async () => {
-      const res: any[] = await driver.aggregate(
-        TABLE,
-        { groupBy: ['closed_at'], aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }] } as any,
-        OPTS,
-      );
+      const query: DriverQuery = {
+        groupBy: ['closed_at'],
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'total' }],
+      };
+      const res: any[] = await driver.aggregate(TABLE, query, OPTS);
       const keys = res.map((r) => r.closed_at);
       expect(keys.length).toBe(DISTINCT_CLOSED_AT.length);
       for (const key of keys) expectCanonicalInstant(key, 'groupBy closed_at key');
