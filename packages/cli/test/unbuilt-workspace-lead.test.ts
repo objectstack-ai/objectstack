@@ -134,3 +134,96 @@ describe('unbuiltWorkspaceLines', () => {
     expect(unbuiltWorkspaceLines(notFound(), [thirdParty, MEASURED_DETAIL], INVOCATION_PREFIX)?.[0]).toContain('@objectstack/spec');
   });
 });
+
+/**
+ * ## #16547 — the SAME classified failure, with the build output never consulted
+ *
+ * Transcript, not invention. Measured in a worktree at `de0bcdd44d` with
+ * `packages/types/dist` present and fresh, running the dev entry from
+ * `packages/plugins/plugin-security`, whose tsconfig maps `@objectstack/types`
+ * to `../../types/src/index.ts` so its own typecheck grades against source:
+ *
+ *     $ TSX_TSCONFIG_PATH="$PWD/tsconfig.json" \
+ *         ../../../node_modules/.bin/tsx ../../../packages/cli/bin/run-dev.js lint objectstack.config.ts
+ *     …
+ *     objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/types
+ *     Error: command lint:objectstack.config.ts not found
+ *     $ echo $?
+ *     2
+ *
+ * The classifier is right that this is an export mismatch on a package this
+ * repo builds. It is the REMEDY that was wrong: tsx honours the CWD's tsconfig,
+ * so the import never reached `packages/types/dist` at all, and the build it
+ * prescribed succeeds and changes nothing.
+ */
+const REDIRECTED_DETAIL = [
+  'module: @oclif/core@4.13.3',
+  'task: findCommand (start)',
+  'plugin: @objectstack/cli',
+  'root: /home/user/objectstack-issue-16547/packages/cli',
+  "message: The requested module '@objectstack/types' does not provide an export named 'PLATFORM_OWNER_EMAIL_ENV'",
+  'See more details with DEBUG=*',
+].join('\n');
+
+/** What the shim's own `import.meta.resolve` answered on that run, verbatim. */
+const REDIRECTED_TO = 'file:///home/user/objectstack-issue-16547/packages/types/src/index.ts';
+
+describe('unbuiltWorkspaceLines — build output that was never consulted (#16547)', () => {
+  it('refuses the rebuild remedy and names the redirect instead', () => {
+    const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX, () => REDIRECTED_TO);
+
+    expect(lines).toHaveLength(2);
+    // Still contradicts "not found" — that half of #12964 is unchanged.
+    expect(lines?.[0]).toContain('NOT A MISSING COMMAND');
+    // …but the attribution is inverted, and says so in words a reader cannot
+    // misread as the old line: the precondition is NOT the build output.
+    expect(lines?.[0]).toContain("The unmet precondition is NOT @objectstack/types's build output");
+    // The evidence is carried, not summarised — a reader can check it.
+    expect(lines?.[0]).toContain(REDIRECTED_TO);
+    // ⛔ The one assertion the whole card is about: the misdirection is GONE.
+    // A `toContain` on the new text would pass while the old text sat beside it.
+    expect(lines?.[1]).not.toContain('turbo run build');
+    expect(lines?.[1]).toContain('tsx reads the CWD');
+    expect(lines?.[1]).toContain('TSX_TSCONFIG_PATH=packages/cli/tsconfig.json');
+  });
+
+  it('CONTROL — the same failure whose specifier DID reach build output keeps the rebuild', () => {
+    // The positive control for the case above. Without it, a probe that
+    // answered "redirect" for everything would read green there and would have
+    // silently retired #7681's remedy for the cause it was written for.
+    const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX, () => 'file:///repo/packages/types/dist/index.mjs');
+    expect(lines?.[0]).toContain("The unmet precondition is @objectstack/types's build output");
+    expect(lines?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/types');
+  });
+
+  it('CONTROL — a caller that asks no question gets the pre-#16547 answer', () => {
+    // The parameter is optional, and omitting it must not change a verdict.
+    // `check:declaration-mirrors` holds the declaration to the same optionality.
+    const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX);
+    expect(lines?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/types');
+  });
+
+  it('a probe that throws is no evidence, and never becomes the report', () => {
+    const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX, () => {
+      throw new Error('resolver exploded');
+    });
+    expect(lines?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/types');
+  });
+
+  it('leaves the MISSING-OUTPUT shape alone even when the probe would answer source', () => {
+    // The narrowing stated in `sourceRedirectOf`. A `missing-output` failure
+    // names a PATH node could not find, so re-resolving it asks a different
+    // question — and a `paths` target that does not exist on disk falls back to
+    // node resolution, so a redirect cannot produce this shape in the first
+    // place. Pinned so a future widening has to argue with this case.
+    const lines = unbuiltWorkspaceLines(notFound(), [MEASURED_DETAIL], INVOCATION_PREFIX, () => REDIRECTED_TO);
+    expect(lines?.[1]).toBe('objectstack: Fix: pnpm exec turbo run build --filter=@objectstack/spec');
+  });
+
+  it('reads a bare path as well as a file:// URL', () => {
+    // `import.meta.resolve` answers a URL; a caller with a plain path must get
+    // the same verdict, so the extension test runs on the PATH either way.
+    const lines = unbuiltWorkspaceLines(notFound(), [REDIRECTED_DETAIL], INVOCATION_PREFIX, () => '/repo/packages/types/src/index.ts');
+    expect(lines?.[1]).not.toContain('turbo run build');
+  });
+});

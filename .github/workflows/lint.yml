@@ -975,6 +975,19 @@ jobs:
       - name: Clause-② carrier checker self-test
         run: pnpm check:pm-clause2-carriers
 
+      # Widening-tell gate self-test (#16448) — the mechanical half of the
+      # directional clause-② ruling (#16349), and the same split as every step
+      # around it: the LIVE predicate is `--pair`'s C5 row, a verdict about ONE
+      # pair's diff, so failing an unrelated PR's CI over it would punish the
+      # wrong actor. Only the offline self-test runs here.
+      #
+      # This gate has no whole-tree production run at all — its input is a DIFF
+      # supplied by its caller, never a file in the tree — so the `--self-test`
+      # invocation is the only instrument its matching rules have, which is
+      # exactly the family `check:self-test-wired` requires this step for.
+      - name: Widening-tell gate self-test
+        run: pnpm check:pm-widening-tells
+
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
       # merges since a date/ref for the PM round report — report-only by
@@ -2032,6 +2045,25 @@ jobs:
       # harnesses asserting the same thing would be worse than one.
       - name: Template version-time rewriter self-test
         run: pnpm check:template-version-sync
+
+      # #16485 — the BUILD-time generator beside the version-time one above, and
+      # the only one of the two whose --check leg runs on a real corpus here.
+      # `create-objectstack` cannot import @objectstack/cli (the dependency edge
+      # runs the other way, and the npx package must not pull the CLI's closure),
+      # so its bundled template RESTATED the scaffold emission policy and the
+      # restatement decayed: `typescript` reached `^6.0.0` there while `os init`
+      # and `os create` emitted `^5.3.0` from the shared constants, so two
+      # projects created the same day got different TypeScript majors depending
+      # on which documented entry point the reader followed. The values are now
+      # generated into the template from `packages/cli/src/commands/init.ts`, and
+      # this is the leg that reddens on drift — a hand edit into agreement would
+      # have satisfied the acceptance box and diverged again on the next move.
+      # Both legs run: --self-test covers the red paths a green corpus cannot
+      # reach (a renamed policy constant, a template omitting a stamped key, an
+      # unparseable template, an empty templates directory), --check covers the
+      # live tree.
+      - name: Scaffold emission policy generated into the on-ramp
+        run: pnpm check:scaffold-emission-policy
 
       # #15332 — the THIRD version-time rewriter, and the third self-test beside
       # the two above. scripts/sync-release-index-currency.mjs joins the root
