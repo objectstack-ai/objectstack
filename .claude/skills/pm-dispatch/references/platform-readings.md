@@ -109,6 +109,7 @@
 - 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
 - job 日志只有 MCP 取得回,REST 侧转 blob 存储 `http=000`;同分钟 MCP 限流而 REST core 满 15000。
 - ⇒ MCP 限流先探 REST 再定退避,⛔ 不据一侧限流把整个平台的写都停掉。
+- MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
 - 容器 curl 的 REST 通道 = App installation token,core 15,000/时,与 GraphQL 池独立计。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
@@ -167,6 +168,7 @@
 - ⛔ 空查重结果不是读数,除非本会话内一个已知必中的控制词答了命中。
 - ⛔ 不是可疑时才验:归零下空结果与真无重复逐字节同形,读作搜过了没有。
 - 后果是重复卡照开、空车道照停;控制词回 0 ⇒ 本会话 search 已坏,立刻换通道,⛔ 不重试。
+- 控制词命中只证通道活着:同一文档换个词即回零,故障按词形不按文档,零仍不是读数。
 - 换道:探针绿走 REST 列表端点 `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`。
 - 它走 core 桶且 `labels` 是真 AND;⛔ 完整性自证靠 `&page=N` 加总数核对。
 - 翻页在偏移 ~9,900 硬拒:422 Pagination with the page parameter is not supported for large datasets。
@@ -192,8 +194,11 @@
 - 组织侧授权变更后仓库访问逐步传播,同一端点数分钟内 403 转 200。
 - 该 403 体解析成净零 ⇒ 空车道先对 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
 - 满页首页零命中是截断不是缺席:`GET /branches?per_page=100` 回满 100 行无目标 ⇒ 翻完再判。
+- 裸数组无总数的 listing 自报不了截断,它的零不是读数;MCP 侧有 `totalCount` 可自报。
+- 存在性问题改单点读:`GET /repos/{o}/{r}/branches/BRANCH` 200/404,或 `git ls-remote --heads`。
 - `issue_write` 的 `labels` 是整组替换不是追加:同一动作内重读现值合并再写。
 - 隔轮旧读数是无效快照,按其回写静默剥别的标签;真追加走 REST `POST /issues/{n}/labels`。
+- `issue_write` 还清空每个未传字段(assignees 在内)⇒ 单字段更新必须把现值带齐重写。
 - 追加端点同样先过探针:403 会话没有真追加通道,只能整组替换。
 - 摘标签也没有加法端点:`finding` 定级这类只能整组写,carve-out 保留;写后照纪律回读。
 - PR 标签的三条读腿全盲、两条静默。
@@ -207,10 +212,12 @@
 - ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
 - `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
 - 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
+- 可指派性是仓+账号属性且会话中可变:`GET /repos/{o}/{r}/assignees/USER` 204/404,指派后回读。
 - MCP `issue_read` 的 body 实体转义是纯读侧伪影,撇号与引号与尖括号成数字实体,comments 原样。
 - 存储体是明文,先解码实体再写回往返安全;腐蚀 body 的恰是把转义读数原样回写。
 - 读侧并非一律可逆:行内反引号里的尖括号片段被 MCP 读路径整个丢弃,非转义,无从解码。
 - 写侧剥除是真实存储损耗,⛔ 两类不并成一条,写后回读必做;实体归属与 `&amp;` 类未实测。
+- 评论里独立成行的标记同被读路径吃掉留空行 ⇒ 缺失不证写侧剥除,先读 payload 原体。
 - `Blocked-by:` 行归 BODY,是单通道反向索引:追加按解码后写回执行。
 - 历史上寄放在评论里的行按同程序增量回填,⛔ 不搞批量突击。
 - 解锁扫描只 grep body,⛔ 不加常设评论读;扫描走 `list_issues` 加 `issue_read` 直读。
