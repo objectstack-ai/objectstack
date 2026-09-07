@@ -307,12 +307,23 @@ describe('the settle write rule: `succeeded` is ABSORBING (#14501 contract revie
     });
 
     it('ObjectStoreFlowDispatchStore: succeeded -> failed is REFUSED, and refused means no write at all', async () => {
+        // Counting `update` calls, not rows: "the row still says succeeded"
+        // would also be true of a store that wrote `failed` and then wrote
+        // `succeeded` back. The claim under test is that NOTHING is written.
+        //
+        // This is a second engine double in its own right — it RESTATES
+        // `update()` rather than passing the base's through — so it carries the
+        // dispatch predicate itself, exactly as `fakeQl()`'s does.
         let updates = 0;
         const { engine, rows } = fakeQl();
         const counting: FlowDispatchStoreEngine = {
             find: engine.find,
             insert: engine.insert,
-            update: (...args) => { updates++; return engine.update(...args); },
+            update: (table: string, data: any, options?: any) => {
+                assertEngineUpdateDispatch(data, options);
+                updates++;
+                return engine.update(table, data, options);
+            },
         };
         const store = new ObjectStoreFlowDispatchStore(counting);
         await store.claim('schedule:digest:w1');
