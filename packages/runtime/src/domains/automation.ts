@@ -17,13 +17,14 @@ import {
 // the posture rule and the #10243 measurement behind it.
 import { refuseUngrantedActivationWrite, FLOW_ACTIVATION_SUBJECT } from './activation-gate.js';
 import { CoreServiceName } from '@objectstack/spec/system';
-import type { IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
+import type { AutomationResult, IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 import { isServiceServeable } from '../service-serveable.js';
 import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
 import { ExecutionStatus } from '@objectstack/spec/automation';
 import { ListRunsRequestSchema } from '@objectstack/spec/api';
+import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
 import { capabilityUnavailable } from './unavailable.js';
 // [#9446] The ONE #9378 status table, now shared with the `/actions` door.
@@ -913,6 +914,69 @@ async function respondToFlowTrigger(
 }
 
 /**
+ * [#15221] The machine-readable verdict the resume door's `400 FLOW_FAILED`
+ * arm carries in `error.details`, beside the run's two artefacts — the
+ * #16472 family ruling (maintainer 2026-09-07, option A), applied to this
+ * door: `status: 'stranded'` and `repairable`, so a client branches without a
+ * message regex, and ⛔ no `FLOW_STRANDED` sibling code (a new code is a
+ * ledger event; the console needing one is its own card).
+ *
+ * The structure is `ResumeFailureDetailsSchema` (`@objectstack/spec/api`),
+ * declared once for every carrier the ruling names; this door is the
+ * PRODUCER of one of them, so the two members it owns are bound to that
+ * declaration at compile time (`satisfies`) and the third is relayed.
+ *
+ * What each member says, and why it is shaped the way it is:
+ *
+ *  - `runId` — the run this door was asked to resume (the path's `:runId`).
+ *    The engine stamps `'stranded'` on exactly one exit, `resumeInternal`'s
+ *    own catch arm for the run being resumed, so the resumed run IS the run
+ *    that is actually stranded; the engine result carries no `runId` on a
+ *    terminal exit (the contract sets it on `'paused'` only), and this door
+ *    knows the id from the request rather than sniffing it out of the
+ *    engine's message.
+ *  - `status` — the engine's own verdict, forwarded VERBATIM when it stamped
+ *    one and never synthesised. Measured on the engine: the stranded exit
+ *    stamps `'stranded'`; the other exit that reaches this arm — a subflow
+ *    child that failed terminally — stamps nothing, so that arm carries no
+ *    `status` today rather than a `'failed'` this door made up. Reading the
+ *    producer's verdict is the whole rule (PD #12; `flow-dispatch-status.ts`
+ *    says it for the trigger table).
+ *  - `repairable` — `status === 'stranded'`, and ALWAYS present on this arm.
+ *    Present-and-false on the plain terminal exit is a deliberate contract,
+ *    not an implementation detail: an ABSENT member would be
+ *    indistinguishable from a server that predates this field, and
+ *    `StrandedDecisionDetails.repairable` (`@objectstack/types`, the approvals
+ *    door's carrier) already fixed the vocabulary — `false` is the honest
+ *    answer for every other exit, including the ones that report no status
+ *    at all, because promising a repair verb that will refuse is worse than
+ *    promising nothing.
+ *
+ * ⛔ Not reused from `@objectstack/types`: `strandedDecisionDetails` /
+ * `strandedDecisionFailure` are an all-four-or-nothing envelope whose
+ * `finalized` and `decision` are approvals facts with no referent at a
+ * generic resume (this door has no decision to report), and its reader
+ * refuses a partial envelope by design. Only the `repairable` / `runId`
+ * vocabulary is shared, through the spec declaration.
+ *
+ * ⛔ Not on the trigger door and not on `/actions`: neither ever resumes, so
+ * "repairable" has no referent there; their `400 FLOW_FAILED` details stay
+ * `{ errorMessage?, summary? }`, and an absent `repairable` there means "not
+ * a resume", never "not repairable". Pinned in
+ * `automation-resume-stranded-details.test.ts`, both halves.
+ */
+function resumeFailureDetails(runId: string, result: AutomationResult): Record<string, unknown> {
+    const verdict = {
+        runId,
+        repairable: result.status === 'stranded',
+    } satisfies Omit<ResumeFailureDetails, 'status'>;
+    return {
+        ...verdict,
+        ...(result.status !== undefined ? { status: result.status } : {}),
+    };
+}
+
+/**
  * Handles Automation requests
  * path: sub-path after /automation/
  *
@@ -957,7 +1021,11 @@ async function respondToFlowTrigger(
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
  *   GET    /:name/runs/:runId    → getRun
  *                                  ⚑ run-state read — `sys_automation_run` grant (#7900)
- *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019)
+ *   POST   /:name/runs/:runId/resume → resume a paused run (screen input / ADR-0019;
+ *                                  a run that resumed and then failed → 400
+ *                                  `FLOW_FAILED` whose details carry the engine's
+ *                                  verdict — `status: 'stranded'` + `repairable` —
+ *                                  beside `errorMessage` / `summary`, #15221)
  *   GET    /:name/runs/:runId/screen → the screen a paused run awaits
  *                                  ⚑ run's trigger identity OR the
  *                                    `sys_automation_run` grant (#7968)
@@ -1490,6 +1558,10 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         //                        existence is unknown; the same call is expected
         //                        to work once it recovers (#4420)
         //   RESUME_IN_PROGRESS → 409, a concurrent resume already has this run
+        // A result with NO code and `success: false` consumed its pause and
+        // ran: 400 `FLOW_FAILED` (#8684), whose details carry the engine's
+        // own verdict since #15221 — `status: 'stranded'` + `repairable`
+        // (`resumeFailureDetails` above) — beside `errorMessage` / `summary`.
         // All are enforced in the ENGINE, at the one place a signal reaches the
         // variable map — deliberately not re-implemented here. Guarding a field
         // at a time in the transport is what let `output` reopen the hole
@@ -1691,6 +1763,26 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // deliberately does not copy it. `summary` rides along for the
                 // same reason it was on the 200 body: a failed run's per-node
                 // accounting is how a caller finds WHICH node failed.
+                //
+                // [#15221] And the engine's VERDICT rides with them. Of the
+                // two exits above, only the flow-itself-failed one can be
+                // `status: 'stranded'` (#14384 / #13937: the pause a durable
+                // decision was waiting on is gone and an operator verb can
+                // re-arm the run) — and until now this arm copied
+                // `errorMessage` and `summary` off the result and dropped
+                // `status`, so `'stranded'` could not reach the wire through
+                // any door and an HTTP-only caller read "beyond reach" and
+                // "repair waiting" as one and the same 400. The #16472
+                // ruling (option A) carries it here, in the details of the
+                // EXISTING code: `runId`, `status` (verbatim, when stamped)
+                // and `repairable` (`status === 'stranded'`, always present —
+                // false on the plain terminal exit, deliberately, see
+                // `resumeFailureDetails`), declared once as
+                // `ResumeFailureDetailsSchema` in `@objectstack/spec/api`.
+                // ⛔ No `FLOW_STRANDED` sibling code: the console treats
+                // `400 FLOW_FAILED` as terminal (#8684) and a client that
+                // wants to branch reads `details.repairable`, never a regex
+                // over the message.
                 if (result?.success === false) {
                     return {
                         handled: true,
@@ -1698,6 +1790,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                             code: 'FLOW_FAILED',
                             ...(result.errorMessage !== undefined ? { errorMessage: result.errorMessage } : {}),
                             ...(result.summary !== undefined ? { summary: result.summary } : {}),
+                            ...resumeFailureDetails(parts[2], result),
                         }),
                     };
                 }

@@ -688,6 +688,32 @@ POST /api/v1/automation/{flow}/runs/{runId}/resume
   segment](#retry-pause-boundary).
 </Callout>
 
+### A resume that fails downstream says whether the run is stranded
+
+The suspension is consumed *before* the downstream nodes run (that is what buys
+exactly-once across a crash), so a node that throws after the resume leaves a
+run that is terminal **and** whose pause is gone. The engine names that state
+`status: 'stranded'` — distinct from a plain `failed`, because an explicit
+operator verb can still re-arm it — and the resume route forwards the verdict
+in the `400` `FLOW_FAILED` details, beside the author's `errorMessage` and the
+per-node `summary`:
+
+```json
+400  { "error": { "code": "FLOW_FAILED", "message": "Node 'tail' failed: …",
+       "details": { "runId": "run_42", "status": "stranded", "repairable": true,
+                    "errorMessage": "…", "summary": { … } } } }
+```
+
+Branch on `details.repairable`, never on the message: it is `true` exactly when
+`status` is `stranded`, and it is **always present** on this route's `400` —
+`false` on a plain terminal failure, so an absent member reads as an older
+server rather than as "not repairable". `status` is the engine's own stamp,
+forwarded when it set one and never invented by the route. The code does not
+change (there is no `FLOW_STRANDED`), and the trigger route's `400` carries
+`errorMessage` / `summary` only — it never resumes, so the question has no
+referent there. The shape is `ResumeFailureDetailsSchema` in
+`@objectstack/spec/api`.
+
 ### Who may resume — the gate is the suspended node
 
 The resume route is generic, so **the node the run is parked on** decides

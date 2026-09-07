@@ -4533,8 +4533,26 @@ export class ObjectStackClient {
        *   err.message;                 // the node failure, verbatim
        *   err.details?.errorMessage;   // the flow author's `errorMessage`
        *   err.details?.summary;        // per-node accounting of the failed run
+       *   err.details?.runId;          // the run this resume was addressed to
+       *   err.details?.status;         // 'stranded' | 'failed' — the engine's verdict, when it stamped one
+       *   err.details?.repairable;     // true exactly when `status` is 'stranded'
        * }
        * ```
+       *
+       * **Since #15221 the 400 tells a stranded run from a plain failure.**
+       * A resume that consumed the pause and then failed downstream leaves
+       * the run *stranded* — terminal like any failure, but the pause a
+       * durable decision was waiting on is gone with it and only an explicit
+       * operator verb can re-arm it. The engine says so
+       * (`AutomationResult.status: 'stranded'`), and the door forwards that
+       * verdict in `err.details`: branch on `err.details.repairable`, never
+       * on the message text. `repairable` is always present on this 400 —
+       * `false` on a plain terminal failure, deliberately, so an absent
+       * member reads as an older server rather than as "not repairable".
+       * The shape is `ResumeFailureDetailsSchema` (`@objectstack/spec/api`);
+       * the code stays `FLOW_FAILED` (no `FLOW_STRANDED` sibling). The
+       * trigger door's 400 carries `errorMessage` / `summary` only — it never
+       * resumes, so "repairable" has no referent there.
        *
        * A **stale** suspension (the flow deregistered, or the node edited away
        * under a live pause) rejects with **404** rather than 400: nothing ran,
