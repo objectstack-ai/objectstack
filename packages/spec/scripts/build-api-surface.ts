@@ -10,9 +10,12 @@
  * with the spec in the same commit. See ADR-0059.
  *
  * Two committed artifacts, both checked in CI:
- *   - api-surface/<entry>.json    — every exported `name (kind)` for ONE public
- *                                    entry point (breadth: did an export
- *                                    disappear?). One file per entry point since
+ *   - api-surface/<entry>.json    — one `name (kind)` row per DECLARED KIND of
+ *                                    every export of ONE public entry point
+ *                                    (breadth: did an export disappear?). A
+ *                                    name declared as both a const and a type
+ *                                    is two rows, so either half can go missing
+ *                                    loudly. One file per entry point since
  *                                    #5837, so two PRs that touch different entry
  *                                    points do not collide in the merge queue —
  *                                    which is where `merge=os-regen` cannot help,
@@ -97,15 +100,31 @@ function collectEntries(): Record<string, string> {
   return entries;
 }
 
-function kindOf(flags: ts.SymbolFlags): string {
-  if (flags & ts.SymbolFlags.Function) return 'function';
-  if (flags & ts.SymbolFlags.Class) return 'class';
-  if (flags & ts.SymbolFlags.Enum) return 'enum';
-  if (flags & ts.SymbolFlags.Interface) return 'interface';
-  if (flags & ts.SymbolFlags.TypeAlias) return 'type';
-  if (flags & ts.SymbolFlags.Variable) return 'const';
-  if (flags & ts.SymbolFlags.Namespace) return 'namespace';
-  return 'other';
+/**
+ * EVERY kind the symbol's flags declare, not just the first one that matches.
+ *
+ * TypeScript merges an `export const X` and an `export type X` into ONE symbol
+ * whose flags carry BOTH. A first-match-wins lookup therefore reported the
+ * merged name as `type` alone and never enumerated the value half, so deleting
+ * `export const X` left `X (type)` byte-identical in the shard and this gate
+ * green on a removed public value export — the exact removal it exists to make
+ * loud (#15919, ablated). One row per declared kind fixes that without touching
+ * the row grammar: `Name (kind)` is unchanged, only completeness moves, and the
+ * two halves become independently removable.
+ *
+ * Order is preserved from the old lookup so the shards stay stable, and `other`
+ * remains the answer for a symbol matching no branch — never an empty row set.
+ */
+function kindsOf(flags: ts.SymbolFlags): string[] {
+  const kinds: string[] = [];
+  if (flags & ts.SymbolFlags.Function) kinds.push('function');
+  if (flags & ts.SymbolFlags.Class) kinds.push('class');
+  if (flags & ts.SymbolFlags.Enum) kinds.push('enum');
+  if (flags & ts.SymbolFlags.Interface) kinds.push('interface');
+  if (flags & ts.SymbolFlags.TypeAlias) kinds.push('type');
+  if (flags & ts.SymbolFlags.Variable) kinds.push('const');
+  if (flags & ts.SymbolFlags.Namespace) kinds.push('namespace');
+  return kinds.length > 0 ? kinds : ['other'];
 }
 
 const entries = collectEntries();
@@ -132,8 +151,10 @@ function buildSurface(): Record<string, string[]> {
   const surface: Record<string, string[]> = {};
   for (const [sub, file] of Object.entries(entries)) {
     surface[sub] = moduleExports(file, sub)
-      .map((s) => `${s.getName()} (${kindOf(unalias(s).getFlags())})`)
+      .flatMap((s) => kindsOf(unalias(s).getFlags()).map((kind) => `${s.getName()} (${kind})`))
       // Code-unit sort (NOT localeCompare): deterministic across CI platforms.
+      // A dual-declared name's rows land adjacent under it, `(const)` before
+      // `(type)`, so this repair reads as a pure insertion in the shards.
       .sort();
   }
   return surface;
