@@ -9381,6 +9381,187 @@ export function h49PartialLandingUnreleased(issue, mergedPrs, openPrs, commentRo
 }
 
 // ---------------------------------------------------------------------------
+// H50 — a `Claim:` whose `Thread-read:` field does not name the comment it
+// follows (#16377).
+//
+// ## The rule this row reads
+//
+// The claim template (`.claude/skills/pm-dispatch/SKILL.md`, 模板与表) carries
+// one line a seat cannot fill without fetching the card's thread to its LAST
+// page — the id of the newest comment on the card at the moment the claim is
+// written, or `none` on an empty thread. Its key is `Thread-read:`, and the
+// self-test drives the reader with the template's own placeholder text.
+//
+// Three seats in six days (the ruling's count, on the filing card) dispatched
+// from a card's BODY without reading its comments — where triage's grading, a
+// prior PM's `Clause-②: yes` and the read-couplings live, i.e. the content that
+// OVERRIDES the body — and each wrote the lesson down for the next one, who
+// repeated it. The prose rule (「每张候选读全文 + 全部评论…评论读到最后一页」) had
+// been written twice and broken three times, so the ruling made the omission
+// AUDITABLE instead of strengthening the wording: a self-declared field that
+// this row CHECKS. ⛔ No SKILL.md wording is strengthened by it.
+//
+// ## What the row asserts, precisely
+//
+// For the newest `Claim:` on an open `pm:dispatched` card, stamped at or after
+// `THREAD_READ_FIELD_SINCE`: the claim's `Thread-read:` value EQUALS the id of
+// the comment immediately preceding the claim in thread order — `none` when the
+// claim opened the thread. A missing field, or a different value, is a row
+// carrying the claim's id, the id it named and the id that was actually there.
+// ⛔ NOT "the seat did not read" — that is unobservable. What is observable is
+// that the claim does not name the thread it was written into; a claim written
+// blind, from a stale read, or over a comment that landed in the race between
+// the read and the write leaves the same evidence and takes the same remedy:
+// re-read the thread NOW, while the work is in flight.
+//
+// A claim stamped before the cutoff predates the field and is never a row: the
+// protocol is not applied backwards to claims written under the old template.
+//
+// ## Population, and what is OUT
+//
+//   IN        an OPEN card carrying `pm:dispatched` — the card in flight under
+//             the claim, and exactly the population whose thread the
+//             dispatch-liveness loop already buys for H20/H27/H33.
+//   OUT       a closed card; a card with no `Claim:` this file's marker reads
+//             (H2's row where the card is assigned, H34's where the separator
+//             is the reason); a claim whose stamp does not parse — it cannot be
+//             placed against the cutoff, so the row DECLINES rather than
+//             accuses; a predecessor whose id does not read — the "actual" half
+//             of the sentence would be invented.
+//   UNJUDGED  a thread whose walk was still full at the page ceiling, or whose
+//             completion failed: the newest claim may sit on a page this row
+//             never saw, so it says nothing and the coverage pair says so
+//             (#4690).
+//
+// ## Cost — the one purchase this row makes
+//
+// The dispatch-liveness loop's thread read is a FIRST PAGE (`commentRowsFor`;
+// H2's deliberate trade, stated at its call site: a claim is early on a healthy
+// card). This row's question is about the LAST page by construction — the
+// newest claim and the comment before it — and a first page that is FULL may
+// hold neither, so the loop completes the walk for exactly that case, page by
+// page to `H50_COMMENT_PAGE_CEILING` (H48's shape), and lands the longer thread
+// in `commentCache` for every later reader (H33/H20/H27 in the same iteration,
+// H37/H47/H49 after the loop). A short first page buys nothing; the summary
+// clause prints how many pages a run actually bought rather than assuming.
+// ---------------------------------------------------------------------------
+
+/**
+ * The instant the `Thread-read:` field entered the claim template — the day
+ * this row's PR was opened (the ruling's cutoff), at the minute it opened, so a
+ * claim written earlier that same day predates the field exactly as an older
+ * one does. A `Claim:` stamped before it is never a row.
+ */
+export const THREAD_READ_FIELD_SINCE = '2026-09-07T12:40:00Z';
+
+/** One comment page, and the quota backstop on the completing walk (H48's). */
+export const H50_COMMENTS_PAGE_SIZE = 100;
+export const H50_COMMENT_PAGE_CEILING = 5;
+
+/**
+ * The `Thread-read:` line of a claim body — H2's leading-blockquote tolerance,
+ * `claimedBranches`'s leading-bullet tolerance, and the bold/code decoration
+ * around the key that `check-clause2-carriers` admits on `Clause-②`. ⛔ The
+ * VALUE is read strictly: the remainder of the line, trimmed, with ONE pair of
+ * enclosing backticks removed and nothing else decoded — a hashed, prosed or
+ * capitalised value is reported as the text it is, exactly as a `Clause-②: YES`
+ * stays malformed rather than being read as `yes`.
+ */
+const THREAD_READ_KEY_LINE = /^[ \t]*(?:[-*+][ \t]+)?>?[ \t]*(?:\*\*)?`?Thread-read`?(?:\*\*)?[ \t]*:[ \t]*(.*)$/im;
+
+/**
+ * @returns {{ present: false } | { present: true, value: string }} — the first
+ *   `Thread-read:` line in the body, or its absence.
+ */
+export function threadReadField(body) {
+  const m = THREAD_READ_KEY_LINE.exec(String(body ?? ''));
+  if (!m) return { present: false };
+  let value = String(m[1] ?? '').trim();
+  const code = /^`([^`]*)`$/.exec(value);
+  if (code) value = code[1].trim();
+  return { present: true, value };
+}
+
+/** Which cards this row can speak about AT ALL — exported for the counting-policy reason every such predicate is. */
+export function h50SpeaksAbout(issue) {
+  if (issue?.state === 'closed') return false;
+  return labelNames(issue ?? {}).includes('pm:dispatched');
+}
+
+/** A REST comment id as the string a claim is expected to name, or `null` when it does not read. */
+function commentIdText(id) {
+  const text = String(id ?? '');
+  return /^[1-9]\d*$/.test(text) ? text : null;
+}
+
+/**
+ * The comment a claim was written INTO: the newest `Claim:` on the thread
+ * (`latestMarkedComment`, H47's resolution) and the row immediately before it
+ * in THREAD order — `none` when the claim opened the thread. Pure over REST
+ * rows, so the self-test drives it offline.
+ *
+ * @param {{ id?: number, body?: string, created_at?: string }[]} commentRows
+ * @returns {{ claim: object, stamp: number|null, expected: string|null } | null}
+ *   `expected` is the predecessor's id as text, `'none'` for a first comment,
+ *   or `null` when the predecessor carries no readable id.
+ */
+export function threadReadExpectation(commentRows) {
+  const rows = Array.isArray(commentRows) ? commentRows : [];
+  const latest = latestMarkedComment(rows, CLAIM_COMMENT_MARKER);
+  if (!latest) return null;
+  const expected = latest.index > 0 ? commentIdText(rows[latest.index - 1]?.id) : 'none';
+  return { claim: rows[latest.index], stamp: latest.stamp, expected };
+}
+
+/**
+ * H50 — null when clean OR unjudged, else the finding sentence.
+ *
+ * Three input states for the thread, never two (#4690): `undefined` never
+ * consulted, `null` unreadable or INCOMPLETE — both UNJUDGED, kept apart from
+ * clean by the coverage pair — and rows, judged.
+ *
+ * @param {object} issue — the card.
+ * @param {{ id?: number, body?: string, created_at?: string }[]|null|undefined} commentRows —
+ *   the COMPLETE thread as REST rows: this row needs ids and the claim's stamp.
+ * @param {number} [sinceMs] — the cutoff, injectable so the self-test can pin
+ *   both sides of it without waiting for the calendar.
+ */
+export function h50ThreadReadMismatch(issue, commentRows, sinceMs = Date.parse(THREAD_READ_FIELD_SINCE)) {
+  if (!Array.isArray(commentRows)) return null;
+  if (!h50SpeaksAbout(issue)) return null;
+  const found = threadReadExpectation(commentRows);
+  if (!found) return null;
+  // An unreadable stamp cannot be placed against the cutoff — decline, never accuse.
+  if (found.stamp === null || !Number.isFinite(sinceMs) || found.stamp < sinceMs) return null;
+  // The "actual" half of the sentence would be invented — decline.
+  if (found.expected === null) return null;
+  const field = threadReadField(found.claim?.body);
+  if (field.present && field.value === found.expected) return null;
+  const claimId = commentIdText(found.claim?.id);
+  const claimName = claimId ? `comment ${claimId}` : 'a comment carrying no readable id';
+  const stamped = found.claim?.created_at ?? 'unstamped';
+  const actual = found.expected === 'none' ? '`none` — the claim opened the thread' : `\`${found.expected}\``;
+  let named;
+  if (!field.present) named = 'carries NO `Thread-read:` line at all';
+  else if (field.value === '') named = 'carries an EMPTY `Thread-read:` value';
+  else named = `names \`Thread-read: ${field.value}\``;
+  return (
+    `the newest \`Claim:\` (${claimName}, ${stamped}) ${named}, while the comment immediately before it in ` +
+    `the thread is ${actual} — so the claim does not name the thread it was written into. The field exists so ` +
+    'that a seat cannot fill it without fetching the thread to its LAST page, where triage\'s grading, prior PM ' +
+    'rulings and read-couplings live — the content that OVERRIDES the body — because a dispatch order written ' +
+    'from the body alone was measured on live boards after the prose rule had been written down twice. ⚠️ The row ' +
+    'asserts a MISMATCH, not a state of mind: a claim written blind, from a stale read, or over a comment that ' +
+    'landed in the race between the read and the write leaves this same evidence and takes the same remedy. ' +
+    'Remedy: re-read the thread to its last page NOW, while the work is in flight and a correction is a message ' +
+    'rather than a rollback; if the dispatch order contradicts a comment it never saw, say so on the card; and post ' +
+    'a fresh `Claim:` whose `Thread-read:` names the comment it follows, which is the record that stands this row ' +
+    'down. A claim stamped before the field landed is never judged here. Report-only patrol INPUT: nothing is ' +
+    'blocked and no label is written.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -9555,6 +9736,17 @@ export const SWEEP_COUNT_KEYS = [
   // must not read as a clean one.
   'partialCandidates',
   'partialJudged',
+  // H50's coverage pair (#16377), plus the two disclosures its one purchase
+  // owes. `threadReadCandidates` is how many OPEN `pm:dispatched` cards the row
+  // could speak about, `threadReadJudged` how many had a COMPLETE thread in
+  // hand (a short first page, or a walk that reached a short page before the
+  // ceiling), `threadReadTruncated` how many were still full at the ceiling or
+  // failed mid-walk — UNJUDGED, never clean — and `threadReadPagesBought` the
+  // extra comment pages the completing walk actually fetched on this run.
+  'threadReadCandidates',
+  'threadReadJudged',
+  'threadReadTruncated',
+  'threadReadPagesBought',
   'commits',
   'commitBindings',
   'commitBindingMessages',
@@ -9980,6 +10172,16 @@ export function summaryLine(counts, findingCount) {
     'shortfall is a thread H2 could not read, and such a card is UNJUDGED rather than clean. The PR side ' +
     'is the H8 merged window plus the open listing, so a `Refs` landing older than the window is ' +
     'invisible here. ' +
+    // H50's coverage pair (#16377). UNCONDITIONAL like every other window's,
+    // and it carries the one purchase this row makes: the completing walk over
+    // a FULL first page, so the pages bought are printed rather than assumed,
+    // and a thread still full at the ceiling is named UNJUDGED.
+    `Thread-read fields (H50): ${counts.threadReadJudged ?? 0} of ${counts.threadReadCandidates ?? 0} ` +
+    'open `pm:dispatched` card(s) had a COMPLETE comment thread in hand to judge the newest `Claim:` against ' +
+    `(${counts.threadReadTruncated ?? 0} still full at the page ceiling or failed mid-walk — UNJUDGED rather than ` +
+    `clean, since the newest claim may sit on a page this row never saw); ${counts.threadReadPagesBought ?? 0} ` +
+    'extra comment page(s) bought completing full first pages. A claim stamped before the field landed is never ' +
+    'a row. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -10033,6 +10235,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h47Release', 'Release records (H47): '],
   ['h48Brief', 'Maintainer briefs (H48): '],
   ['h49Partial', 'Partial landings (H49): '],
+  ['h50ThreadRead', 'Thread-read fields (H50): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -10401,6 +10604,7 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H47: 'state',
   H48: 'state',
   H49: 'state',
+  H50: 'state',
 
   H5: 'inventory',
   H6: 'inventory',
@@ -13203,6 +13407,47 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   };
   const commentsFor = async (issue) => (await commentRowsFor(issue)).map((c) => c.body ?? '');
 
+  // The completing walk (#16377) — H50's one purchase. `commentRowsFor` reads a
+  // FIRST page; a first page that is FULL may hide the newest claim on a later
+  // one, so this walks the remaining pages to H50's ceiling and lands the longer
+  // thread in the SAME cache, where every later reader finds it. Memoised beside
+  // the cache: a thread already walked costs nothing, and a short first page
+  // buys nothing. `complete` is false for a walk still full at the ceiling or
+  // one whose page failed — the rows read so far stay cached, which is never
+  // less than the first page alone, and `pagesBought` is what the summary
+  // clause prints rather than assumes.
+  const threadWalks = new Map();
+  const completeCardThread = async (issue) => {
+    const known = threadWalks.get(issue.number);
+    if (known) return { rows: commentCache.get(issue.number), ...known };
+    const first = await commentRowsFor(issue);
+    const rows = Array.isArray(first) ? [...first] : [];
+    let complete = rows.length < H50_COMMENTS_PAGE_SIZE;
+    let pagesBought = 0;
+    if (!complete) {
+      try {
+        for (let page = 2; page <= H50_COMMENT_PAGE_CEILING; page++) {
+          const batch = await rest(
+            `/repos/${OWNER_REPO}/issues/${issue.number}/comments?per_page=${H50_COMMENTS_PAGE_SIZE}&page=${page}`,
+          );
+          pagesBought += 1;
+          const list = Array.isArray(batch) ? batch : [];
+          rows.push(...list);
+          if (list.length < H50_COMMENTS_PAGE_SIZE) {
+            complete = true;
+            break;
+          }
+        }
+      } catch {
+        complete = false;
+      }
+      commentCache.set(issue.number, rows);
+    }
+    const walk = { complete, pagesBought };
+    threadWalks.set(issue.number, walk);
+    return { rows, ...walk };
+  };
+
   // The PULL-REQUEST comment cache (#15895), and it is a SECOND cache rather
   // than a widening of the one above on purpose: `commentCache` is keyed by card
   // number and fed by listings that all filter `!i.pull_request`, so a PR
@@ -13405,6 +13650,9 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
       // comment is posted at claim time, so on a healthy card it is early in
       // the thread; a >100-comment card with a late claim shows up as a
       // finding the patrol then reads by hand.
+      // For `pm:dispatched` cards the dispatch-liveness loop below completes a
+      // FULL first page to the thread's end (H50's walk, #16377) and replaces
+      // this card's `commentCache` entry with the longer thread.
       const comments = await commentsFor(issue);
       if (h2AssigneeNoClaimComment(issue, comments)) {
         findings.push([issue, 'H2', 'assignee set but no claim comment on the thread']);
@@ -13858,6 +14106,9 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   //     fetched above — costs nothing here. The only new fetches are for
   //     UNASSIGNED dispatched cards, which are H1 findings in their own right
   //     and correspondingly rare.
+  //   • the REST of that thread, only when its first page was FULL (H50's
+  //     completing walk, #16377): bounded by `H50_COMMENT_PAGE_CEILING`, and
+  //     the pages bought are printed on the summary line.
   //   • ONE ref read per distinct claimed branch, cached, and taken only for
   //     candidates (`h20NeedsRefProbe`): a claim younger than the threshold is
   //     not stuck, so it buys no request and the row says nothing about it.
@@ -13915,7 +14166,20 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
 
   for (const issue of seen.values()) {
     if (!labelNames(issue).includes('pm:dispatched')) continue;
-    const commentRows = await commentRowsFor(issue);
+    // H50 (#16377) — the completing walk first, so every reader in this
+    // iteration (H33, H20, H27) and after it (H37, H47, H49 through the cache)
+    // judges the thread's LAST page when the first one was full. Judged for
+    // EVERY `pm:dispatched` card, beside H33 and for H33's reason: the field it
+    // reads has nothing to do with how old the claim is. An incomplete walk
+    // hands the row `null` — UNJUDGED — and the coverage pair says so.
+    const walk = await completeCardThread(issue);
+    const commentRows = walk.rows;
+    stats.threadReadCandidates = (stats.threadReadCandidates ?? 0) + 1;
+    stats.threadReadPagesBought = (stats.threadReadPagesBought ?? 0) + walk.pagesBought;
+    if (walk.complete) stats.threadReadJudged = (stats.threadReadJudged ?? 0) + 1;
+    else stats.threadReadTruncated = (stats.threadReadTruncated ?? 0) + 1;
+    const blindField = h50ThreadReadMismatch(issue, walk.complete ? commentRows : null);
+    if (blindField) findings.push([issue, 'H50', blindField]);
     // H33 (#11724) — the same thread this loop already holds, asked a
     // different question: not "is the claimed branch alive" but "was the order
     // this card is in flight under written before the ruling that now stands".
@@ -20622,6 +20886,131 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   t('H49 summary: …and names H2 as the read it rides', saidBy('h49Partial', summaryLine({}, 0)).includes('H2 buys that thread'), true);
   t('H49 summary: …and the merged window as its PR-side horizon', saidBy('h49Partial', summaryLine({}, 0)).includes('older than the window is invisible here'), true);
   t('H49 summary: a bare line renders numbers, never `undefined`', saidBy('h49Partial', summaryLine({}, 0)).includes('undefined'), false);
+
+  // -- H50 — the `Thread-read:` field against the comment it follows (#16377) --
+  // The field landed together with this row, so no live claim carries it yet;
+  // these cases are the only thing pinning the row's behaviour, written for the
+  // shapes a live thread will produce rather than the shapes it has today.
+  const card50 = (labels = ['pm:dispatched'], extra = {}) => ({
+    number: 16377,
+    state: 'open',
+    labels: labels.map((name) => ({ name })),
+    assignees: [{ login: 'os-musk' }],
+    body: '',
+    title: '',
+    ...extra,
+  });
+  const cm50 = (id, body, at) => ({ id, body, created_at: at });
+  const SINCE50 = Date.parse('2026-09-07T12:00:00Z');
+  const T50_BEFORE = '2026-09-06T18:00:00Z';
+  const T50_AFTER = '2026-09-07T15:00:00Z';
+  // `undefined` leaves the field OUT; any other value writes the line with it.
+  const claim50 = (value, key = 'Thread-read') =>
+    'Claim: PM loop round 1\nSession: `session_x`\nBranch: `claude/issue-16377-claim-thread-read-field`\n' +
+    `Clause-②: no\n${value === undefined ? '' : `${key}: ${value}\n`}Serial constraints cleared: none`;
+  const TRIAGE50 = cm50(5568286781, 'Triage: routing only.', '2026-09-07T09:12:53Z');
+  const GRADING50 = cm50(5569655227, 'Graded by the skills seat: `priority:p2`.', '2026-09-07T11:03:53Z');
+  const DISPATCHED50 = card50();
+  const h50 = (rows, issue = DISPATCHED50) => h50ThreadReadMismatch(issue, rows, SINCE50);
+  const h50row = (rows, issue = DISPATCHED50) => String(h50(rows, issue) ?? '');
+  const MATCH50 = [TRIAGE50, GRADING50, cm50(5569681740, claim50('5569655227'), T50_AFTER)];
+  const MISMATCH50 = [TRIAGE50, GRADING50, cm50(5569681740, claim50('5568286781'), T50_AFTER)];
+  const MISSING50 = [TRIAGE50, GRADING50, cm50(5569681740, claim50(), T50_AFTER)];
+
+  // The five ruled cases.
+  t('H50 match: the field names the comment immediately before the claim -> clean', h50(MATCH50), null);
+  t('H50 mismatch: the field names an OLDER comment -> finding', typeof h50(MISMATCH50), 'string');
+  t('H50 missing: no field on a claim stamped after the cutoff -> finding', typeof h50(MISSING50), 'string');
+  t('H50 empty thread: `none` on the claim that opened the thread -> clean', h50([cm50(1, claim50('none'), T50_AFTER)]), null);
+  t('H50 legacy: a claim stamped BEFORE the cutoff is never a row, field or no field', h50([GRADING50, cm50(2, claim50(), T50_BEFORE)]), null);
+  t('H50 legacy: …even when its field is wrong', h50([GRADING50, cm50(2, claim50('1'), T50_BEFORE)]), null);
+
+  // The sentence — claim id, the id it named, the id that was actually there.
+  t('H50 sentence: names the claim by its comment id', h50row(MISMATCH50).includes('comment 5569681740'), true);
+  t('H50 sentence: …and its stamp', h50row(MISMATCH50).includes(T50_AFTER), true);
+  t('H50 sentence: …the id the field named', h50row(MISMATCH50).includes('names `Thread-read: 5568286781`'), true);
+  t('H50 sentence: …and the id actually there', h50row(MISMATCH50).includes('immediately before it in the thread is `5569655227`'), true);
+  t('H50 sentence: a missing field is SAID to be missing', h50row(MISSING50).includes('carries NO `Thread-read:` line at all'), true);
+  t('H50 sentence: an empty value is said to be empty', h50row([GRADING50, cm50(3, claim50(''), T50_AFTER)]).includes('carries an EMPTY `Thread-read:` value'), true);
+  t('H50 sentence: an id on a claim that opened the thread names `none` as the actual', h50row([cm50(1, claim50('5569655227'), T50_AFTER)]).includes('is `none` — the claim opened the thread'), true);
+  t('H50 sentence: …the remedy is a re-read and a fresh claim', h50row(MISMATCH50).includes('post a fresh `Claim:` whose `Thread-read:` names the comment it follows'), true);
+  t('H50 sentence: …and states its report-only posture', h50row(MISMATCH50).includes('Report-only patrol INPUT'), true);
+  t('H50 sentence: a claim without a readable id is said so, never `undefined`', h50row([GRADING50, cm50(undefined, claim50(), T50_AFTER)]).includes('a comment carrying no readable id'), true);
+  t('H50 sentence: …and prints no `undefined` anywhere', h50row([GRADING50, cm50(undefined, claim50(), T50_AFTER)]).includes('undefined'), false);
+
+  // The reader — decoration on the KEY is admitted, the VALUE is strict.
+  t('H50 reader: the template\'s own placeholder text is a readable line', threadReadField('Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>').present, true);
+  t('H50 reader: …whose literal value is a mismatch, not a match', typeof h50([GRADING50, cm50(3, claim50('<id of the newest comment on the card at the moment this claim is written, or none>'), T50_AFTER)]), 'string');
+  t('H50 reader: a backticked value reads as its id', threadReadField('Thread-read: `5569655227`').value, '5569655227');
+  t('H50 reader: …so a backticked match is clean', h50([TRIAGE50, GRADING50, cm50(4, claim50('`5569655227`'), T50_AFTER)]), null);
+  t('H50 reader: a blockquoted line reads (the documented claim template is a blockquote)', threadReadField('> Thread-read: none').value, 'none');
+  t('H50 reader: a bulleted line reads, as `Branch:` does', threadReadField('- Thread-read: none').value, 'none');
+  t('H50 reader: a bolded key reads, as `Clause-②` does', threadReadField('**Thread-read**: none').value, 'none');
+  t('H50 reader: a code-spanned key reads', threadReadField('`Thread-read`: none').value, 'none');
+  t('H50 reader: spaces around the colon are tolerated', threadReadField('Thread-read : 12').value, '12');
+  t('H50 reader: the key is case-insensitive', threadReadField('thread-read: 12').value, '12');
+  t('H50 reader: ⛔ a hashed id is the text it is, not the id', threadReadField('Thread-read: #5569655227').value, '#5569655227');
+  t('H50 reader: …and therefore a mismatch', typeof h50([TRIAGE50, GRADING50, cm50(4, claim50('#5569655227'), T50_AFTER)]), 'string');
+  t('H50 reader: ⛔ `None` is not `none`', typeof h50([cm50(1, claim50('None'), T50_AFTER)]), 'string');
+  t('H50 reader: ⛔ a prosed value is a mismatch, never decoded', typeof h50([TRIAGE50, GRADING50, cm50(4, claim50('5569655227 (last page read)'), T50_AFTER)]), 'string');
+  t('H50 reader: ⛔ `Thread-reads:` is not the key', threadReadField('Thread-reads: none').present, false);
+  t('H50 reader: ⛔ nor `Thread read:` without the hyphen', threadReadField('Thread read: none').present, false);
+  t('H50 reader: ⛔ nor a key that does not begin the line', threadReadField('see Thread-read: none').present, false);
+  t('H50 reader: the FIRST such line governs', threadReadField('Thread-read: 1\nThread-read: 2').value, '1');
+  t('H50 reader: a missing body is absent, never a crash', threadReadField(undefined).present, false);
+
+  // The expectation — the NEWEST claim, and the row before it in THREAD order.
+  t('H50 order: a re-claim after the first is the one judged', h50([TRIAGE50, cm50(10, claim50('5568286781'), '2026-09-07T13:00:00Z'), GRADING50, cm50(11, claim50('5569655227'), T50_AFTER)]), null);
+  t('H50 order: …and its predecessor is the comment before IT, not before the first claim', typeof h50([TRIAGE50, cm50(10, claim50('5568286781'), '2026-09-07T13:00:00Z'), GRADING50, cm50(11, claim50('5568286781'), T50_AFTER)]), 'string');
+  t('H50 order: the newest claim is judged even when an older one is legacy', typeof h50([GRADING50, cm50(10, claim50(), T50_BEFORE), cm50(11, claim50(), T50_AFTER)]), 'string');
+  t('H50 order: a claim stamped AT the cutoff second is in', typeof h50([GRADING50, cm50(2, claim50(), '2026-09-07T12:00:00Z')]), 'string');
+  t('H50 order: …one second earlier is legacy', h50([GRADING50, cm50(2, claim50(), '2026-09-07T11:59:59Z')]), null);
+  t('H50 order: an unreadable claim stamp DECLINES rather than accuses', h50([GRADING50, cm50(2, claim50(), 'not-a-date')]), null);
+  t('H50 order: a predecessor with no readable id DECLINES — the actual half would be invented', h50([cm50(undefined, 'lgtm', '2026-09-07T11:00:00Z'), cm50(2, claim50('7'), T50_AFTER)]), null);
+  t('H50 order: a predecessor id given as a digit STRING reads', h50([cm50('5569655227', 'Graded.', '2026-09-07T11:03:53Z'), cm50(2, claim50('5569655227'), T50_AFTER)]), null);
+  t('H50 order: the predecessor is the previous ROW, whatever its kind', h50([GRADING50, cm50(77, 'os-dev-report\n{}', '2026-09-07T11:30:00Z'), cm50(2, claim50('77'), T50_AFTER)]), null);
+  t('H50 order: the documented blockquote claim spelling reads the same', h50([TRIAGE50, GRADING50, cm50(4, `> ${claim50('5569655227').split('\n').join('\n> ')}`, T50_AFTER)]), null);
+  t('H50 order: a thread with no claim at all is silent (H2\'s row where assigned)', h50([TRIAGE50, GRADING50]), null);
+  t('H50 order: a dash-written claim is invisible here, as it is to H2 (H34 reports it)', h50([GRADING50, cm50(2, 'Claim — PM loop round 1\nThread-read: 1', T50_AFTER)]), null);
+
+  // Population — `pm:dispatched`, open.
+  t('H50 population: an open `pm:dispatched` card is in', h50SpeaksAbout(DISPATCHED50), true);
+  t('H50 population: ⛔ a `pm:queue` card is out — a spent or half-written claim is H24\'s/H47\'s', h50SpeaksAbout(card50(['pm:queue'])), false);
+  t('H50 population: …so its mismatch is silent', h50(MISMATCH50, card50(['pm:queue'])), null);
+  t('H50 population: ⛔ a closed card is out', h50SpeaksAbout(card50(['pm:dispatched'], { state: 'closed' })), false);
+  t('H50 population: an absent state field is judged, not exempted', typeof h50(MISMATCH50, { ...DISPATCHED50, state: undefined }), 'string');
+  t('H50 population: an unassigned dispatched card is still judged (H1 fires beside it)', typeof h50(MISMATCH50, { ...DISPATCHED50, assignees: [] }), 'string');
+  t('H50 population: a missing issue is out, never a crash', h50SpeaksAbout(undefined), false);
+
+  // Three input states, never two (#4690).
+  t('H50: an unconsulted thread is UNJUDGED, never clean', h50ThreadReadMismatch(DISPATCHED50, undefined, SINCE50), null);
+  t('H50: an incomplete or unreadable thread is UNJUDGED too', h50ThreadReadMismatch(DISPATCHED50, null, SINCE50), null);
+  t('H50: a missing issue does not crash', h50ThreadReadMismatch(undefined, MISMATCH50, SINCE50), null);
+  t('H50: an unreadable cutoff DECLINES everything', h50ThreadReadMismatch(DISPATCHED50, MISMATCH50, Number.NaN), null);
+  t('H50: the default cutoff is the landing stamp, and it parses', Number.isFinite(Date.parse(THREAD_READ_FIELD_SINCE)), true);
+  t('H50: …and a claim stamped after it is judged by default', typeof h50ThreadReadMismatch(DISPATCHED50, [GRADING50, cm50(2, claim50(), '2999-01-01T00:00:00Z')]), 'string');
+
+  // Adjacency — H33 reads the same thread for an ORDERING; this row for a NAME.
+  t('H50 adjacency: H33 is silent on a mismatch whose ruling PRECEDES the claim', h33ClaimPredatesRuling(DISPATCHED50, MISMATCH50), null);
+  t('H50 adjacency: …which is the carrier this row exists for', typeof h50(MISMATCH50), 'string');
+  t('H50 adjacency: H2 is silent (the claim comment is present)', h2AssigneeNoClaimComment(DISPATCHED50, MISMATCH50.map((r) => r.body)), false);
+
+  // The walk's constants and the registry, counters and clause.
+  t('H50 walk: the page size is the API maximum, so a short page proves exhaustion', H50_COMMENTS_PAGE_SIZE, 100);
+  t('H50 walk: the ceiling is H48\'s, one shape for both thread walks', H50_COMMENT_PAGE_CEILING, H48_COMMENT_PAGE_CEILING);
+  t('H50 band: registered as a state row', familyBand('H50'), 'state');
+  t('H50 band: …and the sweep really pushes it, so the registry sees it', familyRegistryCoverage().emitted.includes('H50'), true);
+  t('H50 band: no code is left unregistered by this change', familyRegistryCoverage().missing.length, 0);
+  t('H50 band: …and no band names a family the sweep never emits', familyRegistryCoverage().extra.length, 0);
+  t('H50 band: the registry still fits inside the ledger ROW CAP', Object.keys(HALF_STATE_FAMILY_BAND).length <= FAMILY_LEDGER_ROW_CAP, true);
+  t('H50: all four count keys ride the enumerated forwarding contract', ['threadReadCandidates', 'threadReadJudged', 'threadReadTruncated', 'threadReadPagesBought'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  t('H50 summary: the coverage pair is reported', saidBy('h50ThreadRead', summaryLine({ threadReadJudged: 3, threadReadCandidates: 4, threadReadTruncated: 1 }, 0)).includes('3 of 4 open `pm:dispatched` card(s)'), true);
+  t('H50 summary: …with the truncated count', saidBy('h50ThreadRead', summaryLine({ threadReadJudged: 3, threadReadCandidates: 4, threadReadTruncated: 1 }, 0)).includes('1 still full at the page ceiling'), true);
+  t('H50 summary: …and the pages the walk bought', saidBy('h50ThreadRead', summaryLine({ threadReadPagesBought: 2 }, 0)).includes('2 extra comment page(s) bought'), true);
+  t('H50 summary: the clause is rendered on EVERY run, not just interesting ones', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('0 of 0'), true);
+  t('H50 summary: …and says an incomplete thread is UNJUDGED, not clean', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('UNJUDGED rather than clean'), true);
+  t('H50 summary: …and that a legacy claim is never a row', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('stamped before the field landed is never a row'), true);
+  t('H50 summary: a bare line renders numbers, never `undefined`', saidBy('h50ThreadRead', summaryLine({}, 0)).includes('undefined'), false);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

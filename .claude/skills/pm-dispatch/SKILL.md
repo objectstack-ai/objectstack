@@ -598,7 +598,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `Part of` 卡 MERGED 时点收口;changed files 范围与 changeset/`skip-changeset` 分流;测试证据。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
-- 证伪是好运行:`premise_still_valid: false` 是再分诊输入;dev 纠正 PM 当众认。
 - 删除与二进制:死代码删除亲核引用面;`+0/-0` 先疑 NUL;sweep 范围外产出成组列出。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
@@ -807,5 +806,6 @@ Domain: `domain:<x>`
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: <档位,引当次 --tier 输出>`
 Clause-②: yes | no
+Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
 ```
