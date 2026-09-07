@@ -553,7 +553,29 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 359],
+  // Raised 359 → 362 by the fourth-increment ruling — again an ORDINARY raise
+  // under this map's own maintainer exit, ⛔ not a cross-file move. Maintainer,
+  // decision batch #56, 2026-09-06, verbatim and untranslated: 「其他同意」 on the
+  // presented recommendation, option A; the director record's own sentences for
+  // it (comment 5559776878):
+  //   The ceiling in `scripts/pm/check-skill-line-ratchet.mjs` for
+  //   `.claude/skills/pm-dispatch/references/platform-readings.md` moves 359 →
+  //   362 … All three lines land as authored … No existing line is deleted to pay
+  //   for them (option C rejected); no line is dropped (option B not needed).
+  // Spent in full at one line per reading, each written in this file's voice and
+  // wrapped by this module's own `wrapLine` rather than estimated: the zero-quota
+  // payload channel's timeline discriminant +1 (compare each array's `edges`
+  // length against `totalCount`; short means the NEWEST items are absent, so a
+  // claim check goes to the paged `get_comments` read), the authoritative reading
+  // of a multi-package `ELIFECYCLE` spray +1 (the `Failed:` line plus that
+  // package's own `##[error]`), and the first-differing-offset comparison that the
+  // platform's two-way blank-line normalisation around a trailing rule forces +1
+  // = +3 exactly. Nothing was paid in place: line-neutral folding was MEASURED,
+  // not assumed — of the file's 333 adjacent rule pairs, ZERO fit the 120-byte
+  // line cap when merged, so there is no re-wrap slack at all, and re-wrap funding
+  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0, same
+  // convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 362],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -963,6 +985,21 @@ export const CROSS_FILE_MOVES = new Map([
         // failure the header warns about. Neither ruling is reopened by this: both
         // are still quoted beside the ceiling, which is where a reader gets back to
         // them, and the lines they bought are the lines this rewrite handed back.
+        {
+          // Quoted beside this entry's ceiling above, where the +3 is accounted
+          // for line by line. Copied from there, not paraphrased.
+          ruling:
+            'the fourth-increment raise on'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — maintainer,'
+            + ' decision batch #56, 2026-09-06, verbatim and untranslated: 「其他同意」 on option'
+            + ' A, and the sentences that ruling adopts, in the director record\'s own words'
+            + ' (comment 5559776878): "The ceiling in `scripts/pm/check-skill-line-ratchet.mjs`'
+            + ' for `.claude/skills/pm-dispatch/references/platform-readings.md` moves 359 → 362'
+            + ' … All three lines land as authored … No existing line is deleted to pay for them'
+            + ' (option C rejected); no line is dropped (option B not needed)."',
+          date: '2026-09-06',
+          delta: 3,
+        },
       ],
       sources: [
         ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
