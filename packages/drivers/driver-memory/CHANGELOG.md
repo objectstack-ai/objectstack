@@ -1,5 +1,207 @@
 # @objectstack/driver-memory
 
+## 17.4.0
+
+### Minor Changes
+
+- e9fcd6b: feat(driver-memory)!: the file-persistence auto-save interval names its unit (#15680, ruling B on #14478)
+  
+  <!-- adr-0087: registered memory-persistence-auto-save-interval-to-ms -->
+  
+  **BREAKING** — `InMemoryDriverOptions.persistence.autoSaveInterval` and
+  `FileSystemPersistenceAdapter`'s `autoSaveInterval` constructor option are both
+  renamed to **`autoSaveIntervalMs`**, following the `@objectstack/spec` rename of
+  the authored keys on both persistence arms.
+  
+  Same value, same milliseconds, same 2000 default, same `setInterval` cadence. The
+  option was always milliseconds — it is passed straight to `setInterval` — and the
+  spec's `min(100)` bound is what made the bare name dangerous rather than untidy:
+  100 reads as a plausible number of seconds, so an author who guessed the unit
+  wrong cleared the bound, was refused nowhere, and saved a thousand times more
+  often than intended.
+  
+  Both persistence arms move together: `type: 'auto'` resolves to this same file
+  adapter and forwards the same field, so this package reads exactly one spelling
+  rather than two.
+  
+  ```diff
+  - new InMemoryDriver({ persistence: { type: 'file', autoSaveInterval: 5000 } })
+  + new InMemoryDriver({ persistence: { type: 'file', autoSaveIntervalMs: 5000 } })
+  ```
+- 2003259: fix(driver-memory): `find()`, `findOne()` and `create()` publish their declared types (#14435)
+  
+  **BREAKING** for TypeScript consumers — a published TYPE-surface narrowing, the same shape #13878 landed on `update()` / `upsert()` one door over, shipped as `minor` under the launch-window convention (`major` is refused by `check-changeset-no-major`, so the BREAKING banner and the ADR-0087 disposition are the carriers, not the level).
+  
+  `IDataDriver` has always declared `Promise<Record<string, unknown>[]>`, `Promise<Record<string, unknown> | null>` and `Promise<Record<string, unknown>>` on these three doors. The emitted `.d.ts` published `Promise<any[]>`, `Promise<any>` and `Promise<Record<string, any>>`: the return types of `find` and `findOne` were INFERRED through the backing store's `any[]` rows (`private db: Record<string, any[]>` to `getTable()`), and `create` carried an explicit annotation that itself spelled `Record<string, any>`. They are now declared as the contract declares them.
+  
+  What this asks of a consumer holding a concrete `InMemoryDriver`: a caller that reads fields off a `findOne()` result narrows the `null` arm first — the arm the driver has always been able to answer with (`results[0] || null`) and that no caller was ever asked to handle; and a caller that leaned on `any` to read a member off a `find()` row or a `create()` result now types it, since the rows are `Record<string, unknown>`. A consumer whose receiver is typed as `IDataDriver` sees no change at all — that declaration already said this.
+  
+  The parameters are deliberately untouched: `create(data: Record<string, any>)` stays as it is, because narrowing an INPUT would be a second, unrelated break, and method parameters compare bivariantly against the contract's `Record<string, unknown>`. No runtime behaviour changes; the store keeps its `any[]` rows, which the card measured to cascade if re-typed.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A published return type moves off `any` onto the contract's own shape: no metadata key is removed, renamed or re-shaped, no spec schema changes (this diff touches `packages/drivers/driver-memory/**` only), and nothing exists for `objectstack migrate meta` to rewrite. The obligation is a TypeScript narrowing at the consumer's call site, delivered by the compiler. -->
+- 1cf7392: `driver-memory` analytics honours `AnalyticsQuery.timezone` when it resolves a string `dateRange`, instead of accepting the field and answering on UTC (#16042)
+  
+  `AnalyticsQuerySchema` declares `timezone` optional with no default precisely because an absent value is a meaningful state the engine resolves (`selection.timezone ?? context.timezone ?? 'UTC'`, ADR-0053 Phase 2), and `service-analytics` resolves that whole chain and writes the answer into `query.timezone` before a driver ever sees it. `parseDateRangeString()` never read it: a caller asking `dateRange: 'today'` with `timezone: 'Asia/Shanghai'` was accepted, warned about nothing, and answered on the UTC day.
+  
+  ⚠️ **This changes which rows a query answers for a caller already passing `timezone`.** Measured at `2026-09-06T20:00:00Z` with `timezone: 'Asia/Shanghai'`, `'today'`:
+  
+  | | window | rows selected, from the same 8 probes |
+  |:--|:--|:--|
+  | before | `[2026-09-06T00:00:00.000Z, 2026-09-07T00:00:00.000Z)` — the UTC day | `06T00:00:00.000Z`, `06T15:59:59.999Z`, `06T16:00:00.000Z`, `06T23:59:59.999Z` |
+  | after | `[2026-09-06T16:00:00.000Z, 2026-09-07T16:00:00.000Z)` — Shanghai's day | `06T16:00:00.000Z`, `06T23:59:59.999Z`, `07T04:00:00.000Z`, `07T15:59:59.999Z` |
+  
+  Four rows either way, and **two of the four are different rows**: `2026-09-06T00:00:00.000Z` and `2026-09-06T15:59:59.999Z` leave the answer (they are yesterday in Shanghai), `2026-09-07T04:00:00.000Z` and `2026-09-07T15:59:59.999Z` join it (they are today in Shanghai). Both row sets are asserted against the real `MemoryAnalyticsService.query()` entry, in the same test, so the before is measured rather than recalled.
+  
+  A query carrying **no** timezone is byte-identical to before: `zonedDateStartToUtcMs` returns plain UTC midnight for an unset, `'UTC'`, or unknown zone, so #15825's repair — the common case — is untouched, and both of its pins stay green.
+  
+  Two halves, each of which fails silently on its own and each of which is pinned: the reference timezone decides **which** calendar day `'today'` is (`calendarPartsInTzOrUtc`, the `proxyDay()` pattern), and **where that day begins as an instant** (`zonedDateStartToUtcMs` — that zone's local midnight, which is what ADR-0053 already specifies for a `datetime` bound in `service-analytics`' drill ranges). Resolving only the first would anchor to the zone's calendar day and then cut it at UTC midnight — a window that is neither the UTC day nor the zone's. The end bound is a calendar step, never `+ 86_400_000`: on `America/New_York`, 2026-03-08 is 23 hours long.
+- 5f4f1f6: `driver-memory` analytics resolves `dateRange` on the UTC calendar, so `'today'` and `last N ...` stop being offset by the process timezone (#15825)
+  
+  `MemoryAnalyticsService.query()` lowers a string `dateRange` through
+  `parseDateRangeString()`, and that function built its window on the **local**
+  calendar and rendered it as **UTC**. Two independent defects lived in it.
+  
+  **1. The window boundary was local midnight.** `new Date(y, m, d)` constructs
+  local midnight; `toISOString()` renders that instant in UTC. So in any process
+  not sitting at UTC, the `'today'` bucket was the **local** day expressed as a
+  UTC range. Measured 2026-09-05, with the clock at `2026-09-05T20:51Z`:
+  
+  | `TZ` | `'today'` window produced | the UTC day it should be |
+  |:---|:---|:---|
+  | `UTC` | `2026-09-05T00:00Z` → `2026-09-06T00:00Z` | (agrees) |
+  | `Asia/Shanghai` | `2026-09-05T16:00Z` → `2026-09-06T16:00Z` | `2026-09-05T00:00Z` → `2026-09-06T00:00Z` |
+  | `America/Los_Angeles` | `2026-09-05T07:00Z` → `2026-09-06T07:00Z` | `2026-09-05T00:00Z` → `2026-09-06T00:00Z` |
+  | `Europe/Berlin` | `2026-09-04T22:00Z` → `2026-09-05T22:00Z` | `2026-09-05T00:00Z` → `2026-09-06T00:00Z` |
+  | `Asia/Kolkata` | `2026-09-05T18:30Z` → `2026-09-06T18:30Z` | `2026-09-05T00:00Z` → `2026-09-06T00:00Z` |
+  
+  That is wrong on **every day of the year**, with no DST transition needed.
+  
+  **2. The `last N ...` legs mixed two calendars.** `setDate(getDate() - n)` is
+  local arithmetic and `toISOString()` is a UTC rendering. `setDate` preserves
+  wall-clock time, so the instant moves `n × 24h` only while every local day in
+  the window is 24 hours long; across a DST transition it moves 23h or 25h and
+  the window start slips an hour. `setMonth` / `setFullYear` are the same class,
+  and can move it by a whole day: at `America/New_York` with the clock at
+  `2026-01-01T12:00Z`, `last 1 month` started at `2025-12-02T00:00Z` instead of
+  `2025-12-01T00:00Z`.
+  
+  **⛔ The two do not fix each other**, which is the easiest thing to get wrong
+  here: `setUTCDate` alone leaves the local-midnight boundary in place, and
+  `Date.UTC` alone leaves the arithmetic mixed. Both are repaired, each is pinned
+  by its own file, and each was ablated on its own to prove the separation.
+  
+  **Why UTC and not "any consistent calendar".** The rest of the platform
+  resolves a bare date to the UTC day — `@objectstack/core`'s `{today}`
+  filter-token macro builds its reference day as
+  `new Date(Date.UTC(year, month - 1, day))` and falls back to UTC parts when the
+  context carries no timezone, and `{TODAY()}` in flow templates resolves to the
+  UTC day (#14852 repaired the identical two-calendar shape there). Before this
+  change the same analytics question asked through the driver's `dateRange` and
+  through a flow token could select **different rows in one deployment**. UTC is
+  also the terminal fallback of the engine's own resolution chain
+  (`selection.timezone ?? context.timezone ?? 'UTC'`, ADR-0053 Phase 2).
+  
+  **What did not change.** The parser's vocabulary, its `[range, range]`
+  fallback, and the shape of the emitted `$match` are untouched — this is a
+  calendar repair, not a rewrite. `AnalyticsQuery.timezone` is still not consulted
+  by this path; making the range tokens timezone-**aware** is a separate and
+  larger question, which #14852 also declined.
+  
+  **Who sees a difference.** Any deployment whose process is not at UTC: `'today'`
+  and `last N ...` now select the UTC day they always claimed to, so charts built
+  on a string `dateRange` shift by the process offset — toward agreement with
+  `{today}` / `{TODAY()}` and with the same query run at `TZ=UTC`. Deployments
+  already running at UTC are unaffected; the two spellings are indistinguishable
+  there, which is exactly why CI never reddened on this.
+
+### Patch Changes
+
+- a646120: fix(driver-memory): the reference matcher's `$notContains` arm answers the predicate, not a type test, for a stored non-string value
+  
+  `match()` used to answer `{ n: { $notContains: '5' } }` with NO for `{ n: 5 }` — the arm read `typeof value !== 'string' || value.includes(target)`, so a number failed `$contains` (correct) AND its negation (wrong: for the very reason a number cannot contain the substring, it does not contain it). This package's own live mingo path admitted the row, so one filter answered two ways depending on which face was asked; on this face the failure mode was silently dropped rows.
+  
+  The arm now answers what `FILTER_TEXT_CASES`' new `score` rows declare on every face (maintainer ruling 2026-09-05 on the contract card): a stored value that is not a string never satisfies a positive text operator and always satisfies `$notContains`. The no-value cells keep their #13166 answer; nothing else in the matcher moved.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

@@ -1,5 +1,49 @@
 # @objectstack/console
 
+## 17.4.0
+
+### Minor Changes
+
+- 236f2df: Console (objectui) refreshed to `a472b07167a3`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 15 releasing of 18 changesets added across 29 non-merge commits; omitted: 3 release-nothing changesets, 11 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — **BREAKING** — Converge the lookup/user widget metadata on the spec's camelCase — one concept, one spelling (objectui#7155, maintainer ruling A′ of 2026-09-03, director decision batch #19). (objectui `351eb3181`)
+  - **minor** — **BREAKING** — One authority for `KanbanSchema` / `KanbanColumn` / `KanbanCard`: the bare names now belong to `@object-ui/plugin-kanban` (objectui#6172, closing the cross-package half of objectu… (objectui `2c71482ea`)
+  - **minor** — Retire `ComponentInput.inputType` — the fifth and last key objectui#5905 named (ADR-0049 enforce-or-remove, maintainer ruling 2026-08-31, option B). (objectui `1ec291c0d`)
+  - **minor** — `@object-ui/core` publishes `resolveRecordSourceObjectName`, the ONE reader for "which object is this block bound to" (objectui#7627). (objectui `b041b9c0c`)
+  - **minor** — **Published TS surface narrowed:** `DashboardComponentSchema` no longer declares the dashboard-root `title` member (objectui#7623). (objectui `5d0876c5c`)
+  - **minor** — **BREAKING** — BREAKING (`@object-ui/components`): the chart primitives — `ChartContainer`, `ChartTooltip`, `ChartTooltipContent`, `ChartLegend`, `ChartLegendContent`, `ChartStyle` and the `Char… (objectui `7bf244bea`)
+  - **minor** — ListView: fold `data={{ provider: 'object', object }}` onto `objectName`, and read the author's view kind from `specType` / `type` (objectui#7477 — step 6 of #2890, released by th… (objectui `00d2fa682`)
+  - **minor** — Retire the dashboard-**root** `title` read across all five surfaces (objectui#7509, maintainer ruling 2026-09-04, decision batch #29, option C, under ADR-0049). (objectui `1cca678ba`)
+  - **minor** — **BREAKING** — Re-home the breakpoint layout vocabulary and delete the two dead responsive implementations (objectui#7580, maintainer ruling 2026-09-04, option A). (objectui `e62c44e7e`)
+  - **minor** — `@object-ui/types/zod`: the zod const `StylePropsSchema` is renamed to `ClassNameStylePropsSchema` (objectui#5928). **The old name is gone** — there is no deprecated alias and no… (objectui `24e027e93`)
+  - **patch** — Fix `extractToc` eating the underscores out of a `SCREAMING_SNAKE` heading, so its `#id` links resolve to the heading they name again (objectui#7667). (objectui `a472b0716`)
+  - **patch** — Remove `src/ui/toast.tsx`, an unreferenced primitive, and the dependency only it imported (objectui `2f61238b9`)
+  - **patch** — Fix `extractToc` deleting tag-shaped text that lives INSIDE an inline code span, so its `#id` links resolve to the heading they name again (objectui#7658). (objectui `90c6d090d`)
+  - **patch** — A record-page URL now names the object the clicked rows actually came from, in `ObjectTree` and `ObjectCalendar` (objectui#7638). (objectui `2ce2612df`)
+  - **patch** — fix(app-shell): the object-field options editor no longer drops `default` and `visibleWhen` on save (objectui `97c3e1972`)
+  
+  ⚠️ 4 of these carry a breaking change: 4 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+  
+  **In this console build, declared nowhere** — objectui merged 11 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ fix(scripts): check-doc-links resolves the #fragment, not just the file (objectui#7644) (#7657) (objectui `f7cf7e8a9`)
+  - _(no changeset)_ docs(plugin-chatbot): document chatbot-floating's seven declared inputs keys (objectui#7594) (#7656) (objectui `8e501cb97`)
+  - _(no changeset)_ docs(agents): record the never-approve seat rule beside the governed never-list (#7630) (objectui `2e99852ca`)
+  - _(no changeset)_ refactor(examples): drop the inert root `title` from six catalog dashboards (#7634) (objectui `46cde8264`)
+  - _(no changeset)_ docs(check-skill-examples): drop the stale zero-jsonc-fences claim (#7631) (objectui `0b24d7f85`)
+  - _(no changeset)_ docs(governed-guard): replace the retired sha pin with the ruled approval-record predicate (#7616) (objectui `11edab88f`)
+  - _(no changeset)_ docs(skills): split multi-document JSON fences, drop the `...` elisions, mark every parsing fence (#7608) (objectui `89d6adf37`)
+  - _(no changeset)_ fix(scripts): judge spec citations at member granularity, and stop the header teaching a retired filter (objectui#7513) (#7617) (objectui `d28d87bf4`)
+  - _(no changeset)_ fix(governed-guard): an authorised approval record satisfies the queue leg on any commit (#7606) (objectui `0d8fd7ce3`)
+  - _(no changeset)_ chore(deps): Bump fumadocs-core from 16.14.4 to 16.15.4 (#7059) (objectui `1bae75bb8`)
+  - _(no changeset)_ docs(claude-md): collapse the two AGENTS.md excerpts to rule + hook + pointer (#7600) (objectui `c70ebaaeb`)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) All FOUR declared-breaking entries in the range `00d3f09c500c...a472b07167a3` are judged ONE AT A TIME against `packages/spec`'s authorable surface at this HEAD, not as a batch, and every count below was re-measured here rather than quoted from upstream prose. (1) objectui `351eb3181` (objectui#7155) converges objectui's WIDGET metadata bags `LookupFieldMetadata` / `UserFieldMetadata` onto the spec's camelCase, removing the snake members. It moves TOWARD this repo's contract, not away from it: `packages/spec/src/data/field.zod.ts` already declares `displayField` (`:835`, `:1342`), `descriptionField` (`:1343`) and `lookupFilters` (`:1355`), and the snake spellings have ZERO occurrences under `packages/spec/src` — `display_field` 0, `description_field` 0, `lookup_filters` 0, `id_field` 0 (the single apparent `id_field` hit is the substring inside `invalid_field` in an unrelated `api/protocol.test.ts` fixture). The snake dialect was never an ObjectStack-authorable key, so no accepted key moves, no stored `sys_metadata` row can carry a retired spelling, and there is nothing here for `objectstack migrate meta` to act on. (2) objectui `2c71482ea` (objectui#6172) is a TypeScript export rename inside `@object-ui/types` giving the bare Kanban trio to `@object-ui/plugin-kanban`; `KanbanSchema`, `KanbanColumn` and `KanbanCard` have ZERO occurrences under `packages/spec/src`, and upstream states no member, no optionality and no accept/reject behaviour moves with it. (3) objectui `7bf244bea` (objectui#7397) removes the duplicated React chart primitives from `@object-ui/components`. This repo's own `ChartConfigSchema` / `ChartConfig` (`packages/spec/src/ui/chart.zod.ts:539`) is an independently declared ObjectStack metadata schema that shares a NAME with the removed objectui type and nothing else: `packages/spec/src` imports from `@object-ui/*` zero times (re-measured), so none of the removed React exports sits on any ObjectStack surface. (4) objectui `e62c44e7e` (objectui#7580) re-homes `BreakpointName` and `BreakpointColumnMap` into objectui packages and deletes the two dead responsive implementations. This repo retired that whole vocabulary itself in objectstack#11027 and its ADR-0087 ledger entries ALREADY EXIST on this side — `RETIRED_DEFS_BY_MAJOR[18]` carries `ui/BreakpointName`, `ui/BreakpointColumnMap` and `ui/BreakpointOrderMap` — so this entry is objectui catching up to a retirement already registered here, and it prescribes nothing new. None of the four is reachable through `@objectstack/console` in any case, re-measured against `packages/console/package.json` at this HEAD: it publishes a frozen prebuilt SPA whose `files` list is ["dist", "README.md", "CHANGELOG.md"] and whose sole `exports` entry is `./package.json`, so it forwards no `@object-ui/*` module entry point and re-exports none of these types; and no `package.json` in this workspace declares an `@object-ui/*` dependency at all (0 files, re-measured). This diff is `.objectui-sha`, this changeset and the regenerated console provenance records the pin gates require, and nothing else — no `packages/spec` schema, no authorable metadata key and no protocol surface change is in it. This bump adds no ledger entry and claims none. -->
+  
+  objectui range: `00d3f09c500c...a472b07167a3`
+
 ## 17.3.0
 
 ### Minor Changes

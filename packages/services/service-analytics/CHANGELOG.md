@@ -1,5 +1,237 @@
 # Changelog — @objectstack/service-analytics
 
+## 17.4.0
+
+### Minor Changes
+
+- 6136293: A `min`/`max` over a string-valued field is described as `string`, not `number` (#16098)
+  
+  The sibling population of the temporal fix. `min` and `max` return a value **of the aggregated field's own type**, so a `min` over a `text` / `select` / `lookup` / `autonumber` column carries a string — and `POST /api/v1/analytics/dataset/query` described every one of those columns as `type: "number"`, exactly as it did for the temporal family before the temporal half landed.
+  
+  What changed:
+  
+  - **`measureResultType` now answers `string` for the string-valued field types too**, in the same one table it already answered `time` from. No second mechanism and no new call site: the rule still answers `undefined` for "no correction", and `queryDataset`'s ADR-0021 result-column enrichment still applies it once, downstream of all four producers of the shape.
+  - **The corrected spelling is `string`**, the `DimensionType` word a `lookup` or `string` DIMENSION column in the same response already carries (`dataset-compiler.dimensionType`). A textual measure spelled `text` would have been a sixth word in a five-word wire vocabulary, leaving every existing consumer branch unreached — the same argument that chose `time` over `datetime`.
+  - **Membership is composed from `@objectstack/spec`'s own value classes** (`STRING_VALUE_TYPES`, `SINGLE_OPTION_TYPES`, `REFERENCE_VALUE_TYPES`) rather than re-listed, so what the platform says a field type STORES and what this rule says a `min` over it RETURNS cannot drift.
+  
+  Corrected: `text`, `textarea`, `email`, `url`, `phone`, `password`, `secret`, `markdown`, `html`, `richtext`, `code`, `color`, `signature`, `qrcode`, `select`, `radio`, `lookup`, `master_detail`, `tree`, `user`, `autonumber` — twenty-one members, each verdict read off the two shipped statements of what the type stores (the spec value contract and `driver-sql`'s DDL column switch).
+  
+  Deliberately NOT corrected, with the measurement recorded rather than a guess shipped as a declaration:
+  
+  - **`boolean` / `toggle`** — Postgres has no `min(boolean)` at all, SQLite answers `0`/`1` as numbers, and the driver seam has been recorded answering `false`/`true`. Three readings that disagree about whether a value exists and what kind it is. `DimensionType` does carry a `boolean` word, so the correction is spellable; it is not made.
+  - **The JSON-column classes** (`multiselect` / `checkboxes` / `tags`, `composite` / `repeater` / `record` / `location` / `address` / `vector`, `json`) — no `min` over `jsonb` on Postgres, serialized TEXT on SQLite.
+  - **The file types** (`image` / `file` / `avatar` / `video` / `audio`) — their stored form is mid-migration under ADR-0104 D3: the value contract already says an opaque `sys_file` id while the DDL still gives them a JSON column.
+  - **`formula`** — its result type IS declared, on `FieldSchema.returnType`, but that key is not on `AnalyticsServiceConfig.sourceFieldMeta`'s return shape and is itself optional.
+  - **`summary`** — measured NUMERIC on both shipped statements (the spec's `NUMERIC_VALUE_TYPES`, and `driver-sql`'s `table.float` column), so the `number` it already carried is correct rather than merely unexamined.
+  
+  Every member of `FieldType` now carries an explicit verdict, pinned by a test that walks the enum: a field type added to the spec fails that pin instead of silently inheriting the flat `number`.
+- 07f40e5: A dataset measure's `fields[].type` stops contradicting the value beside it: a `min`/`max` over a temporal field is described as `time`, not `number` (#15768)
+  
+  `POST /api/v1/analytics/dataset/query` described **every** measure column as `type: "number"`, including a `min`/`max` over a `date` / `datetime` / `time` field whose value in the same response is an ISO instant. Measured on a real boot (`@objectstack/cli` 17.3.0, SQLite dev datasource):
+  
+  ```json
+  {"rows":[{"oldest_last_update_at":"2026-07-04T07:00:00.000Z"}],
+   "fields":[{"name":"oldest_last_update_at","type":"number","label":"Oldest touch","format":"relative"}]}
+  ```
+  
+  `min` and `max` return a value **of the aggregated field's own type**, so that column carries an instant and the metadata denied it — which is enough on its own to keep a formatter that branches on the declared type from ever reaching a temporal branch.
+  
+  What changed:
+  
+  - **The measure column's type is resolved from the authored measure plus the source field's declared type**, in `AnalyticsService.queryDataset`'s ADR-0021 result-column enrichment — the same block that already resolves `label` / `format` / `currency` / `percentScale`, and the one seam every producer of the shape passes through on the way to the route, which relays that method's return verbatim. The rule itself is `measureResultType` in the new `measure-result-type.ts`, so the per-aggregate verdict has one home instead of four copies.
+  - **The corrected spelling is `time`**, the `DimensionType` word a temporal DIMENSION column in the same response has always carried. A second temporal word in one wire position would have left every existing consumer branch unreached.
+  - **Only `min` and `max` move.** `count` and `count_distinct` are numeric however temporal the column they read is; `sum` / `avg` over a temporal column are refused by no layer and answered by the backend (an epoch mean on SQLite, an error on Postgres), so there is no single value for a type to describe and none is invented; a derived measure is numeric by construction, because `computeDerived` coerces its operands with `Number()`. Row values are untouched on every path.
+  - **Tiered "cannot answer, do not block".** A host with no source-field metadata wired, and a measure over a relationship PATH (which the source-field lookup resolves against the base object and therefore cannot answer), both leave the column exactly as the query layer produced it.
+  
+  `AnalyticsResult.fields[].type` and the `AnalyticsResultResponse` schema now state the vocabulary this position speaks and what each aggregate answers; neither declaration widens — the wire type was, and remains, a string.
+- 6573af9: A draft-preview `min`/`max` answers the operand's own type instead of `0`, and a preview dimension column is described by its own type
+  
+  `POST /api/v1/analytics/dataset/query` has two producers of one response: the engine, and — when the request renders the as-if-published world over a pending seed draft (ADR-0037 P3) — `evaluateAnalyticsQueryOverRows`. The second one coerced every aggregate operand with `Number()` and dropped the non-finite ones, so a `min` / `max` over a non-numeric field answered `0`. Measured on one dataset and one row set, with two services differing only in whether a pending seed draft exists:
+  
+  ```
+  live     {"category":"travel","latest_spend":"2026-05-12"}
+  preview  {"category":"travel","latest_spend":0}
+  ```
+  
+  That is not a mislabelled column: it is a different, wrong answer to the same query, with no refusal and no warning, on the path an author is looking at *while* authoring the dataset.
+  
+  What changed, per member of the closed `AggregationFunction` vocabulary:
+  
+  - **`min` / `max` return the winning operand in its own type.** Ordering goes through this file's shared `compare` — so an ISO date orders as a date, a BSON `Date` orders as its instant against wire text, and text orders the way `MIN(text_col)` does on a SQL face — with a numeric arm so a numeric column written as text (`'800'`) still orders numerically. `cross-object-rebucket.ts` settled the identical question for the recombination path: the value these two pick is a value OF the column, so it must come back in the shape the row carried.
+  - **A group whose operand is null throughout answers `null`, not `0`** — `emptyGroupValueFor` (`@objectstack/spec/data`) rules `min` / `max` over nothing unanswerable, and `0` reads as a measurement nobody made.
+  - **`count_distinct` answers a cardinality again.** Its arm was spelled `countDistinct`, a word no producer mints (`dataset-compiler` copies the spec's `count_distinct` through), so it was unreachable and the measure fell to the numeric default — answering a row count under the author's `count_distinct` name (measured: `3` where the live path says `2`).
+  - **`count` stays a row count and `sum` / `avg` stay arithmetic.** Counting dates is still counting.
+  - **`sum` / `avg` over a TEMPORAL operand is deliberately unchanged.** There is no defined answer — the SQL faces do not agree on one either — and refusing an incoherent aggregate/field-type pair is an open decision, not this fix's to invent.
+  - **A dimension column is typed from the cube dimension**, the same expression both live producers use (`d?.type || 'string'`), so a `date` dataset dimension is `time` on the preview path as it already was on the live one. A MEASURE column keeps the `number` every producer mints; correcting that is the ADR-0021 descriptor pass's one rule, not a second copy here.
+  
+  Derived measures are untouched: `computeDerived` still coerces with `Number()` and answers `null` for a non-finite operand — but a derived ratio over a temporal `min` / `max` now sees a date instead of the spurious `0`, so it answers `null` on the preview path exactly as it already did on the live one.
+- 54bb2f1: The analytics SQL compilers compile the case-sensitive text family per dialect, so a `$contains` policy on SQLite stops admitting rows it excludes (#15684)
+  
+  `$contains` / `$notContains` / `$startsWith` / `$endsWith` are case-SENSITIVE on every backend (#4706 Q2 = A). All three of `service-analytics`' SQL compilers emitted `col LIKE ? ESCAPE ?` on every dialect, and SQLite's `LIKE` folds ASCII case unconditionally — the fold cannot be turned off per statement, because `PRAGMA case_sensitive_like` is a connection-global switch. Measured on sql.js over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` answered `['1','2']` — `ACME Corp` **and** `acme corp` — where `FILTER_TEXT_CASES` says `['2']`.
+  
+  On two of the three compilers that is a wrong chart. The third is `read-scope-sql.ts`, the ADR-0021 D-C read scope: a scope that **admits** rows the policy's case-sensitive predicate excludes is over-reach, not a loose filter — the same reading that file already applied to its own `LIKE` escaping. The `/analytics/sql` echo was wrong in a third way: it printed `LIKE` while the statement it claims to reproduce ran through a driver that has emitted `GLOB` on the SQLite dialects since #6518.
+  
+  What changed:
+  
+  - **The construct is chosen per dialect** (`text-match-sql.ts`), arm for arm with `driver-sql`'s own table: `GLOB` on SQLite (case-exact by definition, with its own `*` / `?` / `[` escaped class and no `ESCAPE` clause), `LIKE` over `CAST(… AS BINARY)` on MySQL, and `LIKE` **unchanged** on Postgres, where it is already exactly the ruled semantics. There is no single construct that is case-exact and parses on all three, so the dialect had to become an input rather than a guess.
+  - **The dialect arrives from the driver that will execute the statement.** New optional `AnalyticsServiceConfig.sqlDialect`, wired by `AnalyticsServicePlugin` from `IDataEngine.getDriverForObject`. `SqlDriver.dialectName` is now public so that answer can be read without a second dialect-resolution table drifting behind the driver's own knex spellings; it is derived and read-only.
+  - **A host that answers no dialect keeps the `LIKE` it always got** — "cannot answer, do not block". Postgres deployments see byte-identical SQL.
+  
+  `$icontains` is untouched: it keeps its own ASCII-only fold on both sides, and collapsing the two families onto one path would hand the case-exact family back the fold the ruling took away from it. `LIKE` escaping is unchanged wherever a `LIKE` is still emitted.
+- a646120: The three SQL compilers in this package — the RLS read-scope lowering (`compileScopedFilterToSql`), `NativeSQLStrategy`'s own `where` and the `ObjectQLStrategy` SQL echo — compile a text operator over a column whose declared type stores no text to the contract's declared answer.
+  
+  `compileScopedFilterToSql(filter, alias, options?)` takes a new optional `nonTextColumn(field)` predicate; when it answers `true`, a positive text operator compiles to `1 = 0` and `$notContains` to `1 = 1` instead of a `LIKE` that coerces on SQLite (`5` renders `'5.0'`) and is refused at query time on Postgres (SQLSTATE 42883 — a 500 on a read scope the platform accepted). The service answers the predicate from the field metadata hook it already holds (`sourceFieldMeta`), exposed to strategies as `DatasetScopedStrategyContext.declaredFieldType`, and the two strategies pass it for the read scope and for the query's own text filters, so a query and its RLS scope answer one cell one way and the echo prints the statement that ran (`FILTER_TEXT_CASES`' `score` rows, maintainer ruling 2026-09-05). A host that wires no field metadata keeps the `LIKE` it always got, and every comparand refusal still runs ahead of the constant.
+
+### Patch Changes
+
+- dcad825: Analytics `$icontains` no longer compiles a `translate()` call on the `sqlite` and `mysql` dialects. On **SQLite** that function does not exist and the statement failed to parse — measured on the engine, not inferred. On **MySQL** the same construct was emitted and its arm is repaired the same way, but nothing was ever executed there: the MySQL arm is asserted as emitted TEXT only, on this face and on `driver-sql`'s alike, so no MySQL parse failure is claimed as measured.
+  
+  `$icontains` folds ASCII case on both sides of the comparison (#4706 Q1 = A). All three of this package's SQL compilers — the query's own `where` (`NativeSQLStrategy.buildFilterClause`), the ADR-0021 D-C read scope (`compileScopedFilterToSql`) and the `ObjectQLStrategy` echo of that statement — spelled that fold as `translate(col, 'ABC…', 'abc…')` on all four dialect values a compiler can see: `sqlite`, `mysql`, `postgres` and `unknown`, onto which `normalizeSqlDialect` maps everything else, an unset hook and `'oracle'` included. `translate()` is PostgreSQL/Oracle; SQLite has none. Measured on sql.js 1.14.1 (SQLite 3.49.1, the engine `driver-sqlite-wasm` runs), `SELECT translate('ABC','ABC','abc')` answers `no such function: translate` — so this was not a filter that returned the wrong rows, it was a statement the engine refused. On a SQLite datasource, an analytics `where` carrying `$icontains` and an **RLS read scope** carrying it were both unusable.
+  
+  The fold is now chosen per dialect, on the same construct table the case-exact text family already used, reached through one `fold` flag:
+  
+  - **SQLite** — `lower(col) GLOB lower(?)`. SQLite's `lower()` is ASCII-only (measured: `lower('CAFÉ')` is `cafÉ`), so this is the ruled fold rather than an approximation of it, and it runs.
+  - **PostgreSQL** and the `unknown` residue — `translate()`, byte-for-byte what those two arms emitted before. Measured set for that word: this package's own suite pins six cells verbatim — `{NativeSQLStrategy, ObjectQLStrategy echo, compileScopedFilterToSql} × {dialect unset, 'postgres'}` for `{name: {$icontains: 'acme'}}`, full emitted SQL and the exact bound params — and the round-1 contract review widened it to **2,721 cells** (2,720 = `{undefined, 'postgres', 'unknown', 'oracle'} × 5 compiler paths × 8 filter shapes × 17 comparands`, plus the bare `{dialect: undefined}` cell), emitted at the merge-base blobs (all five hash-verified) and again at this head: **0 changed cells, 0 error cells**. Outside that set nothing is claimed — no PostgreSQL server was contacted, and on `sqlite` and `mysql` the bytes deliberately changed (340 of 680 cells each, all inside the four `$icontains` shapes).
+  - **MySQL** — the nested-`REPLACE` fold over `CAST(… AS BINARY)`, matching what `driver-sql` emits for the same operator; the review measured the two faces byte-equal on 60 of 60 MySQL cells. Asserted as text only — no MySQL server is provisionable in the container that wrote this, so that cell is a declared skip, not a claimed pass.
+  
+  ⚠️ Carve-out, stated because it is the surviving half of the defect and not an aside: an `unknown` dialect that is really SQLite is **not** fixed by this change. The residue is reached by four constructions the round-1 contract review drove rather than reasoned — a `SqlDriver` given a **class** client or an unrecognised spelling (`'libsql'`), a host hook answering knex's own `'sqlite3'`, a directly-constructed public `AnalyticsService` with the optional `sqlDialect` omitted, and a `data` service without `getDriverForObject`. For each of them `translate()` still reaches the engine and still fails to parse, on the `where` path, the read scope and the echo alike. No in-repo SQLite driver lands there — `SqliteWasmDriver` and `TursoDriver` both answer `"sqlite"`, measured — so this is an embedder-composition population, not a shipped-driver one. Tracked as #16028.
+  
+  `$icontains` and the case-sensitive `$contains` family remain two separate constructs on every dialect the compilers accept — collapsing them would give `$contains` back the case fold #4706 Q2 = A took away from it. Measured set for that word: 510 cells (six dialect names — the four values above plus `'oracle'` and an unset hook, which both normalize to `unknown` — × 5 compiler paths × 17 comparands), 0 of them identical between the two families and no `$contains` cell carrying a fold.
+  
+  ⚠️ One deliberate divergence from `driver-sql`, recorded here rather than only in this package's source: `driver-sql`'s own `unknown` arm folds with `LOWER()`, this one keeps `translate()`. Each face keeps the residue it already had, and adopting `LOWER()` here would silently restore on PostgreSQL the Unicode fold #4706 Q1 = A rules out. The pointer exists on this side only; `driver-sql` carries no cross-reference back.
+- fd014b1: Analytics `$icontains` no longer compiles a `translate()` call on the `unknown` dialect arm, so a datasource whose dialect nothing answered — which includes SQLite — gets a statement its engine can parse. **Graded `patch`:** no exported type, signature or option changes; the package's own contract for the operator (#4706 Q1 = A, an ASCII-only fold on both sides) is unchanged, and this repairs an arm that could not run rather than adding or retiring behaviour. What moves is emitted SQL text on one arm, measured and enumerated below.
+  
+  `normalizeSqlDialect` maps **everything it cannot name** onto `unknown`: an unset `sqlDialect` hook, `'oracle'`, `'libsql'`, a `SqlDriver` handed a knex Client **class** rather than a spelling. #15780 left that arm folding with `translate()` and recorded it as "never broken", which was true of the dialects the arm was *pictured* as — mssql and oracle, which have `translate()` — and false of the ones actually routed there. Measured on sql.js 1.14.1 (SQLite 3.49.1, the engine `driver-sqlite-wasm` runs), `SELECT translate('ABC','ABC','abc')` answers `no such function: translate`, so on all three of this package's compilers — the query's own `where` (`NativeSQLStrategy.buildFilterClause`), the ADR-0021 D-C read scope (`compileScopedFilterToSql`) and the `ObjectQLStrategy` echo — the statement failed to **parse**. It reached the client as a 500, not an ADR-0112 refusal. One of the four constructions that land there is a directly-constructed public `AnalyticsService` with its **optional** `sqlDialect` omitted: leaving out an optional field turned a documented operator into a 500.
+  
+  The `unknown` arm now folds with one nested `REPLACE` per ASCII letter — the chain the MySQL arm already used, minus its `CAST(… AS BINARY)`, so there is one builder and the two arms cannot fold different alphabets. `REPLACE` is the one string function every SQL dialect has, and the domain is the same 26-letter constant, so the fold is ASCII-only **by construction**:
+  
+  - **PostgreSQL / Oracle-like** — same result set as `translate()`. The chain equals the simultaneous `A`-`Z` map because no step can feed a later one: every replacement writes a lower-case letter and every later step matches an upper-case one. Measured on the engine over **every ASCII code point** plus accented, Greek, Cyrillic and dotted-I probes, required equal to the ASCII-only map exactly.
+  - **SQLite-like** — it runs. Executed over the shared `FILTER_TEXT_CASES` `$icontains` rows through all three compilers on sql.js: the same row sets the `sqlite` arm is required to answer, including the `CAFÉ`/`café` pair that separates an ASCII fold from a Unicode one.
+  - ⛔ **Not `LOWER()`**, which is what `driver-sql`'s own `unknown` arm folds with. `LOWER()` follows the collation, so adopting it would trade this parse failure for **silently wrong rows** on PostgreSQL — the Unicode fold #4706 Q1 = A rules out. ⚠️ Measuring `LOWER()` in this container proves nothing about that: SQLite's `lower()` is ASCII-only and passes the same fixture, which is exactly the trap of letting a green SQLite reading stand in for a PostgreSQL one. No PostgreSQL server was contacted.
+  
+  **Which cells moved.** The emitted SQL and bound params of `{NativeSQLStrategy, ObjectQLStrategy echo, compileScopedFilterToSql} × {undefined, 'unknown', 'oracle', 'libsql', 'postgres', 'sqlite', 'mysql'} × 5 text operators × 17 comparands` = **1,785 cells**, generated at this head and again with the emitter reverted to its merge-base blob (both legs hash-verified on disk and rebuilt, the marker's presence and absence checked in `dist/`): **204 moved, 1,581 byte-identical, 0 error cells either side.** Every moved cell is `$icontains` on one of the four dialect inputs that normalize to `unknown` (51 each = 17 comparands × 3 compilers). **0 of the 204 changed their bound params** — only the fold's spelling moved, never the escaping or the `ESCAPE` binding. Nothing moved on `postgres`, `sqlite` or `mysql`, and no case-exact operator moved on any dialect input.
+  
+  ⚠️ **The cost, stated rather than left to be found:** the predicate grows from 168 to 1,014 characters on the read scope (233 → 1,079 on the other two). Both constructs are non-sargable scalar expressions over the column, so the plan class is unchanged — what grows is statement text and per-row work, on the arm where the alternative was a statement that did not run.
+  
+  ⚠️ **The residue that remains**, because this arm is a residue and not a dialect: the fold is exact everywhere, but the comparison is `LIKE`, which on a case- or accent-insensitive collation (MySQL/MariaDB arriving here through the `'mariadb'` spelling #11756 deliberately leaves unrecognised; SQL Server) over-matches beyond ASCII. That is the **same** residue this arm's case-exact neighbour already carries and names — not a new one — and on those engines `translate()` did not run at all, so nothing that answered correctly before stops answering.
+  
+  `SqliteWasmDriver.dialectName` gains a direct pin. It answers `"sqlite"` only through an `isSqlite` override (the base class string-matches `config.client`, and this transport passes a class), that override had **0 direct test hits**, and it is the sole reason no in-repo SQLite driver reaches the arm above. The new pin includes the control: the base class answers `'unknown'` for that very config.
+- d5d8d50: Correct the documented reason for rejecting `CAST(col AS BLOB) LIKE ?` as a portable case-exact construct.
+  
+  Four headers stated, as a universal fact about SQLite, that the construct "was measured to return NOTHING". That is not a property of SQLite: whether `LIKE` is false for a BLOB operand is fixed when SQLite is compiled, by `SQLITE_LIKE_DOESNT_MATCH_BLOBS`, and the two SQLite builds this project ships disagree about it. Measured over the shared `FILTER_TEXT_ROWS` fixture, `{ name: { $contains: 'acme' } }` compiled to that construct returns `[]` on better-sqlite3 13.0.3 (SQLite 3.53.4, flag compiled in) and `['1','2']` on sql.js 1.14.1 (SQLite 3.49.1, flag absent) — the latter being exactly the ASCII case-folding defect the construct was being considered to avoid.
+  
+  No behaviour changes and no conclusion changes: all four sites still reject the construct and still choose `GLOB`. The rejection is now stated in a form that does not depend on any particular return value — a construct whose meaning is decided by an upstream compile flag cannot carry a read scope, because it means two different things on the two builds shipped here. Two supporting readings are recorded alongside it: `typeof CAST(name AS BLOB)` is `'blob'` on both builds, so the CAST is not the part that differs, and `GLOB` answers identically on both.
+  
+  Documentation only. `@objectstack/spec` and `@objectstack/driver-turso` ship the corrected text in their published type declarations (and `spec` also publishes the corrected source file directly, via its `src/**/*.zod.ts` entry); for `@objectstack/driver-sql` and `@objectstack/service-analytics` the change reaches published output only through sourcemaps.
+- 81919a7: `CubeRegistry`'s documentation now describes what the class actually does. Four claims it shipped were measured false against the built package; no behaviour changes, and the corrected text ships in `dist/index.d.ts`, where consumers read it.
+  
+  The class docblock said cubes reach the registry "from two sources: manifest definitions, and object schema inference". Neither half held. Two sources were missing — a compiled dataset's Cube (ADR-0021), registered under the dataset's name by `queryDataset`, and the ad-hoc Cube `ensureCube` / `inferCubeFromQuery` mints from the members a query references. And object schema inference is `inferFromObject`, which no path in this repository calls: its only in-tree caller is a unit test. The list now names the three sources that do write to the registry, and points at the method for the fourth door instead of advertising it as delivered.
+  
+  `inferFromObject`'s own "heuristic rules" list was wrong in three of five bullets. Driving the built package:
+  
+  - `number` / `currency` / `percent` fields mint one `sum` and one `avg` measure each — not the documented `sum`, `avg`, `min`, `max`. No `min` or `max` measure exists.
+  - `boolean` fields become a `boolean` dimension and nothing else. The documented "`count` measure (count where true)" is not minted.
+  - Every field becomes a dimension. The documented "all non-computed fields" implies an exclusion the code does not have, on a parameter that carries no such flag.
+  
+  The two accurate bullets (a default `count` measure, and `date` / `datetime` fields becoming `time` dimensions granulated day/week/month/quarter/year) are kept and stated in the form the run produced.
+  
+  The method's docblock now also records what it is: a published method with no in-repo caller, still callable by consumers through the package entry (`CubeRegistry`) or `AnalyticsService.cubeRegistry`, whose output does reach the wire because `getMeta()` serves its labels as `CubeMeta` titles.
+- d770b3e: Analytics: a draft-preview dataset response now describes its columns like the live one
+  
+  `AnalyticsService.queryDataset`'s ADR-0037 P3 draft-preview branch returned before the
+  ADR-0021 result-column enrichment ever ran, so a dataset queried while the base object had a
+  pending seed draft came back with none of its column metadata: `fields[].label`, `format`,
+  `currency`, `percentScale`, `builtinAggregate`, and the temporal `type` correction were all
+  absent, on measure and dimension columns alike. A renderer then fell back to humanizing the
+  raw measure name and guessing a percent scale from magnitude — so the same dataset in the
+  same widget described its columns differently depending only on whether a pending seed draft
+  existed, which is the surface an author is looking at while authoring the dataset.
+  
+  Every one of those keys is read off the authored dataset and the source object's field
+  metadata, never off the rows, so the enrichment is now one method both paths call. Dimension
+  VALUE label resolution (resolving a lookup id to a display name) stays skipped on the preview
+  path deliberately: drafted seed rows reference lookups by name, so there is no id to resolve.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

@@ -1,5 +1,215 @@
 # @objectstack/client
 
+## 17.4.0
+
+### Minor Changes
+
+- 7beaaa3: fix(client)!: `oauth.applications.delete` resolves on the zero-byte 200 its route answers, instead of rejecting on every successful delete (#15451)
+  
+  **BREAKING** on two independent axes, and it makes a published method usable for the first time. Before this change `client.oauth.applications.delete(id)` **rejected on every successful delete** — there was no success path a caller could observe. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`); the version number is not the migration signal here, this entry is.
+  
+  <!-- adr-0087: registered client-oauth-applications-delete-void -->
+  
+  The fifth and last method of the `oauth.*` family, and the one #14312 / PR #15445 deliberately could not close: its ruling fenced that card to *narrowing published return types*, and no declared return type could be true while the `res.json()` call stood.
+  
+  ## The defect, measured end to end
+  
+  Real `betterAuth` + real `@better-auth/oauth-provider` over the real ObjectQL adapter on real SQLite, a real signed-up user and a real session, driven through the **real** `ObjectStackClient` with only the socket stood in for:
+  
+  ```
+  POST /api/v1/auth/oauth2/delete-client  ->  200 · 0 bytes
+                                              content-type: application/json
+                                              content-length: (absent)
+  through the client, BEFORE  ->  REJECTED: SyntaxError | Unexpected end of JSON input
+  the row, server-side        ->  ALREADY GONE (get-client answers 404 not_found)
+  through the client, AFTER   ->  RESOLVED | undefined
+  ```
+  
+  The handler returns nothing and the vendor declares the endpoint `void`. `res.json()` had nothing to parse, so the method rejected — *after* the delete had committed. A caller who did the obvious thing saw a failure, retried, and the retry failed **differently**, because the row no longer existed.
+  
+  ## What changes for a caller
+  
+  | | before | now |
+  |:--|:--|:--|
+  | a successful delete | rejects `SyntaxError` | resolves |
+  | the resolved value | `any` (unreachable — the promise never resolved) | `void` |
+  | deleting a client that is not there | rejects `not_found` | rejects `not_found` — unchanged |
+  | a malformed non-empty body | rejects `SyntaxError` | rejects `SyntaxError` — unchanged |
+  
+  ⚠️ **The `catch` you wrote around this call stops firing on success.** Code shaped like
+  
+  ```ts
+  try { await client.oauth.applications.delete(id); }
+  catch { /* the delete probably worked anyway */ }
+  ```
+  
+  still compiles and still runs, but its catch block was executing on **every** successful delete and now executes only on a real failure. Any workaround that lived in there is now inert and can be deleted. And because the promise never used to resolve, a read off its resolved value — `(await …delete(id)).deleted` — was dead code that has never executed; it now stops compiling (TS2339), which is the compiler delivering the change at the call site.
+  
+  ## Why `void`, and not `{ deleted: boolean }`
+  
+  "Deleted" and "was already gone" **are** distinguished by the route, but on the error channel: a missing client answers 404 `{ error: 'not_found' }`, which the client already raises as a throw. The 200 answer carries zero bytes and therefore zero information, so a synthesised `{ deleted: true }` would be a shape the wire never sends and strictly less informative than the 404 a caller already receives.
+  
+  ## Why the emptiness is detected by reading the body
+  
+  Both shortcuts were measured against the real route and both are unusable: the status is **200**, not the `204` five other delete surfaces in this client key off, and the response carries **no `content-length` header at all** — so a header test would never fire and would leave the defect in place while looking like a fix. The body itself is the only thing that answers.
+  
+  A non-empty body is still parsed and its failure still thrown, so **the only behaviour this change moves is the zero-byte case**: a malformed response stays loud, and the day this route grows a payload, surfacing it is a deliberate widening of the return type rather than a silent change of shape.
+  
+  `packages/client/exported-any-returns.json` loses this method's entry in the same change — the ledger is shrink-only, so the entry goes **with** the binding. Its last `oauth.*` entry is now gone; 35 sites remain open.
+- e944fdb: fix(client)!: the `oauth.*` family declares the wire shapes better-auth actually sends — four published `Promise< any >` returns narrowed (#14312)
+  
+  **BREAKING** for a typed caller, and it breaks nothing that ever worked at runtime. No request bytes, no URL and no response handling change: this is a declaration catching up with what the routes have always answered. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs`) — the version number is not the migration signal here, this entry is.
+  
+  <!-- adr-0087: not-required (type-surface-only packages/client/src/index.ts#register, packages/client/src/index.ts#getPublic, packages/client/src/index.ts#consent) A published TYPE-SURFACE narrowing. Each member was UNANNOTATED at the merge base, so lib.dom's `Response.json()` published it as an erased `any`; each now declares the shape its route already answered. No method body changed, so no request or response byte moves, and the diff touches no `packages/spec` path and no ADR-0087 shape surface. The affected party is a TypeScript consumer and the compiler delivers the break at their own call site; `objectstack migrate meta`, `spec-changes.json` and the upgrade guide have nothing to rewrite, so a ledger entry would be false data in the one ledger this gate keeps true. DISCLOSURE, not an omission: the fourth narrowed member of this changeset is `oauth.applications.get` (index.ts line 3184; unannotated at base, `Promise` of `OAuthApplication` at HEAD). It satisfies this same predicate on a direct reading, but it is deliberately NOT named above, because the reference `packages/client/src/index.ts#get` does not address it: this file declares 13 members named `get`, predicate 4 reads the FIRST one (line 1928), and that member is unrelated and unannotated at both revs. Naming it would assert a verified fact about the wrong member; the ambiguity is filed as its own card. -->
+  
+  Card 1 of 3 of the #12104 family, under the maintainer's 2026-08-31 ruling: the wire contract is the only source of truth, and better-auth's own `Date`-typed fields are the pre-serialization SERVER shape, not the wire fact.
+  
+  ## What changed
+  
+  Four methods ended `return res.json()` with no return annotation, so `lib.dom`'s `Response.json(): Promise< any >` was their published type. Each now declares the shape its route serves, and its `exported-any-returns.json` entry is deleted in the same change:
+  
+  | method | resolved to (before) | resolves to (now) |
+  |:--|:--|:--|
+  | `client.oauth.applications.register(req)` | `any` | `OAuthApplicationRegistration` |
+  | `client.oauth.applications.get(id)` | `any` | `OAuthApplication` |
+  | `client.oauth.applications.getPublic(id)` | `any` | `OAuthApplicationPublic` |
+  | `client.oauth.consent(req)` | `any` | `OAuthConsentResult` |
+  
+  `OAuthApplication`, `OAuthApplicationRegistration`, `OAuthApplicationPublic` and `OAuthConsentResult` are newly exported from `@objectstack/client`. These four routes are served BARE by better-auth (`auth-route-ledger.ts` records them `source: 'better-auth'`) — there is no `{ success, data }` envelope to unwrap, and none is introduced.
+  
+  ## The exact reads that stop compiling
+  
+  Everything below compiled before only because `any` is assignable to, and indexable by, everything.
+  
+  ```ts
+  const app = await client.oauth.applications.get('c_1');
+  app.data;                     // was fine; now TS2339 — these routes carry NO envelope
+  app.anythingAtAll;            // was fine; now TS2339
+  
+  const pub = await client.oauth.applications.getPublic('c_1');
+  pub.client_secret;            // now TS2339 — the public projection hand-picks 7 columns
+  pub.grant_types;              // now TS2339 — same reason
+  pub.disabled;                 // now TS2339 — same reason
+  
+  const decision = await client.oauth.consent({ accept: true });
+  decision.client_id;           // now TS2339 — consent answers `{ redirect, url }`
+  
+  // Timestamps are RFC 7591 NUMBERS (Unix epoch seconds), so a caller that
+  // guessed `Date` or ISO `string` now fails:
+  new Date(app.client_id_issued_at!).toISOString();   // TS2769: number is not a Date arg
+  app.client_id_issued_at!.slice(0, 10);              // TS2339: not a string
+  new Date(app.client_id_issued_at! * 1000);          // the correct rewrite
+  ```
+  
+  A caller that only read `client_id`, `client_secret`, `redirect_uris` or `url` needs no change.
+  
+  ## Timestamps: `number`, not `Date` and not ISO-8601
+  
+  The ruling ordered every `Date`-typed field declared as an ISO `string` and forbade both a `Date` declaration and a runtime revival layer. **This family has no `Date` field to convert.** RFC 7591 carries `client_id_issued_at` and `client_secret_expires_at` as Unix-epoch SECONDS, and the provider converts its stored `Date` to a number before serialising, so the wire sends neither a `Date` nor an ISO string. Both are declared `number`, and a type-level pin holds them there. The ruling's prohibitions are satisfied: nothing declares a `Date`, and no revival layer exists.
+  
+  ## Two places better-auth's own types were the wrong answer
+  
+  Read off the wire against a real server, not off the vendor's `.d.ts`:
+  
+  - `getPublic` is declared `OAuthClient` — the full row — but its handler hand-picks seven columns. `OAuthApplicationPublic` is that projection, derived with `Pick` so it cannot drift from its parent. Its `redirect_uris` is always `[]` on this route and carries no information.
+  - `user_id` and `application_type` are declared nullable by the vendor, but the serialiser folds a null column to `undefined`, so `null` is unreachable and is not declared.
+  
+  ## `oauth.applications.delete` is deliberately NOT bound
+  
+  The fifth method of the family keeps its `Promise< any >` and its ledger entry. Its route answers HTTP 200 with a zero-byte body, so its `res.json()` rejects with a `SyntaxError` on every successful delete. No annotation can be honest while that call stands, and binding it needs a behaviour change — a decision beyond this card's type-narrowing scope. That the shrink-only ledger still carries exactly this one entry is the mechanism working.
+
+### Patch Changes
+
+- 92dc937: The README's analytics and automation examples read the resolved payload.
+  
+  `client.analytics.query` / `analytics.meta` and `client.automation.trigger` stopped handing back the dispatcher's `{ success, data }` envelope in 17.0.0: each resolves to the payload itself. The README's namespace tour still showed all three as bare `await` calls with nothing reading the resolved value, so the package's own front page taught nothing about which shape comes back — neither wrong nor useful. Each of the three now assigns its result and reads one member of it: `report.rows` / `report.fields[0].name` (`AnalyticsResult`), `cubes[0].name` (the bare `CubeMeta[]`), `run.status` (`AutomationResult`) — the members those contracts actually declare, read off the payload rather than off a `data` wrapper.
+  
+  No behaviour changes; this is the README that ships inside the package. The docs site's Client SDK and Data API pages take the same treatment in the same PR.
+- 29bef09: The README's namespace tour documents the `ai` surface that exists, not the three methods v17 removed.
+  
+  `client.ai.nlq` / `.suggest` / `.insights` were deleted in 17.0.0 (#3718) — and no server in any repo ever mounted `/api/v1/ai/{nlq,suggest,insights}`, so they 404ed for the whole life of the namespace. The README's "AI Services" example still showed all three. Because `files` ships `README.md` inside the tarball, that example is the package's npm front page: a TypeScript reader copying it gets TS2339 on three properties that are not on `client.ai`, and a JavaScript reader gets a runtime `TypeError`.
+  
+  The block now shows the surface the client really exposes — `ai.chat` (with a read of `answer.content` / `answer.usage`), `ai.complete`, `ai.models`, `ai.conversations.list`, `ai.agents.chat`, `ai.pendingActions.list` — every call type-checked against the package's own published `dist/index.d.ts`. It also names the condition a reader will otherwise hit unexplained: the AI routes are served by `service-ai` (a Cloud/EE package), and an environment without it answers 501 rather than 404, with the remedy discovery reports under `services.ai`.
+  
+  No behaviour changes. `patch` rather than no changeset because the README is a published file of this package, so correcting it changes what `@objectstack/client` ships; the docs site's Client SDK page already carried this correction and is untouched here.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

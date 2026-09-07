@@ -1,5 +1,459 @@
 # @objectstack/core
 
+## 17.4.0
+
+### Minor Changes
+
+- 2ed6be6: Advisory validation rules no longer flood the startup log, and no longer count a row twice on a clean first boot.
+  
+  A `severity: 'warning'` (or `'info'`) validation rule is advisory: it never blocks a write, and its message is written for a person filling in a form. Evaluated across a seed load it produced one `WARN` line per row, so a clean-database first boot opened with a wall of form hints re-cast as boot diagnostics — and an app could reach "zero warnings" only by bending its data or deleting the rule.
+  
+  Two changes, and neither moves what a rule evaluates to:
+  
+  - **Aggregated reporting on the seed/boot path.** `SeedLoaderService.load()` now runs inside an advisory aggregation scope, and reports one summary line per rule — the rule, the object, the row count, the rule's own message and example rows — instead of one line per row. Off that path (an ordinary interactive write) nothing changes: the same per-write line is emitted verbatim. The new scope is `runWithAdvisoryAggregation` / `recordAdvisoryHit` in `@objectstack/core`.
+  - **Advisory rules are counted by row, not by write.** An `update` whose payload touches only platform-injected system columns — the shape `claimSeedOwnership` writes when it hands seeded rows to the first admin, `{ owner_id }` — changes no business field, so it no longer re-evaluates the object's advisory rules. Previously a seeded row rang once on insert and again when the claim scan rewrote `owner_id`, so anyone counting startup warnings over-estimated by the number of claimed objects.
+  
+  `error`-severity rules are untouched by both changes: an invariant is still enforced on every write, whoever issued it and however little it moved. Membership of the "system column" set is resolved per object by `resolveInjectedSystemColumns`, so an object that declares `ownership: 'org'` (no `owner_id`) or `systemFields: false` is judged on its own columns rather than a fixed list.
+- 66dc6ab: Plugin startup elapsed time is now reported as `durationMs` — the unit-bearing name the spec contract for the same result declares. `startTime`, which never held a start time, is deprecated and still populated.
+  
+  `PluginStartupResult.startTime` (`packages/core/src/plugin-loader.ts`) has always been assigned `Date.now() - startTime`, an elapsed duration, on both the success and the failure path. The name therefore asserts the opposite of the value: a reader who correctly takes `startTime` for an instant and writes `Date.now() - result.startTime` gets an age near the epoch rather than a wait. That is the one failure mode a unit convention cannot rescue — an ambiguous name makes someone stop and check, this one lets them proceed confidently wrong.
+  
+  This is not a naming preference but a divergence between what is declared and what is enforced. `packages/spec/src/kernel/startup-orchestrator.zod.ts` declares `durationMs: z.number().min(0)` — "Time taken to start the plugin in milliseconds" — for the same measure on the same result, the outcome of starting one plugin; the bare `duration` spelling is retired there with a `retiredKey()` tombstone whose prescription is "Rename the key to `durationMs`", because a duration-shaped number carries its unit in its key name, never only in describe prose. The contract surface was already correct and `packages/core` had drifted away from it. The same computation already has an honest name twelve lines above the defect in the same file: `PluginLoadResult.loadTime` carries the identical `Date.now() - startTime` under a name that does not lie.
+  
+  Three sites move, and every one of them is additive — nothing is removed, so no consumer has to change anything on this release:
+  
+  - `PluginStartupResult` gains `durationMs?: number`. `startTime?: number` stays, still carrying the same value, marked `@deprecated` with a doc comment that states plainly it is elapsed milliseconds and not an instant.
+  - `ObjectKernel.getPluginStartupDurations()` is added; `getPluginMetrics()` becomes a `@deprecated` delegating alias returning the same map.
+  - The private `pluginStartTimes` map is renamed `pluginStartupDurations` (private; no reader outside `kernel.ts` in this repo or in the pinned `objectui` sibling).
+  
+  Migration, where you want it: read `result.durationMs` where you read `result.startTime`, and `kernel.getPluginStartupDurations()` where you called `kernel.getPluginMetrics()`. The values are identical, so the change can be made at leisure; both old spellings keep working until they are removed.
+  
+  ADR-0087 disposition: no migration-ledger entry, and none is required. Nothing is retired by this release — the old member and the old method both remain, populated and callable, which is ADR-0087's L1 outcome (the old shape keeps loading while the fleet moves) rather than a retirement. There is also nothing for `objectstack migrate meta` to rewrite: `packages/core/src/plugin-loader.ts#PluginStartupResult` is a runtime TypeScript interface with no Zod schema, no `packages/spec` declaration and no stored representation — the `PluginStartupResult` in `packages/spec/src/kernel/startup-orchestrator.zod.ts` is a separate, differently-shaped declaration that this change does not touch, and that schema's own `duration` tombstone entry (`packages/spec/src/migrations/entries/retired-keys/18.kernel__PluginStartupResult__duration.ts`) records that core's interface is not a reader of it. Core simply does not adopt the retired spelling. When the deprecated spellings are removed, that removal is the change that carries the ledger disposition.
+- 2025b1f: `kernel.use()` now enforces the declared plugin contract. A plugin object that `PluginSchema` (`@objectstack/spec`, `kernel/plugin.zod.ts`) refuses is refused at load instead of being stored and mounted.
+  
+  **BREAKING** accept-set narrowing on a published runtime entry point, shipped as `minor` under the repo's launch-window convention for breaking changes (`scripts/check-changeset-no-major.mjs`). **This refuses input the runtime accepted before**, which is also why it is not a `patch`: `PluginSchema` had zero runtime callers, so every constraint it declared beyond `name`, `init` and semver was a declaration with nothing behind it. The sharpest reading of that gap, one input and two answers: `defineStack` accepted `type: 'ui-plugin'` while `PluginSchema.safeParse` refused it — and only one of those answers was on the path a real plugin takes. Maintainer ruling of 2026-09-06 (ADR-0049 enforce-or-remove): the protocol is the baseline, the runtime aligns to it.
+  
+  **Exactly what is newly refused: all EIGHT declared keys, not three.** The schema declares nine optional keys; the loader excludes `version` (below), so enforcement reaches these eight, each refused with the offending key named in the message:
+  
+  - **`id`** — a non-string, or the empty string (`z.string().min(1)`).
+  - **`type`** — any value outside the closed set `standard`, `ui`, `driver`, `server`, `app`, `theme`, `agent`, `objectql`.
+  - **`staticPath`** — a non-string.
+  - **`slug`** — a non-string, or a string that does not match `/^[a-z0-9-_]+$/`.
+  - **`default`** — a non-boolean.
+  - **`description`** — a non-string.
+  - **`author`** — a non-string. An object such as `{ name: 'x' }` is refused; the declared type is a plain string.
+  - **`homepage`** — a non-string, or a string that is not a URL.
+  
+  **`null` is refused on every one of the eight.** These keys are `.optional()`, which admits absence and `undefined` — never an explicit `null`. A plugin object that spells "no value" as `null` on any of the eight loaded before and is refused now.
+  
+  **What a refusal looks like.** It travels the loader's existing plugin-load error path — no new error channel — carrying the stable code `PLUGIN_CONTRACT_VIOLATION` at the head of the message and on the error's `code` property, and naming the plugin plus the first violated key:
+  
+  ```
+  PLUGIN_CONTRACT_VIOLATION: plugin '@acme/console' is refused by the declared
+  plugin contract at 'type': Invalid option: expected one of "standard"|"ui"|…
+  ```
+  
+  A wrong `type` is therefore diagnosable at boot rather than at route mount. The code is a **boot refusal**, not wire vocabulary: it is raised before any HTTP boundary exists, and no door answers with it.
+  
+  **What is STILL ACCEPTED — the door is not narrowed past those eight keys.** Measured on this tree, not assumed:
+  
+  - **Unknown keys still pass.** `PluginSchema` is a plain `z.object` with **no `.strict()`** — the strip posture — and the parse output is discarded, so a valid plugin carrying four keys the schema never declares loads, and is stored as the very object that was passed in with all of its keys intact. A plugin is refused for what it says about a **declared** key, never for saying something extra.
+  - **A version-less plugin still loads**, exactly as before.
+  - **A plugin declaring no `type` still loads and still stores no `type`**: `PluginSchema`'s `.default('standard')` is **not** written back.
+  - **A class-based plugin keeps its identity, its prototype and its prototype methods.** The plugin object is validated, never replaced: `safeParse` is read for `success` and its output discarded, because a copy destroys the prototype chain of class-based plugins — the reason `PluginLoader.toPluginMetadata` is a cast. That survival is pinned by test, not asserted in prose.
+  - **`version` is excluded from this enforcement entirely**, so `1.0.0-alpha.1` and `1.0.0+20230101` still load. The schema spells `version` as `/^\d+\.\d+\.\d+$/`, which refuses the prerelease and build-metadata forms SemVer 2.0.0 defines, while the loader's own `isValidSemanticVersion` implements the full grammar and accepts them — deliberately, pinned by `plugin-loader.test.ts`. Enforcing the narrower spelling would retire that capability silently, so the loader's check remains authoritative for `version`. Reconciling the two spellings is spec work, tracked separately.
+  
+  **Blast radius, measured rather than assumed.** Every in-repo plugin object declares a `type` inside the closed set (`standard` ×62, `server` ×2, `driver` ×2, `objectql`, `app`), and the repo contains no producer of `slug` or `homepage` on a plugin object at all — so no in-repo plugin changes behaviour. Externally authored plugins are the population this reaches, and they are exactly the population that never met the compile-time `Plugin.type` union either.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An accept-set narrowing performed entirely at the runtime boot path: `PluginSchema` is READ by `kernel.use()`, not changed. No metadata key, spec symbol, Zod schema, object definition or stored representation is added, removed or given a different name, so `objectstack migrate meta` has nothing to visit and there is no tombstone to mint. Stored metadata is untouched; what moves is which plugin OBJECTS a boot accepts. The channel that reaches an affected plugin author is the refusal itself, which names the offending key at `kernel.use()` and is more precise than a ledger line — and which value a formerly-refused key should carry is authoring intent no ledger entry can decide. -->
+- cf9bda4: The kernel's in-memory i18n fallback learns the declared `i18n.fallbackLocale`, so one declaration stops answering two ways (#15694)
+  
+  `i18n.fallbackLocale` is authorable on the stack artifact (`TranslationConfigSchema`), and `FileI18nAdapter` — the provider `I18nServicePlugin` installs — has always honoured it: both boot paths construct it with `fallbackLocale || defaultLocale || 'en'`, and its `t()` consults that locale, per key, after the requested one.
+  
+  The kernel's in-memory fallback is constructed with nothing. `AppPlugin.loadTranslations` injected the declared `defaultLocale` and `supportedLocales` (#7679) into whichever `i18n` service was registered, but never `fallbackLocale`, and the provider had no setter to receive one. On every stack running that fallback — any stack that declares `translations` without `@objectstack/service-i18n` registered (not installed, or `tierEnabled('i18n')` false) — the declaration was inert. A stack declaring `defaultLocale: 'zh-CN'` with `fallbackLocale: 'en'` answered a missing `zh-CN` key from `en` under `I18nServicePlugin` and from `zh-CN`, i.e. not at all, under the fallback: one declaration, two providers, two answers. That the fallback self-declares `degraded` licenses fewer capabilities, not a different answer to the same declared key.
+  
+  What changed:
+  
+  - **`II18nService.setFallbackLocale?(locale)`** — a new OPTIONAL member, the injection counterpart of `getFallbackLocale`. It is the same shape `setDefaultLocale` and `setSupportedLocales` already have, and for the same reason: the declaration lives on the stack artifact, which only the runtime app-plugin layer can see. A provider constructed with its fallback (`FileI18nAdapter`) omits the method and keeps the value it was built with.
+  - **`createMemoryI18n` receives it and acts on it.** `t()` now consults the declared fallback per KEY after the requested locale — the same second leg `FileI18nAdapter.t()` has. Per key, not per bundle: the pre-existing `resolveTranslations(locale) ?? mergedLocale(defaultLocale)` line swaps whole bundles and only when the requested locale has none, so a `zh-CN` bundle that simply lacked the key never reached anything else. That older leg is unchanged.
+  - **`AppPlugin.loadTranslations` threads the declaration**, through the same `typeof … === 'function'` optional-capability probe as `setDefaultLocale`, and guarded on the app having declared something — several `AppPlugin`s can share one kernel, and an app that declares no `i18n` block must not clear a fallback another app declared.
+  
+  A stack that declares no `fallbackLocale` gets exactly the behaviour it has today: the setter is never called, and `t()` walks the same chain it always did. A fallback nobody asked for would be a new chain, not a fix.
+  
+  `getFallbackLocale()` is deliberately still absent from the memory fallback. The setter is what the provider is TOLD; the accessor is what the serving layer ASKS it when building the metadata-document translators' fallback chain (#14882). Answering the second from `defaultLocale` — the only value always available there — would settle the default-locale contract question #14882 leaves deliberately open, from a degraded provider. Those reads keep the resolvers' own default, which is known and intentional.
+- cc00df2: feat(core)!: retire `PluginSecurityScanner` — plugin security scanning is not a platform capability (#14919)
+  
+  <!-- adr-0087: registered plugin-security-scanner-retired -->
+  
+  **ADR-0087 disposition: registered**, as `plugin-security-scanner-retired` in
+  `MIGRATIONS_BY_MAJOR[18].semantic` — a **D3 semantic** entry, not a D2 conversion,
+  and so not the metadata migration the ruling excludes. The class has no spec schema
+  and never had one, so there is no authorable key to tombstone with `retiredKey()`
+  and no stored `sys_metadata` row a conversion could rewrite: a scanner was
+  constructed per call and every result lived in a per-instance Map discarded with the
+  object, so `applyConversionsToStoredItem` has no seam that would ever see one. An
+  entry is nevertheless owed rather than optional, because this changeset carries a
+  real consumer prescription — the enforced channel is tsc at the import site, and for
+  any consumer it does not reach, the ledger and the generated upgrade guide are the
+  only channel there is. Same disposition as `contracts.IDataDriver.findStream` and
+  `actor-user-roles-to-positions`.
+  
+  **BREAKING** — `PluginSecurityScanner` is removed from `@objectstack/core`,
+  together with its two companion types `ScanTarget` and `SecurityIssue`. Landing
+  as `minor` under the repo's launch-window convention for breaking changes.
+  **There is no replacement**, and none is planned.
+  
+  ⚠️ **The out-of-repo consumer population for these three exports is NOT
+  MEASURED.** This changeset can state only what was measured *inside* the
+  sources this repo can read: zero constructors in objectstack, zero in objectui
+  at the pinned sha, and zero in the deleted example itself. How many published
+  consumers of `@objectstack/core` import the class is unknown — no download,
+  dependent or source telemetry was consulted. Read the removal as breaking for
+  an unmeasured population, not as a removal proven to break nobody.
+  
+  ## Why it was removed rather than repaired
+  
+  The class was a shell that reported success. `scan()` composed five private
+  scanners: four of them (`scanCode`, `scanMalware`, `scanLicenses`,
+  `scanConfiguration`) allocated an empty issue array, logged, and returned it
+  with no code in between — none could report a finding for any input. The fifth,
+  `scanDependencies`, ran a real loop but matched only against an in-memory
+  vulnerability database whose sole writer, the public `addVulnerability`, had
+  zero callers; `updateVulnerabilityDatabase()` logged twice and fetched nothing.
+  The database was therefore empty on every code path that has ever executed, so
+  no issue was ever produced, the score stayed 100, and the result was
+  `status: 'passed'` for every plugin the scanner was ever handed — a malicious
+  one included.
+  
+  A security control that cannot fail is worse than no security control, because
+  callers rely on it. Repair — writing a real vulnerability scanner — was refused
+  by name: it is a feature with a design surface and no demand, not a defect fix.
+  
+  ## FROM → TO
+  
+  ```ts
+  // FROM — compiles today, and passes every plugin it is given
+  import { PluginSecurityScanner } from '@objectstack/core';
+  
+  const scanner = new PluginSecurityScanner(kernel.logger);
+  const result = await scanner.scan({ pluginId, version, dependencies });
+  if (result.status === 'passed') { await kernel.use(plugin); }
+  
+  // TO — delete it. The condition above was always true.
+  await kernel.use(plugin);
+  ```
+  
+  **The one-line fix:** delete the import and every call; no symbol replaces it.
+  If your code branched on `result.status`, take the `'passed'` branch — that is
+  the only branch it ever took.
+  
+  **If you were relying on it for actual security**, you were not getting any.
+  Audit dependencies with the tools built for it (`npm audit` / `pnpm audit`,
+  Dependabot, the GitHub Advisory Database, OSV) and treat an unaudited
+  third-party plugin as untrusted code. What ObjectStack does still enforce is
+  artifact **integrity and signatures** (`verifyPluginArtifactIntegrity`, the
+  plugin signature verifier — "is this what the publisher signed?", never "is
+  this safe?"), explicit plugin **permissions**, and the sandbox **resource
+  limits**; all three are unchanged.
+  
+  Removed under ADR-0049 enforce-or-remove, per the maintainer ruling of
+  2026-09-05 (director summon #14, decision batch #42). The retirement is pinned
+  as an export-list assertion on both barrels in
+  `packages/core/src/security/security-scanner-retirement.pin.test.ts`.
+
+### Patch Changes
+
+- 6f94458: fix(core): narrow the operation-private-keys pin's scanner to `.ts`, so it judges exactly the population turbo re-runs it for (#15090)
+  
+  `packages/core/src/security/operation-private-keys.pin.test.ts` filtered its
+  candidate set with `/\.tsx?$/` — `.ts` **and** `.tsx` — while this package's
+  declared radius in the cross-package declaration table is a `packages/**`
+  subtree glob ending in `.ts`. So the pin judged a population **strictly wider**
+  than the one either scoping layer of `check:cross-package-test-inputs` knows
+  about: Layer A never unions this package into the test shard when a `.tsx` file
+  changes, and Layer B never moves the `test` task's cache hash for one. A `.tsx`
+  file under `packages/` declaring its own `OPERATION_PRIVATE_KEY_PREFIX` or
+  `withoutOperationPrivateKeys` was therefore scanned by the pin and invisible to
+  CI's scoping — landing on `main` with every PR green and then reddening whichever
+  unrelated PR next touched a `.ts` file. That is the #7802 shape the declaration
+  table exists to close, one extension wide.
+  
+  Repaired by narrowing the **scanner**, not by widening the **glob** — and that
+  asymmetry is measured rather than assumed. On `b548e438d`, adding a `.tsx` glob
+  to this package's roster entry and re-deriving `check:cross-package-test-inputs`'
+  watch hints flips the dispatch-gates self-test case *"nor a .tsx test file inside
+  it"* from true to false, with the added glob itself as the covering hint. That
+  case is a live specimen for "a test class the hint route cannot reach", so the
+  red is real and re-pointing it is a decision in another lane, not a fixup.
+  
+  What the boundary costs, measured on the pin's own surface (tracked **plus**
+  untracked, ignored paths excluded) at `b548e438d`: **5408** `.ts` files scanned,
+  8 of them mentioning a guarded symbol; **8** `.tsx` files excluded, **0** of them
+  mentioning either symbol. The loss is empty today — and that reading is no longer
+  transcribed and trusted. A new case re-measures it on every run: it asserts the
+  excluded `.tsx` population is non-empty (so the boundary is an exclusion and not
+  an empty tree describing itself), that the filter really drops those files, and
+  that none of them declares either symbol. Ablation, with the restore proven by
+  blob hash rather than by exit code: re-widening the scanner reddens it while the
+  offender assertion stays green — which is precisely the failure mode, since a
+  wider scanner reads as coverage CI never runs — and planting a `.tsx`
+  redeclaration reddens it with a message that says the choice is a second-gate
+  trade, not a one-line widening.
+  
+  The correspondence between scanner and glob is now stated at **both** ends: the
+  pin's header and the declaration table's entry for this package. No published
+  surface moves — the only source file edited is a test.
+- 6e67b86: refactor(core): the authz context's time-zone probe is now the shared value-domain predicate, not a third copy of it
+  
+  `resolve-authz-context.ts` carried a module-private `isValidTimeZone` — the
+  `Intl.DateTimeFormat` probe, re-stated. It was the third copy of one
+  definition, alongside `@objectstack/spec/shared`'s `isValueDomainMember` and
+  `service-settings`' own re-statement. `coerceTimeZone` now calls
+  `isValueDomainMember('iana_time_zone', …)` and the copy is gone.
+  
+  **No behavioural change, measured rather than asserted.** The two predicates
+  were run over a shared 4,058-input corpus — the zones
+  `Intl.supportedValuesOf('timeZone')` omits (`UTC`, `Asia/Kolkata`,
+  `Europe/Kyiv`, `Asia/Ho_Chi_Minh`, `US/Eastern`, `GMT`), every member of that
+  enumeration plus its case- and space-padded variants, refusals, `Etc/` and
+  offset spellings, legacy aliases, and fuzz — with **zero disagreements**, and
+  the same zero at the `coerceTimeZone` level. The call site's own
+  pre-processing (trim, stringify a non-string, refuse blank) is unchanged.
+  
+  What this buys is drift resistance, not a fix: core's time-zone acceptance now
+  sits under the shared pins, so a future "modernisation" to
+  `Intl.supportedValuesOf('timeZone')` — which would silently narrow what the
+  authz context accepts, since that enumeration omits this platform's own
+  default `UTC` — turns a test red instead of shipping.
+- e9fcd6b: feat(spec)!: the fourteen `kernel/` duration keys carry their unit in the key name (#15678, ruling B on #14478)
+  
+  <!-- adr-0087: registered kernel-event-bus-retention-unit-in-key, kernel-package-lifecycle-durations-unit-in-key, kernel-plugin-health-report-durations-unit-in-key, kernel-plugin-security-durations-unit-in-key, kernel-startup-orchestrator-durations-unit-in-key -->
+  
+  **BREAKING** — fourteen published `kernel/` duration keys are renamed and
+  tombstoned. Shipped as `minor` under the repo's launch-window convention for
+  breaking changes; the hand-migration prescriptions are registered under protocol
+  major 18. Maintainer ruling B on #14478 (2026-09-02, decision batch #43,
+  「同意」).
+  
+  `check:duration-unit-keys` makes a duration-shaped `z.number()` carry its unit
+  in the key NAME, never only in its `.describe()` prose, and grandfathers no
+  existing offender. Stack card 1/6 (#15676) landed the rule's two structural
+  exemptions and card 2/6 (#15677) cleared `api/`; this card clears `kernel/`.
+  Measured with the gate itself: `src/kernel/**` goes from 14 offenders to **0**,
+  and the whole-tree count falls **36 → 22**.
+  
+  ## FROM → TO
+  
+  | key | replacement | unit |
+  |:--|:--|:--|
+  | `EventPersistence.retention` | `retentionDays` | days |
+  | `EventSourcingConfig.retention` | `retentionDays` | days |
+  | `UpgradePlan.estimatedDuration` | `estimatedDurationSeconds` | seconds |
+  | `PluginHealthReport.metrics.uptime` | `uptimeMs` | milliseconds |
+  | `PluginHealthReport.metrics.responseTime` | `responseTimeMs` | milliseconds |
+  | `SandboxConfig.process.timeout` | `timeoutMs` | milliseconds |
+  | `KernelSecurityPolicy.authentication.tokenExpiration` | `tokenExpirationSeconds` | seconds |
+  | `KernelSecurityPolicy.auditLog.retention` | `retentionDays` | days |
+  | `PluginSecurityManifest.vulnerabilityDisclosure.responseTime` | `responseTimeHours` | hours |
+  | `PackageDependencyResolutionResult.resolvedIn` | `resolvedInMs` | milliseconds |
+  | `MultiVersionSupport.rollout.duration` | `durationMs` | milliseconds |
+  | `StartupOptions.timeout` | `timeoutMs` | milliseconds |
+  | `PluginStartupResult.duration` | `durationMs` | milliseconds |
+  | `StartupOrchestrationResult.totalDuration` | `totalDurationMs` | milliseconds |
+  
+  **Every value is unchanged** — only key names move, and every default moves with
+  its key (`StartupOptions` still defaults to 30000, `EventSourcingConfig` to
+  365). Every old spelling is a `retiredKey()` tombstone, so it fails `tsc` at the
+  authoring site (input type `never`) and fails the parse with the rename
+  prescription rather than a bare unrecognized-key error.
+  
+  ## ⚠️ Two collisions this rename removes — check these by hand, not by search-and-replace
+  
+  **`responseTime` meant two different units on two kernel shapes.** On
+  `PluginSecurityManifest.vulnerabilityDisclosure` it is HOURS (how fast a
+  publisher promises to answer a vulnerability report); on
+  `PluginHealthReport.metrics` the identical bare name is MILLISECONDS. So
+  `responseTime: 24` was a day on one shape and a fortieth of a second on the
+  other, with nothing at the authoring site to tell them apart. They land on
+  `responseTimeHours` and `responseTimeMs` respectively — do not let one
+  find-and-replace rewrite both.
+  
+  **`uptime` is milliseconds here and SECONDS on `GET /health`.** That collision
+  was already costing prose: the protocol lifecycle page carried a standing
+  paragraph whose only job was telling the two apart. `metrics.uptime` becomes
+  `metrics.uptimeMs`; the seconds-valued `uptime` of the HTTP health body is a
+  separate, unchanged surface and must not be renamed with it.
+  
+  A third split worth reading before you migrate: `estimatedDurationSeconds: 120`
+  is two MINUTES while `durationMs: 3600000` is one HOUR. Three adjacent
+  measurements of the same package install carried two different units, and no
+  parse can catch a value moved between them — both bounds accept any
+  non-negative integer.
+  
+  ## Dispositions — five semantic entries, no D2 conversion
+  
+  Justified per key rather than defaulted, and this card's answer is uniform:
+  **none of the fourteen gets an ADR-0087 D2 conversion.** A D2 conversion runs
+  over a stack document, and `stack.zod.ts` declares no `eventBus`, `startup`,
+  `upgrade` or plugin-security root — none of these twelve defs is a stack
+  collection member or a registered metadata kind stored as a `sys_metadata` row,
+  so the conversion chain has no seam that would see one. They are host
+  construction arguments (`EventBusConfig`, `StartupOptions`, `SandboxConfig`,
+  `MultiVersionSupport`), package artifacts (`PluginSecurityManifest`) and
+  runtime-emitted measurements (`PluginHealthReport`, `PluginStartupResult`,
+  `StartupOrchestrationResult`, `UpgradePlan`,
+  `PackageDependencyResolutionResult`). Each therefore carries a **semantic**
+  entry, which is the disposition `kernel/HealthStatus:timestamp` already holds on
+  one of these very files (`epoch-instant-keys-renamed`, card 1/6) and what ruling
+  B prescribes for a key that is not authorable metadata. All fourteen are
+  registered by exact key in `RETIRED_KEYS_BY_MAJOR`.
+  
+  ## Keys deliberately left alone
+  
+  `EventSourcingConfig.snapshotRetention` is a COUNT of snapshots and
+  `MultiVersionSupport.rollout.percentage` is a proportion — neither is a
+  duration, so neither has a unit to carry and both keep their names.
+  `RuntimeConfig.resourceLimits.timeout` names its unit only in the JSDoc above
+  the key ("Execution timeout in milliseconds"), a channel
+  `check:duration-unit-keys` does not read: it reads `.describe()` and
+  `.meta({ description })`, and this key's describe ("Maximum execution time")
+  names none. The gate therefore lists it among the duration-shaped keys but
+  deliberately does not judge it — neither an offender nor an exemption — so it is
+  outside this rename; that JSDoc-channel gap is filed as #15939. A pin test
+  asserts the key still parses bare, so a later sweep cannot read the four
+  security renames as "every timeout on that file".
+  
+  ## Readers moved in the same PR, at the same magnitude
+  
+  `@objectstack/core`'s health monitor (`metrics.uptimeMs: Date.now() -
+  startTime`), the kernel and contracts test suites, and the hand-written
+  `content/docs/protocol/kernel/lifecycle.mdx`, whose `uptime` paragraph now
+  states the collision the rename removes.
+  
+  ⚠️ `packages/core/src/plugin-loader.ts` declares its OWN local
+  `PluginStartupResult` interface — a different type, carrying `startTime` rather
+  than any duration key. It is not a reader of this schema, it is untouched by
+  this rename, and the divergence between the two shapes is tracked separately.
+- d4f9b2a: A session whose active organization is no longer one the user belongs to now resolves with no active organization instead of that one's data.
+  
+  Under a wall-enforcing tenancy posture (`isolated` / `group`), `resolveAuthzContext` took a browser session's stored `activeOrganizationId` as the request tenant without ever comparing it to the user's current memberships — the framework's only such comparison was gated on an API-key principal. A session whose owner had been removed from an organization therefore kept reading that organization's rows and writing into it until the session expired on its own (7 days by default), including when the removal went through the product's own offboarding path.
+  
+  That claim is now vetted: if it is not in the caller's `accessible_org_ids`, it is dropped and the context resolves with no active organization at all, which the tenant wall already fails closed on (reads resolve to nothing; a tenant-scoped write is refused by ADR-0123 D2). The principal is **not** refused — a session is a person who may hold memberships elsewhere, so they stay signed in and can switch to an organization they are actually in. The API-key arm is unchanged: a key is its organization binding and is still refused outright. The wire is unchanged; the drop is reported to the operator as a single server-side `warn`.
+- a727043: fix(rest,core): an organization-less or ex-member API key on a walled single-kernel deployment now answers 401 where it answered 200
+  
+  Under a wall-enforcing tenancy posture (`isolated`), an API key stamped with an
+  organization its owner is no longer a member of **read and wrote that
+  organization's rows** on the wiring the open core actually builds. Not a silent
+  empty set — a GET that returned the other organization's records, and a POST
+  that landed a row read back from the store carrying that organization's id and
+  the ex-member as its creator. An organization-less key on the same deployment
+  read `200` with an empty set, which is the silent failure the wall exists to
+  replace.
+  
+  The cause was a seam, not a predicate. `RestServer.computeExecCtx` derived the
+  effective tenancy posture from a per-request kernel, and on the single-kernel
+  wiring there is no per-request kernel — so the posture was `undefined` on every
+  request, and both posture-conditional API-key refusals are gated on it:
+  `organization_required` in `api-key.ts` and `organization_membership_ended` in
+  `resolve-authz-context.ts`. Neither ever ran. The Layer 0 wall itself was
+  active the whole time; it compares against the caller's active organization,
+  and an API key's tenant is `sys_api_key.active_organization_id` copied verbatim
+  — the holder's own stored claim. Enforcing the wall is what let the ex-member
+  through, because the one fact that would expose the ended membership was not an
+  input to the layer that could act on it.
+  
+  The single-kernel branch now derives the posture from a provider `rest-api-plugin`
+  wires to the lone local kernel's `tenancy` service, in the same shape as the
+  auth-service provider beside it. A host that registers no `tenancy` service is
+  unchanged and still admits: there is no wall on such a deployment, so there is
+  nothing for an organization-less key to be walled out of. A `tenancy` service
+  that was registered and **failed to build** is an outage and answers `503`, not
+  an admission — a posture that could not be read is not a posture that is absent.
+  
+  Refusals are now also said out loud on the server side, at `warn`, where each
+  one is decided: the key's row id (never the credential or its hash), the
+  principal, the organization and the reason. **The wire is unchanged** — both
+  refusals still answer the generic `401 UNAUTHENTICATED` with no reason in the
+  body, so a holder of someone else's key learns nothing a plain 401 does not
+  already tell them. The operator, who previously had a key that was neither
+  revoked nor expired and a 401 that said nothing, now has a line to find.
+  
+  Behaviour that does not move: a current member's key on the same route still
+  returns its rows and still writes; a request with no credential still answers
+  401; and an unknown, revoked or expired key is not a refusal at all, so a key
+  scanner produces no log volume.
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/spec@17.4.0
+  - @objectstack/types@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

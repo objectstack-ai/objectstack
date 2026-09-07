@@ -1,5 +1,101 @@
 # @objectstack/types
 
+## 17.4.0
+
+### Minor Changes
+
+- 3d3f60e: An approval decision that lands while its flow run strands now says so in fields, not only in prose.
+  
+  `POST /api/v1/approvals/requests/{id}/reject` — and its sibling decision doors — could produce three coexisting outcomes from one call: the caller read HTTP 500, the request row **was** in its terminal status and had left the pending inbox, and the workflow run was stranded. A caller reading 500 has one honest inference available — "the rejection did not happen" — and it was the wrong one, so scripts and operators retried or escalated against a decision that was already durable. The only carrier of the truth was English prose in `error`, so finding the affected run meant regexing a run id out of a sentence, and nothing said whether that run could be repaired at all.
+  
+  The 500 stays. A recorded decision whose flow never advances is still a failure and is still reported as one; the door does not become atomic and no decision is ever rolled back. What changed is that it stops discarding what the engine already said:
+  
+  - **The `RESUME_FAILED` body gains four fields**, additively — `finalized` (always `true`: the decision stands), `decision`, `runId`, and `repairable`. Existing consumers see the same `code`, the same `error` and the same status.
+  - **`repairable` carries the engine's own discriminator** — `AutomationResult.status === 'stranded'`, the state stamped on exactly the exit that journals a repair snapshot. `false` is the answer for every other failure, including a lost run: absence of the signal is not repairability, and a repair verb that would refuse is worse than no promise.
+  - **`serviceResume` carries `status`** through to the door. It previously read only `success` / `code` / `error`, and the stranded exit reports a `status` and no `code` at all — so the platform's own repairability signal died one line before the envelope was built.
+  
+  `@objectstack/types` gains `strandedDecisionFailure` / `strandedDecisionDetails` and the `StrandedDecisionDetails` type — the constructor and its recogniser in one module, so the producing service and the REST door cannot drift. A `RESUME_FAILED` raised without that carrier answers exactly the body it always did; the door never synthesises the envelope.
+
+### Patch Changes
+
+- 088f761: `createHostImporter` now loads the `import` build of an ALIASED dual-published package, instead of silently keeping its `require` build.
+  
+  An alias declaration — `{"dependencies": {"foo": "npm:bar@1"}}` — installs a package whose manifest is named `bar` under the key `foo`. On the path where CommonJS resolution SUCCEEDS, the importer re-decides only the CONDITION (it asks the package which entry an `import()` gets, so the caller's ESM chain and this load share one instance). That re-decision recognised the package root by walking up from the resolved entry until it found a manifest named after the DECLARATION KEY — `foo` — while an aliased install's manifest is named `bar`. The walk therefore never matched, the re-decision produced nothing, and the load fell back to whatever the CommonJS resolver had answered: the `require` condition.
+  
+  For an aliased dual publish that left the process holding two live copies of one package — the CommonJS build behind the host importer, the `import` build in the caller's own chain — which is exactly the split the condition re-decision exists to remove: a plugin registry, a singleton kernel, a module-level cache, one copy each.
+  
+  The expectation now comes from the host's own declaration (`npm:name@range`, aliased `workspace:name@range`), the same reading the ESM-only fallback finder has used since it learned about aliases. Nothing about the check's strictness moves: an alias naming one package still does not license a directory holding another, and a non-aliased declaration is still verified against its key. Declarations that name a LOCATION rather than a package (`link:`, `file:`) carry no name to expect, so they keep today's behaviour unchanged.
+  
+  Measured population for the behaviour change: zero aliased declarations exist across this workspace's 875 dependency declarations, and 867 of 867 installed declarations already match their key — no ordinary, non-aliased install reaches this path.
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+  - @objectstack/spec@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes

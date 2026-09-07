@@ -1,5 +1,441 @@
 # @objectstack/rest
 
+## 17.4.0
+
+### Minor Changes
+
+- 65846bc: fix(rest)!: an import ROW report spells a unique-constraint refusal `UNIQUE_VIOLATION` — the same wire code as the whole-request failure on the same route (#14723)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable moves: no spec key, export, config field or stored metadata changes spelling or shape, `packages/spec` is untouched and `objectstack migrate meta` has nothing to rewrite. What moves is the `code` value one import row report carries for one condition — the wire report of a driver's unique-constraint refusal on the per-row surface of `POST /api/v1/data/:object/import` — which now spells the standard-catalog member the whole-request door and the published protocol docs already use. The consumer note below is guidance for a client branching on that row code; it prescribes no rewrite of any authored artifact. -->
+  
+  **BREAKING** on the per-row results of the import runner
+  (`POST /api/v1/data/:object/import` and the import job): a row refused by the
+  engine's `DuplicateRecordError` envelope now reports `code: 'UNIQUE_VIOLATION'`
+  where it reported `'DUPLICATE_RECORD'`. Shipped as `minor` under the repo's
+  launch-window convention for breaking changes. Maintainer ruling 2026-09-03 on
+  #14723 (verbatim 「同意，然后执行契约复审」), adopting option A: one wire
+  spelling for a unique-constraint refusal on every route.
+  
+  **Why.** `toFailedResult` relayed the thrown error's own `code`, and the engine's
+  envelope carries the registered `DUPLICATE_RECORD` — while the whole-request
+  failure on the same import route answered `UNIQUE_VIOLATION` through
+  `mapDataError`. Two spellings of one condition on one route, which ADR-0112's
+  one-name-per-concept and the error-code ledger's header both forbid. The
+  duplication is removed, not declared: no ledger waiver is added.
+  
+  **What changes.** The import row derivation applies the whole-request arm's own
+  predicate — the registered code AND the class name `DuplicateRecordError`,
+  exported from `error-response.ts` as `isEngineDuplicateRecordEnvelope` and now
+  shared by the arm and the row report — and reports `UNIQUE_VIOLATION`. A
+  field-level finding still takes precedence (the envelope carries none), the
+  row's sentence is unchanged (the platform sentence, sanitised as before; no
+  driver text), and a producer that merely throws the registered
+  `DUPLICATE_RECORD` without being the engine's class keeps its own code.
+  
+  **What does NOT change.** The whole-request doors (single-record, bulk, import,
+  metadata, UI) already answered `UNIQUE_VIOLATION` and keep doing so; the arm's
+  logic is untouched beyond reading the shared predicate. The engine's thrown
+  identity stays `DUPLICATE_RECORD` in-process. This package's `error-response.ts`
+  docblock that disclosed the fork under the #14541 contract review now states
+  the converged rule.
+  
+  **Consumer note.** An import client that branched on a row's `code` reading
+  `DUPLICATE_RECORD` reads `UNIQUE_VIOLATION` there now — the same value it
+  already handles for the whole-request 409. Measured in-repo and in the sibling
+  repos (hotcrm, objectui, non-test sources): zero consumers branch on either
+  spelling of a row code.
+- 784cb92: feat(spec): every `metadata.endpoints.*` switch gates exactly the face its name states, and the whole-store operations get their own key `maintenance` (#15542, #15854)
+  
+  `RestServerConfig.metadata.endpoints` declared three switches, each `describe()` naming
+  exactly one route, and each gated a different set. The mismatch ran in **both**
+  directions at once:
+  
+  - **`items`** — declared "GET /meta/:type - List items of type" — also gated the
+    whole-store family: the cross-type spec-validation sweep `GET /meta/diagnostics`, the
+    draft list `GET /meta/_drafts`, and the **`POST /meta/_migrate-stored` write door**.
+    An operator who switched off a listing read they considered chatty silently unmounted
+    a migration door.
+  - **`item`** — declared "GET /meta/:type/:name - Get specific item" — gated four
+    *reads* (`/:type/:name`, `/references`, `/layers`, `/book/:name/tree`) and left the
+    per-item **writes** `PUT` and `DELETE /meta/:type/:name` plus the whole history family
+    (`/history`, `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) answering to
+    `api.enableMetadata` alone. An operator who closed the per-item surface left its
+    writes mounted.
+  
+  Neither is a liveness defect — all three keys were genuinely read — which is why no
+  ADR-0049 census could ever flag them: what drifted was each key's **radius** against its
+  own documentation.
+  
+  **One principle now holds across the block: a switch gates exactly the face its name
+  states, reads and writes alike.**
+  
+  | key | mounts it gates (default prefix `/meta`) |
+  |---|---|
+  | `types` | `GET /meta`, `GET /meta/types` — one handler, two paths (unchanged) |
+  | `items` | `GET /meta/:type` — and nothing else |
+  | `item` | `GET` / `PUT` / `DELETE /meta/:type/:name`, `/references`, `/layers`, `/history`, `/audit`, `/diff`, `/published`, `/publish`, `/rollback`, and `GET /meta/book/:name/tree` |
+  | `maintenance` | **new** — `GET /meta/diagnostics`, `GET /meta/_drafts`, `POST /meta/_migrate-stored` |
+  
+  All four `describe()` strings are rewritten to enumerate what they gate, so the
+  generated reference page is the radius rather than a sample of it.
+  `api.enableMetadata` remains the master switch above all four, and
+  `GET /meta/object/:name/state/:field` — the object FSM read, addressed by object name
+  rather than by `:type/:name` — deliberately stays under that master switch alone.
+  
+  **BREAKING** — for a programmatic embedder that authors `RestServerConfig.metadata.endpoints`,
+  the mounted route table moves for two of the four keys, in opposite directions:
+  
+  - **`items: false` now removes one route instead of four.** An embedder relying on it to
+    close `/diagnostics`, `/_drafts` and the `POST /_migrate-stored` door **regains all
+    three** unless it also sets `maintenance: false`. That is a write door coming back, so
+    it is the half to read twice. One line restores the old table:
+    `endpoints: { items: false, maintenance: false }`.
+  - **`item: false` now removes twelve routes instead of four.** An embedder relying on it
+    to close only the per-item *reads* while keeping `PUT`, `DELETE` and the history family
+    mounted **loses those eight**. There is no key that restores them — the per-item face is
+    one face by this ruling — so an embedder that wants the writes keeps `item` on and
+    closes the surface at `api.enableMetadata` or at the object's own `enable.apiMethods`.
+  - **The exported type `MetadataEndpointsConfigParsed` narrows: `endpoints` gains a
+    REQUIRED member `maintenance: boolean`.** `maintenance` is `z.boolean().default(true)`,
+    so it is optional on the way *in* and always present on the way *out* — and
+    `MetadataEndpointsConfigParsed` is `z.infer<typeof MetadataEndpointsConfigSchema>`, the
+    OUTPUT side. Any code that builds one of these objects by hand — a test fixture, a
+    helper returning the parsed shape, a `satisfies MetadataEndpointsConfigParsed` literal —
+    stops compiling with `TS2741: Property 'maintenance' is missing`. This one IS
+    compiler-carried (the ADR-0087 D8 class), which is the good case: the break is loud, it
+    lands at build time, and no runtime behaviour depends on the author noticing a
+    changelog. Add `maintenance: true` to restore the previous mounts, or `false` to keep
+    the whole-store family closed. In-repo consumers of the type: none — the narrowing was
+    measured against a probe compiled from the rebuilt declaration, not assumed.
+  
+  Priced and accepted rather than deferred: `RestServerConfig` is reachable from **no
+  shipped boot path** today (`os serve` fixes the config and the dev plugin passes none,
+  #15543), so the measured population of affected authors is **zero** and the blast radius
+  is programmatic embedders only. That is precisely why this lands now — once a boot path
+  starts authoring the config, the same change becomes a behaviour change on live
+  operators.
+  
+  **ADR-0087 disposition: a D3 semantic migration, no D2 conversion.** No
+  authored key changes shape or spelling — `items: false` still parses to `items: false`,
+  `maintenance` is additive with `.default(true)`, and nothing is retired (`endpoints.schema`
+  stays the #14691 tombstone it already was). There is nothing for the conversion layer to
+  convert: a `RestServerConfig` is plugin TS configuration, never a stack collection member
+  and never a `sys_metadata` row (the `RestServerConfig.openApi31` precedent, #4579), so no
+  rehydration seam sees it. What changes is a mounted route table at construction time.
+  
+  Nor is the RADIUS change compiler-carried on the AUTHORED side — and that is the half a
+  D3 is owed for. Every authored key is an optional boolean, so `{ items: false }` still
+  compiles and still parses and simply mounts a different table: the author is told
+  nothing. (The parsed-type narrowing in the third BREAKING bullet above *is*
+  compiler-carried, but it catches only code that hand-builds the OUTPUT type — it cannot
+  reach the embedder who authored `{ items: false }` and now silently gets three routes
+  back.) So for the change that actually moves the route table, both channels that would
+  otherwise reach a consumer are blind, which is precisely the residue D3 exists for — the prescription is registered as
+  `metadata-endpoints-switch-radius-repartitioned` so `objectstack migrate meta` hands
+  it to an upgrading embedder instead of leaving it as prose in a changelog.
+  
+  <!-- adr-0087: registered metadata-endpoints-switch-radius-repartitioned -->
+  
+  `@objectstack/rest` is versioned alongside rather than as a passive consumer: it is where
+  the gates live, so the route-table change is observable there and not only in the
+  declaration.
+  
+  Every key's radius is pinned route by route, in both directions, in
+  `packages/rest/src/rest-config-mount-table.pin.test.ts` — the #15544 shape, which asserts
+  each route is **absent from the mounted table** when its switch is off rather than what
+  the switch normalizes to. A gate that grows or loses a route reddens there.
+- f5cc78b: fix(rest): the generic declared-status passthrough names its object on both error doors (#14725)
+  
+  **Response-body change on the published bulk / metadata / UI doors: one optional
+  key is added, `object`.** Nothing is removed, no status moves, and no `code`
+  value changes spelling.
+  
+  #14541 made the two REST error doors agree for every refusal a *bespoke* arm
+  classifies. They still disagreed for every refusal that reached the *generic*
+  declared-status passthrough, because the two copies of that one passthrough
+  differed by exactly one key: `classifyDataError`'s copy ends
+  `...(object ? { object } : {})` and `resolveErrorResponse`'s 4xx arm had no such
+  limb. Measured on `main` @ `a12b15e394` — one error object, both doors:
+  
+  | door | before |
+  |---|---|
+  | `mapDataError(err, 'duly_note')` (single-record `/data`) | `409 {"error":"…","code":"DUPLICATE_RECORD","object":"duly_note"}` |
+  | `sendThrownError(res, err, 'duly_note')` (bulk / metadata / UI) | `409 {"error":"…","code":"DUPLICATE_RECORD"}` |
+  
+  One refusal, two bodies, decided by which route caught it — the #14541 shape one
+  arm over. The bulk door now answers the first row too.
+  
+  It closes the same card's second residue with it. `recordNotFoundError`
+  (`@objectstack/core`) declares `code`, `status = 404` **and** `object`, so that
+  declared status carries a record-level not-found past the `RECORD_NOT_FOUND` arm
+  into this same generic passthrough on every route reporting through
+  `handleRouteError` / `sendThrownError`, while the single-record `/data` door
+  reached the generic arm in `classifyDataError` and shipped the name. Both doors
+  now agree for that producer in every combination of declared status and
+  door-supplied object.
+  
+  **Who sees the new key.** The name comes from the door's `object` *argument*,
+  never from `error.object`, so only a route that supplies one is widened. Of 35
+  route call sites of this door, **9** pass an argument that can be a non-empty
+  object name — `POST /data/:object/batch`, `/createMany`, `/updateMany`,
+  `/deleteMany`, `POST /data/:object/:id/clone`, `POST /data/:object/import`,
+  `POST /data/:object/import/jobs`, `GET /data/:object/export`, and
+  `GET /ui/view/:object/:type`. The other 26 (21 passing nothing, 5 passing the
+  literal `''`) answer byte-identical bodies. `classifiedRefusalAnswer` — the
+  entry point the analytics dataset face and the record-share family re-dress —
+  calls this door with no `object` argument at all, so those envelopes' key sets
+  do not move.
+  
+  **What deliberately does not change.** The declared-**5xx** arm gains nothing:
+  its sibling `declaredServerFaultAnswer` names no object either, so the two doors
+  already agreed in that band and adding the limb there would *create* a
+  divergence, on top of putting a caller-supplied name into a body whose whole
+  rule is that a declared server fault says nothing beyond status and code. The
+  `RECORD_NOT_FOUND` arm's message-**text** limb
+  (`/^Record \S+ not found in \S+/i`) is not lifted above the passthrough either —
+  that boundary is #14541's, and it is now pinned behaviourally and positionally
+  rather than described.
+  
+  Consumer note: a client that key-counts or exact-matches an error body from a
+  bulk, import, export, clone or UI-view route will see `object` alongside `error`
+  and `code` where the equivalent single-record `/data` response has carried it all
+  along. A client that reads named fields is unaffected.
+- 3d3f60e: An approval decision that lands while its flow run strands now says so in fields, not only in prose.
+  
+  `POST /api/v1/approvals/requests/{id}/reject` — and its sibling decision doors — could produce three coexisting outcomes from one call: the caller read HTTP 500, the request row **was** in its terminal status and had left the pending inbox, and the workflow run was stranded. A caller reading 500 has one honest inference available — "the rejection did not happen" — and it was the wrong one, so scripts and operators retried or escalated against a decision that was already durable. The only carrier of the truth was English prose in `error`, so finding the affected run meant regexing a run id out of a sentence, and nothing said whether that run could be repaired at all.
+  
+  The 500 stays. A recorded decision whose flow never advances is still a failure and is still reported as one; the door does not become atomic and no decision is ever rolled back. What changed is that it stops discarding what the engine already said:
+  
+  - **The `RESUME_FAILED` body gains four fields**, additively — `finalized` (always `true`: the decision stands), `decision`, `runId`, and `repairable`. Existing consumers see the same `code`, the same `error` and the same status.
+  - **`repairable` carries the engine's own discriminator** — `AutomationResult.status === 'stranded'`, the state stamped on exactly the exit that journals a repair snapshot. `false` is the answer for every other failure, including a lost run: absence of the signal is not repairability, and a repair verb that would refuse is worse than no promise.
+  - **`serviceResume` carries `status`** through to the door. It previously read only `success` / `code` / `error`, and the stranded exit reports a `status` and no `code` at all — so the platform's own repairability signal died one line before the envelope was built.
+  
+  `@objectstack/types` gains `strandedDecisionFailure` / `strandedDecisionDetails` and the `StrandedDecisionDetails` type — the constructor and its recogniser in one module, so the producing service and the REST door cannot drift. A `RESUME_FAILED` raised without that carrier answers exactly the body it always did; the door never synthesises the envelope.
+
+### Patch Changes
+
+- 4bc9821: An organization-scoped caller's own items now appear in the untyped metadata diagnostics sweep.
+  
+  `GET /api/v1/meta/diagnostics` has two arms. The `?type=` arm has stated the caller's organization since #13753; the untyped whole-registry sweep passed none, so the Studio governance summary reported clean tiles over a partition it never read — undercounting relative to the per-type drill-down screen you reach by clicking into it. A summary whose whole job is surfacing problems, and which structurally cannot see a class of them while its own drill-down can, issues a false all-clear. The untyped arm now forwards the caller's organization, so items that organization authored on the five `allowOrgOverride: true` types (`view`, `dashboard`, `report`, `translation`, `email_template`) are counted in `stats`, `total` and `scannedItems`.
+  
+  The organization is passed RAW, deliberately, and that is the whole of the change — no new parameter, response field, status code or contract surface. There is no single type to fold on for a whole-registry sweep, and folding on any one of them would suppress the organization for every type at once; instead `getMetaDiagnostics` reads each swept type through `getMetaItems`, which applies the `allowOrgOverride` read gate to its own request type, so every type is scoped on its own registry flag. A non-overridable type (`object`, `flow`, `app`, …) is still read environment-wide and no pre-#6190 organization-scoped row is resurrected into the report. An anonymous or organization-less caller reads exactly what it read before, and the `stats` / `total` / `scannedTypes` arithmetic is unchanged in shape.
+- a84e1ce: fix(rest): metadata label lookup honours the stack's declared `i18n.fallbackLocale` / `defaultLocale` instead of falling through to the `en` bundle (#14882)
+  
+  On a workspace whose labels are authored in `zh-CN` (`defaultLocale: 'zh-CN'`,
+  `fallbackLocale: 'zh-CN'`) and which ships only a courtesy `en` translation bundle,
+  `GET /api/v1/meta/object/:name`, the `/meta/:type` list, `GET /api/v1/meta` and the
+  public-form schema served the ENGLISH bundle labels to a `zh-CN` request (`Entry Sheet`
+  for an authored `填报单`, `KPI Assessment` for `KPI 考核管理`). The document translators walk
+  `requested locale → fallback chain → authored label` and default the chain to a literal
+  `['en']`; every REST seam passed none, so the declared fallback never reached the chain
+  and `en` was consulted before the authored label.
+  
+  Every metadata translation seam now passes `fallbackChain: [i18n.getFallbackLocale()]` —
+  the locale the i18n service's own `t()` falls back to, which `I18nServicePlugin` receives
+  from the stack config as `fallbackLocale || defaultLocale || 'en'`. For the workspace
+  above a `zh-CN` request now resolves `zh-CN → zh-CN → authored label` (the authored
+  Chinese labels), an `en` request still gets the `en` bundle, and a `zh-CN` bundle, when one
+  is shipped, still wins over the authored label.
+  
+  Feature-detected: an i18n service that does not declare a fallback (the method is
+  optional on `II18nService`; the core in-memory fallback has none) gets no chain and the
+  resolver's own default applies exactly as before. A stack declaring `defaultLocale: 'zh-CN'`
+  with `fallbackLocale: 'en'` is likewise unchanged — the declared `en` is honoured as it
+  reads.
+- 3e7ef9c: Serve an Invalid `Date` from a driver as visible text instead of raising `RangeError` in the import-job DTO and the CSV export.
+  
+  `canonicalIsoStamp` and `formatCsvCell` both reached `value.toISOString()` for any `Date`, and that call raises `RangeError: Invalid time value` for the one `Date` whose time value is `NaN` — so one bad timestamp column answered **500** on `GET /api/v1/data/import/jobs/:jobId` and aborted a CSV export mid-stream.
+  
+  The shape is measured: mysql2 3.23.1 returns a module constant literally named `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds `new Date(NaN)` for every year in 275760..294276, a range Postgres itself stores.
+  
+  Both arms now guard on `Number.isNaN(value.getTime())` and render the visible text `"Invalid Date"` — the rendering the spelling they replaced produced. Both are read by a human, and the declared contracts allow it: the four import-job stamps are plain `z.string()` (not `z.string().datetime()`), and a CSV cell has no schema at all. The operator sees a wrong-looking field they can report, rather than an error naming no row.
+  
+  The CSV arm needs its own guard rather than a fall-through, because the branch below it is `JSON.stringify` and `Date.prototype.toJSON` answers `null` for an Invalid `Date` — the silent blank this change exists to avoid. Both CSV paths land on the guarded arm: with field metadata, `formatDate` rejects an Invalid `Date` and passes the value through unchanged.
+- e13ede8: The admin "Used by" panel no longer clears a delete when the caller's own organization is using the item.
+  
+  `GET /api/v1/meta/:type/:name/references` backs that panel, whose empty case reads "Nothing in the metadata graph points at this item. Safe to delete." — advice given to an operator about to delete something. The door supplied no organization, so the reference sweep read the environment partition only: an organization-scoped `view` (or `dashboard`, `report`, `translation`, `email_template`) pointing straight at the object being deleted was invisible, and the panel issued a false clearance. It now passes the caller's organization, and those references are returned.
+  
+  The organization is passed RAW, deliberately, and that is the whole of the change — no new parameter, response field or contract surface. `req.params.type` is the reference TARGET, while the sweep spends the organization on the SOURCES it reads per type; `getMetaItems` applies the `allowOrgOverride` read gate to its own request type, so each source is scoped on its own registry flag. A non-overridable source (`object`, `flow`, `app`, …) is still read environment-wide and no pre-#6190 organization-scoped row is resurrected into a delete clearance. An anonymous or organization-less caller reads exactly what it read before, and no status code or response shape moves.
+- 7d7ca6c: `GET /api/v1/meta/:type/:name/references`: both of the door's 501 refusals now answer the same ADR-0112 nested envelope, and the unanswerable-target refusal keeps the prescriptive message ADR-0110 D3 requires of it.
+  
+  The route can refuse in two ways, and the two answers agreed on neither the envelope nor the message:
+  
+  ```
+  A  the protocol cannot answer for this TARGET type (a `field`)
+     501 {"error":"Internal server error","code":"NOT_IMPLEMENTED"}
+  B  the resolved kernel has no `findReferencesToMeta` at all
+     501 {"error":{"code":"NOT_IMPLEMENTED","message":"protocol.findReferencesToMeta() is not available in this kernel"}}
+  ```
+  
+  A now answers in B's shape, carrying the producer's own sentence:
+  
+  ```
+  501 {"error":{"code":"NOT_IMPLEMENTED","message":"[unanswerable_target] References to a 'field' item cannot be computed. … Ask the owning object instead: GET /api/v1/meta/object/account/references."}}
+  ```
+  
+  Why the message matters more than it looks. This door backs the admin "Used by" panel, whose empty case renders "Nothing in the metadata graph points at this item. Safe to delete." to an operator whose next click is a delete. A `field` target can never MATCH a reference site — fields are addressed by the composite `<object>.<field>` key while every property naming one holds the bare name — so the protocol refuses instead of answering an empty list, and its message names the question that IS answerable: ask the owning object. Relayed as "Internal server error", that instruction never reached the operator.
+  
+  Two consequences for a caller:
+  
+  - `body.error.code` now reads `NOT_IMPLEMENTED` on **both** refusals; the top-level sibling `body.code` this route used to answer on refusal A is gone. `@objectstack/client` reads either position, so `err.code` is unchanged for SDK callers; `err.message` improves from `Internal server error` to the prescriptive sentence. A raw HTTP caller branching on `body.code` for this route's 501 should read `body.error.code`, which is what the route's other refusal has always answered.
+  - Nothing else on the door moves. A genuine server fault reaching this route — the 503 a `sys_metadata` outage raises — keeps its withheld generic message and its flat body, and 200 answers are untouched.
+- 53cbad9: The REST server's `api` configuration defaults now come from `RestApiConfigSchema` alone, instead of being restated in `packages/rest`.
+  
+  `RestServer.normalizeConfig` already parsed `config.api` against `RestApiConfigSchema` — and then discarded the result, rebuilding the block from a `??` chain over the raw input. That chain restated the schema's eleven top-level `z.default(...)`s as eleven literals in a second package. They agreed key for key, and nothing measured that they would keep agreeing: changing a default in `@objectstack/spec` silently failed to propagate, because `api.enableUi ?? true` answers `true` for an absent key whatever the schema declares. Consuming the parse deletes the duplicate and makes the schema authoritative.
+  
+  The parse itself is unchanged, so **nothing new is accepted or refused**: the same schema, with the same `.omit({ requireAuth: true })`, already ran at construction. `api.requireAuth` keeps its retired warn-and-ignore posture (`@objectstack/rest`'s plugin reads it off the raw config, so the warning is untouched), and every authored value still wins over the default.
+  
+  One bounded behaviour change, for a caller who writes `api.documentation` or `api.responseFormat` — and it runs in two directions, not one. **Filled in:** those objects now arrive carrying their own declared inner defaults — `documentation.enabled` / `.title`, and `responseFormat.envelope` / `.includeMetadata` / `.includePagination`. **Stripped:** inner keys the schema does not declare no longer survive, at either depth — an authored `documentation.logo`, a `documentation.contact.phone` or a `documentation.license.spdxId` inside the nested objects, a `responseFormat.extra` — where the `??` chain passed the authored object through by reference and kept every key on it. Both halves are the same parse: `documentation` / `responseFormat` (and their `contact` / `license`) are non-strict `z.object()`s, which fill in their `.default()`s and drop what they do not name — dropped silently, so this is a strip and not a new refusal. An object left unwritten stays absent, and nothing in the platform reads either key today: the normalized block is `private` to `RestServer`, which reads only scalars off it (`apiPath` / `basePath` / `version` in `getApiBasePath`, the `enable*` flags, `projectResolution`), and the repo has no other read site for either key — so no consumer observes either half.
+- 9b459b7: The REST data doors' protocol requests are compiled against the declared contract again, so a field added to a data request schema reddens the build instead of going silently unsent.
+  
+  No runtime behaviour changes — every door assembles and forwards exactly the object it did before. What changes is what the compiler is allowed to see. `packages/rest/src/rest-server.ts` dispatched to the protocol through two erasing forms: `p.deleteData({ … } as any)` on the argument, and the stronger `(p as any).updateData({ … })` on the protocol object itself, which erases the check on *every* member — a misspelled method name would not have errored. Across the file that was 22 dispatch sites spanning `findData` / `getData` / `createData` / `updateData` / `deleteData`, their `*Many` and batch siblings, and `getUiView`.
+  
+  The casts were load-bearing rather than lazy: these call sites pass `environmentId` and `context`, and neither is a member of any data request schema. Neither should become one. `environmentId` is the transport routing key that selects the kernel *before* the protocol call and is already ruled out of the request shape; `context` is the server-derived execution context, and a caller-supplied `context` is a privilege escalation the ingress deletes unconditionally — putting it in the published request schema would re-open that door. Both are now declared on a typed envelope alongside the request type, so they stay server-side *and* compiled, and every other member of every literal is checked against the spec.
+  
+  One slot stays deliberately untyped and is now named rather than diffuse: `findData`'s `query` accepts both the declared AST and an undeclared wire dialect (`$top`, `$orderby`, `filters`, …) that the protocol normalizer folds. Three server-built literals speak that dialect; the erasure there is confined to the query slot alone, and the declared-versus-shipped mismatch is filed as its own question.
+- 46803fa: fix(rest): the metadata reads pass the declared default locale to the label resolvers, so a request for it answers with the authored label (#15711)
+  
+  `translateOptionsFor` — the single seam every metadata-document translation in the REST server goes through — now threads `i18n.getDefaultLocale()` into `ResolveOptions.defaultLocale` beside the declared fallback chain it has passed since #14882. Both accessors are optional on `II18nService` and both are feature-detected: a provider that declares no default gets no default, one that declares no fallback gets no chain, and the seam never answers `'en'` on a provider's behalf.
+  
+  Measured on the reporter's stack shape (`defaultLocale: 'zh-CN'`, `fallbackLocale: 'en'`, an `en` bundle and no `zh-CN` bundle): `GET /api/v1/meta/object/kpi_entry_sheet` with `Accept-Language: zh-CN` — or with no header at all, which resolves to the default — now serves the authored `填报单`, not the `en` bundle's `Entry Sheet`; a `fr` request still walks the declared `en` bundle; an `en` request still gets the `en` bundle. Pinned in `meta-i18n-declared-fallback-chain.test.ts` §4 and §5.
+- a727043: fix(rest,core): an organization-less or ex-member API key on a walled single-kernel deployment now answers 401 where it answered 200
+  
+  Under a wall-enforcing tenancy posture (`isolated`), an API key stamped with an
+  organization its owner is no longer a member of **read and wrote that
+  organization's rows** on the wiring the open core actually builds. Not a silent
+  empty set — a GET that returned the other organization's records, and a POST
+  that landed a row read back from the store carrying that organization's id and
+  the ex-member as its creator. An organization-less key on the same deployment
+  read `200` with an empty set, which is the silent failure the wall exists to
+  replace.
+  
+  The cause was a seam, not a predicate. `RestServer.computeExecCtx` derived the
+  effective tenancy posture from a per-request kernel, and on the single-kernel
+  wiring there is no per-request kernel — so the posture was `undefined` on every
+  request, and both posture-conditional API-key refusals are gated on it:
+  `organization_required` in `api-key.ts` and `organization_membership_ended` in
+  `resolve-authz-context.ts`. Neither ever ran. The Layer 0 wall itself was
+  active the whole time; it compares against the caller's active organization,
+  and an API key's tenant is `sys_api_key.active_organization_id` copied verbatim
+  — the holder's own stored claim. Enforcing the wall is what let the ex-member
+  through, because the one fact that would expose the ended membership was not an
+  input to the layer that could act on it.
+  
+  The single-kernel branch now derives the posture from a provider `rest-api-plugin`
+  wires to the lone local kernel's `tenancy` service, in the same shape as the
+  auth-service provider beside it. A host that registers no `tenancy` service is
+  unchanged and still admits: there is no wall on such a deployment, so there is
+  nothing for an organization-less key to be walled out of. A `tenancy` service
+  that was registered and **failed to build** is an outage and answers `503`, not
+  an admission — a posture that could not be read is not a posture that is absent.
+  
+  Refusals are now also said out loud on the server side, at `warn`, where each
+  one is decided: the key's row id (never the credential or its hash), the
+  principal, the organization and the reason. **The wire is unchanged** — both
+  refusals still answer the generic `401 UNAUTHENTICATED` with no reason in the
+  body, so a holder of someone else's key learns nothing a plain 401 does not
+  already tell them. The operator, who previously had a key that was neither
+  revoked nor expired and a 401 that said nothing, now has a line to find.
+  
+  Behaviour that does not move: a current member's key on the same route still
+  returns its rows and still writes; a request with no credential still answers
+  401; and an unknown, revoked or expired key is not a refusal at all, so a key
+  scanner produces no log volume.
+- Updated dependencies [2ed6be6]
+- Updated dependencies [07f40e5]
+- Updated dependencies [ceb4877]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [ca326b5]
+- Updated dependencies [8f404a5]
+- Updated dependencies [159dbad]
+- Updated dependencies [3e3ecb0]
+- Updated dependencies [d5d8d50]
+- Updated dependencies [b548e43]
+- Updated dependencies [c463d03]
+- Updated dependencies [64bd6a3]
+- Updated dependencies [13c48c2]
+- Updated dependencies [66dc6ab]
+- Updated dependencies [6f94458]
+- Updated dependencies [6e67b86]
+- Updated dependencies [132742f]
+- Updated dependencies [85a2459]
+- Updated dependencies [e89fa92]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [56fe8c2]
+- Updated dependencies [ab50c8f]
+- Updated dependencies [6491463]
+- Updated dependencies [89cf4d6]
+- Updated dependencies [bca21f7]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [2025b1f]
+- Updated dependencies [1a7a7c9]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [cbca47d]
+- Updated dependencies [ef3a138]
+- Updated dependencies [fa125f3]
+- Updated dependencies [a646120]
+- Updated dependencies [6f1ce7d]
+- Updated dependencies [7778115]
+- Updated dependencies [2c753fe]
+- Updated dependencies [52804cd]
+- Updated dependencies [3f89967]
+- Updated dependencies [53cf263]
+- Updated dependencies [9c270bb]
+- Updated dependencies [088f761]
+- Updated dependencies [a84e1ce]
+- Updated dependencies [bf1054a]
+- Updated dependencies [d8d2776]
+- Updated dependencies [222dc0f]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [f9a3c32]
+- Updated dependencies [f502898]
+- Updated dependencies [4ca358d]
+- Updated dependencies [cf9bda4]
+- Updated dependencies [784cb92]
+- Updated dependencies [a7da4de]
+- Updated dependencies [6acb37e]
+- Updated dependencies [0a038cc]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [5eb24f8]
+- Updated dependencies [cc00df2]
+- Updated dependencies [cc00df2]
+- Updated dependencies [4db3c61]
+- Updated dependencies [5ca314a]
+- Updated dependencies [414c1fc]
+- Updated dependencies [0db2947]
+- Updated dependencies [92b5d7f]
+- Updated dependencies [8e0b297]
+- Updated dependencies [d4f9b2a]
+- Updated dependencies [5f7fa1d]
+- Updated dependencies [87f0ccc]
+- Updated dependencies [aedbaef]
+- Updated dependencies [a727043]
+- Updated dependencies [69602e5]
+- Updated dependencies [46803fa]
+- Updated dependencies [c2a336c]
+- Updated dependencies [f7db8f4]
+- Updated dependencies [9408b7f]
+- Updated dependencies [2bb0614]
+- Updated dependencies [b3820c3]
+- Updated dependencies [e9fcd6b]
+- Updated dependencies [b398ad2]
+- Updated dependencies [99261a7]
+- Updated dependencies [81b426f]
+- Updated dependencies [fb77aa5]
+- Updated dependencies [3d3f60e]
+- Updated dependencies [581d8f8]
+- Updated dependencies [f81afe3]
+- Updated dependencies [40a44b9]
+- Updated dependencies [021a735]
+- Updated dependencies [7bdb163]
+  - @objectstack/core@17.4.0
+  - @objectstack/spec@17.4.0
+  - @objectstack/platform-objects@17.4.0
+  - @objectstack/types@17.4.0
+  - @objectstack/service-package@17.4.0
+  - @objectstack/metadata-core@17.4.0
+  - @objectstack/observability@17.4.0
+
 ## 17.3.0
 
 ### Minor Changes
