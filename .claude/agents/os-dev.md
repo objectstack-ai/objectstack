@@ -190,9 +190,9 @@ model: opus
 - 退役键的清扫默认走退役 playbook 的 tree-scoped 缺席 pin,不为一次缺席检查重建消费者闭包。
 - 跨包类型改动需要一次反向验证:贴进一个新类型会拒绝的键,确认转红,再恢复。
 - 这证明你读的是重建后的 `.d.ts`,不是缓存。
-- `packages/spec`:`gen:schema` 会重写 `authorable-surface.base.json`,这是预期产物。
+- `packages/spec`:`authorable-surface.base.json` 只由 `gen:authorable-surface-base` 写,普通构建从不写。
 - ⛔ 永不回退它、永不为凑某个相等手改它;作数的断言是 `check:authorable-surface` 绿。
-- `baseRev` 允许滞后,一行信息不是错误。
+- `baseRev` 允许滞后,一行信息不是错误;普通构建下该文件动了是 finding,不是产物。
 - ⛔ 永不在 MERGE 态跑 `gen:schema`:HEAD 还是 merge 前的 tip,锚点会静默回滚到旧分叉点。
 - 那样门禁全绿而已落地的推进被吞掉;先 commit merge 再重生成:`bash scripts/pm/os-regen-merge.sh`。
 - `git worktree` 只隔离工作树与 HEAD;`.git/` 下其余一切全 worktree 共享。
