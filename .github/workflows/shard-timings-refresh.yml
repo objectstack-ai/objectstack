@@ -144,8 +144,32 @@ jobs:
       # green-looking pipeline.
       - name: Self-test the generator and the run selector
         run: |
-          node scripts/measure-test-shard-timings.mjs --self-test
-          node scripts/ci/select-shard-timings-run.mjs --self-test
+          # A COLLECTOR, not a bare sequence. Under `bash -e` the first non-zero
+          # exit aborts the step, so a plain `a && b` list leaves the second
+          # self-test neither green nor red -- and this step exists precisely to
+          # say which instrument is broken before the dataset is trusted.
+          # ⛔ Never let the collector swallow the exit code: a green step over a
+          # red self-test looks identical to success.
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/measure-test-shard-timings.mjs --self-test
+          run_self_test node scripts/ci/select-shard-timings-run.mjs --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "Shard-timings instrument self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          echo "Shard-timings instrument self-tests — both ran and passed"
 
       # The package list the coverage check judges against. `turbo ls` is
       # experimental, so the reader asserts its payload loudly rather than
