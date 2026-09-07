@@ -975,6 +975,19 @@ jobs:
       - name: Clause-② carrier checker self-test
         run: pnpm check:pm-clause2-carriers
 
+      # Widening-tell gate self-test (#16448) — the mechanical half of the
+      # directional clause-② ruling (#16349), and the same split as every step
+      # around it: the LIVE predicate is `--pair`'s C5 row, a verdict about ONE
+      # pair's diff, so failing an unrelated PR's CI over it would punish the
+      # wrong actor. Only the offline self-test runs here.
+      #
+      # This gate has no whole-tree production run at all — its input is a DIFF
+      # supplied by its caller, never a file in the tree — so the `--self-test`
+      # invocation is the only instrument its matching rules have, which is
+      # exactly the family `check:self-test-wired` requires this step for.
+      - name: Widening-tell gate self-test
+        run: pnpm check:pm-widening-tells
+
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
       # merges since a date/ref for the PM round report — report-only by

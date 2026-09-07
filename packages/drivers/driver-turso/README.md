@@ -212,7 +212,10 @@ interface TursoDriverConfig {
    * - Remote mode over HTTP (libsql:// / https:// / http://): every request the
    *   client makes is aborted once the window elapses, and the operation fails
    *   as TIMEOUT / 504 instead of hanging. wss:// and ws:// URLs use the
-   *   WebSocket transport, which has no such seam, and are not bounded.
+   *   WebSocket transport, which has no such seam — so a non-zero timeout
+   *   beside one of them is REFUSED at construction (VALIDATION_ERROR / 400)
+   *   rather than accepted and never delivered: drop the key, or use a
+   *   libsql:// / https:// URL, which is bounded.
    * - Replica mode: bounds sync(), the one remote operation on that arm. A
    *   sync still running when the window closes rejects with the same
    *   envelope; the native binding's own sync is not cancelled, only no longer
