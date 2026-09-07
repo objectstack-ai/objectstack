@@ -575,7 +575,31 @@ export const CEILINGS = new Map([
   // line cap when merged, so there is no re-wrap slack at all, and re-wrap funding
   // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 388],
+  // Raised 388 → 395 by the SIXTH readings increment, taken under the STANDING
+  // one-file exception rather than a fresh decision card. `pm-dispatch`
+  // SKILL.md carries that exception, verbatim and untranslated:
+  //   「唯一例外:`platform-readings.md` 增量抬上限到落地行数,免决策卡,记
+  //   `ruledRaises` 引常设裁决。条件:席位验收评论逐条核实、去重计数(候选/落地/
+  //   已有/拒收)、一事一行、不计重排」
+  // so the number below is the LANDED count and the seat's ACCEPT carries the
+  // per-item verification and the candidate / landed / already-present / refused
+  // counts the exception requires. Spent at ONE line per deduplicated reading,
+  // each written in this file's voice: MCP's read limiter and write limiter are
+  // independent of each other, measured in both polarities (+1); a control
+  // word's hit does not license a different term's zero, since the same document
+  // is reachable by one term and empty by another (+1); a listing that returns a
+  // bare array and no total cannot announce its own truncation (+1) and the
+  // single-point 200/404 read that answers an existence question instead (+1);
+  // `issue_write` clears every field it is not passed, assignees included (+1);
+  // assignability is a repo+account property that moves mid-session, with its
+  // 204/404 probe (+1); a standalone marker line is dropped by the COMMENT read
+  // path with the bytes still in storage, so its absence is not evidence of a
+  // write-side strip (+1) = +7 exactly. Nothing was paid in place: the fourth
+  // increment MEASURED zero line-neutral folds among this file's adjacent rule
+  // pairs, and re-wrap funding is refused per the 2026-08-17 rule in any case.
+  // The same-PR correction of the footer-mechanism row is line-neutral and buys
+  // nothing. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 395],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1027,6 +1051,21 @@ export const CROSS_FILE_MOVES = new Map([
             + ' #15955\'s ruled raise (362) lands first — the same +26 either way."',
           date: '2026-09-07',
           delta: 26,
+        },
+        {
+          // The STANDING exception's own words, copied from `pm-dispatch`
+          // SKILL.md rather than paraphrased; the +7 is accounted for line by
+          // line beside this entry's ceiling above. This raise takes no decision
+          // card BECAUSE the exception says it does not, and it is recorded here
+          // BECAUSE the exception says to record it here.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-07',
+          delta: 7,
         },
       ],
       sources: [

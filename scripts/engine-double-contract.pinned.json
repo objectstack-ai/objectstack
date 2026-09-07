@@ -1872,6 +1872,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/plugin-governance-scoped-metadata.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-boot-hydration-scoped.test.ts",
       "verb": "findOne",
       "pinned": 1
