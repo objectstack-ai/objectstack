@@ -126,8 +126,8 @@ model: opus
 - ① 先 build 依赖闭包:`pnpm --filter '<pkg>^...' build` 是新 worktree 的第一条命令。
 - 跳过它产出的失败,读起来与你的改动弄坏了 import 一模一样。
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
-- 受影响包 = CI 会测的包,清单读 `TURBO_SCM_BASE="$BASE" pnpm exec turbo ls --affected`。
-- ⛔ 不按改了哪些包猜:普通 import 被改模块的包也在清单里,欠它们的测试。
+- 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
+- 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
 - `packages/cli` 只欠 `unit` 层(见 Definition of done 的测试条)。
 - ③ 派发词点名的门禁族,加上你看得出被牵连的。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
@@ -207,11 +207,10 @@ model: opus
 - 它必须答 exit 0;否则阴性作废,`git fetch --deepen` / `--unshallow` 到控制腿转 0 再重读。
 - ⛔ 控制腿别挑浅窗内的近亲:控制 commit 至少与被测那个同深;两条腿的退出码都进报告。
 - `--is-shallow-repository` 是便宜的触发器不是判据,判据是控制腿。
-- 反向验证(回退修复,看诊断变化)先 commit 修复:恢复只是 `git checkout <your-branch> -- <path>`。
-- 对着未提交的编辑,`git checkout origin/main -- <path>` 不留任何恢复点。
+- 反向验证与消融是一次性证明:前后运行引在 PR 正文与报告里;⛔ 不留永久测试文件。
+- 两者都先 commit 修复再回退或变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
+- 未提交时 `git checkout origin/main -- <path>` 不留恢复点,`git checkout HEAD -- <path>` 删的正是实现。
 - 恢复机制与字节一致性证明规则见 AGENTS.md;从已 commit 的状态重跑,红/绿数字才可信。
-- 消融同一条,先 commit 再变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
-- 对未提交的实现,一次完美的 `git checkout HEAD -- <path>` 删的正是实现本身,事后检查全绿。
 - 通则:失效形态是 exit 0 且什么都没做的清理步骤,只能靠观察状态验证,永不靠读退出码。
 - 恢复腿与变异腿完全对称,四条硬线如下。
 - ① 恢复写 `git checkout HEAD -- <path>`,⛔ 永不裸 `git checkout -- <path>`:裸恢复从索引取。
@@ -225,6 +224,7 @@ model: opus
 - 拒收类用例断言信封,不断言 throw 本身;最小断言集是错误的 `code` 与 `status`(ADR-0112 信封)。
 - 单独的 `expect(...).toThrow()` 不是拒收测试:抛裸 `Error` 的未修复 driver 照样绿。
 - 从不抛错的传输层转红时,它指向缺陷之外。
+- 提示、裁决与错误文案 ⛔ 不 pin,除非消费者解析其原文;断言种类、退出码或具名主体。
 - 措辞本身即契约的地方,在 `code`+`status` 之上再断言 message 首句,永不取而代之。
 - 键与值的可达性判据:守某个键是真实编写面 → 断言 fixture 上无 `unrecognized_keys`。
 - 守某个值的判定 → 要求完整 `safeParse` 绿;拒键与拒值是两个不同的事实。
