@@ -1745,14 +1745,13 @@ export function translatePage<T extends PageLike>(
   // `children` after the visitor returns, so the overlay never contends with
   // the descent for a key (`children` is not a copy key).
   const regions = walkAddressedPageComponents(doc, (component, { nested, id, addressed }) => {
-    // Per-component copy (#6080) — addressed by the component's own id, so it
-    // is strictly more specific than the page-name route below and is applied
-    // first. A `page:header` that DOES carry an id can therefore be translated
-    // either way, and the id wins. `addressed` carries the ruled collision
-    // arbitration (#12961), so a looked-up entry is this component's alone;
-    // within one call `lookupPageComponentCopy` is a pure function of the id
-    // (bundle, page name and options are fixed), so the walk's claim-on-first-
-    // sighting selects the same component a claim-on-resolved-lookup would.
+    // Per-component copy (#6080) — addressed by the component's own id, and
+    // applied before the page-name route below. `addressed` carries the ruled
+    // collision arbitration (#12961), so a looked-up entry is this component's
+    // alone; within one call `lookupPageComponentCopy` is a pure function of
+    // the id (bundle, page name and options are fixed), so the walk's
+    // claim-on-first-sighting selects the same component a
+    // claim-on-resolved-lookup would.
     //
     // The one component this route does NOT serve is a REGION-LEVEL
     // `page:header`: its copy is addressed by page name below, and reading
