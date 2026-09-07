@@ -3623,13 +3623,16 @@ jobs:
       # whole population rather than a rule about moves: one of the three commits
       # involved moved nothing at all — it edited `repository.url` in the same
       # JSON object with the stale `directory` line as visible hunk context, and
-      # it shipped. Humans looked and missed it twice. ⛔ It judges only manifests
-      # that DECLARE the field; whether declaring is mandatory for a publishable
-      # package is an open policy question and a maintainer's to answer, so
-      # silence is counted and never a finding. Runs its own --self-test first:
-      # this population is `git ls-files` plus a field predicate, so a changed
-      # glob or a renamed field empties it silently and the production run would
-      # print exactly what a clean tree prints. Static read of tracked manifests;
+      # it shipped. Humans looked and missed it twice. Declaration is MANDATORY
+      # for a publishable (non-private) manifest — ruled, and the 14 that
+      # declared nothing were backfilled in the same change; a private manifest
+      # publishes nothing, so its silence is exempt while a wrong value in it is
+      # still judged. Runs its own --self-test first: this population is
+      # `git ls-files` plus TWO field predicates, so a changed glob, a renamed
+      # `repository.directory` or a `name`/`private` that stops reading as
+      # publishable each empty it silently and the production run would print
+      # exactly what a clean tree prints — hence pinned floors on all four counts
+      # and a control pair on each predicate. Static read of tracked manifests;
       # no build, no network, sub-second.
       - name: Manifest repository.directory guard
         run: pnpm check:manifest-repository-directory
