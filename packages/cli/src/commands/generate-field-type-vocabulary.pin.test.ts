@@ -512,8 +512,10 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
       expect(
         tsColumn(type),
         `os generate migration (typescript) gave a ${type} column something other than a string ` +
-        'column. A platform id is 26 characters (driver-sql spells one out in its lookup arm), ' +
-        'so a `uuid` column refuses it outright on Postgres with 22P02.',
+        'column. A platform id is not a uuid, and its width is not a fixed number (driver-sql\'s ' +
+        'lookup arm states both: it mints a 16-character nanoid, and stores a supplied id at ' +
+        'whatever width the caller chose), so a `uuid` column refuses it outright on Postgres ' +
+        'with 22P02.',
       ).toBe(`table.string('f_${type}')`);
     }
     // The width is knex's default for a bare `table.string(name)`, which is the

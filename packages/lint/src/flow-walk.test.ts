@@ -9,6 +9,8 @@ import {
 import {
   walkFlowNodes,
   flowNodeLabel,
+  stripRegions,
+  ownRegionKeys,
   REGION_SLOTS,
   REGION_CONFIG_KEYS,
   MAX_REGION_DEPTH,
@@ -149,6 +151,60 @@ describe('walkFlowNodes', () => {
   it('leaves localConfig undefined for a node with no config', () => {
     const [only] = walkFlowNodes({ nodes: [{ id: 'x', type: 'end' }] }, 'flows[0]');
     expect(only.localConfig).toBeUndefined();
+  });
+
+  // The other half of the same contract, and the one that was wrong: the view
+  // must remove what the walk descended into and NOTHING else. `body` is a
+  // region slot on `loop` and the canonical request-payload key on `http`, so
+  // stripping the flat union deleted an `http` node's whole payload from every
+  // recursive scan — silently, which is strictly worse than the double-count
+  // this view exists to prevent, because a double-count is visible.
+  it('keeps a config key that is a region slot on some OTHER node type', () => {
+    const flow = {
+      nodes: [
+        { id: 'post', type: 'http', config: { url: 'https://x.example', body: { amount: '{record.amount}' } } },
+      ],
+    };
+    const [walked] = walkFlowNodes(flow, 'flows[0]');
+    expect(Object.keys(walked.localConfig ?? {}).sort()).toEqual(['body', 'url']);
+    // Copy-on-write: nothing was removed, so the view is the config itself.
+    expect(walked.localConfig).toBe(walked.node.config);
+  });
+
+  it('strips a container slot only from the container type that declares it', () => {
+    const flow = {
+      nodes: [
+        { id: 'guard', type: 'try_catch', config: { try: { nodes: [], edges: [] }, body: 'kept' } },
+      ],
+    };
+    const [walked] = walkFlowNodes(flow, 'flows[0]');
+    // `try_catch` owns `try` / `catch`; `body` belongs to `loop` and stays.
+    expect(Object.keys(walked.localConfig ?? {}).sort()).toEqual(['body']);
+  });
+
+  describe('ownRegionKeys / stripRegions', () => {
+    it('answers a container its own slots and every other type none', () => {
+      expect([...ownRegionKeys('loop')].sort()).toEqual(['body']);
+      expect([...ownRegionKeys('try_catch')].sort()).toEqual(['catch', 'try']);
+      expect([...ownRegionKeys('parallel')].sort()).toEqual(['branches']);
+      expect(ownRegionKeys('http')).toEqual([]);
+      expect(ownRegionKeys(undefined)).toEqual([]);
+      // `node.type` is an open, author-controlled namespace — a prototype key
+      // must resolve to no slots rather than to something off Object.
+      expect(ownRegionKeys('constructor')).toEqual([]);
+    });
+
+    it('treats an empty key list as a real answer, distinct from omitting it', () => {
+      const config = { body: 'payload', try: 'kept' };
+      expect(stripRegions(config, [])).toBe(config);
+      // Omitted: the flat-union view its remaining caller was written against.
+      expect(Object.keys(stripRegions(config) ?? {})).toEqual([]);
+    });
+
+    it('returns undefined for a non-record config, whatever the key list', () => {
+      expect(stripRegions(undefined, ownRegionKeys('loop'))).toBeUndefined();
+      expect(stripRegions('nope', [])).toBeUndefined();
+    });
   });
 
   it('labels a node by label, then id, then index', () => {

@@ -208,9 +208,9 @@ localStorage / auth gotchas.
    When renaming a legacy var, use `readEnvWithDeprecation('OS_NEW', 'LEGACY')` from `@objectstack/types` (keeps legacy
    working one release). Third-party exceptions kept as-is: `NODE_ENV`, `HOME`, `OPENAI_API_KEY`, `TURSO_*`, OAuth
    `*_CLIENT_ID/SECRET`, `RESEND_API_KEY`, `POSTMARK_TOKEN`, `AI_GATEWAY_*`, `SMTP_*`.
-10. **File issues for out-of-scope findings — don't silently expand scope or leave them buried.** When you hit a bug,
-    gap, or unenforced capability that's unrelated to the current task, or too large to fix in scope, open a GitHub
-    issue with a clear repro/decision and link it from your PR. Corollary: **never advertise or demo a capability the
+10. **File an issue for a reproducible defect, a contract violation, or a metadata-authoring trap; note everything
+    else in the PR's acceptance notes — never expand scope, never bury a defect.** A card names its evidence (repro,
+    contract text or trap); the reviewer files a note that is one. Corollary: **never advertise or demo a capability the
     runtime doesn't actually deliver** (declared ≠ enforced) — fix it, trim it, or file an issue, but don't fake
     coverage. Trim what can never be enforced, implement the rest, and keep the claim as narrow as the enforcement:
     a `case` label is not enforcement; check every **call site**, bulk paths included.

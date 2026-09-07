@@ -434,3 +434,102 @@ describe('#6251 — reachable on a REAL parsed app stack', () => {
     expect(validateFormLayout(value!)).toEqual([]);
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// #16168 — a container that binds its object only through `list.data.object`
+// (HotCRM's own shape, 14/14 views) had NO `object` / `objectName` /
+// `data.object` of its own, so `containerObject` — and every site under it,
+// including the container's own default `form` — resolved to `undefined` and
+// `form-field-unknown` / `form-section-group-unknown` never fired there.
+// Fix: fall back to `viewObjectName(view.list)`, the same third rung
+// `validate-translatable-sections.ts:178-179` already carries for its sites.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('#16168 — falls back to the container list binding', () => {
+  /** A container that binds ONLY through `list.data.object` — no `object` / `objectName` at the container root. */
+  const listBoundContainer = (form: AnyRec) => ({
+    name: 'contract_views',
+    list: { label: 'Contracts', type: 'grid', data: { provider: 'object', object: 'contract' }, columns: [{ field: 'name' }] },
+    form,
+  });
+
+  it('P1 — flags a dangling field in the default `form` of a list-bound container', () => {
+    const findings = validateFormLayout({
+      objects,
+      views: [listBoundContainer({ sections: [{ columns: 2, fields: ['name', 'ghost_field'] }] })],
+    });
+    expect(findings.map((f) => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_FIELD_UNKNOWN}@views[0].form.sections[0].fields[1]`,
+    ]);
+    expect(findings[0].message).toContain('"contract"');
+  });
+
+  it('P2 — flags an undeclared `group` in the default `form` of a list-bound container', () => {
+    const findings = validateFormLayout({
+      objects: groupedObjects,
+      views: [listBoundContainer({ sections: [{ group: 'contact_info' }] })],
+    });
+    expect(findings.map((f) => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_SECTION_GROUP_UNKNOWN}@views[0].form.sections[0].group`,
+    ]);
+  });
+
+  it('N1 — positive control: the same defects with `object` also on the container produce the SAME findings (byte-identical where/path)', () => {
+    const withObject = (view: AnyRec) => ({ ...view, object: 'contract' });
+    const p1 = validateFormLayout({
+      objects,
+      views: [withObject(listBoundContainer({ sections: [{ columns: 2, fields: ['name', 'ghost_field'] }] }))],
+    });
+    expect(p1.map((f) => ({ rule: f.rule, where: f.where, path: f.path }))).toEqual([
+      { rule: FORM_FIELD_UNKNOWN, where: 'view "contract_views" · form', path: 'views[0].form.sections[0].fields[1]' },
+    ]);
+    const p2 = validateFormLayout({
+      objects: groupedObjects,
+      views: [withObject(listBoundContainer({ sections: [{ group: 'contact_info' }] }))],
+    });
+    expect(p2.map((f) => ({ rule: f.rule, where: f.where, path: f.path }))).toEqual([
+      { rule: FORM_SECTION_GROUP_UNKNOWN, where: 'view "contract_views" · form', path: 'views[0].form.sections[0].group' },
+    ]);
+  });
+
+  it('N2 — a list-bound container whose form references only real fields is clean', () => {
+    expect(validateFormLayout({
+      objects,
+      views: [listBoundContainer({ sections: [{ columns: 2, fields: ['name', 'amount'] }] })],
+    })).toEqual([]);
+  });
+
+  it('N3 — a `formViews[]` entry with its own `objectName` resolves as today, independent of the container', () => {
+    const findings = validateFormLayout({
+      objects,
+      views: [{
+        name: 'contract_views',
+        list: { data: { object: 'contract' } },
+        formViews: { edit: { objectName: 'contract', sections: [{ fields: ['ghost_via_own_binding'] }] } },
+      }],
+    });
+    expect(findings.map((f) => `${f.rule}@${f.path}`)).toEqual([
+      `${FORM_FIELD_UNKNOWN}@views[0].formViews.edit.sections[0].fields[0]`,
+    ]);
+  });
+
+  it('N4 — a view with neither a container nor a list binding stays silent (unchanged: the rule cannot check what it cannot resolve)', () => {
+    expect(validateFormLayout({
+      objects,
+      views: [{ name: 'orphan_views', form: { sections: [{ fields: ['whatever'] }] } }],
+    })).toEqual([]);
+  });
+
+  it('the colSpan rule is unconditional on the object binding — it already fired on a list-bound container before this fix', () => {
+    // Measured for the changeset: `absolute-colspan-discouraged` sits OUTSIDE
+    // the `known`-gated block (validate-form-layout.ts, the `(b)` comment) —
+    // it needs only `entry.colSpan != null`, never `objName` / `known`. So it
+    // was never actually dead on HotCRM's list-bound views; #16168 only fixes
+    // `form-field-unknown` and `form-section-group-unknown`.
+    const findings = validateFormLayout({
+      objects,
+      views: [listBoundContainer({ sections: [{ columns: 2, fields: [{ field: 'name', colSpan: 2 }] }] })],
+    });
+    expect(findings.map((f) => f.rule)).toEqual([FORM_COLSPAN_ABSOLUTE]);
+  });
+});

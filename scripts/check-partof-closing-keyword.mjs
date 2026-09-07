@@ -13,6 +13,11 @@
  *   card-relation trailer at all: no closing keyword, no Part-of and no Refs
  *   bound to any card number. The body is the only carrier of the relation.
  *
+ *   RULE 3 — THE BODY, NEGATED. A pull request may not bind a closing keyword
+ *   to a `#N` inside a sentence that reads as NOT closing it. This is the
+ *   half-state sweep's H21, called. It reads the same surface as RULE 1 and is
+ *   disjoint from it by construction.
+ *
  *   node scripts/check-partof-closing-keyword.mjs              # judge this PR (CI)
  *   node scripts/check-partof-closing-keyword.mjs --self-test  # verify it offline
  *
@@ -134,11 +139,59 @@
  * block, which is the same argument the body's `env:` spelling rests on, applied
  * to a payload too big and too multi-line to be an environment value.
  *
+ * ## RULE 3 — the same surface as RULE 1, and the half of the class it misses
+ *
+ * RULE 1's own rationale is stated in fully general terms: GitHub's parser
+ * matches the keyword plus the number and ignores the surrounding prose
+ * entirely, negations and modals included, so the sentence an author writes to
+ * PREVENT an auto-close is exactly what performs it. Its PREDICATE is narrower
+ * than that sentence — it is bound to a Part-of declaration and fires only when
+ * the same number carries both. A body that declares Part of for nothing is
+ * silent under RULE 1 however plainly it says the card stays open.
+ *
+ * RULE 3 is that missing half, and it is the sweep's H21 called rather than a
+ * second rule invented here — the same no-fork posture the import note below
+ * takes for RULE 1. It fires when a closing keyword is bound to a number the
+ * body never declared itself part of, inside a SENTENCE carrying a negation or
+ * filing marker. The trigger is the negation WINDOW and never keyword presence:
+ * 277 of the 300 most recently merged bodies in the measurement behind H21
+ * carry a closing keyword bound to a number, so a presence rule would red every
+ * correct pull request in the corpus.
+ *
+ * Numbered 3 although it reads RULE 1's surface: renumbering the commit rule
+ * would rewrite output text that this file's own self-test pins by name, for no
+ * gain. Read the numbers as the order the rules were learned, not as a grouping
+ * by surface.
+ *
+ * ## Why RULE 3 is here NOW, and not when H21 was written
+ *
+ * H21 shipped deliberately report-only, as a patrol row this gate did not
+ * import, so that widening the class could not widen a check that fails builds
+ * before the class had a baseline. The promotion rode a measurement rather than
+ * a moment, and the measurement is what a reader of this section should know:
+ *
+ *   - Over every pull request that was open at any point between H21 landing
+ *     and 2026-09-07 — 2,285 of them, every body read through the shipped
+ *     predicate — H21 flags three. None is a correct close wrongly refused.
+ *   - One of the three is a second specimen of the original incident, and it is
+ *     the argument for a blocking gate rather than a patrol row. A body said a
+ *     finding was filed rather than repaired, bound a closing keyword to that
+ *     card in the same sentence, and the card closed two seconds after the
+ *     merge — still carrying its bug and queue labels, i.e. a genuine unfixed
+ *     defect reading as finished.
+ *   - The patrol could not have caught it. That pull request was open for 41
+ *     minutes, entirely between two six-hourly sweeps. A report-only row is
+ *     structurally blind to a short-lived pull request; a PR-time gate is not.
+ *     That gap is not a discipline problem and no schedule fixes it.
+ *
  * ## Exit codes — and why an empty body is a VERDICT, not a skip
  *
  *   0  judged, clean — BOTH rules, over inputs that were really read.
- *   1  judged, finding. The PR is red until the body is reworded (RULE 1) or
- *      the relation is moved out of the commits and into the body (RULE 2).
+ *   1  judged, finding. The PR is red until the body is reworded (RULE 1 and
+ *      RULE 3) or the relation is moved out of the commits and into the body
+ *      (RULE 2). All three findings share this exit: a body that negates the
+ *      relation it also states is the same contradiction class RULE 1 refuses,
+ *      so it is a new finding KIND and not a new exit code.
  *   2  NOT WIRED — an input this gate judges is missing, so a rule verified
  *      nothing. A usage/wiring failure, never a statement about any PR.
  *
@@ -221,6 +274,7 @@ import process from 'node:process';
 import {
   closingKeywordTargets,
   h7PartOfWithClosingKeyword,
+  h21NegatedClosingKeyword,
   partOfTargets,
   refsTargets,
 } from './pm/check-half-states.mjs';
@@ -266,11 +320,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The commit list input. An absent, broken or empty list can never read': 8,
   'The verdict layer over two rules: precedence, and the unread half is': 5,
   'The wiring gathers the commit list and hands it over as a file path.': 5,
+  'RULE 3 — a closing keyword bound to a card the sentence says it is NOT': 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 16;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -542,13 +597,17 @@ export function judge(ctx) {
 
   const where = ctx.number ? `PR #${ctx.number}` : 'this PR';
   const contradiction = h7PartOfWithClosingKeyword({ body: ctx.body });
+  // RULE 3, the sweep's H21 called on the same body. Disjoint from RULE 1 by
+  // construction — a number already declared Part of is RULE 1's, and H21 skips
+  // it — so one number can never be reported twice in one verdict.
+  const negated = h21NegatedClosingKeyword({ body: ctx.body });
   const commitFindings = ctx.commits ? commitTrailerFindings(ctx.commits) : [];
 
   // The unread half is named wherever it exists, on EVERY exit path — a run
   // that judged one surface must never present itself as one that judged both.
   const unread = ctx.commitsProblem ? [`  ⚠️ RULE 2 judged nothing: ${ctx.commitsProblem}`] : [];
 
-  if (contradiction || commitFindings.length) {
+  if (contradiction || negated || commitFindings.length) {
     const lines = [];
     if (contradiction) {
       lines.push(
@@ -563,8 +622,33 @@ export function judge(ctx) {
         '  inventory re-pull. Editing the body re-runs this check; no push and no re-run are needed.',
       );
     }
-    if (commitFindings.length) {
+    if (negated) {
       if (contradiction) lines.push('');
+      lines.push(
+        `::error::${where} tells GitHub to close a card its own sentence says it is not closing: ${negated}`,
+        '',
+        `✗ check:partof-closing-keyword: ${where} tells GitHub to close a card its own sentence says it`,
+        '  is NOT closing.',
+        '',
+        `  ${negated}`,
+        '',
+        '  Remedy, in order of preference: reword so that no closing keyword sits beside that number —',
+        '  the sentence above names the three approved rewordings, and any of them says the same thing',
+        '  to a reader while saying nothing to the parser. If the keyword must stay in the prose, put',
+        '  it in BACKTICKS: a pull request body is markdown, the parser does not fire inside a code',
+        '  span, and that was measured live rather than assumed. ⛔ Backticks are NOT the escape in a',
+        '  commit message — nothing renders one, so they are ordinary characters there and RULE 2',
+        '  above is the rule that surface answers to.',
+        '',
+        '  Why this is blocking rather than advisory: this body declares no `Part of`, so RULE 1 is',
+        '  silent on it by construction, however plainly the sentence says the card stays open. The',
+        '  close then lands SILENTLY on merge, on a card nobody is watching, and a closed card reads as',
+        '  finished — the measured specimen closed a genuine unfixed defect two seconds after its merge.',
+        '  Editing the body re-runs this check; no push and no re-run are needed.',
+      );
+    }
+    if (commitFindings.length) {
+      if (contradiction || negated) lines.push('');
       for (const finding of commitFindings) lines.push(`::error::${finding}`);
       lines.push(
         '',
@@ -602,7 +686,8 @@ export function judge(ctx) {
   return {
     exit: EXIT_CLEAN,
     lines: [
-      `✓ check:partof-closing-keyword: ${where} ${what} Part-of/closing-keyword contradiction, and its`,
+      `✓ check:partof-closing-keyword: ${where} ${what} Part-of/closing-keyword contradiction and no`,
+      '  closing keyword bound to a card its own sentence says it is not closing, and its',
       `  ${ctx.commits.length} commit message(s) carry no card-relation trailer.`,
     ],
   };
@@ -945,6 +1030,86 @@ function selfTest() {
     new RegExp(`${COMMITS_FILE_ENV}:\\s*\\$\\{?\\{?\\s*(RUNNER_TEMP|runner\\.temp)`, 'i').test(wiring),
     true,
   );
+
+  // --- RULE 3 — a closing keyword bound to a card the sentence says it is NOT
+  // closing. The sweep's H21, called. Every fixture below is a real sentence:
+  // the two positives are measured specimens quoted byte-for-byte, and the
+  // greens are the register the specimens live in, which the corpus behind H21
+  // found 116 times without one of them binding a keyword to a number. That
+  // ratio is the whole reason this rule reads a negation WINDOW and not keyword
+  // presence, and these cases are what stops a later edit from widening it.
+  battery('RULE 3 — a closing keyword bound to a card the sentence says it is NOT');
+  const negatedOut = verdict('## Out of scope\n\nFiled, not fixed: #10240 — the same leak through the delete verb.');
+  const negatedText = negatedOut.lines.join('\n');
+  t('the incident specimen is refused, and under the existing finding exit', negatedOut.exit, EXIT_CONTRADICTION);
+  t(
+    'the second specimen is refused too (measured 2026-08-24, a card closed 2s after its merge)',
+    verdict('One adjacent finding filed rather than fixed: #11745').exit,
+    EXIT_CONTRADICTION,
+  );
+  t('the control passes: an ordinary closing body with no negation is clean', verdict('Fixes #10171').exit, EXIT_CLEAN);
+  t(
+    'the specimen REGISTER stays clean when it binds no keyword to a number (the near miss)',
+    verdict('## Out of scope — filed, not repaired here\n\nThe delete verb keeps its own card.').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    '…and its other measured spelling stays clean for the same reason',
+    verdict('The adjacent leak is filed, not fixed here.').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a multi-card close list under an earlier negation is clean (the sentence bound, measured)',
+    verdict('This does not change the loader.\n\nFixes #10581\nFixes #10582\nFixes #10583').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'a markdown structural line start bounds the window, so the negation does not reach the keyword',
+    verdict('This does not touch the loader.\n\n### Closing lines\n\nFixes #10581').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    'backticks ARE the escape on this surface, so an author explaining the keyword is not taxed',
+    verdict('Out of scope — this body deliberately does not say `Fixes #10240` in prose.').exit,
+    EXIT_CLEAN,
+  );
+  t(
+    "a number already declared Part of is RULE 1's row: RULE 3 does not double-report it",
+    h21NegatedClosingKeyword({ body: 'Part of #8131 — this does not close #8131 yet.' }),
+    null,
+  );
+  t(
+    '…and that body is still refused, by RULE 1, so the disjointness costs no coverage',
+    verdict('Part of #8131 — this does not close #8131 yet.').exit,
+    EXIT_CONTRADICTION,
+  );
+  const negatedBodies = [
+    'Filed, not fixed: #10240 — the same leak through the delete verb.',
+    'Fixes #10171',
+    'Part of #8131 — this does not close #8131 yet.',
+    'This does not change the loader.\n\nFixes #10581',
+    '',
+    'Out of scope: closes #77.',
+  ];
+  t(
+    'the verdict is exactly the two shipped predicates over every fixture (no forked rule)',
+    negatedBodies.every(
+      (body) =>
+        (judge({ number: '1', body, commits: CLEAN_COMMITS, commitsProblem: null }).exit === EXIT_CONTRADICTION) ===
+        (h7PartOfWithClosingKeyword({ body }) !== null || h21NegatedClosingKeyword({ body }) !== null),
+    ),
+    true,
+  );
+  t('the failure names the "not addressed here" rewording', negatedText.includes('#10240 is not addressed here'), true);
+  t('the failure names the "out of scope" rewording', negatedText.includes('out of scope: #10240'), true);
+  t('the failure names the "remains open" rewording', negatedText.includes('#10240 remains open'), true);
+  t('the failure names the backtick escape, which is valid on THIS surface', negatedText.includes('BACKTICKS'), true);
+  t(
+    '…and says in the same breath that backticks are NOT the escape in a commit message',
+    negatedText.includes('Backticks are NOT the escape in a'),
+    true,
+  );
+  t('the RULE 3 failure is annotated for the GitHub UI', negatedText.includes('::error::'), true);
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.

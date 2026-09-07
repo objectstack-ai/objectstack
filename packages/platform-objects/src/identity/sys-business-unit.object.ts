@@ -167,8 +167,9 @@ export const SysBusinessUnit = ObjectSchema.create({
     // pairs a bound with the `UTC` default; the enumeration's longest name on
     // the repo's Node baseline is 30 characters and the tzdb caps each path
     // component at 14, so 64 is twice the domain's real ceiling and the smaller
-    // of the two precedents (`sys_job.timezone` says 100, neither declares a
-    // domain — the residue card). No `defaultValue`, deliberately: an explicit
+    // of the two precedents (`sys_job.timezone` still says 100 — #15872 gave
+    // both precedents this same `valueDomain` and deliberately left that one
+    // bound unconverged). No `defaultValue`, deliberately: an explicit
     // default here would mean "stop inheriting", which is the opposite of what
     // an unset unit means.
     timezone: Field.text({

@@ -152,12 +152,96 @@ describe('validateDashboardActionRefs (ADR-0049 references / #3367)', () => {
   });
 
   it('resolves an object route embedded mid-path (app-scoped route)', () => {
+    // Both segments must resolve now that `apps/NAME` is itself checked
+    // (#16169) — the app segment is no longer a free pass just because a
+    // later segment in the same path resolves.
     const findings = validateDashboardActionRefs(
       dashWithHeaderActions(
         [{ label: 'Deals', actionType: 'url', actionUrl: '/apps/crm/objects/deal' }],
-        { objects: [{ name: 'deal' }] },
+        { apps: [{ name: 'crm' }], objects: [{ name: 'deal' }] },
       ),
     );
+    expect(findings).toEqual([]);
+  });
+
+  // #16169 — `resolveUrlRoute` used to `continue` past every unrecognized
+  // segment and return at the FIRST recognized one, so an `apps/NAME` head
+  // was never checked (`apps` was absent from `URL_COLLECTION_TO_STACK_KEY`)
+  // and a bad app name plus a bad later segment reported only the later one.
+  it('WARNS on a url action pointing at a non-existent app (#16169 — the reported bug)', () => {
+    const findings = validateDashboardActionRefs(
+      dashWithHeaderActions(
+        [{ label: 'Open', actionType: 'url', actionUrl: '/apps/no_such_app_nope/crm_lead' }],
+        { apps: [{ name: 'crm_enterprise' }] },
+      ),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'warning',
+      rule: DASHBOARD_ACTION_ROUTE_UNRESOLVED,
+      path: 'dashboards[0].header.actions[0].actionUrl',
+    });
+    expect(findings[0].message).toContain('apps/no_such_app_nope');
+    expect(findings[0].message).toContain('app named "no_such_app_nope"');
+  });
+
+  it('WARNS on EACH unresolved segment of a url with more than one bad segment (#16169)', () => {
+    const findings = validateDashboardActionRefs(
+      dashWithHeaderActions([
+        {
+          label: 'Open',
+          actionType: 'url',
+          actionUrl: '/apps/no_such_app_nope/dashboard/no_such_dashboard_nope',
+        },
+      ]),
+    );
+    expect(findings).toHaveLength(2);
+    expect(findings.every((f) => f.severity === 'warning')).toBe(true);
+    expect(findings.every((f) => f.rule === DASHBOARD_ACTION_ROUTE_UNRESOLVED)).toBe(true);
+    expect(findings.every((f) => f.path === 'dashboards[0].header.actions[0].actionUrl')).toBe(true);
+    // Path order: the app segment's finding first, the dashboard segment's second.
+    expect(findings[0].message).toContain('apps/no_such_app_nope');
+    expect(findings[1].message).toContain('dashboard/no_such_dashboard_nope');
+  });
+
+  it(
+    'WARNS on a later unresolved segment even when an earlier segment resolves ' +
+      '(#16169 — the boundary the triage flagged: this is a NEW finding, was clean before)',
+    () => {
+      // `exec` is a real dashboard; `bad_view` names no view. Before #16169 the
+      // loop returned at the first recognized segment (`dashboards/exec`,
+      // resolved) and never reached `views/bad_view` — this path was silent.
+      const findings = validateDashboardActionRefs(
+        dashWithHeaderActions([
+          { label: 'Open', actionType: 'url', actionUrl: '/dashboards/exec/views/bad_view' },
+        ]),
+      );
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        severity: 'warning',
+        rule: DASHBOARD_ACTION_ROUTE_UNRESOLVED,
+        path: 'dashboards[0].header.actions[0].actionUrl',
+      });
+      expect(findings[0].message).toContain('views/bad_view');
+      expect(findings[0].message).toContain('view named "bad_view"');
+    },
+  );
+
+  it('passes a fully resolvable app-scoped dashboard route (#16169 — both segments real)', () => {
+    const findings = validateDashboardActionRefs({
+      apps: [{ name: 'real_app' }],
+      dashboards: [
+        {
+          name: 'exec',
+          header: {
+            actions: [
+              { label: 'Open', actionType: 'url', actionUrl: '/apps/real_app/dashboard/real_dashboard' },
+            ],
+          },
+        },
+        { name: 'real_dashboard' },
+      ],
+    });
     expect(findings).toEqual([]);
   });
 
