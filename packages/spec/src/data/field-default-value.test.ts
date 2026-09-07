@@ -34,6 +34,11 @@ type Case = {
   accepted: boolean;
   /** Substrings the refusal message must carry (rejection rows only). */
   contains?: string[];
+  /**
+   * Substrings the refusal message must NOT carry — the wrong half of a
+   * rejection that a positional issue read would have selected (#16077).
+   */
+  notContains?: string[];
 };
 
 const CASES: Case[] = [
@@ -85,6 +90,26 @@ const CASES: Case[] = [
     field: { type: 'location', defaultValue: { lat: 37.77, lng: -122.42, heading: 90 } },
     accepted: false,
     contains: ['`heading`'],
+  },
+  // #16077 — the two rows above are the LUCKY half: their other members are
+  // well-typed, so nothing sorted ahead of the object-level issue and the
+  // rename surfaced by accident. These two are the unlucky half, where a
+  // positional `issues[0]` read handed the author a type error about a member
+  // they never wrote. `notContains` names the half that was shown instead —
+  // without it the row cannot see a regression back to the positional read.
+  {
+    label: '#16077 location + the RENAMED legacy pair (a missing-member error sorts ahead)',
+    field: { type: 'location', defaultValue: { latitude: 37.77, longitude: -122.42 } },
+    accepted: false,
+    contains: ['`latitude` \u2192 `lat`', '`longitude` \u2192 `lng`'],
+    notContains: ['expected number, received undefined'],
+  },
+  {
+    label: '#16077 address + a renamed key beside a WRONG-TYPED declared one',
+    field: { type: 'address', defaultValue: { street: 5, postal_code: '98101' } },
+    accepted: false,
+    contains: ['`postal_code` \u2192 `postalCode`'],
+    notContains: ['expected string, received number'],
   },
 
   // ── Literal branch: valid literals stay accepted ──────────────────────────
@@ -227,7 +252,7 @@ const CASES: Case[] = [
 ];
 
 describe('#7127 FieldSchema.defaultValue — three shapes, each judged on its own terms', () => {
-  for (const { label, field, accepted, contains } of CASES) {
+  for (const { label, field, accepted, contains, notContains } of CASES) {
     it(`${accepted ? 'accepts' : 'rejects'}: ${label}`, () => {
       const issue = defaultValueIssue(field);
       if (accepted) {
@@ -242,6 +267,9 @@ describe('#7127 FieldSchema.defaultValue — three shapes, each judged on its ow
       expect(issue!.message).toContain('"probe_field"');
       for (const fragment of contains ?? []) {
         expect(issue!.message).toContain(fragment);
+      }
+      for (const fragment of notContains ?? []) {
+        expect(issue!.message).not.toContain(fragment);
       }
     });
   }
