@@ -15,7 +15,7 @@ Scheduled flows now claim `(flow, tick-window)` in the same `sys_flow_dispatch` 
 - **`replay(name, data, { force: true })` sends anyway.** The duplicate is the operator's, taken knowingly.
 - **A window whose claim is absent, failed or unsettled re-runs** on a plain `replay()`, with no force needed. A job that takes no claim at all — every job that is not a scheduled flow — is the absent row and behaves exactly as before.
 - **`succeeded` is absorbing.** A replay that repairs a failed window records `succeeded`, so the next unforced replay is refused. A *forced* replay that throws leaves the window recorded delivered rather than rewriting it to `failed` — otherwise a failed re-send would silently reopen the unforced re-delivery door. An operator whose forced replay failed forces again.
-- **A `once` schedule now has a tick window too** — the single instant it is due. Two fires of the same one-shot job, on either side of a restart, are one window and deliver once. Previously each fire delivered.
+- **A `once` schedule now has a tick window too** — the single instant it is due, which is one window for the job's whole life. The visible consequence is on replay: an operator who replays a one-shot job *before* its due instant claims that single window, so the real fire then finds the claim and does nothing. Previously both ran.
 
 The error-isolation `catch` that keeps a throwing flow from crashing the ticker is unchanged and still swallows. What it no longer does is leave the run indistinguishable from a delivered one: the throw settles the window's claim as `failed`, so a replay repairs it.
 

@@ -171,6 +171,18 @@ export class ObjectStoreFlowDispatchStore implements FlowDispatchStore {
    * rather than a throw — refusing to write is the invariant working, not an
    * error, and reporting it as one would turn the trigger's honest "could not
    * record the outcome" warning into a lie.
+   *
+   * ⚠️ **The absorbing rule is enforced read-then-write here, so it is not
+   * atomic.** Between the read above and the `update` below a concurrent
+   * settle on the same key can land: a `succeeded` and a `failed` for one
+   * window finishing at the same instant — a replay and a tick, or two
+   * replicas — can interleave and leave the row `failed`, which is exactly
+   * the reopened unforced-replay door the rule exists to close. The reach is
+   * narrow and the engine's by-id `update` shape cannot express a conditional
+   * write, so this is named rather than closed. ⛔ Do not read the persisted
+   * store as giving the guarantee {@link InMemoryFlowDispatchStore} does,
+   * whose check and write share a turn; closing it needs a conditional update
+   * the engine does not have yet.
    */
   async settle(key: string, outcome: FlowDispatchOutcome): Promise<void> {
     const current = await this.read(key);

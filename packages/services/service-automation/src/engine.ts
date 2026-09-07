@@ -2164,10 +2164,12 @@ export class AutomationEngine implements IAutomationService {
             this.dispatchOutcomeDegradationWarned = true;
             // The ledger predates the outcome half of the claim contract.
             this.logger.warn(
-                '[automation] the attached flow-dispatch ledger has no read()/settle() — ' +
-                    'dispatch claims are still deduplicated, but no claim records an OUTCOME durably, so a ' +
-                    "scheduled flow's replay refusal survives no restart: within one process lifetime the " +
-                    'in-process fallback still records outcomes and still refuses, but nothing outlives it.',
+                '[automation] the attached flow-dispatch ledger has no read() — this message describes the ' +
+                    'ledger that has no read()/settle() AT ALL, where dispatch claims are still deduplicated ' +
+                    'and the in-process fallback still records outcomes and still refuses WITHIN one process ' +
+                    'lifetime, but nothing outlives a restart. A ledger that has settle() but no read() is ' +
+                    'weaker still: outcomes are written durably and never read back, so no replay is ever ' +
+                    'refused, in this lifetime or any other.',
             );
         }
         this.pruneInProcessDispatchClaims(Date.now());

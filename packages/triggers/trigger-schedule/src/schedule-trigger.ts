@@ -366,11 +366,14 @@ export class ScheduleTrigger implements FlowTrigger {
      * `stop()` takes it with the binding.
      *
      * ⚠️ Residue is therefore bounded but not zero: an abandoned pass survives
-     * until this flow's next guard call or its next fire, whichever comes
-     * first. Its blast radius is one fire of one flow inside the window the
-     * pass names — a fire that would have been a no-op runs instead — and a
-     * pass for a window that has already passed can never match again, because
-     * the key is compared against the window computed at fire time.
+     * until this flow's next guard call replaces it, or `stop()` drops it. A
+     * later fire does NOT clear it — the handler deletes the entry only when
+     * the pass MATCHES the window it just computed — so an abandoned pass
+     * outlives every fire in every other window. It stays inert through all of
+     * them for the same reason: a pass naming a window that has passed can
+     * never match again. Its blast radius is one fire of one flow inside the
+     * window the pass names, and only if that window is still current — a fire
+     * that would have been a no-op runs instead.
      */
     private readonly replayPasses = new Map<string, string>();
     /** Whether the in-process-only dedup degradation has been said (once). */
