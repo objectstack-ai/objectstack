@@ -126,8 +126,8 @@ model: opus
 ## 本地验证范围 —— 本地只跑定向门禁,全农场归 CI
 
 - ⛔ 不把 lint workflow 的 `check:*` 全枚举本地跑:CI 会把农场跑满。本地清单如下。
-- ① 先 build 依赖闭包:`pnpm --filter '<pkg>^...' build` 是新 worktree 的第一条命令。
-- 跳过它产出的失败,读起来与你的改动弄坏了 import 一模一样。
+- ① diff 触到某包才有 ①:`pnpm --filter '<pkg>^...' build` 建依赖闭包;不触任何包则报告无 ①。
+- 闭包为空(`packages/spec` 无 workspace 依赖)时 ① 空跑;读 `dist/` 的门禁前先 build 本包。
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
 - 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
 - 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
@@ -188,6 +188,7 @@ model: opus
 - 消费者清扫的 filter 方向是前缀:`pnpm --filter '...@objectstack/<pkg>'` = 下游消费者。
 - 后缀形式是上游依赖,方向相反;契约收紧永远落在下游。
 - 报告里写 N 个包全绿必须说方向,否则这句话无法复核。
+- 退役键的清扫默认走退役 playbook 的 tree-scoped 缺席 pin,不为一次缺席检查重建消费者闭包。
 - 跨包类型改动需要一次反向验证:贴进一个新类型会拒绝的键,确认转红,再恢复。
 - 这证明你读的是重建后的 `.d.ts`,不是缓存。
 - `packages/spec`:`gen:schema` 会重写 `authorable-surface.base.json`,这是预期产物。
@@ -344,7 +345,6 @@ model: opus
    - ⛔ 永不结束回合去等 Monitor / 后台通知:结束回合即停摆,通知只送达在跑的回合。
    - 结束一轮之前自检:最后一条消息是否在描述你不拥有的进程给你的唤醒?
    - 排队的锁、别的 agent 的 build、脱管的 watcher 都不会来;保持这一轮活着,自己收退出码。
-   - 报告不违反此条:它以结果结束一轮,不是等别的东西来恢复的承诺。
 
 ## 何时停手不写码
 
