@@ -29,10 +29,6 @@ A datasource authors the window as `config.timeoutMs`; the datasource seam maps 
 
 **What is deliberately NOT done**: routing a `wss://` url over HTTP because `timeout` is set. That would change the wire transport behind the author's back and is a contract decision, not a driver's; the refusal changes no wire behaviour.
 
-## Migration
-
-| Wrote | Write instead |
-| --- | --- |
-| `url: 'wss://…'` (or `ws://…`) beside `timeout: N` (driver) / `timeoutMs: N` (datasource) | keep the window and spell the url `libsql://…` / `https://…` — bounded, and `libsql://` resolves to HTTPS — or drop the window and run the WebSocket remote unbounded, as it always did |
+**What an affected author does.** The refusal text itself says which two: keep the window and spell the url as `libsql://` or `https://` (bounded — `libsql://` resolves to HTTPS), or drop the window and run the WebSocket remote unbounded, as it always did. Which of the two is wanted is authoring intent, and the choice is made at the datasource or driver config, in place.
 
 Blast radius, measured on this tree: no in-repo deployment, example or doc pairs a WebSocket url with a window, and the host boot path (`OS_DATABASE_URL`) forwards only `url` and `authToken`, so an env-configured deployment cannot carry `timeout` at all.
