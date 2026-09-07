@@ -513,9 +513,11 @@ packages/plugins/driver-turso/
 `TursoConfigSchema` exists twice on purpose: the authoring contract in
 `packages/spec/src/data/driver/turso.zod.ts` (strict — what a `datasource` may declare), and the
 package-published Spec / Studio mirror in `packages/drivers/driver-turso/src/spec/turso.zod.ts`.
-Both declare exactly the keys the driver reads (ADR-0049 enforce-or-remove); the mirror keeps its
-retired keys (`timeout` → `timeoutMs`; `localPath` and `wasm`, removed) as `z.never()` tombstones
-whose refusal carries the prescription. The live keys:
+Neither declares a key the driver does not read — the direction ADR-0049 (enforce-or-remove)
+governs. The converse does not hold, and the mirror is the shorter list: it does not declare
+`mode`, which the driver does read (`TursoDriverConfig.mode`). The mirror keeps its retired keys
+(`timeout` → `timeoutMs`; `localPath` and `wasm`, removed) as `z.never()` tombstones whose refusal
+carries the prescription. The live keys:
 
 | Property | Type | Default | Description |
 |:---|:---|:---:|:---|
