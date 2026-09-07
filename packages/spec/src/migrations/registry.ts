@@ -6152,6 +6152,95 @@ const step18: MigrationStep = {
         + 'rewriting, not renaming.',
     },
     {
+      id: 'client-oauth-applications-delete-void',
+      surface:
+        'client.oauth.applications.delete(clientId) — both halves of what a caller of this '
+        + 'published `@objectstack/client` method observes: the DECLARED return, '
+        + '`Promise<any>` before and `Promise<void>` after, and the SETTLE BEHAVIOUR, which '
+        + 'rejected with `SyntaxError: Unexpected end of JSON input` on every successful '
+        + 'delete before and resolves after',
+      replacement:
+        'no value — `void`. There is nothing to move a read TO, because the promise never '
+        + 'resolved for a caller to read anything off it. The migration is on the settle '
+        + 'path instead: `try { await client.oauth.applications.delete(id); } catch { '
+        + '/* it probably worked */ }` → drop the workaround, the `catch` was executing on '
+        + 'EVERY successful delete and now executes only on a real failure. A read off the '
+        + 'resolved value — `(await client.oauth.applications.delete(id)).deleted` — was '
+        + 'unreachable code that has never executed and now stops compiling (TS2339). Same '
+        + 'call, same request, same wire body',
+      reason:
+        'The route answers HTTP 200 with a ZERO-BYTE body: `POST {auth}/oauth2/delete-client` '
+        + 'returns nothing from its handler, the vendor declares the endpoint `void`, and the '
+        + 'response carries `content-type: application/json` with NO `content-length` header '
+        + 'at all. The method ended `return res.json()`, so it rejected `SyntaxError: '
+        + 'Unexpected end of JSON input` on every successful delete — after the row had '
+        + 'already been removed server-side. There was no success path a caller could '
+        + 'observe, and the obvious recovery made it worse: the retry failed DIFFERENTLY, '
+        + 'with the route\'s 404 `not_found`, because the client was already gone. The method '
+        + 'now reads the body as text, returns on the empty case, and still parses (and still '
+        + 'throws on) a non-empty one — so the ONLY behaviour that moved is the zero-byte '
+        + 'case, which is the defect itself. THE WIRE IS BYTE-IDENTICAL: same route, same '
+        + 'request body, same status codes, same error bodies — which on this route are '
+        + 'better-auth\'s FLAT `{ error, error_description }`, NOT ObjectStack\'s nested '
+        + 'ADR-0112 envelope; no Zod schema and '
+        + 'no `packages/spec` declaration moves, no authorable key and no stored '
+        + 'representation is involved, so a raw-HTTP caller is unaffected and '
+        + '`objectstack migrate meta` has nothing to rewrite. This is registered rather than '
+        + 'exempted because the change is NOT compiler-delivered where it matters, and the '
+        + 'gap is exact rather than theoretical. The change has two halves and only one of '
+        + 'them has a diagnostic. (1) The declared return moves from a ledgered `any` to '
+        + '`void`, so a typed caller that read a property off the resolved value now gets '
+        + '`error TS2339` — but that read was UNREACHABLE, since the promise never resolved, '
+        + 'so the compiler names only code that has never run. (2) The half that DID run on '
+        + 'every call — a `try`/`catch` wrapped around the delete — compiles identically '
+        + 'before and after, with no diagnostic anywhere, while its `catch` block stops '
+        + 'executing. So for the only behaviour that was ever observable, `tsc` names ZERO '
+        + 'sites; and for an untyped JS caller there is no constrained channel at all. That '
+        + 'is why the ledger entry is the only notification that reaches an upgrader — the '
+        + 'same argument the three sibling entries on this package make '
+        + '(`client-delete-result-success`, `client-meta-reset-result-reset`, '
+        + '`client-envelope-convergence-analytics-automation`). ⚠️ Note the DIRECTION, which '
+        + 'is the inverse of the usual break: this does not stop working code from working, '
+        + 'it makes a method that could never succeed succeed. The hazard is therefore '
+        + 'inverted too — code written to survive a permanent failure is now inert, and any '
+        + 'alerting or error budget fed by this method\'s rejections goes quiet. ⛔ Do not '
+        + 'keep the old behaviour behind a flag or a wrapper that re-throws: there is one '
+        + 'producer shape, and the rejection was never a contract, it was a parse of an empty '
+        + 'string. ⛔ Do not synthesise `{ deleted: true }` either: the 200 carries zero bytes '
+        + 'and therefore zero information, and "it was already gone" is distinguished on the '
+        + 'ERROR channel — a client that is not there answers 404 `{ error: \'not_found\' }`, '
+        + 'which `ObjectStackClient.fetch` raises as a throw before the body reader runs — so '
+        + 'a synthesised success value would be a shape the wire never sends and strictly '
+        + 'less informative than the 404 the caller already receives. ADR-0087 D3.',
+      acceptanceCriteria:
+        '⚠️ The real work is behavioural and NOTHING will report it: every `try`/`catch` '
+        + 'wrapped around `client.oauth.applications.delete()` has to be re-read one by one, '
+        + 'because it compiles identically before and after while its `catch` block goes from '
+        + 'running on every successful delete to running only on a real failure. Anything '
+        + 'that block did — treating the delete as failed, retrying it (the retry answered '
+        + '404 `not_found`, which may itself have been swallowed), skipping post-delete '
+        + 'cleanup, cache invalidation, audit writes or a UI refresh, or reporting the delete '
+        + 'to a user as failed — is now on the other branch, and the cleanup paths that were '
+        + 'skipped run for the first time. Verify that is what you want rather than assuming '
+        + 'it restores prior behaviour. Alerting, error budgets and dashboards fed by '
+        + '`SyntaxError` rejections from this method drop to zero: that is the fix landing, '
+        + 'not an outage. Any test that passed while asserting this call rejects on a '
+        + 'successful delete was asserting on the defect and needs rewriting, not renaming. '
+        + 'On the type side, no code reads a property off the resolved value; `tsc` names '
+        + 'those sites for a typed caller (TS2339), but every one of them was unreachable, so '
+        + 'a clean type-check is NOT evidence that the sweep above was done. An untyped JS '
+        + 'caller gets no report at all. Nothing about the request, the route, the status '
+        + 'codes or the thrown error shapes changes and no server needs upgrading — the '
+        + 'server has always answered this way; only the client stopped mis-reading it. '
+        + 'Populations, measured at this landing: in the ObjectStack repo, ZERO production '
+        + 'call sites — the only references are the pins that ship with this change '
+        + '(`oauth-applications-delete.test.ts`, `return-type-precision.test.ts`); in '
+        + 'objectui at the pinned `.objectui-sha`, ZERO — neither `oauth.applications` nor '
+        + '`delete-client` appears anywhere in that tree; `objectstack-ai/cloud` is NOT '
+        + 'MEASURED, and a `catch` there that swallowed this method\'s rejection is now dead '
+        + 'code that this entry is the only notice of.',
+    },
+    {
       id: 'cluster-driver-dangling-values-removed',
       surface: 'kernel.cluster.driver (ClusterDriverSchema, kernel/cluster.zod.ts) '
         + '- the `postgres` and `nats` enum values',
@@ -7996,6 +8085,50 @@ const step18: MigrationStep = {
         + '`…/overlay` / `…/effective` endpoints, so removing the limb removes no served '
         + 'behaviour — the ADR-0005 org-overlay read/write path (`getMetaItemLayered`, the REST '
         + 'meta write doors) stays exactly as it was, before and after.',
+    },
+    {
+      id: 'metadata-endpoints-switch-radius-repartitioned',
+      surface: 'restServer.metadata.endpoints.items / restServer.metadata.endpoints.item',
+      replacement:
+        'An `endpoints.*` switch now gates exactly the face its name states, reads and writes alike. '
+        + '`items` gates `GET {prefix}/:type` and nothing else; the whole-store operations it used to take '
+        + 'with it — `GET {prefix}/diagnostics`, `GET {prefix}/_drafts` and the `POST {prefix}/_migrate-stored` '
+        + 'write door — answer to the new key `endpoints.maintenance` (default `true`). `item` now gates the '
+        + 'WHOLE per-item face: `GET` / `PUT` / `DELETE {prefix}/:type/:name`, `/references`, `/layers`, the '
+        + 'history family (`/history`, `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and '
+        + '`GET {prefix}/book/:name/tree`. ⇒ An embedder that authored `endpoints: { items: false }` to close '
+        + 'the whole-store family writes `endpoints: { items: false, maintenance: false }`. An embedder that '
+        + 'authored `endpoints: { item: false }` to close only the per-item READS has no key that keeps the '
+        + 'writes: the per-item face is one face, so leave `item` on and close the surface at '
+        + '`api.enableMetadata`, or per object at `enable.apiEnabled` / `enable.apiMethods`. '
+        + '`types` is unchanged and `api.enableMetadata` remains the master switch above all four.',
+      reason:
+        'Not losslessly convertible, and not compiler-carried either — the two channels that would otherwise '
+        + 'reach a consumer are both blind here. No key is renamed, removed or retyped: every one is an '
+        + 'optional boolean, so `{ items: false }` compiles and parses exactly as before and simply mounts a '
+        + 'different route table. A D2 conversion would have to GUESS which of the four routes the author '
+        + 'meant to close, and the two readings differ by a write door — rewriting `{ items: false }` to '
+        + '`{ items: false, maintenance: false }` preserves the old mounts but presumes an intent the author '
+        + 'never expressed, while leaving it alone re-mounts `POST {prefix}/_migrate-stored`. That is a '
+        + 'judgment, so it is delegated rather than automated. The change itself is the ADR-0049 '
+        + 'declared-vs-enforced defect in the direction the liveness ledger structurally cannot look: all '
+        + 'three keys were genuinely live, and what had drifted was each one\'s RADIUS against its own '
+        + '`describe()` — `items` gated a migration write door while naming a listing read (#15542), and '
+        + '`item` gated four reads while its own `PUT` / `DELETE` and the history family answered to '
+        + '`api.enableMetadata` alone (#15854). Ruled together by the maintainer as one principle. Measured '
+        + 'population at the time of the move: ZERO — no shipped boot path constructs a `RestServerConfig` '
+        + '(#15543), so only programmatic embedders can have authored these keys at all.',
+      acceptanceCriteria:
+        'For each `RestServerConfig` the consumer constructs, `new RestServer(...).registerRoutes()` followed '
+        + 'by `getRoutes()` yields the route table the consumer intends — specifically: with '
+        + '`endpoints.items: false` authored, `GET {prefix}/diagnostics`, `GET {prefix}/_drafts` and '
+        + '`POST {prefix}/_migrate-stored` are PRESENT unless `endpoints.maintenance: false` is also authored; '
+        + 'and with `endpoints.item: false` authored, `PUT {prefix}/:type/:name`, '
+        + '`DELETE {prefix}/:type/:name` and the six history routes are ABSENT. A consumer that authored '
+        + 'neither key is unaffected and needs no change: all four switches default `true` and the default '
+        + 'route table is byte-identical to before. The reference measurement is '
+        + '`packages/rest/src/rest-config-mount-table.pin.test.ts`, which asserts each switch\'s radius as a '
+        + 'set difference against the all-true baseline in both directions.',
     },
     {
       id: 'metadata-item-name-grammar-enforced',

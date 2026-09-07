@@ -71,9 +71,13 @@
  *    `app-nav-translation-parity.test.ts` fails the build when `en.ts` stops
  *    matching the declared `SETUP_APP` / `STUDIO_APP` / `ACCOUNT_APP` /
  *    `SystemOverviewDashboard` literals verbatim.
- *  - `pages.*` — `check:app-nav-i18n` compares the `en` copy against the
- *    composed page metadata (those sources live in `@objectstack/cloud-connection`
- *    and `@objectstack/mcp`, which this package does not and must not depend on).
+ *  - `pages.*` — `packages/cli/test/platform-page-i18n-parity.test.ts` compares
+ *    the `en` copy against the page metadata. Those sources live in
+ *    `@objectstack/cloud-connection`, `@objectstack/mcp` and this package's own
+ *    `pages` barrel; the first two are packages this one does not and must not
+ *    depend on, which is why the assertion sits in `packages/cli`. It moved
+ *    there from `check:app-nav-i18n` on #15743 — that gate's roster is a NAV
+ *    roster and could not reach the two `plugin-auth` pages at all.
  *
  * So hashing `en` transitively hashes the declared source, and this module needs
  * to import nothing but the bundle sitting next to it.

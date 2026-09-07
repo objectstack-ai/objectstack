@@ -66,6 +66,24 @@ export {
 } from './registry.js';
 export type { InjectedColumnProvenance } from './registry.js';
 
+// [#16159] The three ADR-0112 `code` strings the registry's install-time and
+// registration refusals carry, as constants a consumer can import instead of
+// re-spelling. Exported for the reason #14936 established and measured: this
+// package declares BOTH realms in its own `exports`, so a consumer holding
+// the other realm's copy of a class gets `instanceof` === false, silently —
+// a `code` compare is the only check that survives the split, and these are
+// how a consumer performs it without authoring the string itself (and so
+// without acquiring a `check:error-code-provenance` stamp site of its own).
+// ⛔ The classes themselves stay unexported deliberately: exporting them
+// would publish the `instanceof` route this convention exists to replace.
+// See the shared docblock over the constants in `registry.ts` for the full
+// reasoning and for why the `*_CODE` spelling is load-bearing.
+export {
+  NAMESPACE_CONFLICT_CODE,
+  DUPLICATE_ARTIFACT_OBJECT_NAME_CODE,
+  OBJECT_OWNERSHIP_CONFLICT_CODE,
+} from './registry.js';
+
 // [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
 // ADR-0112 D6c). Exported because `os build` is the SECOND door that has to
 // answer "does this group id resolve?" — over a composed artifact, at compile
@@ -114,13 +132,37 @@ export type { AdmittedValueShapeViolationTally } from './engine.js';
 // type of `ObjectQL.listDatasourceDefs()`. Exported so a consumer sweeping for
 // `sys_secret` references can name the shape it reads instead of re-declaring it.
 export type { DatasourceDef } from './engine.js';
-export { SummaryRecomputeError } from './summary-errors.js';
+// [#16159] `SUMMARY_RECOMPUTE_CODE` joins the class it names. The refusal's own
+// docblock tells a caller to identify it by `code` rather than `instanceof`
+// (the two-realm split #14936 measured: this package declares BOTH realms in
+// its own `exports`, so a consumer holding the other realm's copy of the class
+// gets `instanceof` === false, silently) — and until now offered nothing to
+// import. Two first-party packages already re-spell this code to implement the
+// documented "the records WERE written, treat it as a warning" recovery
+// (`packages/rest/src/import-runner.ts`,
+// `packages/metadata-protocol/src/seed-loader.ts`); they can now import it
+// instead. The class stays exported exactly as it was — this adds an
+// affordance, it removes nothing.
+export { SummaryRecomputeError, SUMMARY_RECOMPUTE_CODE } from './summary-errors.js';
 export type { SummaryRecomputeFailure } from './summary-errors.js';
 // [#5126] Thrown by `update` when `options.strictReadonlyWrites` is set and the
 // payload would have had read-only fields stripped. Exported so an in-process
 // caller (a cron / server-side plugin) can narrow on the class; the `code` is
 // the boundary-crossing identity.
-export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
+// [#16159] `READONLY_FIELD_REJECTED_CODE` joins it, so that identity is
+// something a consumer can IMPORT rather than re-spell.
+// `content/docs/kernel/contracts/data-engine.mdx` already tells readers, of
+// this very refusal, to "Catch it by `code`, not `instanceof`" — and until
+// now offered nothing to import, so following the published instruction meant
+// authoring the string in the consumer's own package (a
+// `check:error-code-provenance` stamp site there, free to drift from what this
+// engine throws with no compile error to say so). The class stays exported as
+// it already was — this adds the affordance the docs assume, it removes
+// nothing — but `code` is what survives the two-realm split #14936 measured:
+// this package declares BOTH realms in its own `exports`, so a consumer
+// holding the other realm's copy of the class gets `instanceof` === false,
+// silently.
+export { ReadonlyFieldRejectedError, READONLY_FIELD_REJECTED_CODE } from './readonly-strict-errors.js';
 // [#14095] Thrown by `engine.insert` when a driver refuses a row as a unique
 // violation. Exported so an application implementing the platform's own
 // "declare a unique index, attempt the insert, swallow the violation" idiom can
@@ -175,7 +217,22 @@ export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.j
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
-export { DriverConnectError, DatasourceUnavailableError } from './driver-connect-errors.js';
+// [#16159] `DRIVER_CONNECT_CODE` and `DATASOURCE_UNAVAILABLE_CODE` join the two
+// classes they name, for the same reason: both refusals' docblocks say they are
+// "Identified by `code` rather than `instanceof` so it survives crossing package
+// boundaries", and neither offered anything to import.
+// `packages/rest/src/error-response.ts` already matches the datasource refusal
+// by `code` and re-authors the same spelling into the envelope it builds.
+// ⚠️ Both CLASSES are also published from the lean `./core` entry while these
+// constants, like every other `*_CODE` in this package, are batteries-only —
+// #16260 owns that asymmetry for the whole family and ⛔ this sweep does not
+// decide it.
+export {
+  DriverConnectError,
+  DatasourceUnavailableError,
+  DRIVER_CONNECT_CODE,
+  DATASOURCE_UNAVAILABLE_CODE,
+} from './driver-connect-errors.js';
 export type {
   DriverConnectFailure,
   DriverHealth,
@@ -188,12 +245,27 @@ export type { InsertManyRowOutcome } from './engine.js';
 // [#5696] Thrown by `transaction(cb, base, { require: true })` when the
 // datasource cannot give a real transaction. Exported so a caller that fails
 // closed can narrow on the class; `code` is the boundary-crossing identity.
-export { TransactionUnsupportedError } from './transaction-errors.js';
+// [#16159] `TRANSACTION_UNSUPPORTED_CODE` joins the class it names: the line
+// above already tells a caller that `code` is the boundary-crossing identity,
+// and offered nothing to import — so following it meant re-spelling the wire
+// string in the consumer's own package. The class stays exported exactly as it
+// was; this adds an affordance and removes nothing.
+export { TransactionUnsupportedError, TRANSACTION_UNSUPPORTED_CODE } from './transaction-errors.js';
 // [#5351/#5696] Thrown when a BUSINESS write inside an open transaction()
 // resolves to a driver that transaction does not cover. Append-only system
 // ledgers (lifecycle.class audit/telemetry/event) are carved out and never
 // raise it. Narrow on the class in-process; `code` crosses package boundaries.
-export { CrossDatasourceTransactionWriteError } from './transaction-errors.js';
+// [#16159] `CROSS_DATASOURCE_TRANSACTION_WRITE_CODE` joins its class for the same
+// reason (#14936: this package declares BOTH realms in its own `exports`, so a
+// consumer holding the other realm's copy of the class gets `instanceof` ===
+// false, silently). ⭐ Neither class in `transaction-errors.js` is published from
+// the lean `./core` entry, so batteries-only constants introduce no asymmetry
+// here — class and constant are reachable from exactly one entry point, the same
+// one. #16260 owns that question for the classes that ARE on `./core`.
+export {
+  CrossDatasourceTransactionWriteError,
+  CROSS_DATASOURCE_TRANSACTION_WRITE_CODE,
+} from './transaction-errors.js';
 
 // [#4550] The delete-dispatch contract, exported so a TEST DOUBLE that stands
 // in for the engine can import the producer's own decision rather than
@@ -282,7 +354,19 @@ export type { RelatedTitleTarget } from './record-title.js';
 export { evaluateFormulaField } from './engine.js';
 
 // Export Validation
-export { ValidationError, validateRecord } from './validation/record-validator.js';
+// [#16159] `VALIDATION_FAILED_CODE` joins the class it belongs to: this package
+// declares BOTH realms in its own `exports` (`import` -> dist/index.mjs,
+// `require` -> dist/index.js), so a consumer holding the other realm's copy of
+// `ValidationError` gets `instanceof` === false, silently (#14936). The sound
+// route is a `code` compare, and until now that meant re-spelling the wire
+// string in the consumer's own package -- which acquires a
+// `check:error-code-provenance` stamp site there and is then free to drift from
+// what this engine throws with no compile error to say so. The class stays
+// exported exactly as it was; this adds an affordance and removes nothing.
+// [#16260] The constant is batteries-only while `ValidationError` is ALSO on the
+// lean `./core` entry, matching every existing `*_CODE` in this package; that
+// asymmetry is #16260's question, deliberately not decided here.
+export { ValidationError, validateRecord, VALIDATION_FAILED_CODE } from './validation/record-validator.js';
 export type { FieldValidationError } from './validation/record-validator.js';
 // [ADR-0104 / #4769] The counterexample a boot produces by ADMITTING an
 // off-shape value. Exported because the fresh-datastore attestation

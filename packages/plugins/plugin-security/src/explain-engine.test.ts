@@ -442,12 +442,25 @@ describe('explainAccess — record-grained (C2 / ADR-0095)', () => {
     expect(d.record).toMatchObject({ recordId: 'r1', visible: true });
   });
 
-  it('derives PLATFORM_ADMIN posture from the platform_admin position', async () => {
+  it('derives PLATFORM_ADMIN posture from the unscoped-grant flag', async () => {
+    // [#15981] Was "from the platform_admin position". The NAME is no longer
+    // that evidence: `positions[]` is the security axis and carries ADR-0057 D4
+    // `sys_user_position` names from an `apiEnabled` table, so a tenant can mint
+    // one spelling the built-in. `hasPlatformAdminGrant` is what
+    // `buildContextForUser` sets from `grants.posture === 'PLATFORM_ADMIN'`.
+    const d = await explainAccess(
+      recDeps({ sets: [ADMIN], layered: { layer0: null, layer1: null } }),
+      { object: 'leave_request', operation: 'read', context: { userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [], hasPlatformAdminGrant: true }, recordId: 'r1' },
+    );
+    expect(d.principal.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  it('[#15981] the platform_admin NAME alone does not — it reports MEMBER', async () => {
     const d = await explainAccess(
       recDeps({ sets: [ADMIN], layered: { layer0: null, layer1: null } }),
       { object: 'leave_request', operation: 'read', context: { userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [] }, recordId: 'r1' },
     );
-    expect(d.principal.posture).toBe('PLATFORM_ADMIN');
+    expect(d.principal.posture).toBe('MEMBER');
   });
 
   it('Layer 0 (the tenant wall) excludes a cross-org record — decidedBy tenant_isolation', async () => {
@@ -624,8 +637,27 @@ describe('posture derivation aligns with enforcement (label-drift elimination)',
     expect(await postureOf({ userId: 'a1', tenantId: 'org1', positions: ['everyone'], permissions: ['admin_full_access'], hasPlatformAdminGrant: true })).toBe('PLATFORM_ADMIN');
   });
 
-  it('the projected platform_admin built-in position still yields PLATFORM_ADMIN', async () => {
-    expect(await postureOf({ userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [] })).toBe('PLATFORM_ADMIN');
+  it('[#15981] the platform_admin built-in position NAME no longer yields PLATFORM_ADMIN', async () => {
+    // This assertion is INVERTED from what it pinned before, deliberately. It
+    // used to read "the PROJECTED platform_admin built-in position still yields
+    // PLATFORM_ADMIN", whose premise was that the name is only ever projected
+    // from the unscoped `admin_full_access` grant. Ruling A made `positions[]`
+    // the security axis, so it now also carries ADR-0057 D4
+    // `sys_user_position` names — and that table is `apiEnabled` with
+    // unconstrained values, so the name can be MINTED by a tenant. The genuine
+    // projection is not lost: a real operator's context carries
+    // `hasPlatformAdminGrant` (the case immediately above) and, off
+    // `buildContextForUser`, `posture` itself.
+    expect(await postureOf({ userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [] })).toBe('MEMBER');
+  });
+
+  it('[#15981] …and the two are separable only by the rung, not by the array', async () => {
+    const minted = { userId: 'a1', tenantId: 'org1', positions: ['platform_admin', 'everyone'], permissions: [] };
+    const genuine = { ...minted, hasPlatformAdminGrant: true };
+    // Identical on the axis a name-reading predicate would consult …
+    expect(minted.positions).toEqual(genuine.positions);
+    // … and opposite on the axis that actually decides.
+    expect([await postureOf(minted), await postureOf(genuine)]).toEqual(['MEMBER', 'PLATFORM_ADMIN']);
   });
 
   it('org_owner / org_admin better-auth role positions no longer confer TENANT_ADMIN (ADR-0095 D3)', async () => {

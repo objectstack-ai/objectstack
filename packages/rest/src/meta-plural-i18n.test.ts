@@ -7,10 +7,9 @@
  * `translateMetaItem` / `translateMetaItems` decide "does this type translate"
  * by asking `isTranslatableMetaType`, which reads
  * `TRANSLATABLE_METADATA_TYPES` — a set DERIVED (#3786) from
- * `METADATA_DOCUMENT_TRANSLATORS`' keys, and those keys are singular-only:
- * `view` / `action` / `object` / `app` / `dashboard` / `page`. The `/meta`
- * handlers were handing those helpers the RAW `:type` path segment, while
- * Prime Directive #3 makes PLURAL the canonical REST spelling
+ * `METADATA_DOCUMENT_TRANSLATORS`' keys, and those keys are singular-only. The
+ * `/meta` handlers were handing those helpers the RAW `:type` path segment,
+ * while Prime Directive #3 makes PLURAL the canonical REST spelling
  * (`/api/v1/meta/apps`). So the documented spelling missed the set, the
  * predicate answered `false`, and the entire localization was skipped: the
  * same route, the same document, the same `Accept-Language`, two answers.

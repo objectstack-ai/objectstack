@@ -32,6 +32,23 @@
 // fix one and leave N-1, and no reviewer counts to 39. So the count is asserted
 // here instead.
 //
+// ## Two destinations, not one
+//
+// Deleting a copy means re-pointing its call sites, and there are two places to
+// point them. A reader that reports no location takes `recordsOf` directly. A
+// reader that reports a POSITIONAL path cannot: `recordsOf` drops a non-record
+// member, so every index after it shifts and the finding names an entry the
+// author's file does not have there (#15740). Those readers take
+// `collectionEntries` (`collection-entries.ts`) instead — the same drop, made
+// in the reader, with each survivor's real path carried out beside it
+// (`pages[3]` on the array shape, `pages.contact_page` on the map). #15728
+// moved the four page walks that way; the two reference-integrity members
+// below still hold their own copy because the paths #15494 pinned on them are
+// #15740's call, not a developer's.
+//
+// Either destination satisfies this file: neither declares a second
+// `(v: unknown) => AnyRec[]`, which is the shape all three clauses count.
+//
 // ## The three clauses, and what each one refuses
 //
 //  1. `object-graph.ts` declares exactly one such coercion, named `recordsOf`.
@@ -102,26 +119,6 @@ const COPY_LEDGER: Readonly<Record<string, string>> = {
   // index-preserving reader, not on anyone's attention (#15740).
   'validate-object-field-refs.ts': '#15740',
   'validate-list-view-field-refs.ts': '#15740',
-  // 2026-09-05 — the sixteen copies that do not crash today: twelve grew a
-  // local array-branch filter and four read only the list shape behind a
-  // call-site `if (!page) continue`. They are not #15636's defect; they are its
-  // cause, and re-pointing them is bookkeeping this ledger now forces.
-  'validate-action-body-writes.ts': '#15728',
-  'validate-ai-agent-authoring.ts': '#15728',
-  'validate-ai-surface-affinity.ts': '#15728',
-  'validate-ai-tool-references.ts': '#15728',
-  'validate-flow-node-writes.ts': '#15728',
-  'validate-hook-body-writes.ts': '#15728',
-  'validate-jsx-pages.ts': '#15728',
-  'validate-nav-object-servability.ts': '#15728',
-  'validate-nav-target-refs.ts': '#15728',
-  'validate-page-source-styling.ts': '#15728',
-  'validate-page-visualization-bindings.ts': '#15728',
-  'validate-react-page-props.ts': '#15728',
-  'validate-react-pages.ts': '#15728',
-  'validate-readonly-action-writes.ts': '#15728',
-  'validate-rule-compilability.ts': '#15728',
-  'validate-view-page-refs.ts': '#15728',
 };
 
 /**
@@ -139,11 +136,6 @@ const UNGUARDED_ALLOWANCE: Readonly<Record<string, string>> = {
   // first; both guard every member with `isRec` at the call site.
   'validate-object-field-refs.ts': '#15740',
   'validate-list-view-field-refs.ts': '#15740',
-  // 2026-09-05 — removed by #15728.
-  'validate-jsx-pages.ts': '#15728',
-  'validate-page-source-styling.ts': '#15728',
-  'validate-react-page-props.ts': '#15728',
-  'validate-react-pages.ts': '#15728',
 };
 
 /** Every rule/reader module — tests excluded, this file excluded. */

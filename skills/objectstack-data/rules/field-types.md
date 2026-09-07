@@ -88,7 +88,7 @@ options: [
 |:-----|:------------|:-----------|
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused) |
-| `tree` | Hierarchical self-reference | `reference` |
+| `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
 
 > **`multiple: true` lookup ≠ junction object.** A multi-value lookup is stored
@@ -105,9 +105,6 @@ options: [
 | `avatar` | User/profile picture | — |
 | `video` | Video files | — |
 | `audio` | Audio files | — |
-
-There is no per-field attachment config (size limits, allowed types, storage) —
-storage concerns live outside the field schema.
 
 ## Embedded (JSON sub-objects)
 
@@ -143,77 +140,6 @@ Stored as JSON on the parent row — no separate table / FK:
 | `progress` | Progress bar | `min`, `max` |
 | `tags` | Free-form tag input | — |
 | `vector` | AI/ML embeddings (semantic search, RAG) | `dimensions` (flat sibling, e.g. `1536`) |
-
-## Field Type Decision Tree
-
-```
-What kind of data?
-│
-├── Text?
-│   ├── Single line → text
-│   ├── Multiple lines → textarea
-│   ├── Formatted → richtext / markdown / html
-│   ├── Email → email
-│   ├── URL → url
-│   ├── Phone → phone
-│   ├── Credential (API key, token, DB password) → secret (encrypted at rest — NOT password)
-│   └── Code → code
-│
-├── Number?
-│   ├── Money → currency
-│   ├── Percentage → percent
-│   └── Generic → number
-│
-├── Date/Time?
-│   ├── Date only → date
-│   ├── Time only → time
-│   └── Date + Time → datetime
-│
-├── True/False?
-│   ├── Checkbox → boolean
-│   └── Switch → toggle
-│
-├── Choose from list?
-│   ├── Single choice, dropdown → select
-│   ├── Single choice, always visible → radio
-│   ├── Multiple choice, tags → multiselect
-│   └── Multiple choice, checkboxes → checkboxes
-│
-├── Reference another object?
-│   ├── Independent → lookup
-│   ├── Owned child → master_detail
-│   ├── A person (assignee, watcher) → user
-│   └── Hierarchy → tree
-│
-├── File/Media?
-│   ├── Image → image
-│   ├── Video → video
-│   ├── Audio → audio
-│   ├── User photo → avatar
-│   └── Generic file → file
-│
-├── Calculated?
-│   ├── Formula → formula
-│   ├── Roll-up → summary
-│   └── Auto-number → autonumber
-│
-├── Embedded sub-object (no separate table)?
-│   ├── Single → composite
-│   ├── Array → repeater
-│   └── Name-keyed map → record
-│
-└── Special?
-    ├── Location → location
-    ├── Address → address
-    ├── Color → color
-    ├── Rating → rating
-    ├── Signature → signature
-    ├── QR code → qrcode
-    ├── Progress → progress
-    ├── Tags → tags
-    ├── JSON data → json
-    └── AI embeddings → vector
-```
 
 ## Common Field Configurations
 

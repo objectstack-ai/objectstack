@@ -98,7 +98,31 @@ function checkLabelExists(item: any, path: string, kind: string): LintIssue | nu
   return null;
 }
 
-function checkLabelCase(label: string, path: string): LintIssue | null {
+// A label is not required to be a string. `I18nLabelSchema` (spec
+// `ui/i18n.zod`) is `z.union([z.string(), InlineLocaleMapSchema])`, and it is
+// the label primitive the whole `ui/` tree imports — so of the four carriers
+// this rule is called on, two accept the inline locale map:
+// `views[].list.label` / `views[].listViews.*.label` (`ListViewShapeSchema`)
+// and `apps[].label` (`AppSchema`). The other two are `z.string()` and reject
+// the map at the schema door (`objects[].label`, `objects[].fields.*.label`).
+//
+// Every call site reaches this function through `any`-typed config walking, so
+// the annotation below used to say `string` and be wrong: on a map,
+// `label[0]` is `undefined` and `undefined.toUpperCase()` threw. The throw
+// escaped `lintConfig` into the command's catch-all, so an author who
+// localized an app or list-view label could not lint the project at all —
+// every face exited 1 naming no rule, no path and no remedy, on input
+// `ObjectStackDefinitionSchema` parses clean.
+//
+// ⛔ The guard deliberately says NOTHING about a localized label rather than
+// resolving the map and case-checking an entry. Case is a property of a
+// literal; picking WHICH locale entry a case verdict is taken against is a
+// product decision (`resolveI18nLabel` exists, but which entry is
+// authoritative for a lint verdict is not this rule's to answer). Widening
+// the rule to localized labels is an extension, filed separately; this guard
+// is the floor, and it leaves the string branch below byte-identical.
+function checkLabelCase(label: unknown, path: string): LintIssue | null {
+  if (typeof label !== 'string') return null;
   if (label && label[0] !== label[0].toUpperCase()) {
     return {
       severity: 'warning',
@@ -111,7 +135,11 @@ function checkLabelCase(label: string, path: string): LintIssue | null {
   return null;
 }
 
-function getViewLabel(view: any, viewPath: string): { label?: string; path: string } {
+// ⚠️ `label` is `unknown`, not `string`: it is read straight off `any`-typed
+// config and `ListViewShapeSchema.label` is `I18nLabelSchema`, so the value
+// can legitimately be an inline locale map. Annotating it `string` here is
+// what let the map reach `checkLabelCase`'s indexing unchecked.
+function getViewLabel(view: any, viewPath: string): { label?: unknown; path: string } {
   if (view?.list?.label) {
     return { label: view.list.label, path: `${viewPath}.list.label` };
   }
@@ -863,7 +891,37 @@ export default class Lint extends Command {
   private async runEval(flags: any, timer: ReturnType<typeof createTimer>): Promise<void> {
     let generate: ((prompt: string, id: string) => unknown | Promise<unknown>) | undefined;
 
-    if (flags.generator) {
+    // [#16161] `!== undefined`, not truthiness — the SAME test the
+    // `--generator` precondition guard in `run()` above uses, so one flag has
+    // one rule for "the operator typed it".
+    //
+    // Driven on this entry before this change, from the probe project below,
+    // with a generator that writes a marker file at TOP-LEVEL evaluation:
+    //
+    //     os lint --eval --generator ""   exit 0 · Mode: offline · 5/5 passed · marker ABSENT
+    //     os lint --eval                  exit 0 · Mode: offline · 5/5 passed · marker ABSENT
+    //
+    // Normalise the elapsed-time token and those two stdouts were BYTE-IDENTICAL
+    // (one sha256 across both entries, `bin/run-dev.js` and `bin/run.js`);
+    // stderr was 0 bytes in all four runs and the `--json` face differed only in
+    // `duration`. So the empty string was not merely ineffective — it was
+    // indistinguishable from not passing the flag, on every channel this command
+    // has, while the report said `Mode: offline` to an operator who had asked for
+    // a live run. The classic way to type it is `--generator "$GEN"` with `GEN`
+    // unset in a script.
+    //
+    // ⛔ The opposite rule — empty means "not passed" — is not open here. #15550
+    // settled it for the non-eval side one guard up, and the two sides read one
+    // flag; splitting them would put two spellings of `--generator` under two
+    // rules. Reversing it is a decision, not a patch.
+    //
+    // ⛔ No new refusal shape is invented for the empty case. Once the load is
+    // attempted, an unresolvable path answers the way an unresolvable path
+    // already answers here — the `catch` below, exit 1, `Failed to load
+    // generator ""` on both faces. That is the same envelope
+    // `--generator ./does-not-exist.mjs --eval` has answered with all along; an
+    // empty string is a path that names no module, not a separate error class.
+    if (flags.generator !== undefined) {
       try {
         const { mod } = await bundleRequire({
           filepath: flags.generator,

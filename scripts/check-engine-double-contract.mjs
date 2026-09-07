@@ -101,8 +101,9 @@
 //     NO on #7620 for these doubles specifically. So it asks each independent
 //     double a behavioural question instead of handing it an implementation.
 //   - a scoped repository that declares NO repository-only member. Measured on
-//     the corpus this landed against: `packages/runtime/src/action-body-identity
-//     .test.ts:71` is a real scoped facade (`createContext().object(name)`)
+//     the corpus this landed against:
+//     `packages/runtime/src/action-body-identity.test.ts` (line 71 as measured)
+//     is a real scoped facade (`createContext().object(name)`)
 //     spelling only `find`/`count`/`insert`/`update`/`delete`, and it stays in
 //     the ledger. Seeing it would mean reading its parameter NAMES, and `o` is
 //     ambiguous in exactly this repo: `o: string` is the object name in twelve

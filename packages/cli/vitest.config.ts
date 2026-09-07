@@ -563,27 +563,66 @@
 // the PR that landed this section; re-measure it when the population moves,
 // and print the commit here.
 //
+// ## THE NIGHTLY TIERS (#16455) — a second cut, by NAME, read from `OS_TEST_TIERS`
+//
+// Maintainer direction (2026-09-07, verbatim): 「我想的是测试会不会太多，是否都是
+// 必要的，是不是应该砍，每次修改都要完整的测试吗」. The `e2e` and `live` tiers
+// leave the per-PR and merge-queue runs and run nightly on `main`; selection is
+// by the EXISTING filename tiers only (`*.e2e.test.*`, `*.live.test.*`) and no
+// file is renamed, deleted or edited to move it. Measured on 6eba38f5a3: this
+// package owns every one of the tree's 60 `*.e2e.test.ts` files and the tree
+// owns no `*.live.test.*` at all, so this is the one config that reads the
+// switch today — read through `scripts/nightly-tiers.mjs`, the single reader of
+// the variable, so a package that adopts a tier tomorrow imports rather than
+// re-spells it.
+//
+//   OS_TEST_TIERS unset / queue   this package's population = the 212 non-tier files (180 unit + 32 integration)
+//   OS_TEST_TIERS=nightly         this package's population = exactly the 60 tier files (1 unit + 59 integration)
+//
+// (272 test files on disk at 6eba38f5a3, read from `vitest list --filesOnly`
+// under each setting and each `--project`; 212 + 60 = 272, no file in both.)
+//
+// The cut is applied in ONE place — `testFilesOnDisk()` in `vitest-tiers.ts`,
+// the walk both derivations below read from — so the behavioural partition
+// into `unit` / `integration` operates on whatever population the setting
+// selected, and the two projects remain a partition of it by construction.
+// That is also why the unit tier is now an INCLUDE list rather than
+// `exclude: INTEGRATION_FILES`: an exclude-shaped unit project falls back to
+// vitest's default `include`, which would collect the tier files the queue
+// must not run. `test/vitest-tiers-partition.test.ts` measures all of this
+// under whichever setting it runs in (its `vitest list` child inherits the
+// switch); under `nightly` it is not itself collected — it carries no tier
+// name — which is the ruled behaviour, not a gap.
+//
+// ⛔ The switch reaches vitest only because `turbo.json` names `OS_TEST_TIERS`
+// in the `test` task's `env`: turbo 2.10 runs in STRICT env mode and strips
+// every undeclared variable before the task's shell sees it. It sits in `env`
+// (hashed) rather than `passThroughEnv` on purpose — a `test` task's cached
+// outcome depends on the setting, so the setting is in the hash and a nightly
+// can never replay a queue-mode cache entry as `>>> FULL TURBO`.
+//
 // ⚠️ INLINE PROJECTS INHERIT NOTHING BY DEFAULT — `extends: true` is what
 // carries this file's `resolve.alias` table and `test.server.deps.external`
 // into each project (vitest 4.1.10: an inline project without it gets a fresh
 // Vite config, so the source aliases the gate above guards would be declared
 // here and enforced nowhere). `disableConsoleIntercept: true` is repeated
 // inside every project because `check:console-intercept-disarm` measured the
-// root-level setting inert under projects. `exclude` for the unit tier spreads
-// `configDefaults.exclude` first: an `exclude` that names only the integration
-// files would drop the `node_modules` exclusion and start collecting
-// dependencies' own test files.
-import { configDefaults, defineConfig } from 'vitest/config';
+// root-level setting inert under projects. Both projects carry an explicit
+// `include` of exact paths, so neither reaches vitest's default `include`
+// (which would collect the whole tree) and neither needs its own
+// `node_modules` exclusion: an exact-path list matches nothing it does not name.
+import { defineConfig } from 'vitest/config';
 import path from 'path';
-import { integrationTestFiles } from './vitest-tiers.js';
+import { integrationTestFiles, unitTestFiles } from './vitest-tiers.js';
 
-// The integration tier, DERIVED from what the files DO — never written down.
-// `vitest-tiers.ts` holds the predicate, the walk and the argument for both;
-// `test/vitest-tiers-partition.test.ts` pins what a derivation cannot pin
-// about itself. Package-root-relative, POSIX-separated, sorted; each entry is
-// an exact path, which is what lets the same array serve as the integration
-// project's `include` and the unit project's `exclude`.
+// The two tiers, DERIVED from what the files DO — never written down — over
+// the population `OS_TEST_TIERS` selects. `vitest-tiers.ts` holds the
+// predicate, the walk and the argument for both; `test/vitest-tiers-partition.test.ts`
+// pins what a derivation cannot pin about itself. Package-root-relative,
+// POSIX-separated, sorted; each entry is an exact path, which is what lets
+// each array serve as its project's `include`.
 export const INTEGRATION_FILES = integrationTestFiles(__dirname);
+export const UNIT_FILES = unitTestFiles(__dirname, INTEGRATION_FILES);
 
 export default defineConfig({
   resolve: {
@@ -662,9 +701,10 @@ export default defineConfig({
         external: [/packages[\/]types[\/]dist/],
       },
     },
-    // The two tiers (#13504) — see the header section of the same name. Both
-    // `extends: true` so each project inherits the `resolve.alias` table and
-    // the `server.deps.external` entry above; each repeats the console-intercept
+    // The two tiers (#13504) — see the header section of the same name, and
+    // "THE NIGHTLY TIERS" for the population both read. Both `extends: true`
+    // so each project inherits the `resolve.alias` table and the
+    // `server.deps.external` entry above; each repeats the console-intercept
     // disarm because the root-level one is inert under projects.
     projects: [
       {
@@ -672,7 +712,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           disableConsoleIntercept: true,
-          exclude: [...configDefaults.exclude, ...INTEGRATION_FILES],
+          include: UNIT_FILES,
         },
       },
       {

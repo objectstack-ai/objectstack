@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
   // `core` is the lean engine entry (ADR-0076) — engine/registry/hooks/validation
   // only, no kernel plugin or @objectstack/metadata-protocol. `index` is the
@@ -13,4 +15,5 @@ export default defineConfig({
   dts: !process.env.OS_SKIP_DTS,
   format: ['esm', 'cjs'],
   target: 'es2020',
+  esbuildOptions: dropSourcesContent,
 });

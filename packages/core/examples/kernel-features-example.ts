@@ -232,11 +232,11 @@ async function main() {
   
   console.log('\n✅ Kernel started successfully!\n');
   
-  // Show plugin metrics
-  console.log('📊 Plugin Startup Metrics:');
-  const metrics = kernel.getPluginMetrics();
-  for (const [name, time] of metrics) {
-    console.log(`   ${name}: ${time}ms`);
+  // Show plugin startup durations (elapsed ms, not start instants)
+  console.log('📊 Plugin Startup Durations:');
+  const durations = kernel.getPluginStartupDurations();
+  for (const [name, duration] of durations) {
+    console.log(`   ${name}: ${duration}ms`);
   }
   console.log('');
   

@@ -77,10 +77,17 @@
  * ⛔ The body handed to `registerApp` is still the caller's original
  * `entry.manifest`, never `verdict.data.manifest`. The parse is a GATE, and the
  * reason is unchanged by road B: `ManifestSchema` carries defaults
- * (`defaultDatasource: 'default'`, `scope: 'project'`) and Zod strips
- * undeclared keys, so registering a parsed clone would put different bytes into
- * the registry than the singular-`manifest` branch does for the same authored
- * package. D7 pins that those two branches do not disagree.
+ * (`defaultDatasource: 'default'`, `scope: 'project'`), so registering a parsed
+ * clone would put different bytes into the registry than the singular-`manifest`
+ * branch does for the same authored package. D7 pins that those two branches do
+ * not disagree.
+ *
+ * ⛔ The other half of that reason — "and Zod strips undeclared keys" — is GONE,
+ * not merely reworded. `ManifestSchema` is `strictObject` since #14192 and
+ * `AssembledPackageBodySchema` inherits the closed posture through `.extend()`,
+ * so an undeclared key on an entry is REFUSED by this very parse, by name, and
+ * never reaches a clone to be dropped from. Defaults are what still move bytes;
+ * the drop that used to is now a loud rejection.
  *
  * ## Ordering reuses the ONE sorter (D5)
  *

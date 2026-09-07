@@ -153,6 +153,8 @@ import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
     apiExposureDenialReason,
+    isApiOperationAllowed,
+    API_PRIMITIVES,
     DATA_ACTION_TO_API_OPERATION,
 } from '@objectstack/spec/data';
 // [#8013] The SHARED envelope writer (#3973), aliased. [#9098] The alias no
@@ -403,6 +405,68 @@ interface ApiAccessOpts {
 type NavServabilityGate = (objectName: string, entry: any, appName: string) => boolean;
 
 /**
+ * [#15416] The operation to NAME in a `method-not-allowed` refusal.
+ *
+ * The message and the `allowed` array are ONE envelope and have to agree. They
+ * stopped agreeing wherever the gate judged a CONJUNCTION: `deleteMany` is
+ * `bulk ∧ delete`, and an `insert` import is `import` refined to `create`. An
+ * object granting `bulk` and `update` but not `delete` was therefore refused
+ * with `API operation 'bulk' is not allowed` beside an `allowed` array that
+ * CONTAINS `bulk` — the refusal named the conjunct that PASSED.
+ *
+ * That is worse than a vague message, because the envelope is read as a
+ * DISCRIMINATOR rather than as decoration: a declaration re-widened to
+ * create/update can still 405 for an unrelated reason, so only the set proves
+ * WHICH gate answered. A set contradicting its own message is specific and
+ * wrong, and a later reader concludes either that the verb is still open or
+ * that the gate closed the composite — both false.
+ *
+ * ## Why this probes instead of re-spelling the derivation
+ *
+ * The failing conjunct is found by asking the spec's OWN decision function,
+ * never by copying its table here: widen the declared whitelist by the missing
+ * primitives — smallest combination first — and the widening that clears the
+ * refusal names what the refusal was about. `isApiOperationAllowed` stays the
+ * single source of truth, so a future refinement (another `writeMode`, another
+ * derived verb) is tracked with no second spelling to drift away from it. The
+ * search is monotone and runs only on the 405 path, over six primitives.
+ *
+ * Returns `undefined` when the name is already truthful — the operation as
+ * named is absent from the effective set, so there is no contradiction and the
+ * existing message is left exactly as it was.
+ */
+function deniedConjunctName(
+    enable: any,
+    eff: ReturnType<typeof resolveEffectiveApiMethods>,
+    canonical: string,
+    opts?: ApiAccessOpts,
+): string | undefined {
+    // The contradiction IS the trigger: only rewrite a name the envelope's own
+    // `allowed` array contradicts.
+    if (!eff.operations.has(canonical as any)) return undefined;
+
+    const granted = API_PRIMITIVES.filter((p) => eff.primitives.has(p));
+    const missing = API_PRIMITIVES.filter((p) => !eff.primitives.has(p));
+    const clears = (extra: readonly string[]): boolean =>
+        isApiOperationAllowed(
+            resolveEffectiveApiMethods({ ...(enable ?? {}), apiMethods: [...granted, ...extra] }),
+            canonical,
+            opts,
+        );
+
+    for (const p of missing) if (clears([p])) return p;
+    // Two conjuncts can be missing at once (`upsert` needs create AND update).
+    // Naming either one is truthful and neither is in `allowed`; name the first
+    // in the enum's own order so the message is deterministic.
+    for (let i = 0; i < missing.length; i += 1) {
+        for (let j = i + 1; j < missing.length; j += 1) {
+            if (clears([missing[i]!, missing[j]!])) return missing[i];
+        }
+    }
+    return undefined;
+}
+
+/**
  * Pure per-object API-exposure check: given an object's `enable` block, decide
  * whether `operation` is denied on the *external* REST surface (ADR-0049 /
  * #1889 / #3391). Returns the `{ status, body }` to send, or `null` when
@@ -447,13 +511,19 @@ export function apiAccessDenialFromEnable(
             },
         };
     }
+    // [#15416] Name the conjunct that actually FAILED, not the composite the
+    // route gated under; `deniedConjunctName` returns `undefined` when the
+    // requested name is already absent from `allowed` and nothing needs saying
+    // differently.
+    const eff = resolveEffectiveApiMethods(enable);
+    const named = deniedConjunctName(enable, eff, canonical, opts) ?? operation;
     return {
         status: 405,
         body: {
-            error: `API operation '${operation}' is not allowed on object '${objectName}'`,
+            error: `API operation '${named}' is not allowed on object '${objectName}'`,
             code: 'OBJECT_API_METHOD_NOT_ALLOWED',
             object: objectName,
-            allowed: effectiveOperationsArray(resolveEffectiveApiMethods(enable)),
+            allowed: effectiveOperationsArray(eff),
         },
     };
 }
@@ -657,6 +727,32 @@ function importJobUndoable(row: any): boolean {
  * declaration is right; the emitted value was wrong. This makes the value what
  * the declaration already says.
  *
+ * ## [#14078] The `Date` arm is TOTAL — an Invalid `Date` renders as text
+ *
+ * Ruled **B** by the maintainer (2026-09-02): every copy of this spelling
+ * guards on `Number.isNaN(value.getTime())`, all five arms in ONE change,
+ * because a guard on some arms and not others re-opens the drift the single
+ * spelling closed. Reachability is MEASURED, not assumed (#14409, landed
+ * `3ecb7dc1a`): mysql2 3.23.1 returns a module constant literally named
+ * `INVALID_DATE` for a zero `DATETIME`, and postgres-date 1.0.7 builds
+ * `new Date(NaN)` for every year in 275760..294276 — years Postgres itself
+ * stores. Unguarded, `value.toISOString()` raises `RangeError: Invalid time
+ * value`, so `GET /api/v1/data/import/jobs/:jobId` answers **500** on a job
+ * row the operator cannot identify from the error.
+ *
+ * The terminal value is chosen **per call site**, and this one's is the
+ * VISIBLE TEXT `"Invalid Date"`, reached by letting the Invalid `Date` fall
+ * into the `String(value ?? '')` arm — the "rendered as before" branch this
+ * docblock already describes, and the spelling the #13994 repair replaced.
+ * Why not `undefined`, the answer the `metadata-protocol` / `metadata` copies
+ * take: this function returns `string` because its four call sites are the
+ * DTO's last step, `ImportJobProgressSchema.createdAt` is required, and all
+ * four fields are declared plain `z.string()` (`packages/spec/src/api/
+ * export.zod.ts`) rather than `z.string().datetime()` — so the text passes the
+ * contract and reaches the operator watching the import job, which is the
+ * ruling's "required and an operator reads it". ⛔ And NOT a blanket `''`: a
+ * silent blank is the shape that hides the producer's bug.
+ *
  * Same three branches as the two landed normalisers in
  * `@objectstack/metadata-protocol` — `auditMetaItem`'s `occurredAt` in
  * `protocol.ts` and `canonicalIsoInstant` in `sys-metadata-repository.ts`
@@ -670,7 +766,12 @@ function importJobUndoable(row: any): boolean {
  */
 function canonicalIsoStamp(value: unknown): string {
     if (typeof value === 'string') return value;
-    if (value instanceof Date) return value.toISOString();
+    // [#14078] The `Date` arm is TOTAL: an Invalid `Date` fails the guard and
+    // falls into the "rendered as before" arm below, which is `String(value)`
+    // — exactly the visible text `"Invalid Date"` this repair's predecessor
+    // served. See the docblock's Invalid-`Date` paragraph for why the text and
+    // not `undefined` here.
+    if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
     return String(value ?? '');
 }
 
@@ -726,7 +827,15 @@ function formatCsvCell(value: any): string {
     let s: string;
     if (typeof value === 'string') s = value;
     else if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') s = String(value);
-    else if (value instanceof Date) s = value.toISOString();
+    // [#14078] Total `Date` arm. An Invalid `Date` renders as `String(value)`,
+    // which is exactly the visible text `Invalid Date` — the cell an operator
+    // reads and can report. ⛔ Not the `JSON.stringify` arm below: `toJSON()`
+    // answers `null` for an Invalid `Date`, so the bad row would arrive as the
+    // silent blank the ruling forbids. Both CSV paths land here: the formatted
+    // path's `formatDate` returns the value UNCHANGED when `toDate` rejects it
+    // (`export-format.ts`), so this arm is the terminal for the raw path and
+    // the field-metadata path alike.
+    else if (value instanceof Date) s = Number.isNaN(value.getTime()) ? String(value) : value.toISOString();
     else { try { s = JSON.stringify(value); } catch { s = String(value); } }
     if (/[",\r\n]/.test(s)) {
         return `"${s.replace(/"/g, '""')}"`;
@@ -857,10 +966,20 @@ type NormalizedRestServerConfig = {
          * mask entirely (the data plane is unaffected either way).
          */
         maskObjectFields: boolean;
+        /**
+         * [#15542 / #15854] One switch per FACE, each gating exactly what its
+         * name states — `types` the type list, `items` the per-type list,
+         * `item` the whole per-item face (reads, `PUT`, `DELETE` and the
+         * history family), `maintenance` the whole-store operations
+         * (`/diagnostics`, `/_drafts`, `POST /_migrate-stored`). The radius of
+         * each is pinned route by route in
+         * `rest-config-mount-table.pin.test.ts`.
+         */
         endpoints: {
             types: boolean;
             items: boolean;
             item: boolean;
+            maintenance: boolean;
         };
     };
     batch: {
@@ -4045,6 +4164,12 @@ export class RestServer {
                     types: metadata.endpoints?.types ?? true,
                     items: metadata.endpoints?.items ?? true,
                     item: metadata.endpoints?.item ?? true,
+                    // [#15542] The whole-store family's own switch. Default ON,
+                    // like its three siblings: an embedder who authored only
+                    // `items: false` before keeps `/diagnostics`, `/_drafts` and
+                    // the `POST /_migrate-stored` door, which used to leave with
+                    // that switch — the compatibility cost the ruling priced.
+                    maintenance: metadata.endpoints?.maintenance ?? true,
                     // `schema` is a tombstone since #14691: it gated a route that
                     // does not exist.
                 },
@@ -4896,7 +5021,8 @@ export class RestServer {
      * local: the two passes share this method, not their routes.
      *
      * What actually mounts is gated further by `metadata.endpoints.types` /
-     * `.items` / `.item` — the routes below are the maximum, not a guarantee.
+     * `.items` / `.item` / `.maintenance` — the routes below are the maximum,
+     * not a guarantee.
      *
      * Families, in registration order: the type list (`/meta`, and its
      * `/meta/types` spelling) → whole-store operations (`/diagnostics`,
@@ -4905,6 +5031,36 @@ export class RestServer {
      * (`/:type/:name`) with its sub-resources (`references`, `layers`,
      * `history`, `audit`, `diff`, `publish`, `rollback`, `published`, and the
      * object FSM read `state/:field`).
+     *
+     * **[#15542 / #15854] One switch per FAMILY, and the families above are
+     * exactly the switches.** The taxonomy in the paragraph above predates the
+     * switch surface by a while, and the two disagreed in both directions: the
+     * whole-store family rode `endpoints.items` (a switch whose `describe()`
+     * named the per-type list, so closing a listing read silently disarmed the
+     * `POST /_migrate-stored` write door), while the per-item family's own
+     * `PUT`, `DELETE` and history sub-resources rode nothing but
+     * `api.enableMetadata` (so closing the per-item surface left its writes
+     * mounted). Now: `types` → the type list; `items` → `/:type` alone;
+     * `maintenance` → the whole-store family; `item` → the whole per-item
+     * face, book tree included, reads and writes alike.
+     *
+     * Two consequences when adding a route here:
+     *  1. **Pick its switch deliberately.** A route added inside an existing
+     *     `if` block inherits that block's switch by position alone, which is
+     *     how the drift above accumulated. The per-item family's gate is
+     *     spelled as {@link registerPerItemRoute} at its later members for
+     *     exactly this reason — the gate travels with the registration rather
+     *     than with a brace several hundred lines up.
+     *  2. **Extend the pin in the same PR.** Every switch's radius is asserted
+     *     route by route in `rest-config-mount-table.pin.test.ts`, in both
+     *     directions, so a new mount reddens it. That redness is the review
+     *     prompt, not an obstacle: add the route to the switch's row.
+     *
+     * ⚠️ `GET {metaPath}/object/:name/state/:field` is deliberately in NO
+     * per-family switch and answers to `api.enableMetadata` alone. It is the
+     * object FSM read, addressed by object name rather than by `:type/:name`,
+     * and the ruling that drew these four radii does not name it. Moving it
+     * under a switch is a decision, not a tidy-up.
      *
      * [#12195] The compound-name twins spelled `/:type/:section/:name` used to
      * close that list. They are RETIRED (stage 3 of #12176): every item is
@@ -4932,6 +5088,38 @@ export class RestServer {
         const { metadata } = this.config;
         const metaPath = `${basePath}${metadata.prefix}`;
         const isScoped = basePath.includes('/environments/:environmentId');
+
+        /**
+         * [#15542 / #15854] Register a route only when the per-item switch —
+         * `metadata.endpoints.item` — is on. Its radius is the WHOLE per-item
+         * face: `GET` / `PUT` / `DELETE {metaPath}/:type/:name`, the
+         * `/references` and `/layers` reads, the history family (`/history`,
+         * `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and the
+         * book tree. The first four of those are inside the `if` block further
+         * down; every later member goes through this call.
+         *
+         * A call rather than one more `if` block, for two reasons that are not
+         * cosmetic:
+         *  1. **No single brace pair contains exactly the right set.** The
+         *     later members are spread across ~1200 lines with
+         *     `GET {metaPath}/object/:name/state/:field` — deliberately NOT
+         *     part of this face — sitting among them.
+         *  2. **A gate that travels with its registration cannot be inherited
+         *     or shed by moving a route past a brace**, which is exactly how
+         *     this switch came to gate four reads and none of its own writes:
+         *     `PUT` and `DELETE` were registered below the block's closing
+         *     brace and answered to `api.enableMetadata` alone.
+         *
+         * ⚠️ Reads `this.routeManager` at CALL time, deliberately.
+         * {@link registerMetadataEndpoints} swaps the anonymous-deny wrapping
+         * registrar in for the duration of this method and restores it in a
+         * `finally`, so a reference captured at definition time would register
+         * past that gate.
+         */
+        const registerPerItemRoute = (entry: Parameters<RouteManager['register']>[0]): void => {
+            if (metadata.endpoints.item === false) return;
+            this.routeManager.register(entry);
+        };
 
         // GET /meta - List all metadata types
         //
@@ -4999,7 +5187,13 @@ export class RestServer {
         //
         // Registered BEFORE `/meta/:type` so the `diagnostics` segment
         // is not captured as a `:type` parameter.
-        if (metadata.endpoints.items !== false) {
+        //
+        // [#15542] First of the three WHOLE-STORE operations, and they share
+        // one switch of their own — `metadata.endpoints.maintenance`. They
+        // used to ride `endpoints.items`, whose declared meaning is the
+        // per-type list, so closing a listing read silently took this sweep,
+        // `/_drafts` and the `POST /_migrate-stored` write door with it.
+        if (metadata.endpoints.maintenance !== false) {
             this.routeManager.register({
                 method: 'GET',
                 path: `${metaPath}/diagnostics`,
@@ -5195,7 +5389,9 @@ export class RestServer {
         //
         // Registered BEFORE `/meta/:type` so the `_drafts` segment is not
         // captured as a `:type` parameter.
-        if (metadata.endpoints.items !== false) {
+        //
+        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
+        if (metadata.endpoints.maintenance !== false) {
             this.routeManager.register({
                 method: 'GET',
                 path: `${metaPath}/_drafts`,
@@ -5287,7 +5483,12 @@ export class RestServer {
         //
         // Registered BEFORE `/meta/:type` so the leading-underscore segment is
         // not captured as a `:type` parameter (same reason as `_drafts`).
-        if (metadata.endpoints.items !== false) {
+        //
+        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
+        // This is the WRITE door the card was filed about: it used to be
+        // unmounted by `endpoints.items: false`, a switch declared as "list
+        // items of type".
+        if (metadata.endpoints.maintenance !== false) {
             this.routeManager.register({
                 method: 'POST',
                 path: `${metaPath}/_migrate-stored`,
@@ -5365,6 +5566,9 @@ export class RestServer {
         }
 
         // GET /meta/:type - List items of a type
+        //
+        // [#15542] The whole of `metadata.endpoints.items` — this one mount,
+        // and nothing else, which is what its `describe()` has always said.
         if (metadata.endpoints.items !== false) {
             this.routeManager.register({
                 method: 'GET',
@@ -5824,6 +6028,13 @@ export class RestServer {
         }
 
         // GET /meta/:type/:name - Get specific item
+        //
+        // [#15542 / #15854] The first four members of the per-item face. The
+        // rest of it — `PUT`, `DELETE` and the history family — is registered
+        // below this block's closing brace and goes through
+        // {@link registerPerItemRoute}, which carries the SAME switch. ⛔ The
+        // brace is not the radius: read the pin table in
+        // `rest-config-mount-table.pin.test.ts` for what `item` gates.
         if (metadata.endpoints.item !== false) {
             // Phase 3a-references: /meta/:type/:name/references must be
             // registered BEFORE /meta/:type/:name so the more-specific
@@ -6715,7 +6926,7 @@ export class RestServer {
         // PUT /meta/:type/:name - Save metadata item
         // We always register this route, but return 501 if protocol doesn't support it
         // This makes it discoverable even if not implemented
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'PUT',
             path: `${metaPath}/:type/:name`,
             handler: async (req: any, res: any) => {
@@ -6971,7 +7182,7 @@ export class RestServer {
         // DELETE /meta/:type/:name - Reset metadata item to artifact default
         // Removes a customization overlay row from sys_metadata (ADR-0005).
         // Returns 200 even when no overlay existed (idempotent reset).
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'DELETE',
             path: `${metaPath}/:type/:name`,
             handler: async (req: any, res: any) => {
@@ -7136,7 +7347,7 @@ export class RestServer {
         // (view/dashboard/report/email_template) return real events;
         // non-overlay types return `{ events: [] }` (the legacy raw-engine
         // path does not record history).
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/history`,
             handler: async (req: any, res: any) => {
@@ -7271,7 +7482,7 @@ export class RestServer {
         // 日志 / Audit log" tab can show who tried what and whether
         // a lock blocked it. Empty array on environments where the
         // table is not yet provisioned.
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/audit`,
             handler: async (req: any, res: any) => {
@@ -7396,7 +7607,7 @@ export class RestServer {
 
         // POST /meta/:type/:name/publish — promote the pending draft
         // overlay to live. 404 [no_draft] when nothing to publish.
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'POST',
             path: `${metaPath}/:type/:name/publish`,
             handler: async (req: any, res: any) => {
@@ -7597,7 +7808,7 @@ export class RestServer {
 
         // POST /meta/:type/:name/rollback — restore a historical version
         // as the new live overlay. Body: { toVersion: <number>, message? }.
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'POST',
             path: `${metaPath}/:type/:name/rollback`,
             handler: async (req: any, res: any) => {
@@ -7715,7 +7926,7 @@ export class RestServer {
 
         // GET /meta/:type/:name/diff?from=N&to=M — structural diff
         // between two historical versions (or one version vs current).
-        this.routeManager.register({
+        registerPerItemRoute({
             method: 'GET',
             path: `${metaPath}/:type/:name/diff`,
             handler: async (req: any, res: any) => {
@@ -7919,7 +8130,7 @@ export class RestServer {
         // was removed WITHOUT removing the capability — D1's "any stored junk
         // name remains listable and clearable" still holds through this door.
         {
-            this.routeManager.register({
+            registerPerItemRoute({
                 method: 'GET',
                 path: `${metaPath}/:type/:name/published`,
                 handler: async (req: any, res: any) => {

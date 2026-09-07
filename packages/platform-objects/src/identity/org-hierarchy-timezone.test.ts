@@ -20,8 +20,11 @@
  *     no default on either. The card's thesis is that every author invents this
  *     column differently, and the platform's own two precedents
  *     (`sys_job.timezone`: 100, no default; `sys_report_schedule.timezone`: 64,
- *     default `UTC`; neither validated) already disagree in three dimensions.
- *     The ruled pair must not become a third and a fourth spelling;
+ *     default `UTC`) disagreed in three dimensions. #15872 closed the third by
+ *     giving both the same `valueDomain` this pair carries — pinned next to
+ *     them in `audit/platform-iana-timezone-columns.test.ts` — and left length
+ *     and default alone. The ruled pair must not become a third and a fourth
+ *     spelling;
  *  3. the declared domain admits `UTC`, the fallback the contract names for a
  *     wholly unset chain, and the declared bound admits every zone the runtime
  *     enumerates. Why the first is not automatic — `Intl.supportedValuesOf`

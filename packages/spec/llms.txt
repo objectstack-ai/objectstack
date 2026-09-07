@@ -173,9 +173,9 @@ function registerObject(rawConfig: unknown) {
 
 ---
 
-## 7. Package Ecosystem (68 packages)
+## 7. Package Ecosystem (69 packages)
 
-The workspace publishes 68 packages under the `@objectstack` scope. The table
+The workspace publishes 69 packages under the `@objectstack` scope. The table
 below is a curated entry-point list, not the full set — drivers, connectors,
 triggers, plugins and kernel-managed services each form their own family.
 

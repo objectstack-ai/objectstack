@@ -73,12 +73,18 @@ Run `npm run build` when you need the compiled `dist/objectstack.json` artifact.
 
 ## AI Skills
 
-This project uses ObjectStack skills from `objectstack-ai/objectstack`.
-Install or update skills with the standard [skills CLI](https://skills.sh/):
+This project uses ObjectStack skills from `objectstack-ai/objectstack`. They
+were installed for one agent runtime, live in `.claude/skills/`, and are
+committed with the project. Install or update them with the standard
+[skills CLI](https://skills.sh/), naming your runtime:
 
 ```bash
-npx skills add objectstack-ai/objectstack/skills
+npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
 ```
+
+Adding a second runtime? Re-run it with that runtime's `--agent` name.
+⛔ Do not use `--all`: it writes the same bundle to `.agents/`, `agent/` and
+`.claude/` at once, and all three then land in your next commit.
 
 Skills are triggered automatically based on task context:
 

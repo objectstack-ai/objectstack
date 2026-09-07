@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.mjs';
+
 /**
  * Two entries, deliberately (#6040).
  *
@@ -42,4 +44,5 @@ export default defineConfig({
   dts: !process.env.OS_SKIP_DTS,
   format: ['esm', 'cjs'],
   target: 'es2020',
+  esbuildOptions: dropSourcesContent,
 });

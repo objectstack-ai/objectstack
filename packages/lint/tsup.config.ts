@@ -1,5 +1,7 @@
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../scripts/tsup-drop-sources-content.mjs';
+
 /**
  * Package-local config (#4463): `@objectstack/lint` ships TWO entries, so it
  * cannot use the repo-root `tsup.config.ts` (single `src/index.ts`).
@@ -20,4 +22,5 @@ export default defineConfig({
   dts: !process.env.OS_SKIP_DTS,
   format: ['esm', 'cjs'],
   target: 'es2020',
+  esbuildOptions: dropSourcesContent,
 });

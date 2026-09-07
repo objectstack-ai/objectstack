@@ -32,7 +32,9 @@
  * 16,000-line file has an expected lifetime measured in days.
  *
  * ⭐ And the rot can hide a SEMANTIC INVERSION. ADR-0113 cited
- * `sql-driver.ts:4901` for `if (field.required) col.notNullable()`; the
+ * `packages/drivers/driver-sql/src/sql-driver.ts` (line 4901 as the ADR wrote
+ * it -- a dated reading, ⛔ not a pointer) for `if (field.required)
+ * col.notNullable()`; the
  * mechanism moved and now keys off `storage.notNull` -- the opposite predicate.
  * With the anchor rotted, the ADR's pre-decision Context row reads to a fresh
  * reader as a description of today. That is carded separately as #14193 and is
@@ -96,8 +98,11 @@
  *   (c) READS NATURALLY. `#symbol` is the fragment syntax a reader already
  *       knows from URLs, and it survives copy-paste into a GitHub link.
  *
- * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `file.ts:4901`, `file.ts:341-400`,
- * `file.ts:459–463` (en dash) and a bare continuation `:2933` are all findings.
+ * ⛔ A LINE NUMBER IS NOT AN ANCHOR FORM. `<file>.ts:4901`, `<file>.ts:341-400`,
+ * `<file>.ts:459–463` (en dash) and a bare continuation -- a backticked `:`
+ * followed by a line spec, `2933` -- are all findings. ⚠️ The angle brackets
+ * are deliberate: this file is itself inside the `scripts/**` corpus, so an
+ * illustration written path-shaped would be a citation of its own.
  *
  * ### The one escape hatch, and who may use it
  *
@@ -209,10 +214,10 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
 /* ⛔ The forms the migration deleted. Matched on the SAME text the anchor
  * extractor sees, so a line number cannot hide behind a spelling the extractor
  * normalises away. Both the full form and the bare continuation. */
-/* ⭐ A LINE SPEC is not just `:123`, and assuming it was is how a gate
- * false-greens. The #13556 corpus spells one position NINE ways, and the
- * census's own extractor missed the comma forms exactly as a naive rule here
- * would:
+/* ⭐ A LINE SPEC is not just a colon and one run of digits, and assuming it was
+ * is how a gate false-greens. The #13556 corpus spells one position NINE ways,
+ * and the census's own extractor missed the comma forms exactly as a naive rule
+ * here would:
  *
  *     :4901        :341-400      :459–463 (en dash)     :2214+
  *     :610,1028    :13,346-389   :29-39,147-152         :2956/2991
@@ -224,18 +229,19 @@ const CONTINUATION_SPAN = new RegExp('`#(?<symbol>' + SYMBOL + ')`', 'g');
  * version matched only a span that was EXACTLY an anchor, and it called a
  * corpus still carrying rot clean — three ways at once: a bare anchor in
  * running prose, an anchor sharing a span with other text
- * (`` `Builder.io SDK: packages/sdks/src/types/builder-block.ts:42` ``), and
+ * (`` `Builder.io SDK: <dir>/<file>.ts:42` ``), and
  * that slash list. A line number is rot wherever it is written; the only thing
  * excluded is a FENCED block, which is quoted material, not an anchor. */
 const LINE_SPEC = '\\d+(?:\\s*[-–—]\\s*\\d+)?(?:\\s*[,/]\\s*\\d+(?:\\s*[-–—]\\s*\\d+)?)*\\+?';
 const LINE_ANCHOR = new RegExp('(?<![\\w/.-])(' + PATHISH + '):(' + LINE_SPEC + ')(?![\\w-])', 'g');
 const LINE_CONTINUATION = new RegExp('`\\s*[:,]\\s*(' + LINE_SPEC + ')`', 'g');
 
-/* `// packages/foo/bar.ts:378` — a comment that is nothing but a path. */
+/* `// <dir>/<file>.ts:378` — a comment that is nothing but a path. */
 const FENCED_HEADER = new RegExp('^\\s*(?://|#|\\*|/\\*)\\s*' + PATHISH + ':\\d');
 
 /* ⭐ A ninth spelling, and the census counted none of them: a bare backticked
- * number, tilde-prefixed — `` ~`326` `` for "about line 326". It carries no
+ * number, tilde-prefixed — a `~` then a backticked line number, `` ~`NNN` ``,
+ * written for "about line 326". It carries no
  * path, so it cannot be resolved to anything; ADR-0056 alone held 13.
  *
  * ⚠️ Only the TILDE form is judged. A bare `` `403` `` or `` `4096` `` is an
@@ -370,7 +376,7 @@ export function extractAnchors(markdown) {
      * and the census counted those among its 343 — so skipping fences wholesale
      * would leave five rotted anchors behind. Everything else in a fence is
      * quoted material (sample code, CI output) and is NOT judged: an example
-     * that happens to contain `foo.ts:12` is not an anchor. */
+     * that happens to contain `<file>.ts:12` is not an anchor. */
     if (inFence) {
       if (!FENCED_HEADER.test(text)) return;
       for (const m of text.matchAll(LINE_ANCHOR)) {
@@ -450,7 +456,7 @@ export function extractAnchors(markdown) {
  * corpus unusable. Measured over the 216 tracked `scripts/**` `.mjs` files on
  * `5315098df`: 251 live line citations raw against 128 through this projection.
  * The 123 that vanish are not rot -- they are a gate's own self-test FIXTURES,
- * string literals like `'p.ts:2'` and `'content/docs/other.mdx:1'` written to
+ * string literals like `'<file>.ts:2'` and `'<dir>/<file>.mdx:1'` written to
  * provoke that gate's own line-reporting. Judging those would red a gate for
  * testing itself, which is the fabrication direction
  * `scripts/js-comment-mask.mjs` exists to close.
@@ -523,7 +529,26 @@ function trackedFiles(root) {
 }
 
 /**
- * Sweep one corpus. Returns findings and the counts a report needs.
+ * The SHAPE of a declined citation -- why no resolver could bind it. Kept here
+ * rather than in a corpus so every corpus that waives citations reports the
+ * same four words, and a residual list can be grouped without re-deriving the
+ * classification from the raw text.
+ *
+ * Order is load-bearing: a continuation and a tilde form BOTH inherit whatever
+ * path preceded them on the line, so they must be named by how they were
+ * written, never by the path they borrowed.
+ */
+export function declinedShape(la) {
+  if (la.tilde) return 'tilde';
+  if (la.continuation) return 'continuation';
+  if (la.path?.includes('/')) return 'directory-qualified';
+  return 'bare-filename';
+}
+
+/**
+ * Sweep one corpus. Returns findings, the counts a report needs, and the
+ * citations a corpus declined to judge (`declined`, empty unless the corpus
+ * sets `judgeUntrackedLineAnchors: false`).
  *
  * Finding kinds:
  *   line-anchor        a `path:NNN` survived the migration                (RED)
@@ -535,6 +560,7 @@ function trackedFiles(root) {
 export function sweepCorpus(corpus, root = process.cwd()) {
   const tracked = trackedFiles(root);
   const findings = [];
+  const declined = [];
   const counts = { docs: 0, anchors: 0, symbol: 0, fileLevel: 0, declaration: 0, literal: 0, crossRepo: 0, exempt: 0, continuation: 0, unresolvableLineCitation: 0 };
   const sourceCache = new Map();
   const readTarget = (p) => {
@@ -560,19 +586,26 @@ export function sweepCorpus(corpus, root = process.cwd()) {
        * and a gate whose only remedy is "stop writing that" is the
        * permanently-red gate this repo retired.
        *
-       * Measured on `5315098df` over `scripts/**` `.mjs` comment prose: 128
-       * live citations in all, of which 32 name a tracked file and 96 do not --
-       * 66 bare filenames (`engine.ts:9407`, an abbreviation inside a census
-       * table that no resolver can bind to one of this tree's several
-       * `engine.ts`), 22 continuations inheriting no path of their own, 11
-       * directory-qualified paths that are illustrations or sibling-repo files
-       * (`path/to/file.ts:1234`, `src/github.sh:68-91`), and 1 tilde form. The
-       * 96 are a real defect class and are recorded as a follow-up, exactly as
-       * the 1,056 bare paths under `checkBarePaths` were -- but they are not
-       * the cross-file rot #15765 measured, and folding them in would bury this
-       * gate's signal under a cleanup nobody ruled on. */
+       * Measured on `scripts/symbol-anchors.mjs` over `scripts/**` `.mjs`
+       * comment prose, on the date recorded in `check-scripts-symbol-anchors`'s
+       * own census constant: 128 live citations in all, of which 32 named a
+       * tracked file and 96 did not -- bare filenames (an abbreviation inside a
+       * census table that no resolver can bind to one of this tree's several
+       * files of that name), continuations inheriting no path of their own,
+       * directory-qualified paths that are illustrations or sibling-repo files,
+       * and one tilde form. That population is a real defect class and was
+       * recorded as a follow-up (#15809), exactly as the 1,056 bare paths under
+       * `checkBarePaths` were -- but it is not the cross-file rot #15765
+       * measured, and folding it in would bury this gate's signal under a
+       * cleanup nobody ruled on.
+       *
+       * ⭐ Declining to JUDGE is not declining to SEE. Every declined citation
+       * is counted AND recorded in `declined`, so a corpus can enumerate what
+       * it waived (`--list-unresolvable`) and the residual stays a list rather
+       * than a number nobody can act on. */
       if (!corpus.judgeUntrackedLineAnchors && !tracked.has(la.path ?? '')) {
         counts.unresolvableLineCitation += 1;
+        declined.push({ doc: rel, line: la.line, raw: la.raw, path: la.path ?? null, shape: declinedShape(la) });
         continue;
       }
       /* A marker whose CLASS is unrecognised is its own finding, never a
@@ -645,7 +678,7 @@ export function sweepCorpus(corpus, root = process.cwd()) {
       counts[cls] += 1;
     }
   }
-  return { findings, counts };
+  return { findings, counts, declined };
 }
 
 export function formatFindings(findings) {
@@ -678,8 +711,9 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // The count is a FLOOR, not an equality — adding cases is ordinary work and must
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
+// 63 → 67 when `declinedShape` gained a case per arm (#15809).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 63,
+  'symbol-anchors self-test': 67,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -884,6 +918,18 @@ export function selfTest() {
   let projThrew = false;
   try { defineCorpus({ id: 'x', label: 'x', docRoots: ['a'], docProjection: 'commentProse' }); } catch { projThrew = true; }
   check(projThrew, 'defineCorpus must refuse a docProjection that is not callable — a skipped projection sweeps raw source while reading as though it did not');
+
+  // 11. ⭐ The declined SHAPE, whose ordering is the whole rule (#15809): a
+  //     continuation and a tilde form inherit whatever path preceded them on
+  //     the line, so classifying by the path first would file them under the
+  //     borrowed path and a residual list would name a file the author never
+  //     wrote. All four arms, in one case each.
+  check(declinedShape({ tilde: true, path: 'a/b.ts' }) === 'tilde',
+    'a tilde form is a TILDE even when a path preceded it on the line — it borrowed that path, it did not cite it');
+  check(declinedShape({ continuation: true, path: 'a/b.ts' }) === 'continuation',
+    'a continuation is a CONTINUATION even when a path preceded it on the line');
+  check(declinedShape({ path: 'a/b.ts' }) === 'directory-qualified', 'a path with a slash is directory-qualified');
+  check(declinedShape({ path: 'b.ts' }) === 'bare-filename', 'a path with no slash is a bare filename — the shape no resolver can bind');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //

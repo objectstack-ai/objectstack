@@ -1377,10 +1377,34 @@ describe('[#7795] deleting a platform-global rule requires platform authority', 
     userId: 'ops', organizationId: 'org1',
     systemPermissions: ['manage_sharing', 'manage_platform_settings'],
   } as any;
-  /** Platform authority, spelling 2: the built-in POSITION (ADR-0068 D2). */
-  const PLATFORM_ADMIN_POSITION = {
+  /**
+   * Platform authority, spelling 2: the ADR-0095 posture RUNG.
+   *
+   * [#15981] This fixture used to spell the second channel as the built-in
+   * POSITION NAME alone, on the reading that the name is only ever projected
+   * from the unscoped `admin_full_access` grant. `positions[]` is now the
+   * security axis and also carries ADR-0057 D4 `sys_user_position` names, so
+   * the name no longer implies the grant — the rung does. A genuine operator's
+   * resolved context carries BOTH (the projection is still emitted), which is
+   * why this keeps `positions` as well: dropping it would make the fixture
+   * unrepresentative in the opposite direction.
+   */
+  const PLATFORM_ADMIN_RUNG = {
     userId: 'root', organizationId: 'org1',
     systemPermissions: ['manage_sharing'], positions: ['platform_admin'],
+    posture: 'PLATFORM_ADMIN',
+  } as any;
+  /**
+   * [#15981] The ESCALATION shape: the same name with no rung behind it — what
+   * a tenant can mint through the `apiEnabled` `sys_user_position` surface.
+   * Refused. Driven end-to-end through the real resolver in
+   * `sharing-rule-positions-name-authority.test.ts`; this arm keeps the
+   * boundary visible in the suite that owns the gate.
+   */
+  const PLATFORM_ADMIN_NAME_ONLY = {
+    userId: 'impostor', organizationId: 'org1',
+    systemPermissions: ['manage_sharing'], positions: ['platform_admin'],
+    posture: 'MEMBER',
   } as any;
   /** No `manage_sharing` at all — must still be refused by the OLDER gate. */
   const MALLORY = { userId: 'mallory', organizationId: 'org1', systemPermissions: [] } as any;
@@ -1511,10 +1535,17 @@ describe('[#7795] deleting a platform-global rule requires platform authority', 
     expect(grantsOf(seededId)).toHaveLength(0);
   });
 
-  it('the platform_admin position authorizes the delete', async () => {
-    await expect(rules.deleteRule(seededId, PLATFORM_ADMIN_POSITION)).resolves.toBeUndefined();
+  it('the PLATFORM_ADMIN posture rung authorizes the delete', async () => {
+    await expect(rules.deleteRule(seededId, PLATFORM_ADMIN_RUNG)).resolves.toBeUndefined();
     expect(engine._tables.sys_sharing_rule.find((r) => r.id === seededId)).toBeUndefined();
     expect(grantsOf(seededId)).toHaveLength(0);
+  });
+
+  it('[#15981] the built-in position NAME without the rung does NOT', async () => {
+    expect(await refusalCodeOf(rules.deleteRule(seededId, PLATFORM_ADMIN_NAME_ONLY)))
+      .toBe('PERMISSION_DENIED');
+    // The row survives: a refusal that still destroyed the rule would be none.
+    expect(engine._tables.sys_sharing_rule.find((r) => r.id === seededId)).toBeTruthy();
   });
 
   it('a system context (boot seeding, hooks, backfills) still deletes', async () => {
@@ -1620,9 +1651,19 @@ describe('[#8158] a non-system caller with NO organization does not get the syst
   const ORG_LESS_PLATFORM_CAP = {
     userId: 'ops', systemPermissions: ['manage_sharing', 'manage_platform_settings'],
   } as any;
-  /** Platform authority with no active org, spelling 2: the ADR-0068 D2 position. */
-  const ORG_LESS_PLATFORM_POSITION = {
+  /**
+   * Platform authority with no active org, spelling 2: the ADR-0095 rung.
+   * [#15981] Was the built-in position NAME alone — see the migration note on
+   * `PLATFORM_ADMIN_RUNG` above for why a name is no longer that evidence.
+   */
+  const ORG_LESS_PLATFORM_RUNG = {
     userId: 'root', systemPermissions: ['manage_sharing'], positions: ['platform_admin'],
+    posture: 'PLATFORM_ADMIN',
+  } as any;
+  /** [#15981] The escalation shape: the minted name, no rung. Refused. */
+  const ORG_LESS_NAME_ONLY = {
+    userId: 'impostor', systemPermissions: ['manage_sharing'], positions: ['platform_admin'],
+    posture: 'MEMBER',
   } as any;
   /** No capability at all — the OLDER gate must still fire first. */
   const ORG_LESS_NOBODY = { userId: 'nobody', systemPermissions: [] } as any;
@@ -1788,10 +1829,18 @@ describe('[#8158] a non-system caller with NO organization does not get the syst
     // bootstrapped, so refusing it would be a functional regression.
     expect(namesOf(await rules.listRules({}, ORG_LESS_PLATFORM_CAP)))
       .toEqual(['org1_rule', 'org2_rule', SEEDED].sort());
-    expect(namesOf(await rules.listRules({}, ORG_LESS_PLATFORM_POSITION)))
+    expect(namesOf(await rules.listRules({}, ORG_LESS_PLATFORM_RUNG)))
       .toEqual(['org1_rule', 'org2_rule', SEEDED].sort());
     expect((await rules.getRule(org2RuleId, ORG_LESS_PLATFORM_CAP))?.name).toBe('org2_rule');
-    expect((await rules.getRule('org2_rule', ORG_LESS_PLATFORM_POSITION))?.id).toBe(org2RuleId);
+    expect((await rules.getRule('org2_rule', ORG_LESS_PLATFORM_RUNG))?.id).toBe(org2RuleId);
+  });
+
+  it('[#15981] an org-less caller holding only the minted NAME reads nothing', async () => {
+    // The whole point of the #8158 gate: `manage_sharing` is ORG-scoped, so an
+    // org-less holder of it must not answer unscoped. The name-read was the
+    // bypass — this is the arm that keeps it closed.
+    await expect(rules.listRules({}, ORG_LESS_NAME_ONLY)).rejects.toThrow(/PERMISSION_DENIED/);
+    await expect(rules.getRule(org2RuleId, ORG_LESS_NAME_ONLY)).rejects.toThrow(/PERMISSION_DENIED/);
   });
 
   // ── the anti-vacuity control: scoped ≠ single-tenant ─────────────────
