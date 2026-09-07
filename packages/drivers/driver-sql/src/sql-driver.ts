@@ -12898,13 +12898,19 @@ export class SqlDriver implements IDataDriver {
    * `created_at` an author declared `number` takes the SQLite numeric repair
    * and then the audit presenter there, while here it takes the audit
    * presenter alone (`readPresentationKind` answers one kind per column). The
-   * two agree on every value the driver's own DDL can store in that column —
-   * SQLite's NUMERIC affinity folds a numeric-looking string to INTEGER before
-   * it is ever read back, and a number passes both presenters untouched — and
-   * differ only on a numeric-looking TEXT in a hand-made TEXT-affinity audit
-   * column, which `find()` reads as a number and this door as the string.
-   * `sql-driver-13973-canonical-iso-read-door.test.ts` §D pins the agreement
-   * on the shapes that are reachable.
+   * two differ on any TEXT that `Number()` accepts but SQLite's NUMERIC
+   * affinity leaves as TEXT — hex, binary and octal literals (`'0x10'`,
+   * `'0b101'`, `'0o17'`) and `'Infinity'` — which `find()` reads as the number
+   * (`16`, `5`, `15`, `Infinity`) and this door as the string; that is
+   * reachable through `create()` / `update()` on the driver's own DDL with an
+   * author-declared non-temporal audit column, not only through a hand-made
+   * TEXT-affinity column (measured in the #16619 contract review). A decimal
+   * or exponent spelling (`'1700000000000'`, `'1e3'`, `'.5'`) is folded to
+   * INTEGER/REAL by the affinity before it is read back, and a number passes
+   * both presenters untouched, so those agree. The B1 ruling did not decide
+   * that residual shape — it lies outside its column classes — and nothing
+   * here closes it. `sql-driver-13973-canonical-iso-read-door.test.ts` §D
+   * pins the agreement on the shapes the ruling covers.
    */
   protected presentReadValue(kind: ReadPresentationKind, value: any): any {
     if (value == null) return value;
