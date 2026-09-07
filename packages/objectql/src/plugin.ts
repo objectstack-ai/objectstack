@@ -2490,6 +2490,76 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [#15252] The metadata plane {@link runGovernanceInventory} audits against,
+   * resolved the way a REQUEST resolves it.
+   *
+   * The audit used to take it from `ctx.getService('metadata')` alone. That
+   * accessor reads two synchronous maps — the kernel's own `services` and
+   * `PluginLoader.getServiceInstance` (which reads `serviceInstances`) — and
+   * NEITHER of them holds a scoped instance: `PluginLoader` mints those into
+   * `scopedServices`, keyed by scope id. So against a composition that
+   * registers `metadata` with `ServiceLifecycle.SCOPED` the call threw
+   * `Service 'metadata' is async - use await` BEFORE any read method ran, the
+   * wiring below swallowed the throw into "no metadata plane at all", and the
+   * audit reported that scope's declarations as absent — silently, because an
+   * empty declaration set is indistinguishable from a plane holding nothing.
+   *
+   * The router never had that problem: `HttpDispatcher.resolveService` asks
+   * `defaultKernel.getServiceAsync(name, scopeId)` FIRST, with the request's
+   * environment id, and only then falls back to the synchronous accessors. So
+   * this mirrors that order, with the one scope id a boot-time caller can
+   * legitimately name — `environmentId`, which declares that this kernel
+   * serves ONE environment. `ctx.getServiceScoped` and the dispatcher's
+   * `getServiceAsync(name, scopeId)` both land on `PluginLoader.getService`,
+   * so for a scoped registration this resolves the SAME cached instance the
+   * router resolves through. That identity is the point: an audit reading a
+   * different instance than the router dispatches from cannot say anything
+   * true about what the router will refuse.
+   *
+   * Unchanged for every shipped composition, and checked rather than assumed:
+   * `ObjectKernel.registerService` writes the kernel map AND
+   * `PluginLoader.serviceInstances`, so a statically registered plane
+   * (`packages/metadata/src/plugin.ts`) comes back from the scoped attempt as
+   * the very same object the synchronous lookup returns. The fallback covers
+   * every other shape — a host with no scoped accessor at all
+   * (`KernelBase`/`LiteKernel` throws "not supported"), a test double whose
+   * context implements `getService` only, and a kernel declaring no
+   * `environmentId`.
+   *
+   * ⚠️ The boundary that REMAINS, stated so it is not re-discovered as a bug:
+   * a kernel serving several environments at once has no single scope for a
+   * boot-time audit to name, so there is nothing to ask for and the
+   * synchronous lookup stands. Auditing per environment is a different
+   * inventory with a different lifecycle, not a scope id this method can
+   * invent.
+   */
+  private async resolveGovernanceMetadataService(
+    ctx: PluginContext,
+  ): Promise<(IMetadataService & KeyedPluralMetadataRead) | undefined> {
+    const scopeId = this.environmentId;
+    if (scopeId && typeof ctx.getServiceScoped === 'function') {
+      try {
+        const scoped = await ctx.getServiceScoped<IMetadataService & KeyedPluralMetadataRead>(
+          'metadata',
+          scopeId,
+        );
+        if (scoped != null) return scoped;
+      } catch {
+        // Not resolvable under a scope on this host — nothing registered under
+        // the name, or a host with no scoped accessor. Fall through to the
+        // synchronous lookup, which is what every non-scoped shape answers
+        // from; a plane that is genuinely absent ends up `undefined` either
+        // way and the audit degrades exactly as it did before.
+      }
+    }
+    try {
+      return ctx.getService<IMetadataService & KeyedPluralMetadataRead>('metadata');
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * [ADR-0110 D5] Audit the engine's action-handler registry against the
    * declarations it can dispatch for, and warn about the orphans on both
    * sides. Runs at `kernel:ready` (after {@link resyncAuthoredActions}, so
@@ -2514,7 +2584,9 @@ export class ObjectQLPlugin implements Plugin {
     let loadStandaloneActionsKeyed: (() => Promise<Array<{ name: string; data: any }>>) | undefined;
     let lookupMetadataAction: ((actionName: string) => unknown) | undefined;
     try {
-      const meta = ctx.getService<IMetadataService & KeyedPluralMetadataRead>('metadata');
+      // [#15252] Resolved the way a request resolves it — scoped first, with
+      // this kernel's declared environment id. See the method's docblock.
+      const meta = await this.resolveGovernanceMetadataService(ctx);
       const loadMany = meta?.loadMany;
       if (meta && typeof loadMany === 'function') {
         loadStandaloneActions = () => loadMany.call(meta, 'action');

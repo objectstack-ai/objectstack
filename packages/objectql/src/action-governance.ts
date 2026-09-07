@@ -486,20 +486,31 @@ function fingerprint(r: ReturnType<typeof reconcileActionRegistrations>): string
  *    identity the store holds each row by (#14205), so a row whose body
  *    carries no `name` is a declaration here exactly as it is to the router.
  *
- * ## ⚠️ The boundary this audit does NOT cross, stated so nobody re-discovers it
+ * ## [#15252] The SCOPED plane, and the boundary that is left
  *
- * This runs at boot, OUTSIDE any request scope, so it reads the metadata
- * service its host can hand it — `ctx.getService('metadata')`. If a
- * composition ever registers `metadata` with a SCOPED lifecycle, that
- * accessor cannot reach the per-scope instance at all (it throws before any
- * read method runs), the audit falls back to the sources it does have, and it
- * may then report a handler the router serves from a scoped plane. That is a
- * BOUNDARY of a boot-time audit, not a defect in these reads, and it is not
- * reachable today: no shipped composition registers `metadata` as SCOPED
- * (`packages/metadata/src/plugin.ts` registers a static instance). Making a
- * boot-time audit reach a request-scoped service is a separate product
- * change, tracked on its own card — ⛔ do not "fix" it by loosening what the
- * reads below claim.
+ * This runs at boot, OUTSIDE any request scope, so which plane it reads is the
+ * caller's decision, not this function's. That decision used to be
+ * `ctx.getService('metadata')` and nothing else — an accessor that reads only
+ * the synchronous service maps, so against a composition registering
+ * `metadata` with a SCOPED lifecycle it threw before any read method ran, the
+ * caller swallowed the throw, and this inventory audited a scope's handlers
+ * with that scope's declarations missing. Keying an enumeration cannot help a
+ * caller that never obtained the object to enumerate, and neither can a
+ * by-name rung: the fault sat upstream of every source below.
+ *
+ * `ObjectQLPlugin.resolveGovernanceMetadataService` is where that is settled
+ * now, by resolving the plane in the router's own order — scoped first, under
+ * the kernel's declared `environmentId`, then the synchronous lookup — so the
+ * audit holds the same instance `HttpDispatcher.resolveService` hands the
+ * router. ⛔ It is still not this function's job: a caller that hands over no
+ * plane still gets an inventory that audits the sources it does have, and that
+ * degradation must stay quiet rather than be papered over here.
+ *
+ * ⚠️ What remains a BOUNDARY, so it is not re-filed as a defect: a kernel
+ * serving several environments at once declares no single `environmentId`, so
+ * a boot-time audit has no scope to name and reads the non-scoped plane.
+ * Auditing per environment is a different inventory with a different
+ * lifecycle. ⛔ Do not "fix" that one by loosening what the reads below claim.
  */
 export async function runActionGovernanceInventory(args: {
     registered: Array<{ objectName: string; actionName: string; package?: string }>;

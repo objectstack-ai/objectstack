@@ -222,6 +222,15 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  * `os validate`'s verdict to give), so it runs BOTH tiers on the normalized
  * stack. Every rule here is written to tolerate that — it is what `os lint`
  * already did for the reference-integrity suite and the security linter.
+ * Since #16095 the `parsed` tier under `os lint` is that same normalized stack
+ * with its inline `handler` callables LOWERED to a metadata `body` (the
+ * `lowerCallables` pass `os build` runs before its parse) — still unparsed,
+ * still the same input, but carrying the `body.source` the `hook-body-*` /
+ * `hook-api-update-readonly-*` family opens on. Without it the family judged
+ * only hooks authored with an explicit `body`, which the reference app never
+ * writes (39 of 39 hooks are `handler` functions), while `os build` judged
+ * them all along. `normalized`-tier rules keep the un-lowered input on every
+ * command, so a rule that reads a live function value belongs there.
  *
  * ## What `normalized` does NOT buy, measured (#6073)
  *
@@ -1568,8 +1577,10 @@ export interface AuthoringRuleRun extends AuthoringRuleContext {
   /** `normalizeStackInput` output — pre-Zod-parse. Always required. */
   normalized: AnyRec;
   /**
-   * Post-Zod-parse stack. Omitted by `os lint`, which does not parse; `parsed`
-   * rules then read `normalized` (see `AuthoringRuleInputTier`).
+   * Post-Zod-parse stack. `os lint`, which does not parse, hands this the
+   * normalized stack with its inline callables lowered to metadata bodies
+   * (#16095, see `AuthoringRuleInputTier`); omitted, `parsed` rules read
+   * `normalized`.
    */
   parsed?: AnyRec;
 }
