@@ -347,14 +347,19 @@ export class ScheduleTrigger implements FlowTrigger {
     /** Injectable clock so window math is deterministic under test. */
     private readonly now: () => Date;
     /**
-     * Dispatch keys a {@link ReplayGuard} has authorised for one re-dispatch
-     * (#14501). A replay of a window whose claim is absent or failed must
-     * actually re-run it — but the handler's own claim gate would see the
-     * existing row and no-op, so the guard leaves a one-shot pass here and the
-     * handler consumes it. In-process by construction and correctly so: the
-     * pass is written and read inside a single `replay()` call chain.
+     * flowName → the ONE dispatch key a {@link ReplayGuard} has authorised for
+     * re-dispatch (#14501). A replay of a window whose claim is absent or
+     * failed must actually re-run it — but the handler's own claim gate would
+     * see the existing row and no-op, so the guard leaves a one-shot pass here
+     * and the handler consumes it. In-process by construction and correctly
+     * so: the pass is written and read inside a single `replay()` call chain.
+     *
+     * Keyed by FLOW rather than accumulated in a set, so a pass a job service
+     * asked for and then abandoned is overwritten by the next one instead of
+     * outliving its window — at most one outstanding pass per bound flow, and
+     * `stop()` takes it with the binding.
      */
-    private readonly replayPasses = new Set<string>();
+    private readonly replayPasses = new Map<string, string>();
     /** Whether the in-process-only dedup degradation has been said (once). */
     private claimDegradationWarned = false;
     /** Whether the "no replay guard could be installed" degradation has been said (once). */
@@ -408,7 +413,8 @@ export class ScheduleTrigger implements FlowTrigger {
                 // window whose claim was absent or failed (or a forced replay
                 // of a delivered one): claim anyway so the ledger records the
                 // dispatch, but do not let a claim miss stop it.
-                const replayPass = this.replayPasses.delete(key);
+                const replayPass = this.replayPasses.get(binding.flowName) === key;
+                if (replayPass) this.replayPasses.delete(binding.flowName);
                 const claimed = await this.claimDispatch(binding.flowName, key);
                 if (!claimed && !replayPass) {
                     this.logger.debug?.(
@@ -511,7 +517,7 @@ export class ScheduleTrigger implements FlowTrigger {
             }
             // Absent, failed, unsettled, or forced — this replay re-runs the
             // window, so let the handler past its own claim gate exactly once.
-            this.replayPasses.add(key);
+            this.replayPasses.set(flowName, key);
             return { allow: true };
         });
     }
@@ -590,6 +596,7 @@ export class ScheduleTrigger implements FlowTrigger {
         const jobName = this.bound.get(flowName);
         if (!jobName) return;
         this.bound.delete(flowName);
+        this.replayPasses.delete(flowName);
         const jobService = this.getJobService();
         if (!jobService || typeof jobService.cancel !== 'function') return;
         if (typeof jobService.setReplayGuard === 'function') {
