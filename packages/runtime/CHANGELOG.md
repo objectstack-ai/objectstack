@@ -1719,6 +1719,9 @@
     row that has no registry presence (durable-only) carries no verdict, and the
     REST detail door's database-first row does not either — the registry item is
     the only carrier, by design.
+  - **Correction (2026-09-07):** no package of a compiled artifact is
+    scope-less — `ManifestSchema` defaults `scope` to `project`; the
+    "scope-less `type: module`" clause above is withdrawn, see #14803 / #16122.
 - 8ce628a: fix(objectql,runtime,rest): store a serializable manifest in the package registry so `/packages` stops answering 500 (#14309)
   
   On a stock showcase boot, signed in as the seeded admin, every read door that

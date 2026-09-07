@@ -59,7 +59,7 @@ const SHOWCASE_TASK_FEED = {
   target: 'showcase_task',
   objectParams: { object: 'showcase_task', operation: 'find' },
   authRequired: true,
-  cacheTtl: 30,
+  cacheTtlSeconds: 30,
 } as const;
 
 /** The flow-typed half of the same stack. */

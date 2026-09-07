@@ -68,7 +68,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport } from '../import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 // ⛔ Never `ts.createSourceFile` directly. It does not throw on a source it
 // cannot read — the errors are parked on `parseDiagnostics` and the recovered
 // tree walks like any other, so a file this census could not parse would be

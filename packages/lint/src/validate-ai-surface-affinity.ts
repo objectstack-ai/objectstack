@@ -28,6 +28,8 @@
  * contract is reported.
  */
 
+import { recordsOf } from './object-graph.js';
+
 export const AI_SKILL_SURFACE_MISMATCH = 'ai-skill-surface-mismatch';
 
 export type AiSurfaceAffinitySeverity = 'error' | 'warning';
@@ -49,14 +51,6 @@ export interface AiSurfaceAffinityFinding {
 
 type AnyRec = Record<string, unknown>;
 
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => !!x && typeof x === 'object');
-  if (v && typeof v === 'object') {
-    return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
-  }
-  return [];
-}
-
 function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
@@ -75,12 +69,12 @@ export function validateAiSurfaceAffinity(stack: AnyRec): AiSurfaceAffinityFindi
   if (!stack || typeof stack !== 'object') return findings;
 
   const skillsByName = new Map<string, AnyRec>();
-  for (const skill of asArray(stack.skills)) {
+  for (const skill of recordsOf(stack.skills)) {
     const n = strName(skill.name);
     if (n) skillsByName.set(n, skill);
   }
 
-  const agents = asArray(stack.agents);
+  const agents = recordsOf(stack.agents);
   for (let ai = 0; ai < agents.length; ai++) {
     const agent = agents[ai];
     const agentName = strName(agent.name) ?? `#${ai}`;

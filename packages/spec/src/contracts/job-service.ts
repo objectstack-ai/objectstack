@@ -143,7 +143,7 @@ export interface JobRetryPolicy {
 
 /**
  * Per-job execution options threaded from the authored JobSchema
- * (`retryPolicy` / `timeout`) down to the executing adapter.
+ * (`retryPolicy` / `timeoutMs`) down to the executing adapter.
  *
  * Omitted options preserve the legacy behavior: one attempt, no time limit.
  */
@@ -154,8 +154,13 @@ export interface JobScheduleOptions {
      * Per-attempt time limit in milliseconds. A run that exceeds it is
      * recorded with status 'timeout'. Note: JavaScript cannot forcibly
      * cancel the in-flight handler — the attempt is abandoned, not killed.
+     *
+     * Renamed from `timeout` (#14478) in lockstep with `JobSchema.timeoutMs`,
+     * the authored key whose value this carries: a contract that re-spelled
+     * it without the unit would reintroduce one layer down exactly the
+     * ambiguity the rename removed.
      */
-    timeout?: number;
+    timeoutMs?: number;
 }
 
 /**
@@ -190,7 +195,7 @@ export interface IJobService {
      * @param name - Job name (snake_case)
      * @param schedule - Schedule configuration
      * @param handler - Job handler function
-     * @param options - Optional per-job retry policy / timeout
+     * @param options - Optional per-job retry policy / per-attempt time limit (`timeoutMs`)
      */
     schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void>;
 

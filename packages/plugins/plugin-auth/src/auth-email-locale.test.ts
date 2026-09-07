@@ -126,8 +126,8 @@ const USER = { id: 'u1', email: 'ada@example.com', name: 'Ada' };
  * callback — that placement is itself the #8019 "does not gate" guarantee — so
  * it is driven through that hook with a synthetic success context.
  */
-async function driveAllFive(locale: string | undefined) {
-  const { capturedConfig, sent } = await boot(locale);
+async function driveAllFive(locale: string | undefined, extra: Record<string, unknown> = {}) {
+  const { capturedConfig, sent } = await boot(locale, extra);
 
   await capturedConfig.emailAndPassword.sendResetPassword({
     user: USER,
@@ -846,5 +846,297 @@ describe("#14641 — an invitation reads the INVITEE's own sys_user.locale", () 
       }),
     ).rejects.toThrow(/placeholder address/);
     expect(reads.filter((r) => r.object === 'sys_user')).toHaveLength(0);
+  });
+});
+
+// ── #15106 — the magic-link send reaches the same top rung ─────────────────
+
+/**
+ * The last of the five sends to read the recipient's own `sys_user.locale`.
+ *
+ * ⚠️ POPULATION of the class claim these blocks close, stated rather than
+ * implied: the auth mail surface is the five `sendTemplate` call sites in
+ * `auth-manager.ts` — `IEmailService` declares exactly two delivering members
+ * (`send`, `sendTemplate`), plugin-auth's only `.send(` calls are the SMS
+ * service's, and no other file under `plugin-auth/src` calls either. Those
+ * five are the same five `driveAllFive` above drives and `TEMPLATES` names.
+ * Before this change four of them read the column and `sendMagicLink` did not;
+ * `the whole surface reads it` is pinned below by driving all five against one
+ * recipient-keyed engine, not by asserting it about this send alone.
+ *
+ * Two branches, because a magic link is BOTH a sign-in for an existing account
+ * and a sign-up for a new address (measured in the installed better-auth
+ * 1.7.2: `/sign-in/magic-link` sends without looking the address up, and
+ * `/magic-link/verify` creates the user unless `disableSignUp`). Branch 2 is
+ * therefore a real state here, not a theoretical one.
+ *
+ * ⛔ The request rung is kept, not replaced. Ruling D (#14788, 2026-09-03,
+ * maintainer verbatim 「同意」) reads `sys_user.locale` when set → the
+ * request's `Accept-Language` → the deployment default; a magic link is
+ * requested by its own recipient, so its `ctx` header is the recipient's and
+ * stays the legitimate SECOND rung. The pins below assert both directions:
+ * the column outranks the header, and the header still answers with no column.
+ */
+function recipientKeyedEngine(rows: { byId?: Record<string, unknown>; byEmail?: Record<string, unknown> }) {
+  const reads: any[] = [];
+  const has = (o: Record<string, unknown> | undefined, k: unknown) =>
+    typeof k === 'string' && !!o && Object.prototype.hasOwnProperty.call(o, k);
+  return {
+    reads,
+    engine: {
+      async findOne(object: string, query: any) {
+        reads.push({ object, query });
+        if (object !== 'sys_user') return null;
+        const where = (query?.where ?? {}) as Record<string, unknown>;
+        if (has(rows.byId, where.id)) return { locale: rows.byId![where.id as string] };
+        if (has(rows.byEmail, where.email)) return { locale: rows.byEmail![where.email as string] };
+        return null;
+      },
+    },
+  };
+}
+
+async function driveMagicLink(opts: {
+  engine?: unknown;
+  deployment?: string;
+  recipient?: string;
+  /** The RECIPIENT's own browser language — magic link is requested by them. */
+  header?: string;
+}) {
+  const { capturedConfig, sent } = await boot(
+    opts.deployment,
+    opts.engine === undefined ? {} : ({ dataEngine: opts.engine } as never),
+  );
+  const magic = capturedConfig.plugins.find((p: any) => p.id === 'magic-link');
+  await magic._opts.sendMagicLink(
+    { email: opts.recipient ?? 'ada@example.com', url: 'http://x/magic', token: 't' },
+    opts.header === undefined
+      ? undefined
+      : { request: new Request('http://x/magic', { headers: { 'accept-language': opts.header } }) },
+  );
+  return sent;
+}
+
+describe("#15106 — the magic link reads the recipient's own sys_user.locale", () => {
+  const prevMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OS_MCP_SERVER_ENABLED = 'false';
+  });
+  afterEach(() => {
+    if (prevMcpEnv === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prevMcpEnv;
+  });
+
+  it('the stored column outranks BOTH the request header and the deployment default', async () => {
+    // Three rungs, three distinct tags — each assertion names exactly one.
+    const { engine } = recipientKeyedEngine({ byEmail: { 'ada@example.com': 'ja-JP' } });
+    const sent = await driveMagicLink({ engine, header: 'zh-CN', deployment: 'es-ES' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].template).toBe('auth.magic_link');
+    expect(sent[0].locale).toBe('ja-JP');
+    expect(sent[0].locale).not.toBe('zh-CN');
+    expect(sent[0].locale).not.toBe('es-ES');
+  });
+
+  it('and the reverse — swapping the tags swaps nothing but the answer', async () => {
+    // Rules out a pin that passes because one particular tag always wins.
+    const { engine } = recipientKeyedEngine({ byEmail: { 'ada@example.com': 'zh-CN' } });
+    const sent = await driveMagicLink({ engine, header: 'ja-JP', deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('zh-CN');
+    expect(sent[0].locale).not.toBe('ja-JP');
+  });
+
+  it('BRANCH 2 — an address with no row still takes the request rung, #14319 intact', async () => {
+    // ⚠️ Positive control for the zero, driven through ONE engine: the same
+    // table and the same predicate answer ja-JP for an address that carries a
+    // row and fall through for one that does not. Without it, "the read ran
+    // and found nothing" is indistinguishable from "the read never ran".
+    const { engine, reads } = recipientKeyedEngine({ byEmail: { 'known@example.com': 'ja-JP' } });
+
+    const known = await driveMagicLink({ engine, recipient: 'known@example.com', header: 'zh-CN', deployment: 'es-ES' });
+    expect(known[0].locale).toBe('ja-JP');
+
+    const newcomer = await driveMagicLink({ engine, recipient: 'newcomer@example.com', header: 'zh-CN', deployment: 'es-ES' });
+    expect(newcomer[0].locale).toBe('zh-CN');
+    expect(newcomer[0].locale).not.toBe('ja-JP');
+
+    // ...and the newcomer's read really was attempted, on their address.
+    const userReads = reads.filter((r) => r.object === 'sys_user');
+    expect(userReads.map((r) => r.query.where)).toEqual([
+      { email: 'known@example.com' },
+      { email: 'newcomer@example.com' },
+    ]);
+  });
+
+  it('with neither a row nor a request, the deployment rung answers — #8195 intact', async () => {
+    const { engine } = recipientKeyedEngine({});
+    const sent = await driveMagicLink({ engine, deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('es-ES');
+  });
+
+  it('with nothing at all, NO locale is named and the documented en-US floor applies', async () => {
+    // The ladder's contract is written against an ABSENT key, not an explicit
+    // `undefined` — the same shape the other four sends are pinned on.
+    const { engine } = recipientKeyedEngine({});
+    const sent = await driveMagicLink({ engine });
+    expect(sent[0].locale).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(sent[0], 'locale')).toBe(false);
+  });
+
+  it("reads the column off the recipient's ADDRESS, projected, under a system context", async () => {
+    // Establishes WHICH rung produced the value and on WHAT predicate: this
+    // callback is handed no user row, so an id-keyed read would be a bug.
+    const { engine, reads } = recipientKeyedEngine({ byEmail: { 'ada@example.com': 'ja-JP' } });
+    const sent = await driveMagicLink({ engine, header: 'zh-CN' });
+    expect(sent[0].locale).toBe('ja-JP');
+    const userReads = reads.filter((r) => r.object === 'sys_user');
+    expect(userReads).toHaveLength(1);
+    expect(userReads[0].query.where).toEqual({ email: 'ada@example.com' });
+    expect(userReads[0].query.fields).toEqual(['locale']);
+    expect(userReads[0].query.context?.isSystem).toBe(true);
+  });
+
+  it('matches the address better-auth itself will resolve the link with — lowercased', async () => {
+    // ⚠️ Measured against the installed better-auth 1.7.2, not assumed:
+    // `signInMagicLinkBodySchema` applies no case transform, so a typed
+    // `Ada@Example.com` arrives here verbatim, while
+    // `internalAdapter.findUserByEmail` — what `/magic-link/verify` resolves
+    // this very link with — matches on `email.toLowerCase()`. The column must
+    // be read for the row the link will sign into.
+    const { engine, reads } = recipientKeyedEngine({ byEmail: { 'ada@example.com': 'ja-JP' } });
+    const sent = await driveMagicLink({ engine, recipient: 'Ada@Example.com', deployment: 'es-ES' });
+    const userReads = reads.filter((r) => r.object === 'sys_user');
+    expect(userReads, 'no sys_user read happened at all').toHaveLength(1);
+    expect(userReads[0].query.where).toEqual({ email: 'ada@example.com' });
+    expect(sent[0].locale).toBe('ja-JP');
+    // ...and the address the mail is actually sent to is untouched.
+    expect(sent[0].to).toBe('Ada@Example.com');
+  });
+
+  it('refuses the stringified-nothing literals a lossy producer leaves at rest', async () => {
+    for (const junk of ['undefined', 'null', '', '   ', 42, {}]) {
+      const { engine } = recipientKeyedEngine({ byEmail: { 'ada@example.com': junk } });
+      const sent = await driveMagicLink({ engine, deployment: 'es-ES' });
+      expect(sent[0].locale, `stored ${JSON.stringify(junk)} named a locale`).toBe('es-ES');
+    }
+  });
+
+  it('a failing recipient read never blocks the magic link', async () => {
+    // A magic link IS the credential — a locale lookup must never be why one
+    // fails to arrive.
+    const sent = await driveMagicLink({
+      engine: { async findOne() { throw new Error('sys_user unavailable'); } },
+      header: 'zh-CN',
+      deployment: 'es-ES',
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].template).toBe('auth.magic_link');
+    expect(sent[0].locale).toBe('zh-CN');
+  });
+
+  it('with no data engine at all, the two-rung #14319 behaviour is exactly intact', async () => {
+    const sent = await driveMagicLink({ header: 'zh-CN', deployment: 'es-ES' });
+    expect(sent[0].locale).toBe('zh-CN');
+  });
+
+  it('does not disturb the rest of the magic-link payload', async () => {
+    const { engine } = recipientKeyedEngine({ byEmail: { 'ada@example.com': 'ja-JP' } });
+    const sent = await driveMagicLink({ engine, deployment: 'es-ES' });
+    expect(sent[0].to).toBe('ada@example.com');
+    expect(sent[0].data.magicLinkUrl).toBe('http://x/magic');
+    expect(sent[0].data.token).toBe('t');
+    expect(sent[0].data.expiresInMinutes).toBe(10);
+  });
+
+  it('a placeholder address is still refused BEFORE any recipient read', async () => {
+    // #2766 V1.5 ordering, re-pinned now that a read sits on this path too.
+    const { engine, reads } = recipientKeyedEngine({});
+    const { capturedConfig } = await boot('es-ES', { dataEngine: engine } as never);
+    const magic = capturedConfig.plugins.find((p: any) => p.id === 'magic-link');
+    await expect(
+      magic._opts.sendMagicLink({
+        email: 'u-abcdefghijklmnopqrst@placeholder.invalid',
+        url: 'http://x/magic',
+        token: 't',
+      }),
+    ).rejects.toThrow(/placeholder address/);
+    expect(reads.filter((r) => r.object === 'sys_user')).toHaveLength(0);
+  });
+
+  it('no recipient read happens at all when no transport is wired', async () => {
+    // The no-email-service branch returns before the lookup: an unwired
+    // deployment must not pay for a query whose answer it cannot use.
+    const { engine, reads } = recipientKeyedEngine({ byEmail: { 'ada@example.com': 'ja-JP' } });
+    const { betterAuth } = await import('better-auth');
+    let capturedConfig: any;
+    (betterAuth as any).mockImplementation((config: any) => {
+      capturedConfig = config;
+      return { handler: vi.fn(), api: {} };
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const manager = new AuthManager({
+      secret: 'test-secret-at-least-32-chars-long',
+      baseUrl: 'http://localhost:3000',
+      emailAndPassword: { enabled: true },
+      plugins: { magicLink: true },
+      dataEngine: engine,
+    } as never);
+    await manager.getAuthInstance();
+    const magic = capturedConfig.plugins.find((p: any) => p.id === 'magic-link');
+    await magic._opts.sendMagicLink({ email: 'ada@example.com', url: 'http://x/magic', token: 't' });
+    warnSpy.mockRestore();
+    expect(reads.filter((r) => r.object === 'sys_user')).toHaveLength(0);
+  });
+});
+
+describe('#15106 — the CLASS claim: all five auth sends read the recipient column', () => {
+  const prevMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OS_MCP_SERVER_ENABLED = 'false';
+  });
+  afterEach(() => {
+    if (prevMcpEnv === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prevMcpEnv;
+  });
+
+  it('every one of the five sends is written in the stored language of its own recipient', async () => {
+    // ⚠️ POPULATION: the five `sendTemplate` sites in `auth-manager.ts` — the
+    // same five `driveAllFive` drives and `TEMPLATES` names, and the whole of
+    // plugin-auth's mail surface (see this section's header). This is the pin
+    // that closes the class; the per-send pins above only cover one member.
+    //
+    // The tags are chosen so no send can borrow another's answer: the three
+    // id-keyed sends read `ja-JP`, the invitation reads `zh-CN` off the
+    // invitee's address, and the magic link reads `en-GB` off ITS recipient's
+    // address — a different tag from the SAME person's id-keyed row, which is
+    // what proves the magic link reads by address rather than by id.
+    const { engine } = recipientKeyedEngine({
+      byId: { u1: 'ja-JP' },
+      byEmail: { 'invitee@example.com': 'zh-CN', 'ada@example.com': 'en-GB' },
+    });
+    const sent = await driveAllFive('es-ES', { dataEngine: engine } as never);
+
+    expect(sent.map((s: any) => s.template)).toEqual([...TEMPLATES]);
+    expect(sent.map((s: any) => s.locale)).toEqual([
+      'ja-JP', // auth.password_reset        — id u1
+      'ja-JP', // auth.verify_email          — id u1
+      'zh-CN', // auth.invitation            — invitee@example.com
+      'en-GB', // auth.magic_link            — ada@example.com (by ADDRESS)
+      'ja-JP', // auth.email_change_notice   — id u1
+    ]);
+    // The direction that makes it real: not one of the five fell through to
+    // the deployment default.
+    expect(sent.some((s: any) => s.locale === 'es-ES')).toBe(false);
+  });
+
+  it('...and with an empty table every one of the five falls back, none stuck', async () => {
+    // The negative half of the same population: the class claim is about the
+    // rung being WIRED at all five sites, so the fallback must also be five.
+    const { engine } = recipientKeyedEngine({});
+    const sent = await driveAllFive('es-ES', { dataEngine: engine } as never);
+    expect(sent.map((s: any) => s.template)).toEqual([...TEMPLATES]);
+    expect(sent.map((s: any) => s.locale)).toEqual(['es-ES', 'es-ES', 'es-ES', 'es-ES', 'es-ES']);
   });
 });

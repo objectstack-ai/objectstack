@@ -162,9 +162,9 @@
  * ## Scope: this table only, deliberately
  *
  * Sibling pages state the same facts correctly in PROSE, not in a machine-shaped
- * type→flag table: `content/docs/permissions/authorization.mdx:236`
+ * type→flag table: `content/docs/permissions/authorization.mdx`
  * ("`permission` declares `allowOrgOverride: false`"),
- * `content/docs/automation/jobs.mdx:42` (a job-vs-flow comparison table whose
+ * `content/docs/automation/jobs.mdx` (a job-vs-flow comparison table whose
  * flag mention sits inside an English cell), `content/docs/ai/agents.mdx`,
  * `content/docs/permissions/capabilities.mdx`,
  * `content/docs/references/system/email-template.mdx`.
@@ -173,7 +173,8 @@
  * lines across 13 files. Of those, ~5 are genuine "<type> is <bool>" assertions;
  * the rest are the schema-field reference row, a code sample using an invented
  * type, and sentences ABOUT the flag rather than about any type
- * (`metadata-lifecycle.mdx:121` itself is one). Covering them mechanically
+ * (`content/docs/concepts/metadata-lifecycle.mdx` itself is one, line 121 as
+ * measured). Covering them mechanically
  * means a co-occurrence regex over English plus a per-site allowlist of ~17
  * exceptions to catch ~5 assertions -- a worse gate than none, and the kind
  * whose baseline gets bulk-updated to green. They are left out on purpose, and

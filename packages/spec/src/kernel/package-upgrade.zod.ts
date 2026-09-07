@@ -36,6 +36,7 @@ import { ManifestSchema } from './manifest.zod';
  * Type of change detected between package versions.
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const MetadataChangeTypeSchema = lazySchema(() => z.enum([
   'added',    // New metadata item added in new version
   'modified', // Existing metadata item modified
@@ -121,8 +122,17 @@ export const UpgradePlanSchema = lazySchema(() => z.object({
   })).optional().describe('Dependent packages that also need upgrading'),
 
   /** Estimated upgrade duration in seconds */
-  estimatedDuration: z.number().int().min(0).optional()
+  // Renamed from `estimatedDuration` (#15678, #14478 ruling B): the unit lived
+  // only in the describe prose.
+  estimatedDurationSeconds: z.number().int().min(0).optional()
     .describe('Estimated upgrade duration in seconds'),
+
+  /** Tombstone for the rename above (#15678, ruling B on #14478). */
+  estimatedDuration: retiredKey(
+    '`UpgradePlan.estimatedDuration` was renamed to `estimatedDurationSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose. Rename the key to `estimatedDurationSeconds`; the value (seconds) is unchanged.',
+  ),
 
   /** Human-readable summary */
   summary: z.string().optional().describe('Human-readable upgrade summary'),

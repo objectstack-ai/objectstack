@@ -151,7 +151,11 @@ export const NO_SIGN_IN_ACCOUNT_AT_BOOT = 'no_sign_in_account_at_boot';
  * this, so the two probes cannot drift apart on what they require of a store.
  */
 export interface BootProbeEngine {
-  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
+  find(
+    object: string,
+    query: Record<string, unknown>,
+    options?: unknown,
+  ): Promise<Array<Record<string, unknown>>>;
 }
 
 /**
@@ -179,12 +183,6 @@ export interface SignInReachabilityFacts {
 
 const SYSTEM = { context: { isSystem: true } };
 
-const asRows = (raw: unknown): Record<string, unknown>[] => {
-  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
-  const records = (raw as { records?: unknown } | null | undefined)?.records;
-  return Array.isArray(records) ? (records as Record<string, unknown>[]) : [];
-};
-
 const usable = (engine: BootProbeEngine | undefined): engine is BootProbeEngine =>
   !!engine && typeof engine.find === 'function';
 
@@ -203,8 +201,10 @@ export async function probeHumanUsersPresence(
 ): Promise<BootStorePresence> {
   if (!usable(engine)) return 'unknown';
   try {
-    const page = asRows(
-      await engine.find(SystemObjectName.USER, { limit: HUMAN_POPULATION_PROBE_LIMIT }, SYSTEM),
+    const page = await engine.find(
+      SystemObjectName.USER,
+      { limit: HUMAN_POPULATION_PROBE_LIMIT },
+      SYSTEM,
     );
     // A full page of non-humans cannot prove absence: it reads as populated.
     const humansExist = page.some(isHumanUserRow) || page.length >= HUMAN_POPULATION_PROBE_LIMIT;
@@ -225,7 +225,7 @@ export async function probeSignInAccountsPresence(
 ): Promise<BootStorePresence> {
   if (!usable(engine)) return 'unknown';
   try {
-    const rows = asRows(await engine.find(SystemObjectName.ACCOUNT, { limit: 1 }, SYSTEM));
+    const rows = await engine.find(SystemObjectName.ACCOUNT, { limit: 1 }, SYSTEM);
     return rows.length > 0 ? 'present' : 'absent';
   } catch {
     return 'unknown';

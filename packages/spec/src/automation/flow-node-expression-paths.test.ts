@@ -22,6 +22,8 @@ import {
   resolveFlowNodeExpressions,
   predicateSlotRefusal,
   PREDICATE_SLOT_STRING_REFUSAL,
+  structuralConditionRefusal,
+  STRUCTURAL_CONDITION_SHAPE_REFUSAL,
   type FlowNodeExpressionPath,
   type FlowNodeExpressionRole,
 } from './flow-node-expression-paths.js';
@@ -240,6 +242,71 @@ describe('every pre-#14149 entry resolves byte-identically (the ratchet\'s fixtu
       // No `dialect` ⇒ not envelope-shaped, so no source is claimed from it.
       expect(predicateSlotRefusal({ source: 'x' })?.source).toBe('x');
       expect(predicateSlotRefusal(42)?.source).toBe('');
+    });
+  });
+  /**
+   * [#15662] The STRUCTURAL condition arm — `config.condition` on any node and
+   * `edge.condition`.
+   *
+   * The whole point of a second refusal is that it is NOT the ledger arm's
+   * rule, so the first test here is the one that would fail if somebody
+   * "unified" them: an expression envelope is legitimate on this arm and must
+   * be admitted, while `predicateSlotRefusal` refuses it.
+   */
+  describe('structuralConditionRefusal (#15662)', () => {
+    it('is NOT predicateSlotRefusal — an envelope is legitimate here and refused there', () => {
+      const envelope = { dialect: 'cel', source: 'record.rating >= 4' };
+      // The measured reason: `FlowEdgeSchema.condition` is
+      // `ExpressionInputSchema`, whose string arm transforms into exactly this
+      // shape, so after `FlowSchema.parse` every authored edge condition IS an
+      // envelope. The ledger rule here would refuse every conditional edge.
+      expect(structuralConditionRefusal(envelope)).toBeUndefined();
+      expect(predicateSlotRefusal(envelope)).toBeDefined();
+    });
+
+    it('admits every string — what it SAYS is validateExpression\'s business', () => {
+      expect(structuralConditionRefusal('record.rating >= 4')).toBeUndefined();
+      expect(structuralConditionRefusal('{record.rating} >= 4')).toBeUndefined();
+      // Ruled correct, not a defect: a whitespace-only STRING means "not
+      // authored" on both sides and stays so.
+      expect(structuralConditionRefusal('   ')).toBeUndefined();
+      expect(structuralConditionRefusal('')).toBeUndefined();
+    });
+
+    it('admits an absent condition — "not authored" is not a malformed one', () => {
+      expect(structuralConditionRefusal(undefined)).toBeUndefined();
+      expect(structuralConditionRefusal(null)).toBeUndefined();
+    });
+
+    it('admits an envelope with no dialect, and an ast-only one', () => {
+      // `evaluateCondition` already treats an envelope with no dialect as CEL,
+      // and `ExpressionSchema`'s own refine is `source` OR `ast` — read here,
+      // not re-derived.
+      expect(structuralConditionRefusal({ source: 'record.rating >= 4' })).toBeUndefined();
+      expect(structuralConditionRefusal({ dialect: 'cel', ast: { kind: 'const' } })).toBeUndefined();
+    });
+
+    it('refuses the values measured to register clean and answer a silent false', () => {
+      for (const [value, found] of [[42, 'a number'], [true, 'a boolean'], [['a'], 'an array']] as const) {
+        const refusal = structuralConditionRefusal(value);
+        expect(refusal?.message.startsWith(STRUCTURAL_CONDITION_SHAPE_REFUSAL)).toBe(true);
+        expect(refusal?.message).toContain(`Found ${found}`);
+        expect(refusal?.source).toBe('');
+      }
+    });
+
+    it('refuses an object that is neither text nor an expression', () => {
+      // `{ source: 1 }` is the one that did not even reach the silent `false`:
+      // it threw a bare `TypeError: exprStr.trim is not a function`.
+      expect(structuralConditionRefusal({ source: 1 })?.message)
+        .toContain('neither a string `source` nor an `ast`');
+      // An envelope carrying neither — `ExpressionSchema`'s refine rejects it
+      // too, and the evaluator reads it as an empty condition.
+      expect(structuralConditionRefusal({ dialect: 'cel' })).toBeDefined();
+      expect(structuralConditionRefusal({})).toBeDefined();
+      // A non-string `source` is exactly what is refused, so it is never the
+      // attribution.
+      expect(structuralConditionRefusal({ source: 1 })?.source).toBe('');
     });
   });
 });

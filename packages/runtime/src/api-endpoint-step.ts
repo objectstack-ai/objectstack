@@ -31,7 +31,7 @@
  *
  * ## The chain, in the one order it can run in
  *
- * `authRequired` / `rateLimit` / `cacheTtl` are enforced by
+ * `authRequired` / `rateLimit` / `cacheTtlSeconds` are enforced by
  * {@link applyEndpointPolicies}, in the order #5040 §3 fixes, whenever the
  * caller supplies a {@link EndpointPolicyContext}. A denial (401 / 429) is the
  * answer. A pass reaches {@link executeEndpointTarget} — and NOTHING else can:
@@ -40,7 +40,7 @@
  * forgot the policies" is therefore not a mistake a future change can make by
  * omission; there is nowhere else to put the call.
  *
- * `verdict.responseHeaders` (the `Cache-Control` computed from `cacheTtl`) is
+ * `verdict.responseHeaders` (the `Cache-Control` computed from `cacheTtlSeconds`) is
  * merged into SUCCESS answers only. An error answer never carries it: the
  * header describes a body the caller should be willing to reuse, and telling a
  * client to cache a 401 / 429 / 500 for a minute is worse than saying nothing.
@@ -133,7 +133,7 @@ export interface AppEndpointStepAnswer {
      * Headers that are part of THIS answer and must be written with it:
      * `Retry-After` on a rate-limit denial (the one piece of information a
      * throttled client needs to behave), and `Cache-Control` on a SUCCESSFUL
-     * execution result (from `cacheTtl`).
+     * execution result (from `cacheTtlSeconds`).
      *
      * The asymmetry is deliberate and enforced below — `Cache-Control` rides
      * only on a success, never on an error answer.
@@ -242,7 +242,7 @@ export async function runAppEndpointStep(
         // hint says which keys were NOT evaluated — a report that is wrong
         // about what ran is worse than no report.
         return notImplemented(match, method, path,
-            'This request reached the step without a policy context, so authRequired / rateLimit / cacheTtl '
+            'This request reached the step without a policy context, so authRequired / rateLimit / cacheTtlSeconds '
             + 'were not evaluated — and nothing was executed either. The composed runtime always threads one '
             + '(#5040 E5b), so reaching this answer means a host mounted the step by hand and omitted it.');
     }
@@ -261,7 +261,7 @@ export async function runAppEndpointStep(
     // without a policy context, and a denial short-circuits before it.
     if (!input.execution) {
         return notImplemented(match, method, path,
-            'Policies (authRequired / rateLimit / cacheTtl) were enforced and this request passed them, but no '
+            'Policies (authRequired / rateLimit / cacheTtlSeconds) were enforced and this request passed them, but no '
             + 'execution wiring was supplied, so the target was not run. The composed runtime always supplies '
             + 'it (#5040 E5b).');
     }
@@ -295,7 +295,7 @@ export async function runAppEndpointStep(
         deps,
     );
 
-    // `Cache-Control` (from `cacheTtl`) applies to a SUCCESS and nothing else.
+    // `Cache-Control` (from `cacheTtlSeconds`) applies to a SUCCESS and nothing else.
     // `executeEndpointTarget` never throws — a delegated failure is already an
     // error answer here — so the status is the whole test, and an endpoint whose
     // execution failed cannot hand the client a cache directive for the failure.

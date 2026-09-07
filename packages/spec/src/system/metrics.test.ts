@@ -239,7 +239,7 @@ describe('MetricAggregationConfigSchema', () => {
     const config = MetricAggregationConfigSchema.parse({
       type: 'avg',
       window: {
-        size: 300,
+        durationSeconds: 300,
         sliding: true,
         slideInterval: 60,
       },
@@ -247,7 +247,7 @@ describe('MetricAggregationConfigSchema', () => {
     });
     
     expect(config.type).toBe('avg');
-    expect(config.window?.size).toBe(300);
+    expect(config.window?.durationSeconds).toBe(300);
   });
 });
 
@@ -263,7 +263,7 @@ describe('ServiceLevelIndicatorSchema', () => {
         operator: 'gte',
       },
       window: {
-        size: 2592000, // 30 days
+        durationSeconds: 2592000, // 30 days
       },
     };
     
@@ -282,7 +282,7 @@ describe('ServiceLevelIndicatorSchema', () => {
         percentile: 0.99,
       },
       window: {
-        size: 86400, // 1 day
+        durationSeconds: 86400, // 1 day
         rolling: true,
       },
     };
@@ -301,7 +301,7 @@ describe('ServiceLevelIndicatorSchema', () => {
         operator: 'gte',
       },
       window: {
-        size: 3600,
+        durationSeconds: 3600,
       },
     });
     
@@ -318,7 +318,7 @@ describe('ServiceLevelObjectiveSchema', () => {
       target: 99.9,
       period: {
         type: 'rolling',
-        duration: 2592000, // 30 days
+        durationSeconds: 2592000, // 30 days
       },
     };
     
@@ -346,7 +346,7 @@ describe('ServiceLevelObjectiveSchema', () => {
       label: 'Error Budget SLO',
       sli: 'test_sli',
       target: 99.9,
-      period: { type: 'rolling', duration: 2592000 },
+      period: { type: 'rolling', durationSeconds: 2592000 },
       errorBudget: {
         enabled: true,
         alertThreshold: 75,
@@ -366,7 +366,7 @@ describe('ServiceLevelObjectiveSchema', () => {
       label: 'Test SLO',
       sli: 'test_sli',
       target: 99,
-      period: { type: 'rolling', duration: 86400 },
+      period: { type: 'rolling', durationSeconds: 86400 },
     });
     
     expect(slo.enabled).toBe(true);
@@ -449,7 +449,7 @@ describe('MetricsConfigSchema', () => {
             threshold: 99.9,
             operator: 'gte',
           },
-          window: { size: 2592000 },
+          window: { durationSeconds: 2592000 },
         },
       ],
       slos: [
@@ -458,7 +458,7 @@ describe('MetricsConfigSchema', () => {
           label: 'API SLO',
           sli: 'api_availability',
           target: 99.9,
-          period: { type: 'rolling', duration: 2592000 },
+          period: { type: 'rolling', durationSeconds: 2592000 },
         },
       ],
       exports: [
@@ -488,5 +488,86 @@ describe('MetricsConfigSchema', () => {
       name: longName,
       label: 'Test',
     })).toThrow();
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B. All three old spellings are
+// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. The new name is `durationSeconds` and NOT the
+// gate's mechanical `sizeSeconds`: `size` is byte/row-count vocabulary elsewhere
+// in this spec, and the parent key is already `window`, so `windowSeconds` would
+// read `window.windowSeconds`.
+describe('metrics window and period lengths carry their unit (#15679)', () => {
+  const sliBase = {
+    name: 'api_availability',
+    label: 'API Availability',
+    metric: 'http_requests_total',
+    type: 'availability' as const,
+    successCriteria: { threshold: 99.9, operator: 'gte' as const },
+  };
+  const sloBase = {
+    name: 'api_uptime_slo', label: 'API Uptime SLO', sli: 'api_availability', target: 99.9,
+  };
+
+  it('REFUSES the retired `MetricAggregationConfig.window.size`', () => {
+    const result = MetricAggregationConfigSchema.safeParse({
+      type: 'avg',
+      window: { size: 300 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'window.size');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('renamed to `durationSeconds`');
+    // The prescription must EXPLAIN the departure from the mechanical name, or the
+    // next author reads `durationSeconds` as a slip and "corrects" it back.
+    expect(issue!.message).toContain('The new name is not `sizeSeconds`');
+  });
+
+  it('REFUSES the retired `ServiceLevelIndicator.window.size`', () => {
+    const result = ServiceLevelIndicatorSchema.safeParse({ ...sliBase, window: { size: 2592000 } });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'window.size');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('renamed to `durationSeconds`');
+  });
+
+  it('REFUSES the retired `ServiceLevelObjective.period.duration`', () => {
+    const result = ServiceLevelObjectiveSchema.safeParse({
+      ...sloBase,
+      period: { type: 'rolling', duration: 2592000 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'period.duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`ServiceLevelObjective.period.duration` was renamed to `durationSeconds`',
+    );
+  });
+
+  it('accepts every renamed key at the same magnitude', () => {
+    expect(MetricAggregationConfigSchema.parse({ type: 'avg', window: { durationSeconds: 300 } })
+      .window?.durationSeconds).toBe(300);
+    expect(ServiceLevelIndicatorSchema.parse({ ...sliBase, window: { durationSeconds: 2592000 } })
+      .window.durationSeconds).toBe(2592000);
+    expect(ServiceLevelObjectiveSchema.parse({
+      ...sloBase, period: { type: 'rolling', durationSeconds: 2592000 },
+    }).period.durationSeconds).toBe(2592000);
+  });
+
+  it('leaves the two non-duration keys on this file alone', () => {
+    // The exporter batch `size` is a COUNT of records, not a duration.
+    expect(MetricExportConfigSchema.parse({ type: 'prometheus', batch: { size: 500 } })
+      .batch?.size).toBe(500);
+    // The error-budget burn-rate `window` names no unit in its describe, so it is
+    // outside the gate population entirely and keeps its bare name.
+    const slo = ServiceLevelObjectiveSchema.parse({
+      ...sloBase,
+      period: { type: 'rolling', durationSeconds: 2592000 },
+      errorBudget: { burnRateWindows: [{ window: 3600, threshold: 14.4 }] },
+    });
+    expect(slo.errorBudget?.burnRateWindows?.[0]?.window).toBe(3600);
   });
 });

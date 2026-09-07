@@ -16,6 +16,7 @@ describe('FileI18nAdapter', () => {
     expect(typeof i18n.getLocales).toBe('function');
     expect(typeof i18n.getDefaultLocale).toBe('function');
     expect(typeof i18n.setDefaultLocale).toBe('function');
+    expect(typeof i18n.getFallbackLocale).toBe('function');
   });
 
   it('should default to "en" locale', () => {
@@ -32,6 +33,37 @@ describe('FileI18nAdapter', () => {
     const i18n = new FileI18nAdapter();
     i18n.setDefaultLocale('ja');
     expect(i18n.getDefaultLocale()).toBe('ja');
+  });
+
+  // #14882 — the declared fallback locale is readable, so the REST metadata
+  // reads can hand the document translators the chain `t()` itself walks.
+  describe('getFallbackLocale', () => {
+    it('reports the fallback locale it was constructed with', () => {
+      expect(new FileI18nAdapter({ fallbackLocale: 'zh-CN' }).getFallbackLocale()).toBe('zh-CN');
+    });
+
+    it('reports undefined when no fallback locale was declared', () => {
+      expect(new FileI18nAdapter().getFallbackLocale()).toBeUndefined();
+      // `defaultLocale` alone is NOT a fallback declaration at this layer —
+      // the boot paths collapse `fallbackLocale || defaultLocale` before
+      // constructing the adapter, and this accessor reports what arrived.
+      expect(new FileI18nAdapter({ defaultLocale: 'zh-CN' }).getFallbackLocale()).toBeUndefined();
+    });
+
+    it('answers the locale t() falls back to', () => {
+      const i18n = new FileI18nAdapter({ defaultLocale: 'zh-CN', fallbackLocale: 'zh-CN' });
+      i18n.loadTranslations('en', { objects: { kpi_entry_sheet: { label: 'Entry Sheet' } } });
+      // `t()` does not consult `en` for a zh-CN key on this adapter, and the
+      // accessor says the same — the document translators are handed exactly
+      // this locale as their chain.
+      expect(i18n.t('objects.kpi_entry_sheet.label', 'zh-CN')).toBe('objects.kpi_entry_sheet.label');
+      expect(i18n.getFallbackLocale()).toBe('zh-CN');
+
+      const english = new FileI18nAdapter({ defaultLocale: 'zh-CN', fallbackLocale: 'en' });
+      english.loadTranslations('en', { objects: { kpi_entry_sheet: { label: 'Entry Sheet' } } });
+      expect(english.t('objects.kpi_entry_sheet.label', 'zh-CN')).toBe('Entry Sheet');
+      expect(english.getFallbackLocale()).toBe('en');
+    });
   });
 
   it('should return empty translations for unknown locale', () => {

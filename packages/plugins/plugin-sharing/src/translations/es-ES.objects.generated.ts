@@ -136,18 +136,19 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_type: {
         label: "Tipo de destinatario",
-        help: "Quién recibe el acceso. Al elegir un equipo, una unidad de negocio o un puesto, lo reciben todas las personas que lo integran. «Unidad de negocio y subordinadas» abarca además todas las unidades por debajo de la elegida.",
+        help: "Quién recibe el acceso. Al elegir un equipo, una unidad de negocio o un puesto, lo reciben todas las personas que lo integran. «Unidad de negocio y subordinadas» abarca además todas las unidades por debajo de la elegida. «Campo» comparte cada registro con el usuario o los usuarios guardados en uno de sus propios campos: indique ese campo como destinatario.",
         options: {
           user: "Usuario",
           team: "Equipo",
           business_unit: "Unidad de negocio",
           position: "Puesto",
-          unit_and_subordinates: "Unidad de negocio y subordinados"
+          unit_and_subordinates: "Unidad de negocio y subordinados",
+          field: "Campo"
         }
       },
       recipient_id: {
         label: "Destinatario",
-        help: "El usuario, equipo, unidad de negocio o puesto concreto que recibe el acceso."
+        help: "El usuario, equipo, unidad de negocio o puesto concreto que recibe el acceso o, para el tipo de destinatario «Campo», el nombre del campo del registro que guarda el usuario o los usuarios con quienes compartir."
       },
       access_level: {
         label: "Nivel de acceso",

@@ -7,9 +7,28 @@
 //   node scripts/measure-durability-swallow-family.mjs --sites     # every site
 //   node scripts/measure-durability-swallow-family.mjs --json      # machine
 //   node scripts/measure-durability-swallow-family.mjs --file <p>  # one file
-//   node scripts/measure-durability-swallow-family.mjs --self-test # all 4 control families
+//   node scripts/measure-durability-swallow-family.mjs --self-test # every control family
 //   node scripts/measure-durability-swallow-family.mjs --self-test=gated
-//                                                      # the 3 families CI runs
+//                                                      # every family but POSITIVE_CONTROLS
+//
+// THE CONTROL FAMILIES, NAMED rather than counted, so that the next one added
+// contradicts a LIST and not an integer -- which is exactly how the two bare integers
+// that stood here before went stale, unread, as further families landed:
+// `POSITIVE_CONTROLS`, `NEGATIVE_CONTROLS`, `REGRESSION_CONTROLS`, `RESOLUTION_CONTROLS`,
+// the `DETERMINED` register cross-check (#13886), the copied gate-vocabulary cross-check
+// (#15459), and `WORKLIST_READING_CONTROLS` (#15503).
+//
+// `--self-test=gated` asserts every one of them EXCEPT `POSITIVE_CONTROLS`, and that
+// asymmetry is the point of the split rather than a convenience: the single expression
+// `gated ? [] : POSITIVE_CONTROLS` is the ONLY thing either mode drops, and it drops
+// those controls because they pin MEMBERS of the #12981 worklist that the repair
+// programme exists to REMOVE -- a control a successful repair destroys cannot hold a
+// CI gate.
+//
+// ⛔ THIS PARAGRAPH IS NOT THE AUTHORITY: `SELF_TEST_MODES` is (with the next block,
+// for what CI runs and why), together with the verdict line each mode prints, which
+// NAMES the families it just asserted. A reader who finds either of them disagreeing
+// with this list should trust them and repair this list.
 //
 // THE CENSUS is NOT a gate: it exits 0 on any membership count, it prints "a
 // MEASUREMENT, not a gate" on every run of it, and the file is deliberately not
@@ -237,7 +256,8 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
+import { requireDefaultExport } from './import-prerequisite.mjs';
+const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -484,8 +504,9 @@ const REGRESSION_CONTROLS = [
 /**
  * RESOLUTION controls: a (call site -> body) pair that must not move.
  *
- * The other three families all read MEMBERSHIP, and membership cannot see this
- * defect. Measured, on the tree the scope-aware index landed against: the flat
+ * The other membership-reading families -- POSITIVE, NEGATIVE, REGRESSION -- all
+ * read MEMBERSHIP, and membership cannot see this defect. Measured, on the tree
+ * the scope-aware index landed against: the flat
  * last-wins index misresolved 27 reached call sites, and the census printed
  * byte-identical output before and after the repair — 56 members, 98 quiet, the
  * same stats. A control that reads the census output is therefore GREEN against
@@ -943,9 +964,9 @@ function staleLines(stale) {
  *
  * ## Why there is a subset at all
  *
- * All four families were green only while somebody remembered to run them by
- * hand: measured on `origin/main`, nothing in `package.json` or `.github/**`
- * named this script. The same resolver was then repaired three times (#13459,
+ * The families that existed then (POSITIVE, NEGATIVE, REGRESSION, RESOLUTION)
+ * were green only while somebody remembered to run them by hand: measured on
+ * `origin/main`, nothing in `package.json` or `.github/**` named this script. The same resolver was then repaired three times (#13459,
  * #13474, PR #13915) with no gate holding any of the previous repairs, and the
  * census's numbers feed #12981's repair worklist, so a wrong denominator
  * propagates into that programme unwatched.
@@ -962,8 +983,10 @@ function staleLines(stale) {
  * repairs THAT file. ⛔ A gate that reddens on success is not a gate, and worse,
  * it teaches the fleet to route around gates.
  *
- * So `gated` is the families the repair programme CANNOT destroy — three at
- * #13919, joined by the `DETERMINED` register at #13886 (last section) — and the
+ * So `gated` is the families the repair programme CANNOT destroy — NEGATIVE,
+ * REGRESSION and RESOLUTION at #13919, joined by the `DETERMINED` register
+ * (#13886, last sections), the copied gate vocabulary (#15459) and the worklist
+ * readings (#15503, whose case is made at `WORKLIST_READING_CONTROLS`) — and the
  * exclusion is PERMANENT rather than pending (#13919 ruling of 2026-09-01,
  * boundary 1): repairs move a member from tier `dark` to tier `channelled` and
  * it stays a member, so neither the negative controls, the regression controls,
@@ -1007,6 +1030,26 @@ function staleLines(stale) {
  * PR #15458 grew the gate's map from 18 names to 20 and this file went stale in
  * four places the same afternoon (#15459, #15473), under a green farm the whole
  * time, which is the cost of an uncross-checked copy stated as a measurement.
+ *
+ * ## The WORKLIST READINGS (#15503) are in both modes, for the same reason
+ *
+ * `WORKLIST_READING_CONTROLS` pins what the tier-1 worklist PRINTS, and the
+ * `--self-test` exercises those readings against a DECLARED population rather
+ * than against this tree: neither `(none …)` line has ever been printed by a run
+ * of this instrument, and an unreachable reading is a reading nobody proofreads.
+ * That does not weaken its claim to `gated`, it is the claim. The family passes
+ * the test the two sections above apply, and its own declaration states the
+ * answer in those words: can a successful repair destroy it? "No — the empty
+ * worklist it pins is the state the repair programme is trying to reach", so the
+ * day this family matters most is the day the programme succeeds. The self-test
+ * body says the mechanical half: it "compares a producer against a declared
+ * population and never touches membership", so no repair can destroy it.
+ *
+ * ⛔ That is the pattern and not a courtesy: A FAMILY THAT JOINS `gated` OWES A
+ * SECTION HERE, arguing on those terms why a successful repair cannot destroy
+ * it. This block is where the self-test body sends a reader asking that
+ * question, and a pointer landing on a block that names every family but the one
+ * asked about is how the next author learns the obligation is optional.
  */
 const SELF_TEST_MODES = new Set(['all', 'gated']);
 
@@ -1294,7 +1337,7 @@ function isAwaited(node) {
  *
  * Only `foo(...)` and `this.foo(...)` may resolve to a same-file body. Measured
  * cost of the looser rule, which resolved any dotted path by its LAST segment:
- * `packages/services/service-job/src/db-job-adapter.ts:139` calls
+ * `packages/services/service-job/src/db-job-adapter.ts#cancel` calls
  * `this.cron.cancel(name)` — the CronJobAdapter's method — and the loose rule
  * walked into the file's OWN `cancel()` method, reached `setActive()`'s
  * `engine.update(...)` two frames down, and reported a cron-registry cleanup as

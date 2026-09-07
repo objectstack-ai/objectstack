@@ -149,7 +149,14 @@ async function tryFind(
 ): Promise<any[]> {
   try {
     const rows = await ql.find(object, { where, limit }, { context });
-    return Array.isArray(rows) ? rows : Array.isArray(rows?.records) ? rows.records : [];
+    // Bare array, driven — see `engine-find-bare-array.pin.test.ts`, which boots
+    // a real engine over a real `SqlDriver` and pins this seam. The `{ records }`
+    // limb removed from here was dead code that read as a contract.
+    //
+    // The `[]` arm is left exactly as it was: this function's whole contract is
+    // `Promise<any[]>` best-effort, and turning it into a gap is a different
+    // change with a different blast radius than removing an unreachable limb.
+    return Array.isArray(rows) ? rows : [];
   } catch (e) {
     // Reads legitimately fail before the tables exist (boot ordering), so this
     // is debug rather than warn — but it is no longer nothing (#4640).

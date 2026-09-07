@@ -6,9 +6,11 @@
 // field in packages/spec/src — see EXPRESSION_INPUT_SCHEMAS — plus the RLS
 // using/check predicates; fail if any is unclassified). Discovery is by SCHEMA
 // NAME, so a slot that moves to a narrower schema leaves the scan unless that
-// schema is registered: #7327 is the worked example. The
-// expression-specific invariants (mode/dialect/fail-policy,
-// compile rows name the canonical compiler) stay here.
+// schema is registered: #7327 is the worked example. Discovery is also by
+// POSITION since #15500 — the key is `file:Schema.field` and two positions
+// sharing one key FAIL rather than merge. The expression-specific invariants
+// (mode/dialect/fail-policy, compile rows name the canonical compiler) stay
+// here.
 
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -61,24 +63,62 @@ const DECLARES_EXPRESSION = new RegExp(
 );
 
 /**
- * Re-discover every expression surface in the spec — the SAME scan the ledger encodes.
+ * One DECLARING POSITION of an expression surface in the spec.
  *
- * ⚠️ A ratchet key is `file:field`, NOT `file:line`, so N declarations of one
- * key name in one file are ONE key and one ledger row classifies all of them.
- * Measured at `61821e54cf5` while widening the roster above: 44 declaring
- * positions reduce to 34 keys (+2 hard-added RLS = 36 surfaces), and 10 keys
- * carry two positions each. Two of those collapses are the cron ones this
- * commit classifies (`api/export.zod.ts:cronExpression` at `:576`/`:706`,
- * `system/disaster-recovery.zod.ts:schedule` at `:57`/`:238`) — genuinely the
- * same surface twice, so one row is right for them. The other 8 predate this
- * commit and at least three of them collapse surfaces that are NOT the same
- * (#15500): `data/field.zod.ts:requiredWhen` covers both the server-enforced
- * `FieldSchema` gate and the `InlineGridColumnSchema` cell whose own describe
- * says nothing on the write path reads it. Do not read a green ratchet as
- * "every declaration is classified" — it means every KEY is.
+ * The ratchet's unit of accountability is the position, not the name: a
+ * position is what an author writes and what a reader has to classify. The
+ * `key` is only a NAME for it, and the ledger can be honest exactly as far as
+ * that name is 1:1 with positions.
  */
-function discoverSurfaces(): Set<string> {
-  const found = new Set<string>();
+interface Declaration {
+  /** Ratchet key — `file:Schema.field`, relative to packages/spec/src. */
+  key: string;
+  /** Path relative to packages/spec/src. */
+  file: string;
+  /** Enclosing top-level declaration (see `TOP_LEVEL_DECL`). */
+  schema: string;
+  field: string;
+  line: number;
+}
+
+/**
+ * The enclosing top-level declaration a position belongs to.
+ *
+ * Column 0 ONLY, deliberately: these files routinely wrap a schema as
+ * `export const FieldSchema = lazySchema(() => { const base = strictObject({…`,
+ * and the indented inner `const base` must never win over `FieldSchema`.
+ */
+const TOP_LEVEL_DECL = /^(?:export\s+)?(?:const|function|class)\s+([A-Za-z_][A-Za-z0-9_]*)/;
+
+/**
+ * Re-discover every expression-declaring POSITION in the spec — the SAME scan
+ * the ledger encodes, but without the dedup that used to hide half of it.
+ *
+ * A ratchet key was `file:field` until #15500, so N declarations of one field
+ * name in one file were ONE key and one ledger row classified all of them —
+ * silently, because the collapse happened inside a `Set` before anything could
+ * object. Measured at `61821e54cf5`: 44 declaring positions reduced to 34 keys,
+ * and 10 keys carried two positions each. Two of those pairs were genuinely the
+ * same surface twice (the cron ones), and the rest were not: one key covered
+ * both the server-enforced `FieldSchema.requiredWhen` transition gate and the
+ * `InlineGridColumnSchema.requiredWhen` cell whose own describe says nothing on
+ * the write path reads it. The ledger could not represent the difference, and
+ * the ratchet could not notice that it had never asked.
+ *
+ * The key is now `file:Schema.field`, which separates all 44 positions today.
+ * ⚠️ That is a measurement, NOT a guarantee: two same-named fields in two
+ * different inline `z.object({…})` blocks under ONE top-level const would
+ * attribute to the same schema name and collide again. So the naming scheme is
+ * not what makes this sound — the COLLISION ASSERTION below is. It holds for
+ * any naming scheme, which is why it is the durable half of the repair and the
+ * finer key is only what makes it pass today.
+ *
+ * A line number is deliberately not part of the key: it is not an identity, and
+ * a key that moved whenever an unrelated edit shifted lines would rot every
+ * ledger row on contact.
+ */
+function discoverDeclarations(): Declaration[] {
+  const found: Declaration[] = [];
   const walk = (dir: string) => {
     // `withFileTypes` reads the entry type from the single readdir syscall — no
     // stat-then-read window (avoids a file-system TOCTOU race; CodeQL).
@@ -86,19 +126,35 @@ function discoverSurfaces(): Set<string> {
       const p = join(dir, ent.name);
       if (ent.isDirectory()) walk(p);
       else if (ent.isFile() && ent.name.endsWith('.zod.ts')) {
-        const rel = relative(SPEC_SRC, p);
-        for (const line of readFileSync(p, 'utf8').split('\n')) {
+        const file = relative(SPEC_SRC, p);
+        let schema = '(top-level)';
+        readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
+          const decl = line.match(TOP_LEVEL_DECL);
+          if (decl) schema = decl[1];
           const m = line.match(DECLARES_EXPRESSION);
-          if (m) found.add(`${rel}:${m[1]}`);
-        }
+          if (m) found.push({ key: `${file}:${schema}.${m[1]}`, file, schema, field: m[1], line: i + 1 });
+        });
       }
     }
   };
   walk(SPEC_SRC);
-  // RLS using/check are expression predicates too (legacy z.string() fields).
-  found.add('security/rls.zod.ts:using');
-  found.add('security/rls.zod.ts:check');
+  // RLS using/check are expression predicates too (legacy z.string() fields, so
+  // no roster schema types them and the scan above cannot see them). Spelled
+  // schema-qualified like every other key so the ledger has ONE key vocabulary.
+  for (const field of ['using', 'check']) {
+    found.push({
+      key: `security/rls.zod.ts:RowLevelSecurityPolicySchema.${field}`,
+      file: 'security/rls.zod.ts',
+      schema: 'RowLevelSecurityPolicySchema',
+      field,
+      line: 0,
+    });
+  }
   return found;
+}
+
+function discoverSurfaces(): Set<string> {
+  return new Set(discoverDeclarations().map((d) => d.key));
 }
 
 describe('ADR-0058 D7 — expression surface conformance ledger', () => {
@@ -127,5 +183,35 @@ describe('ADR-0058 D7 — expression surface conformance ledger', () => {
       ).toBe(true);
       expect(s.proof, `${s.id}: an enforced compile surface must carry a proof`).toBeTruthy();
     }
+  });
+
+  // The structural half of #15500. Before this existed, two declarations of one
+  // field name in one file collapsed inside a `Set` and the ratchet reported
+  // the file green — the same defect class the ledger header claims to prevent
+  // ("a NEW expression surface that nobody classified breaks the build"),
+  // reached through GRANULARITY instead of roster membership. A gate that says
+  // "these positions share a key and I cannot tell them apart" is honest; one
+  // that quietly re-keys moves coverage with nobody reading the diff.
+  it('every declaring POSITION has its own ratchet key — no silent collapse', () => {
+    const declarations = discoverDeclarations();
+    // Positive control. An aborted or mis-rooted scan returns nothing, which
+    // would make the assertion below vacuously green — precisely the "reports
+    // green because it never looked" failure this card is about.
+    expect(
+      declarations.length,
+      'discovery returned NO declarations — the scan did not run, so the collision check below proves nothing',
+    ).toBeGreaterThan(0);
+
+    const byKey = new Map<string, Declaration[]>();
+    for (const d of declarations) byKey.set(d.key, [...(byKey.get(d.key) ?? []), d]);
+
+    const collisions = [...byKey.entries()]
+      .filter(([, ds]) => ds.length > 1)
+      .map(([key, ds]) =>
+        `${key}: ${ds.length} declaring positions share ONE ratchet key, so a single ledger row `
+        + 'classifies all of them and the ratchet cannot tell them apart — '
+        + `${ds.map((d) => `${d.file}:${d.line}`).join(', ')}. `
+        + 'Give the colliding declarations distinguishable keys, then classify each on its own row.');
+    expect(collisions, collisions.join('\n')).toEqual([]);
   });
 });

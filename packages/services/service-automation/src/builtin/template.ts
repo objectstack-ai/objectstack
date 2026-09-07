@@ -224,7 +224,20 @@ function resolveToken(token: string, variables: VariableMap, context: Automation
             }
         }
         const now = new Date();
-        if (offset) now.setDate(now.getDate() + sign * offset);
+        // ONE calendar, and it is UTC — the same one both returns render on
+        // two lines below (#14852). The old spelling did the day arithmetic
+        // on the LOCAL calendar (`getDate`/`setDate`) and rendered on the UTC
+        // one. That is accidentally equivalent only while the local day is 24
+        // hours long: `setDate` preserves wall-clock time, so across a DST
+        // transition the instant moves 23h (spring-forward) or 25h
+        // (fall-back) instead of n x 24h, and the rendered date lands a day
+        // early or a day late for the one UTC hour whose shortfall/overshoot
+        // crosses midnight. Measured over 34 zones x every 30 minutes of 2026
+        // x offsets {+1, -1} (1,191,360 pairs): the mixed spelling flips 190
+        // of them across 24 DST-observing zones, this spelling flips none.
+        // Pinned by `template-date-offset-dst.test.ts`, which cannot go red
+        // at TZ=UTC -- there the two spellings are indistinguishable.
+        if (offset) now.setUTCDate(now.getUTCDate() + sign * offset);
         if (fn === 'NOW') return now.toISOString();
         return now.toISOString().slice(0, 10);
     }

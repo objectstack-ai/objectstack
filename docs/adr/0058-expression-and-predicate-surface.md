@@ -290,7 +290,7 @@
 >   appendix will not presume the answer. The engine half and #5846 settle it
 >   together, in one edit to one ordering, and record it as an amendment.
 >   **→ Settled in Amendment II.1 below.**
-> - **`scripts/adr-anchors.json`'s `hook-wrappers.ts` invariant still describes
+> - **`scripts/adr-anchors/`'s `hook-wrappers.ts` invariant still describes
 >   the batch dispatch.** It is TRUE today and must move with the engine half,
 >   not before it. **→ Moved with #5574's engine half.**
 

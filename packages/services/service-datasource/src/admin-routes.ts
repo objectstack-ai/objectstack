@@ -12,7 +12,18 @@ import {
   ANONYMOUS_DENY_STATUS,
   ANONYMOUS_DENY_CODE,
   ANONYMOUS_DENY_MESSAGE,
+  // [#15350] The four symbols the admission posture read needs, and nothing
+  // more. `effectiveTenancyPosture` reads the posture IN FORCE off the
+  // `tenancy` service (ADR-0093 D4/D5: a deployment REQUESTING `isolated`
+  // without the enterprise organizations runtime is `single` in force), while
+  // `isServiceNotRegisteredError` / `AuthzStoreUnavailableError` are the two
+  // halves of #13906 decision 1 option A's classification.
+  effectiveTenancyPosture,
+  isServiceNotRegisteredError,
+  AuthzStoreUnavailableError,
+  type TenancyPostureSource,
 } from '@objectstack/core';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ErrorCode } from '@objectstack/spec/api';
 // The slots this module resolves, by their declared contracts. Erasing a
 // lookup to `any` is banned (#4127/#4176/#4202/#4251) and the ban is right
@@ -359,6 +370,89 @@ export function registerDatasourceAdminRoutes(
    * else it was not entitled to read — which is also why this check, like the
    * anonymous one, runs BEFORE `resolve()` and before any handler body.
    */
+  /**
+   * [#15350] The EFFECTIVE tenancy posture for THIS door's admission decision.
+   *
+   * ## What was open
+   *
+   * `resolveAuthzContext` gates every posture-conditional API-key refusal on a
+   * posture its CALLER supplies, and this registrar supplied none — so neither
+   * of them ran here:
+   *
+   *  - `organization_required` — `core/security/api-key.ts`,
+   *    `if (!tenantId && tenancyPosture)`;
+   *  - `organization_membership_ended` — `core/security/resolve-authz-context.ts`,
+   *    `if (keyPrincipal?.tenantId && input.tenancyPosture)`.
+   *
+   * An API key's `tenantId` is `sys_api_key.active_organization_id` copied
+   * verbatim — the caller's own stored claim, never vetted against current
+   * membership. These are REAL request headers on the datasource ADMIN routes,
+   * so `x-api-key` is accepted; under a wall-enforcing posture a key stamped
+   * with an organization its owner has LEFT was therefore ADMITTED here, and
+   * the family then gated it on `authz.systemPermissions` alone.
+   *
+   * ⚠️ Severity, stated as the card states it: this family gates on system
+   * capabilities rather than on org-scoped rows, so the immediate consequence
+   * is an ADMITTED PRINCIPAL — an ex-member whose grants outlive their
+   * membership manages this deployment's datasources — not a cross-organization
+   * row read. Less severe than the REST data door (#15256); not correct.
+   *
+   * ## The classification — #13906 decision 1 option A
+   *
+   * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
+   *   `undefined`. An embedding with no `plugin-auth` is a SUPPORTED
+   *   composition, and its behaviour here is exactly what it was.
+   * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
+   *   (ADR-0112 `SERVICE_UNAVAILABLE`). The posture is an authorization INPUT,
+   *   so admission was never DECIDED and must not be answered. A
+   *   `try { … } catch { undefined }` here would re-introduce precisely the
+   *   permissive-on-failure defect #13906 exists to repair — a FAILURE reading
+   *   as "this check does not apply".
+   *
+   * The throw is raised inside `requireDatasourceAdmin`'s own `try`, so it
+   * takes the relay that block already runs for the identical fault one seam
+   * over: `isAuthzStoreUnavailableError(err)` re-raises it rather than
+   * laundering an outage into a denial (#13279). Deliberately NOT a new relay.
+   *
+   * ## Why `getServiceAsync`, and why its ABSENCE is quiet
+   *
+   * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
+   * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
+   * await`), so the synchronous read this file uses for `objectql` cannot tell
+   * the two facts apart and would have to guess. Hence the kernel's async
+   * accessor, reached through `getKernel()`.
+   *
+   * ⚠️ And the accessor's PRESENCE is part of the wiring fact, exactly as on
+   * the two sibling seams (`rest-server.ts`, `sharing-plugin.ts`): a
+   * `KernelBase`-shaped host (`LiteKernel`) exposes `getKernel()` but has no
+   * `getServiceAsync` at all, so dereferencing it would raise an unbranded —
+   * therefore LOUD — `TypeError`, turning "this host shape has no async
+   * registry" into an outage. Such a host has no service factories either
+   * (`registerServiceFactory` throws "not supported"), so absence is the only
+   * fault it could report. It keeps the quiet answer, unchanged.
+   *
+   * ⛔ Deliberately NOT extracted into a shared helper. Three sibling cards
+   * (#15349, #15351, #15352) are live on this same seam in other packages; a
+   * helper extracted by one of the four collides with the other three. The
+   * extraction is worth doing — once, as its own card, after they land.
+   */
+  const resolveAdmissionTenancyPosture = async (): Promise<TenancyPosture | undefined> => {
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+      | undefined;
+    if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+    try {
+      return effectiveTenancyPosture(
+        await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
+      );
+    } catch (err) {
+      if (!isServiceNotRegisteredError(err)) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
+      }
+      return undefined;
+    }
+  };
+
   const requireDatasourceAdmin = async (req: any, res: any): Promise<boolean> => {
     let userId: string | undefined;
     let systemPermissions: string[] = [];
@@ -384,7 +478,13 @@ export function registerDatasourceAdminRoutes(
         } catch {
           ql = undefined;
         }
-        const authz = await resolveAuthzContext({ ql, headers, getSession });
+        // [#15350] The posture is an authorization INPUT, resolved for THIS
+        // door before the resolver runs. Omitting it is what left both
+        // posture-conditional API-key refusals unreachable here — see
+        // `resolveAdmissionTenancyPosture` above for the classification and for
+        // why a quiet `catch` at this seam is the defect, not the fix.
+        const tenancyPosture = await resolveAdmissionTenancyPosture();
+        const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
         userId = authz.userId;
         // The same envelope, read twice. `systemPermissions` is the resolver's
         // aggregate of every permission set the caller holds (user-bound and

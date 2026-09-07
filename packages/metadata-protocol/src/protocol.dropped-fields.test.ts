@@ -6,9 +6,10 @@
 // the strip back to the REST layer:
 //   - updateData forwards the engine's onFieldsDropped events (readonly /
 //     readonly_when) onto the response as `droppedFields`;
-//   - createData surfaces the #3043 static-`readonly` INGRESS strip, which runs
-//     BEFORE the engine (so it is recovered by diffing the payload, not via the
-//     engine listener) — symmetric with update;
+//   - createData surfaces the static-`readonly` create strip — which since
+//     #14147 runs INSIDE `engine.insert`, so it arrives on the SAME
+//     `onFieldsDropped` listener the update side uses (it used to run at this
+//     ingress and be recovered by diffing the payload) — symmetric with update;
 //   - no strip → NO `droppedFields` key, so the response shape stays
 //     backward-compatible for clients that only read `record`.
 
@@ -88,11 +89,21 @@ describe('updateData — forwards engine write strips as droppedFields (#3431)',
   });
 });
 
-describe('createData — surfaces the #3043 ingress readonly strip as droppedFields (#3431)', () => {
+describe('createData — surfaces the engine readonly create strip as droppedFields (#3431/#14147)', () => {
   function makeProtocol() {
     const engine = {
       registry: { getObject: (n: string) => (n === 'approval_case' ? SCHEMA : undefined) },
-      insert: vi.fn(async (_object: string, data: any) => ({ id: 'rec-1', ...data })),
+      // Stands in for `engine.insert` AFTER #14147: it strips a non-system
+      // caller's readonly key and reports it through the listener, which is the
+      // same shape the update stand-ins above have always had.
+      insert: vi.fn(async (object: string, data: any, options?: any) => {
+        if (options?.context?.isSystem || !(data && 'approval_status' in data)) {
+          return { id: 'rec-1', ...data };
+        }
+        const { approval_status: _forged, ...kept } = data;
+        options?.onFieldsDropped?.({ object, fields: ['approval_status'], reason: 'readonly' });
+        return { id: 'rec-1', ...kept };
+      }),
     };
     return { p: new ObjectStackProtocolImplementation(engine as any), engine };
   }
@@ -107,7 +118,8 @@ describe('createData — surfaces the #3043 ingress readonly strip as droppedFie
     expect(res.droppedFields).toEqual([
       { object: 'approval_case', fields: ['approval_status'], reason: 'readonly' },
     ]);
-    // Stripped field is absent from the persisted payload (existing #3043 behaviour).
+    // Stripped field is absent from the record the engine returns (#3043's
+    // behaviour, enforced one layer down since #14147).
     expect(res.record).not.toHaveProperty('approval_status');
   });
 

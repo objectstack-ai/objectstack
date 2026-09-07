@@ -19,6 +19,19 @@ export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
 export { DatabaseLoader, type DatabaseLoaderOptions } from './loaders/database-loader.js';
 
+// [#14921] The ambiguous-stem refusal. Published from the ROOT entry, not only
+// from `./node` beside `FilesystemLoader`: the error reaches consumers through
+// `MetadataManager.listNames()` / `list()`, which live here, and a caller that
+// wants to tell "this deployment's metadata tree names one item twice" apart
+// from a storage outage needs the predicate wherever it catches — not only
+// where the loader is constructed.
+export {
+  AmbiguousMetadataStemError,
+  isAmbiguousMetadataStemError,
+  AMBIGUOUS_METADATA_STEM_CODE,
+  AMBIGUOUS_METADATA_STEM_STATUS,
+} from './loaders/ambiguous-metadata-stem.js';
+
 // Objects
 export { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 

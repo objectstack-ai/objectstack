@@ -21,6 +21,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * Standard SemVer format with optional pre-release and build metadata
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const SemanticVersionSchema = lazySchema(() => z.object({
   major: z.number().int().min(0).describe('Major version (breaking changes)'),
   minor: z.number().int().min(0).describe('Minor version (backward compatible features)'),
@@ -336,6 +337,11 @@ export const PluginDependencyResolutionResultSchema = lazySchema(() => z.object(
     .describe('Map of plugin ID to its dependencies'),
 }));
 
+const ROLLOUT_DURATION_RETIRED =
+  '`MultiVersionSupport.rollout.duration` was renamed to `durationMs` in @objectstack/spec '
+  + '17 — the unit of a duration-shaped number lives in the key name, not only in the '
+  + 'describe prose. Rename the key to `durationMs`; the value (milliseconds) is unchanged.';
+
 /**
  * Multi-Version Support Configuration
  * Allows running multiple versions of a plugin simultaneously
@@ -381,8 +387,13 @@ export const MultiVersionSupportSchema = lazySchema(() => z.object({
     strategy: z.enum(['percentage', 'blue-green', 'canary']),
     percentage: z.number().min(0).max(100).optional()
       .describe('Percentage of traffic to new version'),
-    duration: z.number().int().optional()
+    // Renamed from `duration` (#15678, #14478 ruling B): the unit lived only in
+    // the describe prose, beside the unit-less `percentage`.
+    durationMs: z.number().int().optional()
       .describe('Rollout duration in milliseconds'),
+
+    /** Tombstone for the rename above (#15678, ruling B on #14478). */
+    duration: retiredKey(ROLLOUT_DURATION_RETIRED),
   }).optional(),
 }));
 

@@ -39,10 +39,35 @@
  *  3. `'stranded'` observed AT THE DOOR, not dropped — with its reverse
  *     control, a resume failure the engine does NOT call stranded, which must
  *     report `repairable: false` rather than inheriting a default.
+ *
+ * ## The fourth pin (#15555) — the false NEGATIVE
+ *
+ * PIN 3's reverse control holds that the ABSENCE of the stamp must not be read
+ * as repairable. #15555 is the other half of the same reading: the stamp could
+ * go missing on a run that IS repairable, because the engine journalled the
+ * repair snapshot and then threw before stamping. The door then answered
+ * `repairable: false` — correctly from its own point of view, and wrong about
+ * the world — telling an operator not to attempt a repair that succeeds.
+ * PIN 4 drives that window through this same door and asserts the fix at the
+ * only place it matters: what the operator is told.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AutomationEngine, InMemorySuspendedRunStore } from '@objectstack/service-automation';
+
+/**
+ * [#15555] A durable run-history store whose terminal write throws
+ * SYNCHRONOUSLY — the statement that sits between the engine's repair journal
+ * and its `status: 'stranded'` stamp. The engine's own `void write.catch(...)`
+ * beneath that call only ever sees a returned promise's rejection, so a
+ * synchronous throw escapes the whole catch arm.
+ */
+const TERMINAL_WRITE_FAILURE = 'run-history driver refused the terminal row';
+class SyncThrowTerminalStore extends InMemorySuspendedRunStore {
+  override recordTerminal(): Promise<void> {
+    throw new Error(TERMINAL_WRITE_FAILURE);
+  }
+}
 // [#4550] The engine doubles below route their write verbs through ObjectQL's
 // OWN dispatch predicates rather than a hand-mirrored copy — a double looser
 // than the engine it stands in for is how #4434 shipped a dead REST route with
@@ -141,8 +166,8 @@ describe('#13807 — a stranded decision publishes its facts, and keeps its stat
   let rejectBranchThrows: string | undefined;
 
   /** One live process: real engine, real approval node, real approvals service. */
-  function boot() {
-    const automation = new AutomationEngine(noopLogger as any, new InMemorySuspendedRunStore());
+  function boot(store?: InMemorySuspendedRunStore) {
+    const automation = new AutomationEngine(noopLogger as any, store ?? new InMemorySuspendedRunStore());
     registerApprovalNode(automation, service, noopLogger as any);
     automation.registerNodeExecutor({
       type: 'mark',
@@ -307,5 +332,48 @@ describe('#13807 — a stranded decision publishes its facts, and keeps its stat
     expect(lostDetails?.repairable, 'no stranded stamp ⇒ no repair promise').toBe(false);
     expect(lostDetails?.runId, 'and it still names the run an operator must look at')
       .toBe(lostReq.flow_run_id);
+  });
+
+  it('PIN 4 — #15555: a strand whose own bookkeeping throws is STILL reported repairable', async () => {
+    // The false NEGATIVE, driven end to end through the public door. The
+    // engine consumes the pause, journals the repair snapshot, and then the
+    // durable run-history write throws out of the arm before the
+    // `status: 'stranded'` stamp is reached. Before the engine-side guard the
+    // door received a raw throw carrying no run-state discriminator at all,
+    // so `repairable = status === 'stranded'` answered FALSE — about a run the
+    // repair verb puts back successfully, asserted below on the same run.
+    rejectBranchThrows = 'the node blew up';
+    const automation = boot(new SyncThrowTerminalStore());
+    const req = await park(automation);
+    const runId = req.flow_run_id;
+
+    const err = await service
+      .decide(req.id, { decision: 'reject', actorId: 'u1' }, SYSTEM_CTX)
+      .then(() => null, (e: Error) => e);
+
+    // The door still throws and the decision still stands — this card moves
+    // neither. ⛔ The status code and the `finalized` fact are the #13807
+    // ruling's and are untouched.
+    const details = strandedDecisionDetails(err);
+    expect(details?.finalized).toBe(true);
+    expect(details?.decision).toBe('reject');
+    expect(details?.runId).toBe(runId);
+    // ⭐ The card: the operator must be told the repair is worth attempting.
+    expect(details?.repairable, 'a journalled strand is repairable even when its bookkeeping failed').toBe(true);
+
+    // The two assertions that make the old `false` a FALSE NEGATIVE rather
+    // than a conservative default: the run really is stranded, and the verb
+    // the operator was told not to bother with really does put it back.
+    expect(await automation.hasSuspendedRun(runId)).toBe(false);
+    const restored = await automation.restoreConsumedSuspension(runId, { requestedBy: 'ops' });
+    expect(restored.restored, 'the repair the caller was told not to attempt').toBe(true);
+    expect(await automation.hasSuspendedRun(runId)).toBe(true);
+
+    // And the prose names the run's OWN failure, not the history driver's:
+    // the secondary failure is an operator fact and belongs in the engine's
+    // log, never in the sentence that explains why the flow stopped.
+    expect(err?.message).toMatch(/^RESUME_FAILED/);
+    expect(err?.message).toContain(rejectBranchThrows);
+    expect(err?.message).not.toContain(TERMINAL_WRITE_FAILURE);
   });
 });

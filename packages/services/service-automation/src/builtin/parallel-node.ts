@@ -72,11 +72,22 @@ export function registerParallelNode(engine: AutomationEngine, ctx: PluginContex
       try {
         // Implicit join: continue once when ALL branches have completed.
         // #1479: each branch returns its body steps, tagged with the branch index.
+        //
+        // #15230: the branch index goes on `branch`, NOT on `iteration`. It
+        // used to share `iteration` with the loop's row index — one field, two
+        // meanings, told apart only by reading `regionKind` first — and because
+        // the tagger let the innermost region win outright, a branch step
+        // inside a loop body recorded the branch and lost the row entirely.
+        // `iteration` is now single-valued (the enclosing loop's, carried
+        // through nesting by `runRegion`'s tagger), so nothing here writes it:
+        // a branch step inside a loop body gets the row from the loop's own
+        // tagging pass, and a bare `parallel` leaves it absent because there is
+        // no enclosing loop to report. Maintainer ruling 2026-09-03.
         branchSteps = await Promise.all(
-          branches.map((branch, i) =>
-            engine.runRegion(branch, variables, context ?? ({} as AutomationContext), {
+          branches.map((branchRegion, i) =>
+            engine.runRegion(branchRegion, variables, context ?? ({} as AutomationContext), {
               parentNodeId: node.id,
-              iteration: i,
+              branch: i,
               regionKind: 'parallel-branch',
             }),
           ),

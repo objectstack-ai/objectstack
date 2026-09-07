@@ -327,6 +327,11 @@ export default class MigrateMeta extends Command {
         await emitJson({
               from: result.fromMajor,
               to: result.toMajor,
+              // Deliberately NOT relabelled alongside the human line below:
+              // this is a machine-readable key on a published payload, so
+              // moving it is a contract change owing a reader census and a
+              // deprecation window of its own (#15585, option C). The value is
+              // the protocol major padded to a semver, not a package version.
               runtime: PROTOCOL_VERSION,
               applied: result.applied,
               todos: result.todos,
@@ -350,7 +355,15 @@ export default class MigrateMeta extends Command {
       }
 
       printInfo(`Config: ${chalk.white(absolutePath)}`);
-      printInfo(`Chain:  protocol ${fromMajor} → ${toMajor} (runtime ${PROTOCOL_VERSION})`);
+      // State this build's protocol major in the protocol's own units.
+      // `PROTOCOL_VERSION` is that major padded to a semver ('17.0.0'), never
+      // the installed package version -- printed as a bare semver under the
+      // word "runtime" it read as one, so on a 17.3.0 install the operator saw
+      // an apparent downgrade next to the real package versions of the same
+      // upgrade session. The fact itself is worth keeping: with `--to` below
+      // this build's major it is the only line saying where the runtime
+      // actually stands. So it is relabelled and de-padded, not dropped.
+      printInfo(`Chain:  protocol ${fromMajor} → ${toMajor} (this runtime implements protocol ${PROTOCOL_MAJOR})`);
       console.log('');
 
       if (result.applied.length === 0 && result.todos.length === 0) {

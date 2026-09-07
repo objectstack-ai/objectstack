@@ -31,7 +31,7 @@ A commit-history model usually means "build a versioning system." Here, most of 
 | Capability | Where | Note |
 |---|---|---|
 | Per-item version history, **full body per version** | `sys_metadata_history` (`packages/metadata-core/src/objects/sys-metadata-history.object.ts`) | append-only; `operation_type ∈ {create,update,publish,revert,delete}`; `event_seq` (per-org monotonic, orders *all* changes); `version` (per-item monotonic); `recorded_by` (incl. `ai:claude`) |
-| Read a prior version / **single-item revert** | `SysMetadataRepository.history()` / `restoreVersion(ref, targetVersion)` (`packages/objectql/src/sys-metadata-repository.ts`) | revert already lands as a forward `operation_type='revert'` event |
+| Read a prior version / **single-item revert** | `SysMetadataRepository.history()` / `restoreVersion(ref, targetVersion)` (`packages/metadata-protocol/src/sys-metadata-repository.ts`) | revert already lands as a forward `operation_type='revert'` event |
 | Per-write ACID (metadata row + history row atomic) | `withTxn()` / `engine.transaction()` (same file + `engine.ts`) | exists **per item**; not across items |
 | Full-bundle package snapshot + atomic rollback-by-install | `sys_package_version` + `snapshotBundleAsManifest()` + install pointer swap (cloud `service-tenant` / `service-cloud`) | downgrade already detected ("Rolled back v2→v1") |
 | Soft vs hard delete | `keepData` / `dropStorage` flags (`engine.ts` teardown) | **default keeps data**; hard drop is opt-in — soft-drop is already the default posture |

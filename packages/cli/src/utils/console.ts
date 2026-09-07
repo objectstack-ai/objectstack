@@ -1,7 +1,16 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Console UI Integration Utilities
+ * Console UI Integration Utilities — an INTERNAL module (#16046).
+ *
+ * ⚠️ This module is not a published entry point. Until #16046 the `./console`
+ * subpath pointed straight at this file's build output, so all 13 of its
+ * top-level exports were public API and any export it gained became public on
+ * landing. The published face is now `src/console.ts`, which re-exports three
+ * of them by name; the other ten are reachable only from inside this package.
+ * Adding an export here no longer publishes anything, and ⛔ moving one into
+ * the public face means editing that barrel and its pin
+ * (`test/published-subpath-console.pin.test.ts`) on purpose, with a changeset.
  *
  * Mirrors `studio.ts` / `account.ts` but for the opinionated, fork-ready
  * runtime console. The Console SPA is mounted at `/_console/` by every

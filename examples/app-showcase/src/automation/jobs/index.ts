@@ -20,7 +20,7 @@ export const HealthSweepJob = defineJob({
   schedule: { type: 'cron', expression: '0 1 * * *', timezone: 'UTC' },
   handler: 'sweepProjectHealth',
   retryPolicy: { maxRetries: 2, backoffMs: 5000, backoffMultiplier: 2 },
-  timeout: 300000,
+  timeoutMs: 300000,
   enabled: true,
 });
 

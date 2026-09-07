@@ -22,6 +22,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * Defines the scope of a permission
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const PermissionScopeSchema = lazySchema(() => z.enum([
   'global',      // Applies to entire system
   'tenant',      // Applies to specific tenant
@@ -295,6 +296,31 @@ export const RuntimeConfigSchema = lazySchema(() => z.object({
   }).optional(),
 }));
 
+const SANDBOX_PROCESS_TIMEOUT_RETIRED =
+  '`SandboxConfig.process.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+  + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+  + 'prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.';
+
+const TOKEN_EXPIRATION_RETIRED =
+  '`KernelSecurityPolicy.authentication.tokenExpiration` was renamed to '
+  + '`tokenExpirationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number '
+  + 'lives in the key name, not only in the describe prose, and the sibling rate-limit window '
+  + 'on this same policy is already `windowMs`. Rename the key to `tokenExpirationSeconds`; '
+  + 'the value (seconds) is unchanged.';
+
+const AUDIT_LOG_RETENTION_RETIRED =
+  '`KernelSecurityPolicy.auditLog.retention` was renamed to `retentionDays` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. Rename the key to `retentionDays`; the value (days) is '
+  + 'unchanged.';
+
+const DISCLOSURE_RESPONSE_TIME_RETIRED =
+  '`PluginSecurityManifest.vulnerabilityDisclosure.responseTime` was renamed to '
+  + '`responseTimeHours` in @objectstack/spec 17 — the unit of a duration-shaped number lives '
+  + 'in the key name, not only in the describe prose. This one is HOURS, while the same bare '
+  + 'name on `PluginHealthReport.metrics` was milliseconds — which is the confusion the rule '
+  + 'exists to remove. Rename the key to `responseTimeHours`; the value (hours) is unchanged.';
+
 /**
  * Sandbox Configuration
  * Defines how plugin is isolated
@@ -349,7 +375,12 @@ export const SandboxConfigSchema = lazySchema(() => z.object({
   process: z.object({
     allowSpawn: z.boolean().default(false).describe('Allow spawning child processes'),
     allowedCommands: z.array(z.string()).optional().describe('Whitelisted commands'),
-    timeout: z.number().int().optional().describe('Process timeout in ms'),
+    // Renamed from `timeout` (#15678, #14478 ruling B): the unit lived only in
+    // the describe prose.
+    timeoutMs: z.number().int().optional().describe('Process timeout in ms'),
+
+    /** Tombstone for the rename above (#15678, ruling B on #14478). */
+    timeout: retiredKey(SANDBOX_PROCESS_TIMEOUT_RETIRED),
   }).optional(),
   
   /**
@@ -583,7 +614,12 @@ export const KernelSecurityPolicySchema = lazySchema(() => z.object({
   authentication: z.object({
     required: z.boolean().default(true),
     methods: z.array(z.enum(['jwt', 'oauth2', 'api-key', 'session', 'certificate'])),
-    tokenExpiration: z.number().int().optional().describe('Token expiration in seconds'),
+    // Renamed from `tokenExpiration` (#15678, #14478 ruling B): the unit lived
+    // only in the describe prose, beside the already-suffixed `windowMs`.
+    tokenExpirationSeconds: z.number().int().optional().describe('Token expiration in seconds'),
+
+    /** Tombstone for the rename above (#15678, ruling B on #14478). */
+    tokenExpiration: retiredKey(TOKEN_EXPIRATION_RETIRED),
   }).optional(),
   
   /**
@@ -602,7 +638,12 @@ export const KernelSecurityPolicySchema = lazySchema(() => z.object({
   auditLog: z.object({
     enabled: z.boolean().default(true),
     events: z.array(z.string()).optional().describe('Events to log'),
-    retention: z.number().int().optional().describe('Log retention in days'),
+    // Renamed from `retention` (#15678, #14478 ruling B): the unit lived only in
+    // the describe prose.
+    retentionDays: z.number().int().optional().describe('Log retention in days'),
+
+    /** Tombstone for the rename above (#15678, ruling B on #14478). */
+    retention: retiredKey(AUDIT_LOG_RETENTION_RETIRED),
   }).optional(),
 }));
 
@@ -694,7 +735,13 @@ export const PluginSecurityManifestSchema = lazySchema(() => z.object({
    */
   vulnerabilityDisclosure: z.object({
     policyUrl: z.string().url().optional(),
-    responseTime: z.number().int().optional().describe('Expected response time in hours'),
+    // Renamed from `responseTime` (#15678, #14478 ruling B): the unit lived only
+    // in the describe prose — and it is HOURS here, while the same bare name on
+    // PluginHealthReport.metrics was milliseconds.
+    responseTimeHours: z.number().int().optional().describe('Expected response time in hours'),
+
+    /** Tombstone for the rename above (#15678, ruling B on #14478). */
+    responseTime: retiredKey(DISCLOSURE_RESPONSE_TIME_RETIRED),
     bugBounty: z.boolean().default(false),
   }).optional(),
 }));

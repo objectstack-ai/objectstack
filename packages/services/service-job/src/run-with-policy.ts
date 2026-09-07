@@ -3,7 +3,7 @@
 import type { JobScheduleOptions } from '@objectstack/spec/contracts';
 
 /**
- * Error thrown when a job attempt exceeds its configured `timeout`.
+ * Error thrown when a job attempt exceeds its configured `timeoutMs`.
  * Executors map it to JobExecution status 'timeout' (vs plain 'failed').
  */
 export class JobTimeoutError extends Error {
@@ -85,11 +85,12 @@ function withTimeout<T>(run: () => Promise<T>, jobId: string, timeoutMs?: number
 }
 
 /**
- * Execute one job run under the authored `retryPolicy` / `timeout`
- * (#3494 — JobSchema's retryPolicy/timeout used to be parsed-but-ignored).
+ * Execute one job run under the authored `retryPolicy` / `timeoutMs`
+ * (#3494 — JobSchema's retryPolicy/timeout used to be parsed-but-ignored;
+ * the key was renamed `timeoutMs` in #14478 so the unit lives in its name).
  *
  * - No options → exactly the legacy behavior: one attempt, no time limit.
- * - `timeout` applies per attempt; an over-limit attempt rejects with
+ * - `timeoutMs` applies per attempt; an over-limit attempt rejects with
  *   {@link JobTimeoutError}. JavaScript cannot forcibly cancel the in-flight
  *   handler — the attempt is abandoned, not killed.
  * - `retryPolicy` re-runs failed attempts (including timeouts) with
@@ -124,7 +125,7 @@ export async function runWithPolicy<T = void>(
   options?: JobScheduleOptions,
   recorder?: JobAttemptRecorder<T>,
 ): Promise<T> {
-  const timeoutMs = options?.timeout;
+  const timeoutMs = options?.timeoutMs;
   const policy = options?.retryPolicy;
 
   // No policy ⇒ maxRetries 0 ⇒ the loop below runs exactly one attempt and

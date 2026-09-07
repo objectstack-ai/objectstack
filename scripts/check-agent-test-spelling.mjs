@@ -80,11 +80,16 @@
  * printing. FIVE of the six are forms a naive bare-`--` selector would have RED,
  * and every one of them is correct as written:
  *
- *   .github/workflows/ci.yml:1122   pnpm turbo run test --filter=@objectstack/dogfood -- --shard=N/3
- *   .github/workflows/lint.yml:2443 pnpm dev -- --fresh   (quoted in this gate's own wiring comment)
- *   AGENTS.md:126                   pnpm dev -- --fresh -p <random>
- *   AGENTS.md:133                   pnpm dev:crm -- --fresh -p 38421
- *   AGENTS.md:388                   pnpm dev -- --fresh -p <random>
+ * ⚠️ The rows name the FILE, never a line in it. The line each sat on when this
+ * was measured is kept beside it as data, because that is a dated reading and
+ * not a pointer -- and a pointer written `file:NNN` rots silently, which is the
+ * whole finding of #15765. `--list` re-derives the live position on every run.
+ *
+ *   `.github/workflows/ci.yml`    (was line 1122)  pnpm turbo run test --filter=@objectstack/dogfood -- --shard=N/3
+ *   `.github/workflows/lint.yml`  (was line 2443)  pnpm dev -- --fresh   (quoted in this gate's own wiring comment)
+ *   `AGENTS.md`                   (was line 126)   pnpm dev -- --fresh -p <random>
+ *   `AGENTS.md`                   (was line 133)   pnpm dev:crm -- --fresh -p 38421
+ *   `AGENTS.md`                   (was line 388)   pnpm dev -- --fresh -p <random>
  *
  * The sixth is prose inside `scripts/check-examples-live-imports.mjs`, cleared
  * because its command word is a `check:` script.

@@ -124,7 +124,19 @@ export interface Plugin {
      * Plugin type categorisation for runtime behaviour — a {@link PluginType},
      * the closed set the spec declares. The enumeration lives on that type
      * (derived from `CORE_PLUGIN_TYPES`), not in this comment: a value outside
-     * it no longer type-checks, and `PluginSchema.type` refuses it at parse.
+     * it no longer type-checks, and since #16049 `kernel.use()` REFUSES it at
+     * boot — `PluginLoader.validatePluginContract` runs `PluginSchema` over
+     * every plugin object and raises `PLUGIN_CONTRACT_VIOLATION` naming the
+     * plugin and the first violated key.
+     *
+     * ⚠️ This sentence used to say the value was refused "at parse". It was
+     * measured false (#16049, from #15638): `PluginSchema` had no runtime
+     * caller, kernel plugin objects were never parsed, and a `type` outside the
+     * set was accepted and stored verbatim. The refusal this comment describes
+     * is the one that now exists, on the boot path, and the compiler's arm is
+     * the second half rather than the only one — `kernel.use(plugin as any)` is
+     * a shipped in-repo pattern, and externally authored plugins never meet
+     * this compiler at all.
      * @default 'standard'
      */
     type?: PluginType;

@@ -16,7 +16,7 @@ internal `name` mirrors the key.
 The Studio metadata editor, however, treated `fields` as an **array** all
 the way down:
 
-1. Hand-crafted JSON Schema in `packages/objectql/src/protocol.ts`
+1. Hand-crafted JSON Schema in `packages/metadata-protocol/src/protocol.ts`
    declared `{ type: 'array', items: { … } }`.
 2. The form spec in `packages/spec/src/data/object.form.ts` declared
    `{ type: 'repeater', widget: 'grid' }`.

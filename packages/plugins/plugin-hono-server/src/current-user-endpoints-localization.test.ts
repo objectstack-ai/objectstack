@@ -20,13 +20,30 @@
 // served" clause; the narrowed-rule case is the "no second parser" clause
 // (the answer moves with the registry's rule, not with a built-in regex).
 //
-// Before this card the resolver behind these endpoints assembled NO
-// localization at all — `execCtx.locale` here was always `undefined` and the
-// endpoint answered `locale: null` for every authenticated caller — so the
-// rung-3 cases are also the first pins that this surface answers a language
-// at all. `currency` / `timezone` are deliberately untouched by the ruling and
-// still come off that resolver (i.e. `null` in these fixtures); the response
-// SHAPE objectui reads is pinned unchanged.
+// Before #14788 the resolver behind these endpoints assembled NO localization
+// at all — `execCtx.locale` here was always `undefined` and the endpoint
+// answered `locale: null` for every authenticated caller — so the rung-3 cases
+// are also the first pins that this surface answers a language at all.
+//
+// #15387 — WHAT THIS FILE PINS CHANGED, deliberately and not silently.
+// `currency` / `timezone` were out of #14788's scope and kept coming off that
+// same resolver, so the rung-1 case below asserted `timezone: null` as the
+// contract. It was pinning the DEFECT: the endpoint answered null for both to
+// every authenticated caller whatever the deployment configured. The
+// assertion is now the corrected contract, and the `#15387` block at the foot
+// of this file is what makes the two values falsifiable rather than merely
+// present:
+//
+//   * `timezone` — the deployment cascade's answer, floor `UTC`. An
+//     authenticated caller can no longer be answered `null` for it, which is
+//     why the rung-1 fixture (which configures no time zone) now reads `UTC`.
+//   * `currency` — the deployment cascade's answer, and the one value with NO
+//     floor. `null` there is still legal and still correct for a deployment
+//     that configures no currency, so the rung-1 expectation for it is
+//     UNCHANGED. Keeping that asymmetry visible is the point: the two keys do
+//     not have the same nullability contract.
+//
+// The response SHAPE objectui reads is unchanged — same four keys.
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
@@ -61,6 +78,10 @@ interface MountOptions {
     rules?: Row[] | null;
     /** Tenant-scoped `localization.locale` `sys_setting` row value (rung 3). */
     settingLocale?: string;
+    /** Tenant-scoped `localization.timezone` `sys_setting` row value. */
+    settingTimezone?: string;
+    /** Tenant-scoped `localization.currency` `sys_setting` row value. */
+    settingCurrency?: string;
     /** Whether a session resolves at all. */
     authenticated?: boolean;
     /**
@@ -73,20 +94,65 @@ interface MountOptions {
     failUserRead?: boolean;
 }
 
-function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, authenticated = true, failUserRead = false }: MountOptions = {}) {
+/**
+ * The `where` shapes these endpoints actually issue: scalar equality
+ * (`{ id }`, `{ namespace }`, `{ scope }`) and the one `$in` list on `key` the
+ * grouped settings read carries. Anything else — a combinator, another
+ * operator — is REFUSED loudly rather than answered silently wrong, which is
+ * the cheap correct answer for a double that never sees one (the defect class
+ * `check:where-matcher` exists for is silence, not incompleteness).
+ */
+function matchesWhere(row: Row, where: Row | undefined): boolean {
+    for (const [key, condition] of Object.entries(where ?? {})) {
+        if (key.startsWith('$')) {
+            throw new Error(`this double does not implement the where operator ${key}`);
+        }
+        if (condition !== null && typeof condition === 'object') {
+            const operators = Object.keys(condition);
+            if (operators.length !== 1 || operators[0] !== '$in') {
+                throw new Error(`this double does not implement the where operator(s) ${operators.join(', ')} on ${key}`);
+            }
+            if (!condition.$in.includes(row[key])) return false;
+            continue;
+        }
+        if (row[key] !== condition) return false;
+    }
+    return true;
+}
+
+function mount({ storedLocale, rules = [LOCALE_SHAPE_RULE], settingLocale, settingTimezone, settingCurrency, authenticated = true, failUserRead = false }: MountOptions = {}) {
     const reads: Array<{ object: string; opts: any }> = [];
     let sysUserReads = 0;
+    /**
+     * The rows each read draws from, held as a table rather than assembled per
+     * branch, so the double answers `where` and the caller's `limit` the way
+     * the engine does instead of by object name.
+     */
+    const tables: Record<string, Row[]> = {
+        sys_user: [{ id: USER, email: 'lang@example.com', locale: storedLocale }],
+        // The endpoint reads all three `localization` keys in ONE `$in` query,
+        // so the table carries whichever of them the fixture configured — and
+        // nothing for the rest.
+        sys_setting: ([
+            ['locale', settingLocale],
+            ['timezone', settingTimezone],
+            ['currency', settingCurrency],
+        ] as Array<[string, string | undefined]>)
+            .filter(([, value]) => value !== undefined)
+            .map(([key, value]) => ({ namespace: 'localization', key, value, scope: 'tenant' })),
+    };
     const ql = {
         find: async (object: string, opts: any) => {
             reads.push({ object, opts });
-            if (object === 'sys_user') {
-                if (failUserRead && ++sysUserReads > 1) throw new Error('sys_user unavailable');
-                return opts?.where?.id === USER ? [{ id: USER, email: 'lang@example.com', locale: storedLocale }] : [];
-            }
-            if (object === 'sys_setting' && settingLocale !== undefined) {
-                return [{ namespace: 'localization', key: 'locale', value: settingLocale, scope: 'tenant' }];
-            }
-            return [];
+            if (object === 'sys_user' && failUserRead && ++sysUserReads > 1) throw new Error('sys_user unavailable');
+            // The caller's bound is applied BY PRESENCE and AFTER the filter.
+            // Both reads this double serves carry one — `sys_user` at 1, the
+            // grouped `sys_setting` read at 10 — so a double that dropped it
+            // could not tell a bounded read from an unbounded one, and every
+            // bound change on those reads would be green by construction
+            // (`check:objectql-double-limit`).
+            const matched = (tables[object] ?? []).filter((row) => matchesWhere(row, opts?.where));
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         // The registry view the endpoint reads the column's rule off.
         getSchema: (name: string) => (name === 'sys_user' && rules !== null ? { name: 'sys_user', validations: rules } : undefined),
@@ -130,7 +196,9 @@ describe('/auth/me/localization — the signed-in user\'s language, three rungs 
         const { status, body } = await get('ja-JP,ja;q=0.9,en;q=0.8');
         expect(status).toBe(200);
         // The SHAPE objectui reads (`json?.locale`, plus `currency`) — unchanged.
-        expect(body).toEqual({ authenticated: true, currency: null, locale: 'zh-CN', timezone: null });
+        // `timezone: 'UTC'` is the cascade floor for a fixture that configures
+        // no time zone (#15387); `currency: null` is the no-floor value.
+        expect(body).toEqual({ authenticated: true, currency: null, locale: 'zh-CN', timezone: 'UTC' });
         // The identity row is read under a SYSTEM context by the caller's own
         // id (the `tryFind` shape core uses for the same row) — never routed
         // through the caller's own RLS wall.
@@ -213,5 +281,55 @@ describe('/auth/me/localization — the signed-in user\'s language, three rungs 
         expect(body).toEqual({ authenticated: false });
         // No identity row is read for an anonymous caller.
         expect(reads.filter((r) => r.object === 'sys_user')).toEqual([]);
+    });
+});
+
+describe('/auth/me/localization — the regional defaults are RESOLVED, not always null (#15387)', () => {
+    it('answers the tenant\'s configured currency and time zone', async () => {
+        const { get } = mount({ settingTimezone: 'Asia/Shanghai', settingCurrency: 'CNY', settingLocale: 'zh-CN' });
+        const { status, body } = await get();
+        expect(status).toBe(200);
+        // The WHOLE published shape, so a fourth key cannot appear unnoticed.
+        expect(body).toEqual({ authenticated: true, currency: 'CNY', locale: 'zh-CN', timezone: 'Asia/Shanghai' });
+    });
+
+    it('resolves them independently of which locale rung won — they are not a by-product of the language cascade', async () => {
+        // Rung 1 answers the language, so the deployment cascade does NOT decide
+        // `locale` here. Before this card that short-circuit was the only reason
+        // the cascade was consulted at all, and `currency` / `timezone` came off
+        // an ExecutionContext that never carried them.
+        const { get } = mount({ storedLocale: 'ja-JP', settingLocale: 'zh-CN', settingTimezone: 'Europe/Paris', settingCurrency: 'eur' });
+        const { body } = await get('de-DE');
+        // `eur` lower-case: the cascade's own coercion upper-cases a 3-letter code.
+        expect(body).toEqual({ authenticated: true, currency: 'EUR', locale: 'ja-JP', timezone: 'Europe/Paris' });
+    });
+
+    it('a value the cascade refuses falls to the cascade\'s own answer — this surface adds no second parser', async () => {
+        // `coerceCurrency` takes exactly three letters; `coerceTimeZone` takes an
+        // `iana_time_zone` domain member. Neither refusal is re-implemented here:
+        // the endpoint answers whatever the shared resolver answers.
+        const { get } = mount({ settingTimezone: 'Middle/Earth', settingCurrency: 'euro' });
+        const { body } = await get();
+        expect(body.timezone).toBe('UTC');
+        expect(body.currency).toBeNull();
+    });
+
+    it('with nothing configured: the time-zone floor answers, and currency is the one value that stays null', async () => {
+        // The asymmetry is the cascade's, and it is deliberate to pin: `timezone`
+        // has a floor (`UTC`) so an authenticated caller can never see null for
+        // it again, while `currency` has none — a deployment that configures no
+        // currency has no reference currency, and inventing one would be a wrong
+        // answer rather than a missing one.
+        const { get } = mount({});
+        const { body } = await get();
+        expect(body).toEqual({ authenticated: true, currency: null, locale: 'en-US', timezone: 'UTC' });
+    });
+
+    it('the unauthenticated answer stays localization-free', async () => {
+        const { get, reads } = mount({ authenticated: false, settingTimezone: 'Asia/Shanghai', settingCurrency: 'CNY' });
+        const { body } = await get();
+        expect(body).toEqual({ authenticated: false });
+        // Anti-vacuity: no settings read is issued for a caller with no session.
+        expect(reads.filter((r) => r.object === 'sys_setting')).toEqual([]);
     });
 });

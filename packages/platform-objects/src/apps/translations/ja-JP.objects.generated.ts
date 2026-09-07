@@ -328,11 +328,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_at: {
         label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin). System-managed."
+        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
       },
       active_organization_id: {
         label: "アクティブ組織"
@@ -533,6 +533,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       require_mfa: {
         label: "多要素認証を必須化",
         help: "true の場合、この組織のすべてのメンバーはデータにアクセスするために認証アプリの登録が必要になります。"
+      },
+      timezone: {
+        label: "タイムゾーン",
+        help: "この組織で日付の境界を計算する IANA タイムゾーン（例: UTC、Asia/Shanghai）。独自のタイムゾーンを持たないすべてのビジネスユニットが継承するルートの既定値です。未設定の場合は UTC です。"
       },
       parent_organization_id: {
         label: "Parent Organization",
@@ -856,6 +860,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "親ビジネスユニット",
         help: "組織ツリーの自己参照。null = テナントのルート。"
+      },
+      timezone: {
+        label: "タイムゾーン",
+        help: "このユニットで日付の境界を計算する IANA タイムゾーン（例: Asia/Shanghai）。未設定の場合は親ビジネスユニット、次に組織のタイムゾーン、最後に UTC を継承します。"
       },
       organization_id: {
         label: "組織",

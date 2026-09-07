@@ -42,6 +42,36 @@ const HISTORY_PREFIX = 'run_';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
 /**
+ * [#15832] The sentinel the counted-multi-delete capability probe addresses —
+ * see {@link ObjectStoreSuspendedRunStore.probeCountedMultiDelete}.
+ *
+ * It is written into `id`, `node_id` AND `correlation` at once, so a row would
+ * have to carry this exact string in all three columns to match. No producer
+ * writes it into any of them: `id` is the engine's minted `runId` (or a
+ * {@link HISTORY_PREFIX}-prefixed terminal id), `node_id` is an authored flow
+ * node id, and `correlation` is minted by the pausing executor.
+ *
+ * ⛔ The zero-match property is NOT bought with an empty `$in` or any other
+ * "matches nothing by construction" operator. `{ id: { $in: [] } }` reads as
+ * the safer spelling and is the more dangerous one: it is a driver-by-driver
+ * question whether an empty `IN` compiles at all, and the failure direction of
+ * a builder that drops an empty clause is a `DELETE` over the whole table.
+ * Three ANDed equalities compile the same way everywhere and fail closed.
+ */
+const CLAIM_CAPABILITY_PROBE_SENTINEL = '__objectstack_suspended_run_claim_capability_probe__';
+
+/**
+ * [#15832] What the one-time probe learned about this engine's counted
+ * multi-delete route — `ObjectQL.delete` declares `Promise<any>`, so this is
+ * the only place the answer exists.
+ */
+type CountedMultiDeleteCapability =
+  /** The route resolved a number: the compare-and-set verdict is readable. */
+  | { readonly counted: true }
+  /** It resolved something else; `observed` is that value's `typeof`. */
+  | { readonly counted: false; readonly observed: string };
+
+/**
  * Default per-flow cap on terminal run-history rows (#2585). A busy
  * per-record-change flow otherwise persists one row per execution forever —
  * exactly the unbounded self-telemetry growth ADR-0057 exists to prevent.
@@ -254,6 +284,16 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
    */
   private claimUnsupportedWarned = false;
   /**
+   * [#15832] The in-flight or settled one-time capability probe — memoized as
+   * the PROMISE, not as its value, so two resumes arriving in the same tick
+   * take one probe between them rather than one each.
+   *
+   * ⛔ A REJECTED probe is deliberately un-memoized (see
+   * {@link probeCountedMultiDelete}): a store that was unreachable for one
+   * second must not answer for the life of the process.
+   */
+  private countedMultiDelete?: Promise<CountedMultiDeleteCapability>;
+  /**
    * [#10101] Memoized shared platform-row organization resolver over the same
    * engine the rows are written through — answers "which column carries the
    * TRIGGERING object's own organization, and what does the trigger record
@@ -356,7 +396,8 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
    *  1. an engine with no `delete()` at all — the same composition
    *     {@link delete} already degrades on;
    *  2. a multi-row result that is not a count, where "did I win?" has no
-   *     answer to read;
+   *     answer to read — settled BEFORE the compare-and-set since #15832, by
+   *     {@link probeCountedMultiDelete}; see the section below;
    *  3. ⚠️ a DRIVER with no `deleteMany` — which this method never sees as an
    *     answer at all. `ObjectQL.delete` resolves the predicate route and then
    *     finds no `deleteMany` to call, so it throws
@@ -377,6 +418,61 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
    * already promises. ⛔ Deliberately NOT extended to {@link delete}'s warn one
    * screen up: that line predates this card, fires once per CONSUMPTION rather
    * than once per resume attempt, and is not this change's to re-shape.
+   *
+   * ## [#15832] Reason 2 is settled BEFORE the row is touched, and `'unsupported'`
+   * is no longer an answer this method can give AFTER it
+   *
+   * Until #15832 the shape test lived where the count arrives — i.e. one line
+   * after the compare-and-set had gone out. On an engine whose multi-delete
+   * does not resolve a count that made the refusal a LIE about its own effect:
+   * the conditional delete had been performed against the shared row and its
+   * verdict discarded, so a replica that ACTUALLY LOST (0 rows affected) was
+   * told `'unsupported'`, which {@link AutomationEngine.claimAdvance} reads as
+   * `unguarded`, and it resumed. That is the doubled side effect #14333 exists
+   * to prevent, occurring on the one composition that declares itself unable
+   * to prevent it. (The extra round-trip `forgetSuspendedRun` then issues is
+   * real too, and ⛔ it is not why this changed.)
+   *
+   * So the question is asked of a call that touches no suspension:
+   * {@link probeCountedMultiDelete}, once per store instance, down the very
+   * route the claim takes, against a predicate that matches no row.
+   *
+   * ⚠️ **What that probe cannot do, stated plainly.** It cannot promise what
+   * the NEXT call resolves to. `ObjectQL.delete` declares `Promise<any>`
+   * (`packages/objectql/src/engine.ts`) and what surfaces is `opCtx.result`,
+   * which any middleware may rewrite per call — so "the engine returns a
+   * count" is not a fact the probe can establish, only a fact it can OBSERVE
+   * once. There is no read-only way to establish it either: the shape is
+   * undeclared at this boundary, and the only instrument that answers is a
+   * call down the same route. Closing THAT gap is #16033's — the count is
+   * contracted one layer down (`IDataDriver.deleteMany`,
+   * `packages/spec/src/contracts/data-driver.ts`, `Promise<number>`) and
+   * erased to `any` at the engine boundary this store talks to.
+   *
+   * ⇒ The probe alone would therefore be exactly the "looks like it decides in
+   * advance" change it must not be. It is half of the fix, and the half it
+   * buys is the DECLARATION: an engine that cannot count is refused with
+   * nothing consumed, which is what makes `claimAdvance`'s `unguarded`
+   * reading true when it is taken. The other half is the residual, below.
+   *
+   * ⭐ **The residual is closed by RETIRING `'unsupported'` after the write.**
+   * If a probed-counting engine still resolves a non-count for a real claim,
+   * the compare-and-set is committed and its verdict is unrecoverable — a
+   * winner and a loser both see the row gone, so no follow-up read can tell
+   * them apart. That is not "no guarantee was offered"; it is UNKNOWN, which
+   * this store says the way every other unknown is said here: it THROWS.
+   * {@link AutomationEngine.claimAdvance} already catches exactly that and
+   * answers `STORE_UNAVAILABLE`, whose text is already written for this fact
+   * ("a failure can arrive after a committed delete"), and the resume is
+   * REFUSED rather than continued. ⇒ A replica that lost is never told it is
+   * unguarded once the row has been touched, whatever the probe concluded.
+   *
+   * ⛔ Refusing is not free and is not pretended to be: a claim that in fact
+   * WON is then stranded (the row is gone and this resume does not continue
+   * it) until an operator retries. That is the deliberate direction — #14333's
+   * whole premise is that a doubled side effect is the worse outcome — and it
+   * is reachable only on an engine that answers inconsistently between the
+   * probe and the claim, which no shipped composition does.
    */
   async claimSuspension(runId: string, parkedAt: SuspensionParkedAt): Promise<SuspensionClaimOutcome> {
     if (typeof this.engine.delete !== 'function') {
@@ -385,17 +481,116 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       );
       return 'unsupported';
     }
+    // [#15832] BEFORE the row is touched. A rejection propagates: it means the
+    // question could not be asked at all, which `claimAdvance` already maps to
+    // STORE_UNAVAILABLE — the same answer the claim itself produced when it
+    // was the call that threw, and the same one a driver with no `deleteMany`
+    // produces (reason 3 above).
+    const capability = await this.countedMultiDeleteCapability();
+    if (!capability.counted) {
+      this.warnClaimUnsupported(
+        `the data engine's multi-row delete resolved ${capability.observed}, not an affected-row count, so the ` +
+          `conditional advance for suspended run '${runId}' cannot be decided — NO delete was issued, so no ` +
+          `suspension was consumed and no claim verdict was discarded`,
+      );
+      return 'unsupported';
+    }
     const where: Record<string, unknown> = { id: runId, node_id: parkedAt.nodeId };
     if (parkedAt.correlation !== undefined) where.correlation = parkedAt.correlation;
     const affected = await this.engine.delete(TABLE, { where, multi: true, context: SYSTEM_CTX });
     if (typeof affected !== 'number') {
-      this.warnClaimUnsupported(
-        `the data engine's multi-row delete resolved ${typeof affected}, not an affected-row count, so the ` +
-          `conditional advance for suspended run '${runId}' cannot be decided`,
+      // ⛔ NOT `'unsupported'`, and this is the whole of #15832. The
+      // compare-and-set is COMMITTED; its verdict is unreadable and
+      // unrecoverable. Answering "no guarantee is offered" here would hand a
+      // losing replica an `unguarded` resume having just consumed — or failed
+      // to consume — the row it is racing for.
+      throw new Error(
+        `the data engine's multi-row delete resolved ${typeof affected}, not an affected-row count, AFTER the ` +
+          `compare-and-set for suspended run '${runId}' had already been issued. This engine answered a count ` +
+          `for the capability probe, so the shape is inconsistent between calls and this claim's verdict is ` +
+          `UNRECOVERABLE — a winner and a loser both find the row gone. Refusing the resume rather than ` +
+          `guessing: retry once the engine answers consistently.`,
       );
-      return 'unsupported';
     }
     return affected > 0 ? 'claimed' : 'lost';
+  }
+
+  /**
+   * [#15832] Ask, ONCE per store instance, whether this engine's counted
+   * multi-delete route resolves a count — before anything is claimed on it.
+   *
+   * See {@link claimSuspension}'s docblock for why the question is asked at
+   * all, and for the boundary of what an answer here is worth.
+   *
+   * ## The probe is a mutation-SHAPED call that mutates nothing
+   *
+   * The route is the decision, not the statement: `ObjectQL.delete` sends a
+   * `where` carrying keys besides `id` together with `multi: true` to
+   * `driver.deleteMany`, and that is the only route whose result is a count.
+   * So the probe must be a delete — a `find` would answer about a different
+   * method. What it must NOT be is a delete that can consume anything, and it
+   * is not: the predicate is {@link CLAIM_CAPABILITY_PROBE_SENTINEL} in all
+   * three condition columns at once.
+   *
+   * What a zero-match multi-delete costs on the real engine, read off
+   * `ObjectQL.delete` rather than assumed:
+   *
+   *  - **no row changes** — the predicate matches none;
+   *  - **no hook dispatch** — the caller's `where` is present, so the
+   *    unscoped-multi-write dispatch does not fire; the per-row before phase
+   *    is explicitly "zero matched rows is zero dispatches"; and the per-row
+   *    after phase iterates the same empty set;
+   *  - **no realtime event** — `publishBulkDataEvent` returns at `matched === 0`
+   *    with a `debug` line, precisely so an idle sweep is not a webhook
+   *    delivery saying "0 records";
+   *  - **no summary recompute** — that is the by-id arm's, keyed on a pre-image
+   *    this path never reads.
+   *
+   * ⇒ one `DELETE … WHERE` that matches nothing, once per process. It also
+   * happens to remove the redundant round-trip the old shape bought on every
+   * resume of an uncounted engine, but ⛔ that is a side benefit, not the
+   * reason.
+   *
+   * ⛔ A THROWN probe is not memoized. "The store was unreachable" is a
+   * transient fact and must not become this store's permanent answer; the
+   * rejection reaches {@link claimSuspension}'s caller, and the next resume
+   * asks again. A SETTLED probe — counted or not — is memoized either way,
+   * because that one is a property of the composition.
+   *
+   * ⛔ And a throwaway ROW is deliberately not inserted to make the probe
+   * match something. It would answer a strictly stronger question (that the
+   * count counts, not merely that it is a number), and `typeof affected !==
+   * 'number'` is the whole of the condition this store branches on — while
+   * buying an INSERT on a platform object and a stranded row whenever a
+   * process dies between the two statements.
+   */
+  private countedMultiDeleteCapability(): Promise<CountedMultiDeleteCapability> {
+    return this.countedMultiDelete ?? this.probeCountedMultiDelete();
+  }
+
+  private probeCountedMultiDelete(): Promise<CountedMultiDeleteCapability> {
+    const pending = (async (): Promise<CountedMultiDeleteCapability> => {
+      const affected = await this.engine.delete!(TABLE, {
+        where: {
+          id: CLAIM_CAPABILITY_PROBE_SENTINEL,
+          node_id: CLAIM_CAPABILITY_PROBE_SENTINEL,
+          correlation: CLAIM_CAPABILITY_PROBE_SENTINEL,
+        },
+        multi: true,
+        context: SYSTEM_CTX,
+      });
+      return typeof affected === 'number' ? { counted: true } : { counted: false, observed: typeof affected };
+    })();
+    // Memoized BEFORE it settles, so concurrent resumes share one probe.
+    this.countedMultiDelete = pending;
+    // Forget a REJECTED probe so the next resume re-asks. The `catch` is on a
+    // derived promise purely to keep the memoized rejection from surfacing as
+    // an unhandled one; `pending` itself is what callers await, so they still
+    // see the failure.
+    pending.catch(() => {
+      if (this.countedMultiDelete === pending) this.countedMultiDelete = undefined;
+    });
+    return pending;
   }
 
   /**

@@ -429,10 +429,12 @@ describe('ApprovalService (node era)', () => {
       { id: 'd1', active: true, organization_id: 't1' },
       { id: 'd2', active: true, organization_id: 't1' },
     ];
+    // #14946: membership rows are stamped (the session write path fills
+    // `organization_id`); the member read is now strictly screened to it.
     engine._tables['sys_business_unit_member'] = [
-      { id: 'm1', business_unit_id: 'd1', user_id: 'u2' },
-      { id: 'm2', business_unit_id: 'd1', user_id: 'u3' },
-      { id: 'm3', business_unit_id: 'd2', user_id: 'u4' },
+      { id: 'm1', business_unit_id: 'd1', user_id: 'u2', organization_id: 't1' },
+      { id: 'm2', business_unit_id: 'd1', user_id: 'u3', organization_id: 't1' },
+      { id: 'm3', business_unit_id: 'd2', user_id: 'u4', organization_id: 't1' },
     ];
     const req = await svc.openNodeRequest(
       exprInput('vars.picked_departments', {
@@ -913,8 +915,8 @@ describe('ApprovalService (node era)', () => {
       { id: 'bu2', parent_business_unit_id: 'bu1', organization_id: 't1', active: true },
     ];
     engine._tables['sys_business_unit_member'] = [
-      { id: 'bm1', business_unit_id: 'bu1', user_id: 'u5' },
-      { id: 'bm2', business_unit_id: 'bu2', user_id: 'u6' },
+      { id: 'bm1', business_unit_id: 'bu1', user_id: 'u5', organization_id: 't1' },
+      { id: 'bm2', business_unit_id: 'bu2', user_id: 'u6', organization_id: 't1' },
     ];
     const req = await svc.openNodeRequest(positionInput({
       config: {
@@ -944,9 +946,13 @@ describe('ApprovalService (node era)', () => {
       { id: 'bu_seeded', organization_id: null, active: true },
       { id: 'bu_seeded_child', parent_business_unit_id: 'bu_seeded', organization_id: null, active: true },
     ];
+    // #14946: the SEEDED rows are the units; the membership rows are stamped,
+    // as the session write path leaves them. An org-less membership row on a
+    // seeded unit is pinned on its own in
+    // `business-unit-member-org-screen.test.ts` (B3) — it does NOT route.
     engine._tables['sys_business_unit_member'] = [
-      { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5' },
-      { id: 'bm2', business_unit_id: 'bu_seeded_child', user_id: 'u6' },
+      { id: 'bm1', business_unit_id: 'bu_seeded', user_id: 'u5', organization_id: 't1' },
+      { id: 'bm2', business_unit_id: 'bu_seeded_child', user_id: 'u6', organization_id: 't1' },
     ];
     const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
     // Both the seed check AND the subtree descent must see the null-org rows.
@@ -973,8 +979,8 @@ describe('ApprovalService (node era)', () => {
       { id: 'bu_theirs', parent_business_unit_id: 'bu_seeded', organization_id: 't2', active: true },
     ];
     engine._tables['sys_business_unit_member'] = [
-      { id: 'bm1', business_unit_id: 'bu_mine', user_id: 'u5' },
-      { id: 'bm2', business_unit_id: 'bu_theirs', user_id: 'intruder' },
+      { id: 'bm1', business_unit_id: 'bu_mine', user_id: 'u5', organization_id: 't1' },
+      { id: 'bm2', business_unit_id: 'bu_theirs', user_id: 'intruder', organization_id: 't2' },
     ];
     const req = await svc.openNodeRequest(departmentInput('bu_seeded'), CTX);
     expect(req.pending_approvers).toEqual(['u5']);

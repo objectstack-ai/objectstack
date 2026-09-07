@@ -28,6 +28,7 @@
     "automation/DecisionConfig",
     "automation/DecisionOutputDef",
     "automation/DeleteRecordConfig",
+    "automation/EndConfig",
     "automation/ExecutionError",
     "automation/ExecutionErrorSeverity",
     "automation/ExecutionLog",

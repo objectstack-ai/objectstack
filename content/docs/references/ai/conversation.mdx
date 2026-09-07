@@ -58,7 +58,8 @@ const result = CodeContentSchema.parse(data);
 | **summarizationEvents** | `integer` | optional (default: `0`) |  |
 | **tokensSavedByPruning** | `integer` | optional (default: `0`) |  |
 | **tokensSavedBySummarization** | `integer` | optional (default: `0`) |  |
-| **duration** | `number` | optional | Session duration in seconds |
+| **durationSeconds** | `number` | optional | Session duration in seconds |
+| **duration** | `never` | optional | [REMOVED] `ConversationAnalytics.duration` was renamed to `durationSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `durationSeconds`; the value (seconds) is unchanged. |
 | **firstMessageAt** | `string` | optional | ISO 8601 timestamp |
 | **lastMessageAt** | `string` | optional | ISO 8601 timestamp |
 

@@ -2,7 +2,7 @@
 
 /**
  * The POLICY KEYS of a declarative `apis:` endpoint — `authRequired`,
- * `rateLimit`, `cacheTtl` (#5040 E4).
+ * `rateLimit`, `cacheTtlSeconds` (#5040 E4).
  *
  * ## What this is, and what it deliberately is not
  *
@@ -16,9 +16,9 @@
  * |---|---|---|
  * | `authRequired` | `shouldDenyAnonymous` + the `ANONYMOUS_DENY_*` constants | `/meta`, `/ai`, `/security` (#2567, #3963) |
  * | `rateLimit` | `deriveBucketConfig` / `resolveRateLimitKey` / `SharedTokenBucketLimiter` | the server-level inbound limiter (#5006, #4910 Q3=C / Q4=B) |
- * | `cacheTtl` | a `Cache-Control` response header, nothing more | — |
+ * | `cacheTtlSeconds` | a `Cache-Control` response header, nothing more | — |
  *
- * `cacheTtl` is header semantics ONLY. #5091 narrowed the design's original
+ * `cacheTtlSeconds` is header semantics ONLY. #5091 narrowed the design's original
  * server-side cache out of scope on purpose: a cache needs an invalidation
  * story, and inventing one for a key whose vocabulary says four words
  * ("Response cache TTL in seconds") is how a runtime dialect is born. A header
@@ -33,7 +33,7 @@
  *
  * ## Order: rate limit BEFORE auth. This is not an accident.
  *
- * #5040 §3 fixes the order as `rateLimit → authRequired → cacheTtl`, and the
+ * #5040 §3 fixes the order as `rateLimit → authRequired → cacheTtlSeconds`, and the
  * rationale is worth restating where the code is: the traffic that most needs
  * metering — credential stuffing, token spraying, scraping — is exactly the
  * traffic that will be answered 401. Gating first and metering second would let
@@ -53,7 +53,7 @@
  * traffic: `api-endpoint-step.ts` applies this chain on every match, and the
  * showcase's two declared endpoints exercise it over a socket
  * (`packages/qa/dogfood/test/showcase-declarative-endpoints.dogfood.test.ts`
- * pins that `authRequired` denies anonymous and `cacheTtl` reaches the wire).
+ * pins that `authRequired` denies anonymous and `cacheTtlSeconds` reaches the wire).
  * The tests below still drive this module directly — a pure function over
  * explicit deps is worth testing as one.
  */
@@ -209,7 +209,7 @@ export type EndpointPolicyVerdict =
         principalId?: string;
         /**
          * Headers for the endpoint's eventual SUCCESS answer — today only
-         * `Cache-Control`, from `cacheTtl`. Handed back rather than applied
+         * `Cache-Control`, from `cacheTtlSeconds`. Handed back rather than applied
          * because the thing being described (the response body) does not exist
          * yet: execution lands with #5040 E5, and telling a client to cache a
          * 501 for a minute would be worse than saying nothing.
@@ -225,7 +225,7 @@ export type EndpointPolicyVerdict =
     };
 
 /**
- * `cacheTtl` → the `Cache-Control` header for a successful response.
+ * `cacheTtlSeconds` → the `Cache-Control` header for a successful response.
  *
  * The vocabulary fixes the unit (seconds) and nothing else, so the rest is
  * stated here, tested, and documented rather than left to a reader's guess:
@@ -239,28 +239,28 @@ export type EndpointPolicyVerdict =
  *    shared cache must never store one and hand it to somebody else. (The
  *    design's per-principal cache key, #5040 §3.3, is the same rule one layer
  *    down; with no server-side cache this is where it survives.)
- *  - **0 or negative** → `no-store`. An author who writes `cacheTtl: 0` said
+ *  - **0 or negative** → `no-store`. An author who writes `cacheTtlSeconds: 0` said
  *    something; making it identical to saying nothing is exactly the silent
  *    no-op this program exists to remove. (E7's publish gate should reject a
  *    NEGATIVE ttl outright — noted on #5111 — but the runtime still has to
  *    answer coherently if one arrives.)
- *  - **non-GET** → no header, plus a `warn` naming the endpoint. `cacheTtl` is
+ *  - **non-GET** → no header, plus a `warn` naming the endpoint. `cacheTtlSeconds` is
  *    GET-only (#5040 §3.3) and E7 rejects the combination at publish; until
  *    then the runtime refuses to invent a meaning for it, and says so out loud
  *    instead of dropping it silently.
  */
 export function computeCacheControl(
-    endpoint: Pick<ApiEndpoint, 'name' | 'cacheTtl'>,
+    endpoint: Pick<ApiEndpoint, 'name' | 'cacheTtlSeconds'>,
     method: string,
     logger?: RateLimitLogger,
 ): string | undefined {
-    const ttl = endpoint.cacheTtl;
+    const ttl = endpoint.cacheTtlSeconds;
     if (ttl === undefined || ttl === null) return undefined;
 
     if (method.toUpperCase() !== 'GET') {
         logger?.warn?.(
-            `[dispatcher] endpoint '${endpoint.name}' declares \`cacheTtl\` on a ${method.toUpperCase()} endpoint. `
-            + '`cacheTtl` is GET-only (#5040 §3.3) and no Cache-Control header will be sent. Remove the key, or '
+            `[dispatcher] endpoint '${endpoint.name}' declares \`cacheTtlSeconds\` on a ${method.toUpperCase()} endpoint. `
+            + '`cacheTtlSeconds` is GET-only (#5040 §3.3) and no Cache-Control header will be sent. Remove the key, or '
             + 'declare the endpoint as GET.',
         );
         return undefined;
@@ -378,7 +378,7 @@ export async function applyEndpointPolicies(input: EndpointPolicyInput): Promise
         }
     }
 
-    // ── ③ cacheTtl ──────────────────────────────────────────────────────
+    // ── ③ cacheTtlSeconds ──────────────────────────────────────────────────────
     const cacheControl = computeCacheControl(endpoint, method, logger);
 
     return {

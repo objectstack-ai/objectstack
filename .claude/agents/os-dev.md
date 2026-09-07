@@ -35,11 +35,14 @@ model: opus
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
    - 你恒不写 assignee;到手时它为空照常开工,报进 `summary`。
    - 发现与他人在途工作重复,停下报 `blocked`。
-   - PR 上不是你设置的状态属于另一个 actor:去问,⛔ 永不去纠正。
+   - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
-3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的无 assignee issue。
-   - 列进 `out_of_scope_findings`;⛔ 永不在本 PR 里修它。
+3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
+   - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文);
+   - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
+   - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
+   - 它们进 PR `## 验收备注`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 时读。
    - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
@@ -49,17 +52,15 @@ model: opus
    - 大宗读走零配额档:公开仓单卡网页内嵌 JSON payload 载原始 body + 全评论。
    - 其拼写与边界住 platform-readings;它只覆盖单卡读,⛔ 不拿它做 search。
    - 卡与评论先走 git 与 payload 档,MCP 留给写 + 那一次查重;报告记 MCP 调用计数(`mcp_calls`)。
-   - 立不成 ⇒ 发现连同缘由写进报告交 PM 代立。
-   - ⛔ 不查重硬立与静默弃报同为禁形:发现永不因通道断而消失。
+   - 立不成 ⇒ 发现连同缘由写进报告交 PM 代立;⛔ 不查重硬立与静默弃报同为禁形。
    - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
    - 归挂不散落:落在已排队 issue 完成范围内的发现,立成它的 sub-issue(自动进派发池)。
    - 只是依赖它的,独立立单带一行 `Blocked-by:`;立在修复落地的仓,带回链。
-   - 观察类发现(死代码、未演练漂移、外观抛光)打 `finding` 标签,⛔ 不打 `pm:queue`。
-   - 具体缺陷不打标签,留给 PM 分诊;⛔ 不因看着小揣着不报,平实立单,分诊轮定级。
    - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。
    - ③ 该文件无其他认领持有;④ 同一批门禁族,不新增验证面。
    - 就地修欠两样:认领申报的文件面同轮增补;PR 正文点名该修复并附证据。
    - 优先扩展一个守卫关掉整个类;任一条不成立 ⇒ 回默认:无 assignee 立单、列出、不碰。
+   - 本轮改动令其变假或触碰的已发布缺陷必修;其余立卡并记明已发布面,PR 照常落地。
 4. ⛔ 永不编辑 `content/docs/releases/`、force-push、推 `main`、合并任何东西。
    - 用户可见的改动需要 `.changeset/*.md`。
 5. **Contract-first。** 修复若诱使你在消费端加宽容回退(`??` 别名、宽松解析),缺陷在上游。
@@ -73,10 +74,10 @@ model: opus
 
 1. **重活串行,共享验证锁只有一个入口。** 每次 build/test 都从这里走。
    - `bash scripts/pm/os-verify-lock.sh -c '<command>'`(或 `-- <argv>`);⛔ 永不手搓 `flock`/lockfile。
-   - 入口点保证:等待预算钉死在一次前台调用内;按到达序授予;99 专指没排到;报持锁时长。
+   - 一次前台调用领全部等待预算,阻塞到拿锁或 99;⛔ 不轮询重试,恒设 `OS_VERIFY_LOCK_SLOT`。
    - 它不保证机器空闲:`check:*` 门禁、install、dev server 不走它,与持锁同核并跑。
    - 锁下墙钟绝对值是共享盒读数;只包命令本身,不包你的阅读与判断。
-   - 结论读它印的 `VERDICT command-exit` 行,⛔ 不读裸 `$?`;排队是常态,不是挂死。
+   - 结论读它印的 `VERDICT command-exit` 行,⛔ 不读裸 `$?`;按到达序授予,排队是常态,不是挂死。
 2. **压住堆**:重命令前缀 `NODE_OPTIONS=--max-old-space-size=4096`,要抬需给理由。
 3. **定向,不扫全**:只 build/test 受影响的包,turbo 用 `--concurrency=2`。
    - 单文件跑法 `pnpm --filter <pkg> exec vitest run --maxWorkers=2 <file>`。
@@ -92,8 +93,8 @@ model: opus
    - 消融/变异脚本自带还原 trap(硬线在标准条款节的 ablation 条)。
 7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,它的完成不会唤醒你。
    - ⛔ 永不为等锁结束一轮。
-   - 循环:拿到 99 就把间隔花在无锁工作上(测试、changeset、PR 正文、包内 `typecheck`)。
-   - 然后带同名再跑一次:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试之前就设好。
+   - 99 专指没排到,读作 NOT MEASURED;把间隔花在无锁工作上(写测试、changeset、PR 正文)。
+   - 再取以同名续位,⛔ 不从队尾重排:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试前就设好。
    - 没排到的调用把排位寄存,同名再来续原到达戳;不设它,每次离开都从队尾重排。
    - 排队约 20 分钟无进展 ⇒ 先看这次检查能否收窄到不必持锁(收窄要申报,见干净收尾)。
    - 收窄不了就停下报 `blocked` 并点名持锁者:`os-verify-lock.sh --status` 打印持锁者与队列。
@@ -126,8 +127,8 @@ model: opus
 - ① 先 build 依赖闭包:`pnpm --filter '<pkg>^...' build` 是新 worktree 的第一条命令。
 - 跳过它产出的失败,读起来与你的改动弄坏了 import 一模一样。
 - ② 受影响包自己的 `pnpm test` / `pnpm typecheck`,用 `--filter` 圈定。
-- 受影响包 = CI 会测的包,清单读 `TURBO_SCM_BASE="$BASE" pnpm exec turbo ls --affected`。
-- ⛔ 不按改了哪些包猜:普通 import 被改模块的包也在清单里,欠它们的测试。
+- 受影响包 = 本包;import 方只在公开面变化时欠测试:spec 契约、发布的 `exports`、线上形状。
+- 公开面字节不变 ⇒ 只欠本包测试与派生门禁,⛔ 不给每个 import 方补测试。
 - `packages/cli` 只欠 `unit` 层(见 Definition of done 的测试条)。
 - ③ 派发词点名的门禁族,加上你看得出被牵连的。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
@@ -207,11 +208,10 @@ model: opus
 - 它必须答 exit 0;否则阴性作废,`git fetch --deepen` / `--unshallow` 到控制腿转 0 再重读。
 - ⛔ 控制腿别挑浅窗内的近亲:控制 commit 至少与被测那个同深;两条腿的退出码都进报告。
 - `--is-shallow-repository` 是便宜的触发器不是判据,判据是控制腿。
-- 反向验证(回退修复,看诊断变化)先 commit 修复:恢复只是 `git checkout <your-branch> -- <path>`。
-- 对着未提交的编辑,`git checkout origin/main -- <path>` 不留任何恢复点。
+- 反向验证与消融是一次性证明:前后运行引在 PR 正文与报告里;⛔ 不留永久测试文件。
+- 两者都先 commit 修复再回退或变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
+- 未提交时 `git checkout origin/main -- <path>` 不留恢复点,`git checkout HEAD -- <path>` 删的正是实现。
 - 恢复机制与字节一致性证明规则见 AGENTS.md;从已 commit 的状态重跑,红/绿数字才可信。
-- 消融同一条,先 commit 再变异:恢复腿指向 `HEAD`,`HEAD` 必须先装着你的实现。
-- 对未提交的实现,一次完美的 `git checkout HEAD -- <path>` 删的正是实现本身,事后检查全绿。
 - 通则:失效形态是 exit 0 且什么都没做的清理步骤,只能靠观察状态验证,永不靠读退出码。
 - 恢复腿与变异腿完全对称,四条硬线如下。
 - ① 恢复写 `git checkout HEAD -- <path>`,⛔ 永不裸 `git checkout -- <path>`:裸恢复从索引取。
@@ -225,6 +225,7 @@ model: opus
 - 拒收类用例断言信封,不断言 throw 本身;最小断言集是错误的 `code` 与 `status`(ADR-0112 信封)。
 - 单独的 `expect(...).toThrow()` 不是拒收测试:抛裸 `Error` 的未修复 driver 照样绿。
 - 从不抛错的传输层转红时,它指向缺陷之外。
+- 提示、裁决与错误文案 ⛔ 不 pin,除非消费者解析其原文;断言种类、退出码或具名主体。
 - 措辞本身即契约的地方,在 `code`+`status` 之上再断言 message 首句,永不取而代之。
 - 键与值的可达性判据:守某个键是真实编写面 → 断言 fixture 上无 `unrecognized_keys`。
 - 守某个值的判定 → 要求完整 `safeParse` 绿;拒键与拒值是两个不同的事实。
@@ -275,20 +276,20 @@ model: opus
 - ⛔ 不写否定式的关单句,它照样关掉点名的卡:解析器无视否定,只匹配关键词 + `#<n>`。
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
-- PR 正文与 commit message 是分开解析的两个源:commit message 干净不能证明正文干净。
-- 会 squash 的分支,卡片关系在 PR 正文声明一次;分支内各 commit ⛔ 不带卡片关系 trailer。
-- squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。
+- PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
+- 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
+- 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
+- 认领写 `Clause-②: yes` ⇒ 开 PR 同笔挂 `needs:contract-review`,报告附 `--pair N` 退出码。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
-- 派发词给的净增预算装不下 ⇒ 停下按 `blocked` 报缺口;⛔ 不自行扩写、不自行抬预算。
-- 预算是 PM 的,抬它是维护者裁决。
-- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行。
-- 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化只随净减内容的 PR。
-- 分界只问折行有没有为新增内容买行,门禁分不出两种 net-0。
+- 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
+- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
+- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
+- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
 - `skip-changeset` 标签按仓库分流,先认清目标仓有没有这个机制;判据:不从任何包发布东西。
 - 例:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根工具配置 · 私有 workspace · 注释。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
@@ -317,7 +318,6 @@ model: opus
 - 被吃掉标记的评论对 PM 扫描不可见;HTML 注释形不是等价写法,是坏写法。
 - 凡要上 GitHub 的文本,尖括号形状片段一律改占位词拼写(`FIELD`、`IDENT.MEMBER` 一类)。
 - 两种派发模式(`mode:subagent` 与 `mode:cloud`)下 GitHub 都是报告的权威源。
-- 返回消息是加速器,不是记录;只存在于返回消息里的报告随你的进程一起死。
 - 写完读回那条评论到尾部:只认首行标记保不住正文,sanitizer 可从首个 tag 形片段吃到尾。
 - PR 正文同欠一次全文回读,评审读的正是它。
 
@@ -371,7 +371,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["filed as #<n>: one-line description"]
+  "out_of_scope_findings": ["filed as #<n>: one-line description", "noted, not filed: one-line observation"]
 }
 ```
 
@@ -394,10 +394,10 @@ model: opus
 
 ```text
 ---                                                                 ← 规则线,前留一空行;平台只认整块
-_Generated by [Claude Code](https://claude.ai/code)_                ← bare:评论用;PR 正文编辑后的落形
+_Generated by [Claude Code](https://claude.ai/code)_                ← bare:评论用
 _Generated by [Claude Code](https://claude.ai/code/session_<id>)_   ← session-URL:创建 PR 正文用
 ```
 
-- session 形按 create-only 对待:PATCH 编辑把它降回裸形。
+- session-URL 形创建用,编辑后原样存活;编辑时不带页脚发送、读回,平台在其下追加裸形块。
 - 评论通路 MCP 与 REST 同判:整块原样存活,缺规则线则不认、再落整块留两个。
 - 耐久归属写进正文散文或评论,⛔ 不循环重贴页脚;完整读数住 AGENTS.md 同条。

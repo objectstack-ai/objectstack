@@ -1,7 +1,20 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
+import {
+  resolveAuthzContext,
+  isAuthzStoreUnavailableError,
+  // [#15352] The three symbols the download door's tenancy-posture read is
+  // built from: the reader for the posture IN FORCE (ADR-0093 D4/D5 - a
+  // deployment REQUESTING `isolated` without the enterprise organizations
+  // runtime is `single` in force), plus the two halves of the classification
+  // #13906 decision 1 option A requires - the registry's "never registered"
+  // brand, and the loud outage every other rejection has to become.
+  effectiveTenancyPosture,
+  isServiceNotRegisteredError,
+  AuthzStoreUnavailableError,
+  type TenancyPostureSource,
+} from '@objectstack/core';
 import type {
   IHttpServer,
   IDataEngine,
@@ -19,6 +32,7 @@ import { S3StorageAdapter } from './s3-storage-adapter.js';
 import type { S3StorageAdapterOptions } from './s3-storage-adapter.js';
 import { StorageMetadataStore } from './metadata-store.js';
 import type { FileRecord } from './metadata-store.js';
+import type { TenancyPosture } from '@objectstack/spec/security';
 import { registerStorageRoutes } from './storage-routes.js';
 import type { FileReadVerdict, StorageUploadSession } from './storage-routes.js';
 import { installAttachmentLifecycleHooks, createSysFileReapGuard, createUploadSessionReapGuard, findFileHolder, findHeldFiles } from './attachment-lifecycle.js';
@@ -812,6 +826,112 @@ function buildAuthSessionResolver(
 }
 
 /**
+ * [#15352] The EFFECTIVE tenancy posture for THIS door's admission decision —
+ * the parent-governed download gate's, resolved fresh on every download.
+ *
+ * ## What was open
+ *
+ * `resolveAuthzContext` gates BOTH posture-conditional API-key refusals on a
+ * posture its CALLER supplies:
+ *
+ *  - `organization_required` — `core/security/api-key.ts`,
+ *    `if (!tenantId && tenancyPosture)`;
+ *  - `organization_membership_ended` — `core/security/resolve-authz-context.ts`,
+ *    `if (keyPrincipal?.tenantId && input.tenancyPosture)`.
+ *
+ * {@link buildFileReadAuthorizer} supplied none, so neither ran here. Its
+ * headers are the REAL request headers (`toWebHeaders`), so `x-api-key` is
+ * accepted, and an API key's `tenantId` is `sys_api_key.active_organization_id`
+ * copied verbatim — the caller's own stored claim, never vetted against current
+ * membership. Under a wall-enforcing posture a key stamped with an organization
+ * its owner had LEFT therefore resolved a `userId` at this door and went on to
+ * be judged by the ownership and record-reachability checks below — checks
+ * evaluated for a principal the wall should have refused at the door.
+ *
+ * ## The classification — #13906 decision 1 option A
+ *
+ * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`) ⇒ a quiet
+ *   `undefined`. A kernel assembled without `plugin-auth` registers no
+ *   `tenancy` service and enforces no organization wall, so there is nothing
+ *   for a key to be walled out of; that composition is SUPPORTED and its
+ *   behaviour here is exactly what it was.
+ * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`. The
+ *   posture is an authorization INPUT, so admission was never DECIDED and must
+ *   not be answered. A `try { … } catch { undefined }` here would re-introduce
+ *   precisely the permissive-on-failure defect #13906 exists to repair — a
+ *   FAILURE reading as "this check does not apply".
+ *
+ * The throw is raised inside the authorizer's own `try`, so it takes the
+ * #13279 relay that block already runs for the identical fault one seam over
+ * (`isAuthzStoreUnavailableError(err)` re-raises instead of returning
+ * `'deny'`). Deliberately NOT a second net.
+ *
+ * ⚠️ MEASURED on this tree, and worth knowing before reading that relay as a
+ * 503: `registerStorageRoutes`' `authorizeDownload` wraps this authorizer in
+ * `catch { verdict = 'deny' }`, so on THIS door the re-raise is absorbed one
+ * frame up and a failed posture read renders as the download gate's own 403
+ * refusal. Fail-CLOSED — never an admission — but not the branded status
+ * either. That flattening is PRE-EXISTING (it has swallowed the #13279
+ * permission-store outage at this door since that card landed, out of the same
+ * `catch`), it is not something this card opened, and it is ⛔ not repaired
+ * here; the pin below asserts the outage CLASS rather than the digits so a
+ * later status repair does not have to redden a security test.
+ *
+ * ## Why `getServiceAsync`, and why its ABSENCE stays quiet ON THIS DOOR
+ *
+ * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
+ * — the accessor every other lookup in this file uses — throws two UNBRANDED
+ * plain `Error`s (`… not found` and `… is async - use await`), so a synchronous
+ * read cannot tell the two facts apart and would have to guess.
+ *
+ * ⚠️ And the accessor's PRESENCE is part of the wiring fact here for a reason
+ * that is this door's own, not a sibling's: {@link buildFileReadAuthorizer}
+ * already returns `undefined` — no gate at all, downloads ungated — when the
+ * `auth` service or the data engine is absent. Degrading through an
+ * incompletely composed host is this gate's DECLARED contract, so turning "this
+ * host shape has no async registry" into a raised `TypeError` would take the
+ * download surface offline on precisely the hosts whose gate is optional by
+ * design. A `KernelBase`-shaped host (`LiteKernel`) exposes `getKernel()` and
+ * has no `getServiceAsync` at all; it instantiates no service factories either
+ * (`registerServiceFactory` throws "not supported"), so absence is the only
+ * fault its registry could report. It keeps the quiet answer, unchanged
+ * (family-wide behaviour, #15997).
+ *
+ * ## ⚠️ Read PER DOWNLOAD — deliberately not hoisted
+ *
+ * {@link buildFileReadAuthorizer} runs ONCE, inside `start()`'s `kernel:ready`
+ * hook, and returns a closure that runs per request; the posture read lives in
+ * the closure. Resolved at build time and held, it would be frozen inside the
+ * boot window — `TenancyService.posture` is a LIVE getter that probes
+ * `org-scoping` on each read and reports a wall it cannot yet enforce as
+ * `single` (ADR-0093 D4/D5) — and a frozen "no wall" would never self-correct
+ * for the life of the process. The read costs two registry lookups and no I/O,
+ * so there is nothing to buy by caching it.
+ *
+ * ⛔ Deliberately NOT extracted into a shared helper. Sibling cards are live on
+ * this same seam in other packages (#15349, #15350, #15351), and a helper
+ * extracted by one of them collides with the rest; the landed siblings
+ * (`mcp`, `cloud-connection`) each wrote a local copy for the same reason. The
+ * extraction is worth doing — once, as its own card, after they land.
+ */
+async function resolveAdmissionTenancyPosture(
+  ctx: PluginContext,
+): Promise<TenancyPosture | undefined> {
+  const kernel = ctx.getKernel?.() as
+    | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+    | undefined;
+  if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+  try {
+    return effectiveTenancyPosture(await kernel.getServiceAsync<TenancyPostureSource>('tenancy'));
+  } catch (err) {
+    if (!isServiceNotRegisteredError(err)) {
+      throw new AuthzStoreUnavailableError('tenancy', err);
+    }
+    return undefined;
+  }
+}
+
+/**
  * Authorize a parent-governed download (#2970 item 2; extended for field-owned
  * files by ADR-0104 D3 wave 2). Builds the FULL caller ExecutionContext via
  * `resolveAuthzContext` (the same shared resolver rest-server uses — a bare
@@ -838,7 +958,15 @@ function buildFileReadAuthorizer(
     try {
       const headers = toWebHeaders(req);
       if (!headers) return 'unauthenticated';
-      const authz = await resolveAuthzContext({ ql: engine, headers, getSession });
+      // [#15352] The posture is an authorization INPUT, resolved for THIS door
+      // before the resolver runs. Omitting it is what left both
+      // posture-conditional API-key refusals unreachable here — see
+      // `resolveAdmissionTenancyPosture` above for the classification, and for
+      // why a quiet `catch` at this seam would be the defect rather than the
+      // fix. Raised INSIDE this `try`, so an outage takes the #13279 relay in
+      // the `catch` below rather than a new net.
+      const tenancyPosture = await resolveAdmissionTenancyPosture(ctx);
+      const authz = await resolveAuthzContext({ ql: engine, headers, getSession, tenancyPosture });
       if (!authz.userId) return 'unauthenticated';
 
       // Uploader / owner may always download.

@@ -57,7 +57,15 @@ async function confirm(question: string): Promise<boolean> {
  * nothing left to do.
  *
  * `min`/`max`/`avg` are never touched — undefined on an empty set, so a `null`
- * there is the correct reading of "no child rows", not a defect.
+ * there is the correct reading of "no child rows", not a defect — UNLESS the
+ * operator names one with `--recompute-undefined-on-empty object.field`
+ * (#15064). A summary field declared after its parent rows already existed has
+ * never been computed by anything (the insert-time seed is create-time, the
+ * recompute runs on a child write, and this run skips the function), and the
+ * one who just declared it is the one who knows that; named, the column is
+ * walked like a `count` and every `NULL` parent is recomputed through the same
+ * aggregate the engine writes. A parent with no child rows keeps `NULL` there —
+ * the aggregate's own value. Unnamed, nothing about this command changes.
  *
  * ## No deployment flag, deliberately
  *
@@ -77,6 +85,7 @@ export default class MigrateSummaryNulls extends Command {
     '$ os migrate summary-nulls --apply',
     '$ os migrate summary-nulls --apply --yes --json',
     '$ os migrate summary-nulls --object project',
+    '$ os migrate summary-nulls --apply --object customer --recompute-undefined-on-empty customer.last_follow_up_at',
   ];
 
   static override flags = {
@@ -95,6 +104,14 @@ export default class MigrateSummaryNulls extends Command {
     }),
     object: Flags.string({
       description: 'Restrict to this object (repeatable; default: every object owning a count/sum roll-up)',
+      multiple: true,
+    }),
+    'recompute-undefined-on-empty': Flags.string({
+      description:
+        'Also recompute this min/max/avg roll-up, spelled object.field (repeatable) — for a column you KNOW was never ' +
+        'computed, e.g. one declared after its parent rows already existed. Every NULL parent is recomputed through ' +
+        'the same aggregate the engine writes; a parent with no child rows keeps NULL. A name that is not a roll-up ' +
+        'this run walks is refused before any row is read. Without this flag min/max/avg are never touched.',
       multiple: true,
     }),
     'max-records': Flags.integer({
@@ -152,8 +169,13 @@ export default class MigrateSummaryNulls extends Command {
         this.exit(1);
         return;
       }
+      const named = flags['recompute-undefined-on-empty'] ?? [];
       const ok = await confirm(
-        chalk.bold('\nRecompute and write every NULL count/sum roll-up value on this database? [y/N] '),
+        chalk.bold(
+          '\nRecompute and write every NULL count/sum roll-up value' +
+            (named.length > 0 ? ` — and every NULL in ${named.join(', ')} —` : '') +
+            ' on this database? [y/N] ',
+        ),
       );
       if (!ok) {
         printInfo('Aborted — no changes made.');
@@ -207,6 +229,7 @@ export default class MigrateSummaryNulls extends Command {
       const report = await backfillSummaryNulls(engine, logger, {
         apply,
         objects: flags.object,
+        recomputeUndefinedOnEmpty: flags['recompute-undefined-on-empty'],
         maxRecordsPerObject: flags['max-records'],
       });
 

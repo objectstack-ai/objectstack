@@ -89,26 +89,19 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { maskCommentsAndLiterals } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
-/**
- * Comments AND string/template/regex content blanked, offsets kept. This gate
- * looks for a bare code-position `disableConsoleIntercept: true`, so unlike
- * the gates whose signal IS a string literal, a quoted spelling here is never
- * the real setting — it is prose (an error message, a doc snippet) and
- * blanking it keeps prose from satisfying the check. The boundary this
- * accepts: a config spelling the KEY as a quoted property
- * (`'disableConsoleIntercept': true`) reds the gate even though vitest would
- * honour it — the failure is loud, names the file, and the remedy is the
- * unquoted spelling every other config uses.
- */
-function maskProse(source) {
-  const { comment, literal } = scanSource(source);
-  const flags = new Uint8Array(comment.length);
-  for (let i = 0; i < flags.length; i++) flags[i] = comment[i] | literal[i];
-  return blank(source, flags);
-}
+// Why this gate reads `maskCommentsAndLiterals` — the tree's one
+// comments+literals projection, imported rather than re-derived here (#15776).
+// This gate looks for a bare code-position `disableConsoleIntercept: true`, so
+// unlike the gates whose signal IS a string literal, a quoted spelling here is
+// never the real setting — it is prose (an error message, a doc snippet) and
+// blanking it keeps prose from satisfying the check. The boundary this accepts:
+// a config spelling the KEY as a quoted property
+// (`'disableConsoleIntercept': true`) reds the gate even though vitest would
+// honour it — the failure is loud, names the file, and the remedy is the
+// unquoted spelling every other config uses.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -261,7 +254,7 @@ export function scan(root) {
       );
       continue;
     }
-    const masked = maskProse(readFileSync(join(dir, configName), 'utf8'));
+    const masked = maskCommentsAndLiterals(readFileSync(join(dir, configName), 'utf8'));
     if (REARM_RE.test(masked)) {
       findings.push(
         `${rel(root, dir)}/${configName}: sets disableConsoleIntercept: FALSE — this ` +

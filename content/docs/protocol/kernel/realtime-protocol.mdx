@@ -102,7 +102,7 @@ ObjectStack supports two real-time protocols:
 
 ### Connection Endpoint
 
-The discovery endpoint reports the realtime service honestly (ADR-0076 D12): because the in-process realtime service mounts **no** HTTP/WS surface today, **no `routes.realtime` entry is advertised** — an advertised route with no handler would 404. The service itself appears in `services.realtime` as `degraded` with `handlerReady: false` when registered:
+The discovery endpoint reports the realtime service honestly (ADR-0076 D12): because the in-process realtime service mounts **no** HTTP/WS surface today, **no `routes.realtime` entry is advertised** — an advertised route with no handler would 404 — and `services.realtime` reports `enabled: false`:
 
 ```http
 GET /.well-known/objectstack
@@ -116,17 +116,50 @@ GET /.well-known/objectstack
   },
   "services": {
     "realtime": {
-      "enabled": true,
+      "enabled": false,
       "status": "degraded",
       "handlerReady": false,
       "message": "In-process event bus only — no HTTP/WS realtime surface is mounted"
     }
+  },
+  "capabilities": {
+    "websockets": { "enabled": false }
   }
 }
 ```
 
+### What counts as a subscribable channel
+
+**A subscribable channel exists only where discovery reports `handlerReady: true` together with a connectable `route`; `enabled` never means "there is a channel".**
+
+That is the whole definition, and it is computed in exactly one place —
+`isSubscribableChannel()` in `@objectstack/spec/api`. Both discovery producers set
+`services.realtime.enabled` and `capabilities.websockets` to the value of that call, so the
+fields a client reads and the predicate a client is told to use are the same computation
+and cannot disagree.
+
+`realtime` is the one slot whose advertised capability *is* such a channel, so it is also
+the one slot whose `enabled` answers that question. Everywhere else `enabled` keeps its
+narrower meaning — `cache`, `queue` and `job` deliver their whole contract in-process, so
+they are honestly enabled with no route at all and there is nothing to subscribe to there
+either.
+
+The route comes from the occupant (`IRealtimeService.getChannelRoute()`), because no
+producer in the open framework mounts a realtime transport and neither discovery builder
+can honestly invent one. `@objectstack/service-realtime` is an in-process pub/sub bus and
+names none, which is why every host the open framework ships answers `false`.
+
+<Callout type="warn">
+  ⛔ **Do not key a subscription off `enabled` alone.** Until this was written down,
+  `/discovery` reported `enabled: true` for `realtime` *and* "no HTTP/WS realtime surface is
+  mounted" in the same entry — both true, because `enabled` meant "the slot is filled". A
+  client that read it as "a channel exists" subscribed to nothing and silently lost the
+  feature it was subscribing for: no error, no failed request, no signal at all. Poll, or
+  degrade, unless `handlerReady` is `true` **and** a `route` is present.
+</Callout>
+
 <Callout type="info">
-  A WebSocket upgrade endpoint is part of the planned transport (`IRealtimeService.handleUpgrade()`) and is not yet served. When it lands, discovery will advertise `routes.realtime` again — until then clients must treat `services.realtime.handlerReady: false` as "no wire transport" (see #2462).
+  A WebSocket upgrade endpoint is part of the planned transport (`IRealtimeService.handleUpgrade()`) and is not yet served — realtime stays out of the open framework (maintainer ruling, 2026-09-04). If a host ever mounts one, its realtime service names the mounted path via `getChannelRoute()` and discovery advertises `routes.realtime`, `handlerReady: true` and `capabilities.websockets` in the same step (see #2462, #14646).
 </Callout>
 
 ### Establishing Connection

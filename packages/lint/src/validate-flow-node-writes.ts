@@ -100,6 +100,7 @@ import {
   unprovisionedAnchorHint,
 } from './system-fields.js';
 import { walkFlowNodes, flowNodeLabel } from './flow-walk.js';
+import { recordsOf } from './object-graph.js';
 
 /**
  * `error` for the existence verdict — a literal key against a literal object is
@@ -182,18 +183,6 @@ type AnyRec = Record<string, unknown>;
 
 const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
-/** Coerce an array-or-name-keyed-map collection to an array (name injected). */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter((x): x is AnyRec => isRec(x));
-  if (isRec(v)) {
-    return Object.entries(v).map(([name, def]) => ({
-      name,
-      ...(isRec(def) ? def : {}),
-    }));
-  }
-  return [];
-}
-
 /**
  * The target object of a CRUD node, when statically knowable. Reads the
  * canonical `objectName` and its historical `object` alias — a pre-parse source
@@ -220,7 +209,7 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
   const findings: FlowNodeWriteFinding[] = [];
   if (!isRec(stack)) return findings;
 
-  const flows = asArray(stack.flows);
+  const flows = recordsOf(stack.flows);
   if (flows.length === 0) return findings;
 
   // Built lazily: a stack whose flows carry no write node never pays it.

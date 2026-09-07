@@ -257,8 +257,11 @@ const REPO_ROOT = resolve(HERE, '..');
  *
  * A row is located STRUCTURALLY -- by its heading and the fence inside that
  * heading's section -- never by line number. Line numbers are the first thing
- * to rot here: this card was filed against `AGENTS.md:96-106` and the block sat
- * at `:92-104` by the time it was implemented, three days later.
+ * to rot here: this card was filed against lines 96-106 of `AGENTS.md` and the
+ * block sat at 92-104 by the time it was implemented, three days later. ⚠️ Those
+ * four numbers are the EVIDENCE and every digit is kept; what is not kept is the
+ * `file:NNN` spelling, because a dated rot record written in anchor form reads
+ * as a live pointer to the next person (#15765).
  */
 export const MIRRORS = [
   {

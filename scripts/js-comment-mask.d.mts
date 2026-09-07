@@ -77,6 +77,18 @@ export function stripComments(source: string): string;
 export function maskComments(source: string): string;
 
 /**
+ * `source` with its COMMENT spans AND its LITERAL content both blanked.
+ * Offsets and line numbers both survive, exactly as under `maskComments`.
+ *
+ * Pick this when the signal is a bare CODE position (`new SchemaRegistry(`, a
+ * property key): under `maskComments` the same spelling inside a string or a
+ * template still satisfies it, so the gate reports a finding made of quoted
+ * text. Literal DELIMITERS are not literal content, so the quotes survive and
+ * a caller can still pair them.
+ */
+export function maskCommentsAndLiterals(source: string): string;
+
+/**
  * The outcome of walking the body of the regex literal opening at `at`.
  *
  * `closed: true` means `end` is the index of the CLOSING `/`. `closed: false`

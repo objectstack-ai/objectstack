@@ -302,22 +302,33 @@ function fieldDefsOf(object: AnyRec): AnyRec[] {
 }
 
 /**
- * Whether the tree renderer could auto-detect a parent pointer on this object
- * — a mirror of objectui's `detectParentField`
- * (`packages/plugin-tree/src/ObjectTree.tsx`): a field declared
- * `type: 'tree'`, else a `lookup` / `master_detail` whose `reference` is the
- * object's own name. Mirrored, not tightened: a stricter predicate here would
- * warn about a view that renders correctly, a looser one would bless the flat
- * render. The renderer also reads `reference_to`; that is the retired spelling
- * the ADR-0087 conversion layer folds to `reference` before this predicate
- * ever sees the stack, so it needs no arm here. An object with no `name`
- * cannot be self-referenced — the renderer's detection needs the object name
- * for the lookup arm too.
+ * Whether the tree renderer could auto-detect a parent pointer on this object:
+ * a field declared `type: 'tree'` whose `reference` is absent or the object's
+ * own name, else a `lookup` / `master_detail` whose `reference` is the object's
+ * own name.
+ *
+ * The `tree` arm reads the rule `ObjectSchema` enforces at parse (#14892
+ * ruling: a `tree` field's `reference`, when present, must name the declaring
+ * object — a hierarchy is parent/child within one object), so an unparsed
+ * object carrying a foreign-referencing `tree` is judged here exactly as the
+ * parse door judges it: not a parent pointer. On that arm this predicate is
+ * STRICTER than objectui's `detectParentField`
+ * (`packages/plugin-tree/src/ObjectTree.tsx`), which still returns the first
+ * `tree` field whatever its `reference` says; tightening the renderer is an
+ * objectui follow-up, and the shape the two now disagree on no longer parses
+ * here, so the disagreement is unreachable from parsed metadata. The
+ * `lookup` / `master_detail` arm is the renderer's, unchanged. The renderer
+ * also reads `reference_to`; that is the retired spelling the ADR-0087
+ * conversion layer folds to `reference` before this predicate ever sees the
+ * stack, so it needs no arm here. An object with no `name` cannot be
+ * self-referenced — the renderer's detection needs the object name for the
+ * lookup arm too, and a `tree` that names a `reference` cannot be matched
+ * against a name that is not there.
  */
 function hasDetectableParentField(object: AnyRec): boolean {
   const own = isNonEmptyString(object.name) ? object.name : undefined;
   return fieldDefsOf(object).some((def) =>
-    def.type === 'tree'
+    (def.type === 'tree' && (def.reference === undefined || (own !== undefined && def.reference === own)))
     || ((def.type === 'lookup' || def.type === 'master_detail') && own !== undefined && def.reference === own));
 }
 
@@ -456,8 +467,9 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
         path: 'tree.parentField',
         message:
           'A `tree` view with no resolvable parent pointer renders FLAT, not empty: `parentField` is '
-          + 'undeclared and the bound object declares neither a `tree` field nor a lookup/master_detail '
-          + 'back to itself, so the renderer\'s auto-detection finds nothing (objectui `ObjectTree.tsx` — '
+          + 'undeclared and the bound object declares neither a `tree` field (with no `reference`, or one '
+          + 'naming this object) nor a lookup/master_detail back to itself, so the renderer\'s '
+          + 'auto-detection finds nothing (objectui `ObjectTree.tsx` — '
           + '`detectParentField`) and `buildForest` makes every record a root at depth 0. The result is '
           + 'a complete, correct-looking table with an expand slot that never opens, while authoring '
           + 'reports success. Declare `tree.parentField`, or add a self-referencing field to the object.',

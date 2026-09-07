@@ -343,8 +343,8 @@ describe('#5189 — publish gates re-applied at load (identity-free subset)', ()
       endpoint({ name: 'proxied', type: 'proxy', target: 'https://x.test' }),
       endpoint({ name: 'no_params', objectParams: undefined }),
       endpoint({ name: 'mapped', outputMapping: [{ source: 'a', target: 'b', transform: 'upper' }] }),
-      endpoint({ name: 'neg_cache', cacheTtl: -1 }),
-      endpoint({ name: 'post_cache', method: 'POST', cacheTtl: 30 }),
+      endpoint({ name: 'neg_cache', cacheTtlSeconds: -1 }),
+      endpoint({ name: 'post_cache', method: 'POST', cacheTtlSeconds: 30 }),
     ]) {
       const logger = makeLogger();
       expect(buildEndpointIndex([bad], logger).size).toBe(0);

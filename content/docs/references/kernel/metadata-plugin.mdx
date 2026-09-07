@@ -118,7 +118,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **fallback** | `Enum<'filesystem' \| 'memory' \| 'none'>` | optional (default: `"none"`) | Fallback strategy when datasource is unavailable |
 | **rootDir** | `string` | optional | Root directory path |
 | **formats** | `Enum<'yaml' \| 'json' \| 'typescript' \| 'javascript'>[]` | optional (default: `["typescript","json","yaml"]`) | Enabled formats |
-| **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
+| **cache** | `{ enabled: boolean; ttlSeconds: integer; maxSize?: integer; databaseLoader?: object }` | optional | Cache settings |
 | **watch** | `boolean` | optional (default: `false`) | Enable file watching |
 | **watchOptions** | `{ ignored?: string[]; persistent: boolean; ignoreInitial: boolean }` | optional | File watcher options |
 | **validation** | `{ strict: boolean; throwOnError: boolean }` | optional | Validation settings |

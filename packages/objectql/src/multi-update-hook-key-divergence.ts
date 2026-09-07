@@ -156,6 +156,8 @@ export class MultiUpdateHookKeyDivergenceError extends Error {
   override readonly name = 'MultiUpdateHookKeyDivergenceError';
   readonly code = MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE;
   readonly status = MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS;
   /** The object the refused batch targeted. */
   readonly object: string;
   /** The keys whose presence differed across rows, sorted. */

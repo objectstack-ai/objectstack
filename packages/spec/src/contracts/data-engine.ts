@@ -136,30 +136,38 @@ export interface WriteObservabilityOptions {
    * client toggle write-refusal on a security-adjacent path. Widening strict to
    * the wire is a SEPARATE decision, not a side effect of this one.
    *
-   * ## INSERT — refuses runtime-owned values (since #5503)
+   * ## INSERT — refuses runtime-owned values (since #5503) and static
+   * `readonly` values (since the 2026-09-03 ruling, #14147)
    *
    * Until #5503 this paragraph declared the option inert on insert — true
-   * when written (#5126 predates the runtime-owned strip), false since. At
-   * this seam insert remains deliberately exempt from the two AUTHOR-DECLARED
-   * strips (#3413: an in-process create may seed a `readonly: true` field's
-   * initial value, and `readonlyWhen` cannot lock anything on a create at
-   * all), but the implicitly-readonly runtime-owned strip #5503 added runs on
-   * insert too — and it is exactly the one strict refuses. An insert whose
-   * payload carries a runtime-owned value (`RUNTIME_OWNED_FIELD_TYPES`, today
-   * `autonumber` — a caller-supplied record number) behaves like update at
-   * this seam: with this option `true` it throws `ReadonlyFieldRejectedError`
-   * (`operation: 'insert'`) and nothing is written; without it the value is
-   * stripped, the write completes, and `onFieldsDropped` fires with
-   * `reason: 'readonly'`. The engine-level writers exempt from that strip —
-   * and therefore never refused — are the two the error message itself names:
-   * `isSystem`, and the `preserveAudit` historical import reinstating legacy
-   * record numbers (#3493). Layer note: that exemption pair is THIS
-   * in-process seam's. The DataProtocol ingress enforces its own
-   * author-declared `readonly` policy on create (#3043), where
-   * `preserveAudit` is UPDATE-only (#6640) — see `FieldSchema.readonly`;
-   * nothing here widens or narrows it. `ReadonlyFieldRejectedError`'s own doc
-   * records the same contract from the error's side: "Thrown by
-   * `engine.update` — and, since #5503, by `engine.insert`".
+   * when written (#5126 predates the runtime-owned strip), false since. Until
+   * the maintainer ruling of 2026-09-03 (option C, #14147) it then declared
+   * insert exempt from the two AUTHOR-DECLARED strips (#3413: "an in-process
+   * create may seed a `readonly: true` field's initial value") — true when
+   * written, SUPERSEDED since: `engine.insert` now runs the static-`readonly`
+   * strip for a non-system caller, the same `stripReadonlyFields` under the
+   * same `isSystem` gate as `engine.update`, and the metadata-protocol ingress
+   * copy that used to cover external callers only is deleted. One semantics,
+   * one enforcement point. What insert still does NOT strip is `readonlyWhen`
+   * (a conditional lock has no prior record to evaluate on a create).
+   *
+   * So at this seam an insert behaves like update for BOTH reported strips: a
+   * payload carrying a runtime-owned value (`RUNTIME_OWNED_FIELD_TYPES`, today
+   * `autonumber` — a caller-supplied record number) or a static `readonly`
+   * value from a non-system caller, with this option `true`, throws
+   * `ReadonlyFieldRejectedError` (`operation: 'insert'`, every taken field in
+   * one list) and nothing is written; without it the values are stripped, the
+   * write completes, and `onFieldsDropped` fires once with
+   * `reason: 'readonly'`. The writers exempt — and therefore never refused —
+   * differ per strip, and the difference is the 2026-08-08 ruling, not this
+   * one: `isSystem` exempts both; the `preserveAudit` historical import
+   * reinstating legacy record numbers (#3493) exempts the runtime-owned strip
+   * only, and a non-system create that asks for it still has its static
+   * `readonly` fields stripped, with a `warn` saying the exemption is
+   * UPDATE-only (#6640) — see `FieldSchema.readonly`.
+   * `ReadonlyFieldRejectedError`'s own doc records the same contract from the
+   * error's side: "Thrown by `engine.update` — and, since #5503, by
+   * `engine.insert`".
    */
   strictReadonlyWrites?: boolean;
 }

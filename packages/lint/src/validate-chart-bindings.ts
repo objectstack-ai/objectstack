@@ -98,6 +98,69 @@
  * it, so the series plots nothing"*. That is the truth at a query position and
  * not at a presentation one, where no series is derived for the name in the
  * first place, so its consequence is per position too.
+ *
+ * ## Which SET `chart-axis-not-selected` resolves against (#15734)
+ *
+ * The consequence is per POSITION; the selection it is measured against is per
+ * SURFACE — and on the report surface that selection is not `report.values`.
+ * At the same pinned revision `DatasetReportRenderer.tsx` runs
+ * `useDatasetRows(dataset, plan.kind === 'series' && xAxis ? [xAxis] : [],
+ * wantsQuery && yAxis ? [yAxis] : [], …)` and derives the plotted series with
+ * `buildChartSeries(…, [xAxis], [yAxis], …)` — *"the selection is exactly one
+ * dimension × one measure, so this takes the helper's single-dimension branch
+ * and returns ONE series"*. `report.values` is the selection of the TABLE
+ * beneath the chart; the chart's own is the axis pair. Two things follow:
+ *
+ *  - **Nothing to report at the report `chart.yAxis`.** That position IS the
+ *    chart's query, so it cannot fail to select itself. The warning that fired
+ *    for a declared measure outside `report.values` stated a query consequence
+ *    its own pin refutes: the chart asks for exactly that measure and plots
+ *    it. `chart-measure-unknown` at that position is untouched — an UNDECLARED
+ *    measure still returns no column, and still gates.
+ *  - **`chart.series[].name` resolves against the singleton `{ chart.yAxis }`.**
+ *    The override is paired with a DERIVED series and the chart derives one,
+ *    so that singleton — not `report.values` — is the set an entry can land
+ *    on. An entry naming `chart.yAxis` lands however the table is selected;
+ *    one naming any other declared measure lands on nothing.
+ *
+ * The list-view and page-component surfaces keep `values`: there it IS the
+ * measure set the query asks for, so the existing resolution is correct.
+ *
+ * ## What a REPORT binds, chart or no chart (#16105)
+ *
+ * A report is dataset-bound in its own right — `ReportSchema` requires
+ * `dataset` + `values` on every non-`joined` report and declares `rows` (the
+ * down axis) and `columns` (the across axis a `matrix` pivots on, ADR-0021 D2)
+ * as dimension names "from the dataset". The chart is optional decoration on
+ * top of that binding, not the binding itself.
+ *
+ * The walk did not read it that way. Every report position reached the resolver
+ * through one closure that opened `if (!isRec(chart)) return`, and that closure
+ * was the only site `report.dataset` was ever passed to, so:
+ *
+ *  - a report authored WITHOUT a chart was not checked at all — an unresolvable
+ *    `dataset`, an unknown `rows`/`columns` dimension and an unknown `values`
+ *    measure all published clean; and
+ *  - `rows`/`columns` were passed to the resolver on NO report, charted or not.
+ *    On one and the same charted report, `values` was resolved and the
+ *    dimension selection beside it was not.
+ *
+ * So the dataset is resolved once per report and once per block — before the
+ * chart question is asked — and fed to two groups of positions: the report's
+ * own selection (`rows`/`columns` → `chart-dimension-unknown`, `values` →
+ * `chart-measure-unknown`) and, when a chart is present, its axis refs
+ * exactly as before. Not a second "chartless reports too" pass after the early
+ * return: one path, entered unconditionally, with the chart as the branch it
+ * always was. Which is also why an unresolvable dataset on a charted report is
+ * still ONE finding — `resolveDataset` runs once per surface, not once per
+ * group.
+ *
+ * `rows`/`columns` take `chart-dimension-unknown` rather than an id of their
+ * own: the position is a dataset DIMENSION reference resolved against the
+ * dataset's declared dimensions, which is what that rule already means on the
+ * list-view and page surfaces, and the spec's own words for the two report
+ * keys are "down axis" and "across" — so the rule's existing sentence about an
+ * axis rendering with no categories is true where it now fires.
  */
 
 export const CHART_DIMENSION_UNKNOWN = 'chart-dimension-unknown';
@@ -181,8 +244,15 @@ function indexDatasets(stack: AnyRec): Map<string, DatasetNames> {
  */
 interface ChartBinding {
   dataset?: string;
-  /** Selected dimension names (list-chart shape). */
-  dimensions?: { names: string[]; path: string };
+  /**
+   * Selected dimension names — a LIST of selections, because a report has two
+   * of them and the other surfaces have one (#16105). `rows` is a report's
+   * down axis and `columns` its across axis (`matrix`, ADR-0021 D2); a list
+   * chart and a page chart each carry a single `dimensions` array. Every entry
+   * keeps its own path, so a finding names `reports[i].columns[j]` rather than
+   * a position in some merged list the author never wrote.
+   */
+  dimensions?: Array<{ names: string[]; path: string }>;
   /** Selected measure names (list-chart / report shape). */
   values?: { names: string[]; path: string };
   /** Single dimension ref (report `xAxis`). */
@@ -204,10 +274,33 @@ interface ChartBinding {
    * different sentence from a series entry that pairs with nothing.
    */
   axes?: Array<{ name: string; path: string }>;
+  /**
+   * The measures THIS chart's own query selects, when that is narrower than
+   * the `values` limb above (#15734). Set on the report surface and nowhere
+   * else: the embedded report chart queries `chart.xAxis` × `chart.yAxis`
+   * alone and derives exactly ONE series from it, while `report.values` is the
+   * selection of the table beneath it. `chart-axis-not-selected` resolves
+   * against this set where it is present — which is both why a `series[].name`
+   * override is measured against the singleton `{ chart.yAxis }`, and why the
+   * report `chart.yAxis` carries no not-selected check at all (a chart cannot
+   * fail to select what it queries). The other two surfaces leave it undefined
+   * and resolve against `values`, which on them IS the query's measure set.
+   */
+  ownSelection?: string[];
   where: string;
-  /** Path of the chart container, for the dataset-level finding. */
+  /** Path of the binding's container, for the dataset-level finding. */
   path: string;
 }
+
+/**
+ * A binding whose `dataset` has already been resolved — the positions alone.
+ *
+ * The report surface resolves its dataset once and then checks two groups of
+ * positions against it (the report's own selection, and its chart's axis refs),
+ * which is why resolution and position-checking are separate steps rather than
+ * one call (#16105).
+ */
+type ResolvedBinding = Omit<ChartBinding, 'dataset'>;
 
 /**
  * What a measure name is DOING at the position it was written (#15575).
@@ -273,26 +366,40 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
   const datasets = indexDatasets(stack);
   if (datasets.size === 0 && !stack.reports && !stack.views && !stack.pages) return findings;
 
-  const check = (binding: ChartBinding) => {
-    const dsName = binding.dataset;
-    if (!dsName) return; // nothing bound — the shape rules own that case
+  /**
+   * Resolve one bound dataset NAME, reporting `chart-dataset-unknown` when it
+   * names nothing declared. Returns `undefined` in that case and when nothing
+   * is bound at all — either way there is no dataset to resolve positions
+   * against, and the shape rules own an absent binding.
+   *
+   * A step of its own (#16105) so a surface can resolve its dataset BEFORE it
+   * asks whether it has a chart. It reports at most once per call, which is
+   * what keeps a charted report's unresolvable dataset a single finding.
+   */
+  const resolveDataset = (
+    dsName: string | undefined,
+    where: string,
+    path: string,
+  ): DatasetNames | undefined => {
+    if (!dsName) return undefined; // nothing bound — the shape rules own that case
     const ds = datasets.get(dsName);
-    if (!ds) {
-      findings.push({
-        severity: 'error',
-        rule: CHART_DATASET_UNKNOWN,
-        where: binding.where,
-        path: `${binding.path}.dataset`,
-        message:
-          `binds dataset "${dsName}", which resolves to no declared dataset — ` +
-          `the chart has no data to render.`,
-        hint:
-          `Declared datasets: ${list(datasets.keys())}.${suggestName(dsName, datasets.keys())} ` +
-          `Define it with defineDataset() or fix the reference (ADR-0021).`,
-      });
-      return;
-    }
+    if (ds) return ds;
+    findings.push({
+      severity: 'error',
+      rule: CHART_DATASET_UNKNOWN,
+      where,
+      path: `${path}.dataset`,
+      message:
+        `binds dataset "${dsName}", which resolves to no declared dataset — ` +
+        `there is no data to render.`,
+      hint:
+        `Declared datasets: ${list(datasets.keys())}.${suggestName(dsName, datasets.keys())} ` +
+        `Define it with defineDataset() or fix the reference (ADR-0021).`,
+    });
+    return undefined;
+  };
 
+  const checkAgainst = (ds: DatasetNames, dsName: string, binding: ResolvedBinding) => {
     const dimensionRef = (name: string, path: string) => {
       if (ds.dimensions.has(name)) return;
       findings.push({
@@ -364,14 +471,18 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       }
     };
 
-    const dimSel = binding.dimensions;
-    if (dimSel) {
+    for (const dimSel of binding.dimensions ?? []) {
       for (let i = 0; i < dimSel.names.length; i++) {
         dimensionRef(dimSel.names[i], `${dimSel.path}[${i}]`);
       }
     }
     const valSel = binding.values;
     const selected = new Set(valSel?.names ?? []);
+    // What this chart DERIVES A SERIES FOR — the set `chart-axis-not-selected`
+    // is measured against (#15734). Equal to the selection above wherever the
+    // chart IS the surface's selection; the narrower `{ chart.yAxis }` on the
+    // report surface, whose chart runs its own axis-pair query.
+    const derived = binding.ownSelection ? new Set(binding.ownSelection) : selected;
     if (valSel) {
       for (let i = 0; i < valSel.names.length; i++) {
         // The SELECTION itself — the names the dataset query asks for on every
@@ -380,12 +491,23 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
       }
     }
     if (binding.xAxis) dimensionRef(binding.xAxis.name, binding.xAxis.path);
-    if (binding.yAxis) measureRef(binding.yAxis.name, binding.yAxis.path, 'query', selected);
+    // No selection is passed at this position: the report `yAxis` IS the query
+    // the chart issues, so it cannot name a measure that query does not ask
+    // for (#15734). The `chart-measure-unknown` half still runs — an undeclared
+    // measure is no column at all.
+    if (binding.yAxis) measureRef(binding.yAxis.name, binding.yAxis.path, 'query');
     // Axes before series, the order the page surface reported them in when the
     // two shared one limb — the split (#15575) changes the message, not the
     // walk.
-    for (const a of binding.axes ?? []) measureRef(a.name, a.path, 'page-axis', selected);
-    for (const s of binding.series ?? []) measureRef(s.name, s.path, s.kind, selected);
+    for (const a of binding.axes ?? []) measureRef(a.name, a.path, 'page-axis', derived);
+    for (const s of binding.series ?? []) measureRef(s.name, s.path, s.kind, derived);
+  };
+
+  /** Resolve a binding's dataset and check its positions — the one-call form. */
+  const check = (binding: ChartBinding) => {
+    const ds = resolveDataset(binding.dataset, binding.where, binding.path);
+    if (!ds || !binding.dataset) return;
+    checkAgainst(ds, binding.dataset, binding);
   };
 
   // ── 1. Report charts (report.chart + report.blocks[].chart) ──
@@ -395,22 +517,56 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     if (!isRec(report)) continue;
     const reportName = strName(report.name) ?? `#${ri}`;
 
-    const checkReportChart = (
-      chart: unknown,
-      dataset: string | undefined,
-      values: string[],
-      where: string,
-      path: string,
-    ) => {
+    /**
+     * One report SURFACE — a top-level report, or one of its `blocks[]`. The
+     * two carry the same binding keys (`dataset` + `rows`/`columns`/`values`,
+     * plus an optional `chart`), so they are one shape applied twice.
+     *
+     * ONE pass, with the dataset resolved BEFORE the chart question is asked
+     * (#16105). The chart closure this replaced opened with
+     * `if (!isRec(chart)) return`, and it was the only site that ever received
+     * `report.dataset` — so a report authored without a chart was not checked
+     * at all, and no report ever had its `rows`/`columns` resolved. Both are
+     * dataset bindings that a report declares in its own right: `rows` names
+     * the dimensions it groups down by, `columns` the across axis a `matrix`
+     * pivots on (ADR-0021 D2), and `values` the measures its table shows.
+     *
+     * The report's own selection and its chart's axis refs are checked as two
+     * groups against the ONE resolved dataset, because they sit at different
+     * depths and their findings should say so: `reports[i].rows[j]` under
+     * `report "x"`, `reports[i].chart.yAxis` under `report "x" · chart`.
+     */
+    const checkReportSurface = (container: AnyRec, where: string, path: string) => {
+      const dsName = strName(container.dataset);
+      const ds = resolveDataset(dsName, where, path);
+      if (!ds || !dsName) return;
+
+      // The REPORT's own selection — what the table shows, independent of any
+      // chart. `chart-axis-not-selected` reads none of it: on this surface the
+      // set a presentation override is measured against is the chart's own
+      // `{ chart.yAxis }` (#15734), passed as `ownSelection` below.
+      checkAgainst(ds, dsName, {
+        dimensions: [
+          { names: strList(container.rows), path: `${path}.rows` },
+          { names: strList(container.columns), path: `${path}.columns` },
+        ],
+        values: { names: strList(container.values), path: `${path}.values` },
+        where,
+        path,
+      });
+
+      const chart = container.chart;
       if (!isRec(chart)) return;
-      check({
-        dataset,
-        // `values` is the report's measure SELECTION, not a chart ref; feeding
-        // it in lets the yAxis "declared but not selected" check work without
-        // reporting the selection itself twice.
-        values: { names: values, path: `${path}.values` },
-        xAxis: strName(chart.xAxis) ? { name: strName(chart.xAxis)!, path: `${path}.chart.xAxis` } : undefined,
-        yAxis: strName(chart.yAxis) ? { name: strName(chart.yAxis)!, path: `${path}.chart.yAxis` } : undefined,
+      const xAxisName = strName(chart.xAxis);
+      const yAxisName = strName(chart.yAxis);
+      checkAgainst(ds, dsName, {
+        xAxis: xAxisName ? { name: xAxisName, path: `${path}.chart.xAxis` } : undefined,
+        yAxis: yAxisName ? { name: yAxisName, path: `${path}.chart.yAxis` } : undefined,
+        // The chart's own selection: the ONE measure it queries and derives a
+        // series from. Empty when no `yAxis` is authored — the chart plots
+        // nothing at all then, which the shape rules own, so no override can
+        // be reported as landing on nothing.
+        ownSelection: yAxisName ? [yAxisName] : [],
         series: recordsOf(chart.series)
           .map((s, si) => ({
             name: strName(s.name),
@@ -418,28 +574,20 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
             kind: 'report-series' as const,
           }))
           .filter((s): s is { name: string; path: string; kind: 'report-series' } => !!s.name),
-        where,
+        where: `${where} · chart`,
         path: `${path}.chart`,
       });
     };
 
-    checkReportChart(
-      report.chart,
-      strName(report.dataset),
-      strList(report.values),
-      `report "${reportName}" · chart`,
-      `reports[${ri}]`,
-    );
+    checkReportSurface(report, `report "${reportName}"`, `reports[${ri}]`);
 
     const blocks = Array.isArray(report.blocks) ? report.blocks : [];
     for (let bi = 0; bi < blocks.length; bi++) {
       const block = blocks[bi];
       if (!isRec(block)) continue;
-      checkReportChart(
-        block.chart,
-        strName(block.dataset),
-        strList(block.values),
-        `report "${reportName}" · block "${strName(block.name) ?? `#${bi}`}" chart`,
+      checkReportSurface(
+        block,
+        `report "${reportName}" · block "${strName(block.name) ?? `#${bi}`}"`,
         `reports[${ri}].blocks[${bi}]`,
       );
     }
@@ -452,7 +600,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
     if (!isRec(chart)) return;
     check({
       dataset: strName(chart.dataset),
-      dimensions: { names: strList(chart.dimensions), path: `${path}.chart.dimensions` },
+      dimensions: [{ names: strList(chart.dimensions), path: `${path}.chart.dimensions` }],
       values: { names: strList(chart.values), path: `${path}.chart.values` },
       where,
       path: `${path}.chart`,
@@ -513,7 +661,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
         .filter((s): s is { name: string; path: string; kind: 'page-series' } => !!s.name);
       check({
         dataset: strName(props.dataset),
-        dimensions: { names: strList(props.dimensions), path: `${path}.properties.dimensions` },
+        dimensions: [{ names: strList(props.dimensions), path: `${path}.properties.dimensions` }],
         values: { names: strList(props.values), path: `${path}.properties.values` },
         // #15575 — two limbs, not one concatenated `series` array: the pin
         // refuses an axis `field` and a series `name` for different reasons.

@@ -138,7 +138,6 @@ This document serves as the **Grand Map** of the ObjectStack specification. It l
 | [`license.zod.ts`](src/system/license.zod.ts) | | **Licensing**. License keys and entitlements. |
 | [`registry-config.zod.ts`](src/system/registry-config.zod.ts) | | **Registry Config**. Configuration for the package registry. |
 | [`tenant.zod.ts`](src/system/tenant.zod.ts) | | **Tenant**. Multi-tenant environment isolation. |
-| [`change-management.zod.ts`](src/system/change-management.zod.ts) | | **Change Mgmt**. Deployment history and rollbacks. |
 | [`collaboration.zod.ts`](src/system/collaboration.zod.ts) | | **Collaboration**. Real-time collaboration settings. |
 
 ---

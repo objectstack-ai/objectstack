@@ -569,3 +569,91 @@ describe('renderSchemaSection — the same treatment for relocated vocabularies 
     expect(qualifiedHeadings(md)).toEqual(['### Allowed Values: `Widget.mode`']);
   });
 });
+
+/**
+ * [#15676] The PUBLISHED half of the `externalVocabulary` exemption — ruling B
+ * on #14478.
+ *
+ * `check:duration-unit-keys` exists because a bare `maxAge` publishes a naked
+ * number to the reference page and the reader has to guess seconds from
+ * milliseconds. The exemption lets eleven keys keep their bare name BECAUSE the
+ * name is fixed by an external standard — and that argument only holds for the
+ * reference-page reader if the page says which standard. Exempting the key
+ * without publishing its reason would leave exactly that reader where the gate
+ * found them, so the note is part of the exemption rather than a nicety.
+ *
+ * The marker reaches this renderer as a property of the JSON-Schema node,
+ * riding `z.toJSONSchema` verbatim — the same channel `xRef` / `xExpression` /
+ * `xEnumDeprecated` use.
+ *
+ * MEASURED (reverse verification): deleting the `externalVocabularyNote(prop)`
+ * term from the description cell turns the first three cases below red and
+ * leaves the last two green — the last two assert the note's ABSENCE, which is
+ * what keeps it from decorating every row in the reference.
+ */
+describe('externalVocabulary — the published half of the duration-rule exemption', () => {
+  const withMarker = (marker: unknown) => ({
+    type: 'object',
+    properties: {
+      maxAge: {
+        type: 'number',
+        description: 'Maximum cache age in seconds',
+        ...(marker === undefined ? {} : { externalVocabulary: marker }),
+      },
+    },
+  });
+
+  it('prints the unit as per the named standard, beside the prose that states it', () => {
+    const md = renderSchemaSection('CacheControl', withMarker('HTTP Cache-Control `max-age` (RFC 9111 §5.2.2.1)'));
+
+    expect(md).toContain(
+      'Maximum cache age in seconds (unit per HTTP Cache-Control `max-age` (RFC 9111 §5.2.2.1))',
+    );
+  });
+
+  it('keeps the describe prose — the note QUALIFIES the unit, it does not replace it', () => {
+    const md = renderSchemaSection('CacheControl', withMarker('PostgreSQL `statement_timeout`'));
+
+    expect(md).toContain('Maximum cache age in seconds');
+    expect(md).toContain('(unit per PostgreSQL `statement_timeout`)');
+  });
+
+  it('renders inside a nested shape table too — one grammar, not two', () => {
+    const md = renderSchemaSection('AuthConfig', {
+      type: 'object',
+      properties: {
+        session: {
+          type: 'object',
+          description: 'Session options',
+          properties: {
+            expiresIn: {
+              type: 'number',
+              description: 'Session duration in seconds',
+              externalVocabulary: 'better-auth `session.expiresIn`',
+            },
+          },
+        },
+      },
+    });
+
+    expect(md).toContain('Session duration in seconds (unit per better-auth `session.expiresIn`)');
+  });
+
+  it('prints nothing for a key that declares no marker — the note is not decoration', () => {
+    const md = renderSchemaSection('CacheControl', withMarker(undefined));
+
+    expect(md).toContain('Maximum cache age in seconds');
+    expect(md).not.toContain('unit per');
+  });
+
+  it('prints nothing for an empty or non-string marker — an unverifiable claim publishes nothing', () => {
+    // The gate refuses these too (they exempt no key), so the page must not
+    // print a standard the contract never named. Held on the SAME inputs from
+    // both sides so the two halves cannot drift into disagreeing about what
+    // counts as a declaration.
+    for (const marker of ['', '   ', 42, null, { name: 'RFC 9111' }]) {
+      const md = renderSchemaSection('CacheControl', withMarker(marker));
+      expect(md, `marker ${JSON.stringify(marker)}`).not.toContain('unit per');
+    }
+  });
+});

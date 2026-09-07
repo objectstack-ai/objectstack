@@ -12,7 +12,7 @@ describe('Startup Orchestrator Protocol', () => {
       const options = {};
 
       const result = StartupOptionsSchema.parse(options);
-      expect(result.timeout).toBe(30000);
+      expect(result.timeoutMs).toBe(30000);
       expect(result.rollbackOnFailure).toBe(true);
       expect(result.healthCheck).toBe(false);
       expect(result.parallel).toBe(false);
@@ -20,7 +20,7 @@ describe('Startup Orchestrator Protocol', () => {
 
     it('should validate custom options', () => {
       const options = {
-        timeout: 60000,
+        timeoutMs: 60000,
         rollbackOnFailure: false,
         healthCheck: true,
         parallel: true,
@@ -30,14 +30,14 @@ describe('Startup Orchestrator Protocol', () => {
       const result = StartupOptionsSchema.safeParse(options);
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.timeout).toBe(60000);
+        expect(result.data.timeoutMs).toBe(60000);
         expect(result.data.context).toEqual({ custom: 'data' });
       }
     });
 
     it('should reject negative timeout', () => {
       const options = {
-        timeout: -1000,
+        timeoutMs: -1000,
       };
 
       const result = StartupOptionsSchema.safeParse(options);
@@ -49,7 +49,7 @@ describe('Startup Orchestrator Protocol', () => {
     it('should validate healthy status', () => {
       const healthyStatus = {
         healthy: true,
-        timestamp: Date.now(),
+        checkedAt: Date.now(),
         details: {
           databaseConnected: true,
           memoryUsage: 45.2,
@@ -63,7 +63,7 @@ describe('Startup Orchestrator Protocol', () => {
     it('should validate unhealthy status with message', () => {
       const unhealthyStatus = {
         healthy: false,
-        timestamp: Date.now(),
+        checkedAt: Date.now(),
         message: 'Database connection failed',
       };
 
@@ -80,7 +80,7 @@ describe('Startup Orchestrator Protocol', () => {
           version: '1.0.0',
         },
         success: true,
-        duration: 1250,
+        durationMs: 1250,
       };
 
       const result = PluginStartupResultSchema.safeParse(successResult);
@@ -94,7 +94,7 @@ describe('Startup Orchestrator Protocol', () => {
           version: '1.0.0',
         },
         success: false,
-        duration: 500,
+        durationMs: 500,
         error: { name: 'Error', message: 'Connection failed' },
       };
 
@@ -108,10 +108,10 @@ describe('Startup Orchestrator Protocol', () => {
           name: 'crm-plugin',
         },
         success: true,
-        duration: 1250,
+        durationMs: 1250,
         health: {
           healthy: true,
-          timestamp: Date.now(),
+          checkedAt: Date.now(),
         },
       };
 
@@ -123,7 +123,7 @@ describe('Startup Orchestrator Protocol', () => {
       const invalidResult = {
         plugin: { name: 'test' },
         success: true,
-        duration: -100,
+        durationMs: -100,
       };
 
       const result = PluginStartupResultSchema.safeParse(invalidResult);
@@ -138,15 +138,15 @@ describe('Startup Orchestrator Protocol', () => {
           {
             plugin: { name: 'plugin1', version: '1.0.0' },
             success: true,
-            duration: 1200,
+            durationMs: 1200,
           },
           {
             plugin: { name: 'plugin2', version: '2.0.0' },
             success: true,
-            duration: 850,
+            durationMs: 850,
           },
         ],
-        totalDuration: 2050,
+        totalDurationMs: 2050,
         allSuccessful: true,
       };
 
@@ -160,16 +160,16 @@ describe('Startup Orchestrator Protocol', () => {
           {
             plugin: { name: 'plugin1' },
             success: true,
-            duration: 1200,
+            durationMs: 1200,
           },
           {
             plugin: { name: 'plugin2' },
             success: false,
-            duration: 850,
+            durationMs: 850,
             error: { name: 'Error', message: 'Startup failed' },
           },
         ],
-        totalDuration: 2050,
+        totalDurationMs: 2050,
         allSuccessful: false,
         rolledBack: ['plugin1'],
       };
@@ -177,5 +177,68 @@ describe('Startup Orchestrator Protocol', () => {
       const result = StartupOrchestrationResultSchema.safeParse(orchestrationWithRollback);
       expect(result.success).toBe(true);
     });
+  });
+});
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. All three old spellings are `retiredKey()`
+// tombstones, so the refusal carries the RENAME (the prescription IS the
+// payload) rather than a bare unrecognized-key error. This contract already
+// contained its own counter-example: `startWithTimeout(plugin, ctx, timeoutMs)`
+// named its parameter correctly while the options object beside it did not.
+describe('Startup orchestration durations carry their unit (#15678)', () => {
+  it('StartupOptions REFUSES the retired `timeout` with the rename in the message', () => {
+    const result = StartupOptionsSchema.safeParse({ timeout: 60000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`StartupOptions.timeout` was renamed to `timeoutMs`');
+  });
+
+  it('PluginStartupResult REFUSES the retired `duration` with the rename in the message', () => {
+    const result = PluginStartupResultSchema.safeParse({
+      plugin: { name: 'crm-plugin' },
+      success: true,
+      duration: 1250,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`PluginStartupResult.duration` was renamed to `durationMs`');
+  });
+
+  it('StartupOrchestrationResult REFUSES the retired `totalDuration` with the rename', () => {
+    const result = StartupOrchestrationResultSchema.safeParse({
+      results: [],
+      totalDuration: 2050,
+      allSuccessful: true,
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'totalDuration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      '`StartupOrchestrationResult.totalDuration` was renamed to `totalDurationMs`',
+    );
+  });
+
+  it('the aggregate and its parts now agree: totalDurationMs sums durationMs', () => {
+    const parsed = StartupOrchestrationResultSchema.parse({
+      results: [
+        { plugin: { name: 'plugin1' }, success: true, durationMs: 1200 },
+        { plugin: { name: 'plugin2' }, success: true, durationMs: 850 },
+      ],
+      totalDurationMs: 2050,
+      allSuccessful: true,
+    });
+    expect(parsed.totalDurationMs).toBe(2050);
+    expect(parsed.results.reduce((sum, r) => sum + r.durationMs, 0)).toBe(2050);
+  });
+
+  it('keeps the 30000 default under the renamed key', () => {
+    expect(StartupOptionsSchema.parse({}).timeoutMs).toBe(30000);
+    expect(StartupOptionsSchema.parse({ timeoutMs: 5000 }).timeoutMs).toBe(5000);
   });
 });

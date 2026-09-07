@@ -68,7 +68,7 @@ export const hookForm = defineForm({
           { label: 'Abort', value: 'abort' },
           { label: 'Log', value: 'log' },
         ] },
-        { field: 'timeout', type: 'number', colSpan: 1, helpText: 'Abort the hook after N milliseconds' },
+        { field: 'timeoutMs', type: 'number', colSpan: 1, helpText: 'Abort the hook after N milliseconds' },
         { field: 'runAs', type: 'select', colSpan: 1, helpText: 'Identity for ctx.api data operations: inherit the triggering write (default), system (elevated), or user (the triggering user)', options: [
           { label: 'Inherit (triggering write)', value: 'inherit' },
           { label: 'System (elevated)', value: 'system' },

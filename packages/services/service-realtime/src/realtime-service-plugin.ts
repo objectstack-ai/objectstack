@@ -61,6 +61,17 @@ export class RealtimeServicePlugin implements Plugin {
   }
 
   async init(ctx: PluginContext): Promise<void> {
+    // [#14646] The occupant registered here deliberately does NOT implement
+    // `IRealtimeService.getChannelRoute()`. That absence is the fact discovery
+    // reports: `realtime` is a CHANNEL SLOT, so `services.realtime.enabled`,
+    // its `route`/`handlerReady` and `capabilities.websockets` are all
+    // `isSubscribableChannel(...)` over the route an occupant names, and this
+    // adapter is an in-process pub/sub bus with no wire surface. Discovery
+    // therefore advertises no channel — the retraction the 2026-09-04 ruling
+    // asks for, computed from the implementation rather than hardcoded in two
+    // builders. ⛔ Do not implement `getChannelRoute` to "fix" a client that
+    // wants a channel: realtime stays out of open core, and naming a route
+    // nothing serves is the `declared ≠ enforced` defect that ruling closed.
     const realtime = new InMemoryRealtimeAdapter(this.options.memory);
     ctx.registerService('realtime', realtime);
 

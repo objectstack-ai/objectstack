@@ -293,8 +293,11 @@ that order.
 
 // 1. Identity — resolveExecutionContext() reads the better-auth session (or
 //    API key), aggregates positions/permission sets/RLS membership, and layers
-//    locale + timezone on top. It always resolves; anonymous yields
-//    `{ isSystem: false, positions: [], permissions: [] }`.
+//    locale + timezone on top. Anonymous yields
+//    `{ isSystem: false, positions: [], permissions: [] }`. It rejects with
+//    AuthzStoreUnavailableError (503) only when an authorization input exists
+//    and could not be read — a failed permission-store read, or a tenancy
+//    service that is registered and failed to build.
 const context = await resolveExecutionContext({ getService, getQl, request });
 // → ExecutionContext { userId, tenantId, locale, timezone, positions,
 //                      permissions, isSystem, ... }

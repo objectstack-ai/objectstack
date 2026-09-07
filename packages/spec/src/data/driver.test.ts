@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   DriverCapabilitiesSchema,
   DriverInterfaceSchema,
+  DriverOptionsSchema,
   type DriverCapabilities,
   type DriverInterface,
+  type DriverOptions,
 } from './driver.zod';
 
 /**
@@ -349,5 +351,34 @@ describe('DriverInterfaceSchema', () => {
       const parsed = DriverInterfaceSchema.parse(withLegacyMethod);
       expect(parsed).not.toHaveProperty('findStream');
     });
+  });
+});
+
+// #14478 — `DriverOptions.timeout` said "Timeout in ms" in prose and nothing
+// else; the unit now lives in the key name. Tombstoned (the shape is not
+// strict, so a bare deletion would strip the old key in silence) and
+// registered as `data/DriverOptions:timeout` under protocol 18.
+describe('DriverOptions.timeout → DriverOptions.timeoutMs (#14478)', () => {
+  it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
+    const result = DriverOptionsSchema.safeParse({ timeout: 5000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(/`DriverOptions\.timeout` was removed.*Rename the key to `timeoutMs`/s);
+  });
+
+  it('accepts `timeoutMs` at the same magnitude, and strips nothing silently', () => {
+    const parsed = DriverOptionsSchema.parse({ timeoutMs: 5000, skipCache: true });
+    expect(parsed.timeoutMs).toBe(5000);
+    expect(parsed.skipCache).toBe(true);
+    expect(parsed).not.toHaveProperty('timeout');
+  });
+
+  it('tsc channel: `timeout` is unwritable on the DriverOptions input type', () => {
+    // @ts-expect-error — `timeout` is a tombstone (input type `never`); the key is `timeoutMs`
+    const bad: DriverOptions = { timeout: 5000 };
+    expect(bad).toBeDefined();
+    const good: DriverOptions = { timeoutMs: 5000 };
+    expect(good.timeoutMs).toBe(5000);
   });
 });

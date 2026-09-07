@@ -116,7 +116,7 @@ describe('[#6402] TursoDriver `options` doors are DriverOptions, all 17 of them'
       bypassTenantAudit: true,
       tenantId: 'org_1',
       skipCache: true,
-      timeout: 5_000,
+      timeoutMs: 5_000,
     };
     expect(declared.tenantId).toBe('org_1');
   });

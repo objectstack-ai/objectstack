@@ -16,7 +16,7 @@
  * `content/docs` teaches with pasted CLI output. Some of those lines quote a
  * number the CLI computes at runtime from a registry:
  *
- *     packages/cli/src/commands/validate.ts:245
+ *     `packages/cli/src/commands/validate.ts`
  *       const registered = authoringRulesFor('validate');
  *       printStep(`Running author-time rules (${registered.length})...`);
  *

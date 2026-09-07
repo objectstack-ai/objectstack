@@ -57,12 +57,20 @@ import { join } from 'node:path';
 import {
   publishBoundPort,
   runtimeBoundPortChannels,
+  runtimeStateFileName,
   type BoundPortChannels,
   type ListeningMessage,
 } from '../src/commands/serve.js';
 
-/** The file name a plain `os serve` writes when `OS_ENVIRONMENT_ID` is unset. */
-const RUNTIME_FILE = 'runtime.env_local.json';
+/**
+ * The file name a plain `os serve` writes when `OS_ENVIRONMENT_ID` is unset.
+ *
+ * Asked of the writer's OWN naming function rather than spelled out, because
+ * the name is keyed by the project as well as the environment (#15733) and a
+ * literal copy here would be free to drift away from what is written. These
+ * publishes run outside a boot, so the project half anchors on the CWD.
+ */
+const RUNTIME_FILE = runtimeStateFileName('env_local', process.cwd());
 
 const tempDirs: string[] = [];
 /** `runtimeBoundPortChannels` registers an `exit` cleanup per state file written. */

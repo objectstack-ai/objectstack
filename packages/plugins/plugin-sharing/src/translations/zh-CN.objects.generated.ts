@@ -136,18 +136,19 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       recipient_type: {
         label: "接收方类型",
-        help: "把访问权限给谁。选择团队、业务单元或岗位时，其中的每个人都会获得访问权限；选择「业务单元及下级」还会包含该单元下属的所有单元。",
+        help: "把访问权限给谁。选择团队、业务单元或岗位时，其中的每个人都会获得访问权限；选择「业务单元及下级」还会包含该单元下属的所有单元；选择「字段」时，每条记录会共享给该记录自身某个字段里保存的用户——把那个字段填作接收方即可。",
         options: {
           user: "用户",
           team: "团队",
           business_unit: "业务单元",
           position: "岗位",
-          unit_and_subordinates: "业务单元及下级"
+          unit_and_subordinates: "业务单元及下级",
+          field: "字段"
         }
       },
       recipient_id: {
         label: "接收方",
-        help: "具体把访问权限给哪一个用户、团队、业务单元或岗位。"
+        help: "具体把访问权限给哪一个用户、团队、业务单元或岗位；接收方类型为「字段」时，填写保存共享对象用户的那个记录字段的名称。"
       },
       access_level: {
         label: "访问级别",

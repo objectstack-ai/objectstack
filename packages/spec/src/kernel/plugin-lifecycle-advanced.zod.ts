@@ -154,6 +154,19 @@ export const PluginHealthCheckSchema = lazySchema(() => z.object({
   restartBackoff: retiredKey(RESTART_BACKOFF_RETIRED),
 }));
 
+const UPTIME_RETIRED =
+  '`PluginHealthReport.metrics.uptime` was renamed to `uptimeMs` in @objectstack/spec 17 '
+  + '— the unit of a duration-shaped number lives in the key name, not only in the describe '
+  + 'prose, and this platform already spells a SECONDS-valued uptime with the same bare name '
+  + 'on GET /health. Rename the key to `uptimeMs`; the value (milliseconds, `Date.now() - '
+  + 'startTime`) is unchanged.';
+
+const HEALTH_RESPONSE_TIME_RETIRED =
+  '`PluginHealthReport.metrics.responseTime` was renamed to `responseTimeMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. Rename the key to `responseTimeMs`; the value '
+  + '(milliseconds) is unchanged.';
+
 /**
  * Plugin Health Report
  * Detailed health information from a plugin
@@ -178,12 +191,20 @@ export const PluginHealthReportSchema = lazySchema(() => z.object({
    * Detailed metrics
    */
   metrics: z.object({
-    uptime: z.number().describe('Plugin uptime in milliseconds'),
+    // Renamed from `uptime` (#15678, #14478 ruling B): the unit lived only in the
+    // describe prose, and the neighbouring HTTP /health `uptime` is SECONDS.
+    uptimeMs: z.number().describe('Plugin uptime in milliseconds'),
     memoryUsage: z.number().optional().describe('Memory usage in bytes'),
     cpuUsage: z.number().optional().describe('CPU usage percentage'),
     activeConnections: z.number().optional().describe('Number of active connections'),
     errorRate: z.number().optional().describe('Error rate (errors per minute)'),
-    responseTime: z.number().optional().describe('Average response time in ms'),
+    // Renamed from `responseTime` (#15678, #14478 ruling B): the unit lived only
+    // in the describe prose.
+    responseTimeMs: z.number().optional().describe('Average response time in ms'),
+
+    /** Tombstones for the two renames above (#15678, ruling B on #14478). */
+    uptime: retiredKey(UPTIME_RETIRED),
+    responseTime: retiredKey(HEALTH_RESPONSE_TIME_RETIRED),
   }).partial().optional(),
   
   /**

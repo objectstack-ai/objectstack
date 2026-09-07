@@ -78,11 +78,42 @@ export const SysReportSchedule = ObjectSchema.create({
       group: 'Schedule',
     }),
 
+    // [#15872] Validated on write by `valueDomain: 'iana_time_zone'` — the same
+    // declaration `sys_business_unit.timezone` / `sys_organization.timezone`
+    // carry (#14238), and the same shared `Intl.DateTimeFormat` probe, never the
+    // `Intl.supportedValuesOf('timeZone')` enumeration (which omits `UTC`, this
+    // column's own default). Written values only (the `min`/`max`/`maxLength`
+    // transition-gate class), so a stored non-member survives and no migration
+    // is owed.
+    //
+    // WHY THIS COLUMN IS THE SHARP ONE, measured on #15872: unlike
+    // `sys_job.timezone`, this value IS read back and handed to a scheduler.
+    // `ReportService.rowFromSchedule` lifts it off the row and `nextRunAt` calls
+    // `new Cron(cron, { timezone }).nextRun(from)`. croner (10.0.1) does not
+    // reject a non-member zone when it is constructed WITHOUT a callback — it
+    // throws from `nextRun()` — and `nextRunAt` CATCHES that throw and falls
+    // back to `from + interval_minutes`. So before this line, a typo'd zone on a
+    // cron schedule silently discarded the cron: an admin's "every weekday 09:00
+    // Asia/Shanghai" became "every 1440 minutes, forever", logged only as
+    // `invalid cron '<expr>'` — a warning that names the wrong input, since the
+    // expression was fine. Neither a throw nor a fall back to UTC: the wrong
+    // instant, permanently, which is the outcome this card was told to escalate
+    // on. `scheduleReport`'s eager create-time guard does not catch it either;
+    // it constructs a callback-less `Cron` and so is blind to exactly this half
+    // of its own input. Refusing the write is what closes it.
+    //
+    // `maxLength: 64` and `defaultValue: 'UTC'` are BOTH unchanged. The bound is
+    // already the value #14238 justified (twice the domain's real ceiling: the
+    // enumeration's longest name is 30 characters on this Node baseline, the
+    // longest tzdb link 32). The default is a consumer semantic — this reader
+    // documents "default UTC" and falls back to `'UTC'` in four places — and is
+    // deliberately NOT converged with `sys_job`, which has none.
     timezone: Field.text({
       label: 'Timezone',
       required: false,
       maxLength: 64,
       defaultValue: 'UTC',
+      valueDomain: 'iana_time_zone',
       group: 'Schedule',
     }),
 

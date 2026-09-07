@@ -191,6 +191,7 @@ The migration is non-destructive and idempotent. Steps 1–4 ship in v4.x as an 
 
 - `packages/spec/src/cloud/environment-package.zod.ts` — current installation schema (to be updated)
 - `packages/services/service-tenant/src/objects/sys-package-installation.object.ts` — DB object (to be updated)
+  *(Path note, 2026-09: historical and deliberately unlinked — the `packages/services/service-tenant/` package left this repository with the control-plane split to `objectstack-ai/cloud` (`473fce590`, 2026-05-21).)*
 - ADR-0002: `docs/adr/0002-environment-database-isolation.md` — Control Plane / Data Plane split
 - Salesforce Unlocked Packages: <https://developer.salesforce.com/docs/atlas.en-us.pkg2_dev.meta/pkg2_dev/>
 - Power Platform Solution Layers: <https://learn.microsoft.com/power-platform/alm/solution-layers-alm>

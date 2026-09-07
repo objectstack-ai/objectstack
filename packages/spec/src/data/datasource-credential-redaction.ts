@@ -28,6 +28,24 @@
  *     refusal list rather than re-typing it. A driver that refuses a new
  *     credential key tomorrow is covered here the day it lands, which a
  *     hand-maintained list in a consumer package would not be.
+ *
+ *     ⚠️ **One exception, and it is declared on the schema:** a `retiredKey()`
+ *     RETIREMENT TOMBSTONE is also a `z.never()`, and it is not a credential
+ *     — it is a key that used to exist under another name. Until #15680 no
+ *     driver contract carried one, so "never ⇒ credential" held by accident of
+ *     population rather than by construction; the duration renames of #14478
+ *     put the first one in (`TursoConfig.timeout` → `timeoutMs`) and the
+ *     derivation answered that a millisecond budget was a secret. Tombstones
+ *     are excluded by the `[REMOVED] ` prefix `retiredKey()` itself stamps on
+ *     the description — the producer's own marker, the same one the reference
+ *     pages and the authorable-surface ratchet already read.
+ *
+ *     The exclusion is deliberately NEGATIVE (skip declared tombstones) rather
+ *     than POSITIVE (keep only keys marked `format: 'password'`), even though
+ *     every credential slot in every builtin contract does carry that marker
+ *     today. Under-redacting is the dangerous direction: a future credential
+ *     key whose author forgets the marker must still be scrubbed, and only a
+ *     key that has explicitly declared itself retired may drop out.
  *  2. **Former alias spellings** ({@link FORMER_CREDENTIAL_ALIASES}) — `passwd`
  *     / `pwd` / `token` / `jwt` / `auth_token` / `authtoken` used to be
  *     `aliases` that the parse RENAMED onto the canonical key; #8078 moved them
@@ -247,6 +265,25 @@ function baseTypeOf(schema: unknown): string | undefined {
   return def?.type;
 }
 
+/**
+ * Is this shape member a `retiredKey()` tombstone rather than a refused
+ * credential slot? Both are `z.never()`; only the tombstone carries the
+ * `[REMOVED] ` prescription prefix `retiredKey()` stamps on the description.
+ *
+ * Read from the member AND from its unwrapped base node: `retiredKey()` calls
+ * `.describe()` last, so the prefix sits on the outer `.optional()` clone,
+ * while a caller that re-wraps a tombstone could leave it further in.
+ */
+function isRetirementTombstone(member: unknown, node: unknown): boolean {
+  const described = (m: unknown): string | undefined => {
+    const d = (m as any)?.description;
+    if (typeof d === 'string') return d;
+    const meta = (m as any)?.meta?.();
+    return typeof meta?.description === 'string' ? meta.description : undefined;
+  };
+  return (described(member) ?? described(node) ?? '').startsWith('[REMOVED] ');
+}
+
 /** The `shape` record of an object-typed schema node, or `undefined`. */
 function shapeOf(schema: unknown): Record<string, unknown> | undefined {
   const raw = (schema as any)?.shape;
@@ -279,7 +316,8 @@ export function refusedCredentialPathsOfSchema(schema: unknown): (readonly strin
       const def = node?.def ?? node?._def;
       const type: string | undefined = def?.type;
       if (type === 'never') {
-        out.push([...prefix, key]);
+        // A retirement tombstone is a `z.never()` that is not a credential.
+        if (!isRetirementTombstone(member, node)) out.push([...prefix, key]);
         continue;
       }
       if (type === 'object') {
@@ -323,7 +361,8 @@ export function refusedCredentialKeys(driver: unknown): string[] {
   }
   if (!shape) return [];
   return Object.entries(shape)
-    .filter(([, member]) => baseTypeOf(member) === 'never')
+    .filter(([, member]) => baseTypeOf(member) === 'never'
+      && !isRetirementTombstone(member, baseNodeOf(member)))
     .map(([key]) => key);
 }
 

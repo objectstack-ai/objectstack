@@ -33,13 +33,13 @@ const result = RegistryConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **type** | `Enum<'public' \| 'private' \| 'hybrid'>` | ✅ | Registry deployment type |
-| **upstream** | `{ url: string; syncPolicy: Enum<'manual' \| 'auto' \| 'proxy'>; syncInterval?: integer; auth?: object; … }[]` | optional | Upstream registries to sync from or proxy to |
+| **upstream** | `{ url: string; syncPolicy: Enum<'manual' \| 'auto' \| 'proxy'>; syncIntervalSeconds?: integer; auth?: object; … }[]` | optional | Upstream registries to sync from or proxy to |
 | **scope** | `string[]` | optional | npm-style scopes managed by this registry (e.g., @my-corp, @enterprise) |
 | **defaultScope** | `string` | optional | Default scope prefix for new plugins |
 | **storage** | `{ backend: Enum<'local' \| 's3' \| 'gcs' \| 'azure-blob' \| 'oss'>; path?: string; credentials?: Record<string, any> }` | optional |  |
 | **visibility** | `Enum<'public' \| 'private' \| 'internal'>` | optional (default: `"private"`) | Who can access this registry |
 | **accessControl** | `{ requireAuthForRead: boolean; requireAuthForWrite: boolean; allowedPrincipals?: string[] }` | optional |  |
-| **cache** | `{ enabled: boolean; ttl: integer; maxSize?: integer }` | optional |  |
+| **cache** | `{ enabled: boolean; ttlSeconds: integer; maxSize?: integer }` | optional |  |
 | **mirrors** | `{ url: string; priority: integer }[]` | optional | Mirror registries for redundancy |
 
 ### Nested Shape: `RegistryConfig.upstream[number]`
@@ -48,10 +48,12 @@ const result = RegistryConfigSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | Upstream registry endpoint |
 | **syncPolicy** | `Enum<'manual' \| 'auto' \| 'proxy'>` | optional (default: `"auto"`) | Registry synchronization strategy |
-| **syncInterval** | `integer` | optional | Auto-sync interval in seconds |
+| **syncIntervalSeconds** | `integer` | optional | Auto-sync interval in seconds |
+| **syncInterval** | `never` | optional | [REMOVED] `RegistryUpstream.syncInterval` was renamed to `syncIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the `timeout` beside it on this same block is milliseconds. Rename the key to `syncIntervalSeconds`; the value (seconds) and the min-60 bound are unchanged. |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api-key' \| 'oauth2'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **tls** | `{ enabled: boolean; verifyCertificate: boolean; certificate?: string; privateKey?: string }` | optional |  |
-| **timeout** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `RegistryUpstream.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and `syncIntervalSeconds` on this same block is seconds. Rename the key to `timeoutMs`; the value (milliseconds), the 30000 default and the min-1000 bound are unchanged. |
 | **retry** | `{ maxAttempts: integer; backoff: Enum<'fixed' \| 'linear' \| 'exponential'> }` | optional |  |
 
 ### Nested Shape: `RegistryConfig.cache`
@@ -59,7 +61,8 @@ const result = RegistryConfigSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) |  |
-| **ttl** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **ttlSeconds** | `integer` | optional (default: `3600`) | Cache TTL in seconds |
+| **ttl** | `never` | optional | [REMOVED] `RegistryConfig.cache.ttl` was renamed to `ttlSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the sibling `maxSize` in this same cache block is bytes. Rename the key to `ttlSeconds`; the value (seconds) and the 3600 default are unchanged. |
 | **maxSize** | `integer` | optional | Maximum cache size in bytes |
 
 
@@ -86,10 +89,12 @@ Registry synchronization strategy
 | :--- | :--- | :--- | :--- |
 | **url** | `string` | ✅ | Upstream registry endpoint |
 | **syncPolicy** | `Enum<'manual' \| 'auto' \| 'proxy'>` | optional (default: `"auto"`) | Registry synchronization strategy |
-| **syncInterval** | `integer` | optional | Auto-sync interval in seconds |
+| **syncIntervalSeconds** | `integer` | optional | Auto-sync interval in seconds |
+| **syncInterval** | `never` | optional | [REMOVED] `RegistryUpstream.syncInterval` was renamed to `syncIntervalSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and the `timeout` beside it on this same block is milliseconds. Rename the key to `syncIntervalSeconds`; the value (seconds) and the min-60 bound are unchanged. |
 | **auth** | `{ type: Enum<'none' \| 'basic' \| 'bearer' \| 'api-key' \| 'oauth2'>; username?: string; password?: string; token?: string; … }` | optional |  |
 | **tls** | `{ enabled: boolean; verifyCertificate: boolean; certificate?: string; privateKey?: string }` | optional |  |
-| **timeout** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
+| **timeoutMs** | `integer` | optional (default: `30000`) | Request timeout in milliseconds |
+| **timeout** | `never` | optional | [REMOVED] `RegistryUpstream.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and `syncIntervalSeconds` on this same block is seconds. Rename the key to `timeoutMs`; the value (milliseconds), the 30000 default and the min-1000 bound are unchanged. |
 | **retry** | `{ maxAttempts: integer; backoff: Enum<'fixed' \| 'linear' \| 'exponential'> }` | optional |  |
 
 

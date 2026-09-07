@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+# also without the slash: in a linked worktree node_modules can be a symlink, which is not a directory to git and so escapes the line above; the repo tracks node_modules in no shape (#15763)
+node_modules
 package-lock.json
 
 # Build output

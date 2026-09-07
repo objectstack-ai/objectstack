@@ -215,7 +215,7 @@ import YAML from 'yaml';
 
 import { fencedBlocks } from './check-react-page-adapter-contract.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, scanSource } from './js-comment-mask.mjs';
+import { maskCommentsAndLiterals, scanSource } from './js-comment-mask.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -444,14 +444,17 @@ export function docsFiles(root) {
 /**
  * The two projections of one scan. Both share byte offsets with `body`.
  *
+ * `codeOnly` is `js-comment-mask.mjs`'s own `maskCommentsAndLiterals` (#15776),
+ * not a composition re-derived here; the raw `comment`/`literal` flags are what
+ * this gate still needs `scanSource` for (a rule below reads `literal[i] === 0`
+ * directly), and they address `body` at the same offsets the mask does.
+ *
  * @param {string} body
  * @returns {{ codeOnly: string, comment: Uint8Array, literal: Uint8Array }}
  */
 export function project(body) {
   const { comment, literal } = scanSource(body);
-  const both = new Uint8Array(body.length);
-  for (let i = 0; i < body.length; i++) both[i] = comment[i] || literal[i] ? 1 : 0;
-  return { codeOnly: blank(body, both), comment, literal };
+  return { codeOnly: maskCommentsAndLiterals(body), comment, literal };
 }
 
 /**
@@ -1467,9 +1470,10 @@ export function selfTest() {
     t('a NAMED YAML mapping satisfies the rule', run(yamlNamed, quiet), EXIT_CLEAN);
 
     // ── ⭐ #13880 selector ③: a singular `section:` mapping, nameless ───────
-    // The exact shape `concept.mdx:426` carried live: `section:` (not
-    // `sections:`) whose value is a mapping, nested under an unrelated outer
-    // key -- the `- section:` sequence-item cardinality.
+    // The exact shape `content/docs/protocol/objectui/concept.mdx` carried
+    // live (line 426 as measured): `section:` (not `sections:`) whose value
+    // is a mapping, nested under an unrelated outer key -- the `- section:`
+    // sequence-item cardinality.
     battery('⭐ #13880 selector ③: a singular `section:` mapping, nameless');
     const yamlSingularNameless = tree(
       baseFixtureFiles({
@@ -1505,8 +1509,9 @@ export function selfTest() {
 
     // ── negative controls: the widened `sections?:` prefilter must not ──────
     // fabricate a population out of `_section:`, `.section` member access, or
-    // a scalar `section:` value (no mapping to judge -- the doc-pages.mdx:257
-    // control this card's own triage named: "...from the previous section:"
+    // a scalar `section:` value (no mapping to judge -- the control at
+    // `content/docs/ui/doc-pages.mdx` (line 257 as measured) this card's own
+    // triage named: "...from the previous section:"
     // is prose outside any fence and never reaches this regex at all).
     battery('negative controls: the widened `sections?:` prefilter must not');
     const yamlSingularNegatives = tree(
@@ -1561,7 +1566,8 @@ export function selfTest() {
     t('a `jsonc` fence with comments and a trailing comma is judged, not refused', run(jsonWithComments, quiet), EXIT_CLEAN);
 
     // ── an ELIDED placeholder array: judged as ZERO entries, not skipped ────
-    // (`forms.mdx:183`'s real shape: `"sections": [/* … */]`)
+    // (`content/docs/ui/forms.mdx`'s real shape, line 183 as measured:
+    // `"sections": [/* … */]`)
     battery('an ELIDED placeholder array: judged as ZERO entries, not skipped');
     const jsonElided = tree(
       baseFixtureFiles({

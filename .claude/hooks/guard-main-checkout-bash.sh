@@ -24,9 +24,9 @@
 #
 # Repo predicate — lifted verbatim from guard-main-checkout.sh so the two hooks can never
 # disagree about what "shared checkout" means:
-#   resolve the target's nearest EXISTING ancestor dir -> `git rev-parse --git-dir`
+#   resolve the target's nearest EXISTING ancestor dir -> `git rev-parse`
 #     * not a git repo at all (/tmp, $HOME dotfiles, the scratchpad)  -> allow
-#     * git-dir matches */worktrees/*  (a linked worktree)            -> allow
+#     * git-dir differs from git-common-dir (a linked worktree)       -> allow
 #     * anything else (the shared PRIMARY checkout, any sibling repo) -> BLOCK
 #
 # PRECISION OVER RECALL. Recognising a write target inside an arbitrary shell command is
@@ -312,9 +312,14 @@ tokenize() {
 }
 
 # --- the repo predicate, identical to guard-main-checkout.sh's ------------------------
+# Canonicalise an existing directory to its physical absolute path, so both sides of the
+# comparison below are spelled the same way: git prints the common-dir RELATIVE, and some
+# hosts hand out symlinked temp dirs.
+canon_dir() { ( cd "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"; }
+
 # 0 = this target lands in a shared primary checkout (block it), 1 = fine / unknowable.
 target_is_shared_checkout() {
-  local p="$1" d gitdir
+  local p="$1" d gitdir commondir
   [ -n "$p" ] || return 1
   [ "$p" = "-" ] && return 1                 # stdout, not a file
 
@@ -334,10 +339,15 @@ target_is_shared_checkout() {
   while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -d "$d" ]; do d="$(dirname "$d")"; done
   [ -d "$d" ] || return 1
 
-  gitdir="$(git -C "$d" rev-parse --git-dir 2>/dev/null)" || return 1
-  case "$gitdir" in
-    */worktrees/*) return 1 ;;
-  esac
+  # A linked worktree's git-dir (.git/worktrees/NAME) differs from its git-COMMON-dir
+  # (.git); a primary checkout has the two equal, and so does a submodule. Structural, so it
+  # holds whatever the path is spelled like — the `*/worktrees/*` substring match it replaces
+  # did not (#11809). --git-common-dir prints RELATIVE to $d, so resolve it against $d first or
+  # the guard fails open at EVERY depth.
+  gitdir="$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+  commondir="$(git -C "$d" rev-parse --git-common-dir 2>/dev/null)" || return 1
+  case "$commondir" in /*) ;; *) commondir="$d/$commondir" ;; esac
+  [ "$(canon_dir "$gitdir")" != "$(canon_dir "$commondir")" ] && return 1
   return 0
 }
 
@@ -561,7 +571,10 @@ Always fine, no flag needed:
   writes into a linked worktree  sed -i … ../${name}-<task>/packages/…
   writes outside any repo        /tmp/…, the scratchpad, \$HOME dotfiles
 
-Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.
+Deliberate non-task exception: set OS_ALLOW_MAIN_EDITS=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
       exit 2
     fi

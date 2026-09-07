@@ -86,8 +86,26 @@ record, and issue a **short-lived signed URL**:
 
 | Code | Status | When |
 | --- | --- | --- |
-| `AUTH_REQUIRED` | 401 | Anonymous download of an attachments-scope file |
+| `AUTH_REQUIRED` | 401 | Anonymous download of an attachments-scope file, or a credential the organization wall refuses (see below) |
 | `ATTACHMENT_DOWNLOAD_DENIED` | 403 | The caller is neither the file's owner nor able to read any record it is attached to |
+
+**The 401 is the generic "unauthenticated" answer, and it has always covered
+more than a missing credential** — an unknown, revoked or expired API key reads
+the same way. Under a wall-enforcing
+[tenancy posture](/docs/deployment/tenancy-modes) two further credentials join
+it, refused before this door's ownership and parent-read checks are consulted:
+
+- an API key **stamped with an organization its owner has left** — refused
+  under both `group` and `isolated`, the two postures that enforce a wall;
+- an API key carrying **no organization at all** — refused under `isolated`
+  only. `group` reads across the caller's whole membership set, so a key with
+  no organization is still admitted there.
+
+Under `single` neither applies — there is no organization wall for a key to be
+walled out of. Both refusals deliberately tell the caller nothing more than the
+anonymous case does: the response is byte-identical to sending no credential at
+all, and the reason is written to the server log instead. The check itself lives
+in the shared API-key admission path, not in the attachments gate.
 
 The gate is scoped to attachments files on purpose: **non-attachments files**
 (avatars, `Field.image` thumbnails, org logos) keep their stable, anonymous

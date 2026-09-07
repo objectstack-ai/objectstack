@@ -30,6 +30,7 @@ import { CronExpressionInputSchema } from '../shared/expression.zod';
  * @see ../../api/http-cache.zod.ts for HTTP-level caching
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * Cache eviction strategy — the single declaration of the `CacheStrategy`
@@ -48,11 +49,31 @@ export const CacheStrategySchema = lazySchema(() => z.enum([
 
 export type CacheStrategy = z.input<typeof CacheStrategySchema>;
 
+const CACHE_TIER_TTL_RETIRED =
+  '`CacheTier.ttl` was renamed to `ttlSeconds` in @objectstack/spec 17 — the unit of a '
+  + 'duration-shaped number lives in the key name, not only in the describe prose, and the '
+  + 'sibling `maxSize` on this same tier is a size in MB. Rename the key to `ttlSeconds`; '
+  + 'the value (seconds) and the 300 default are unchanged.';
+
+const CIRCUIT_BREAKER_RESET_TIMEOUT_RETIRED =
+  '`CacheAvalanchePrevention.circuitBreaker.resetTimeout` was renamed to '
+  + '`resetTimeoutSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number '
+  + 'lives in the key name, not only in the describe prose, and the sibling `lockout` block '
+  + 'on this same schema already spells `lockTimeoutMs`. Rename the key to '
+  + '`resetTimeoutSeconds`; the value (seconds) and the 30 default are unchanged. Note the '
+  + 'two are NOT the same unit: this one is seconds, `lockTimeoutMs` is milliseconds.';
+
 export const CacheTierSchema = lazySchema(() => z.object({
   name: z.string().describe('Unique cache tier name'),
   type: z.enum(['memory', 'redis', 'memcached', 'cdn']).describe('Cache backend type'),
   maxSize: z.number().optional().describe('Max size in MB'),
-  ttl: z.number().default(300).describe('Default TTL in seconds'),
+  // Renamed from `ttl` (#15679, #14478 ruling B): the unit lived only in the
+  // describe prose, while the sibling `maxSize` on this very tier is MB — two
+  // bare numbers side by side, neither naming its unit at the authoring site.
+  ttlSeconds: z.number().default(300).describe('Default TTL in seconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  ttl: retiredKey(CACHE_TIER_TTL_RETIRED),
   strategy: CacheStrategySchema.default('lru').describe('Eviction strategy'),
   warmup: z.boolean().default(false).describe('Pre-populate cache on startup'),
 }).describe('Configuration for a single cache tier in the hierarchy'));
@@ -111,7 +132,7 @@ export type CacheConsistency = z.input<typeof CacheConsistencySchema>;
  * ```typescript
  * const prevention: CacheAvalanchePrevention = {
  *   jitterTtl: { enabled: true, maxJitterSeconds: 60 },
- *   circuitBreaker: { enabled: true, failureThreshold: 5, resetTimeout: 30 },
+ *   circuitBreaker: { enabled: true, failureThreshold: 5, resetTimeoutSeconds: 30 },
  *   lockout: { enabled: true, lockTimeoutMs: 5000 },
  * };
  * ```
@@ -127,7 +148,13 @@ export const CacheAvalanchePreventionSchema = lazySchema(() => z.object({
   circuitBreaker: z.object({
     enabled: z.boolean().default(false).describe('Enable circuit breaker for backend protection'),
     failureThreshold: z.number().default(5).describe('Failures before circuit opens'),
-    resetTimeout: z.number().default(30).describe('Seconds before half-open state'),
+    // Renamed from `resetTimeout` (#15679, #14478 ruling B): the unit lived only
+    // in the describe prose, and the sibling `lockout.lockTimeoutMs` on this same
+    // schema already spelled its own unit — one shape, two conventions.
+    resetTimeoutSeconds: z.number().default(30).describe('Seconds before half-open state'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    resetTimeout: retiredKey(CIRCUIT_BREAKER_RESET_TIMEOUT_RETIRED),
   }).optional().describe('Circuit breaker for backend protection'),
 
   /** Cache lock to prevent thundering herd on key miss */
@@ -175,8 +202,8 @@ export type CacheWarmupParsed = z.infer<typeof CacheWarmupSchema>;
  * const distributedCache: DistributedCacheConfig = {
  *   enabled: true,
  *   tiers: [
- *     { name: 'l1', type: 'memory', maxSize: 100, ttl: 60, strategy: 'lru' },
- *     { name: 'l2', type: 'redis', maxSize: 1000, ttl: 300, strategy: 'lru' },
+ *     { name: 'l1', type: 'memory', maxSize: 100, ttlSeconds: 60, strategy: 'lru' },
+ *     { name: 'l2', type: 'redis', maxSize: 1000, ttlSeconds: 300, strategy: 'lru' },
  *   ],
  *   invalidation: [
  *     { trigger: 'update', scope: 'key' },

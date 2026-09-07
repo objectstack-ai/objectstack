@@ -33,8 +33,14 @@ on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
 
+# `contents: read` checks the repo out to get at the script. `pull-requests:
+# read` is what the commit-list gather below needs, and naming a `permissions:`
+# block at all sets every scope NOT listed to `none`, so both must be spelled.
+# Read-only is the whole grant: this gate reports, and never closes a PR,
+# comments, or edits a body.
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: partof-closing-keyword-${{ github.event.pull_request.number }}
@@ -87,8 +93,47 @@ jobs:
       # No install step: the script imports one sibling module and reads no
       # workspace package, so `node` on the pinned runtime is the whole
       # toolchain it needs.
-      - name: A Part-of PR body may not carry a closing keyword for the same card
+      # RULE 2's input. The script judges it but never fetches it: the judging
+      # path stays HTTP-free, and the gather is a step of its own so that a
+      # network failure reads as a failed gather rather than as a verdict about
+      # somebody's PR.
+      #
+      # The endpoint is chosen over `git log base..head` deliberately. It
+      # returns exactly the set GitHub will squash. The git walk needs the merge
+      # base present to exclude what is already on the default branch, and the
+      # checkout above is depth 1 — so on a branch that has merged `main` back
+      # in, the walk cannot exclude those commits and would report another
+      # author's landed trailers as this PR's. Deepening until the merge base
+      # appears is unbounded, and `fetch-depth: 0` clones the whole repository
+      # to read a handful of messages.
+      #
+      # `--paginate` is load-bearing: without it a PR over one page silently
+      # loses its later commits, and a rule that read half the commits would
+      # report the unread half as clean. `--jq` emits one JSON object per line,
+      # and JSON escapes the newlines inside a commit message, so one row really
+      # is one line. The messages go to a FILE rather than into the environment:
+      # they are multi-line attacker-controlled text, and a path is inert where
+      # a body of prose is not.
+      #
+      # No pipeline here, on purpose. A `run:` block executes as `bash -e`
+      # WITHOUT pipefail, so `gh ... | jq ...` would take jq's exit code and a
+      # failed gather would reach the script as an empty file. It is a single
+      # redirect, so a failing `gh` fails the step; and if it ever did produce an
+      # empty file, the script reads zero rows as a failed gather, not as a PR
+      # with no commits.
+      - name: Gather the PR's commit messages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: >
+          gh api --paginate "/repos/$REPO/pulls/$PR_NUMBER/commits"
+          --jq '.[] | {sha: .sha, message: .commit.message}'
+          > "$RUNNER_TEMP/pr-commits.jsonl"
+
+      - name: A PR body may not close the card it is only part of, and no commit may carry a card trailer
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_COMMITS_FILE: ${{ runner.temp }}/pr-commits.jsonl
         run: node scripts/check-partof-closing-keyword.mjs

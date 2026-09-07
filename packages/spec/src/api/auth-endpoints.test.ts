@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   AuthEndpointPaths,
+  DeviceRequestResponseSchema,
   AuthEndpointSchema,
   AuthEndpointAliases,
   AuthFeaturesConfigSchema,
@@ -171,5 +172,43 @@ describe('getAuthEndpointUrl', () => {
     expect(getAuthEndpointUrl('http://localhost:3000/api/auth', 'signUpEmail')).toBe(
       'http://localhost:3000/api/auth/sign-up/email'
     );
+  });
+});
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('DeviceRequestResponse.interval \u2192 intervalSeconds (#15677)', () => {
+  const base = {
+    code: 'ABCD-1234',
+    verificationUrl: 'https://example.com/device',
+    expiresAt: '2026-09-05T12:00:00.000Z',
+  };
+
+  it('REFUSES the retired `interval` spelling with the rename in the message', () => {
+    const result = DeviceRequestResponseSchema.safeParse({ ...base, interval: 5 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'interval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`DeviceRequestResponse\.interval` was renamed to `intervalSeconds`/,
+    );
+  });
+
+  it('records in the prescription that this is NOT an RFC 8628 mirror', () => {
+    const result = DeviceRequestResponseSchema.safeParse({ ...base, interval: 5 });
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'interval');
+    expect(issue!.message).toMatch(/not an RFC 8628 device-authorization payload/);
+  });
+
+  it('accepts `intervalSeconds` at the same magnitude, and keeps the default', () => {
+    const parsed = DeviceRequestResponseSchema.parse({ ...base, intervalSeconds: 5 });
+    expect(parsed.intervalSeconds).toBe(5);
+    expect(parsed).not.toHaveProperty('interval');
+    expect(DeviceRequestResponseSchema.parse(base).intervalSeconds).toBe(2);
   });
 });

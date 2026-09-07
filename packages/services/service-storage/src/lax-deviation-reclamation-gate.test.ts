@@ -182,6 +182,10 @@ describe('the reclamation gate refuses to delete bytes while a deviation stands 
     });
 
     expect(await guard('sys_file', [{ ...RELEASED_FIELD_FILE }])).toEqual(['f1']);
+    // The guard ran TWICE in this test: withheld first, authorised second. So the
+    // count is the whole point — 1 proves the withheld pass deleted nothing, and
+    // `toHaveBeenCalledWith` alone would pass just the same if it had (#15607).
+    expect(s.delete).toHaveBeenCalledTimes(1);
     expect(s.delete).toHaveBeenCalledWith('user/f1.png');
   });
 
@@ -201,6 +205,8 @@ describe('the reclamation gate refuses to delete bytes while a deviation stands 
     // reach a lifecycle that never gated on the flag would be the borrowed-
     // evidence error in the other direction.
     expect(confirmed).toEqual(['a1']);
+    // One attachment-scope tombstone ⇒ exactly one byte delete (#15607).
+    expect(s.delete).toHaveBeenCalledTimes(1);
     expect(s.delete).toHaveBeenCalledWith('attachments/a1.bin');
   });
 });

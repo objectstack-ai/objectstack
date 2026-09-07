@@ -85,8 +85,16 @@ function artifactPackages(parsed: Record<string, unknown>): Array<{
  * "manifest fields" and "collections" would need a second copy of the key set
  * `AssembledPackageBodySchema` derives, and the rules do not need the split —
  * they read collections off the top level (already there) and identity off
- * `manifest` (a superset of the manifest, and `ManifestSchema` is an open
- * object).
+ * `manifest`.
+ *
+ * That `manifest` is a SUPERSET of a real manifest — it is the whole body — and
+ * that is safe here for one reason only: nothing parses it. `runAuthoringRules`
+ * reads fields off this object and never hands it to a schema. ⛔ Do not start
+ * parsing it against `ManifestSchema`, and do not reach for a widened schema to
+ * make that possible: `ManifestSchema` is `strictObject` since #14192, so it
+ * would REFUSE, by name, every collection key this superset deliberately puts
+ * under `manifest` — and re-opening it to stop the refusal would re-open the
+ * real manifest surface with it.
  */
 function packageBodyAsStack(body: Record<string, unknown>): Record<string, unknown> {
   return { ...body, manifest: body };

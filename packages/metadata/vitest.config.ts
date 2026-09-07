@@ -43,6 +43,18 @@ export default defineConfig({
         replacement: path.join(path.resolve(__dirname, '..'), 'spec/src/$1/index.ts'),
       },
       { find: /^@objectstack\/spec$/, replacement: path.resolve(__dirname, '../spec/src/index.ts') },
+      // [#16100] The deployment-ledger writer/reader pair the notification-event
+      // migration's receipt cases drive (`attestFreshDatastore` seeds the
+      // fresh-store row, `isDataMigrationVerified` reads the verdict back). The
+      // entry is ANCHORED on the subpath rather than spelled bare: this package
+      // publishes a FILE-shaped subpath (`./plugin`), so a bare prefix rule with
+      // a file replacement would resolve `…/system` to
+      // `…/platform-objects/src/index.ts/system` — ENOTDIR at run time, from a
+      // config that reads as correct.
+      {
+        find: /^@objectstack\/platform-objects\/system$/,
+        replacement: path.resolve(__dirname, '../platform-objects/src/system/index.ts'),
+      },
       // Subpath BEFORE the bare package, same prefix-match reason: `./node` is a
       // published subpath served by a FILE (`types/src/node.ts` — the node-only slice
       // the root export deliberately excludes), so the bare entry would resolve it to

@@ -387,6 +387,100 @@ export function predicateSlotRefusal(value: unknown): { message: string; source:
 }
 
 /**
+ * The one sentence a refused **structural** condition leads with (#15662) —
+ * `config.condition` on any node and `edge.condition`, the two predicate
+ * surfaces every flow has whether or not any ledger entry names them.
+ *
+ * ⚠️ Deliberately NOT {@link PREDICATE_SLOT_STRING_REFUSAL}. That one says
+ * "bare text, an envelope is not authorable" because a ledger `predicate` slot
+ * is *declared* `z.string()`. Neither structural slot is:
+ *
+ *  - `FlowEdgeSchema.condition` is `ExpressionInputSchema`, whose string arm
+ *    **transforms into** `{ dialect: 'cel', source }` — so after
+ *    `FlowSchema.parse` EVERY authored edge condition is an envelope, and the
+ *    ledger arm's rule applied here would refuse every conditional edge in
+ *    every flow.
+ *  - `FlowNodeSchema.config` is an open `z.record`, so an envelope written at
+ *    `config.condition` is passed through by the parse verbatim and evaluated
+ *    correctly by `evaluateCondition` (both spellings, by #4336's ruling).
+ *
+ * Both shapes are therefore legitimate here and this refusal admits them. What
+ * it refuses is the third population, which no layer ever admitted on purpose:
+ * a value that is neither text nor an expression.
+ */
+export const STRUCTURAL_CONDITION_SHAPE_REFUSAL =
+  'A structural condition (`config.condition` on a node, `edge.condition`) holds either BARE CEL TEXT or an '
+  + 'expression envelope — an object carrying a string `source`, or an `ast`. No other shape is authorable there.';
+
+/**
+ * Why a value sitting in a structural condition slot is not authorable at all —
+ * the SINGLE notion both consumers apply, derived once (#15662).
+ *
+ * `undefined` — admitted — for:
+ *
+ *  - every **string**, including a whitespace-only one. What a non-empty string
+ *    *says* stays `validateExpression('predicate', …)`'s verdict, and a
+ *    whitespace-only condition meaning `false` is consistent on both sides and
+ *    is ruled correct, not a defect.
+ *  - absent / `null`. "Not authored" is not a malformed predicate; both callers
+ *    already return early on it, and this agrees rather than disagreeing.
+ *  - an **expression envelope**: an object carrying a string `source`, or an
+ *    `ast`. That is `ExpressionSchema`'s own rule (`.refine(e => e.source !==
+ *    undefined || e.ast !== undefined)`), read here rather than re-derived, and
+ *    it is the shape `FlowEdgeSchema` produces for every parsed edge condition.
+ *    `dialect` is not required: an envelope without one is CEL, which is what
+ *    `evaluateCondition` already does with it.
+ *
+ * ## What it refuses, and what that was doing before
+ *
+ * A number, a boolean, an array, or an object that is neither — `{ source: 1 }`,
+ * `{ dialect: 'cel' }` with no source and no ast, `{}`. `evaluateCondition`
+ * reads the source as `expression?.source ?? ''` and the empty-source arm
+ * returns **`false`**: the "an unauthored branch must not open" rule, applied to
+ * a value that was very much authored. Measured: `42`, `true` and `['a']` at a
+ * node's `config.condition` each registered clean, executed `success: true`, and
+ * said nothing anywhere — on the same key the **start node's trigger gate** is
+ * read from, so a flow could be silently gated shut forever. `{ source: 1 }`
+ * did not even get that far: it reached `exprStr.trim()` and threw a bare
+ * `TypeError` out of the validator.
+ *
+ * Refusing at the producer is the contract-first half: the flow does not
+ * register and `objectstack validate` locates it, rather than the reject set of
+ * registration and the reject set of evaluation being two different sets.
+ *
+ * @returns the refusal and the source to attribute it to, or `undefined` when
+ *   the value is authorable and therefore this function's business is done.
+ */
+export function structuralConditionRefusal(
+  value: unknown,
+): { message: string; source: string } | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return undefined;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const rec = value as { source?: unknown; ast?: unknown };
+    if (typeof rec.source === 'string' || rec.ast !== undefined) return undefined;
+  }
+  const found = Array.isArray(value)
+    ? 'an array'
+    : typeof value === 'object'
+      ? 'an object carrying neither a string `source` nor an `ast`'
+      : `a ${typeof value}`;
+  // The envelope's own `source`, when it has one, so the finding still points at
+  // the text the author wrote rather than at an empty string. A non-string
+  // `source` (the `{ source: 1 }` case) is exactly what is being refused, so it
+  // cannot be the attribution.
+  const rawSource = (value as { source?: unknown }).source;
+  return {
+    message:
+      `${STRUCTURAL_CONDITION_SHAPE_REFUSAL} Found ${found}. Write the condition as bare CEL text `
+      + '(e.g. `record.rating >= 4`), or as an expression envelope (`{ dialect: \'cel\', source: \'…\' }`). '
+      + 'A value that is neither is read by the evaluator as an EMPTY condition, which answers `false` '
+      + 'without saying anything — and on a start node that is the trigger gate.',
+    source: typeof rawSource === 'string' ? rawSource : '',
+  };
+}
+
+/**
  * Descend `segments` through `node`, expanding a `key[]` segment over every
  * element of that array and a `*` segment over every own key of that object,
  * and hand each terminal value to `emit` with its concrete path.

@@ -37,8 +37,21 @@ export type ServiceStatus = z.input<typeof ServiceStatus>;
  * Reports per-service availability so clients can adapt their UI accordingly.
  */
 export const ServiceInfoSchema = lazySchema(() => z.object({
-  /** Whether the service is enabled and available */
-  enabled: z.boolean(),
+  /**
+   * Whether the slot is filled by something this host delivers.
+   *
+   * ⛔ **Not** the predicate for "there is a channel I can subscribe to" — see
+   * {@link isSubscribableChannel}, which is `handlerReady: true` AND a
+   * connectable `route`. For a slot whose advertised capability IS such a
+   * channel ({@link CHANNEL_SURFACE_SLOTS}) this field is set to that
+   * predicate's value, so the two cannot disagree; for every other slot it
+   * still answers the narrower "is the slot filled" question (a kernel-internal
+   * contract like `cache` is honestly enabled with no route at all).
+   */
+  enabled: z.boolean().describe(
+    'Whether the slot is filled by something this host delivers. NOT "a channel exists": '
+    + 'subscribing requires handlerReady:true AND a connectable route (isSubscribableChannel).'
+  ),
   /** Current operational status */
   status: ServiceStatus,
   /**
@@ -148,6 +161,97 @@ export function readServiceSelfInfo(svc: unknown): ServiceSelfInfo | undefined {
   return undefined;
 }
 
+// ============================================================================
+// What counts as a SUBSCRIBABLE CHANNEL (#14646, maintainer ruling A 2026-09-04)
+// ============================================================================
+
+/**
+ * **A subscribable channel exists only where discovery reports
+ * `handlerReady: true` together with a connectable `route` for that slot;
+ * `enabled` never means "there is a channel".**
+ *
+ * That sentence is the whole definition, and this function is the only place
+ * it is computed — read it, do not re-derive it.
+ *
+ * ## Why it had to be written down
+ *
+ * `/discovery` reported the `realtime` slot as `enabled: true` **and**
+ * "In-process event bus only — no HTTP/WS realtime surface is mounted" at the
+ * same time, both true: `enabled` meant "the slot is filled", which for an
+ * in-process pub/sub bus says nothing about whether anything is listening on
+ * the wire. A client keying on it subscribes to nothing and silently loses the
+ * feature it was subscribing for — no error, no red, no signal. The defect was
+ * not a wrong value in a field; it was a field with two meanings, so flipping
+ * the boolean would have left the next half-mounted service to reproduce it.
+ *
+ * ## How it is enforced, rather than merely documented
+ *
+ * For a slot in {@link CHANNEL_SURFACE_SLOTS} — a slot whose advertised
+ * capability *is* the channel — **both discovery producers set `enabled` to
+ * the value of this predicate**, so the field a consumer reads and the
+ * predicate a consumer is told to use are the same computation and cannot
+ * disagree. `capabilities.websockets` is derived from the same call rather
+ * than stated as a constant, for the same reason.
+ *
+ * Nothing changes for the other slots. `cache`/`queue`/`job` are kernel-internal
+ * contracts fully delivered in-process (#4318): they are honestly `enabled`
+ * with no route, and they advertise no channel to subscribe to either — which
+ * is exactly why the predicate is applied per slot instead of to `enabled`
+ * globally.
+ *
+ * @param info the discovery entry for the slot (a `ServiceInfo`, or the parts
+ *   of one being assembled)
+ */
+export function isSubscribableChannel(
+  info?: { handlerReady?: boolean; route?: string } | null,
+): boolean {
+  return info?.handlerReady === true
+    && typeof info.route === 'string'
+    && info.route.length > 0;
+}
+
+/**
+ * The slots whose advertised capability IS a subscribable channel, i.e. the
+ * slots whose `enabled` is {@link isSubscribableChannel} rather than "the slot
+ * is filled".
+ *
+ * `realtime` is the only member and, under the 2026-09-04 ruling, the open
+ * framework mounts no transport for it — so on a stock boot the predicate is
+ * false and discovery advertises nothing to subscribe to. A slot joins this set
+ * when the thing it promises a client is a connection, not an in-process
+ * contract.
+ */
+export const CHANNEL_SURFACE_SLOTS: ReadonlySet<string> = new Set(['realtime']);
+
+/**
+ * The producer half of the definition: the route a channel-slot occupant says
+ * it is mounted at, or `undefined` when it names none.
+ *
+ * The occupant is asked because **no open-core producer mounts a realtime
+ * transport** — the dispatcher has no `/realtime` branch and no plugin mounts
+ * one (ADR-0076 D12, #2462), so neither discovery builder can honestly supply
+ * a route out of its own route table the way it does for its own domains. Only
+ * an implementation that actually serves a transport knows where a host put it,
+ * and a transport is not necessarily a WebSocket upgrade (SSE mounts a plain
+ * GET), so the question is asked as "where is your channel", never as "do you
+ * implement `handleUpgrade`".
+ *
+ * Read via {@link IRealtimeService.getChannelRoute}. Absence is the answer on
+ * every host that ships today: `@objectstack/service-realtime` is an in-process
+ * bus and does not implement it, so it advertises no channel — the retraction
+ * the ruling asks for, computed rather than hardcoded.
+ *
+ * ⛔ An occupant that returns a route without serving one at that path
+ * re-creates the very `declared ≠ enforced` gap this closes.
+ */
+export function readChannelRoute(svc: unknown): string | undefined {
+  if (!svc || typeof svc !== 'object') return undefined;
+  const getter = (svc as { getChannelRoute?: unknown }).getChannelRoute;
+  if (typeof getter !== 'function') return undefined;
+  const route = (getter as () => unknown).call(svc);
+  return typeof route === 'string' && route.length > 0 ? route : undefined;
+}
+
 /**
  * API Routes Schema
  * The "Map" for the frontend to know where to send requests.
@@ -244,7 +348,16 @@ export const ApiRoutesSchema = lazySchema(() => z.object({
   approvals: z.string().optional().describe('e.g. /api/v1/approvals'),
 
   /** Base URL for Realtime (WebSocket/SSE) */
-  realtime: z.string().optional().describe('e.g. /api/v1/realtime'),
+  /**
+   * Where clients connect for realtime push, when a host mounts one.
+   *
+   * Advertised only when the `realtime` occupant names a mounted channel route
+   * (see {@link readChannelRoute}); absent on every host the open framework
+   * ships, whose realtime service is an in-process bus (ADR-0076 D12, #2462).
+   */
+  realtime: z.string().optional().describe(
+    'e.g. /api/v1/realtime — present only when a realtime transport is actually mounted'
+  ),
 
   /** Base URL for Notification Service */
   notifications: z.string().optional().describe('e.g. /api/v1/notifications'),
@@ -585,16 +698,22 @@ export const WellKnownCapabilitiesSchema = lazySchema(() => z.object({
    * Whether the backend mounts a realtime push surface (WebSocket or SSE)
    * clients can subscribe to.
    *
-   * `false` on every host today, and that is a measured fact rather than a
-   * placeholder: `service-realtime` is an **in-process pub/sub bus**, the
-   * dispatcher has no `/realtime` branch and no plugin mounts one (ADR-0076
-   * D12, #2462), which is exactly why `ApiRoutesSchema.realtime` is never
-   * advertised either. A producer that one day mounts a real WS/SSE surface
-   * flips this — and must also pass the anonymous-access gate (#2567).
+   * `false` on every host the open framework ships, and that is a measured
+   * fact rather than a placeholder: `service-realtime` is an **in-process
+   * pub/sub bus**, the dispatcher has no `/realtime` branch and no plugin
+   * mounts one (ADR-0076 D12, #2462), which is exactly why
+   * `ApiRoutesSchema.realtime` is not advertised either.
+   *
+   * [#14646] Both producers now **derive** this from
+   * {@link isSubscribableChannel} applied to `services.realtime` rather than
+   * stating a literal `false`. Two constants agreeing is not agreement — it is
+   * two places to forget — and this flag and that entry answer the very same
+   * question, so a host that one day mounts a real WS/SSE surface flips both in
+   * one step (and must also pass the anonymous-access gate, #2567).
    */
   websockets: z.boolean().describe(
     'Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. '
-    + 'False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12).'
+    + 'Derived from isSubscribableChannel(services.realtime): handlerReady true AND a connectable route.'
   ),
   /**
    * Whether a file-storage surface is served at all (upload / download /

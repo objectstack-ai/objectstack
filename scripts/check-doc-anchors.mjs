@@ -16,7 +16,8 @@
 // heading lives in one file, the link in another, and until this script nothing
 // in CI related them: a rename that updates the heading and not the inbound
 // `#anchor` shipped green. #7465 exists because exactly that pairing had already
-// drifted once — `cli.mdx:458` pointed at a heading whose text had been correct
+// drifted once — `content/docs/deployment/cli.mdx` (line 458 as measured then)
+// pointed at a heading whose text had been correct
 // in 2024 — and PR #7483 could only catch its own rename by hand, with a slug
 // computed in a REPL and a repo-wide grep. Neither runs on anyone else's PR.
 //
@@ -81,10 +82,14 @@
 // 200 internal fragment links across `content/**`, of which 4 pointed at
 // headings that do not exist:
 //
-//   content/docs/automation/flows.mdx:240              #notify
-//   content/docs/concepts/metadata-lifecycle.mdx:77    #overlay-whitelist
-//   content/docs/permissions/authentication.mdx:75     /docs/deployment/cli#os-login--json-is-ndjson--the-one-exception
-//   content/docs/protocol/kernel/http-protocol.mdx:764 /docs/api/client-sdk#clientdata--crud-operations
+// The FRAGMENT is the durable identifier of each row, so the file is named as a
+// file-level anchor and the line it sat on at measurement time is data beside
+// it — a dated reading, not a pointer (#15765).
+//
+//   `content/docs/automation/flows.mdx`               (was line 240)  #notify
+//   `content/docs/concepts/metadata-lifecycle.mdx`    (was line 77)   #overlay-whitelist
+//   `content/docs/permissions/authentication.mdx`     (was line 75)   /docs/deployment/cli#os-login--json-is-ndjson--the-one-exception
+//   `content/docs/protocol/kernel/http-protocol.mdx`  (was line 764)  /docs/api/client-sdk#clientdata--crud-operations
 //
 // Three of the four are the exact shape the card predicted — an anchor written
 // from the heading a reader SEES, one dash off from the heading the slugger

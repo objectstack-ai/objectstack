@@ -324,7 +324,7 @@ describe('DatabaseLevelIsolationStrategySchema', () => {
       connectionPool: {
         poolSize: 10,
         maxActivePools: 100,
-        idleTimeout: 300,
+        idleTimeoutSeconds: 300,
         usePooler: true,
       },
       backup: {
@@ -448,7 +448,7 @@ describe('TenantSecurityPolicySchema', () => {
         requireMFA: true,
         requireSSO: true,
         ipWhitelist: ['192.168.1.0/24', '10.0.0.0/8'],
-        sessionTimeout: 3600,
+        sessionTimeoutSeconds: 3600,
       },
       compliance: {
         standards: ['sox', 'hipaa', 'gdpr'],
@@ -488,7 +488,7 @@ describe('TenantSecurityPolicySchema', () => {
     const parsed = TenantSecurityPolicySchema.parse(policy);
     expect(parsed.accessControl?.requireMFA).toBe(false);
     expect(parsed.accessControl?.requireSSO).toBe(false);
-    expect(parsed.accessControl?.sessionTimeout).toBe(3600);
+    expect(parsed.accessControl?.sessionTimeoutSeconds).toBe(3600);
   });
 
   it('should accept compliance standards', () => {
@@ -702,5 +702,55 @@ describe('QuotaEnforcementResultSchema', () => {
     expect(parsed.exceededQuota).toBe('maxObjects');
     expect(parsed.currentUsage).toBe(50);
     expect(parsed.limit).toBe(50);
+  });
+});
+
+// #14478 (folding in #14519) — both keys carried their unit (seconds) in a
+// source JSDoc only; the published `.describe()` named none, so the
+// reference-page reader could not tell 300 seconds from 300 milliseconds.
+// Renamed with the unit in the key; the old spellings are retiredKey
+// tombstones (the nested objects are not strict).
+describe('tenant idleTimeout / sessionTimeout → *Seconds (#14478, #14519)', () => {
+  it('REFUSES `connectionPool.idleTimeout` with a rename naming `idleTimeoutSeconds`', () => {
+    const result = DatabaseLevelIsolationStrategySchema.safeParse({
+      strategy: 'isolated_db',
+      connectionPool: { idleTimeout: 300 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'connectionPool.idleTimeout');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(/`connectionPool\.idleTimeout` was removed.*Rename the key to `idleTimeoutSeconds`/s);
+  });
+
+  it('REFUSES `accessControl.sessionTimeout` with a rename naming `sessionTimeoutSeconds`', () => {
+    const result = TenantSecurityPolicySchema.safeParse({ accessControl: { sessionTimeout: 3600 } });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'accessControl.sessionTimeout');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toMatch(/`accessControl\.sessionTimeout` was removed.*Rename the key to `sessionTimeoutSeconds`/s);
+  });
+
+  it('accepts both suffixed keys at the magnitudes the retired keys carried, with the same defaults', () => {
+    const pool = DatabaseLevelIsolationStrategySchema.parse({
+      strategy: 'isolated_db',
+      connectionPool: { idleTimeoutSeconds: 600 },
+    });
+    expect(pool.connectionPool?.idleTimeoutSeconds).toBe(600);
+    expect(pool.connectionPool).not.toHaveProperty('idleTimeout');
+    expect(
+      DatabaseLevelIsolationStrategySchema.parse({ strategy: 'isolated_db', connectionPool: {} }).connectionPool?.idleTimeoutSeconds,
+    ).toBe(300);
+
+    const policy = TenantSecurityPolicySchema.parse({ accessControl: { sessionTimeoutSeconds: 1800 } });
+    expect(policy.accessControl?.sessionTimeoutSeconds).toBe(1800);
+    expect(policy.accessControl).not.toHaveProperty('sessionTimeout');
+    expect(TenantSecurityPolicySchema.parse({ accessControl: {} }).accessControl?.sessionTimeoutSeconds).toBe(3600);
+  });
+
+  it('publishes the unit in the describe — the text the reference pages render (#14519)', () => {
+    const pool = DatabaseLevelIsolationStrategySchema.shape.connectionPool.unwrap().shape.idleTimeoutSeconds;
+    const access = TenantSecurityPolicySchema.shape.accessControl.unwrap().shape.sessionTimeoutSeconds;
+    expect(pool.description).toBe('Idle pool timeout in seconds');
+    expect(access.description).toBe('Session timeout in seconds');
   });
 });

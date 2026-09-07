@@ -60,6 +60,7 @@ const PERSISTENCE_HISTORY =
  * via `PersistenceAdapterInterface` in the driver implementation.
  */
 import { lazySchema } from '../../shared/lazy-schema';
+import { retiredKey } from '../../shared/retired-key';
 export const PersistenceAdapterSchema = lazySchema(() => strictObject(
   {
     surface: "this memory datasource's custom persistence adapter",
@@ -108,8 +109,25 @@ export const FilePersistenceConfigSchema = lazySchema(() => strictObject(
      * config-material, not data.
      */
     path: placeholderFree(z.string(), 'persistence.path').optional().describe('File path to persist data'),
-    /** Auto-save interval in milliseconds. Default: 2000ms. */
-    autoSaveInterval: z.number().min(100).default(2000).describe('Auto-save interval in ms'),
+    /**
+     * Auto-save interval in milliseconds. Default: 2000ms.
+     *
+     * Renamed from `autoSaveInterval` (#15680, ruling B on #14478): the unit
+     * lived only in the describe prose. The `min(100)` bound is the tell that
+     * made the bare name dangerous — 100 reads as a plausible number of
+     * SECONDS, so an author who guessed the unit wrong was refused nowhere and
+     * saved 1000x more often than intended.
+     */
+    autoSaveIntervalMs: z.number().min(100).default(2000).describe('Auto-save interval in ms'),
+
+    /** Tombstone for the rename above (#15680, ruling B on #14478). */
+    autoSaveInterval: retiredKey(
+      '`FilePersistenceConfig.autoSaveInterval` was renamed to `autoSaveIntervalMs` in '
+      + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+      + 'only in the describe prose. Rename the key to `autoSaveIntervalMs`; the value '
+      + '(milliseconds) and the 2000 default are unchanged. '
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    ),
   },
 ).describe('File-system persistence configuration'));
 
@@ -185,8 +203,28 @@ export const AutoPersistenceConfigSchema = lazySchema(() => strictObject(
      * `file` branch's `path`; the auto-detected file adapter resolves nothing.
      */
     path: placeholderFree(z.string(), 'persistence.path').optional().describe('File path override for Node.js environments'),
-    /** Auto-save interval override when running in Node.js. */
-    autoSaveInterval: z.number().min(100).optional().describe('Auto-save interval override for Node.js environments'),
+    /**
+     * Auto-save interval override when running in Node.js, in milliseconds.
+     *
+     * Renamed from `autoSaveInterval` alongside the `file` arm's key (#15680,
+     * ruling B on #14478). It is not a second key: `type: 'auto'` resolves to
+     * the same Node.js file adapter, and this value is forwarded to the same
+     * `FileSystemPersistenceAdapter` field, in the same milliseconds, under the
+     * same `min(100)` bound. Renaming one arm and not the other would have left
+     * ONE value with TWO spellings across sibling arms of one union — and the
+     * driver reading both, which is the consumer-side dialect Prime Directive
+     * #12 forbids.
+     */
+    autoSaveIntervalMs: z.number().min(100).optional().describe('Auto-save interval override for Node.js environments, in milliseconds'),
+
+    /** Tombstone for the rename above (#15680, ruling B on #14478). */
+    autoSaveInterval: retiredKey(
+      '`AutoPersistenceConfig.autoSaveInterval` was renamed to `autoSaveIntervalMs` in '
+      + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+      + 'only in the describe prose. Rename the key to `autoSaveIntervalMs`; the value '
+      + '(milliseconds) is unchanged. '
+      + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; apply them by hand.',
+    ),
     /**
      * localStorage key override when running in a browser.
      * `${…}` placeholder syntax is refused (#8495) — same judgment as the

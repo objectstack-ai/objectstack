@@ -1374,3 +1374,34 @@ describe('HookContext.api typing (#5945)', () => {
     expect(doc).toContain('transaction(cb)');
   });
 });
+
+// #14478 — the unit of a duration-shaped number lives in the key name. The
+// old `timeout` is a retiredKey tombstone on this strict shape, so the
+// rejection carries the RENAME (the prescription is the payload) rather than a
+// bare unrecognized-key error, and the value survives at the same magnitude.
+describe('hook.timeout → hook.timeoutMs (#14478, ADR-0087 `hook-timeout-to-timeout-ms`)', () => {
+  const base = { name: 'audit_order', object: 'order', events: ['afterInsert' as const], handler: 'auditOrder' };
+
+  it('REFUSES the retired `timeout` spelling with the rename in the message', () => {
+    const result = HookSchema.safeParse({ ...base, timeout: 5000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`hook\.timeout` was removed.*Rename the key to `timeoutMs`.*os migrate meta --from 17/s);
+  });
+
+  it('accepts `timeoutMs` at the same magnitude the retired key carried', () => {
+    const parsed = HookSchema.parse({ ...base, timeoutMs: 5000 });
+    expect(parsed.timeoutMs).toBe(5000);
+    expect(parsed).not.toHaveProperty('timeout');
+  });
+
+  it('tsc channel: `timeout` is unwritable on the Hook input type', () => {
+    // @ts-expect-error — `timeout` is a tombstone (input type `never`); the key is `timeoutMs`
+    const bad: Hook = { ...base, timeout: 5000 };
+    expect(bad).toBeDefined();
+    const good: Hook = { ...base, timeoutMs: 5000 };
+    expect(good.timeoutMs).toBe(5000);
+  });
+});

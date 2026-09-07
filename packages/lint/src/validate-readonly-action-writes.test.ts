@@ -22,6 +22,12 @@
 // when it does. `flags nothing on a static readonly field` below is that
 // measurement's pin: if the engine ever stops exempting system callers, this is
 // the test that should be revisited first.
+//
+// [#14147] The engine DID change on one axis and this table did not move: the
+// static strip now runs on the CREATE path too, under the same `isSystem` gate.
+// An action body is elevated on both verbs, so every row above is unchanged —
+// what changed is that "INSERT is exempt" stopped being a true reason for
+// anything, which the INSERT block at the bottom of this file now pins.
 import { describe, expect, it } from 'vitest';
 
 import { HOOK_BODY_WRITE_PATTERNS } from './validate-hook-body-writes.js';
@@ -30,6 +36,7 @@ import {
   ACTION_API_UPDATE_READONLY_WHEN_FIELD,
   READONLY_ACTION_WRITE_PATTERN_IDS,
   READONLY_ACTION_WRITE_EXCLUSIONS,
+  READONLY_ACTION_INSERT_SILENCE,
 } from './validate-readonly-action-writes.js';
 
 /**
@@ -278,12 +285,41 @@ describe('validateReadonlyActionWrites - GREEN: ctx.input is the params bag', ()
   });
 });
 
-describe('validateReadonlyActionWrites - GREEN: INSERT is exempt from both strips', () => {
-  // Measured on the same harness: an elevated insert seeding a `readonly` AND a
-  // `readonlyWhen`-locked column keeps both values. A `readonlyWhen` predicate
-  // has no prior record to evaluate on a create, which is also why the flow
-  // sibling never reads a `create_record` node.
-  it('never flags insert()', () => {
+describe('validateReadonlyActionWrites - the INSERT silence is a REASONED refusal, not a gap', () => {
+  // [#14147] This block used to be titled "INSERT is exempt from both strips"
+  // and rested on exactly that sentence. The maintainer ruling of 2026-09-03
+  // (option C) SUPERSEDED it: `engine.insert` now runs the static-`readonly`
+  // strip for a non-system caller, `isSystem`-gated, exactly as `engine.update`
+  // does, and the metadata-protocol boundary copy the old reason cited is
+  // deleted. A green case whose justification has been overturned is
+  // indistinguishable from a scan gap, so the verdicts below are kept — they
+  // are still TRUE — and the REASON is pinned alongside them.
+  //
+  // Re-measured after the ruling, on the harness this file's header describes:
+  // an ELEVATED insert seeding a `readonly` AND a `readonlyWhen`-locked column
+  // still keeps both values, because `buildActionExecutionContext` is
+  // `{ ...ec, isSystem: true }`. That is a fact about elevation, not INSERT.
+
+  it('pins WHY it refuses to report on insert/create — and that neither reason is the superseded one', () => {
+    expect(READONLY_ACTION_INSERT_SILENCE.methods).toEqual(['insert', 'create']);
+    expect(READONLY_ACTION_INSERT_SILENCE.reasons.map((r) => r.id)).toEqual([
+      'conditional-lock-has-no-prior-record',
+      'action-body-is-system-elevated',
+    ]);
+    for (const { reason } of READONLY_ACTION_INSERT_SILENCE.reasons) {
+      expect(reason.length, 'a refusal with no stated reason is a gap').toBeGreaterThan(40);
+      // The refusal pin proper: the overturned sentence may never come back as
+      // the justification, in any of its spellings.
+      expect(reason).not.toMatch(/INSERT is exempt/i);
+      expect(reason).not.toMatch(/exempt from both strips/i);
+    }
+    // ...and one of them must still name the surviving engine fact, so a future
+    // author cannot read the silence as "the engine does not strip on create".
+    expect(READONLY_ACTION_INSERT_SILENCE.reasons.map((r) => r.reason).join(' '))
+      .toContain('isSystem: true');
+  });
+
+  it('never flags insert() — the conditional lock has no prior record on a create', () => {
     expect(
       validateReadonlyActionWrites(
         invoiceStack("await ctx.api.object('showcase_invoice').insert({ tax_rate: 8 });"),
@@ -291,10 +327,10 @@ describe('validateReadonlyActionWrites - GREEN: INSERT is exempt from both strip
     ).toEqual([]);
   });
 
-  it('never flags create()', () => {
+  it('never flags create() — same, and the static half is skipped by ELEVATION, not by INSERT', () => {
     expect(
       validateReadonlyActionWrites(
-        invoiceStack("await ctx.api.object('showcase_invoice').create({ tax_rate: 8 });"),
+        invoiceStack("await ctx.api.object('showcase_invoice').create({ invoice_number: 'INV-1' });"),
       ),
     ).toEqual([]);
   });

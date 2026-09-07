@@ -292,7 +292,28 @@ jobs:
     # ~5× a normal sharded run (~4-6 min), with margin for a cold Turbo cache;
     # the old 45 left a hung job "running" for half an hour past any plausible
     # healthy finish.
-    timeout-minutes: 30
+    #
+    # ⚠ TEMPORARY RAISE, 30 -> 45 (#16173). Shard 5/6 is being killed at the
+    # 30-minute wall — 12+ observations at 30:16-30:21 with every other job in
+    # every one of those runs green — so the paragraph above describes the
+    # value this line must RETURN to, not the value it currently carries.
+    #
+    # Two reasons, both #16173's:
+    #   1. Unblock. The only uncensored shard-5 readings are 25:32 and 27:36,
+    #      and shard 6/6 has been seen at 28:56 — a ~1 minute margin at the top
+    #      of the observed green band against a 30:00 wall.
+    #   2. Un-censor. Every tail observation is a reading of THIS number, not
+    #      of the shard: the true duration is >= 30:16, unbounded above. So the
+    #      shard timings cannot be re-derived from CI history while the wall
+    #      stands here. Raising it produces the durations #16173 needs before
+    #      anyone touches `scripts/test-shard-timings.json`.
+    #
+    # ⛔ REVERT CONDITION, explicit: back to `30` once #16173 lands its shard
+    # rebalance. This value is temporary and carries no other expiry — a raise
+    # with no revert condition written beside it becomes permanent by
+    # forgetting. The backstop stays loose only for that window; the stall
+    # guard named above remains the primary hang detector throughout.
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -350,15 +371,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # PRs: only test packages affected by the diff against the PR base.
-      # spec sits at the root of the dependency graph, so spec-touching PRs
-      # still run (close to) everything — but the many PRs that don't touch
-      # spec skip the bulk of the 75-package matrix. Push to main and
-      # merge-queue builds partition the FULL package list instead: the queue
-      # result IS the next main, so it gets main's validation, not the PR's
-      # affected-only subset. (Spec's suite runs here plain / uninstrumented;
-      # the coverage-instrumented pass lives in the nightly coverage-nightly
-      # workflow.)
+      # PRs and merge-queue builds: only test packages affected by the diff —
+      # against the PR base on pull_request, against the group's own
+      # `base_sha` on merge_group (#16453). spec sits at the root of the
+      # dependency graph, so spec-touching diffs still run (close to)
+      # everything — but the many that don't touch spec skip the bulk of the
+      # 75-package matrix, and at ~120 queue merges a day that is the bulk of
+      # the queue's test compute. Push to main partitions the FULL package
+      # list: it gates nobody, and its full run is the ground truth the
+      # shard-timings refresh reads. (Spec's suite runs here plain /
+      # uninstrumented; the coverage-instrumented pass lives in the nightly
+      # coverage-nightly workflow.)
       #
       # !@objectstack/dogfood: the ~7½-minute dogfood suite is the dedicated
       # Dogfood job's whole purpose, and both jobs run under the same `core`
@@ -415,131 +438,30 @@ jobs:
       #     `turbo ls`'s internal choice of dot-ness — undocumented, and
       #     `turbo ls` is experimental (see above). Resolving to a commit here
       #     leaves turbo no choice to make.
+      # The selection itself lives in scripts/ci/select-shard-packages.sh:
+      # environment in, `$RUNNER_TEMP/turbo-ls.json` out. This step only
+      # exports the event's fields, so the same script -- every branch of
+      # it -- runs locally and under its self-test (#16453). Per event:
+      #   pull_request  affected set against merge-base(origin/<base>, HEAD)
+      #   merge_group   affected set against the group's `base_sha`, unioned
+      #                 with the same cross-package scans. An EMPTY set is a
+      #                 legitimate docs-only group: it reaches the "No packages
+      #                 on this shard" exit below, every shard still attests,
+      #                 and Test Core is an honest green. It is NOT the #10057
+      #                 case, which is pull_request-only (the script says why).
+      #   push          unchanged: the FULL list.
       - name: Compute this shard's package set
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          OS_SHARD_EVENT_NAME: ${{ github.event_name }}
+          OS_SHARD_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          OS_SHARD_PR_PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          OS_SHARD_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
-          SCM_BASE=''
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if [ -z "$BASE_REF" ]; then
-              echo "::warning::This pull_request event carries no base branch, so the affected-set diff base cannot be computed."
-            else
-              # `fetch-depth: 0` above already makes this resolve — the fetch is
-              # the guard for the day that changes, not the normal path.
-              #
-              # `git cat-file -e` rather than the more idiomatic strict
-              # `git rev-parse --verify` spelling. That is history rather than
-              # style, and it is written down because it used to be a live
-              # hazard: the pre-#6589 check-shard-attestation.mjs classified a
-              # job as an aggregate GATE when the script's basename and its
-              # `--verify` flag merely CO-OCCURRED as substrings anywhere in
-              # the job's joined `run:` text. This job always carries the
-              # basename (its `--emit` step at the bottom), so spelling
-              # `--verify` anywhere in this step — comments included, since
-              # they were part of `run:` — silently reclassified the shard job
-              # as a gate.
-              #
-              # #6589 closed that by construction. Classification is now by
-              # INVOCATION: within one command the flag must follow the
-              # script's own name as an argument, the test is applied per STEP
-              # and never over the job's joined text, and the lexer drops shell
-              # comments — all three pinned by that script's `--self-test`,
-              # which is why this comment can now name the flag at all. Either
-              # spelling is safe here; `git cat-file -e` stays because
-              # churning it would buy nothing.
-              if ! git cat-file -e "refs/remotes/origin/$BASE_REF^{commit}" 2>/dev/null; then
-                git fetch --no-tags --quiet origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF" \
-                  || echo "::warning::Could not fetch origin/$BASE_REF; the merge-base resolution below will decide."
-              fi
-              # `if !` rather than a bare assignment on purpose: these steps run
-              # under `bash -e`, where a failing command substitution kills the
-              # step with no message at all.
-              if ! SCM_BASE=$(git merge-base "refs/remotes/origin/$BASE_REF" HEAD); then
-                SCM_BASE=''
-              fi
-            fi
-          fi
-          if [ -n "$SCM_BASE" ]; then
-            # The drift is printed, not just corrected: nothing in this log ever
-            # said which commit the affected diff started from, which is why the
-            # decay was invisible.
-            DRIFT=$(git rev-list --count "$PINNED_BASE_SHA..$SCM_BASE" 2>/dev/null || echo '?')
-            echo "Affected-set diff base: $SCM_BASE  (merge-base of origin/$BASE_REF and HEAD)"
-            echo "Frozen payload base.sha: $PINNED_BASE_SHA  -- $BASE_REF has moved $DRIFT commit(s) since it was frozen, and that drift is exactly what this step used to charge to this PR."
-            TURBO_SCM_BASE="$SCM_BASE" pnpm exec turbo ls --affected --output=json > "$RUNNER_TEMP/turbo-ls.json"
-            # `turbo ls --affected` answers "which packages does the dependency
-            # GRAPH reach from this diff" — and some suites read files the graph
-            # does not connect them to. spec's api-methods-batch-conformance scan
-            # walks every `*.object.ts` in the monorepo while spec declares no
-            # dependency on the packages it judges (nor should it: the scan reads
-            # source text precisely to avoid inverting the spec -> * direction).
-            # A platform-objects-only diff therefore left it unrun, and #7769
-            # landed a violation on `main` that only PRs touching `spec` ever saw.
-            # Measured on turbo 2.10.7: 51 packages affected by that diff, spec
-            # not among them.
-            #
-            # So packages that declare a cross-package input radius are unioned
-            # back in when the diff touches it. The declarations, and the static
-            # detector that refuses to let a new cross-package scan go
-            # undeclared, live in the script (`pnpm check:cross-package-test-inputs`).
-            #
-            # Failure here falls back to the FULL package list, never to the
-            # affected-only set: same posture as the merge-base fallback below
-            # (#6195), and the same reason — the full list is a strict superset,
-            # so doubt costs minutes rather than coverage. This is the FILTER
-            # CONTRACT's half 1 applied one layer down.
-            if ! git diff --name-only "$SCM_BASE" HEAD > "$RUNNER_TEMP/changed-files.txt" \
-              || ! node scripts/check-cross-package-test-inputs.mjs \
-                   --union-into "$RUNNER_TEMP/turbo-ls.json" \
-                   --changed "$RUNNER_TEMP/changed-files.txt"; then
-              echo "::warning::Could not union cross-package scans into the affected set; falling back to the full package list for this shard."
-              pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
-            # A fourth signal the failure branches do not cover: a producer that
-            # exits 0 with a wrong, plausible, EMPTY answer. Only that `git
-            # diff`'s exit STATUS was checked, never its emptiness, so a
-            # merge-base resolving to something wrong-but-valid gave an empty
-            # changed-file list -> zero affected packages -> a green shard that
-            # tested nothing, with every log line reading like a normal quiet PR
-            # (#10057). The shard attestation (#6082) does not cover it: it
-            # attests "shard N ran and every step passed", which is exactly what
-            # a shard that tested nothing does.
-            #
-            # Empty is decidable as BROKEN here, and only here: a pull_request
-            # always differs from its merge-base. At the partitioner zero is
-            # frequently the CORRECT answer (a docs-only PR genuinely affects no
-            # package, and with 6 shards a small change legitimately leaves
-            # shards empty), so a blanket "red on empty" belongs there least of
-            # all -- this is the one place selection-failed and nothing-selected
-            # can be told apart.
-            #
-            # Scoping this to pull_request needs no `github.event_name` test:
-            # SCM_BASE is assigned only inside the `pull_request` guard above, so
-            # this whole `[ -n "$SCM_BASE" ]` branch is unreachable on push and
-            # merge_group. Those keep taking the full-list path in the `else`
-            # below, by design.
-            elif [ ! -s "$RUNNER_TEMP/changed-files.txt" ]; then
-              echo "::warning::The diff against merge-base $SCM_BASE listed no changed files, which a pull_request cannot legitimately produce; falling back to the full package list for this shard rather than selecting nothing (#10057)."
-              pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
-            fi
-          else
-            # Falling back to the FULL package list, never to the frozen
-            # base.sha. This is not the #4690 silent-skip anti-pattern: that is
-            # about a gate PASSING on input it could not read, and the full list
-            # is a strict superset of the affected one — this shard still runs
-            # everything it would have run and more. Cost is minutes; the
-            # alternative is a red Test Core on a PR with nothing wrong with it.
-            # Push and merge-queue builds take this branch by design (the queue
-            # result IS the next main, so it gets main's validation).
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "::warning::Could not resolve merge-base(origin/$BASE_REF, HEAD); falling back to the full package list for this shard rather than diffing from the frozen base.sha (#6195)."
-            fi
-            pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
-          fi
+          bash scripts/ci/select-shard-packages.sh
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
             --shard ${{ matrix.shard }}/6 --exclude @objectstack/dogfood \
             > "$RUNNER_TEMP/shard-packages.txt"
-          echo "Packages on this shard:"
+          echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
@@ -575,6 +497,14 @@ jobs:
       - name: Run this shard's tests
         env:
           NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+          # The `e2e` and `live` filename tiers run NIGHTLY on main
+          # (test-nightly-tiers.yml), not here: `queue` is the per-PR and
+          # merge-queue setting, read once in scripts/nightly-tiers.mjs. Spelled
+          # explicitly even though unset reads the same, so the setting this
+          # required check verifies is written where the check runs.
+          # turbo.json hashes it in the `test` task's `env`, which is what lets
+          # it reach vitest under strict env mode at all.
+          OS_TEST_TIERS: queue
         run: |
           if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
             echo "No packages on this shard — nothing to test."
@@ -587,11 +517,69 @@ jobs:
           # vitest's own "use the default" signal. Needs turbo.json's
           # globalPassThroughEnv entry or turbo strips it — see the script header.
           export VITEST_MAX_WORKERS="$(node scripts/vitest-worker-cap.mjs)"
-          FILTERS=$(sed 's/^/--filter=/' "$RUNNER_TEMP/shard-packages.txt" | tr '\n' ' ')
           mkdir -p "$RUNNER_TEMP/stall-reports"
-          node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/test-core.log" --stall-minutes 10 \
-            --report-dir "$RUNNER_TEMP/stall-reports" -- \
-            pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+
+          # Split the shard's ITEMS into the whole packages, which share one
+          # turbo run as they always have, and the file-level slices, which
+          # cannot: `--shard=k/n` is passed through to vitest by turbo as a
+          # RUN-level argument, so it would reach every package in the run —
+          # and on any package with fewer test files than n that is a hard
+          # vitest failure (or, with --passWithNoTests, silently no tests at
+          # all). A slice therefore gets its own invocation, filtered to the one
+          # package the partitioner sliced.
+          FILTERS=""
+          SLICES=""
+          while read -r PKG SLICE; do
+            [ -n "$PKG" ] || continue
+            if [ -n "$SLICE" ]; then
+              SLICES="$SLICES $PKG=$SLICE"
+            else
+              FILTERS="$FILTERS --filter=$PKG"
+            fi
+          done < "$RUNNER_TEMP/shard-packages.txt"
+
+          # Each leg tees to its OWN log — run-with-stall-guard opens the log
+          # with 'w', so a second leg pointed at one path would truncate the
+          # first leg's output and the completeness guard below would grade half
+          # a shard. They are concatenated afterwards, and that concatenation
+          # happens even when a leg failed, because a red suite is exactly when
+          # the completeness guard earns its keep.
+          #
+          # ⛔ A failing leg STOPS the remaining ones, the same way turbo stops
+          # scheduling on the first failure inside one run. Carrying on would add
+          # a second full suite to a job that is already red and already inside a
+          # 30-minute wall — turning an informative red into a killed job with no
+          # attestation at all, which is the #16173 failure mode itself.
+          STATUS=0
+          LOGS=""
+          for LEG in __whole__ $SLICES; do
+            if [ "$LEG" = __whole__ ]; then
+              [ -n "$FILTERS" ] || continue
+              LOG="$RUNNER_TEMP/test-core-packages.log"
+              set -- pnpm turbo run test $FILTERS --concurrency=4 --summarize --log-order=stream
+            else
+              PKG="${LEG%%=*}"
+              SLICE="${LEG#*=}"
+              LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+            fi
+            LOGS="$LOGS $LOG"
+            node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
+              --report-dir "$RUNNER_TEMP/stall-reports" -- "$@" || { STATUS=$?; break; }
+          done
+
+          # Only over logs that EXIST, and via an explicit `if` rather than a
+          # `&&` chain: a leg whose guard never got far enough to open its log
+          # would otherwise make `cat` non-zero, and under `set -e` that replaces
+          # the SUITE's exit status with cat's — the step would report the wrong
+          # reason for its own red.
+          : > "$RUNNER_TEMP/test-core.log"
+          for LOG in $LOGS; do
+            if [ -f "$LOG" ]; then
+              cat "$LOG" >> "$RUNNER_TEMP/test-core.log"
+            fi
+          done
+          exit $STATUS
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
@@ -634,6 +622,31 @@ jobs:
           path: .turbo/runs/
           if-no-files-found: ignore
           retention-days: 1
+
+      # ⛔ THE DRIFT STEP IS DELIBERATELY NOT WIRED HERE YET (#16173).
+      #
+      # partition-test-shards.mjs carries a fully-tested `--check-drift` mode —
+      # it reads the summary uploaded above back and reds when a shard's MEASURED
+      # test total outruns its PREDICTED one past MAX_MEASURED_OVER_PREDICTED. The
+      # code, its self-tests and its ablation are all on this branch; only this
+      # invocation waits, and the wait is a SEQUENCING decision, not an oversight.
+      #
+      # Why: scripts/test-shard-timings.json is still stale for @objectstack/cli
+      # (458.15s recorded, 1231.52s measured), so wiring the step today would red
+      # the shard carrying a CLI slice on every single PR — a true reading, but one
+      # that blocks everything until the dataset is refreshed. The file-level split
+      # above already removes the urgent hazard on its own, taking the worst shard
+      # from ~1445s (80% of this job's 30-minute wall) to ~1059s (59%) with the
+      # dataset untouched, because the CLI is halved across two runners instead of
+      # falling on one.
+      #
+      # ⇒ The refresh and this step land TOGETHER in the follow-up, in that order.
+      # The refresh recipe is in PR #16220's body. When it lands, restore a step
+      # here that runs `--check-drift` over `.turbo/runs/*.json` with
+      # `--label "Test Core (${{ matrix.shard }}/6)"`, with NO `if:` and NO
+      # `continue-on-error` (the point is the red), placed ABOVE the attestation
+      # pair for the #6082 reason documented on the upload above — so a drift red
+      # also withholds the attestation, which is the fail-closed direction.
 
       # Runs even when the suite failed — that is when it earns its keep. It
       # answers TWO questions about a red suite, and needs both to be able to
@@ -1492,6 +1505,19 @@ jobs:
       - name: Build packages (excluding docs)
         run: pnpm build
 
+      # [#15042] The closure-wide declaration re-check. `check-dts-emitted` runs
+      # per package, immediately after that package's `tsup`, and is the LAST
+      # thing that ever looks: on the filing observation it reported
+      # `3/3 declared declaration file(s) present` and the files were gone later
+      # in the same tree, with no second build and no `rm`. Sits directly after
+      # the build so the tree the steps BELOW read is the tree this swept — a
+      # package whose declarations are absent makes an importing symbol `any`,
+      # and the direction that does NOT throw is a suite passing against a type
+      # nothing is checking (#7668, #12078). No `dist/` anywhere is exit 3
+      # PREREQUISITE NOT MET, never a pass.
+      - name: Sweep the built closure for vanished declarations
+        run: pnpm check:dts-closure
+
       # A package that builds with plain `tsc` and does not exclude tests emits
       # `dist/**/*.test.js`. Two costs, and the second is the dangerous one:
       #
@@ -1577,6 +1603,15 @@ jobs:
       # silent green. Its header is the authority on detail.
       - name: Every published require entry point actually loads
         run: pnpm check:dual-build-cjs-loads
+
+      # #16469 (build half of #15905's E3 question 1): `sourcesContent` is off
+      # by construction at the shared tsup/esbuild layer, so a `.map` file that
+      # carries it means a config skipped the shared hook, or a toolchain
+      # upgrade changed esbuild's default back to embedding. Lives here for the
+      # same reason the step above does: it reads a real `dist/`, and refuses
+      # (exit 3) rather than passing silently when there is none.
+      - name: No published source map embeds source text
+        run: pnpm check:sourcemap-no-sources-content
 
       - name: Analyze bundle size
         run: pnpm --filter @objectstack/spec analyze

@@ -123,6 +123,10 @@ The migration is **non-destructive** and **idempotent**: each legacy org's datab
 
 ## References
 
+> **Path note (2026-09):** the three `packages/services/service-tenant/…` paths below are historical
+> and deliberately unlinked — the `packages/services/service-tenant/` package left this repository with the control-plane split to `objectstack-ai/cloud` (`473fce590`, 2026-05-21).
+> They are kept as written because they record where this decision landed at the time.
+
 - `packages/spec/src/cloud/environment.zod.ts` — protocol schemas
 - `packages/services/service-tenant/src/objects/sys-environment.object.ts` — merged control-plane environment object (includes DB addressing)
 - `packages/services/service-tenant/src/environment-provisioning.ts` — provisioning service
