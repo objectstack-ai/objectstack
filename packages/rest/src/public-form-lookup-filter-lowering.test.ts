@@ -155,7 +155,7 @@ async function persistedBody(item: unknown): Promise<any> {
 /**
  * Evaluate a lowered `FilterCondition` against a row.
  *
- * ⚠️ Deliberately tiny and deliberately LOUD. It implements exactly the two
+ * ⚠️ Deliberately tiny and deliberately LOUD. It implements exactly the three
  * comparisons this card's filters lower to and throws on anything else,
  * including an array — a filter still in the authoring dialect reaching a
  * driver is the defect itself, and a matcher that shrugged at it would let a
