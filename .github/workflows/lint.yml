@@ -2615,6 +2615,24 @@ jobs:
       - name: Auth mount-vs-ledger guard
         run: pnpm check:auth-mount-ledger
 
+      # Vendor export contract (#16186). `@better-auth/core@1.7.3` deleted
+      # `createLocalAccountIssuer` in a PATCH; plugin-auth imports it statically
+      # through a caret range, so published 17.1.0-17.3.0 could not load at all
+      # on a fresh install -- while every job here stayed green, because
+      # pnpm-lock.yaml held 1.7.2. The lockfile protected the producer from the
+      # defect it was shipping. This gate asserts that a governed vendor's
+      # DECLARED range is exact, that the installed version IS that version, and
+      # that importing it really yields every symbol our shipped source takes
+      # from it -- so "what CI imported" and "what a consumer resolves" are the
+      # same string. Cheap and offline: it imports what `pnpm install` already
+      # put on disk. The network half (`--resolve`, which enumerates every
+      # registry version the range admits) runs in validate-deps.yml, which
+      # already installs from the registry. No `paths:` filter: a manifest edit,
+      # a lockfile refresh and a new vendor import can each move it. Runs its
+      # own --self-test first.
+      - name: Vendor export contract
+        run: pnpm check:vendor-export-contract
+
       # Optional-`error` sink contract (#9754, wired by #10608). A sink TYPE that
       # declares `error` as OPTIONAL must also declare `warn` as NON-optional, so
       # every value of that type has somewhere to put a durability report —
