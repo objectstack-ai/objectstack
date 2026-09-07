@@ -183,6 +183,16 @@ function isMissingColumnOfRelation(message: string): boolean {
  * (table/object/relation) — not column/syntax errors, which stay hard failures
  * so real query bugs still surface.
  *
+ * ⚠️ [#16019] Reached only by a BARE error. A fault an in-repo driver raises
+ * DECLARES itself — the typed read exits since #8931 (PR #9273), the raw-SQL
+ * path (`SqlDriver.execute`, which the native-SQL strategy runs on) since
+ * #16019 — and `queryDataset`'s catch re-throws a declared envelope before
+ * this question is asked (#5717 defence B). So a missing backing table raised
+ * by `driver-sql` / `driver-turso` does NOT degrade on either strategy: it
+ * answers `500 DATABASE_ERROR` at the door. What still degrades is an
+ * undeclared producer — an embedder's own `executeRawSql`, a bare `Error`
+ * from a driver outside this repo, the framework's not-registered signals.
+ *
  * ⚠️ It is a heuristic over driver PHRASING, so it is the SECOND question the
  * degradation path asks, never the first: {@link hasDeclaredErrorEnvelope} runs
  * ahead of it (#5717), and only an error whose producer declared nothing is
@@ -1166,6 +1176,17 @@ export class AnalyticsService implements IAnalyticsService {
     // that never mounted the audit object) must render as "no data" — NOT
     // crash the widget with a 500. Datasets were the one read surface that
     // hard-failed on a missing source.
+    //
+    // [#16019] That leniency now holds for a BARE error only. A fault an
+    // in-repo driver raises declares `code` + `status` — typed reads since
+    // #8931, the raw-SQL path the native-SQL strategy runs on since #16019 —
+    // and the `hasDeclaredErrorEnvelope` re-throw below (#5717 defence B)
+    // hands it to the door untouched, where it answers `500 DATABASE_ERROR`
+    // on both strategies. The degrade is not re-judged here; the ruling that
+    // drivers declare (and that a declared envelope is never re-read by its
+    // wording) decides it. Producers that still reach the degrade: an
+    // embedder's own `executeRawSql`, an out-of-repo driver throwing bare, the
+    // framework's not-registered signals.
     //
     // #5033 — that leniency is scoped to the dataset's OWN source. Once the raw-SQL
     // bridge routes by object (`plugin.ts`), a dataset that JOINS across datasources

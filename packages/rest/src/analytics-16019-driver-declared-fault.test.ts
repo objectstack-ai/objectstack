@@ -51,6 +51,12 @@
  * `select ` limb — and the driver-log assertion goes RED (the driver no longer
  * logs; the route's `logError` becomes the only copy). The second block stays
  * GREEN throughout: it hands the door shapes that never touch the driver.
+ *
+ * The ORDERING pin in block 2 has its own leg: gate the door's ③a relay
+ * behind `looksLikeInternalErrorLeak` being false (i.e. consult the heuristic
+ * first) and only that case goes RED (`ANALYTICS_QUERY_FAILED` in place of the
+ * producer's code); the neighbouring "phrase the heuristic does not know"
+ * case stays GREEN, which is precisely why it could not stand in for this one.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -266,6 +272,26 @@ describe('[#16019] at the door: a declaration wins over the heuristic, and the h
 
     expect(res.statusCode).toBe(500);
     expect(res.body.code).toBe('ANALYTICS_QUERY_FAILED');
+    expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
+    expect(JSON.stringify(res.body)).not.toContain('translate');
+  });
+
+  it("DECLARED, with a phrase the heuristic DOES know → the producer's code, not the fallback's (the ORDERING pin)", async () => {
+    // The one shape that discriminates the order of the two arms: the message
+    // trips `looksLikeInternalErrorLeak` AND the error declares. Declared-first
+    // (③a before ③b, the door as written) answers the producer's code;
+    // heuristic-first would answer `ANALYTICS_QUERY_FAILED` with the same
+    // withheld text and this case alone would go red. The case above cannot
+    // tell the two orders apart, because its message trips nothing.
+    expect(looksLikeInternalErrorLeak(KNEX)).toBe(true);
+    const declared = Object.assign(new Error(KNEX), { code: 'DATABASE_ERROR', status: 500 });
+    expect(declaresServerFault(declared)).toBe(true);
+
+    const res = await post(buildRoute(async () => throwingAnalytics(declared)), { dataset, selection });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body.code).toBe('DATABASE_ERROR');
+    expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
     expect(res.body.error).toBe(INTERNAL_ERROR_MESSAGE);
     expect(JSON.stringify(res.body)).not.toContain('translate');
   });
