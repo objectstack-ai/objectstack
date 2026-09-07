@@ -270,6 +270,8 @@ export const CubeSchema = lazySchema(() => strictObject(
  * it (#16322) instead of each guessing.
  */
 export const AnalyticsDateRangePresetSchema = z.enum(DATE_RANGE_PRESETS);
+/** The same names as {@link DateRangePreset} — declared through the schema so the alias cannot drift from it. */
+export type AnalyticsDateRangePreset = z.input<typeof AnalyticsDateRangePresetSchema>;
 
 /**
  * The one refusal wording for a `timeDimensions[].dateRange` value outside
