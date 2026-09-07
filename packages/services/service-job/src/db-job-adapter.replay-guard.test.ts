@@ -16,6 +16,7 @@
 // 409 naming the window and the claim; `{ force: true }` → send anyway.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { DbJobAdapter } from './db-job-adapter.js';
 import type { ReplayGuard } from './db-job-adapter.js';
 
@@ -26,7 +27,13 @@ function fakeEngine() {
   return {
     async find() { return []; },
     async insert(_t: string, data: any) { return data; },
-    async update() { return {}; },
+    // Routed through ObjectQL's OWN dispatch predicate, so this fake cannot be
+    // looser than the engine it stands in for — the sibling doubles in this
+    // package do the same, and `pnpm check:engine-double-contract` is the gate.
+    async update(_t: string, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
+      return {};
+    },
   };
 }
 
