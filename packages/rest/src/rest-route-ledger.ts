@@ -435,15 +435,14 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   { route: 'POST /api/v1/data/:object/updateMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.updateMany' },
   { route: 'POST /api/v1/data/:object/deleteMany', family: 'batch', source: 'route-manager', disposition: 'sdk', client: 'data.deleteMany' },
 
-  // ── packages (direct-mount registrar; the three `:id` rows service-gated) ──
+  // ── packages (direct-mount registrar) ──────────────────────────────────────
+  // ONE row since #14503: the three read/delete twins the registrar used to
+  // mount beside `publish` are gone, and `packages/runtime`'s `/packages`
+  // domain is the single implementation of `GET /packages`,
+  // `GET /packages/:id` and `DELETE /packages/:id` — their rows live in
+  // `packages/runtime/src/route-ledger.ts`.
   { route: 'POST /api/v1/packages/publish', family: 'packages', source: 'direct-mount', disposition: 'server-only',
     note: 'marketplace registry publish ({manifest, metadata}) — publisher tooling, not app-SDK surface. Moved off the bare POST /packages in #3610: that verb+path is the dispatcher install route, and REST registering it first swallowed every packages.install call with a 400. Mounted UNCONDITIONALLY since #7563 — it has no dispatcher twin, so while it was service-gated the path was absorbed by /packages/:id and answered 405 with THAT route\'s Allow set; it now resolves the `package` service per request and answers an honest 404 on a deployment that composes none.' },
-  { route: 'GET /api/v1/packages', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.list',
-    note: 'shadows the dispatcher twin (registered first); merges registry + database packages' },
-  { route: 'GET /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.get',
-    note: 'shadows the dispatcher twin (registered first)' },
-  { route: 'DELETE /api/v1/packages/:id', family: 'packages', source: 'direct-mount', disposition: 'sdk', client: 'packages.uninstall',
-    note: 'shadows the dispatcher twin (registered first); full uninstall via protocol.deletePackage (#2747)' },
 
   // ── external datasource federation (ADR-0015 §6.2, direct-mount) ──────────
   { route: 'GET /api/v1/datasources/:name/external/tables', family: 'external-datasource', source: 'direct-mount', disposition: 'sdk', client: 'datasources.external.listTables' },
