@@ -62,6 +62,18 @@
  *      because it carries a control: `repo:objectstack-ai/objectui console`
  *      answers 1,640 hits from the same index in the same session, so objectui
  *      is genuinely indexed and its zero is a measurement rather than a silence.
+ *   5. The PINNED sibling checkout — the reading AGENTS.md prescribes before a
+ *      removal ships, taken at `.objectui-sha` (`a472b07167a3`) rather than at
+ *      whatever that checkout's HEAD happens to be. The specifier
+ *      `cli/console` does not occur in objectui at that sha, and none of the
+ *      ten occurs as an identifier, except `CONSOLE_PATH` twice — both inside
+ *      comment prose in one browser test, neither an import. Its control: 545
+ *      lines of that same tree DO import from the `@objectstack/` scope, so the
+ *      corpus is live and the zero is a reading. Note what this is NOT: an
+ *      earlier draft of this docblock justified the exclusion on "the one
+ *      sibling checkout reachable from the implementing container", and that
+ *      was retired for being unverifiable from anywhere else. A sha this
+ *      repository itself pins is re-runnable by anyone who checks objectui out.
  *
  * ⚠️ `cloud` is NOT MEASURED, which is a different thing from zero. The same
  * control run against it — `repo:objectstack-ai/cloud objectstack` — answers 0

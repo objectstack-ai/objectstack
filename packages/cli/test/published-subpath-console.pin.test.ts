@@ -431,6 +431,38 @@ function pnpmPack(destination: string): { filename: string; files: string[] } {
  * census below still green: this file's own defect, reproduced inside the
  * instrument meant to catch it. Reporting the kind rather than enumerating more
  * of them closes the CLASS — a form nobody has thought of yet reds too.
+ *
+ * ## Where that promise stops — measured, then recorded rather than repaired
+ *
+ * An independent contract review extracted this walk byte-identically and drove
+ * it over 38 export forms, predictions written before each run. Nothing that is
+ * a module export NAME is silent. Three residuals stand. They are written down
+ * here instead of fixed because fixing one re-opens an instrument whose
+ * behaviour that review verified form by form — whoever changes this function
+ * owes that 38-form probe again, and should read these three first:
+ *
+ *   1. A NAMED DEFAULT is attributed to its LOCAL name. `export default
+ *      function df` reports `df`; the name the module actually publishes is
+ *      `default`. Rewriting an `export function X` into an
+ *      `export default function X` would therefore keep the census green while
+ *      the published surface changed — the silent class this file exists to
+ *      prevent. Contrived HERE, which is why it is recorded and not repaired:
+ *      the barrel re-exports by name only, `utils/console.ts` has no default
+ *      export, and every in-package importer of `X` would fail the build first.
+ *      The repair, when someone wants it: push `default` when the
+ *      `DefaultKeyword` modifier is present. `export default X;` — an
+ *      identifier with no declaration — is NOT affected; that is an
+ *      `ExportAssignment` and is already reported.
+ *   2. OVERLOADS produce a duplicate name (`['ov', 'ov']`), so adding an
+ *      overload to any of the 13 reds the partition test with the export set
+ *      unchanged. A FALSE red — but a loud one, and loud is the only direction
+ *      this file is allowed to fail in.
+ *   3. `export as namespace UMD;` IS skipped silently — the one exception to
+ *      the paragraph above. It parses as a `NamespaceExportDeclaration`, which
+ *      carries no `ExportKeyword` modifier, so the `exported` test below drops
+ *      it before either limb sees it. The census stays right in EFFECT, because
+ *      a UMD global is not a module export name; it is named here so the
+ *      exception is read rather than discovered.
  */
 function declaredExports(dtsPath: string): { names: string[]; starReExports: number; unrecognized: string[] } {
   const sf = ts.createSourceFile(dtsPath, readFileSync(dtsPath, 'utf8'), ts.ScriptTarget.Latest, true);
