@@ -774,7 +774,7 @@ export function floorProblem(counts) {
     [counts?.trackedDirectories ?? 0, MIN_TRACKED_DIRECTORIES, MEASURED.trackedDirectories, 'tracked directory(ies) indexed',
       'This is the index the RESOLVES invariant is answered from. A collapsed index cannot tell a live directory from a deleted one.'],
     [counts?.controls ?? 0, REQUIRED_CONTROLS, REQUIRED_CONTROLS, 'control probe(s) fired',
-      'The probes are what prove the tracked-directory predicate still answers in BOTH directions. Unfired, nothing establishes that this run could have produced a finding at all.'],
+      'The probes are what prove BOTH of this gate\'s predicates still answer in BOTH directions — `isTrackedDirectory` for RESOLVES, `isPublishable` for DECLARED. A missing probe means one of the four went unexercised, and nothing then establishes that this run could have produced a finding at all.'],
   ];
   for (const [got, min, measured, what, why] of rows) {
     if (got >= min) continue;
