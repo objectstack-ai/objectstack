@@ -32,6 +32,15 @@ import {
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
 
 /**
+ * The refusal `--check` without `--out` ends on — one string, because two faces
+ * now reach it. The console run throws it below the skeleton summary; a
+ * `--json` run throws it from the machine face, where it lands in this
+ * command's ordinary `{ error }` envelope (#16600).
+ */
+const CHECK_NEEDS_OUT =
+  '--check needs --out=<dir> — it compares a fresh extract against the bundles committed there.';
+
+/**
  * A path for one of this command's output lines: relative to the cwd while that
  * is still a NAME for the file, absolute once it stops being one.
  *
@@ -431,7 +440,126 @@ export default class I18nExtract extends Command {
         return narrowToCommittedSections(table, committed);
       };
 
+      /**
+       * Every file a normal run would write into `dir`, paired with its
+       * rendered content — the ONE list every face that names this run's files
+       * reads: the write loop, the console `--check`, and the `--json`
+       * `--check` below. So no two of them can disagree about what this run
+       * produces, and in particular `--check` can never compare something the
+       * write path would not have written.
+       *
+       * It was a straight-line `const emitted` built after the `--dry-run`
+       * branch, which is below the machine face and therefore out of its reach.
+       * A `--json --check` run needs the same list, so the list moved rather
+       * than being rebuilt beside it (#16600).
+       */
+      const emittedFiles = (dir: string): Array<{ file: string; content: string; keys: number }> => {
+        const files: Array<{ file: string; content: string; keys: number }> = [];
+        for (const locale of localesEmitted) {
+          for (const mod of emittedModules(locale)) {
+            files.push({
+              file: path.join(dir, `${locale}.${mod.suffix}`),
+              content: renderTranslationModule(result.bundles[locale], { locale, kind: mod.kind }),
+              keys: mod.keys,
+            });
+          }
+          // The provenance companion rides in the SAME list, so `--check` compares
+          // it by the same byte-for-byte rule as the bundles it belongs to and can
+          // never diverge from what a real extract writes.
+          const table = committedSourceHashes(locale);
+          if (flags['source-hashes'] && table) {
+            files.push({
+              file: path.join(dir, `${locale}.source-hashes.generated.ts`),
+              content: renderSourceHashModule(table, { locale }),
+              keys: Object.keys(table).length,
+            });
+          }
+        }
+        return files;
+      };
+
+      /** What `--check` found: committed files that are absent, and ones whose bytes differ. */
+      const compareCommitted = (
+        files: ReadonlyArray<{ file: string; content: string }>,
+      ): { missing: string[]; stale: string[] } => {
+        const missing: string[] = [];
+        const stale: string[] = [];
+        for (const { file, content } of files) {
+          const shown = displayPath(file);
+          if (!fs.existsSync(file)) missing.push(shown);
+          else if (fs.readFileSync(file, 'utf8') !== content) stale.push(shown);
+        }
+        return { missing, stale };
+      };
+
+      /**
+       * The sentence a drifted `--check` ends on, built once so both faces end
+       * on the same words. {@link rerunWithoutCheck} says why the command it
+       * names is spelled as a deletion and what the degraded line is for.
+       */
+      const driftMessage = (): string => {
+        const rerun = rerunWithoutCheck(this.config.bin, this.id, this.argv);
+        return (
+          'Translation bundles have drifted from the schema. Regenerate and commit:\n' +
+          (rerun ? `  ${rerun}` : '  re-run the same command without `--check`')
+        );
+      };
+
       if (flags.json) {
+        /**
+         * ⭐ `--check` is a VERDICT mode, so under `--json` the comparison runs
+         * HERE — before the one document this run is allowed to write (#16600).
+         *
+         * ## What was wrong
+         *
+         * This branch emitted and returned unconditionally, which put it ahead
+         * of both the `--check` needs-`--out` guard and the comparison itself.
+         * Driven on one drifted fixture, the two invocations differing ONLY by
+         * `--json`:
+         *
+         *     $ os i18n extract CONFIG --locales=zh-CN --no-metadata-forms
+         *       --out=OUT --check
+         *       missing:    OUT/zh-CN.objects.generated.ts
+         *       Translation bundles have drifted from the schema. …
+         *     -> exit 1
+         *
+         *     $ … --out=OUT --check --json
+         *       {"totalExpected":…,"counts":…,"bundles":…}
+         *     -> exit 0, nothing compared
+         *
+         * The first run is the second one's positive control: the drift is
+         * provably there and the second reported success. Same shape as the
+         * `--dry-run` branch in #16480, and `--json` is if anything the more
+         * likely CI spelling of the two — a pipeline that wants to parse the
+         * result reaches for it. A check that cannot fail is indistinguishable
+         * from a check that finds nothing.
+         *
+         * ## Why the failure is this command's `{ error }` envelope and NOT a
+         * new payload member
+         *
+         * ⛔ The drift report is deliberately NOT widened into the published
+         * payload — no `drift` / `missing` / `stale` member is added here. This
+         * command already has exactly one machine-readable failure envelope,
+         * twenty lines down in the `catch`: `{ error, …errorCodeFields }`,
+         * compact, exit 1. Every other way this command can fail already speaks
+         * it, the `--check` needs-`--out` refusal above included, so routing
+         * drift through the same `throw` is copying the convention rather than
+         * settling a second one for the same mode. Which files drifted is a
+         * genuine addition to a published output face and is its own card.
+         *
+         * ⚠️ And it must stay ONE document: emitting the payload here and an
+         * error envelope afterwards is the two-JSON-documents defect
+         * {@link isExitSignal} records — unparseable as either one document or
+         * as JSONL. So the verdict is reached before anything is written, and
+         * the run leaves through exactly one of the two faces.
+         *
+         * ⛔ Returning 0 without comparing must not come back.
+         */
+        if (flags.check) {
+          if (!flags.out) throw new Error(CHECK_NEEDS_OUT);
+          const { missing, stale } = compareCommitted(emittedFiles(outDir as string));
+          if (missing.length > 0 || stale.length > 0) throw new Error(driftMessage());
+        }
         await emitJson({
           totalExpected: result.totalExpected,
           // Leaves of the `bundles` payload below, locale by locale, so this
@@ -526,7 +654,7 @@ export default class I18nExtract extends Command {
       console.log('');
 
       if (flags.check && !flags.out) {
-        throw new Error('--check needs --out=<dir> — it compares a fresh extract against the bundles committed there.');
+        throw new Error(CHECK_NEEDS_OUT);
       }
 
       /**
@@ -579,39 +707,12 @@ export default class I18nExtract extends Command {
       // under `--check`, and `--check` without `--out` already threw.
       const resolvedOutDir = outDir as string;
 
-      // Every file a normal run would emit, paired with its rendered content.
-      // Both branches below iterate this, so `--check` can never diverge from
-      // what a real extract writes.
-      const emitted: Array<{ file: string; content: string; keys: number }> = [];
-      for (const locale of localesEmitted) {
-        for (const mod of emittedModules(locale)) {
-          emitted.push({
-            file: path.join(resolvedOutDir, `${locale}.${mod.suffix}`),
-            content: renderTranslationModule(result.bundles[locale], { locale, kind: mod.kind }),
-            keys: mod.keys,
-          });
-        }
-        // The provenance companion rides in the SAME list, so `--check` compares
-        // it by the same byte-for-byte rule as the bundles it belongs to and can
-        // never diverge from what a real extract writes.
-        const table = committedSourceHashes(locale);
-        if (flags['source-hashes'] && table) {
-          emitted.push({
-            file: path.join(resolvedOutDir, `${locale}.source-hashes.generated.ts`),
-            content: renderSourceHashModule(table, { locale }),
-            keys: Object.keys(table).length,
-          });
-        }
-      }
+      // Every file a normal run would emit, paired with its rendered content —
+      // {@link emittedFiles}, the same list the machine face compares.
+      const emitted = emittedFiles(resolvedOutDir);
 
       if (flags.check) {
-        const stale: string[] = [];
-        const missing: string[] = [];
-        for (const { file, content } of emitted) {
-          const shown = displayPath(file);
-          if (!fs.existsSync(file)) missing.push(shown);
-          else if (fs.readFileSync(file, 'utf8') !== content) stale.push(shown);
-        }
+        const { missing, stale } = compareCommitted(emitted);
         if (missing.length === 0 && stale.length === 0) {
           console.log('');
           printSuccess(`${emitted.length} bundle(s) are in sync with the schema ${chalk.dim(`(${timer.display()})`)}`);
@@ -621,15 +722,11 @@ export default class I18nExtract extends Command {
         for (const shown of stale) printError(`out of date: ${shown}`);
         console.log('');
         // The command that regenerates these bytes is THIS run without
-        // `--check` — the two branches share the `emitted` list above, so the
+        // `--check` — the two faces share the `emittedFiles` list above, so the
         // write path cannot produce anything other than what was just
-        // compared. {@link rerunWithoutCheck} says why it is spelled as a
-        // deletion and what the degraded line is for.
-        const rerun = rerunWithoutCheck(this.config.bin, this.id, this.argv);
-        printError(
-          'Translation bundles have drifted from the schema. Regenerate and commit:\n' +
-          (rerun ? `  ${rerun}` : '  re-run the same command without `--check`'),
-        );
+        // compared. {@link driftMessage} is the sentence, built once so the
+        // `--json` face ends on the same words.
+        printError(driftMessage());
         process.exit(1);
       }
 
