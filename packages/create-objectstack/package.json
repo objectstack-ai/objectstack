@@ -12,8 +12,7 @@
     }
   },
   "scripts": {
-    "build": "pnpm gen:emission-policy && tsup && node ../../scripts/check-dts-emitted.mjs",
-    "gen:emission-policy": "node ../../scripts/sync-scaffold-emission-policy.mjs",
+    "build": "node ../../scripts/sync-scaffold-emission-policy.mjs && tsup && node ../../scripts/check-dts-emitted.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "tsup --watch",
     "test": "vitest run"

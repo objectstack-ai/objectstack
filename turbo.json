@@ -137,6 +137,7 @@
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml",
         "$TURBO_ROOT$/packages/create-objectstack/bin/create-objectstack.js",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/package.json",
+        "$TURBO_ROOT$/scripts/sync-scaffold-emission-policy.mjs",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
         "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts"

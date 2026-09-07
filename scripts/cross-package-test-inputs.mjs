@@ -544,6 +544,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // same and replays a cached green over it.
       'packages/create-objectstack/bin/create-objectstack.js',
       'packages/create-objectstack/src/templates/blank/package.json',
+      // The generator that ties those two to this package's own constants, and
+      // the third entry of the mention shape on this package — settled the way
+      // check-nul-bytes.mjs above is. It earns the declaration on the merits
+      // too: it is what makes the bundled template equal `SCAFFOLD_*`, so a
+      // change to it changes what that pin measures.
+      'scripts/sync-scaffold-emission-policy.mjs',
       // The two files that hold the COLUMN authority the CLI's migration
       // generators mirror, READ by
       // src/commands/generate-multiple-json-column.pin.test.ts (#14829). That
