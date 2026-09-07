@@ -65,10 +65,13 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '`ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, and not the MCP bridge ' +
     '(which derives `destructiveHint` from a hardcoded name list). Delete the key. For a ' +
     'REAL gate on a destructive operation, put it behind an action and set ' +
-    '`action.ai.requiresConfirmation` — that is the flag the HITL approval queue reads ' +
-    '(packages/runtime/src/action-execution.ts), and it is the only path that actually ' +
-    'stops execution. For AI metadata mutations the ADR-0033 draft/publish workspace is ' +
-    'the gate: nothing is live until a human publishes.',
+    '`action.ai.requiresConfirmation: true` — the platform\'s one enforced confirmation ' +
+    'gate. An AI-facing call on an action DECLARING that flag must carry the confirmation ' +
+    'member on the request, and is refused without it; the refusal names the action and ' +
+    'the exact member to set, so the caller confirms and retries. It is a gate, not a ' +
+    'queue: nothing is parked, nothing is held for an operator to find later, and a call ' +
+    'is either confirmed or it does not run. For AI metadata mutations the ADR-0033 ' +
+    'draft/publish workspace is the gate: nothing is live until a human publishes.',
 };
 
 /**

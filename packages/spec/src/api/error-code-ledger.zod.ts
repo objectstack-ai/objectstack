@@ -264,6 +264,36 @@ export const ERROR_CODE_LEDGER = {
     'VALIDATION_FAILED',          // record-level validation; carries `fields[]` (#3977)
   ],
   '@objectstack/runtime': [
+    // The AI-facing action doors refuse a call against an action whose AUTHOR
+    // declared `ai.requiresConfirmation: true` when the request does not carry
+    // the confirmation member as `true` — 428, the standard catalog's "request
+    // is missing a required precondition" status, because the request is VALID
+    // and merely incomplete: the identical call with the member set succeeds,
+    // and nothing about server state changed. Never carries `status: 'failed'`:
+    // nothing dispatched, no action body ran, no record was read or written.
+    // Contract, including which request member and what `error.details` carries:
+    // `AIActionConfirmation` / `ActionConfirmationRequiredDetails` in
+    // `contracts/ai-service.ts`.
+    //
+    // ⛔ NOT a re-spelling of the standard catalog's `PRECONDITION_REQUIRED`,
+    // and the distinction is why it is registered: that member says SOME
+    // precondition is missing, which leaves a client unable to tell a
+    // confirmation gate from a missing conditional header, and unable to build
+    // the retry. This code says WHICH precondition — the human attestation on
+    // this named action — which is the thing the caller acts on, exactly the
+    // discrimination its `*_DISABLED` and `FLOW_*` neighbours make. Its
+    // nearest sibling is `UNIQUE_SCOPE_CONFIRMATION_REQUIRED`
+    // (`@objectstack/cloud-connection`), the platform's other confirmation
+    // gate, registered beside the same standard member for the same reason.
+    //
+    // Registered AHEAD of its producer by design — the `FLOW_INPUT_SCHEMA_INVALID`
+    // split shape. The emitting half is the runtime's pre-dispatch check in
+    // `action-execution.ts` (`invokeBusinessAction`), which the ruling split
+    // into its own card; this row is the contract half, and the door will
+    // assert this exact string by value. Registered HERE and not under a
+    // producing service for the same reason as its `FLOW_*` neighbours: the
+    // action door, not the predicate, is where the wire vocabulary is named.
+    'ACTION_CONFIRMATION_REQUIRED',
     // [ADR-0126 §8 item 2] a packaged ACTION this installation switched off,
     // refused at dispatch — the activation-ledger consult in
     // `action-execution.ts`, answered 409 by BOTH action doors (the REST
