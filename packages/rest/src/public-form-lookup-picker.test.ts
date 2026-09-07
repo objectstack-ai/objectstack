@@ -212,7 +212,7 @@ describe('#7467 a spec-valid stored form carrying a publicPicker reaches the loo
         // `FormFieldPublicPickerSchema.filter` declares, NOT a
         // `FilterCondition`. `findData` is stubbed in this suite, so it never
         // meets the ingress's verdict on that value; the real normalizer
-        // refuses it. Filed separately — ⛔ do not "repair" it by editing this
+        // refuses it (#16581) — ⛔ do not "repair" it by editing this
         // expectation.
         expect(findData).toHaveBeenCalledTimes(1);
         const call = findData.mock.calls[0][0];

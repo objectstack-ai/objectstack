@@ -41,7 +41,7 @@
  * pair is asserted equal by both REFUSING — its `where` carries
  * `ViewFilterRule` rows, which the ingress declines with `400 INVALID_FILTER`
  * before and after this card alike. Equality is the assertion; the verdict on
- * either side is the ingress's, and repairing it is a separate card.
+ * either side is the ingress's, and repairing it is #16581.
  */
 
 import { describe, it, expect, vi } from 'vitest';
