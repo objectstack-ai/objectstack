@@ -30,6 +30,7 @@
     "Invitation (type)",
     "InvitationParsed (type)",
     "InvitationSchema (const)",
+    "InvitationStatus (const)",
     "InvitationStatus (type)",
     "MEMBERSHIP_ROLE_ADMIN (const)",
     "MEMBERSHIP_ROLE_DELEGATED_ADMIN (const)",

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-// ADR-0081 D1 — the default-org bootstrap helper (open home: plugin-auth).
+// cloud ADR-0081 D1 — the default-org bootstrap helper (open home: plugin-auth).
 // Covers the idempotency short-circuits, the create/reuse paths, and the
 // injectable seed-ownership step (enterprise injects it; open path omits it).
 

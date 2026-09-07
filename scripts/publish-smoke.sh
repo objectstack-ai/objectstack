@@ -887,7 +887,7 @@ if [ "$AUDIENCE_POSTURE" = "invite_only" ]; then
   # BY INVITATION, and a self-serve sign-up whose address holds a pending,
   # unexpired `sys_invitation` row is admitted under every posture (the
   # invitation carve-out). The route runs as the signed-in admin against the
-  # default organization their session carries — ADR-0081 bootstraps that org
+  # default organization their session carries — cloud ADR-0081 D1 bootstraps that org
   # precisely so this path exists on a single-org install.
   #
   # Chosen over `POST /auth/admin/create-user` — the other operator path named
