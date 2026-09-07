@@ -4569,9 +4569,11 @@ const step17: MigrationStep = {
       id: 'tool-requires-confirmation-retired',
       surface: 'ai.tool.requiresConfirmation',
       replacement:
-        'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — that '
-        + 'is the flag the HITL approval queue actually reads, and the only path that stops '
-        + 'execution',
+        'put the operation behind an ACTION and set `ai.requiresConfirmation: true` there — an '
+        + 'AI-facing call on an action DECLARING that flag must carry an explicit confirmation '
+        + 'member on the request and is refused without it, the refusal naming the action and the '
+        + 'exact member to set so the caller confirms and retries. It is a gate, not a queue: '
+        + 'nothing is parked and a call is either confirmed or it does not run',
       reason:
         '`ToolSchema.requiresConfirmation` accepted `true` and no execution path ever read it: '
         + 'not the LLM tool set (a tool reaches the model as name / description / parameters '
@@ -4604,8 +4606,9 @@ const step17: MigrationStep = {
         + 'load-bearing half is what happens NEXT, and no gate can check it for you: for every '
         + 'tool that carried the flag, decide whether that operation genuinely needs a human in '
         + 'the loop. If it does, move it behind an action carrying `ai.requiresConfirmation: '
-        + 'true` and prove the pause exists — invoke it and observe the approval queue hold it, '
-        + 'rather than assuming the declaration. If it does not, delete the key knowingly. '
+        + 'true` and prove the refusal exists — invoke it WITHOUT the confirmation member and '
+        + 'observe the call refused rather than dispatched, rather than assuming the '
+        + 'declaration. If it does not, delete the key knowingly. '
         + 'Deleting it without that decision leaves exactly the state the retirement exists to '
         + 'end: a destructive tool nobody is approving, now without even the false flag to show '
         + 'that somebody once meant to.',
