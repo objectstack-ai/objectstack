@@ -183,6 +183,8 @@ function matchesCondition(row: Record<string, unknown>, cond: unknown): boolean 
             for (const [op, operand] of Object.entries(expected as Record<string, unknown>)) {
                 if (op === '$eq') {
                     if (row[key] !== operand) return false;
+                } else if (op === '$ne') {
+                    if (row[key] === operand) return false;
                 } else if (op === '$contains') {
                     if (!String(row[key] ?? '').includes(String(operand))) return false;
                 } else {
@@ -405,8 +407,65 @@ describe('[#16581] §3 CONTROL: the parser was NOT loosened — the object shape
         // The other half of the card's control: same server, same object, same
         // anonymity, only the filter's shape differs. That is what rules out
         // permissions, anonymity and every other part of the route as the cause.
+        //
+        // `records` is the key `findData` returns — this route hands its result
+        // through untouched, which is also how the picker's own `data`/`items`
+        // read was measured to match nothing (repaired in the same card).
         const { status, body } = await dataApi('[["status","=","published"]]');
         expect(status).toBe(200);
-        expect(body.data.map((r: any) => r.id)).toEqual(['job_1', 'job_3', 'job_4']);
+        expect(body.records.map((r: any) => r.id)).toEqual(['job_1', 'job_3', 'job_4']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §4 the response the route READS back — the second half of "the right rows"
+// ---------------------------------------------------------------------------
+
+/**
+ * The picker read `result.data ?? result.items` and never `result.records`,
+ * which is the key `findData` returns (`{ object, records, total, hasMore }`)
+ * and the order the file's three other read sites already use. So with the
+ * filter lowered the route answered `200 {"data":[]}` — an empty picker for
+ * every search, the same user-visible outcome as the 400 by a different route.
+ *
+ * It was invisible twice over: unreachable while every non-empty search 400'd,
+ * and unreachable in `public-form-lookup-picker.test.ts`, whose `findData`
+ * double answers `{ data: rows }` — a shape the real protocol does not produce.
+ * A double that invents its subject's response shape cannot report that the
+ * consumer reads the wrong key.
+ */
+describe('[#16581] §4 the projection reads `records`, the key `findData` actually returns', () => {
+    it('rows survive the real response envelope — not 200 with an empty list', async () => {
+        const stored = await persistedBody(applyForm(PICKER_WITH_FILTER));
+        const { status, body } = await lookup(stored, 'engineer');
+
+        expect(status).toBe(200);
+        expect(body.total).toBe(2);
+        expect(body.data.length).toBe(2);
+    });
+
+    it('the legacy `data` envelope a protocol double may answer with still works', async () => {
+        // The aliases are kept, so the sibling suite's double and any alternate
+        // protocol keep being read. Driven here rather than assumed.
+        const stored = await persistedBody(applyForm(PICKER_NO_FILTER));
+        const rest = new RestServer(mockServer() as any, {
+            getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
+            getMetaTypes: vi.fn().mockResolvedValue([]),
+            getMetaItem: vi.fn().mockResolvedValue(undefined),
+            getMetaItems: vi.fn(async ({ type }: { type: string }) => {
+                if (type === 'view') return [stored];
+                if (type === 'object') return [jobObject, applicationObject];
+                return [];
+            }),
+            findData: vi.fn().mockResolvedValue({ data: [{ id: 'job_9', title: 'Legacy envelope', city: 'Oslo' }] }),
+        } as any, { api: { requireAuth: false } } as any);
+        (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+        rest.registerRoutes();
+        const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path.endsWith('/forms/:slug/lookup/:field'))!;
+        const res = mockRes();
+        await (route as any).handler({ params: { slug: 'apply', field: 'job' }, query: {} } as any, res);
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body.data).toEqual([{ id: 'job_9', title: 'Legacy envelope', city: 'Oslo' }]);
     });
 });

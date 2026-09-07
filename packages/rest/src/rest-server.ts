@@ -10599,7 +10599,23 @@ export class RestServer {
 
                     // Project the response server-side too — never trust
                     // that the driver respected `select`.
-                    const rows: any[] = Array.isArray(result?.data) ? result.data : Array.isArray(result?.items) ? result.items : [];
+                    //
+                    // [#16581] `records` FIRST, which is the key `findData`
+                    // actually returns (`{ object, records, total, hasMore }`)
+                    // and the order the other three read sites in this file
+                    // already use. This one read `data` / `items` and NOT
+                    // `records`, so against the real protocol it matched
+                    // nothing and the picker answered `200 {"data":[]}` — an
+                    // empty list for every search. Invisible until the filter
+                    // above stopped 400ing, and invisible to the sibling suite
+                    // because its `findData` double answers `{ data }`, a shape
+                    // the protocol does not produce. The legacy aliases stay so
+                    // those doubles and alternate protocols keep working.
+                    const rows: any[] = Array.isArray(result?.records) ? result.records
+                        : Array.isArray(result?.data) ? result.data
+                            : Array.isArray(result?.items) ? result.items
+                                : Array.isArray(result?.rows) ? result.rows
+                                    : Array.isArray(result) ? result : [];
                     const projected = rows.slice(0, maxResults).map((row: any) => {
                         const out: any = { id: row?.id };
                         for (const f of displayFields) {
