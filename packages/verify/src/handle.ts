@@ -51,6 +51,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ValidateDataResponse } from '@objectstack/spec/api';
 import type { AutomationResult } from '@objectstack/spec/contracts';
 import type { ServiceObject } from '@objectstack/spec/data';
+import type { ObjectQL } from '@objectstack/objectql';
 import type { TenancyService } from '@objectstack/plugin-auth';
 
 /** Any row the engine hands back. Untyped on purpose: the engine's, not the handle's. */
@@ -278,8 +279,11 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
   // Its constructor registers domain handlers and nothing else (no routes
   // mounted, no services registered, no timers) — see `HttpDispatcher`.
   const dispatcher = new HttpDispatcher(kernel);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const engine = async (): Promise<any> => kernel.getServiceAsync<any>('objectql');
+  // The slot's contract is the engine class itself: the handle reaches
+  // `registry`, `validate` and the write/read doors, which `IDataEngine` does
+  // not name (eslint.config.mjs, the slot-lookup rule).
+  const engine = (): Promise<ObjectQL> => kernel.getServiceAsync<ObjectQL>('objectql');
+  const registry = () => kernel.getService<ObjectQL>('objectql').registry;
 
   const requestFor = (token: string, method: string, path: string) => ({
     method,
@@ -332,23 +336,24 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
 
     hooks: {
       async run(object, operation, input, opts) {
+        // The call's own shape is judged before anyone is resolved: a
+        // malformed call is refused for its own reason, not for whatever the
+        // identity resolver says about the token.
+        if (operation !== 'insert' && operation !== 'update' && operation !== 'delete') {
+          throw new Error(`verify: hooks.run operation must be 'insert' | 'update' | 'delete', got '${String(operation)}'`);
+        }
+        const id = operation === 'insert' ? undefined : requireId(input, operation);
         const context = await contextFor(opts.as);
         const ql = await engine();
         switch (operation) {
           case 'insert':
             return ql.insert(object, input, { context });
-          case 'update': {
-            const id = requireId(input, operation);
+          case 'update':
             // The REST PATCH door's spelling (`protocol.updateData`): the id
             // rides in the payload AND selects the row.
             return ql.update(object, { ...input, id }, { where: { id }, context });
-          }
-          case 'delete': {
-            const id = requireId(input, operation);
+          case 'delete':
             return ql.delete(object, { where: { id }, context });
-          }
-          default:
-            throw new Error(`verify: hooks.run operation must be 'insert' | 'update' | 'delete', got '${String(operation)}'`);
         }
       },
     },
@@ -408,10 +413,10 @@ export async function createHandle(kernel: ObjectKernel, origin: string): Promis
     },
 
     metadata: {
-      object: (name) => kernel.getService<any>('objectql').registry.getObject(name),
-      objects: () => kernel.getService<any>('objectql').registry.getAllObjects(),
-      items: <T = unknown>(type: string): T[] => [...kernel.getService<any>('objectql').registry.listItems(type)] as T[],
-      types: () => kernel.getService<any>('objectql').registry.getRegisteredTypes(),
+      object: (name) => registry().getObject(name),
+      objects: () => registry().getAllObjects(),
+      items: <T = unknown>(type: string): T[] => [...registry().listItems<T>(type)],
+      types: () => registry().getRegisteredTypes(),
     },
 
     tenancy: () => kernel.getService<TenancyService>('tenancy'),
