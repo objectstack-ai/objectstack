@@ -1479,7 +1479,19 @@ export class TursoDriver extends SqlDriver {
   // ===================================
 
   override async execute(command: any, params?: any[], options?: DriverOptions): Promise<any> {
-    if (this.isRemote) return this.remoteTransport!.execute(command, params);
+    if (this.isRemote) {
+      // [#16019] The remote transport hands the libsql client's error back
+      // whole — `SQLITE_ERROR: no such function: translate`: no statement, no
+      // `status`, the bare shape the HTTP doors' phrasing heuristic never
+      // covered. Declared through the base class's raw-path terminal so both
+      // transports leave this driver with ONE envelope (`DATABASE_ERROR`/500,
+      // the dialect error under a non-enumerable `cause`).
+      try {
+        return await this.remoteTransport!.execute(command, params);
+      } catch (error) {
+        throw this.rawStatementFault(typeof command === 'string' ? command : String(command), error);
+      }
+    }
     return super.execute(command, params, options);
   }
 

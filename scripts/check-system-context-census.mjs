@@ -213,6 +213,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { CORPUS_ROOTS, runCensus, symbolPopulation } from './isystem-census.mjs';
 import {
@@ -1688,15 +1689,14 @@ function fixturePage({ anchor = 'pkg/a.ts#handler', helper = 'pkg/a.ts#isSystemO
  * stripped for the duration of the self-test AND passed stripped to each child
  * here, rather than relying on either one alone.
  *
+ * ⭐ The strip itself now lives in `scripts/git-env.mjs`, so the rule this gate
+ * discovered has ONE spelling for the whole repo rather than a copy per gate
+ * that learns it (#16624). The local copy that used to sit here is gone; what
+ * stays here is the pin below, because the pin is about THIS gate's children.
+ *
  * @param {{ symbol?: string, pad?: number }} shape
  * @returns {{ dir: string, sourceLine: number }}
  */
-function gitFreeEnv() {
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
-  return env;
-}
-
 function buildRedFirstCorpus({ symbol = 'handler', pad = 0 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'system-context-corpus-'));
   mkdirSync(join(dir, 'content', 'docs', 'permissions'), { recursive: true });

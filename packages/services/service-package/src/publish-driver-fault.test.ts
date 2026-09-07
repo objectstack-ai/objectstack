@@ -340,3 +340,58 @@ describe('[#8131] the caller-facing sentence interpolates nothing', () => {
     expect(PACKAGE_PUBLISH_DRIVER_FAULT_MESSAGE).toContain('no package data was written');
   });
 });
+
+/**
+ * [#16019] The shape `SqlDriver.execute()` raises since #16019 — a DECLARED
+ * `DATABASE_ERROR` / 500 with a composed message and the dialect error under
+ * a non-enumerable `cause` — reaches this catch as a declared throw, so branch
+ * ② re-throws it and the door's catch-all (`sendThrownError`) answers
+ * `500 DATABASE_ERROR`. Before #16019 the same fault arrived UNDECLARED
+ * (`code: 'SQLITE_ERROR'`, no `status`, knex's `STATEMENT - DIAGNOSTIC`
+ * message) and took branch ③: `500 PACKAGE_PUBLISH_FAILED`. The status band and the
+ * withhold are unchanged; the wire `code` on this door moves, and this pair
+ * pins both halves of the flip so it is a disclosed consequence rather than
+ * an accident the `{code}`-only fakes above cannot see.
+ *
+ * ⛔ Not a re-judgement of `declaresHttpAnswer`: its docblock already says a
+ * declared 5xx is re-thrown too. The reviewer of PR #16650 required the flip
+ * to be pinned, not the predicate to be changed.
+ */
+describe('[#16019] a raw-statement fault that DECLARES its status is re-thrown, where its undeclared ancestor was swallowed', () => {
+  const DIALECT_LINE = 'select 1 from sys_packages - no such table: sys_packages';
+
+  /** What `SqlDriver.execute()` composes for that dialect error since #16019. */
+  function rawStatementFault(): Error {
+    const err = Object.assign(
+      new Error(
+        'The database refused to run a raw statement. The driver could not attribute the failure ' +
+          'to any part of the request, so no verdict about the statement is claimed here.',
+      ),
+      { code: 'DATABASE_ERROR', status: 500 },
+    );
+    Object.defineProperty(err, 'cause', {
+      value: Object.assign(new Error(DIALECT_LINE), { code: 'SQLITE_ERROR' }),
+      enumerable: false, writable: true, configurable: true,
+    });
+    return err;
+  }
+
+  it('AFTER #16019 — the declared driver fault propagates UNCHANGED (branch ②): the door answers its own code', async () => {
+    const fault = rawStatementFault();
+    const { svc, errorLogs } = await bootThrowing(fault);
+
+    await expect(svc.publish({ manifest: MANIFEST, metadata: METADATA })).rejects.toBe(fault);
+    expect(errorLogs.some((l) => l.msg === 'Failed to publish package')).toBe(true);
+    // What the door's `resolveThrownHttpError` will read off it.
+    expect((fault as { status?: unknown }).status).toBe(500);
+    expect((fault as { code?: unknown }).code).toBe('DATABASE_ERROR');
+  });
+
+  it('BEFORE #16019 — the same dialect error, undeclared, is the driver fault of section 1 (branch ③) — the control', async () => {
+    const undeclared = Object.assign(new Error(DIALECT_LINE), { code: 'SQLITE_ERROR' });
+    const { svc } = await bootThrowing(undeclared);
+
+    const result = await svc.publish({ manifest: MANIFEST, metadata: METADATA });
+    expect(result.success).toBe(false);
+  });
+});

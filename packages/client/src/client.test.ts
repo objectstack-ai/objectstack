@@ -2129,14 +2129,60 @@ describe('ScopedEnvironmentClient', () => {
         expect(String(fetchMock.mock.calls[4][0])).toBe(`${base}/batch`);
     });
 
-    it('[#6714] a custom dataPrefix makes the base underivable — the convention holds, byte-identical (case B)', async () => {
+    it('[#14879] a custom dataPrefix no longer makes the base underivable — `routes.metadata` is the second equation (case B1)', async () => {
         const { client, fetchMock } = createMockClient({ types: [] });
-        // routes.data does not end with the conventional `/data`, so the base
-        // cannot be derived honestly; the client must NOT guess (contract-first
-        // — no lenient re-parsing) and falls back to the convention,
-        // byte-identical to the pre-#6714 behavior.
+        // WAS pinned the other way. Until #14879 this case asserted the
+        // convention `/api/v1/...`, because the only suffix `_apiBase()` knew
+        // how to strip was the literal `/data`, so a custom `crud.dataPrefix`
+        // made the base undetectable and the client fell back.
+        //
+        // That fallback was never RIGHT on this deployment — it is a 404; it
+        // was merely honest, which is why it was pinned rather than fixed.
+        // `_dataPrefix()` now recovers the split without guessing:
+        // `routes.metadata` is `{realBase}{metadata.prefix}` over the SAME
+        // base, so the two advertised routes share exactly `realBase` plus
+        // whatever their prefixes share, and cutting that common run back to
+        // its last `/` lands on the boundary. Here that yields `/records`, the
+        // base `/backend/api/v9`, and the path the server actually mounts.
+        //
+        // Contract-first is unchanged: this reads a second ADVERTISED value,
+        // it does not loosen the parse of the first.
         (client as any)['discoveryInfo'] = {
             routes: { data: '/backend/api/v9/records', metadata: '/backend/api/v9/meta' },
+        };
+        await client.environment('proj-123').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/backend/api/v9/environments/proj-123/meta',
+        );
+    });
+
+    it('[#14879] a custom dataPrefix with no second equation still declines to the convention (case B2)', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // The decline leg the case above used to carry, kept alive on the
+        // shape that is genuinely still underivable: `routes.data` does not end
+        // with the conventional `/data` AND there is no `routes.metadata` to
+        // supply the missing equation, so `{realBase}{dataPrefix}` stays one
+        // string with two unknowns. The client must NOT guess a split — it
+        // falls back to the convention, byte-identical to the pre-#14879
+        // behavior.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/records' },
+        };
+        await client.environment('proj-123').meta.getTypes();
+        expect(String(fetchMock.mock.calls[0][0])).toBe(
+            'http://localhost:3000/api/v1/environments/proj-123/meta',
+        );
+    });
+
+    it('[#14879] two advertised routes sharing no base decline rather than mistake the whole path for a prefix (case B3)', async () => {
+        const { client, fetchMock } = createMockClient({ types: [] });
+        // `routes.metadata` present but NOT substituted from this deployment's
+        // base (its endpoints are off, so it still carries the conventional
+        // literal). The two routes then share nothing but the leading `/`,
+        // which is not a shared `realBase` — deriving from it would hand back
+        // the whole of `routes.data` as the prefix. Decline instead.
+        (client as any)['discoveryInfo'] = {
+            routes: { data: '/backend/api/v9/records', metadata: '/api/v1/meta' },
         };
         await client.environment('proj-123').meta.getTypes();
         expect(String(fetchMock.mock.calls[0][0])).toBe(

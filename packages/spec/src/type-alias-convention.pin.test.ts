@@ -275,7 +275,7 @@ import type * as M184 from './shared/value-domain.zod.js';
 import type * as M185 from './shared/epoch.zod.js';
 
 // ---------------------------------------------------------------------------
-// 813 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 815 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1463,6 +1463,13 @@ export type Iso770 = Assert<Eq< z.input< typeof M42.StateNodeSchema >, z.infer< 
 export type Iso771 = Assert<Eq< z.input< typeof M55.AggregationMetricType >, z.infer< typeof M55.AggregationMetricType > >>;
 export type Iso772 = Assert<Eq< z.input< typeof M55.DimensionType >, z.infer< typeof M55.DimensionType > >>;
 export type Iso773 = Assert<Eq< z.input< typeof M55.TimeUpdateInterval >, z.infer< typeof M55.TimeUpdateInterval > >>;
+// [#16041] Added after the generated corpus (numbers continue from the file's
+// end, see the #4395 note above). The closed `timeDimensions[].dateRange`
+// vocabulary: a bare `z.enum` derived from `DATE_RANGE_PRESETS`, and the union
+// of that enum with `z.array(z.string())` — no default, no transform on either
+// arm, so author and parsed states coincide.
+export type Iso869 = Assert<Eq< z.input< typeof M55.AnalyticsDateRangePresetSchema >, z.infer< typeof M55.AnalyticsDateRangePresetSchema > >>;
+export type Iso870 = Assert<Eq< z.input< typeof M55.AnalyticsDateRangeSchema >, z.infer< typeof M55.AnalyticsDateRangeSchema > >>;
 
 // data/context-tokens.zod.ts
 export type Iso774 = Assert<Eq< z.input< typeof M176.ContextTokenPlaceholderSchema >, z.infer< typeof M176.ContextTokenPlaceholderSchema > >>;
@@ -1679,7 +1686,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 813 isomorphic pins', () => {
+  it('still declares all 815 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2158,7 +2165,14 @@ describe('ADR-0122 type-alias convention', () => {
     // pin (`Iso868`). The two movements are disjoint — the retirement drops
     // pins those three modules declared, this adds one no module had — so
     // the merged count is 825 - 13 + 1.
-    expect(pins).toHaveLength(813);
+    //
+    // 813 -> 815 is #16041's closed `timeDimensions[].dateRange` vocabulary
+    // (data/analytics.zod.ts, module slot M55): `AnalyticsDateRangePresetSchema`
+    // (a bare `z.enum` derived from `DATE_RANGE_PRESETS`) and
+    // `AnalyticsDateRangeSchema` (its union with `z.array(z.string())`) — no
+    // default, no transform on either arm, two new pins (`Iso869` / `Iso870`).
+    // +2 added.
+    expect(pins).toHaveLength(815);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

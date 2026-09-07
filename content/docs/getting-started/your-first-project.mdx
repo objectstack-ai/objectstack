@@ -70,7 +70,10 @@ so explicitly.
 
 <Callout type="tip">
 `os init` (from `@objectstack/cli`) is an alternative scaffolder with `app` /
-`plugin` / `empty` templates — see the [CLI reference](/docs/deployment/cli#os-init).
+`plugin` / `empty` templates. Its `plugin` template writes a **metadata package** —
+declarative objects another stack loads — and **not** the kernel code plugin
+`os create plugin` writes; [Which scaffolder?](/docs/deployment/cli#os-init) routes
+between all four entry points by the artifact you want rather than by the word.
 `npm create objectstack` is the recommended entry point for new standalone projects.
 </Callout>
 

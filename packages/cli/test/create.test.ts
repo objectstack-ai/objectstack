@@ -27,12 +27,22 @@
  * claimed the stronger property would be the same shape of comfort the
  * `workspace:*` assertion above was.
  *
- * The sweep is DERIVED from the template map, never a list of `plugin` and
- * `example`: a third template must arrive already covered.
+ * The sweep is DERIVED from the template map, never a written-down roster: a
+ * template added later must arrive already covered.
+ *
+ * ## `example` is not in that map any more
+ *
+ * `os create example` was retired in #16483 under the #15531 ruling — it
+ * emitted a subset of what `os init` writes plus one README. Its absence from
+ * the map is asserted below beside its presence in `RETIRED_TEMPLATES`, so
+ * deleting a template WITHOUT leaving the signpost behind reddens here. What
+ * the surviving refusal actually prints, driven through the real CLI, is pinned
+ * in `create-example-retired.e2e.test.ts`.
  */
 
 import { describe, it, expect } from 'vitest';
 import {
+  RETIRED_TEMPLATES,
   templates,
   objectstackDependencySpec,
   rootTsconfigExtends,
@@ -77,8 +87,22 @@ function objectstackDeps(pkg: Record<string, any>): Record<string, string> {
 describe('os create: the sweep covers every shipped template', () => {
   it('derives its population from the template map', () => {
     expect(TEMPLATE_KEYS.length).toBeGreaterThan(0);
-    // The two reported in #14824, named so a rename is loud rather than silent.
-    expect(TEMPLATE_KEYS).toEqual(expect.arrayContaining(['plugin', 'example']));
+    // Named so a rename is loud rather than silent. `plugin` is the survivor of
+    // the two #14824 reported; `example` was retired in #16483.
+    expect(TEMPLATE_KEYS).toEqual(expect.arrayContaining(['plugin']));
+  });
+
+  it('has retired `example`, and left a signpost where the template was', () => {
+    // Both halves, because the ruling is not satisfied by either alone: the
+    // template is gone from the roster AND the command still answers for the
+    // word. A deletion that dropped the entry below would leave
+    // `os create example` failing generically, which is what #16483 forbids.
+    expect(TEMPLATE_KEYS).not.toContain('example');
+    expect(Object.keys(RETIRED_TEMPLATES)).toContain('example');
+    // The signpost names the replacement — the property, not the wording. The
+    // message a user actually sees is driven and asserted in
+    // `create-example-retired.e2e.test.ts`.
+    expect(RETIRED_TEMPLATES.example.detail.join('\n')).toContain('os init');
   });
 
   it('defaults to the standalone placement', () => {

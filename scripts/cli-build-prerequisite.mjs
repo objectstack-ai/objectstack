@@ -326,21 +326,28 @@ const WORKSPACE_PACKAGE_IN_SPECIFIER = new RegExp(`(?:^|node_modules/)(${WORKSPA
  * and CommonJS interop's differently-worded `Named export 'x' not found`, which is
  * an authoring problem and not staleness.
  *
+ * `specifier` is the module specifier the failure names, carried out alongside
+ * the package so a caller can ASK WHERE IT WENT rather than assume it reached
+ * the package's build output (#16547). For `export-mismatch` it is the bare
+ * specifier as written (`@objectstack/spec/data`); for `missing-output` it is
+ * whatever path node reported it could not find. Reported, never interpreted
+ * here: this module still decides nothing it cannot decide from the text.
+ *
  * @param {string} text combined stdout/stderr
- * @returns {{ kind: 'export-mismatch' | 'missing-output', pkg: string, missingExport: string, sentence: string } | null}
+ * @returns {{ kind: 'export-mismatch' | 'missing-output', pkg: string, specifier: string, missingExport: string, sentence: string } | null}
  */
 export function looksLikeStaleWorkspaceDist(text) {
   const flat = flattenCliOutput(text);
   const mismatch = flat.match(/The requested module '([^']+)' does not provide an export named '([^']+)'/);
   if (mismatch) {
     const pkg = mismatch[1].match(WORKSPACE_PACKAGE_IN_SPECIFIER)?.[1] ?? '';
-    return pkg ? { kind: 'export-mismatch', pkg, missingExport: mismatch[2], sentence: mismatch[0] } : null;
+    return pkg ? { kind: 'export-mismatch', pkg, specifier: mismatch[1], missingExport: mismatch[2], sentence: mismatch[0] } : null;
   }
   const missing = flat.match(/Cannot find (?:module|package) '([^']+)'/);
   if (missing) {
     const pkg = missing[1].match(WORKSPACE_PACKAGE_IN_SPECIFIER)?.[1] ?? '';
     if (pkg && /(?:^|\/)dist\//.test(missing[1])) {
-      return { kind: 'missing-output', pkg, missingExport: '', sentence: missing[0] };
+      return { kind: 'missing-output', pkg, specifier: missing[1], missingExport: '', sentence: missing[0] };
     }
   }
   return null;
