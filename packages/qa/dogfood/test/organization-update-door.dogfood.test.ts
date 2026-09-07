@@ -40,6 +40,33 @@
  *
  * Refusal cases assert `code` AND `status` (ADR-0112): a status-only assertion
  * stays green against an implementation that answers the wrong refusal.
+ *
+ * ## Two more published surfaces move with the verb, and are pinned here too
+ *
+ * The contract review of PR #16687 measured what the first round did not name:
+ *
+ *  - the DERIVED `import` door. `API_METHOD_DERIVATION` (`@objectstack/spec`,
+ *    `api-derivation.ts`) derives `import` from `any: ['create', 'update']`, so
+ *    granting `update` admits `POST /data/sys_organization/import` in
+ *    `writeMode: 'update'` — one request updates N rows. It is column-safe for
+ *    the same reason the PATCH is: the import runner writes each row under the
+ *    caller's context, so the D2 guard clamps every row (`timezone` lands,
+ *    `name` is stripped; a row carrying only better-auth columns is refused
+ *    per row; `treatAsHistorical` does not elevate). Insert / upsert modes
+ *    stay 405, and the conjunct the envelope names is `create`;
+ *  - `/auth/me/permissions`, the payload the console renders its edit
+ *    affordance from: `clampManagedObjectWrites` reads `userActions.edit` for
+ *    the `better-auth` bucket and `annotateEffectiveApiOperations` reports the
+ *    effective operation set, so for a principal the permission layer already
+ *    admits, `sys_organization.allowEdit` goes false → true and
+ *    `apiOperations` gains `update` and `import`.
+ *
+ * ⚠️ Instrument note for anything `reconcileManagedApiMethods` touches: it runs
+ * at REGISTRATION, not at build, so a property-read of `dist/` cannot see it —
+ * with `userActions` removed, `dist` still says `["get","list","update"]` while
+ * the registered schema says `["get","list"]`. The registered-schema pin at the
+ * bottom of this file, and the `/me/permissions` pin, are the instruments that
+ * can.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -189,6 +216,106 @@ describe('#15873: sys_organization platform-owned columns through PATCH /data/sy
     expect(deleted.status).toBe(405);
     const deletedBody: any = await deleted.json();
     expect(deletedBody.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+  });
+
+  it('the payload the console consumes: /auth/me/permissions says sys_organization is editable, with update and import in apiOperations', async () => {
+    const res = await stack.apiAs(token, 'GET', '/auth/me/permissions');
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    const entry = body.objects?.sys_organization;
+    expect(entry, 'sys_organization entry present in /me/permissions').toBeTruthy();
+
+    // `clampManagedObjectWrites` — the `better-auth` bucket is clamped to its
+    // `userActions`; `edit` is the one opened, `create` / `delete` stay off.
+    expect(entry.allowEdit).toBe(true);
+    expect(entry.allowCreate).toBe(false);
+    expect(entry.allowDelete).toBe(false);
+
+    // `annotateEffectiveApiOperations` — the effective set the console renders:
+    // the ruled verb and the door it derives, never the ones not granted.
+    expect(entry.apiOperations).toContain('update');
+    expect(entry.apiOperations).toContain('import');
+    expect(entry.apiOperations).not.toContain('create');
+    expect(entry.apiOperations).not.toContain('delete');
+    expect(entry.apiOperations).not.toContain('bulk');
+
+    // Control: the clamp is live, not a wildcard fold reporting everything
+    // editable — a sibling better-auth table with no `userActions` stays
+    // `allowEdit: false` for the very same principal.
+    const control = body.objects?.sys_member;
+    expect(control, 'sys_member entry present (control)').toBeTruthy();
+    expect(control.allowEdit).toBe(false);
+    expect(control.apiOperations ?? []).not.toContain('update');
+  });
+
+  it('the derived import door is open in update mode, and the guard clamps every row: timezone lands, name is stripped', async () => {
+    const before = await readOrg(orgId);
+
+    const res = await stack.apiAs(token, 'POST', '/data/sys_organization/import', {
+      format: 'json',
+      writeMode: 'update',
+      matchFields: ['id'],
+      rows: [{ id: orgId, name: 'Imported Name', timezone: 'Asia/Tokyo' }],
+    });
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.writeMode).toBe('update');
+    expect(body.updated).toBe(1);
+    expect(body.errors).toBe(0);
+
+    const after = await readOrg(orgId);
+    // The door is open: the whitelisted column landed through import…
+    expect(after.timezone).toBe('Asia/Tokyo');
+    // …and the row was written under the caller's context, not as system:
+    // `name` did not land. Measured (ablation, contract-review patch round):
+    // with `name` added to the guard's whitelist this assertion STAYS green,
+    // because `name` is `readonly` (ADR-0092 D4) and the engine's
+    // static-readonly strip — after the guard, non-system callers only — holds
+    // it too. Two layers, one observable. The guard-SPECIFIC control on the
+    // import path is the next pin (a better-auth-only row is refused per row):
+    // under the same cut it goes red. What THIS assertion fails on is the
+    // runner elevating rows to system context, which exempts both layers.
+    expect(after.name).toBe(before.name);
+    expect(after.name).not.toBe('Imported Name');
+  });
+
+  it('import: a row carrying only better-auth columns is refused per row, PERMISSION_DENIED — treatAsHistorical does not elevate', async () => {
+    const before = await readOrg(orgId);
+    const res = await stack.apiAs(token, 'POST', '/data/sys_organization/import', {
+      format: 'json',
+      writeMode: 'update',
+      matchFields: ['id'],
+      treatAsHistorical: true,
+      rows: [{ id: orgId, name: 'Imported Name 2' }],
+    });
+    // The import route's contract is a per-row outcome report: the request is
+    // answered 200 and the refusal lives on the row. This is the guard's own
+    // verdict on the import path (measured red the moment the whitelist admits
+    // `name`), the same way the name-only PATCH pin above is on the PATCH path.
+    expect(res.status).toBe(200);
+    const body: any = await res.json();
+    expect(body.updated).toBe(0);
+    expect(body.results?.[0]?.ok).toBe(false);
+    expect(body.results?.[0]?.code).toBe('PERMISSION_DENIED');
+    expect((await readOrg(orgId)).name).toBe(before.name);
+  });
+
+  it('import: insert mode is still refused at the method gate — 405, and the conjunct named is create', async () => {
+    const res = await stack.apiAs(token, 'POST', '/data/sys_organization/import', {
+      format: 'json',
+      writeMode: 'insert',
+      rows: [{ name: 'Forged Via Import', slug: 'forged-via-import' }],
+    });
+    expect(res.status).toBe(405);
+    const body: any = await res.json();
+    expect(body.code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+    // `deniedConjunctName` names the primitive that actually failed: import
+    // in insert mode needs `create`, which stays off.
+    expect(String(body.error)).toContain("'create'");
+    // …and the same envelope advertises the derived door the ruling opened.
+    expect(body.allowed).toContain('update');
+    expect(body.allowed).toContain('import');
+    expect(body.allowed).not.toContain('create');
   });
 
   it('the REGISTERED schema serves `update` (post-reconcile) and better-auth keeps its own door', async () => {

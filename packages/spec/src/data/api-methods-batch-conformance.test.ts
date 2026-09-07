@@ -113,11 +113,18 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // verbatim 「同意」): the data door admits `update` so an administrator can set
   // the four platform-owned columns (`require_mfa`, `parent_organization_id`,
   // `sort_order`, `timezone`) the ADR-0092 D2 whitelist already admitted on
-  // the engine path. The ruling widened ONE verb on an identity table, and
+  // the engine path. The ruling named ONE verb on an identity table, and
   // `bulk` is a second widening it did not take: granting it would open
   // `POST /data/sys_organization/batch` and the `*Many` routes to every API
-  // client. The object's one list view (`all_orgs`) declares no `bulkActions`
-  // / selection, and the implicit bulk-delete entry gates on the `delete`
+  // client. What `update` DOES derive is admitted, and named: `import` is
+  // `any: ['create', 'update']` in `API_METHOD_DERIVATION`, so update-mode
+  // `POST /data/sys_organization/import` now passes the method gate and
+  // updates N rows in one request — each row clamped to the D2 whitelist under
+  // the caller's context, insert/upsert modes still 405. That is not the batch
+  // shape this ledger is about (`bulk` gates `/batch` and `*Many`, `import`
+  // does not read it), which is why the exemption stands beside it. The
+  // object's one list view (`all_orgs`) declares no `bulkActions` /
+  // selection, and the implicit bulk-delete entry gates on the `delete`
   // affordance — off three times over (`managedBy: 'better-auth'` denies by
   // default, `userActions` opens `edit` alone, `delete` is not in
   // `apiMethods`) — so there is no multi-select to batch today. The cost the
@@ -128,12 +135,13 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // this entry and add `'bulk'`; the stale-entry test below refuses to let
   // both stand.
   sys_organization:
-    'Administrators set the platform-owned columns one organization at a time ' +
-    '(#15873 ruled `update` alone, column-gated by ADR-0092 D2). No console ' +
-    'surface multi-selects organizations — the list view declares no bulk ' +
-    'actions and the object grants no delete affordance — and a promoted bulk ' +
-    'edit would fan out per row through the action runner rather than hitting ' +
-    '/batch (#7802).',
+    'Administrators set the platform-owned columns through single-record PATCH ' +
+    'and the derived update-mode import door (#15873 ruled `update`; both are ' +
+    'column-clamped per row by ADR-0092 D2). `bulk` — /batch and the *Many ' +
+    'routes — is not granted: no console surface multi-selects organizations ' +
+    '(the list view declares no bulk actions and the object grants no delete ' +
+    'affordance), and a promoted bulk edit would fan out per row through the ' +
+    'action runner rather than hitting /batch (#7802).',
 };
 
 /** Every `*.object.ts` under `packages/`, skipping build output and deps. */
