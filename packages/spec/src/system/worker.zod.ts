@@ -40,6 +40,7 @@ import { z } from 'zod';
  * Lower numbers = higher priority
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const TaskPriority = z.enum([
   'critical',   // 0 - Must execute immediately
   'high',       // 1 - Execute soon
@@ -254,7 +255,7 @@ export type TaskExecutionResult = z.input<typeof TaskExecutionResultSchema>;
  *   "concurrency": 10,
  *   "rateLimit": {
  *     "max": 100,
- *     "duration": 60000
+ *     "durationMs": 60000
  *   }
  * }
  */
@@ -274,7 +275,18 @@ export const QueueConfigSchema = lazySchema(() => z.object({
    */
   rateLimit: z.object({
     max: z.number().int().positive().describe('Maximum tasks per duration'),
-    duration: z.number().int().positive().describe('Duration in milliseconds'),
+    // Renamed from `duration` (#15679, #14478 ruling B): the unit lived only in
+    // the describe prose, while `TaskResult.durationMs` earlier in this same file
+    // already spelled the identical measurement correctly.
+    durationMs: z.number().int().positive().describe('Duration in milliseconds'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    duration: retiredKey(
+      '`QueueConfig.rateLimit.duration` was renamed to `durationMs` in @objectstack/spec '
+      + '17 — the unit of a duration-shaped number lives in the key name, not only in the '
+      + 'describe prose, and `TaskResult.durationMs` on this same file already spelled it '
+      + 'that way. Rename the key to `durationMs`; the value (milliseconds) is unchanged.',
+    ),
   }).optional().describe('Rate limit configuration'),
   
   /**

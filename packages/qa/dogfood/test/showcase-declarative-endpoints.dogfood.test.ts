@@ -22,7 +22,7 @@
 //      built-in route gives for the same operation (#5040 §4's red line);
 //   2. does `authRequired` actually gate (401 for anonymous), rather than
 //      parsing green and gating nothing as it did before #4936;
-//   3. does `cacheTtl` reach the wire as `Cache-Control`;
+//   3. does `cacheTtlSeconds` reach the wire as `Cache-Control`;
 //   4. does an UNDECLARED path under the mount still answer the transport's
 //      own bare 404, byte for byte — the seam must cost non-endpoint traffic
 //      nothing (#5090);
@@ -272,7 +272,7 @@ describe('[#5112] object_operation endpoint: same pipeline, same answer', () => 
     expect(a.data).toEqual(b);
   });
 
-  it('carries the declared cacheTtl as a Cache-Control header — `private` included', async () => {
+  it('carries the declared cacheTtlSeconds as a Cache-Control header — `private` included', async () => {
     // Both halves of this header are pinned, and the FIRST one is the reason
     // this assertion exists at all (#5396).
     //
@@ -290,7 +290,7 @@ describe('[#5112] object_operation endpoint: same pipeline, same answer', () => 
     const res = await stack.apiAs(adminToken, 'GET', TASKS);
     expect(
       res.headers.get('cache-control'),
-      'cacheTtl: 30 must reach the wire, and reach it as `private`',
+      'cacheTtlSeconds: 30 must reach the wire, and reach it as `private`',
     ).toMatch(/^private, max-age=30$/);
   }, 60_000);
 

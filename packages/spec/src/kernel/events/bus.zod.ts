@@ -16,7 +16,7 @@ import { EventWebhookConfigSchema, EventMessageQueueConfigSchema, RealTimeNotifi
  * 
  * @example
  * {
- *   "persistence": { "enabled": true, "retention": 365 },
+ *   "persistence": { "enabled": true, "retentionDays": 365 },
  *   "queue": { "concurrency": 20 },
  *   "eventSourcing": { "enabled": true },
  *   "webhooks": [],

@@ -27,6 +27,9 @@ export {
   type StrandedApprovalRequest,
   // #13909 — which unrecoverable shape a reported row is in.
   type StrandedRunState,
+  // #15389 — re-issuing a stranded continuation onto a restored suspension.
+  type StrandedContinuationSignal,
+  type ApprovalContinuationResult,
 } from './approval-service.js';
 export {
   ApprovalsServicePlugin,

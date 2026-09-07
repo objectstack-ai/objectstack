@@ -316,15 +316,18 @@ const result = await client.analytics.query({
   where: { status: 'active' },
   limit: 100,
 });
+console.log(result.rows.length, result.fields[0].name); // AnalyticsResult, unwrapped
 
 // Get cube metadata — all cubes, or one with meta('account')
 const meta = await client.analytics.meta('account');
+console.log(meta[0].name, meta[0].measures.length);     // the bare cube list
 
 // Dry-run a query to its generated SQL (POST /analytics/sql)
 const explained = await client.analytics.explain({
   cube: 'account',
   measures: ['revenue_sum'],
 });
+console.log(explained.sql, explained.params);           // { sql, params }
 ```
 
 ### `client.packages` — Package Management
@@ -430,7 +433,8 @@ await client.i18n.getTranslations('zh-CN');
 await client.i18n.getFieldLabels('account', 'zh-CN');
 
 // Automation — Trigger workflows and automations
-await client.automation.trigger('send_welcome_email', { userId });
+const welcome = await client.automation.trigger('send_welcome_email', { userId });
+console.log(welcome.status); // AutomationResult — the run's own outcome, unwrapped
 
 // A flow that does not run REJECTS — it does not resolve with an inner
 // `{ success: false }`. Branch on the thrown error's `code`, not on the

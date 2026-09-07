@@ -51,6 +51,24 @@ arithmetic composes on a merge and the judgement does not).
   authenticity criterion is untouched in both halves: `baseRev` is an `origin/main`
   ancestor, and its keys **are** that commit's surface.
 
+### Which artifact answers "is this key authorable today"
+
+**`packages/spec/authorable-surface/*.json` — the live per-category ratchet, read as one
+set. ⛔ Never `authorable-surface.base.json`.** The anchor is pinned at a fixed `baseRev`,
+so it is missing every key authored since and answers that question with a stale *no* — a
+false negative that grows with the lag. `check:authorable-surface` prints the current
+delta on every run; ⛔ do not copy the number into prose, it rots (#14612 re-measured
+#13713's figure four days later and it had already moved).
+
+Where no key may be dropped, read the **union** of ratchet and anchor — a union can only
+ever keep an anchor one source vouches for, never drop one more.
+`scripts/docs-audit/affected-docs.mjs` is the **reference consumer** for that union read
+(#13713 / PR #14607, which measured the false-negative class it closes), and its
+`--self-test` pins both halves against the live artifacts: that a key added after
+`baseRev` is still authorable, and that the `[RETIRED]` tombstone annotation the ratchet
+carries is **stripped** rather than matched — a tombstoned key still rejects with an
+upgrade prescription, so it is still surface a page documents.
+
 ## The invariant that makes sharding semantics-preserving
 
 > **Every gate reads the whole DIRECTORY as one set — never "the shards this build would

@@ -30,7 +30,13 @@
 
 import { createHash } from 'node:crypto';
 
-import { isAppResolvedDefaultToken, isUniqueDeclared } from '@objectstack/spec/data';
+import {
+  isAppResolvedDefaultToken,
+  isUniqueDeclared,
+  STRUCTURED_JSON_TYPES,
+  FILE_REFERENCE_TYPES,
+  MULTI_OPTION_TYPES,
+} from '@objectstack/spec/data';
 import type { SchemaDiffEntry } from '@objectstack/spec/shared';
 
 // ───────────────────────────────────────────────────────────────────────
@@ -641,8 +647,53 @@ export const UNBOUNDED_TEXT_FIELD_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Does a multi-value field's JSON column carry its type on THIS dialect — i.e.
- * does a stale textual column silently corrupt the value (#11535)?
+ * The field types the EMITTER materialises as a JSON column — the writer's own
+ * predicate, restated on this side of the cycle (#15771).
+ *
+ * `createColumn`'s catch-all is `JSON_COLUMN_TYPES.has(type) ? jsonColumn(...)
+ * : table.string(...)` and `isJsonField` — the read-side deserializer — is
+ * `JSON_COLUMN_TYPES.has(type) || !!field.multiple`. So the writer has always
+ * asked about the TYPE as well as `multiple`, while the base-type branch below
+ * asked only `field.multiple === true`. A single-value JSON-class field on a
+ * `varchar`/`text` column was therefore written as JSON and did not exist to
+ * the differ, permanently and silently — the additive sync never revisits a
+ * column. Two halves disagreeing about which declarations get a json column is
+ * the defect class this module exists to close; this constant is the deletion
+ * of that fork, not a new criterion.
+ *
+ * ⚠️ Seeded from `@objectstack/spec` — the SAME three sets `JSON_COLUMN_TYPES`
+ * is seeded from — rather than hand-listed, so a value-shape class added to the
+ * spec becomes a JSON column and a DETECTABLE one in one edit. Only the two
+ * driver-internal aliases are hand-written, because they are not authorable
+ * `FieldType`s at all: `object` / `array` name introspected external columns.
+ *
+ * ⚠️ A second constant rather than an import, for the reason
+ * {@link UNBOUNDED_TEXT_FIELD_TYPES} gives in full — `sql-driver.ts` imports
+ * THIS module, so the import would be a cycle. It is therefore PINNED rather
+ * than trusted: `schema-drift.json-column-parity.test.ts` asserts set equality
+ * against the driver's own `isJsonField`, in both directions, over every
+ * `FieldType` the spec declares.
+ *
+ * ⛔ Module-exported so this package's own suites can pin it, and deliberately
+ * NOT added to `index.ts` — the same call {@link UNBOUNDED_TEXT_FIELD_TYPES}
+ * and {@link MULTI_VALUE_COLUMN_REMEDY_COMMAND} make.
+ */
+export const JSON_COLUMN_FIELD_TYPES: ReadonlySet<string> = new Set<string>([
+  ...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,
+  'object', 'array',
+]);
+
+/**
+ * Does a JSON-class field's column carry its type on THIS dialect — i.e. does a
+ * stale textual column silently corrupt the value (#11535 / #15771)?
+ *
+ * The question is about the DIALECT, so widening the population it is asked
+ * about (from `multiple` alone to the emitter's own JSON-class predicate,
+ * #15771) changes nothing here: what makes SQLite exempt is that its read path
+ * `JSON.parse`s a textual column regardless, which is as true of a single-value
+ * `file` id as of an array — re-measured on an in-memory cell, the stale
+ * `varchar(2048)` column and the driver's own `text` column store BYTE-IDENTICAL
+ * bytes and read back identically.
  *
  * Postgres and MySQL: yes. Measured end to end on live Postgres 16.13 and MySQL
  * 8.0.46 — a field that gained `multiple: true` over a pre-existing
@@ -661,7 +712,7 @@ export const UNBOUNDED_TEXT_FIELD_TYPES: ReadonlySet<string> = new Set([
  * not an enforced type, which is the same reason
  * {@link enforcesVarcharLength} excludes it.
  */
-function multiValueColumnTypeIsLoadBearing(dialect: SqlDialectName): boolean {
+function jsonColumnTypeIsLoadBearing(dialect: SqlDialectName): boolean {
   return dialect === 'postgres' || dialect === 'mysql';
 }
 
@@ -941,8 +992,49 @@ export function diffManagedTable(args: {
     // `remedy_not_recognized`, i.e. the remedy this text points at stops
     // working. Pinned from this side by the `toContain(manualJsonConversionSql(…))`
     // cases in `schema-drift.base-type-mismatch.test.ts`.
-    const declaresJsonColumn = field.multiple === true;
-    if (declaresJsonColumn && multiValueColumnTypeIsLoadBearing(dialect) && acceptsStringifiedJson(col.type)) {
+    //
+    // ── #15771: the predicate is the WRITER'S, not `multiple` alone ─────────
+    //
+    // See {@link JSON_COLUMN_FIELD_TYPES}: the emitter gives a json column to
+    // every JSON-class TYPE, `multiple` or not, so a single-value `file` /
+    // `location` / `record` / `vector` field on a `varchar` column was written
+    // as JSON and reported by nothing. Measured on the pre-fix tree, one
+    // `diffManagedTable` call per type: all fifteen JSON-class types the spec
+    // declares returned ZERO entries over a `character varying(2048)` column on
+    // `postgres` and `mysql`, while the same column under `{ multiple: true }`
+    // returned one — the differ was working and this whole population was
+    // invisible to it.
+    //
+    // ## Why the message SPLITS, and why the array half is byte-identical
+    //
+    // The remedy named below repairs a stale column by WRAPPING each stored
+    // value in a one-element JSON array — `json_build_array(col)` /
+    // `JSON_ARRAY(col)`, the ELSE arm of {@link manualJsonConversionSql}. That
+    // is the right repair for a field whose value IS an array and the wrong one
+    // for a field whose value is a scalar or an object: the write path
+    // `JSON.stringify`s a single-value `file` id into the column, so it holds
+    // the JSON scalar `"file_01HXYZ"` — measured byte-for-byte on an in-memory
+    // SQLite cell — and wrapping that yields `["\"file_01HXYZ\""]`, a shape
+    // the field never declared. Measured with the command's OWN planner: a
+    // single-value finding carrying this message is accepted as a target and
+    // planned with `json_build_array`.
+    //
+    // So both populations are REPORTED and only one is offered the remedy. The
+    // array half keeps its message CHARACTER FOR CHARACTER — the contract note
+    // above is why — and the single-value half carries neither the command nor
+    // the statement, so the same probe recovers no dialect and the command
+    // REFUSES the entry (`remedy_not_recognized`) rather than run array SQL over
+    // scalar rows. That refusal is the command's designed branch for a message
+    // it cannot read, and it is pinned from both sides.
+    const declaredType = field.type || 'string';
+    const declaresJsonColumn = JSON_COLUMN_FIELD_TYPES.has(declaredType) || field.multiple === true;
+    // Is the declared VALUE an array? `multiple: true` on any type, plus the
+    // inherently-multi option types, whose value is a list with or without the
+    // flag (`MULTI_OPTION_TYPES` — the spec's own class). This, and never
+    // JSON-class membership (which both populations share), is what decides
+    // whether the wrapping remedy is the right repair.
+    const declaresArray = field.multiple === true || MULTI_OPTION_TYPES.has(declaredType);
+    if (declaresJsonColumn && jsonColumnTypeIsLoadBearing(dialect) && acceptsStringifiedJson(col.type)) {
       out.push({
         kind: 'type_mismatch',
         remoteName: table,
@@ -953,8 +1045,8 @@ export function diffManagedTable(args: {
         severity: 'error',
         category: 'needs_confirm',
         op: { type: 'manual_column_type_change', table, column: fieldName, to: 'json', from: col.type },
-        message:
-          `${table}.${fieldName}: metadata declares a multi-value field (stored as \`json\`) but the ` +
+        message: declaresArray
+          ? `${table}.${fieldName}: metadata declares a multi-value field (stored as \`json\`) but the ` +
           `column is \`${col.type}\` — the database was created while the field was single-value and the ` +
           `additive sync never migrates a column's type. Arrays are being written as the STRINGIFIED ` +
           `literal (e.g. '["a","b"]') and read back as a string, so anything consuming the value ` +
@@ -967,7 +1059,22 @@ export function diffManagedTable(args: {
           `a json column cannot carry a plain btree: ` +
           `${manualJsonConversionSql(dialect, table, fieldName)} ` +
           `Rows written while the column was stale may already hold a stringified array in a RELATED ` +
-          `single-value column; neither route repairs those.`,
+          `single-value column; neither route repairs those.`
+          : `${table}.${fieldName}: metadata declares \`${declaredType}\`, a field ObjectStack stores ` +
+            `in a \`json\` column whether or not it is multi-value, but the column is \`${col.type}\` ` +
+            `and the additive sync never migrates a column's type. The value is written JSON-ENCODED ` +
+            `into that textual column — a single-value \`file\` id lands as the quoted text ` +
+            `'"file_01HXYZ"' — while on this dialect the read path decodes a json COLUMN rather than ` +
+            `the text inside a textual one, so it comes back with its quotes and every consumer that ` +
+            `matches the raw stored form (file resolution, ownership claims) refuses it. ` +
+            `The automated column migration ObjectStack ships is NOT offered for this column and will ` +
+            `refuse it: it repairs a stale column by wrapping each value in a ONE-ELEMENT JSON ARRAY, ` +
+            `which is right for a field declaring \`multiple: true\` and wrong here — it would leave ` +
+            `an array where the declaration promises a single value. Convert the column by hand ` +
+            `instead, in a transaction and with a backup taken first: CAST the stored text to json ` +
+            `rather than wrapping it — rows written through ObjectStack already hold valid JSON — and ` +
+            `drop any index on the column first, since a json column cannot carry a plain btree. ` +
+            `"os migrate plan" lists this entry; "os migrate apply" reports it as skipped.`,
       });
     }
 

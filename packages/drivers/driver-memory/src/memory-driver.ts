@@ -201,9 +201,9 @@ export interface InMemoryDriverConfig {
    * - `'auto'` — Auto-detect environment (browser → localStorage, Node.js → file, serverless → disabled)
    * - `'file'` — File-system persistence with defaults (Node.js only)
    * - `'local'` — localStorage persistence with defaults (Browser only)
-   * - `{ type: 'file', path?: string, autoSaveInterval?: number }` — File-system with options
+   * - `{ type: 'file', path?: string, autoSaveIntervalMs?: number }` — File-system with options
    * - `{ type: 'local', key?: string }` — localStorage with options
-   * - `{ type: 'auto', path?: string, key?: string, autoSaveInterval?: number }` — Auto-detect with options
+   * - `{ type: 'auto', path?: string, key?: string, autoSaveIntervalMs?: number }` — Auto-detect with options
    * - `{ adapter: PersistenceAdapterInterface }` — Custom adapter
    *
    * Durability is **opt-in**, as #815 specified ("默认情况下不启用持久化（纯内存，行为不变）",
@@ -222,7 +222,7 @@ export interface InMemoryDriverConfig {
     type?: 'file' | 'local' | 'auto';
     path?: string;
     key?: string;
-    autoSaveInterval?: number;
+    autoSaveIntervalMs?: number;
     adapter?: PersistenceAdapterInterface;
   };
 }
@@ -2293,7 +2293,7 @@ export class InMemoryDriver implements IDataDriver {
           const { FileSystemPersistenceAdapter } = await import('./persistence/file-adapter.js');
           this.persistenceAdapter = new FileSystemPersistenceAdapter({
             path: persistence.path,
-            autoSaveInterval: persistence.autoSaveInterval,
+            autoSaveIntervalMs: persistence.autoSaveIntervalMs,
           });
           this.logger.debug('Auto-detected Node.js environment, using file persistence');
         }
@@ -2301,7 +2301,7 @@ export class InMemoryDriver implements IDataDriver {
         const { FileSystemPersistenceAdapter } = await import('./persistence/file-adapter.js');
         this.persistenceAdapter = new FileSystemPersistenceAdapter({
           path: persistence.path,
-          autoSaveInterval: persistence.autoSaveInterval,
+          autoSaveIntervalMs: persistence.autoSaveIntervalMs,
         });
       } else if (persistence.type === 'local') {
         const { LocalStoragePersistenceAdapter } = await import('./persistence/local-storage-adapter.js');

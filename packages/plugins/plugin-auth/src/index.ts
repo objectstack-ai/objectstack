@@ -31,6 +31,7 @@ export * from './identity-write-guard.js';
 // has to be able to register the invariant itself rather than ship an
 // environment that can ban or delete its last administrator.
 export * from './last-admin-guard.js';
+export * from './membership-ended-session.js';
 // [#8317] `sys_member.role` canonicalisation — the write-path hooks and the
 // one-off convergent pass. Exported for the same reason the two guards above
 // are, plus one of its own: a host that upgrades outside this plugin's boot

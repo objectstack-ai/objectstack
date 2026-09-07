@@ -355,7 +355,7 @@ export function wrapDeclarativeHook(
   const declaredRetry = meta.retryPolicy ? retryPolicyDefaults() : undefined;
   const retryMax = Math.max(0, Number(meta.retryPolicy?.maxRetries ?? declaredRetry?.maxRetries ?? 0));
   const retryBackoffMs = Math.max(0, Number(meta.retryPolicy?.backoffMs ?? declaredRetry?.backoffMs ?? 0));
-  const timeoutMs = typeof meta.timeout === 'number' && meta.timeout > 0 ? meta.timeout : undefined;
+  const timeoutMs = typeof meta.timeoutMs === 'number' && meta.timeoutMs > 0 ? meta.timeoutMs : undefined;
   const onError = meta.onError ?? 'abort';
   // `async` is only meaningful for after* events; ignore on before* (we must
   // wait for the handler to potentially mutate ctx.input).

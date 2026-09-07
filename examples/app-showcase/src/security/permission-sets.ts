@@ -42,6 +42,21 @@ export const ContributorPermissionSet = definePermissionSet({
     // are `controlled_by_parent` — no line RLS is authored (ADR-0055).
     showcase_invoice: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     showcase_invoice_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    // Expense graph — the SAME master/detail shape as the invoice graph above,
+    // and the reason the CHILD is listed explicitly rather than inherited.
+    // `controlled_by_parent` derives the child's RECORD scope from its master;
+    // it does NOT derive the child's OBJECT-level CRUD. That is a separate gate
+    // (`checkObjectPermission`) and it runs FIRST, so a set that grants the
+    // report and forgets the line denies 403 before the parent-derived access is
+    // ever consulted — the silent "can't fill in / can't submit the subtable"
+    // trap (`security-master-detail-ungranted`, ADR-0055).
+    showcase_expense_report: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    showcase_expense_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+    // Same rule, one object further from intuition: `showcase_field_zoo` is a
+    // master_detail CHILD of `showcase_project`, which this set grants above.
+    // Being a synthetic catalogue changes nothing — a detail object still needs
+    // its own object-level grant to be writable from its master's page.
+    showcase_field_zoo: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
   },
   // Field-level security — contributors can read but not edit budget figures.
   // Keys MUST be `<object>.<field>` qualified: the runtime evaluator matches
@@ -183,6 +198,20 @@ export const OpsPermissionSet = definePermissionSet({
     showcase_announcement: { allowRead: true, allowCreate: true, allowEdit: true, modifyAllRecords: true },
     showcase_inquiry: { allowRead: true, allowEdit: true, readScope: 'org', writeScope: 'org' },
     showcase_invoice: { allowRead: true },
+    // Shared reference data — the org geometry and the tagging tree every
+    // member READS from the baseline set below, and that back-office CURATES
+    // here. The split is the point: nav-wide readability is a baseline
+    // question, authorship is a persona question, and they are different
+    // grants on the same objects.
+    showcase_team: { allowRead: true, allowCreate: true, allowEdit: true },
+    showcase_category: { allowRead: true, allowCreate: true, allowEdit: true },
+    showcase_business_unit: { allowRead: true, allowCreate: true, allowEdit: true },
+    // `showcase_project_membership` is the team↔project junction — a detail of
+    // `showcase_team` (its FIRST master_detail field), granted here beside that
+    // master for the ADR-0055 reason above. `allowDelete` is what un-staffs a
+    // team, and is also why the junction cannot live on the `everyone` baseline:
+    // delete is a high-privilege bit the D7 anchor gate refuses there.
+    showcase_project_membership: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
   // `setup.access` is a platform capability; `showcase.export_data` is a
   // PACKAGE capability this app DECLARES via defineCapability (see
@@ -279,6 +308,40 @@ export const MemberDefaultPermissionSet = definePermissionSet({
     // The D7 linter flags this owner-only read as `security-private-no-
     // readscope` (info) — here it is exactly the intent.
     showcase_private_note: { allowRead: true, allowCreate: true, allowEdit: true },
+
+    // ── Navigation is an ACCESS CLAIM (ADR-0090 D6) ──────────────────────
+    //
+    // Everything below sits in `showcase_app`'s SHARED navigation, which every
+    // authenticated member sees. Putting an object there asserts that every
+    // member may open it, so the baseline set is where that assertion has to be
+    // paid for — one read grant per shared nav entry, and no further.
+    //
+    // None of these needed a WIDER `sharingModel` to become readable and none
+    // got one: all seven are already `public_read_write`, the widest RECORD
+    // baseline the model has, and all seven were still unreachable. Object-level
+    // CRUD (gate ①) and the OWD (gate ②) are independent, gate ① runs first, and
+    // the only principal it admits with no grant at all is the platform's
+    // built-in wildcard admin set — which is exactly who an author browses as
+    // while building the app, and why this class survives to production.
+    // `nav-object-ungranted` is the check that the two declarations agree.
+    //
+    // Read-only here, deliberately. Write lives on the persona that owns the
+    // data: reference-data curation on `showcase_ops`, expense filing on
+    // `showcase_contributor`. The two exceptions below carry write because the
+    // member genuinely owns the row.
+    showcase_expense_report: { allowRead: true },
+    showcase_team: { allowRead: true },
+    showcase_category: { allowRead: true },
+    showcase_business_unit: { allowRead: true },
+    showcase_field_zoo: { allowRead: true },
+    // Every member keeps their own workspace settings (nav "Settings").
+    showcase_preference: { allowRead: true, allowCreate: true, allowEdit: true },
+    // The B3 dynamic-options fixture is only a fixture if a member can CREATE a
+    // row and watch the cascade re-filter. Note where the narrowing actually
+    // is: not on the object, but on one OPTION — `tier: 'restricted'` is offered
+    // only to admins and re-checked server-side by the objectql rule validator.
+    // Object grants and option visibility are different instruments.
+    showcase_cascade: { allowRead: true, allowCreate: true, allowEdit: true },
   },
 });
 

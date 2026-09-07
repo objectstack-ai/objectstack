@@ -107,7 +107,7 @@ const myHook = defineHook({
   onError: 'abort',  // 'abort' | 'log'
 
   // Optional: Execution timeout (ms)
-  timeout: 5000,
+  timeoutMs: 5000,
 
   // Optional: Retry policy
   retryPolicy: {
@@ -868,7 +868,7 @@ const maskSensitiveData = defineHook({
 
 **1. Declarative — `defineStack({ hooks })`, the default.** `AppPlugin` auto-binds
 these at startup: no `register*Hook` boilerplate, and the declarative fields
-(`condition`, `async`, `retryPolicy`, `timeout`, `onError`, `priority`) are honoured
+(`condition`, `async`, `retryPolicy`, `timeoutMs`, `onError`, `priority`) are honoured
 **only** on this path. A string-named `handler` resolves through the stack's
 `functions` map.
 
@@ -882,7 +882,7 @@ export default defineStack({
 
 **2. Programmatic — `ctx.ql.registerHook()`, the plugin escape hatch.** Pass
 `packageId` so the hook can be unregistered cleanly. ⚠️ Hooks bound this way get
-**none** of the declarative `condition` / `retryPolicy` / `timeout` / `onError` /
+**none** of the declarative `condition` / `retryPolicy` / `timeoutMs` / `onError` /
 `async` semantics — those apply only through `defineStack({ hooks })` or
 `ql.bindHooks([...])`.
 

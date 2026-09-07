@@ -56,9 +56,12 @@ you so rather than failing as an unknown template.
    every object name in the template is re-prefixed to match
    (`blank_note` → `my_app_note`).
 2. Installs dependencies (pnpm if available, otherwise npm).
-3. Installs the ObjectStack AI skills bundle for coding agents
-   (`npx skills add objectstack-ai/objectstack/skills --all` — scoped to the
-   curated `skills/` catalog).
+3. Installs the ObjectStack AI skills bundle for **one** coding agent —
+   `npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y`,
+   scoped to the curated `skills/` catalog. One agent, not `--all`, so the
+   bundle lands in exactly one directory (`.claude/skills/`) and a scaffolded
+   project commits it once; `src/skills-install.ts` carries the measurement.
+   The closing summary prints the same command for any other runtime.
 4. Writes `AGENTS.md` and `.github/copilot-instructions.md` with the project
    conventions — unless the template ships its own.
 

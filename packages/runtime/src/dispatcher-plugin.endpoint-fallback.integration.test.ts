@@ -14,7 +14,7 @@
  * Since #5129 the seam serves the whole chain — policies (E4) then target
  * delegation (E5) — so the cases below drive REAL `callData` and a REAL
  * automation slot, and pin the two things only a socket can prove: that a 429
- * carries its `Retry-After` ON THE WIRE, and that a `cacheTtl` `Cache-Control`
+ * carries its `Retry-After` ON THE WIRE, and that a `cacheTtlSeconds` `Cache-Control`
  * rides a success and never an error.
  *
  * The load-bearing assertion in most of these is a NEGATIVE one: that adding
@@ -349,10 +349,10 @@ const EXECUTABLE: ApiEndpoint[] = [
         target: 'showcase_task',
         objectParams: { object: 'showcase_task', operation: 'find' },
         authRequired: false,
-        cacheTtl: 30,
+        cacheTtlSeconds: 30,
     }),
     ApiEndpointSchema.parse({
-        // Same `cacheTtl`, but a shape whose execution FAILS: `get` with no
+        // Same `cacheTtlSeconds`, but a shape whose execution FAILS: `get` with no
         // `?id=` is a 400 from the executor. The pair is the whole point —
         // one key, two outcomes, only one of them cacheable.
         name: 'showcase_cached_get',
@@ -362,7 +362,7 @@ const EXECUTABLE: ApiEndpoint[] = [
         target: 'showcase_task',
         objectParams: { object: 'showcase_task', operation: 'get' },
         authRequired: false,
-        cacheTtl: 30,
+        cacheTtlSeconds: 30,
     }),
 ];
 
@@ -513,12 +513,12 @@ describe('the wired chain — policies, then the real pipeline (#5129)', () => {
         expect(body.error.details?.retryAfterSeconds).toBe(Number(retryAfter));
     });
 
-    it('sends cacheTtl\'s Cache-Control on a success and on nothing else', async () => {
+    it('sends cacheTtlSeconds\'s Cache-Control on a success and on nothing else', async () => {
         const ok = await fetch(`${baseUrl}/api/v1/apps/showcase/cached`);
         expect(ok.status).toBe(200);
         expect(ok.headers.get('Cache-Control')).toBe('private, max-age=30');
 
-        // Same endpoint family, same `cacheTtl: 30`, but the execution fails
+        // Same endpoint family, same `cacheTtlSeconds: 30`, but the execution fails
         // (a `get` with no `?id=`). Telling the client to reuse a 400 for 30
         // seconds would make an author's typo sticky.
         const failed = await fetch(`${baseUrl}/api/v1/apps/showcase/cached-get`);

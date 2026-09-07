@@ -573,6 +573,16 @@ Gallery/card view configuration
 | **quickFilters** | `{ field: string; label?: string; options?: (string \| object)[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
 | **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
+| **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
+| **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
+| **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
+| **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
+| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning |
+| **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
+| **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
+| **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
 
 ### Nested Shape: `GanttConfig.quickFilters[number]`
 
@@ -581,6 +591,23 @@ Gallery/card view configuration
 | **field** | `string` | ✅ | Record field / dot-path the dimension filters on |
 | **label** | `string` | optional | Trigger label (falls back to the field label) |
 | **options** | `(string \| { value: string \| number; label?: string })[]` | optional | Explicit option override for fixed enums |
+
+### Nested Shape: `GanttConfig.interactions`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **move** | `boolean` | optional | Bar and subtree dragging along the timeline (default true) |
+| **resize** | `boolean` | optional | Edge resize grips that change a duration (default true) |
+| **progress** | `boolean` | optional | The progress drag handle (default true) |
+| **link** | `boolean` | optional | Dependency UI — the drag-to-link dots and the create/delete menu entries (default true) |
+
+### Nested Shape: `GanttConfig.timeSegments`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **dayStart** | `string` | optional | Clock time the shift-day begins, 'HH:mm' (24h); the day column starts here and runs 24h. Renderer default '00:00' (calendar day); for an 08:00 handover set '08:00' |
+| **bands** | `{ key?: string; label: string; start: string; end: string; … }[]` | ✅ | Ordered bands covering the 24h shift-day, beginning at dayStart |
+| **showMidnight** | `boolean` | optional | Draw the dashed calendar-midnight (00:00) cue inside cross-midnight bands; renderer default true |
 
 
 ---
@@ -773,12 +800,12 @@ Map view configuration
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
-| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
@@ -940,6 +967,16 @@ View filter rule
 | **quickFilters** | `{ field: string; label?: string; options?: (string \| object)[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
 | **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
+| **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
+| **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
+| **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
+| **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
+| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning |
+| **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
+| **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
+| **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
 
 ### Nested Shape: `ListView.gallery`
 
@@ -1168,12 +1205,12 @@ Tab configuration for multi-tab view interface
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
-| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
@@ -1326,6 +1363,16 @@ View filter rule
 | **quickFilters** | `{ field: string; label?: string; options?: (string \| object)[] }[]` | optional | Multi-select filter dropdowns rendered above the chart |
 | **autoZoomToFilter** | `boolean` | optional | When true (default), filtering zooms the range to the filtered tasks |
 | **viewMode** | `Enum<'day' \| 'week' \| 'month' \| 'quarter' \| 'year'>` | optional | Timeline granularity — one column per day/week/month/quarter/year (also the resource-view column granularity; renderer default 'day') |
+| **borderColorField** | `string` | optional | Field carrying a per-task alert stroke color — any CSS color or semantic palette name (red, orange, …): the bar keeps its fill and gains an outline plus halo in that color (e.g. red for overdue, orange for due-soon; typically a server-computed alert field). Empty or null means no stroke |
+| **lockField** | `string` | optional | Field marking a row view-only (truthy means locked): a locked bar cannot be dragged or resized, its progress cannot be dragged, no dependency can be drawn from it and its inline-edit and edit/delete menu entries are hidden — clicking it (open drawer, jump) still works. Independent of the global readOnly; freezes individual levels while siblings stay editable |
+| **objectField** | `string` | optional | Field carrying the row's OWN object API name, for mixed-object trees (an api provider composing parent-object rows with child-object rows): the detail drawer and its full-page link follow each row's real object instead of the view's bound object. Empty or missing falls back to the bound object |
+| **summaryExtent** | `Enum<'children' \| 'self'>` | optional | How a summary bar's span is computed. 'children' (renderer default) rolls the bar up from its children — min start, max end, duration-weighted progress — and ignores the record's own dates; 'self' renders the record's OWN start, end and progress and falls back to rollup only for records without dates (use it when the parent's schedule is authoritative, e.g. a shift plan whose work-order children are locked history) |
+| **defaultCollapsedDepth** | `integer` | optional | Auto-collapse tree nodes at or below this 0-indexed depth on first render (roots are depth 0): every node at that depth or deeper that has children starts folded; the user can still expand them. Omit to start fully expanded |
+| **dependencyTypes** | `boolean` | optional | Whether the backing store persists dependency link TYPES (fs, ss, ff, sf); renderer default true. Set false when dependencies are bare predecessor ids: the link menu hides the type switcher (a switch would be silently reverted on refetch) and drag-created links are always finish-to-start |
+| **timeZone** | `string` | optional | Business time zone, an IANA name such as 'Asia/Shanghai': the chart's calendar — shift bands, day columns, snapping, the today line, date labels — renders in this zone's wall time for every viewer instead of the browser's zone; persisted data stays real instants. An invalid name falls back to the browser zone with a console warning |
+| **exportFileName** | `string` | optional | Base name for exported PNG and PDF files (e.g. the view's display label — the host's view schema often reaches the renderer stripped of label); falls back to the object schema label, then the object API name. A timestamp suffix is always appended |
+| **interactions** | `{ move?: boolean; resize?: boolean; progress?: boolean; link?: boolean }` | optional | Per-interaction switches, each defaulting to true: allow bar moves but pin durations (resize: false), or keep the dependency UI read-only (link: false). They only narrow what readOnly and row locks already allow |
+| **timeSegments** | `{ dayStart?: string; bands: object[]; showMidnight?: boolean }` | optional | Shift segmentation for the day-mode timeline: splits each shift-day (starting at dayStart) into the configured bands — a two-tier header (date over band), per-band tints and drag/resize snapping to band boundaries. No shift concept is hardcoded; bands are pure config. Off when omitted |
 
 ### Nested Shape: `ObjectListView.gallery`
 
@@ -1754,12 +1801,12 @@ Tab configuration for multi-tab view interface
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
-| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
@@ -1839,12 +1886,12 @@ Tab configuration for multi-tab view interface
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
-| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
@@ -2080,12 +2127,12 @@ This schema accepts one of the following structures:
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
-| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |
@@ -2256,12 +2303,12 @@ This schema accepts one of the following structures:
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
 | **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
-| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
+| **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … }` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
 | **chart** | `{ chartType?: Enum<'bar' \| 'line' \| 'pie' \| 'area' \| 'scatter'>; dataset: string; dimensions?: string[]; values: string[] }` | optional | List chart view configuration |
 | **map** | `{ latitudeField?: string; longitudeField?: string; locationField?: string; titleField?: string; … }` | optional | Map configuration — applies when the view renders as a map layout |
-| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer } & Record<string, any>` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
+| **tree** | `{ parentField?: string; labelField?: string; fields?: string[]; defaultExpandedDepth?: integer }` | optional | Tree/hierarchy configuration — applies when the view renders as a tree layout |
 | **pageName** | `string` | optional | Published page this view mounts — required when `type: 'page'`, and refused on every other view type. Rendering is delegated to the existing page renderer; the page keeps its own `assignedProfiles` audience. |
 | **description** | `string \| Record<string, string>` | optional | View description for documentation/tooltips |
 | **sharing** | `{ type?: Enum<'personal' \| 'collaborative'>; lockedBy?: string }` | optional | View sharing and access configuration |

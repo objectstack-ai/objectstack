@@ -17,10 +17,23 @@ import {
 
 describe('ExecutionStatus', () => {
   it('should accept all valid statuses', () => {
-    const valid = ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying'];
+    const valid = ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying', 'refused'];
     valid.forEach((v) => {
       expect(() => ExecutionStatus.parse(v)).not.toThrow();
     });
+  });
+
+  it('names the refused terminal (#14945) — appended LAST, so every `.options` index reader keeps its positions', () => {
+    expect(ExecutionStatus.options).toContain('refused');
+    expect(ExecutionStatus.options.at(-1)).toBe('refused');
+    expect(ExecutionStatus.options.slice(0, 8)).toEqual(
+      ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying'],
+    );
+    // Distinct members, not aliases: a refusal is a successful evaluation that
+    // said no, a failure is a throw.
+    expect(ExecutionStatus.safeParse('refused').success).toBe(true);
+    expect(ExecutionStatus.safeParse('failed').success).toBe(true);
+    expect(ExecutionStatus.safeParse('rejected').success).toBe(false);
   });
 
   it('should reject invalid statuses', () => {

@@ -169,14 +169,42 @@ describe('#9652 runAdminUnbanUser', () => {
 });
 
 describe('#9652 the shared ADR-0068 platform-admin gate', () => {
-  it('admits a platform admin carrying positions[] and NO role scalar', () => {
-    // This is the identity a real deployment produces after ADR-0068 D2 — the
-    // exact shape better-auth refuses.
+  // [#15136] MIGRATED FIXTURE. This case used to admit on
+  // `positions: ['user','platform_admin']` with no `isPlatformAdmin` — it pinned
+  // the array leg `isPlatformAdminUser` no longer has. Under ruling A
+  // `positions[]` is the security axis, so that name can arrive from a
+  // tenant-writable ADR-0057 D4 `sys_user_position` row, and admitting on it
+  // would hand platform-operator routes to a tenant admin. The identity a real
+  // deployment produces still carries the derived alias, which is the posture
+  // RUNG; that is what the gate reads and what this now pins.
+  it('admits a platform admin carrying the derived alias and NO role scalar', () => {
     const verdict = judgePlatformAdmin({
-      user: { id: 'usr_admin', email: 'a@b.c', positions: ['user', 'platform_admin'], role: 'user' },
+      user: {
+        id: 'usr_admin',
+        email: 'a@b.c',
+        positions: ['org_member', 'platform_admin', 'everyone'],
+        isPlatformAdmin: true,
+        role: 'user',
+      },
     });
     expect(verdict.ok).toBe(true);
     expect(verdict.ok && verdict.actor.id).toBe('usr_admin');
+  });
+
+  it('⛔ REFUSES a `platform_admin` NAME in positions[] with no rung behind it', () => {
+    // The escalation shape: a `sys_user_position` row spelling the built-in
+    // name. `isPlatformAdmin` is absent because the rung said no. Admitting
+    // here would be the privilege-escalation path — this is the unit-level
+    // half of the three-way-agreement pin in
+    // `session-platform-admin-rung-agreement.test.ts`, which drives the same
+    // shape through a real session.
+    const verdict = judgePlatformAdmin({
+      user: { id: 'usr_member', positions: ['org_member', 'platform_admin', 'everyone'], role: 'user' },
+    });
+    expect(verdict.ok).toBe(false);
+    expect(!verdict.ok && verdict.refusal.status).toBe(403);
+    expect(!verdict.ok && verdict.refusal.body.error.code).toBe('PERMISSION_DENIED');
+    expect(isPlatformAdminUser({ id: 'usr_member', positions: ['platform_admin'] })).toBe(false);
   });
 
   it('admits on the derived isPlatformAdmin alias alone', () => {

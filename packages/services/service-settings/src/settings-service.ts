@@ -2304,8 +2304,14 @@ export class SettingsService {
    * `readonly: true` (`packages/platform-objects/src/system/sys-setting.object.ts`),
    * and the engine STRIPS author-declared read-only columns from a
    * **non-system** caller's UPDATE payload (`stripReadonlyFields`, gated on
-   * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). The
-   * INSERT path is deliberately exempt from that strip (#3413) — which is
+   * `if (!opCtx.context?.isSystem)` in `packages/objectql/src/engine.ts`). On
+   * THIS object the INSERT path is outside that strip — not by the 2026-07-24
+   * "INSERT exempt" row (superseded by the 2026-09-03 ruling, #14147:
+   * `engine.insert` runs the same strip for a non-system caller) but because
+   * `sys_setting` is `sys_`-prefixed and `managedBy: 'engine-owned'`, which
+   * `staticReadonlyInsertSubject` (`packages/objectql/src/validation/rule-validator.ts`)
+   * leaves to the platform object's own guards while the UPDATE path applies no
+   * such carve-out (#15719) — which is
    * exactly why the FIRST write of a secret landed correctly and every later
    * one silently did not: a rotation inserted a fresh `sys_secret` row, got its
    * 200 with a redacted echo and an advanced `updated_at`, and left

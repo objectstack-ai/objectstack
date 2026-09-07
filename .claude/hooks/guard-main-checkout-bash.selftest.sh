@@ -28,7 +28,12 @@ trap 'rm -rf "$tmp"' EXIT
 MAIN="$tmp/mainrepo"
 WT="$tmp/wt"
 PLAIN="$tmp/plain"
-mkdir -p "$MAIN/pkg" "$PLAIN"
+# ODD: a PRIMARY checkout whose own path carries a literal `worktrees` segment. Every write
+# into it must BLOCK — it is a primary checkout, and the verdict comes from the git-dir vs
+# git-common-dir structure, never from the spelling of the path (#11809). $WT is its positive
+# twin: a real linked worktree at a path with no such segment.
+ODD="$tmp/worktrees/oddrepo"
+mkdir -p "$MAIN/pkg" "$PLAIN" "$ODD/pkg"
 (
   cd "$MAIN" || exit 1
   git init -q .
@@ -39,6 +44,14 @@ mkdir -p "$MAIN/pkg" "$PLAIN"
   git add -A
   git commit -qm init
   git worktree add -q "$WT" -b selftest-wt
+  cd "$ODD" || exit 1
+  git init -q .
+  git config user.email selftest@example.com
+  git config user.name selftest
+  : > README.md
+  : > pkg/x.ts
+  git add -A
+  git commit -qm init
 ) >/dev/null 2>&1 || { echo "could not build the git fixture" >&2; exit 1; }
 
 CWD="$MAIN"   # payload cwd for the cases that follow; reassigned per section
@@ -63,11 +76,40 @@ expect() { # expect <block|allow> <command> [env…]
   local got; got="$(verdict "$cmd" "$@")"
   local shown="${cmd//$'\n'/ ⏎ }"
   shown="${shown//$MAIN/\$MAIN}"; shown="${shown//$WT/\$WT}"; shown="${shown//$PLAIN/\$PLAIN}"
+  shown="${shown//$ODD/\$ODD}"
   if [ "$got" = "$want" ]; then
     pass=$((pass + 1)); printf '  ok   %-5s  %s\n' "$got" "$shown"
   else
     fail=$((fail + 1)); printf '  FAIL want=%s got=%s  %s\n' "$want" "$got" "$shown"
   fi
+}
+
+stderr_of() { # stderr_of <command> [env…] -> the refusal text an agent actually reads
+  local cmd="$1"; shift
+  local payload
+  payload="$(jq -nc --arg c "$cmd" --arg w "$CWD" \
+    '{cwd:$w,tool_name:"Bash",tool_input:{command:$c}}')"
+  printf '%s' "$payload" | env "$@" "$hook" 2>&1 >/dev/null
+}
+
+says() { # says <needle> <label> <command> [env…]
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) pass=$((pass + 1)); printf '  ok   says   %s\n' "$label" ;;
+    *) fail=$((fail + 1)); printf '  FAIL missing "%s"  %s\n' "$needle" "$label" ;;
+  esac
+}
+
+lacks() { # lacks <needle> <label> <command> [env…]
+  # The direction only an ABSENCE assertion can hold: a remedy that stopped being true stays
+  # in the text a reader acts on long after the thing it described stopped working.
+  local needle="$1" label="$2" subject="$3"; shift 3
+  local out; out="$(stderr_of "$subject" "$@")"
+  case "$out" in
+    *"$needle"*) fail=$((fail + 1)); printf '  FAIL still says "%s"  %s\n' "$needle" "$label" ;;
+    *) pass=$((pass + 1)); printf '  ok   lacks  %s\n' "$label" ;;
+  esac
 }
 
 echo "== writes into the shared PRIMARY checkout are blocked =="
@@ -109,6 +151,19 @@ expect allow 'rm -rf pkg/x.ts'
 expect allow 'touch pkg/new.ts'
 expect allow 'cp /tmp/a.txt pkg/a.txt'
 expect allow "cd $WT && tee pkg/a.ts"
+
+echo "== a PRIMARY checkout whose own path carries a 'worktrees' segment is BLOCKED =="
+# Every target here is ABSOLUTE, so the verdict can only have come from the path's own repo.
+# The two $ODD SUBDIRECTORY cases were `allow` under the `*/worktrees/*` substring test this
+# replaced — unguarded writes into a primary checkout — because git prints an ABSOLUTE
+# git-dir from a subdirectory and a RELATIVE one at the toplevel, so one checkout got
+# opposite verdicts by depth (#11809). The structural test is spelling-independent.
+CWD="$PLAIN"
+expect block "sed -i s/a/b/ $ODD/pkg/x.ts"   # a SUBDIRECTORY — the depth the substring test lost
+expect block "echo x > $ODD/pkg/x.ts"        # same depth, reached through redirection
+expect block "sed -i s/a/b/ $ODD/README.md"  # the toplevel, which blocked only by accident
+expect block "sed -i s/a/b/ $MAIN/pkg/x.ts"  # control: an ordinary shared primary checkout
+expect allow "sed -i s/a/b/ $WT/pkg/x.ts"    # control: a real linked worktree still allows
 
 echo "== writes outside any repo are fine (/tmp, scratchpad, \$HOME dotfiles) =="
 CWD="$MAIN"
@@ -262,6 +317,25 @@ echo "== escape hatch =="
 CWD="$MAIN"
 expect allow 'sed -i s/a/b/ pkg/x.ts' OS_ALLOW_MAIN_EDITS=1
 expect allow 'echo x > README.md' OS_ALLOW_MAIN_EDITS=1
+
+echo "== the hatch names WHERE it works: this hook's own environment, never a prefix =="
+# The refusal used to end by telling the reader to re-run the same thing with the variable
+# as a VAR=1 command prefix — an instruction that cannot work where it is printed. A VAR=1
+# prefix sets the variable in the environment of THAT COMMAND; this hook is not that
+# command, and it reads the variable from its own environment, so the prefix changes
+# nothing and the refusal repeats (#15971). An instruction that does not work is an
+# invitation to route around the guard, so both directions are pinned: the dead remedy is
+# gone, and the sentence names the environment the hook actually reads. The `allow` rows
+# next door — the variable really in the hook's environment — are this pair's other half.
+# The first row is the card's own reproduction, kept as a case: the prefix spelled exactly
+# as the old message told the reader to spell it must still BLOCK, because it never reaches
+# this hook. It is the twin of the `allow` rows above, where the same variable is really in
+# the hook's environment.
+CWD="$MAIN"
+expect block "OS_ALLOW_MAIN_EDITS=1 rm -f $MAIN/x"
+expect block 'OS_ALLOW_MAIN_EDITS=1 sed -i s/a/b/ pkg/x.ts'
+lacks 're-run with' 'the refusal no longer prints the prefix remedy' 'sed -i s/a/b/ pkg/x.ts'
+says 'hook itself runs in' 'the refusal names the environment this hook reads' 'sed -i s/a/b/ pkg/x.ts'
 
 echo "== unparseable / absent payload fails open =="
 for probe in '{"tool_name":"Bash","tool_input":{}}' 'not json at all' '{}'; do

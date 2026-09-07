@@ -298,3 +298,64 @@ describe('runActionGovernanceInventory — the router registry rung (#14123)', (
         );
     });
 });
+
+/**
+ * [#15444] The declarative single-record field write is not a dead button.
+ *
+ * `unboundDeclarations` was built from a `type`-only test, and the declarative
+ * `operation: 'update'` action (#14092, maintainer ruling 2026-09-01) is
+ * exactly the shape that test mistakes for a button wired to nothing: the spec
+ * refuses `target` and `body` beside `operation: 'update'` and keeps `type` at
+ * its materialized default `'script'`, because the platform action route IS
+ * where the write is performed. So it fell through both `continue`s and was
+ * named, at every boot and every `metadata:reloaded`, in the ADR-0110 D5
+ * surface an operator reads to find REAL dead buttons — with a prescription
+ * ("add a `body`, or register a handler under the declared `target`") that
+ * `ActionSchema` refuses at parse time.
+ *
+ * The positive control shares the object and the run deliberately: a pin that
+ * only asserted the update action's absence would pass just as well against a
+ * reader that reported nothing at all.
+ */
+describe('[#15444] a declarative `operation: \'update\'` action is not an unbound declaration', () => {
+    const objects = [{
+        name: 'todo_task',
+        actions: [
+            // The platform performs this write; `type` stays at its default.
+            { name: 'mark_done', operation: 'update', patch: { status: 'done' } },
+            // Positive control: a real dead button, still named.
+            { name: 'ghost_button', type: 'script' },
+        ],
+    }];
+
+    it('omits it from the finding while still naming a real dead button', async () => {
+        const logger = makeLogger();
+        await runActionGovernanceInventory({ registered: [], objects, logger });
+
+        const unbound = logger.warn.mock.calls.filter(
+            (call: any[]) => /declared script actions with NO handler/.test(String(call[0])),
+        );
+        expect(unbound).toHaveLength(1);
+        expect(unbound[0][1]).toEqual(expect.objectContaining({
+            count: 1,
+            actions: ['todo_task:ghost_button'],
+        }));
+    });
+
+    it('holds when the row carries an explicit `type: \'script\'` (the materialized default)', async () => {
+        const logger = makeLogger();
+        await runActionGovernanceInventory({
+            registered: [],
+            objects: [{
+                name: 'todo_task',
+                actions: [{ name: 'mark_done', type: 'script', operation: 'update', patch: { status: 'done' } }],
+            }],
+            logger,
+        });
+
+        expect(logger.warn).not.toHaveBeenCalledWith(
+            expect.stringMatching(/declared script actions with NO handler/),
+            expect.anything(),
+        );
+    });
+});

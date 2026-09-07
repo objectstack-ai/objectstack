@@ -112,7 +112,7 @@ Advanced / low-level Better-Auth options
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **expiresIn** | `number` | optional (default: `604800`) | Session duration in seconds |
+| **expiresIn** | `number` | optional (default: `604800`) | Session duration in seconds (unit per better-auth `session.expiresIn`) |
 | **updateAge** | `number` | optional (default: `86400`) | Session update frequency |
 
 ### Nested Shape: `AuthConfig.socialProviders[string]`
@@ -151,7 +151,7 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 | **requireEmailVerification** | `boolean` | optional | Require email verification before creating a session |
 | **minPasswordLength** | `number` | optional | Minimum password length (default 8) |
 | **maxPasswordLength** | `number` | optional | Maximum password length (default 128) |
-| **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) |
+| **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) (unit per better-auth `emailAndPassword.resetPasswordTokenExpiresIn`) |
 | **autoSignIn** | `boolean` | optional | Auto sign-in after sign-up (default true) |
 | **revokeSessionsOnPasswordReset** | `boolean` | optional | Revoke all other sessions on password reset |
 
@@ -162,7 +162,7 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 | **sendOnSignUp** | `boolean` | optional | Automatically send verification email after sign-up |
 | **sendOnSignIn** | `boolean` | optional | Send verification email on sign-in when not yet verified |
 | **autoSignInAfterVerification** | `boolean` | optional | Auto sign-in the user after email verification |
-| **expiresIn** | `number` | optional | Verification token TTL in seconds (default 3600) |
+| **expiresIn** | `number` | optional | Verification token TTL in seconds (default 3600) (unit per better-auth `emailVerification.expiresIn`) |
 
 ### Nested Shape: `AuthConfig.audience`
 
@@ -248,7 +248,7 @@ Email and password authentication options forwarded to better-auth
 | **requireEmailVerification** | `boolean` | optional | Require email verification before creating a session |
 | **minPasswordLength** | `number` | optional | Minimum password length (default 8) |
 | **maxPasswordLength** | `number` | optional | Maximum password length (default 128) |
-| **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) |
+| **resetPasswordTokenExpiresIn** | `number` | optional | Reset-password token TTL in seconds (default 3600) (unit per better-auth `emailAndPassword.resetPasswordTokenExpiresIn`) |
 | **autoSignIn** | `boolean` | optional | Auto sign-in after sign-up (default true) |
 | **revokeSessionsOnPasswordReset** | `boolean` | optional | Revoke all other sessions on password reset |
 
@@ -266,7 +266,7 @@ Email verification options forwarded to better-auth
 | **sendOnSignUp** | `boolean` | optional | Automatically send verification email after sign-up |
 | **sendOnSignIn** | `boolean` | optional | Send verification email on sign-in when not yet verified |
 | **autoSignInAfterVerification** | `boolean` | optional | Auto sign-in the user after email verification |
-| **expiresIn** | `number` | optional | Verification token TTL in seconds (default 3600) |
+| **expiresIn** | `number` | optional | Verification token TTL in seconds (default 3600) (unit per better-auth `emailVerification.expiresIn`) |
 
 
 ---

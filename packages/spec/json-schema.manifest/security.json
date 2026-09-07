@@ -30,6 +30,7 @@
     "security/SharingLevel",
     "security/SharingRule",
     "security/SharingRuleType",
-    "security/TenancyPosture"
+    "security/TenancyPosture",
+    "security/TenantLayer0Verdict"
   ]
 }

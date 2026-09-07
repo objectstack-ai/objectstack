@@ -362,16 +362,16 @@ const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
  * phantom half of the same defect, and the shape `validateSecurityPosture` was
  * caught in for `objects` (#15552).
  *
- * `stack.agents · an array`: the agent readers filter their array branch with
- * `!!x && typeof x === 'object'`, and `[]` passes that test — so an empty list
- * item survives as an agent with no name and draws one reference-integrity
- * finding at a position nobody wrote. `recordsOf` uses `isRec`, which excludes
- * an array, so re-pointing those readers closes this too. They are among the
- * sixteen copies in #15728.
+ * Empty since #15728. The one row it held was `stack.agents · an array`: the
+ * agent readers filtered their array branch with `!!x && typeof x === 'object'`
+ * and `[]` passes that test, so an empty list item survived as an agent with no
+ * name and drew one reference-integrity finding at a position nobody wrote.
+ * `recordsOf` filters with `isRec`, which excludes an array, and re-pointing
+ * those readers closed it. The row came out because this assertion went red
+ * demanding an invented finding that no longer happens — the both-directions
+ * half earning its keep, the same way `stack.datasets` left `RESIDUAL_THROWS`.
  */
-const RESIDUAL_INVENTED: Readonly<Record<string, number>> = {
-  'stack.agents · an array': 1,
-};
+const RESIDUAL_INVENTED: Readonly<Record<string, number>> = {};
 
 describe('a non-record entry in any other stack collection (#15636)', () => {
   describe.each(SWEPT_COLLECTIONS.map((c) => [c.label, c] as const))('%s', (_label, collection) => {

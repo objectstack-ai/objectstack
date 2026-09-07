@@ -47,6 +47,12 @@ import {
 } from './lib/root-index';
 import { rootCategoryDirs } from './lib/root-meta';
 import {
+  formatSchemaClosureExemptionCoverage,
+  schemaClosureAbsenceIsDeclared,
+  schemaClosureExemptionCoverage,
+  schemaClosureExemptionsAreClean,
+} from './lib/schema-closure';
+import {
   buildSchemaIndex,
   formatConflicts,
   resolveSchemaPage,
@@ -313,13 +319,24 @@ function schemaHrefFrom(fromCategory: string): (name: string) => string | null {
  */
 function groupSchemasByPage(): Map<string, Map<string, Array<{ name: string; content: any }>>> {
   const byCategory = new Map<string, Map<string, Array<{ name: string; content: any }>>>();
+  /** Fed to the exemption coverage check below — never a second walk of the tree. */
+  const categoriesWithSchemaDir: string[] = [];
 
   for (const category of Object.keys(CATEGORIES)) {
     const categorySchemaDir = path.join(SCHEMA_DIR, category);
     if (!fs.existsSync(categorySchemaDir)) {
-      console.log(`Warning: Schema directory ${categorySchemaDir} does not exist`);
+      // Absent AND undeclared is the reading this warning exists to deliver, so
+      // it still prints. Absent and declared is `CATEGORIES_WITHOUT_SCHEMA_CLOSURE`
+      // — the exemption is a hand-signed claim about design carrying its
+      // citation, not "the Protocol map in build-schemas.ts happens to omit it",
+      // which would make a category dropped from that map by accident exempt
+      // itself from the very check that would have caught it (#15870).
+      if (!schemaClosureAbsenceIsDeclared(category)) {
+        console.log(`Warning: Schema directory ${categorySchemaDir} does not exist`);
+      }
       continue;
     }
+    categoriesWithSchemaDir.push(category);
 
     const pages = new Map<string, Array<{ name: string; content: any }>>();
     for (const file of fs.readdirSync(categorySchemaDir).filter(f => f.endsWith('.json'))) {
@@ -337,6 +354,18 @@ function groupSchemasByPage(): Map<string, Map<string, Array<{ name: string; con
     }
 
     byCategory.set(category, pages);
+  }
+
+  // Held in both directions, from the walk that just ran rather than from a
+  // second one: an exemption may not outlive the condition it declares, or the
+  // module it names. Loud and fatal, like `resolveCategoryTitles` above — the
+  // freshness guard at the top of this file has already proved `json-schema/`
+  // is newer than `src/`, so a mismatch here is the declaration being wrong and
+  // never a half-built tree.
+  const exemptions = schemaClosureExemptionCoverage(Object.keys(CATEGORIES), categoriesWithSchemaDir);
+  if (!schemaClosureExemptionsAreClean(exemptions)) {
+    console.error(`\n\u2717 ${formatSchemaClosureExemptionCoverage(exemptions)}`);
+    process.exit(1);
   }
 
   return byCategory;

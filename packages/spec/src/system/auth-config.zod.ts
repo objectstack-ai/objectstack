@@ -305,9 +305,15 @@ export const EmailAndPasswordConfigSchema = lazySchema(() => z.object({
   ),
   minPasswordLength: z.number().optional().describe('Minimum password length (default 8)'),
   maxPasswordLength: z.number().optional().describe('Maximum password length (default 128)'),
+  // `externalVocabulary` mirror (#14478 ruling B): this object's own describe
+  // says its options are "forwarded to better-auth", and every sibling here is
+  // a better-auth option name verbatim (`disableSignUp`,
+  // `requireEmailVerification`, `minPasswordLength`, `autoSignIn`,
+  // `revokeSessionsOnPasswordReset`). A key that is forwarded by name cannot be
+  // renamed without breaking the forwarding.
   resetPasswordTokenExpiresIn: z.number().optional().describe(
     'Reset-password token TTL in seconds (default 3600)'
-  ),
+  ).meta({ externalVocabulary: 'better-auth `emailAndPassword.resetPasswordTokenExpiresIn`' }),
   autoSignIn: z.boolean().optional().describe('Auto sign-in after sign-up (default true)'),
   revokeSessionsOnPasswordReset: z.boolean().optional().describe(
     'Revoke all other sessions on password reset'
@@ -327,9 +333,11 @@ export const EmailVerificationConfigSchema = lazySchema(() => z.object({
   autoSignInAfterVerification: z.boolean().optional().describe(
     'Auto sign-in the user after email verification'
   ),
+  // `externalVocabulary` mirror (#14478 ruling B) — forwarded to better-auth by
+  // name, as this object's own describe states.
   expiresIn: z.number().optional().describe(
     'Verification token TTL in seconds (default 3600)'
-  ),
+  ).meta({ externalVocabulary: 'better-auth `emailVerification.expiresIn`' }),
 }).optional().describe('Email verification options forwarded to better-auth'));
 
 /**
@@ -547,7 +555,11 @@ export const AuthConfigSchema = lazySchema(() => z.object({
   providers: z.array(AuthProviderConfigSchema).optional(),
   plugins: AuthPluginConfigSchema.optional(),
   session: z.object({
-    expiresIn: z.number().default(60 * 60 * 24 * 7).describe('Session duration in seconds'),
+    // `externalVocabulary` mirror (#14478 ruling B): better-auth's own
+    // `session.expiresIn` / `session.updateAge` pair, forwarded by name — the
+    // defaults above are that library's defaults (7 days / 1 day).
+    expiresIn: z.number().default(60 * 60 * 24 * 7).describe('Session duration in seconds')
+      .meta({ externalVocabulary: 'better-auth `session.expiresIn`' }),
     updateAge: z.number().default(60 * 60 * 24).describe('Session update frequency'),
   }).optional(),
   trustedOrigins: z.array(z.string()).optional().describe(

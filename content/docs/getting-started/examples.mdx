@@ -332,6 +332,14 @@ blocks first — make them identical, or declare `i18n` in only one of the
 stacks. Composition never picks a locale set for you: each stack's
 `translations` bundles are written against the locales that stack declares.
 
+Every top-level key's composition rule is exported: `COMPOSE_KEY_DISPOSITIONS`
+maps each key `ObjectStackDefinitionSchema` declares to its rule (`concat`,
+`single`, `manifest`, `objects`, `functions`) and `STACK_DEFINITION_KEYS` is
+the key set derived from it — a downstream seam that walks an artifact's top
+level (a hosted publish, an artifact merge) derives the key set and each key's
+disposition from those two exports instead of copying a list, so a key added
+to the schema reaches it without an edit.
+
 ### Short Names Are Canonical
 
 Each app declares a `namespace` in its manifest, but **the short object name is what you use everywhere** — in `engine.find()`, hooks, formulas, lookups, REST URLs, and physical tables. The namespace is internal metadata used only for package provenance and cross-package disambiguation.

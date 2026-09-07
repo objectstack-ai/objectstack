@@ -44,7 +44,7 @@ describe('InMemoryDriver Persistence', () => {
     it('should persist and restore data via file adapter', async () => {
       // Create and populate driver with file persistence
       const driver1 = new InMemoryDriver({
-        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveIntervalMs: 100 },
       });
       await driver1.connect();
       await driver1.create('users', { id: '1', name: 'Alice' });
@@ -59,7 +59,7 @@ describe('InMemoryDriver Persistence', () => {
 
       // Create a new driver and verify data is restored
       const driver2 = new InMemoryDriver({
-        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveIntervalMs: 100 },
       });
       await driver2.connect();
 
@@ -84,7 +84,7 @@ describe('InMemoryDriver Persistence', () => {
 
     it('should persist updates and deletes', async () => {
       const driver1 = new InMemoryDriver({
-        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveIntervalMs: 100 },
       });
       await driver1.connect();
 
@@ -99,7 +99,7 @@ describe('InMemoryDriver Persistence', () => {
 
       // Restore
       const driver2 = new InMemoryDriver({
-        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveIntervalMs: 100 },
       });
       await driver2.connect();
 
@@ -194,7 +194,7 @@ describe('InMemoryDriver Persistence', () => {
     it('should auto-detect Node.js environment and use file persistence with object config', async () => {
       const filePath = path.join(TEST_DATA_DIR, 'auto-test-db.json');
       const driver1 = new InMemoryDriver({
-        persistence: { type: 'auto', path: filePath, autoSaveInterval: 100 },
+        persistence: { type: 'auto', path: filePath, autoSaveIntervalMs: 100 },
       });
       await driver1.connect();
       await driver1.create('users', { id: '1', name: 'Alice' });
@@ -206,7 +206,7 @@ describe('InMemoryDriver Persistence', () => {
 
       // Restore from file
       const driver2 = new InMemoryDriver({
-        persistence: { type: 'auto', path: filePath, autoSaveInterval: 100 },
+        persistence: { type: 'auto', path: filePath, autoSaveIntervalMs: 100 },
       });
       await driver2.connect();
       const users = await driver2.find('users', {});
@@ -219,7 +219,7 @@ describe('InMemoryDriver Persistence', () => {
   describe('Bulk Operations with Persistence', () => {
     it('should persist bulk creates', async () => {
       const driver1 = new InMemoryDriver({
-        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveIntervalMs: 100 },
       });
       await driver1.connect();
       await driver1.bulkCreate('items', [
@@ -231,7 +231,7 @@ describe('InMemoryDriver Persistence', () => {
       await driver1.disconnect();
 
       const driver2 = new InMemoryDriver({
-        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: TEST_FILE_PATH, autoSaveIntervalMs: 100 },
       });
       await driver2.connect();
       const items = await driver2.find('items', {});
@@ -278,7 +278,7 @@ describe('InMemoryDriver Persistence', () => {
     it('still persists when a host opts in explicitly', async () => {
       const filePath = path.join(TEST_DATA_DIR, 'opt-in.json');
       const driver = new InMemoryDriver({
-        persistence: { type: 'file', path: filePath, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: filePath, autoSaveIntervalMs: 100 },
       });
       await driver.connect();
       await driver.create('items', { id: 'a', name: 'Widget' });
@@ -338,7 +338,7 @@ describe('InMemoryDriver Persistence', () => {
       process.env.VERCEL = '1';
       const filePath = path.join(TEST_DATA_DIR, 'explicit-file-serverless.json');
       const driver = new InMemoryDriver({
-        persistence: { type: 'file', path: filePath, autoSaveInterval: 100 },
+        persistence: { type: 'file', path: filePath, autoSaveIntervalMs: 100 },
       });
       await driver.connect();
       await driver.create('items', { id: '1', name: 'Widget' });

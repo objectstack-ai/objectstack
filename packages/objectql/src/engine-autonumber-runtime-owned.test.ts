@@ -546,19 +546,24 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
  * them sees what that flag changes on the way in.
  *
  * What it changes is WHICH strip gets to the field first. A `readonly` field is
- * also stripped at the DataProtocol create INGRESS (`stripReadonlyForInsert`,
- * #3043) — a seam that knows only the `isSystem` exemption, while the engine's
- * runtime-owned strip also honours `preserveAudit` (#3493: a historical import
- * reinstating legacy record numbers). Left alone, the flag would therefore have
- * SILENTLY narrowed a documented exemption: the ingress would delete the legacy
- * number before the engine could keep it, with no test anywhere going red,
- * because every existing preserveAudit pin calls `engine.insert` directly.
+ * also subject to the AUTHOR-declared static strip — at the DataProtocol create
+ * ingress when this note was written (`stripReadonlyForInsert`, #3043), and
+ * inside `engine.insert` itself since the maintainer ruling of 2026-09-03
+ * (option C, #14147), which deleted that ingress copy. Either way it is a strip
+ * that knows only the `isSystem` exemption, while the engine's runtime-owned
+ * strip also honours `preserveAudit` (#3493: a historical import reinstating
+ * legacy record numbers). Left alone, the flag would therefore have SILENTLY
+ * narrowed a documented exemption: the static strip would delete the legacy
+ * number before the runtime-owned pass could keep it, with no test anywhere
+ * going red, because every existing preserveAudit pin calls `engine.insert`
+ * directly.
  *
- * So the ingress skips runtime-owned types outright (they are covered by the
- * engine strip on EVERY insert path, including the direct `engine.insert`
- * callers the ingress never sees) and these cases pin both halves of that: the
- * ordinary caller is still stripped, and the historical import still keeps its
- * value — flagged or not, the verdicts are identical.
+ * So the static strip skips runtime-owned types outright — the ingress copy did
+ * by rule, and the in-engine pass does by construction: it runs over
+ * `staticReadonlyInsertSubject`, a schema view with those types removed, AFTER
+ * the runtime-owned pass has had its say — and these cases pin both halves of
+ * that: the ordinary caller is still stripped, and the historical import still
+ * keeps its value — flagged or not, the verdicts are identical.
  */
 describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set', () => {
   // What `Field.autonumber({ label: 'Invoice No.' })` produces since #5628.
@@ -603,9 +608,12 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
   });
 
   it('keeps a legacy number for a `preserveAudit` historical import THROUGH THE INGRESS (#3493)', async () => {
-    // The regression this whole describe exists for: the ingress strip has no
-    // `preserveAudit` exemption, so if it acted on the flag the value would be
-    // gone before the engine's whitelist ran.
+    // The regression this whole describe exists for: the static strip has no
+    // `preserveAudit` exemption — at the ingress when this was written, inside
+    // `engine.insert` since ruling C — so if it acted on the flagged autonumber
+    // the value would be gone before the runtime-owned whitelist could keep it.
+    // It does not: the static pass runs over `staticReadonlyInsertSubject`,
+    // with runtime-owned types removed, after the runtime-owned pass.
     const created = await rig.protocol.createData({
       object: 'an_invoice',
       data: { name: 'legacy', invoice_number: 'LEGACY-0007' },
@@ -623,7 +631,7 @@ describe('#5628 — a `readonly: true` autonumber keeps the #5503 exemption set'
     expect(created.record.invoice_number).toBe('INV-000042');
   });
 
-  it('an author-declared `readonly` field of an ORDINARY type is still stripped at the ingress', async () => {
+  it('an author-declared `readonly` field of an ORDINARY type is still stripped on a create through the ingress — inside `engine.insert` since ruling C', async () => {
     // The #3043 strip keeps its full width — only runtime-owned types moved.
     rig.engine.registry.registerObject({
       name: 'an_case',

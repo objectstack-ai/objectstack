@@ -2,6 +2,8 @@
 
 import { defineConfig } from 'tsup';
 
+import { dropSourcesContent } from '../../../scripts/tsup-drop-sources-content.mjs';
+
 export default defineConfig({
     entry: ['src/index.ts', 'src/contracts/index.ts'],
     splitting: true,
@@ -16,4 +18,5 @@ export default defineConfig({
     // never tries to bundle/resolve those optional natives. (They are devDeps for
     // tests; previously they were optional peerDeps, which tsup auto-externalized.)
     external: ['vitest', /^@objectstack\/driver-/],
+    esbuildOptions: dropSourcesContent,
 });

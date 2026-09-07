@@ -27,6 +27,14 @@ export const SCORE_WEIGHTS = {
   suggestion: 1,
 } as const;
 
+/**
+ * The `rule` id on the synthetic issue raised when the linter throws.
+ *
+ * Exported so a consumer can tell "the linter reported a problem" from "the
+ * linter never ran" by matching an id rather than prose.
+ */
+export const LINT_CRASHED_RULE = 'rubric/lint-crashed';
+
 export interface MetadataScore {
   /** 0–100 quality score (higher is better). */
   score: number;
@@ -44,6 +52,18 @@ export interface MetadataScore {
   schemaErrors: string[];
   /** Lint issues (naming, labels, structure, data-model conventions). */
   issues: LintIssue[];
+  /**
+   * Set only when the lint half of the rubric could NOT run: `lintConfig` threw
+   * and this carries the thrown message. Absent on every run where the linter
+   * completed -- including one where it reported errors, which is a lint
+   * verdict, not a missing one.
+   *
+   * Optional on purpose. It is the machine-readable half of the refusal below,
+   * not its enforcement: a consumer that never reads it still cannot mistake a
+   * crashed run for a clean one, because the same event is carried by `issues`,
+   * `counts.errors`, `valid` and `score`.
+   */
+  lintError?: string;
 }
 
 function gradeFor(score: number): MetadataScore['grade'] {
@@ -72,12 +92,47 @@ export function scoreMetadata(stack: unknown): MetadataScore {
     : parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`);
 
   // 2) Lint (naming/labels/structure + data-model conventions).
+  //
+  // A linter crash must not mask the schema verdict — the original intent, and
+  // still right. What was not right is the number that came out of it: with
+  // `issues = []` the penalty was 0, so a stack whose linter threw scored
+  // 100 / A / `valid: true` with every count at zero — byte-for-byte the
+  // verdict a genuinely clean stack gets, on a rubric half of which never ran.
+  // "The linter found nothing" and "the linter never ran" are different facts.
+  //
+  // Reachable, and not exotically: a localized `label` (`{ en: …, 'zh-CN': … }`)
+  // on an app, or on a view's `list`, is schema-valid and makes the label-case
+  // rule throw. That crash is its own defect, filed separately; this function's
+  // job is to never publish a clean verdict it did not earn.
+  //
+  // So the failure is recorded in every carrier a consumer might read, because
+  // reading any ONE of them must be enough:
+  //   · `lintError` — the fact itself, typed, for a machine consumer;
+  //   · a synthetic `error` issue — so `issues`, `counts.errors` and `valid`
+  //     carry it too, which is what makes the eval harness fail the case: its
+  //     `passed` reads `counts.errors` and would never see a new field;
+  //   · `score` 0 / grade `F` — the only channel `os lint --score --json`
+  //     publishes, and the same refusal `unscorableScore()` (metadata-eval.ts)
+  //     already gives a case there was nothing to judge, for the same reason:
+  //     a clean number nothing earned is the worst possible output.
+  // The schema verdict survives all of it — `schemaErrors` and
+  // `counts.schemaErrors` still report exactly what the parse found.
   let issues: LintIssue[] = [];
+  let lintError: string | undefined;
   try {
     issues = lintConfig(normalized) as LintIssue[];
-  } catch {
-    // A linter crash shouldn't mask the schema verdict — treat as no lint data.
-    issues = [];
+  } catch (err) {
+    lintError = err instanceof Error ? err.message : String(err);
+    issues = [
+      {
+        severity: 'error',
+        rule: LINT_CRASHED_RULE,
+        message:
+          `The lint rubric did not run: ${lintError}. This verdict covers the schema ` +
+          `parse only — no lint verdict was produced, so it must not be read as a clean one.`,
+        path: '(lint)',
+      },
+    ];
   }
 
   const errors = bySeverity(issues, 'error');
@@ -90,7 +145,10 @@ export function scoreMetadata(stack: unknown): MetadataScore {
     warnings.length * SCORE_WEIGHTS.warning +
     suggestions.length * SCORE_WEIGHTS.suggestion;
 
-  const score = Math.max(0, Math.min(100, 100 - penalty));
+  // A rubric that did not run has no score to report. 0 / `F` is not a penalty
+  // dressed up as a measurement — it is the refusal, and it is the shape the
+  // eval harness already uses for "there was nothing to judge".
+  const score = lintError !== undefined ? 0 : Math.max(0, Math.min(100, 100 - penalty));
 
   return {
     score: Math.round(score),
@@ -104,5 +162,6 @@ export function scoreMetadata(stack: unknown): MetadataScore {
     },
     schemaErrors,
     issues,
+    ...(lintError !== undefined ? { lintError } : {}),
   };
 }

@@ -740,6 +740,7 @@
     "isNowDefaultToken (function)",
     "isOrganizationUnique (function)",
     "isPlainRecord (function)",
+    "isPublicSharingEnabled (function)",
     "isRuntimeDefaultToken (function)",
     "isTenancyDisabled (function)",
     "isTextFilterOperator (function)",

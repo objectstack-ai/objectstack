@@ -171,6 +171,7 @@ import {
   childEnv,
   E2E_SECRET_KEY,
   portContentionError,
+  probeThroughChild,
   requireBuiltCli,
   reservePort,
 } from './helpers/serve-process.js';
@@ -316,8 +317,7 @@ interface OriginCheckResult {
 const READY_BANNER_TAIL = /Press Ctrl\+C to stop/;
 
 /**
- * WHY THE PROBE BELOW IS LIFECYCLE-AWARE, and the reading that decided its
- * shape. The bound is this constant; the reason is this whole section.
+ * WHY THE PROBE BELOW IS LIFECYCLE-AWARE — this file's half of the reading.
  *
  * A merge-group run evicted a queue entry when the third call site below failed
  * with:
@@ -326,149 +326,25 @@ const READY_BANNER_TAIL = /Press Ctrl\+C to stop/;
  *     Caused by: SocketError: other side closed
  *     { code: 'UND_ERR_SOCKET', socket: { bytesWritten: 349, bytesRead: +0 } }
  *
- * ## What that signature IS — measured, and it is ⛔ NOT "the server was not up"
+ * ⛔ That is NOT "the server was not up": `bytesRead: 0` with `bytesWritten` set
+ * says the connection was ESTABLISHED and the whole request delivered before the
+ * peer closed it, whereas nothing listening answers `ECONNREFUSED` with no
+ * socket object at all. So the wait above was already correct — ⛔ the repair is
+ * not a longer wait and ⛔ not a bigger timeout.
  *
- * `bytesWritten: 349, bytesRead: 0` says the TCP connection was ESTABLISHED,
- * the whole request was delivered, and the peer then closed it without
- * answering. Three shapes measured side by side on this container, with the
- * same request this file sends:
+ * The mechanism, the three socket shapes measured side by side, the bound and
+ * every fence now live ONCE, with `probeThroughChild()` in
+ * `helpers/serve-process.ts` — read that section rather than a copy of it. Three
+ * sibling files here had the same unguarded shape (#15653) and the idiom was
+ * hoisted so the family has one definition and one pin
+ * (`serve-probe-child-attribution.test.ts`) rather than four copies of it.
  *
- *     nothing listening on the port    ECONNREFUSED, and NO socket object
- *                                      (bytesWritten/bytesRead both undefined)
- *     listener accepts, then FINs      UND_ERR_SOCKET "other side closed",
- *                                      bytesWritten 321, bytesRead 0
- *     server torn down mid-request     UND_ERR_SOCKET "other side closed",
- *                                      bytesWritten 345, bytesRead 0
- *
- * Only the second and third match what was recorded, and the FIRST is what a
- * genuine readiness race looks like. So the child was serving when the request
- * arrived, and something ended the connection after it. The wait above was
- * already correct: ⛔ the repair is not a longer or better wait, and ⛔ not a
- * bigger timeout.
- *
- * ## What this harness could not say, and now says
- *
- * On the failing path this function used to discard the two artefacts that
- * decide between "the child died" and "a live child dropped a connection": the
- * child's exit status, and everything the child printed. The `child.on('exit')`
- * handler above feeds the READINESS promise only, so once that promise has
- * settled a later death is invisible here and the rejection reaches vitest as a
- * bare `TypeError: fetch failed` — no exit code, no stdout, no stderr. That is
- * why the one recorded occurrence could not be attributed at all, and it is the
- * defect this repair removes.
- *
- * It matters that a silent death is reachable. There is no
- * `process.on('uncaughtException')` and no `'unhandledRejection'` handler
- * anywhere in this repo's product source, so a late async throw inside the
- * child — or an OOM kill on a six-shard CI box — takes the process down with no
- * HTTP answer and exactly this client-side signature.
- *
- * ## The bound, and what it can and cannot hide
- *
- * ⛔ The retry is not the first move and cannot be reached before the child has
- * been asked whether it is alive. On a transport failure the probe waits up to
- * {@link CHILD_EXIT_SETTLE_MS} for the child's `exit` event — the FIN reaches
- * the client on the network's schedule and `exit` arrives on the event loop's,
- * so reading `exitCode` at the instant `fetch` rejects reports a dead child as
- * alive — and then:
- *
- *   • child EXITED ⇒ ⛔ never retried. Fails at once, naming the exit code and
- *     signal and quoting the child's whole stdout and stderr.
- *   • failure is NOT `UND_ERR_SOCKET` ⇒ ⛔ never retried. Rethrown with the
- *     child's output attached. ECONNREFUSED (nothing listening), a timeout, a
- *     DNS or a TLS fault each still fail on their first occurrence.
- *   • child ALIVE and `UND_ERR_SOCKET` ⇒ absorbed, up to this many attempts in
- *     total.
- *
- * ⛔ CANNOT hide a wrong ANSWER. The loop absorbs transport failures only; a
- * `200` where the pin wants `403` is returned to the caller untouched, on the
- * first attempt, every time. Nor can it hide a boot that never reaches the
- * banner: that is the readiness rejection above, which this does not touch.
- *
- * ⚠️ CAN hide a LIVE `os serve` that occasionally destroys a connection without
- * answering it. That is a real product-defect class and this bound does not
- * remove it. What it does is make every occurrence print
- * `[serve-node-env-production-default] absorbed a transport failure` with the
- * full socket signature, so a recurring one is a `grep` away in a CI log
- * instead of a merge-queue eviction. ⛔ If that line starts appearing, the
- * finding is in `os serve` and belongs in a card against it — do not raise this
- * number to make it stop.
- *
- * ⛔ And the line this file may never cross, restated because the test is slow
- * (its shard ran 783 s) and its subject is unglamorous: no `.skip`, no `.todo`,
- * no quarantine list, no retry that swallows a failure into silence. A flake in
- * a required shard is a harness bug to diagnose, never a licence to stop
+ * ⛔ The line this file may never cross, restated because the test is slow (its
+ * shard ran 783 s) and its subject is unglamorous: no `.skip`, no `.todo`, no
+ * quarantine list, no retry that swallows a failure into silence. A flake in a
+ * required shard is a harness bug to diagnose, never a licence to stop
  * measuring.
  */
-const PROBE_ATTEMPTS = 3;
-
-/**
- * How long the probe gives the child's `exit` event before it will call the
- * child alive — see the section above for why that answer cannot be read
- * synchronously off `exitCode`.
- *
- * Two seconds because this is a LOCAL child whose exit has already happened by
- * the time its FIN reached us; the wait covers event-loop delivery, not process
- * teardown. It is paid ONLY on a failing attempt, so a green run never waits.
- */
-const CHILD_EXIT_SETTLE_MS = 2_000;
-
-/** The child's lifecycle state, as far as this process can observe it. */
-interface ChildFate {
-  exited: boolean;
-  code: number | null;
-  signal: NodeJS.Signals | null;
-}
-
-function fateOf(child: ProbeChild): ChildFate {
-  return {
-    exited: child.exitCode !== null || child.signalCode !== null,
-    code: child.exitCode,
-    signal: child.signalCode,
-  };
-}
-
-/** Ask the child whether it is still running, allowing `ms` for the answer. */
-function settleChildFate(child: ProbeChild, ms: number): Promise<ChildFate> {
-  const already = fateOf(child);
-  if (already.exited) return Promise.resolve(already);
-  return new Promise<ChildFate>((settle) => {
-    const onExit = () => {
-      clearTimeout(timer);
-      settle(fateOf(child));
-    };
-    const timer = setTimeout(() => {
-      child.off('exit', onExit);
-      settle(fateOf(child));
-    }, ms);
-    child.once('exit', onExit);
-  });
-}
-
-/** `cause.code` of a `fetch` rejection, when it carries one. */
-function transportCode(err: unknown): string | undefined {
-  const cause = (err as { cause?: { code?: unknown } } | undefined)?.cause;
-  return typeof cause?.code === 'string' ? cause.code : undefined;
-}
-
-/**
- * One line naming what the transport did — the exact fields the recorded
- * failure had to be diagnosed from, kept together so the NEXT occurrence needs
- * no second run to be readable.
- */
-function transportSignature(err: unknown): string {
-  const cause = (err as {
-    cause?: { code?: unknown; message?: unknown; socket?: Record<string, unknown> };
-  } | undefined)?.cause;
-  const socket = cause?.socket;
-  const wire = socket
-    ? ` socket: bytesWritten=${String(socket.bytesWritten)} bytesRead=${String(socket.bytesRead)}`
-      + ` local=${String(socket.localAddress)}:${String(socket.localPort)}`
-      + ` remote=${String(socket.remoteAddress)}:${String(socket.remotePort)}`
-    : ' socket: none — the connection was never established';
-  return `${(err as Error)?.message ?? String(err)}`
-    + ` [cause ${String(cause?.code ?? 'none')}: ${String(cause?.message ?? 'none')}]${wire}`;
-}
 
 /**
  * Boot `os serve` for real against the shipped entrypoint, wait for the ready
@@ -609,9 +485,14 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
   const transcript = () => `\n--- child stdout ---\n${out}\n--- child stderr ---\n${err}`;
 
   try {
-    const absorbed: string[] = [];
-    for (let attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
-      try {
+    return await probeThroughChild(
+      {
+        child,
+        transcript,
+        label: 'serve-node-env-production-default',
+        what: `the origin probe on port ${port}`,
+      },
+      async () => {
         const res = await fetch(`http://localhost:${port}/api/v1/auth/sign-in/email`, {
           method: 'POST',
           headers: {
@@ -622,45 +503,14 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
           },
           body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
         });
+        // ⛔ The body read stays INSIDE the guard, and cannot throw: a connection
+        // torn down mid-body rejects out of `res.json()` rather than out of
+        // `fetch()`, and an ASSERTION in here would be reported as a dropped
+        // socket rather than as the wrong answer it is.
         let body: any = null;
         try { body = await res.json(); } catch { /* non-JSON error body, fall through with null */ }
         return { status: res.status, body };
-      } catch (probeErr) {
-        const signature = transportSignature(probeErr);
-        // ⛔ Ask the child FIRST, and wait for the answer. See PROBE_ATTEMPTS:
-        // a dead child must never reach the absorb branch below.
-        const fate = await settleChildFate(child, CHILD_EXIT_SETTLE_MS);
-        if (fate.exited) {
-          throw new Error(
-            `os serve DIED while answering the origin probe on port ${port} — exit code `
-            + `${String(fate.code)}, signal ${String(fate.signal)}. This is the CHILD's failure, not a `
-            + 'dropped socket, so it is NOT retried; the transcript below is what it printed on its '
-            + `way down.\nattempt ${attempt}/${PROBE_ATTEMPTS}: ${signature}${transcript()}`,
-          );
-        }
-        if (transportCode(probeErr) !== 'UND_ERR_SOCKET') {
-          throw new Error(
-            `the origin probe on port ${port} failed with a transport error this harness does not `
-            + 'absorb — only UND_ERR_SOCKET against a still-running child is absorbed, and only '
-            + `${PROBE_ATTEMPTS} times (see PROBE_ATTEMPTS).\nattempt ${attempt}/${PROBE_ATTEMPTS}: `
-            + `${signature}${transcript()}`,
-          );
-        }
-        absorbed.push(`attempt ${attempt}/${PROBE_ATTEMPTS}: ${signature}`);
-        // Loud on purpose. An absorbed failure that printed nothing would be the
-        // "retry into silence" this card forbids; this line is what makes a
-        // recurring one greppable in a CI log.
-        console.error(
-          '[serve-node-env-production-default] absorbed a transport failure from a STILL-RUNNING '
-          + `os serve on port ${port} (attempt ${attempt}/${PROBE_ATTEMPTS}) — ${signature}`,
-        );
-      }
-    }
-    throw new Error(
-      `the origin probe never completed a request against os serve on port ${port} after `
-      + `${PROBE_ATTEMPTS} attempts. The child was still running ${CHILD_EXIT_SETTLE_MS} ms after `
-      + 'EVERY one of them, so this is a live server dropping connections, not a dead child — the '
-      + `finding is in os serve, not in this harness.\n${absorbed.join('\n')}${transcript()}`,
+      },
     );
   } finally {
     await stop(child);

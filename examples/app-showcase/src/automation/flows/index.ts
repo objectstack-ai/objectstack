@@ -852,11 +852,19 @@ export const ProjectClosureFlow = defineFlow({
  * variable scope, and the body sends a reminder. A hard `maxIterations` guard
  * keeps iteration bounded. The loop node's ordinary out-edge (`→ end`) is the
  * after-loop continuation — the DAG invariant for ordinary edges is preserved.
+ *
+ * The body also demonstrates **per-iteration containment**: the reminder runs
+ * inside a `try_catch` whose `catch` is one bare `assignment`. A `loop` body has
+ * no error handling of its own, so without that guard the first task with an
+ * empty `owner` would end the whole run — later tasks never reminded, and the
+ * run summary reporting `acted: 0` for work that did happen. With it, every
+ * iteration is attempted and the sweep completes. See
+ * content/docs/automation/flows.mdx §"Per-iteration containment".
  */
 export const BatchRemindersFlow = defineFlow({
   name: 'showcase_batch_reminders',
   label: 'Batch Task Reminders (Loop)',
-  description: 'Iterates a collection of tasks and sends a reminder for each (structured loop container, ADR-0031).',
+  description: 'Iterates a collection of tasks and sends a reminder for each, each iteration contained by a try_catch so one bad task cannot end the sweep (structured loop container, ADR-0031).',
   type: 'autolaunched',
   variables: [
     { name: 'tasks', type: 'list', isInput: true, isOutput: false },
@@ -874,15 +882,48 @@ export const BatchRemindersFlow = defineFlow({
         maxIterations: 500,
         body: {
           nodes: [
+            // Per-iteration containment (#13681 / #14394) — a `loop` body has NO
+            // error handling of its own: the container iterates with a bare
+            // `await`, so a body node that returns `success: false` propagates
+            // straight out and ends the WHOLE run. `notify` fails on an empty
+            // resolved recipient set, so one task with a blank `owner` would
+            // leave every later task unreminded while the run summary reports
+            // `acted: 0` for work that did happen. The guard is a `try_catch`
+            // INSIDE the body, one per iteration.
             {
-              id: 'send_reminder',
-              type: 'notify',
-              label: 'Send Reminder',
+              id: 'guard_reminder',
+              type: 'try_catch',
+              label: 'Guarded iteration',
               config: {
-                recipients: '{task.owner}',
-                title: 'Reminder ({taskIndex}): {task.title}',
-                sourceObject: 'showcase_task',
-                sourceId: '{task.id}',
+                try: {
+                  nodes: [
+                    {
+                      id: 'send_reminder',
+                      type: 'notify',
+                      label: 'Send Reminder',
+                      config: {
+                        recipients: '{task.owner}',
+                        title: 'Reminder ({taskIndex}): {task.title}',
+                        sourceObject: 'showcase_task',
+                        sourceId: '{task.id}',
+                      },
+                    },
+                  ],
+                  edges: [],
+                },
+                // The shortest handler that works: ONE bare `assignment` node
+                // with no `config` at all. A `catch` region cannot be empty —
+                // `FlowRegionSchema.nodes` is `.min(1)`, so `catch: {}` and
+                // `catch: { nodes: [] }` are both refused by the parse, and
+                // omitting `catch` entirely parses while containing NOTHING.
+                // `edges` omitted; `errorVariable` omitted (defaults to
+                // `$error`). See content/docs/automation/flows.mdx
+                // §"Per-iteration containment".
+                catch: {
+                  nodes: [
+                    { id: 'reminder_failed', type: 'assignment', label: 'Reminder Failed (contained)' },
+                  ],
+                },
               },
             },
           ],

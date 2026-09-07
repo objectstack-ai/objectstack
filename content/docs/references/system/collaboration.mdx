@@ -346,10 +346,11 @@ This schema accepts one of the following structures:
 | **enablePresence** | `boolean` | optional (default: `true`) | Enable presence tracking |
 | **enableAwareness** | `boolean` | optional (default: `true`) | Enable awareness state |
 | **maxUsers** | `integer` | optional | Maximum concurrent users |
-| **idleTimeout** | `integer` | optional (default: `300000`) | Idle timeout in milliseconds |
+| **idleTimeoutMs** | `integer` | optional (default: `300000`) | Idle timeout in milliseconds |
+| **idleTimeout** | `never` | optional | [REMOVED] `CollaborationSessionConfig.idleTimeout` was renamed to `idleTimeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. This one was the live 1000x collision the rule exists to remove: the tenant surface carried its own `idleTimeout` in SECONDS, so the same bare name meant five minutes here and three and a half days there. Rename the key to `idleTimeoutMs`; the value (milliseconds) and the 300000 default are unchanged. |
 | **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | optional (default: `"ot"`) | Conflict resolution strategy |
 | **persistence** | `boolean` | optional (default: `true`) | Enable operation persistence |
-| **snapshot** | `{ enabled: boolean; interval: integer }` | optional | Snapshot configuration |
+| **snapshot** | `{ enabled: boolean; intervalMs: integer }` | optional | Snapshot configuration |
 
 ### Nested Shape: `CollaborationSession.users[number]`
 
@@ -421,17 +422,19 @@ This schema accepts one of the following structures:
 | **enablePresence** | `boolean` | optional (default: `true`) | Enable presence tracking |
 | **enableAwareness** | `boolean` | optional (default: `true`) | Enable awareness state |
 | **maxUsers** | `integer` | optional | Maximum concurrent users |
-| **idleTimeout** | `integer` | optional (default: `300000`) | Idle timeout in milliseconds |
+| **idleTimeoutMs** | `integer` | optional (default: `300000`) | Idle timeout in milliseconds |
+| **idleTimeout** | `never` | optional | [REMOVED] `CollaborationSessionConfig.idleTimeout` was renamed to `idleTimeoutMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. This one was the live 1000x collision the rule exists to remove: the tenant surface carried its own `idleTimeout` in SECONDS, so the same bare name meant five minutes here and three and a half days there. Rename the key to `idleTimeoutMs`; the value (milliseconds) and the 300000 default are unchanged. |
 | **conflictResolution** | `Enum<'ot' \| 'crdt' \| 'manual'>` | optional (default: `"ot"`) | Conflict resolution strategy |
 | **persistence** | `boolean` | optional (default: `true`) | Enable operation persistence |
-| **snapshot** | `{ enabled: boolean; interval: integer }` | optional | Snapshot configuration |
+| **snapshot** | `{ enabled: boolean; intervalMs: integer }` | optional | Snapshot configuration |
 
 ### Nested Shape: `CollaborationSessionConfig.snapshot`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | ✅ | Enable periodic snapshots |
-| **interval** | `integer` | ✅ | Snapshot interval in milliseconds |
+| **intervalMs** | `integer` | ✅ | Snapshot interval in milliseconds |
+| **interval** | `never` | optional | [REMOVED] `CollaborationSessionConfig.snapshot.interval` was renamed to `intervalMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `intervalMs`; the value (milliseconds) is unchanged. |
 
 
 ---

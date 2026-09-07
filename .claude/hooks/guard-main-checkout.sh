@@ -83,7 +83,10 @@ blocks instead.
 Fix the row for $tool in this hook's known_path_keys table, then re-run
 .claude/hooks/guard-main-checkout.selftest.sh.
 
-Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.
+Deliberate non-task exception: set OS_ALLOW_MAIN_EDITS=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
   exit 2
 fi
@@ -94,11 +97,24 @@ if [ -n "$file" ]; then d="$(dirname "$file")"; else d="${CLAUDE_PROJECT_DIR:-$P
 while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -d "$d" ]; do d="$(dirname "$d")"; done
 [ -d "$d" ] || d="${CLAUDE_PROJECT_DIR:-$PWD}"
 
-gitdir="$(git -C "$d" rev-parse --git-dir 2>/dev/null)" || exit 0
+# Canonicalise an existing directory to its physical absolute path, so both sides of the
+# comparison below are spelled the same way: git prints the common-dir RELATIVE, and some
+# hosts hand out symlinked temp dirs.
+canon_dir() { ( cd "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"; }
 
-case "$gitdir" in
-  */worktrees/*) exit 0 ;;
-esac
+# Am I in a LINKED WORKTREE? Structurally: a linked worktree's git-dir (.git/worktrees/NAME)
+# differs from its git-COMMON-dir (.git). A primary checkout has the two equal, and so does a
+# submodule (.git/modules/NAME for both) — which is why neither needs a special case. The
+# test holds whatever the path is spelled like; the `*/worktrees/*` substring match it
+# replaces did not, so a PRIMARY checkout that merely lived under a directory named
+# `worktrees` read as a linked worktree and went unguarded (#11809). --git-common-dir prints
+# RELATIVE to $d (`.git` at a toplevel, `../.git` from a subdirectory), so it MUST be
+# resolved against $d first: compared raw it never equals the absolute git-dir, and the
+# guard would fail open at EVERY depth instead of some.
+gitdir="$(git -C "$d" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+commondir="$(git -C "$d" rev-parse --git-common-dir 2>/dev/null)" || exit 0
+case "$commondir" in /*) ;; *) commondir="$d/$commondir" ;; esac
+[ "$(canon_dir "$gitdir")" != "$(canon_dir "$commondir")" ] && exit 0
 
 root="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$d")"
 branch="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '?')"
@@ -124,6 +140,9 @@ branch on the shared checkout is NOT enough; you must be in a dedicated worktree
 
 This guard checks the edited file's OWN repo, so sibling repos are covered too.
 
-Deliberate non-task exception: re-run with OS_ALLOW_MAIN_EDITS=1.
+Deliberate non-task exception: set OS_ALLOW_MAIN_EDITS=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
 exit 2

@@ -312,6 +312,42 @@ function buildRefusalMessage(
 }
 
 /**
+ * The refusal's machine-readable code, published as a VALUE so a consumer can
+ * recognise the refusal without re-spelling the literal (#14936).
+ *
+ * The class below mandates `code` over `instanceof`, and the measurement
+ * behind that mandate is why this constant exists rather than staying implicit
+ * in the class field: `@objectstack/objectql` declares BOTH realms in its own
+ * `exports` (`import` -> `dist/index.mjs`, `require` -> `dist/index.js`), so a
+ * consumer that loads this package through the other realm than the engine did
+ * holds a SECOND copy of this module. Measured across that split from a real
+ * consumer package:
+ *
+ *     SAME CLASS IDENTITY (A === B):      false
+ *     instA instanceof A (same realm):    true
+ *     instA instanceof B (CROSS-REALM):   false
+ *     code compare survives the split:    true
+ *
+ * so `instanceof` against this class is unsound for every consumer and fails
+ * SILENTLY - a `catch` that simply never fires.
+ *
+ * Deliberately the same shape as this package's five other published codes
+ * (`DUPLICATE_RECORD_CODE`, `HOOK_TARGET_REBIND_ERROR_CODE`,
+ * `HOOK_UNSCOPED_DATA_ACCESS_CODE`, `MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE`,
+ * `EMPTY_CREDENTIAL_REFUSAL_CODE`) rather than a new abstraction. The `*_CODE`
+ * NAME is load-bearing, not cosmetic: it is the shape
+ * `check:error-code-provenance`'s `constdef` pattern can see, so the one
+ * remaining spelling of this string is a stamp site the ledger accounts for
+ * under this package's own owner key - where
+ * `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` is already registered (#8844).
+ * ⛔ Never rename it out of that shape to quiet the gate: a spelling the
+ * gate cannot see is the failure mode the gate exists to catch, not a clean
+ * result.
+ */
+export const SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE =
+  'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' as const;
+
+/**
  * Binding point 2's refusal.
  *
  * Identified by `code` rather than `instanceof`, the convention every engine
@@ -326,8 +362,10 @@ function buildRefusalMessage(
  * through the engine's own ERROR log.
  */
 export class SystemWriteOrganizationRequiredError extends Error {
-  readonly code = 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' as const;
+  readonly code = SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE;
   readonly status = 500;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 500;
 
   constructor(
     public readonly object: string,
@@ -338,4 +376,32 @@ export class SystemWriteOrganizationRequiredError extends Error {
     super(buildRefusalMessage(object, posture, reason, organizationCount));
     this.name = 'SystemWriteOrganizationRequiredError';
   }
+}
+
+/**
+ * Does `err` carry this module's refusal (#14936)?
+ *
+ * The recognizer a consumer should reach for instead of the two options it
+ * otherwise has: `instanceof`, which the measurement on
+ * {@link SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE} shows is unsound across the
+ * dual build, or a re-spelled string literal, which acquires a stamp site in
+ * the consumer's own package and can drift from what the engine throws. A
+ * `code` compare is the only one of the three that survives the realm split,
+ * and it is the convention this class's own docblock already mandates.
+ *
+ * ⛔ Deliberately returns `boolean` and does NOT narrow to
+ * `err is SystemWriteOrganizationRequiredError`. A `code` compare is satisfied
+ * by ANY value carrying that `code` - including an envelope a transport
+ * rebuilt from the wire, which keeps the machine-readable `code` and drops
+ * everything else - so a type guard would promise `object`, `posture` and
+ * `reason` members such a value need not have, turning a sound check into an
+ * unsound assertion one layer down. Read those fields off the caught value
+ * only after checking for them; `code` is what this predicate guarantees.
+ */
+export function isSystemWriteOrganizationRequiredError(err: unknown): boolean {
+  return (
+    typeof err === 'object'
+    && err !== null
+    && (err as { code?: unknown }).code === SYSTEM_WRITE_ORGANIZATION_REQUIRED_CODE
+  );
 }

@@ -221,7 +221,10 @@ Already allowed, no flag needed:
   git stash list | git stash show | git stash create
   git stash apply <sha> | git stash store <sha>    # literal hex id, never stash@{N}
 
-Deliberate exception (the stack really is yours alone): re-run with OS_ALLOW_STASH=1.
+Deliberate exception (the stack really is yours alone): set OS_ALLOW_STASH=1 in the
+environment this hook itself runs in — a local settings "env" entry, or whatever this
+agent process was started with. A VAR=1 prefix on a command sets it for that command
+only, and this hook is not that command, so a prefix never reaches it.
 EOF
   exit 2
 done

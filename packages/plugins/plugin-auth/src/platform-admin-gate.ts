@@ -58,9 +58,20 @@ export const PLATFORM_ADMIN_REFUSAL_MESSAGES: Readonly<Record<401 | 403, string>
 /**
  * Is this session user a platform admin under ADR-0068 D2?
  *
- * Reads the canonical signals `customSession` contributes — the derived
- * `isPlatformAdmin` alias and `platform_admin` in `positions[]` — plus the
- * legacy `role` scalar as the back-compat fallback described above.
+ * Reads the derived `isPlatformAdmin` alias `customSession` contributes — which
+ * is the ADR-0095 D3 posture RUNG, not a name — plus the legacy `role` scalar as
+ * the back-compat fallback described above.
+ *
+ * ⛔ [#15136] It does NOT read `platform_admin` from `positions[]`, and that leg
+ * was REMOVED rather than merely left unused. `positions[]` is the security axis
+ * (ruling A), so it carries ADR-0057 D4 `sys_user_position` names — and
+ * `sys_user_position` is `apiEnabled`, writable by a tenant admin outright and by
+ * a delegate whose bound-set test passes vacuously for a position carrying no
+ * position-bound set. A row spelled `platform_admin` would therefore have made
+ * this predicate — and so the `/admin/*` mount gate below — admit a principal
+ * that `hasPlatformAdminStanding` refuses. The array read was defensible only
+ * while `positions` carried the auth axis, where nothing a tenant writes could
+ * put that word in it; it is the exact form `resolve-authz-context.ts` forbids.
  *
  * Exported separately from `judgePlatformAdmin` so a caller that already holds
  * a session (a test, a hook) can ask the question without building an
@@ -70,7 +81,6 @@ export function isPlatformAdminUser(sessionUser: unknown): boolean {
   const u = sessionUser as Record<string, unknown> | null | undefined;
   if (!u) return false;
   if (u.isPlatformAdmin === true) return true;
-  if (Array.isArray(u.positions) && u.positions.includes('platform_admin')) return true;
   return u.role === 'admin';
 }
 

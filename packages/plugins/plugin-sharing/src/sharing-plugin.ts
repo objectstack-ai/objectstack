@@ -1,7 +1,20 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
+import {
+  resolveAuthzContext,
+  isAuthzStoreUnavailableError,
+  // [#15349] The three symbols the ADMISSION posture read needs, and nothing
+  // more. `effectiveTenancyPosture` reads the posture IN FORCE off the
+  // `tenancy` service (ADR-0093 D4/D5: a deployment that REQUESTS `isolated`
+  // without the enterprise organizations runtime is `single` in force), while
+  // `isServiceNotRegisteredError` / `AuthzStoreUnavailableError` are the two
+  // halves of #13906 decision 1 option A's classification.
+  effectiveTenancyPosture,
+  isServiceNotRegisteredError,
+  AuthzStoreUnavailableError,
+  type TenancyPostureSource,
+} from '@objectstack/core';
 import type { EngineMiddleware, OperationContext } from '@objectstack/objectql';
 import type {
   AuthSessionApi,
@@ -476,6 +489,87 @@ export class SharingServicePlugin implements Plugin {
     ctx.logger.info('SharingServicePlugin: sharing-rule data-change rebind triggers bound');
   }
 
+  /**
+   * [#15349] The share-link ADMISSION seam's EFFECTIVE tenancy posture.
+   *
+   * ## What was open
+   *
+   * `resolveAuthzContext` gates every posture-conditional refusal on a posture
+   * its CALLER supplies, and this door supplied none — so none of them ran:
+   *
+   *  - `organization_required` (`core/security/api-key.ts`, `if (!tenantId &&
+   *    tenancyPosture)`),
+   *  - `organization_membership_ended` (`core/security/resolve-authz-context.ts`,
+   *    `if (keyPrincipal?.tenantId && input.tenancyPosture)`),
+   *  - and the #15409 SESSION arm beside it, which drops an
+   *    `activeOrganizationId` claim no `sys_member` row backs.
+   *
+   * An API key's `tenantId` is `sys_api_key.active_organization_id` copied
+   * verbatim — the caller's own stored claim, never vetted against current
+   * membership. Under a wall-enforcing posture a key stamped with an
+   * organization its owner has LEFT was therefore admitted here carrying that
+   * organization as its tenant, and minted share links — capability tokens —
+   * on that organization's records.
+   *
+   * ## ⛔ Why this plugin's EXISTING `tenancy` probes are the wrong value
+   *
+   * Two are already resolved a few hundred lines up, and BOTH swallow failure
+   * as absence: the `tenancy: () => { try { … } catch { return null; } }` option
+   * handed to `SharingService`, and `sharingPosture()`, whose own catch falls
+   * through to the walled default. Reusing either
+   * accessor here would re-introduce exactly the permissive-on-failure defect
+   * #13906 exists to repair — a `tenancy` service that was WIRED and BROKE
+   * reading as "this check does not apply". Those two are also answering a
+   * different question: their fallback is *walled*, which is fail-closed for a
+   * seeding/scope decision and would be fail-OPEN nonsense for an admission one
+   * (`undefined` means "run no posture-conditional refusal at all", while
+   * `'single'` is a posture that is present and simply enforces no wall).
+   *
+   * ## The classification, #13906 decision 1 option A
+   *
+   * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`), quiet
+   *   `undefined`. An embedding with no `plugin-auth` is a SUPPORTED
+   *   composition and its behaviour here is exactly what it was.
+   * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`
+   *   (ADR-0112 `SERVICE_UNAVAILABLE` / 503). Admission was never DECIDED, so
+   *   it must not be answered. `verifiedContextFromRequest`'s `catch` already
+   *   re-raises this brand rather than laundering it into a 401 (#13279), and
+   *   the routes' own `catch` answers `err.status` — so the outage reaches the
+   *   wire as a 503.
+   *
+   * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
+   * throws two UNBRANDED plain `Error`s (`… not found` and `… is async - use
+   * await`), so a synchronous read cannot tell the two facts apart and would
+   * have to guess. Hence `getServiceAsync`, reached through `getKernel()`.
+   *
+   * ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, exactly as on
+   * the two sibling seams (`rest-server.ts`, `marketplace-install-local-plugin.ts`):
+   * a `KernelBase`-shaped host (`LiteKernel`) exposes `getKernel()` but has no
+   * `getServiceAsync` at all, so dereferencing it would raise an unbranded —
+   * therefore LOUD — `TypeError`, turning "this host shape has no async
+   * registry" into an outage. Such a host has no service factories either
+   * (`registerServiceFactory` throws "not supported"), so absence is the only
+   * fault it could report. It keeps the quiet answer, unchanged.
+   */
+  private resolveAdmissionTenancyPosture = async (
+    ctx: PluginContext,
+  ): Promise<TenancyPosture | undefined> => {
+    const kernel = ctx.getKernel?.() as
+      | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
+      | undefined;
+    if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+    try {
+      return effectiveTenancyPosture(
+        await kernel.getServiceAsync<TenancyPostureSource>('tenancy'),
+      );
+    } catch (err) {
+      if (!isServiceNotRegisteredError(err)) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
+      }
+      return undefined;
+    }
+  };
+
   async init(ctx: PluginContext): Promise<void> {
     // Register sys_record_share via the manifest service.
     ctx.getService<{ register(m: any): void }>('manifest').register({
@@ -844,7 +938,14 @@ export class SharingServicePlugin implements Plugin {
                     return undefined;
                   }
                 };
-                const authz = await resolveAuthzContext({ ql, headers, getSession });
+                // [#15349] The posture is an authorization INPUT, resolved for
+                // THIS door before the resolver runs. Omitting it is what left
+                // every posture-conditional refusal unreachable here — see
+                // `resolveAdmissionTenancyPosture` for the classification and
+                // for why this plugin's two existing `tenancy` probes are not
+                // the value an admission decision may read.
+                const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
+                const authz = await resolveAuthzContext({ ql, headers, getSession, tenancyPosture });
                 // `isSystem: false` states what the absence of the flag already
                 // means (ADR-0118 D2: absence is never system) and matches what
                 // both sibling transports build — `rest-server.ts` and

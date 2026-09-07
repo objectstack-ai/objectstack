@@ -132,8 +132,62 @@ export interface FieldValidationError {
   options?: string[];
 }
 
+/**
+ * [#16159] The ADR-0112 `code` {@link ValidationError} carries, as a constant a
+ * consumer can import instead of re-spelling.
+ *
+ * This is the LAST row of #16159's eleven-row census, and the one whose
+ * consumer-side re-spelling is measurably the widest: `'VALIDATION_FAILED'` is
+ * re-authored as an inline literal at 148 non-test sites in 33 files across
+ * this repo. Most of those are INDEPENDENT PRODUCERS minting their own
+ * house-code envelope, not consumers of this class — but the recognizers that
+ * genuinely catch THIS error had, until now, no importable spelling to compare
+ * against: `packages/types/src/validation-failure.ts` and
+ * `packages/rest/src/error-response.ts` both test
+ * `code === 'VALIDATION_FAILED' || name === 'ValidationError'`, each holding
+ * its own copy of the string, each free to drift from what this engine throws
+ * with no compile error to say so.
+ *
+ * ⛔ The string is byte-identical to the literal it replaces. This moves where a
+ * spelling lives, never what it says.
+ *
+ * ⛔⛔ It also does NOT answer the question the card fenced off: `secret-fields.ts`
+ * spells its refusal `EMPTY_CREDENTIAL_REFUSAL_CODE = 'VALIDATION_ERROR'` while
+ * this one is `'VALIDATION_FAILED'`, and *"whether they should converge is a
+ * question this card does not answer"*. Publishing the current spelling leaves
+ * that decision exactly as open as it was: converging them was a breaking
+ * rename of a registered wire code before this constant existed and still is
+ * after, and a rename would move this constant's VALUE, not its existence.
+ *
+ * ⚠️ `VALIDATION_FAILED` IS registered in `ERROR_CODE_LEDGER` under
+ * `@objectstack/objectql` (`packages/spec/src/api/error-code-ledger.zod.ts`),
+ * so this declaration is a `constdef` stamp site `check:error-code-provenance`
+ * DOES see — that gate skips unregistered codes — and it is listed under this
+ * package's own owner key, which is what makes the gate accept it. Equally, no
+ * row moves in `packages/runtime/src/dispatcher-error-vocabulary.ts`: that
+ * table records UNREGISTERED code sites, so a registered code is invisible to
+ * it by construction. The two gates are exactly inverted — measured on this
+ * branch, not assumed.
+ *
+ * The `_CODE` NAME and the bare `readonly code = VALIDATION_FAILED_CODE;`
+ * spelling are load-bearing rather than cosmetic: the first is the shape
+ * `check:error-code-provenance`'s `constdef` pattern can see, the second is the
+ * shape `check:dispatcher-error-vocabulary` classifies as `classconst` — its
+ * pattern requires the constant name to be followed by `;`, `,` or a newline,
+ * so an `as const` suffix on the FIELD takes the site out of it. ⛔ Never rename
+ * out of either shape to quiet a gate.
+ *
+ * ⚠️ Re-exported from the `index.ts` barrel beside the class, and ⛔ NOT from the
+ * lean `./core` entry — matching every existing `*_CODE` in this package.
+ * {@link ValidationError} itself IS on `./core`, so this row adds one more
+ * instance to the asymmetry #16260 owns; ⛔ deciding that question for one
+ * member of the family inside a mechanical sweep is the thing this card's
+ * slicing exists to prevent.
+ */
+export const VALIDATION_FAILED_CODE = 'VALIDATION_FAILED' as const;
+
 export class ValidationError extends Error {
-  readonly code = 'VALIDATION_FAILED';
+  readonly code = VALIDATION_FAILED_CODE;
   readonly fields: FieldValidationError[];
   constructor(fields: FieldValidationError[]) {
     // The top-level message is what generic UI surfaces (toasts, CLI output)
@@ -487,6 +541,47 @@ export function coerceBooleanFields<T extends Record<string, unknown>>(
   return (copy ?? row) as T;
 }
 
+/**
+ * The one parse issue an author can act on, out of everything zod reported for
+ * a value-shape rejection.
+ *
+ * NOT `issues[0]`. zod reports per-member issues before the object-level
+ * `unrecognized_keys` one, so on a value whose keys were RENAMED the actionable
+ * message sorts LAST. A `location` stored as `{latitude, longitude}` — the
+ * exact legacy shape `scan-value-shapes` names in its own header as one the
+ * scan exists to find — reports:
+ *
+ *     [0] invalid_type       lat   Invalid input: expected number, received undefined
+ *     [1] invalid_type       lng   Invalid input: expected number, received undefined
+ *     [2] unrecognized_keys        ... Did you mean `latitude` -> `lat`, `longitude` -> `lng`? ...
+ *
+ * The rename IS the prescription, and edit distance cannot reach it
+ * (`latitude` -> `lat`), which is exactly why `LocationValueSchema` curates an
+ * `aliases` map. Reading positionally builds that hint and then discards it,
+ * leaving an operator running `os migrate value-shapes` to derive the rename
+ * themselves while the identically-shaped `address` case is handed it.
+ *
+ * The preference is a NO-OP for every other class rather than merely harmless
+ * to it, which is what makes it safe as a blanket rule: of the sixteen types
+ * these readers cover, only `location` and `address` are backed by a
+ * `strictObject`, so only they can emit `unrecognized_keys` at all. The
+ * reference and file-reference classes are strings, `composite` / `record` /
+ * `repeater` / `vector` are open records and arrays, `json` is `z.unknown()`,
+ * and the one deliberately loose object shape (`FileValueSchema`) never refuses
+ * a key. For the other fourteen this cannot change a single character; both
+ * classes it does reach curate the alias map that makes the undeclared key the
+ * more actionable half of the rejection.
+ *
+ * Shared by both readers for the reason `valueShapeViolation` is exported
+ * rather than re-derived one layer up: two readings of the same rejection
+ * drifting by one clause is how one path prescribes the rename and the other
+ * hands out `expected number, received undefined`.
+ */
+function valueShapeDetail(error: { issues: ReadonlyArray<{ code: string; message: string }> }): string {
+  const { issues } = error;
+  return (issues.find((i) => i.code === 'unrecognized_keys') ?? issues[0])?.message ?? 'invalid value shape';
+}
+
 function validateOne(
   name: string,
   def: FieldDef,
@@ -792,7 +887,7 @@ function validateOne(
   if (REFERENCE_VALUE_TYPES.has(t) || FILE_REFERENCE_TYPES.has(t) || STRUCTURED_JSON_TYPES.has(t)) {
     const parsed = shapeSchemaFor(def).safeParse(value);
     if (!parsed.success) {
-      const detail = parsed.error.issues[0]?.message ?? 'invalid value shape';
+      const detail = valueShapeDetail(parsed.error);
       const isMedia = FILE_REFERENCE_TYPES.has(t);
       if (isMedia ? mediaStrictEffective(mediaStrict) : valueShapeStrictEffective(valueStrict)) {
         return fail('invalid_type', { type: t, detail }, 'invalid_value_shape');
@@ -931,7 +1026,9 @@ export function mediaPostureSetByEnv(): boolean {
  * not recognise, which is precisely the borrowed-evidence failure the ADR's
  * addendum forbids one layer up.
  *
- * Returns the first parse issue's message, or `null` when the value conforms.
+ * Returns the actionable parse issue's message (see `valueShapeDetail` — the
+ * undeclared-key one when present, which is the half carrying the rename),
+ * or `null` when the value conforms.
  * A value that is missing (per `isMissing`) is never a violation: absence is
  * the `required` check's business, not the shape contract's.
  */
@@ -943,7 +1040,7 @@ export function valueShapeViolation(def: FieldDef, value: unknown): string | nul
   }
   const parsed = shapeSchemaFor(def).safeParse(value);
   if (parsed.success) return null;
-  return parsed.error.issues[0]?.message ?? 'invalid value shape';
+  return valueShapeDetail(parsed.error);
 }
 
 /**
@@ -1009,7 +1106,11 @@ export interface AdmittedValueShapeViolation {
   field: string;
   /** The declared field type, so a report can group by what went wrong. */
   type: string;
-  /** The first parse issue — the prescription an author acts on. */
+  /**
+   * The prescription an author acts on — `valueShapeDetail`'s reading of the
+   * rejection, the same string the warn-first log line and the
+   * `os migrate value-shapes` finding carry. Not positional.
+   */
   detail: string;
 }
 

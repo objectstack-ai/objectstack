@@ -18,6 +18,29 @@ import type { PermissionSet } from '../security/permission.zod';
  * `roles`, ADR-0090 D3). A singular field is NOT part of this contract — its legacy "overwritten to 'admin' on promotion"
  * behavior is the footgun this eliminates.
  *
+ * ## Which axis `positions` is — and which it is not (#15136)
+ *
+ * It is the **security** axis: the built-in identity names plus the
+ * `sys_position` names the principal actually holds through `sys_user_position`
+ * (ADR-0057 D4) and their active membership, plus the `everyone` anchor
+ * (ADR-0090 D5) — exactly the set `/auth/me/permissions` reports and
+ * `resolveUserAuthzGrants` resolves. Every surface derives it from that one
+ * authority, so the "identical shape" promise above is a property of the
+ * producer, not a convention producers are asked to honour.
+ *
+ * ⛔ It is **not** the better-auth `sys_user.role` scalar. That scalar is an
+ * authentication-layer field on a table this platform does not own; it stays
+ * published, unchanged, as `user.role` (the one exception ADR-0090 D3's word
+ * ban carves out), and a consumer that genuinely wants it reads it there.
+ *
+ * ⚠️ The session payload used to union the scalar into this array and omit the
+ * `sys_user_position` names entirely, which made a position-narrowed client
+ * gate answer FALSE for its own holder — silently, since the root and the key
+ * were both bound and CEL raised nothing. The documented `org_admin` example
+ * kept working throughout because that name sits on both axes. If you are
+ * adding a producer of this shape: derive it from the authority, never
+ * assemble it from whatever identity fields are in reach.
+ *
  * @see docs/adr/0068-unified-user-context-and-built-in-identity-roles.md
  */
 
@@ -189,8 +212,12 @@ export const EvalUserSchema = lazySchema(() =>
     id: z.string().describe('User ID'),
     name: z.string().optional().describe('Display name'),
     email: z.string().optional().describe('Email address'),
-    /** CANONICAL. Scope-resolved (ADR-0068 D3); built-in identity names + position names. */
-    positions: z.array(z.string()).default([]).describe('Canonical position/identity names assigned to the user (scope-resolved)'),
+    /**
+     * CANONICAL. Scope-resolved (ADR-0068 D3); built-in identity names +
+     * position names. The SECURITY axis (#15136) — never the better-auth
+     * `sys_user.role` scalar, which stays published as `user.role`.
+     */
+    positions: z.array(z.string()).default([]).describe('Canonical position/identity names the user holds — built-in identity names plus sys_position assignments, scope-resolved (ADR-0068 D3). The security axis, the same set /auth/me/permissions reports; NOT the better-auth user.role scalar, which remains published as user.role'),
     /** DERIVED alias of positions.includes(platform_admin) (ADR-0068 D2). Deprecated surface. */
     isPlatformAdmin: z.boolean().optional().describe("DERIVED alias of 'platform_admin' in positions. Deprecated."),
     organizationId: z.string().nullable().optional().describe('Active organization ID (null = platform/unscoped)'),

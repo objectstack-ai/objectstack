@@ -61,6 +61,15 @@ import { clientFacingFailureText, seedRequestValidationError } from '@objectstac
 // [#8805] Moved to `metadata-core` so the REST `/meta` write doors decide this
 // the same way rather than through a second copy. Behaviour unchanged.
 import { organizationIdForMetaWrite } from '@objectstack/metadata-core';
+// [#15591] The DECLARED removal of our OWN read-time annotations, imported
+// from the list that defines them (`METADATA_READ_DECORATIONS`) rather than
+// re-spelled here. `applyPublishedSeeds` below re-parses a SERVED document, and
+// `spec/kernel/metadata-read-decorations.ts` states the rule this door was
+// missing: "a served body is NOT a valid input to the schema that produced it
+// until these are removed". Same helper, same reason, as the three consumers
+// that already call it — the dataset query in `rest-server.ts`, the cold-boot
+// flow bind in `service-automation`, and `saveMetaItem`'s verbatim persist.
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -306,6 +315,15 @@ function requireReadCapability(deps: DomainHandlerDeps, context: HttpProtocolCon
  * authoring one ("switch to a writable package in the package selector") names
  * a remedy that makes no sense for a delete.
  *
+ * [#14451] The remedy it names is ADR-0005 org overlay, and it used to name
+ * `POST /packages/:id/duplicate` instead. That sentence sent a caller holding a
+ * read-only package at a route which — for exactly the packages this refusal
+ * fires on — cannot help: duplicate clones a base's `sys_metadata` rows, a code
+ * package owns none, and until {@link requireDuplicableSource} the trip ended
+ * in a 200 reporting `copiedCount: 0` (the #14451 measurement). A refusal that
+ * prescribes a dead end is worse than one that prescribes nothing, so the two
+ * doors now agree: overlay is how a code package is customised.
+ *
  * ⛔ Deliberately NOT caller-sensitive — there is no `isSystem` bypass, unlike
  * {@link requireManageMetadata}. Read-only is a property of the PACKAGE. Engine
  * self-invocation has no business uninstalling a code package over HTTP, and
@@ -333,11 +351,115 @@ function requireWritablePackage(
         response: deps.error(
             `[writable_package_required] Cannot ${action} package '${id}': it is read-only `
             + `(provided by code or an installed app). Packages the deployment ships are managed by `
-            + `the deployment, not over this API — ${action} a package you own, or duplicate this one `
-            + `into a writable base (POST /packages/${encodeURIComponent(id)}/duplicate) and change that.`,
+            + `the deployment, not over this API — ${action} a package you own, or customise what `
+            + `this one provides in place, with an ADR-0005 org overlay.`,
             422,
             {
                 code: 'WRITABLE_PACKAGE_REQUIRED',
+                packageId: id,
+                docs: 'docs/adr/0070-package-first-authoring.md',
+            },
+        ),
+    };
+}
+
+/**
+ * [#14451] `POST /packages/:id/duplicate` — the SOURCE must be a BASE.
+ *
+ * ## The measurement
+ *
+ * `POST /api/v1/packages/com.example.todo/duplicate` against a RUNNING code
+ * package (`examples/app-todo`, one object + four flows + views + dashboards +
+ * reports) answered **HTTP 200**:
+ *
+ *     {"success":true,"data":{"success":false,"copiedCount":0,"failedCount":0,
+ *      "targetPackageId":"com.acme.dupbase","copied":[],"failed":[]}}
+ *
+ * …and left a real, empty package record behind: `com.acme.dupbase` appeared in
+ * `GET /packages` (scope-less, so `writable: true`), its detail door answered
+ * 200, and its manifest embedded a copy of the SOURCE bundle
+ * (`manifest.manifest.id === 'com.example.todo'`). Reproduced independently
+ * twice, on two separate `os dev` processes.
+ *
+ * ## Why `copiedCount: 0` is BY CONSTRUCTION, not a copy that failed
+ *
+ * {@link ObjectStackProtocolImplementation.duplicatePackage} clones the rows
+ * `sys_metadata` holds for the source (`{ package_id: source, state: 'active' }`).
+ * A code package's metadata is CODE — it is registered from an artifact at boot
+ * and has no `sys_metadata` rows at all — so the scan is not a copy that came
+ * back empty, it is a copy that could never have found anything. The scan
+ * cannot fail either, which is what made the old answer unfalsifiable: a
+ * `copied: []` that means "this gesture does not apply here" was byte-identical
+ * to one meaning "the base really is empty".
+ *
+ * That is the #11063 ruling, one route over and pointed at a WRITE:
+ * `packages/rest/src/package-routes.ts` states it verbatim — **"a read that
+ * could not happen must not be reported as a read that found nothing."**
+ *
+ * ## Why the refusal, rather than teaching duplicate to clone code items
+ *
+ * ADR-0070 D4 is DECLARED AND NOT BUILT — the ADR's own status line says
+ * "D4–D6 remaining", and D4's text names its object precisely: *"Duplicate:
+ * clone a **base** into a new writable package (the Airtable 'duplicate base'
+ * gesture)."* A base is a writable DB package (D-TL;DR 2). So this route is not
+ * a broken implementation of D4; it is a route shipped AHEAD of it, and the
+ * "duplicate base" prose around it describes an aspiration rather than a
+ * contract the code is failing to meet.
+ *
+ * Making it clone a code package's items would extend D4 from bases to code
+ * packages — a NEW decision, and one the ADR itself still lists as open
+ * ("should customising a code item also fork it into a writable base?
+ * *Leaning: keep overlay for surgical tweaks*"). ADR-0005 overlay is the built,
+ * shipped answer for customising what a code package provides, so the honest
+ * behaviour of an unbuilt gesture is to say so.
+ *
+ * ## Shape
+ *
+ * Same PREDICATE as every other writability verdict in this file
+ * ({@link isWritablePackage}, ADR-0070 D2 — #8146's "one answer to 'is this
+ * package writable?'"), a DIFFERENT code. `WRITABLE_PACKAGE_REQUIRED` would be
+ * a lie by implicature here: nothing is being written to the source, and its
+ * remedy ("use a writable package") reads as *make the source writable*, which
+ * is neither possible nor the point. `DUPLICATE_SOURCE_NOT_A_BASE` names the
+ * one thing the caller can act on — pick a base, or overlay instead.
+ *
+ * ⛔ Deliberately NOT a check on emptiness. A WRITABLE base holding no active
+ * rows still duplicates to `copiedCount: 0`, and that answer stays exactly as
+ * it is: that read HAPPENED and found nothing, which is the legitimate arm of
+ * the same ruling. The axis is whether the gesture applies, not whether it
+ * found anything.
+ *
+ * Runs BEFORE the protocol call, which is what makes it observable: the shell
+ * package is minted INSIDE `duplicatePackage` (its `installPackage` call
+ * precedes the copy loop), so a refusal that ran afterwards would still leave
+ * the empty `com.acme.dupbase` the report is about. Same "refuse before you
+ * mutate" ordering as {@link requireWritablePackage}, for the same reason.
+ *
+ * An id that resolves to nothing is treated as writable, exactly as
+ * {@link requireWritablePackage} treats it — an unknown source falls through to
+ * the protocol rather than being re-labelled 422, so this gate never becomes an
+ * existence oracle.
+ *
+ * Returns a refusal result to short-circuit on, or `null` to proceed.
+ */
+function requireDuplicableSource(
+    deps: DomainHandlerDeps,
+    engine: unknown,
+    id: string,
+): HttpDispatcherResult | null {
+    if (isWritablePackage(engine, id)) return null;
+    return {
+        handled: true,
+        response: deps.error(
+            `[duplicate_source_not_a_base] Cannot duplicate package '${id}': it is read-only `
+            + `(provided by code or an installed app), and duplicate clones a writable base's `
+            + `stored metadata rows. A code package's metadata is delivered as code, so there are `
+            + `no rows to clone and the copy would be empty (ADR-0070 D4 duplicates a BASE). `
+            + `Duplicate a base you own, or customise what this package provides in place, with an `
+            + `ADR-0005 org overlay.`,
+            422,
+            {
+                code: 'DUPLICATE_SOURCE_NOT_A_BASE',
                 packageId: id,
                 docs: 'docs/adr/0070-package-first-authoring.md',
             },
@@ -379,10 +501,18 @@ function requireWritablePackage(
  * `manifest.scope` alone (`scope !== 'project'`). That is not the rule this
  * server enforces: {@link isWritablePackage} (ADR-0070 D2) reads
  * `engine.manifests` FIRST — a package booted from an artifact through
- * `registerApp` is read-only whatever its scope says, and a scope-less module
- * carried by a multi-package artifact (ADR-0130 D4/D5) lands there too. The
- * client cannot see `engine.manifests`, so it cannot tell that module
- * (read-only) from a scope-less Studio-created base (writable); only the
+ * `registerApp` is read-only whatever its scope says, and a scope-less BOOTED
+ * package lands there too. ⛔ That scope-less row is NOT a module carried by a
+ * multi-package artifact: `defineStack` parses every `packages[]` entry through
+ * `ManifestSchema` (`spec/src/stack.zod.ts`, `ArtifactPackageEntrySchema`),
+ * whose `scope` is `.default('project')`, so no package of a compiled artifact
+ * is ever scope-less. A row reaches the registry scope-less only WITHOUT that
+ * parse: a marketplace install / offline file import
+ * (`manifestService.register(rawBody)` → `ql.registerApp` — booted, hence
+ * read-only), or a Studio-created base through `POST /api/v1/packages`
+ * (`body.manifest || body` → `installPackage`, which stores a key-by-key copy
+ * and applies no defaults — hence writable). The client cannot see
+ * `engine.manifests`, so it cannot tell those two apart; only the
  * server can, so the server says it — with the SAME predicate the authoring
  * and lifecycle gates use, which is #8146's ruling ("one answer to 'is this
  * package writable?'") applied to the read door.
@@ -1021,9 +1151,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             }
         }
 
-        // POST /packages/:id/duplicate → clone this base into a NEW writable
-        // package, re-namespacing objects + rewriting references (ADR-0070 D4
-        // "duplicate base"). Body { targetPackageId, targetName?, targetNamespace? }.
+        // POST /packages/:id/duplicate → clone a writable BASE into a NEW
+        // writable package, re-namespacing objects + rewriting references.
+        // Body { targetPackageId, targetName?, targetNamespace? }.
+        //
+        // [#14451] The source must BE a base — {@link requireDuplicableSource},
+        // which carries the measurement and the reasoning. ADR-0070 D4 is
+        // declared-and-not-built ("D4–D6 remaining"), and its object is a *base*
+        // ("clone a base into a new writable package"): what this route clones
+        // is the source's `sys_metadata` rows, which a code package does not
+        // have. ⛔ Do not read the sentence above as "any package can be
+        // duplicated into an editable copy" — that is the aspiration the card
+        // measured against, and the route does not implement it.
         if (parts.length === 2 && parts[1] === 'duplicate' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
             const id = decodeURIComponent(parts[0]);
@@ -1035,6 +1174,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (!targetPackageId) {
                 return { handled: true, response: deps.error('Body { targetPackageId } is required', 400) };
             }
+            // [#14451] Refuse BEFORE the protocol call: `duplicatePackage` mints
+            // the target package record (`installPackage`) ahead of its copy
+            // loop, so a refusal any later still leaves the empty shell behind.
+            const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
             try {
                 const organizationId = await deps.resolveActiveOrganizationId(_context);
                 const result = await protocol.duplicatePackage({
@@ -1399,7 +1542,34 @@ _context: HttpProtocolContext,
             ? item
             : (item?.item ?? item?.metadata ?? item?.body);
         if (seed?.object && Array.isArray(seed?.records)) {
-            datasets.push(seed);
+            // [#15591] Strip the READ-TIME decorations before the closed parse
+            // below. `getMetaItem` exits through `decorateMetadataItem`, which
+            // stamps `_diagnostics` on every body whose type has a registered
+            // schema — `seed` has one — so the document this door reads back is
+            // the platform's own output and `SeedSchema` (closed since #4001)
+            // refused it by name: `unrecognized_keys: ["_diagnostics"]`, minted
+            // as a 422 by the `safeParse` below, delivered on a **200** as
+            // `seedApplied.error`. Zero rows loaded, and the author told their
+            // seed body failed spec validation when nothing about it is wrong.
+            //
+            // ⛔ NOT a blanket `startsWith('_')` strip, and deliberately not the
+            // one `assemblePackageManifest` runs 300 lines up: the two paths
+            // have opposite obligations, and the spec states both.
+            // `METADATA_READ_DECORATIONS` is `['_diagnostics', '_draft']` and
+            // its module says the ADR-0010 envelope (`_packageId`,
+            // `_provenance`, …) is "deliberately NOT" a member — "the closed
+            // metadata schemas allowlist them precisely so a served document
+            // keeps its provenance on re-parse". `SeedSchema` is one of those:
+            // it spreads `MetadataProtectionFields` on purpose. Measured on the
+            // real producer, the served body carries BOTH keys and the schema
+            // refuses exactly one — `_packageId` alone parses clean. So the
+            // export path's blanket strip would drop provenance this schema
+            // accepts, which is why the DECLARED list is the one to use here.
+            //
+            // ⛔ And NOT a widened schema: nothing about the request contract
+            // changes. This removes an annotation the READ path added, which is
+            // the only reason the round trip was not already closed.
+            datasets.push(stripReadDecorations(seed));
         } else {
             readErrors.push(`seed "${name}" body unreadable (keys: ${item ? Object.keys(item).join(',') : 'none'})`);
         }

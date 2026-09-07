@@ -199,10 +199,28 @@ export const RestApiEndpointSchema = lazySchema(() => z.object({
   /**
    * Performance and reliability settings
    */
-  timeout: z.number().int().optional().describe('Request timeout in milliseconds'),
+  // Renamed from `timeout` / `cacheTtl` (#15677, #14478 ruling B): both units
+  // lived only in the describe prose, and the two sat two lines apart in
+  // DIFFERENT units — milliseconds and seconds — which is the confusion the
+  // rule exists to remove.
+  timeoutMs: z.number().int().optional().describe('Request timeout in milliseconds'),
   rateLimit: z.string().optional().describe('Rate limit policy name'),
   cacheable: z.boolean().default(false).describe('Whether response can be cached'),
-  cacheTtl: z.number().int().optional().describe('Cache TTL in seconds'),
+  cacheTtlSeconds: z.number().int().optional().describe('Cache TTL in seconds'),
+
+  /** Tombstones for the two renames above (#15677, ruling B on #14478). */
+  timeout: retiredKey(
+    '`RestApiEndpoint.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose, and the neighbouring cache TTL two lines below is in SECONDS. '
+    + 'Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
+  ),
+  cacheTtl: retiredKey(
+    '`RestApiEndpoint.cacheTtl` was renamed to `cacheTtlSeconds` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only '
+    + 'in the describe prose, and the neighbouring request timeout two lines above is in '
+    + 'MILLISECONDS. Rename the key to `cacheTtlSeconds`; the value (seconds) is unchanged.',
+  ),
 
   /**
    * RETIRED (#13823, ADR-0049): `handlerStatus` (`implemented` / `stub` /
@@ -714,7 +732,16 @@ export const RestApiPluginConfigSchema = z.object({
     enableCompression: z.boolean().default(true).describe('Enable response compression'),
     enableETag: z.boolean().default(true).describe('Enable ETag generation'),
     enableCaching: z.boolean().default(true).describe('Enable HTTP caching'),
-    defaultCacheTtl: z.number().int().default(300).describe('Default cache TTL in seconds'),
+    // Renamed from `defaultCacheTtl` (#15677, #14478 ruling B).
+    defaultCacheTtlSeconds: z.number().int().default(300).describe('Default cache TTL in seconds'),
+
+    /** Tombstone for the rename above (#15677, ruling B on #14478). */
+    defaultCacheTtl: retiredKey(
+      '`RestApiPluginConfig.performance.defaultCacheTtl` was renamed to '
+      + '`defaultCacheTtlSeconds` in @objectstack/spec 17 — the unit of a '
+      + 'duration-shaped number lives in the key name, not only in the describe prose. Rename '
+      + 'the key to `defaultCacheTtlSeconds`; the value (seconds) is unchanged.',
+    ),
   }).optional().describe('Performance optimization settings'),
 });
 
@@ -747,7 +774,7 @@ export const DEFAULT_DISCOVERY_ROUTES: RestApiRouteRegistration = {
     tags: ['Discovery'],
     responseSchema: 'GetDiscoveryResponseSchema',
     cacheable: true,
-    cacheTtl: 3600, // Cache for 1 hour as discovery info rarely changes
+    cacheTtlSeconds: 3600, // Cache for 1 hour as discovery info rarely changes
   }],
   middleware: [
     { name: 'response_envelope', type: 'transformation', enabled: true, order: 100 },
@@ -782,7 +809,7 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       tags: ['Metadata'],
       responseSchema: 'GetMetaTypesResponseSchema',
       cacheable: true,
-      cacheTtl: 3600,
+      cacheTtlSeconds: 3600,
     },
     {
       method: 'GET',
@@ -795,7 +822,7 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       tags: ['Metadata'],
       responseSchema: 'GetMetaItemsResponseSchema',
       cacheable: true,
-      cacheTtl: 3600,
+      cacheTtlSeconds: 3600,
     },
     {
       method: 'GET',
@@ -813,7 +840,7 @@ export const DEFAULT_METADATA_ROUTES: RestApiRouteRegistration = {
       // performs or could perform.
       responseSchema: 'GetMetaItemResponseSchema',
       cacheable: true,
-      cacheTtl: 3600,
+      cacheTtlSeconds: 3600,
     },
     {
       method: 'GET',
@@ -1037,7 +1064,7 @@ export const DEFAULT_BATCH_ROUTES: RestApiRouteRegistration = {
       requestSchema: 'BatchUpdateRequestSchema',
       responseSchema: 'BatchUpdateResponseSchema',
       permissions: ['data.batch'],
-      timeout: 60000, // 60 seconds for batch operations
+      timeoutMs: 60000, // 60 seconds for batch operations
       cacheable: false,
     },
     {
@@ -1059,7 +1086,7 @@ export const DEFAULT_BATCH_ROUTES: RestApiRouteRegistration = {
       requestSchema: 'CreateManyDataRequestSchema',
       responseSchema: 'BatchUpdateResponseSchema',
       permissions: ['data.create', 'data.batch'],
-      timeout: 60000,
+      timeoutMs: 60000,
       cacheable: false,
     },
     {
@@ -1074,7 +1101,7 @@ export const DEFAULT_BATCH_ROUTES: RestApiRouteRegistration = {
       requestSchema: 'UpdateManyRequestSchema',
       responseSchema: 'BatchUpdateResponseSchema',
       permissions: ['data.update', 'data.batch'],
-      timeout: 60000,
+      timeoutMs: 60000,
       cacheable: false,
     },
     {
@@ -1089,7 +1116,7 @@ export const DEFAULT_BATCH_ROUTES: RestApiRouteRegistration = {
       requestSchema: 'DeleteManyRequestSchema',
       responseSchema: 'BatchUpdateResponseSchema',
       permissions: ['data.delete', 'data.batch'],
-      timeout: 60000,
+      timeoutMs: 60000,
       cacheable: false,
     },
   ],
@@ -1233,7 +1260,7 @@ export const DEFAULT_I18N_ROUTES: RestApiRouteRegistration = {
       tags: ['i18n'],
       responseSchema: 'GetLocalesResponseSchema',
       cacheable: true,
-      cacheTtl: 86400, // 24 hours — locales change very rarely
+      cacheTtlSeconds: 86400, // 24 hours — locales change very rarely
     },
     {
       method: 'GET',
@@ -1246,7 +1273,7 @@ export const DEFAULT_I18N_ROUTES: RestApiRouteRegistration = {
       tags: ['i18n'],
       responseSchema: 'GetTranslationsResponseSchema',
       cacheable: true,
-      cacheTtl: 3600,
+      cacheTtlSeconds: 3600,
     },
     {
       method: 'GET',
@@ -1259,7 +1286,7 @@ export const DEFAULT_I18N_ROUTES: RestApiRouteRegistration = {
       tags: ['i18n'],
       responseSchema: 'GetFieldLabelsResponseSchema',
       cacheable: true,
-      cacheTtl: 3600,
+      cacheTtlSeconds: 3600,
     },
   ],
   middleware: [
@@ -1295,7 +1322,7 @@ export const DEFAULT_ANALYTICS_ROUTES: RestApiRouteRegistration = {
       requestSchema: 'AnalyticsQueryRequestSchema',
       responseSchema: 'AnalyticsResultResponseSchema',
       permissions: ['analytics.query'],
-      timeout: 120000, // 2 minutes for analytics queries
+      timeoutMs: 120000, // 2 minutes for analytics queries
       cacheable: false,
     },
     {
@@ -1309,7 +1336,7 @@ export const DEFAULT_ANALYTICS_ROUTES: RestApiRouteRegistration = {
       tags: ['Analytics'],
       responseSchema: 'AnalyticsMetadataResponseSchema',
       cacheable: true,
-      cacheTtl: 3600,
+      cacheTtlSeconds: 3600,
     },
   ],
   middleware: [
@@ -1359,7 +1386,7 @@ export const DEFAULT_AUTOMATION_ROUTES: RestApiRouteRegistration = {
       // protocol-method contract only.
       responseSchema: 'AutomationTriggerResponseSchema',
       permissions: ['automation.trigger'],
-      timeout: 120000, // 2 minutes for long-running automations
+      timeoutMs: 120000, // 2 minutes for long-running automations
       cacheable: false,
     },
     {

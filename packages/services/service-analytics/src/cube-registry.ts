@@ -5,12 +5,26 @@ import type { Cube } from '@objectstack/spec/data';
 /**
  * CubeRegistry — Central registry for analytics cube definitions.
  *
- * Cubes can be registered from two sources:
- * 1. **Manifest definitions** — Explicit cube definitions in `objectstack.config.ts`.
- * 2. **Object schema inference** — Auto-generated cubes from ObjectQL object schemas.
+ * The registry is the single source of truth for cube metadata discovery:
+ * `getMeta()` maps every registered cube's measure/dimension `label` onto the
+ * `CubeMeta` titles served by `GET /api/v1/analytics/meta`, and the strategy
+ * chain resolves a query's cube through it.
  *
- * The registry is the single source of truth for cube metadata discovery
- * (used by `getMeta()` and the strategy chain).
+ * Three sources write to it, all of them from `AnalyticsService`:
+ * 1. **Manifest definitions** — `AnalyticsServiceConfig.cubes` (`registerAll`),
+ *    i.e. explicit cube definitions authored in `objectstack.config.ts`.
+ * 2. **Compiled datasets** (ADR-0021) — `compileDataset()`'s Cube, registered
+ *    under the dataset's name by `queryDataset`.
+ * 3. **Ad-hoc query inference** — `ensureCube` / `inferCubeFromQuery` mints a
+ *    minimal Cube from the members an `AnalyticsQuery` references, once
+ *    `assertInferableCube` (#3867) has confirmed the name is a registered
+ *    object. It infers from the QUERY, never from the object's field schema.
+ *
+ * This list used to read "two sources: manifest definitions, and object schema
+ * inference". Neither half was right: sources 2 and 3 were missing, and object
+ * schema inference is `inferFromObject` below, which no path in this repository
+ * calls (#15019). It is described at the method rather than advertised here,
+ * because listing it would promise a source the platform does not deliver.
  */
 export class CubeRegistry {
   private cubes = new Map<string, Cube>();
@@ -58,14 +72,36 @@ export class CubeRegistry {
   }
 
   /**
-   * Auto-generate a cube definition from an object schema.
+   * Auto-generate a cube definition from an object's FIELD SCHEMA, and register
+   * it under `objectName`.
    *
-   * Heuristic rules:
-   * - `number` fields → `sum`, `avg`, `min`, `max` measures
-   * - `boolean` fields → `count` measure (count where true)
-   * - All non-computed fields → dimensions
-   * - `date`/`datetime` fields → time dimensions with standard granularities
-   * - A default `count` measure is always added
+   * ⚠️ Nothing in this repository calls this — the only in-tree caller is a unit
+   * test, and every cube the platform registers itself comes from one of the
+   * three sources named on the class above (#15019). That is not the same thing
+   * as unreachable: `CubeRegistry` is exported from the package entry and
+   * `AnalyticsService.cubeRegistry` is public, so a consumer of
+   * `@objectstack/service-analytics` can call it, and what it mints does reach
+   * the wire — `getMeta()` serves the labels below as `CubeMeta` titles. Whether
+   * this published method is removed or wired up as a real cube source is #15019.
+   *
+   * Heuristic rules, measured by driving the built package (the list this
+   * replaces claimed three behaviours the code does not have — `min`/`max`
+   * measures, a `count` measure for booleans, and a computed-field exclusion):
+   * - `number` / `currency` / `percent` fields → one `sum` and one `avg` measure
+   *   each, labelled with the field's label plus ` (Sum)` / ` (Avg)`. No `min`
+   *   or `max` measure is minted.
+   * - EVERY field becomes a dimension; there is no computed-field exclusion (the
+   *   `fields` parameter carries no flag one could exclude on).
+   * - `boolean` fields become a `boolean` DIMENSION and nothing else — no count
+   *   measure is minted for them.
+   * - `date` / `datetime` fields → `time` dimensions granulated
+   *   day/week/month/quarter/year.
+   * - A default `count` measure labelled `Count` is always added.
+   *
+   * Those three defaults (`Count`, and the two composites) are English literals
+   * with no i18n hook; #14492's ruling listed the `Count` one as a site to carry
+   * the `builtinAggregate` discriminator, and it was left alone because no
+   * in-repo path reaches it.
    *
    * @param objectName - The snake_case object name (used as table/cube name)
    * @param fields - Array of field descriptors `{ name, type, label? }`

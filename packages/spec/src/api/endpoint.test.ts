@@ -201,13 +201,13 @@ describe('ApiEndpointSchema', () => {
         windowMs: 60000,
         maxRequests: 10,
       },
-      cacheTtl: 300,
+      cacheTtlSeconds: 300,
     });
 
     expect(endpoint.summary).toBe('Create a new order');
     expect(endpoint.inputMapping).toHaveLength(2);
     expect(endpoint.rateLimit?.enabled).toBe(true);
-    expect(endpoint.cacheTtl).toBe(300);
+    expect(endpoint.cacheTtlSeconds).toBe(300);
   });
 
   it('should accept different HTTP methods', () => {
@@ -359,10 +359,10 @@ describe('ApiEndpointSchema', () => {
       method: 'GET',
       type: 'object_operation',
       target: 'data',
-      cacheTtl: 600,
+      cacheTtlSeconds: 600,
     });
 
-    expect(endpoint.cacheTtl).toBe(600);
+    expect(endpoint.cacheTtlSeconds).toBe(600);
   });
 
   it('should accept public endpoint (no auth required)', () => {
@@ -535,7 +535,7 @@ describe('#5384 — ApiEndpointSchema REJECTS undeclared keys', () => {
 
   it.each([
     // The three typos the file header names as what the strip used to cost.
-    ['cacheTTL', 'cacheTtl'],
+    ['cacheTTL', 'cacheTtlSeconds'],
     ['objectParam', 'objectParams'],
     ['outputMappings', 'outputMapping'],
     // The policy block, where a silent strip is worst.
@@ -604,5 +604,49 @@ describe('#5227 — the author state is what `ApiEndpoint` denotes', () => {
     // @ts-expect-error `authRequired` is required on the parsed state (ADR-0122).
     const parsed: ApiEndpointParsed = { ...AUTHORED_ENDPOINT };
     expect(parsed).toBeDefined();
+  });
+});
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('ApiEndpoint.cacheTtl \u2192 cacheTtlSeconds (#15677, ADR-0087 `api-endpoint-cache-ttl-to-cache-ttl-seconds`)', () => {
+  const base = {
+    name: 'get_customers',
+    path: '/api/v1/customers',
+    method: 'GET' as const,
+    type: 'object_operation' as const,
+  };
+
+  it('REFUSES the retired `cacheTtl` spelling with the rename in the message', () => {
+    const result = ApiEndpointSchema.safeParse({ ...base, cacheTtl: 30 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'cacheTtl');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(/`ApiEndpoint\.cacheTtl` was renamed to `cacheTtlSeconds`/);
+  });
+
+  it('closes with the house `os migrate meta` sentence — the surface IS covered by a conversion', () => {
+    const result = ApiEndpointSchema.safeParse({ ...base, cacheTtl: 30 });
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'cacheTtl');
+    expect(issue!.message).toMatch(/os migrate meta --from 17/);
+  });
+
+  it('accepts `cacheTtlSeconds` at the same magnitude the retired key carried', () => {
+    const parsed = ApiEndpointSchema.parse({ ...base, cacheTtlSeconds: 30 });
+    expect(parsed.cacheTtlSeconds).toBe(30);
+    expect(parsed).not.toHaveProperty('cacheTtl');
+  });
+
+  it('tsc channel: `cacheTtl` is unwritable on the ApiEndpoint input type', () => {
+    // @ts-expect-error — `cacheTtl` is a tombstone (input type `never`); the key is `cacheTtlSeconds`
+    const bad: ApiEndpoint = { ...base, cacheTtl: 30 };
+    expect(bad).toBeDefined();
+    const good: ApiEndpoint = { ...base, cacheTtlSeconds: 30 };
+    expect(good.cacheTtlSeconds).toBe(30);
   });
 });

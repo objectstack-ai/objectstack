@@ -91,7 +91,7 @@ describe('[#5112] ADR-0121 D6 — anonymous is served, and metered', () => {
     expect(body.success).toBe(true);
   });
 
-  it('carries the declared cacheTtl on the anonymous success', async () => {
+  it('carries the declared cacheTtlSeconds on the anonymous success', async () => {
     const res = await stack.api(PUBLIC_FEED, { method: 'GET' });
     expect(res.headers.get('cache-control')).toMatch(/max-age=15/);
   });

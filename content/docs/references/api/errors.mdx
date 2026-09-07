@@ -47,7 +47,8 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **httpStatus** | `number` | optional | HTTP status code |
 | **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
-| **retryAfter** | `number` | optional | Seconds to wait before retrying |
+| **retryAfterSeconds** | `number` | optional | Seconds to wait before retrying |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
 | **details** | `any` | optional | Additional error context |
 | **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
 | **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |
@@ -162,7 +163,8 @@ const result = EnhancedApiErrorSchema.parse(data);
 | **httpStatus** | `number` | optional | HTTP status code |
 | **retryable** | `boolean` | optional (default: `false`) | Whether the request can be retried |
 | **retryStrategy** | `Enum<'no_retry' \| 'retry_immediate' \| 'retry_backoff' \| 'retry_after'>` | optional | Recommended retry strategy |
-| **retryAfter** | `number` | optional | Seconds to wait before retrying |
+| **retryAfterSeconds** | `number` | optional | Seconds to wait before retrying |
+| **retryAfter** | `never` | optional | [REMOVED] `EnhancedApiError.retryAfter` was renamed to `retryAfterSeconds` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `retryAfterSeconds`; the value (seconds) is unchanged. This is the ADR-0112 error envelope, not the HTTP `Retry-After` response header — that header keeps its RFC 9110 name and is untouched. |
 | **details** | `any` | optional | Additional error context |
 | **fields** | `{ field: string; code: Enum<'required' \| 'invalid_type' \| 'invalid_shape' \| 'unknown_field' \| …>; message: string; label?: string; … }[]` | optional | One entry per offending value |
 | **fieldErrors** | `never` | optional | [REMOVED] `EnhancedApiError.fieldErrors` was renamed to `fields` in @objectstack/spec 17 (ADR-0114 D4) — the array is unchanged, only the property name. Every producer already emitted `fields`; `fieldErrors` was declared and never emitted, so a reader keying on it was reading a field no server sent. |

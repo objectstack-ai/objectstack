@@ -45,35 +45,55 @@
  * The per-process `this.resuming` stays as the cheap first gate; it is not
  * replaced.
  *
- * ## REVERT-PROOF — three mutations, all measured on the committed tree
+ * ## REVERT-PROOF — five mutations, all measured on the committed tree
  *
  * Each was confirmed ON DISK before a single result was read (anchored counts
  * plus the blob hash) and restored inside a `trap ... EXIT INT TERM`, with the
  * restore proven by an empty `git diff HEAD` and a blob hash equal to HEAD's.
  * The population is these three files: this one, `suspended-run-store.test.ts`
- * and `multi-replica-resume-staleness.test.ts` — 61 tests.
+ * and `multi-replica-resume-staleness.test.ts` — 62 tests.
  *
- * **(E) the engine stops asking.** Replace the `claimAdvance` call in
- * `resumeInternal` with the unconditional `forgetSuspendedRun(run, 'resumed')`
- * it had before this card: `Tests 9 failed | 52 passed (61)`. Seven here
- * (SHAPE A and SHAPE B on `expected [ 'notify', 'notify' ] to deeply equal
- * [ 'notify' ]`, SIZED on `{ trials: 25, doubled: 25, extraOpens: 25 }`, both
- * CONDITION cases, the loser's `debug` trace and the declared degradation) and
- * two in `suspended-run-store.test.ts` (the two-engines race over the durable
- * store, and the throwing claim). `multi-replica-resume-staleness.test.ts`
- * stays 8/8: the mutation is targeted, and #13617's own ledger is untouched.
+ * ⚠️ RE-MEASURED IN FULL at #14956, on `origin/main` `d4f9b2a9d`. The counts
+ * below are that run's, not #14333's: the third CONDITION case added there
+ * joins the population, so every total moved by one and one leg — (C-node) —
+ * turned out to have been reported wrong. Splitting (C) into its three
+ * separate deletions is the point of that card; see the CONDITION block below.
+ *
+ * **(E) the engine stops asking.** Make `resumeInternal` never consult the
+ * store: pin its `claim` to a kind that is none of `claimed` / `lost` /
+ * `unavailable`, so no branch fires and `forgetSuspendedRun(run, 'resumed')`
+ * deletes unconditionally — the pre-#14333 shape. `Tests 10 failed |
+ * 52 passed (62)`. Eight here (SHAPE A and SHAPE B on `expected
+ * [ 'notify', 'notify' ] to deeply equal [ 'notify' ]`, SIZED on
+ * `{ trials: 25, doubled: 25, extraOpens: 25 }`, all THREE CONDITION cases,
+ * the loser's `debug` trace and the declared degradation) and two in
+ * `suspended-run-store.test.ts` (the two-engines race over the durable store,
+ * and the throwing claim). `multi-replica-resume-staleness.test.ts` stays
+ * 8/8: the mutation is targeted, and #13617's own ledger is untouched.
  *
  * **(C) the condition stops being a condition.** Delete BOTH comparisons from
  * `InMemorySuspendedRunStore.claimSuspension`, leaving an existence-only
- * consume: `Tests 2 failed | 59 passed (61)` — exactly the two CONDITION cases
- * below, and nothing else. That is the point of them. Every other race in this
- * file lets the loser lose by finding no row at all, which an existence check
- * satisfies too; before those two existed this mutation was measured GREEN
- * across the whole branch.
+ * consume: `Tests 3 failed | 59 passed (62)` — exactly the three CONDITION
+ * cases below, and nothing else. That is the point of them. Every other race
+ * in this file lets the loser lose by finding no row at all, which an
+ * existence check satisfies too; before those cases existed this mutation was
+ * measured GREEN across the whole branch.
+ *
+ * **(C-node) only `run.nodeId !== parkedAt.nodeId`.** `Tests 1 failed |
+ * 61 passed (62)`, and the one red is the correlation-less CONDITION case.
+ * ⛔ Before that case existed this leg was `61 passed (61)` — ZERO red, on the
+ * comparison the maintainer's ruling names verbatim ("delete only if still
+ * parked at node N"). Both other CONDITION cases re-park with a NEW
+ * correlation, so the correlation comparison rejects the stale claim first and
+ * masks this one entirely.
+ *
+ * **(C-corr) only the correlation comparison.** `Tests 1 failed | 61 passed
+ * (62)`, the one red being the CONDITION (correlation) case. Unchanged by
+ * #14956 — this half was falsifiable all along.
  *
  * **(C2) the production store loses its predicate.** Delete `multi: true` from
  * the one `delete` call in `ObjectStoreSuspendedRunStore.claimSuspension`:
- * `Tests 7 failed | 54 passed (61)`, every one of them in
+ * `Tests 7 failed | 55 passed (62)`, every one of them in
  * `suspended-run-store.test.ts`, failing with the PRODUCER's own refusal —
  * "Delete names one row by primary key, but options.where also carries
  * predicate keys 'node_id', 'correlation' ... For a conditional
@@ -375,9 +395,29 @@ describe('#14333 concurrent resumes of one run on two replicas advance it exactl
     // claim lands AFTER the winner has already advanced and RE-PARKED. Now a
     // row exists again, at a different parking, and an existence-only consume
     // deletes the parking another replica is standing on and traverses forward
-    // from a snapshot that is two beats stale. The two tests below hold the
-    // loser's claim until exactly that moment — one per comparison, so a
-    // mutation that deletes only one of them still reddens.
+    // from a snapshot that is two beats stale. The tests below hold the
+    // loser's claim until exactly that moment.
+    //
+    // ⚠️ ONE PER COMPARISON IS NOT ENOUGH, and this comment said the opposite
+    // until #14956 measured it. The first two cases below both re-park with a
+    // NEW CORRELATION (`req_lv1`->`req_lv2`, `map:item_1`->`map:item_2`), so on
+    // either of them the correlation comparison rejects the stale claim FIRST
+    // and MASKS the node comparison entirely. Measured on the three-file
+    // population (this file, `suspended-run-store.test.ts`,
+    // `multi-replica-resume-staleness.test.ts`), deleting from
+    // `InMemorySuspendedRunStore.claimSuspension`:
+    //
+    //                       WITHOUT the third case   WITH it (today)
+    //   both comparisons       2 red / 61 tests         3 red / 62 tests
+    //   correlation alone      1 red                    1 red
+    //   node alone          ⛔ 0 RED                     1 red
+    //
+    // The third case is what makes the node comparison falsifiable: a
+    // CORRELATION-LESS parking, the shape `SuspensionParkedAt` documents as
+    // legitimate ("a row persisted with no correlation has nothing to compare,
+    // and the node condition still holds"). There the node comparison is the
+    // ONLY guard there is, so deleting it alone reddens — `expected true to be
+    // false`, the loser's stale claim granted and the action fired twice.
 
     /** A promise with its resolver, for holding a claim open. */
     function latch(): { held: Promise<void>; release: () => void } {
@@ -547,6 +587,112 @@ describe('#14333 concurrent resumes of one run on two replicas advance it exactl
         expect(done).toEqual(['item_1', 'item_2']);
         // The live parking survived.
         expect((await shared.load(runId))?.correlation).toBe('map:item_2');
+    });
+
+    /**
+     * [#14956] A replica whose pausing executor mints NO CORRELATION.
+     *
+     * `SuspensionParkedAt.correlation` is optional by contract and
+     * `SuspendedRunStore.claimSuspension`'s docblock names this shape
+     * explicitly — "a row persisted with no correlation has nothing to
+     * compare, and the node condition still holds". Every other case in this
+     * file mints one, which is exactly why the node comparison was unfalsifiable
+     * here: with a correlation present the correlation test rejects a stale
+     * claim before the node test is ever consulted.
+     */
+    function uncorrelatedReplica(store: SuspendedRunStore, led: Ledgers): AutomationEngine {
+        const engine = new AutomationEngine(silentLogger(), store);
+        engine.registerNodeExecutor({
+            type: 'approval_level',
+            descriptor: defineActionDescriptor({
+                type: 'approval_level',
+                version: '1.0.0',
+                name: 'Approval level',
+                supportsPause: true,
+                resumeAuthority: 'service',
+            }),
+            async execute(node) {
+                led.opened.push(node.id);
+                // ⛔ No `correlation` — the whole point of the case below. An
+                // approvals service that keys its request row by `runId` alone
+                // mints nothing here, and it is entitled not to.
+                return { success: true, suspend: true };
+            },
+        });
+        engine.registerNodeExecutor({
+            type: 'notify_action',
+            descriptor: defineActionDescriptor({
+                type: 'notify_action',
+                version: '1.0.0',
+                name: 'Notify',
+            }),
+            async execute(node) {
+                led.fired.push(node.id);
+                return { success: true };
+            },
+        });
+        engine.registerFlow('expense_approval', APPROVAL_FLOW);
+        return engine;
+    }
+
+    it('THE CONDITION (node, correlation-less): with nothing to correlate, the node test alone loses the stale claim', async () => {
+        const shared = new InMemorySuspendedRunStore();
+        const led = ledgers();
+        const gate = latch();
+        const seen: Array<{ nodeId: string; correlation?: string }> = [];
+        const a = uncorrelatedReplica(client(shared), led);
+        const b = uncorrelatedReplica(delayedClaimClient(shared, gate.held, seen), led);
+
+        const submitted = await a.execute('expense_approval');
+        expect(submitted.status).toBe('paused');
+        const runId = submitted.runId!;
+        expect(led.opened).toEqual(['lv1']);
+
+        // The precondition that makes this case different from the two above,
+        // asserted rather than assumed: the persisted row carries NO
+        // correlation, so `claimSuspension` has exactly one field to test.
+        const parked = await shared.load(runId);
+        expect(parked?.nodeId).toBe('lv1');
+        expect(parked?.correlation).toBeUndefined();
+
+        // B's decision arrives first and reads the run at `lv1` — then its
+        // claim stalls (a slow client, a queued statement, a paused container).
+        const bDecision = approve(b, runId);
+
+        // A's decision lands and completes: `notify` fires once and the run
+        // RE-PARKS at `lv2`. A row for this run exists again.
+        const aResult = await approve(a, runId);
+        expect(aResult.success).toBe(true);
+        expect(aResult.status).toBe('paused');
+        expect(led.fired).toEqual(['notify']);
+        expect(led.opened).toEqual(['lv1', 'lv2']);
+
+        // B is claiming the parking it READ, and the claim carries no
+        // correlation key at all — not an empty one. `nodeId` is the only
+        // thing the store can compare.
+        expect(seen).toEqual([{ nodeId: 'lv1' }]);
+
+        // Now B's claim reaches the store.
+        gate.release();
+        const bResult = await bDecision;
+
+        // ⛔ It must LOSE, and ONLY the node comparison can make it lose.
+        // Delete `run.nodeId !== parkedAt.nodeId` and this line reads
+        // `expected true to be false`.
+        expect(bResult.success).toBe(false);
+        expect(bResult.code).toBe('RESUME_IN_PROGRESS');
+        expect(bResult.status).toBeUndefined();
+
+        // The observable effects are unchanged by the loser. Without the node
+        // comparison this reads `[ 'notify', 'notify' ]` — the doubled side
+        // effect this whole file exists to measure.
+        expect(led.fired).toEqual(['notify']);
+        expect(led.opened).toEqual(['lv1', 'lv2']);
+
+        // And the winner's parking SURVIVED rather than being consumed out
+        // from under it, which is the half a doubled effect alone misses.
+        expect(await a.hasSuspendedRun(runId)).toBe(true);
+        expect((await shared.load(runId))?.nodeId).toBe('lv2');
     });
 
     it('the loser is traced at DEBUG — an ordinary outcome, not a degradation', async () => {

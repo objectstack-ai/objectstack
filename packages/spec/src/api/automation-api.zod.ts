@@ -340,10 +340,16 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     // `stranded` is the contract half of the #13937 shape-4 ruling (#14384);
     // the condition is #13909's. Mirrors `AutomationResult.status` member for
     // member — the pin is `contracts/automation-result-status.pin.test.ts`.
-    status: z.enum(['completed', 'paused', 'failed', 'stranded']).optional().describe(
+    // `refused` (#14945) mirrors the same way: the run reached an `end` node
+    // declaring `outcome: 'refused'` — terminal, never resumed, distinct from
+    // `failed`; its rendered text rides on `refusalMessage` below.
+    status: z.enum(['completed', 'paused', 'failed', 'stranded', 'refused']).optional().describe(
       'Lifecycle status. `paused` means the run suspended at a node and can be '
-      + 'continued with the resume route. Absent or `completed`/`failed`/`stranded` '
-      + 'means the run reached a terminal state. `stranded` is the '
+      + 'continued with the resume route. Absent or `completed`/`failed`/`stranded`/`refused` '
+      + 'means the run reached a terminal state. `refused` is a first-class refusal: the '
+      + 'flow reached an `end` node declaring `outcome: \'refused\'` — a successful evaluation '
+      + 'that said no, so `success` is true, `successMessage` is absent and the per-record '
+      + 'reason is on `refusalMessage`; a runner shows it with Close only. `stranded` is the '
       + 'terminally-failed-but-repairable run: a resume consumed the suspension '
       + 'and a downstream node threw, so the run is recorded as failed and can be '
       + 're-armed only by an explicit operator verb - never by the resume route, '
@@ -362,6 +368,12 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
     ),
     errorMessage: z.string().optional().describe(
       'Friendly terminal message copied from the flow definition on failure',
+    ),
+    refusalMessage: z.string().optional().describe(
+      'Rendered refusal, set when `status` is `refused` - the `end` node\'s `message` '
+      + 'template interpolated against the run\'s variables, so it names the record. '
+      + 'Authored per-record text (not a flow-level copy like the two above); absent on '
+      + 'every other status. A runner shows it with Close only',
     ),
     summary: FlowRunSummarySchema.optional().describe(
       'What the run did - records selected / acted on, gate skips, per-node '

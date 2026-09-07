@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, POSTURE_LADDER, isRowActive } from '@objectstack/core';
-import type { PermissionSet, RowLevelSecurityPolicy } from '@objectstack/spec/security';
+import type { PermissionSet, RowLevelSecurityPolicy, TenantLayer0Verdict } from '@objectstack/spec/security';
 import { describeHighPrivilegeBits, describeAnchorForbiddenBits, PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { MCP_AGENT_PERMISSION_SET_RESTRICTED } from '@objectstack/spec/ai';
 // [#8220] The read-scope provenance mark: this middleware is one of the two
@@ -65,7 +65,12 @@ import { bootstrapSystemCapabilities } from './bootstrap-system-capabilities.js'
 import { normalizeManagedByVocab } from './normalize-managed-by.js';
 import { bootstrapDeclaredCapabilities } from './bootstrap-declared-capabilities.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
-import { computeTenantLayer0Filter, andComposeLayers } from './tenant-layer.js';
+import {
+  computeTenantLayer0Verdict,
+  tenantLayer0FilterOf,
+  andComposeLayers,
+  intersectTenantLayer0Verdicts,
+} from './tenant-layer.js';
 import {
   PLATFORM_OWNER_WALL_BYPASS_EVENT,
   isVerifiedPlatformOwnerRow,
@@ -110,6 +115,7 @@ import {
   DetailRecordNotFoundError,
   MasterReferenceMissingError,
   MaskedValueWriteError,
+  PermissionSetReadUnansweredError,
 } from './errors.js';
 import { assertEngineOwnedWriteAllowed } from './system-write-guard.js';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
@@ -746,6 +752,53 @@ function userFacingDenialMessage(
   return renderOperationMessage({ messageKey }, { locale, translate });
 }
 
+/**
+ * The `sys_permission_set` page the enforcement-plane loader asked for, or a
+ * REFUSAL — never a different empty.
+ *
+ * ## The shape, driven rather than declared
+ *
+ * `ObjectQL.find` resolves a BARE array of row objects. That is MEASURED, not
+ * read off `IDataEngine.find`'s declared `Promise<any[]>`: a declared type is
+ * not proof here, because this repo also carries a `find()` that resolves a
+ * `QueryResult` envelope and never an array. `engine-find-bare-array.pin.test.ts`
+ * boots a real `ObjectQL` over a real `SqlDriver`, starts this plugin against
+ * it, and pins what this very loader receives — on a populated page and an
+ * empty one. The `{ records }` limb this function replaced was therefore
+ * unreachable: dead code that read as a contract.
+ *
+ * ## Why anything else REFUSES instead of returning `[]`
+ *
+ * This is the enforcement plane. A value this loader cannot read is a read that
+ * did not answer, and the one thing it must never become is "this principal has
+ * no permission sets" — a statement that silently withdraws grants that exist
+ * while the request keeps looking normal. `PermissionEvaluator
+ * .resolvePermissionSets` catches the refusal one frame up, keeps the request
+ * fail-closed exactly as before, and reports it once (#2565's warn, which the
+ * old swallow made unreachable).
+ *
+ * A non-object ELEMENT refuses for the same reason, and that half is the
+ * repair's other direction: it used to be dropped in silence by the trailing
+ * `r?.name === name` filter, which is the same invention one row at a time.
+ */
+function permissionSetPageOrRefuse(rows: unknown, names: readonly string[]): any[] {
+  if (!Array.isArray(rows)) {
+    throw new PermissionSetReadUnansweredError(
+      names,
+      `the engine resolved ${rows === null ? 'null' : typeof rows}, not an array of rows`,
+    );
+  }
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') {
+      throw new PermissionSetReadUnansweredError(
+        names,
+        `the page carried a ${row === null ? 'null' : typeof row} where a row object was contracted`,
+      );
+    }
+  }
+  return rows;
+}
+
 export class SecurityPlugin implements Plugin {
   name = 'com.objectstack.security';
   /**
@@ -1279,17 +1332,35 @@ export class SecurityPlugin implements Plugin {
     // multiple of the names asked for, never unbounded.
     const dbLoaderFor = ql
       ? (organizationId?: string) => async (names: string[]) => {
-          let rows: any;
-          try {
-            rows = await ql.find(
-              'sys_permission_set',
-              { where: { name: { $in: names } }, limit: Math.max(names.length * 4, 20) },
-              { context: seedCtx(organizationId) },
-            );
-          } catch {
-            rows = [];
-          }
-          const fetched = Array.isArray(rows) ? rows : rows?.records ?? [];
+          // ⛔ NO `catch` here, and ⛔ no invented empty below — this seam is
+          // the DROP-shaped half of this cleanup and is repaired in the OPPOSITE
+          // direction from the dead limbs elsewhere in this plugin.
+          //
+          // Three distinct facts used to leave here as one value, `[]`: the read
+          // succeeded on an empty catalog; the read THREW; the read resolved
+          // something this loader could not read. Only the first is an answer.
+          // The other two were inventions, and this is the enforcement plane —
+          // "no permission sets" silently withdraws grants that EXIST while
+          // every request still looks completely normal. The residue comment
+          // below already names that failure ("revokes standing access with no
+          // signal at the moment of loss"); the swallow above it produced the
+          // same loss for a whole page at once.
+          //
+          // The refusal is not this seam's invention: `resolvePermissionSets`
+          // ALREADY declares how a throwing loader is handled — it catches, the
+          // unresolved sets grant nothing (fail closed, unchanged), and the
+          // failure is named in a warn, because without it "a transient DB error
+          // makes custom permission sets silently vanish and the resulting 403s
+          // are undiagnosable" (#2565). Swallowing here made that warn
+          // UNREACHABLE. Letting the read fault propagate is what re-arms a
+          // diagnostic this repo had already built, and it is the direction the
+          // 2026-08-11 store-fault ruling settles: a fault propagates.
+          const rows = await ql.find(
+            'sys_permission_set',
+            { where: { name: { $in: names } }, limit: Math.max(names.length * 4, 20) },
+            { context: seedCtx(organizationId) },
+          );
+          const fetched = permissionSetPageOrRefuse(rows, names);
           // One row per NAME: this organization's own where it has one, an
           // organization-less leftover only where it does not.
           //
@@ -3048,13 +3119,19 @@ export class SecurityPlugin implements Plugin {
       // below are what must normalise before it can go green again.
       if (opCtx.ast) {
         const extra: Record<string, unknown>[] = [];
-        const rlsFilter = await this.computeRlsFilter(
+        // [#15813] The layered split rather than `computeRlsFilter`, composed
+        // here with the SAME `andComposeLayers` that wrapper uses — so the
+        // injected predicate is byte-identical to before, and the Layer 0
+        // verdict that produced it is in hand to be RECORDED below.
+        const layered = await this.computeLayeredRlsFilter(
           permissionSets,
           opCtx.object,
           opCtx.operation,
           opCtx.context,
         );
+        const rlsFilter = andComposeLayers(layered.layer0, layered.layer1);
         if (rlsFilter) extra.push(rlsFilter);
+        let tenantLayer0Verdict = layered.tenantLayer0Verdict;
         // ADR-0055: a controlled_by_parent object derives its read scope from the
         // master record — `masterFK IN (accessible master ids)`, AND-ed in.
         const cbpFilter = await this.computeControlledByParentFilter(
@@ -3068,11 +3145,30 @@ export class SecurityPlugin implements Plugin {
         // against the delegator's own context so its userId/tenant substitutions
         // are faithful.
         if (delegatorSets) {
-          const delRls = await this.computeRlsFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext);
+          const delLayered = await this.computeLayeredRlsFilter(delegatorSets, opCtx.object, opCtx.operation, delegatorContext);
+          const delRls = andComposeLayers(delLayered.layer0, delLayered.layer1);
           if (delRls) extra.push(delRls);
+          // [#15813] Two Layer 0 walls are AND-ed onto this operation; the
+          // recorded verdict is their intersection — what the composed wall
+          // decided, not the caller's half alone.
+          tenantLayer0Verdict = intersectTenantLayer0Verdicts(tenantLayer0Verdict, delLayered.tenantLayer0Verdict);
           const delCbp = await this.computeControlledByParentFilter(delegatorSets, opCtx.object, delegatorContext);
           if (delCbp) extra.push(delCbp);
         }
+        // [#15813 / ADR-0131 D8] RECORD the Layer 0 verdict on the operation —
+        // the seam ruled on #15706 (option (i)): the wall states what it
+        // decided, and the bulk data-event producer in the engine
+        // (`publishBulkDataEvent` → `bulkEventOrganizationId`) reads it
+        // instead of re-deriving the wall from posture + context + schema,
+        // which structurally could not see the deployment's #12699 carve-out
+        // and mislabelled that population. Written for every operation whose
+        // predicate the wall was composed onto (this branch: reads and
+        // predicate writes); a system context exits before this point and a
+        // by-id write carries no `ast`, so neither records anything — absence
+        // is a distinct, honest state ("no wall was composed"), never `none`.
+        // The member is declared on `OperationContext` (`@objectstack/objectql`)
+        // and its shape by `TenantLayer0VerdictSchema` (`@objectstack/spec`).
+        opCtx.tenantLayer0Verdict = tenantLayer0Verdict;
         // [#8220, A of #7929] This is one of the two read-scope MERGE
         // BOUNDARIES, and the only frame that knows which subtree the caller
         // did not write — so the provenance mark is stamped here, before the
@@ -5448,7 +5544,17 @@ export class SecurityPlugin implements Plugin {
     operation: string,
     context: any,
     opts?: RlsFilterOptions,
-  ): Promise<{ layer0: Record<string, unknown> | null; layer1: Record<string, unknown> | null }> {
+  ): Promise<{
+    layer0: Record<string, unknown> | null;
+    layer1: Record<string, unknown> | null;
+    /**
+     * [#15813] What Layer 0 DECIDED — `layer0` is this verdict's projection
+     * (`tenantLayer0FilterOf`), never a sibling computation. The engine
+     * middleware records it on the operation context so a producer downstream
+     * reads the wall's decision instead of re-deriving the wall.
+     */
+    tenantLayer0Verdict: TenantLayer0Verdict;
+  }> {
     // [ADR-0095 D1] Effective filter = Layer0(tenant) AND Layer1(business RLS).
     // The two are computed independently and never share a compiler, a merge
     // step, or a bypass bit (closes W1 by construction, W2 structurally).
@@ -5701,7 +5807,9 @@ export class SecurityPlugin implements Plugin {
     // Decides "tenant object?" directly from the field set + tenancy posture (NOT
     // via extractTargetField's `=`-only shape match), so a `tenancy.enabled:false`
     // global object correctly contributes nothing (ADR-0095 delta c).
-    const layer0 = computeTenantLayer0Filter({
+    // [#15813] The verdict is computed ONCE; the filter injected below is its
+    // projection. Recording the verdict costs no second computation.
+    const tenantLayer0Verdict = computeTenantLayer0Verdict({
       tenancyPosture: this.tenancyPosture,
       organizationId: context?.tenantId,
       // [ADR-0105 D2] The `group` wall's predicate. Resolved by
@@ -5730,6 +5838,7 @@ export class SecurityPlugin implements Plugin {
       posturePermitsCrossTenant: posturePermits,
       isPlatformAdmin,
     });
+    const layer0 = tenantLayer0FilterOf(tenantLayer0Verdict);
 
     // [#12974] Verified platform OWNER crosses the Layer 0 org wall — READS
     // ONLY. Maintainer ruling 2026-08-29, verbatim and untranslated: 「能不能
@@ -5781,10 +5890,13 @@ export class SecurityPlugin implements Plugin {
           suppressedFilter: layer0,
         },
       );
-      return { layer0: null, layer1 };
+      // [#15813] The recorded verdict follows the wall as APPLIED: lifted here,
+      // so `none` — a reader must not learn an organization from a wall that
+      // was not appended.
+      return { layer0: null, layer1, tenantLayer0Verdict: { kind: 'none' } };
     }
 
-    return { layer0, layer1 };
+    return { layer0, layer1, tenantLayer0Verdict };
   }
 
   /**

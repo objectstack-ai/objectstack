@@ -1121,16 +1121,25 @@ describe('#13753 GET /meta/:type/:name/references states the org partition', () 
             // reads as "the question was never asked", so a scope repair that
             // moved either would be moving the destructive-action clearance.
             //
-            // ⚠️ The code is read through BOTH refusal dialects on purpose.
-            // Measured on this boot, the two 501s this route can answer do not
-            // agree: the missing-method branch hand-builds the ADR-0112 NESTED
-            // `{ error: { code, message } }`, while the protocol-raised
-            // unanswerable-target refusal reaches the wire as the FLAT
-            // `{ error: 'Internal server error', code }` — the prescriptive
-            // "ask the owning object instead" message scrubbed. That is a
-            // finding of its own, filed as #15685; it is NOT this card's
-            // subject, and reading both keeps this pin measuring the thing it
-            // is about.
+            // ⚠️ The code is read through BOTH refusal dialects on purpose,
+            // and the reason CHANGED with #15685 — so the sentence is rewritten
+            // rather than left standing as a falsified one.
+            //
+            // It used to accommodate a real divergence: the missing-method
+            // branch hand-built the ADR-0112 NESTED `{ error: { code, message } }`
+            // while the protocol-raised unanswerable-target refusal reached the
+            // wire as the FLAT `{ error: 'Internal server error', code }`, its
+            // prescriptive "ask the owning object instead" message scrubbed.
+            // #15685 closed that: both exits now answer the nested envelope, and
+            // `body.error.code` reads the same way on each.
+            //
+            // The tolerant read STAYS, deliberately. The envelope and the
+            // message are pinned — positionally, and on both refusals at once —
+            // by `rest-server-meta-references-refusal-envelope.test.ts`, which
+            // is where a regression in either belongs. What THIS pin measures is
+            // that a SCOPE repair moves neither the code nor the status, and
+            // reading the code wherever it sits is what keeps it measuring that
+            // and not a second copy of the envelope contract.
             const refused = await b.references('field', 'account.owner');
             const body = refused.body as any;
             const observed = refused.thrown

@@ -550,6 +550,11 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
         expect(err, named.join(',')).toBeInstanceOf(Error);
         expect(err.code, named.join(',')).toBe('INVALID_FIELD');
         expect(err.status, named.join(',')).toBe(400);
+        // Both spellings, same number (ADR-0112 D5). `status` is what the HTTP
+        // doors read; `httpStatus` is what a consumer holding the THROWN error
+        // reads, and it is the one the CLI `--json` envelope forwards — that
+        // envelope carried `code` with no status at all until this was stamped.
+        expect(err.httpStatus, named.join(',')).toBe(400);
         // The engine's sibling producers' shape: `field` is the first entry
         // that did not resolve, `fields` every one of them.
         expect(err.field, named.join(',')).toBe(named[named.length - 1]);

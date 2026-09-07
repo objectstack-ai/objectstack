@@ -162,7 +162,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "fields.reference": {
         label: "Reference",
-        helpText: "Target object name"
+        helpText: "Target object name. For a tree field it is optional and, if given, must be this object (a tree is a hierarchy within its own object — link a different object with a lookup)"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",
@@ -555,8 +555,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       onError: {
         label: "On Error"
       },
-      timeout: {
-        label: "Timeout",
+      timeoutMs: {
+        label: "Timeout Ms",
         helpText: "Abort the hook after N milliseconds"
       },
       runAs: {
@@ -942,8 +942,8 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Gap",
         helpText: "Space between widgets, in steps of 0.25rem (4 = 1rem)"
       },
-      refreshInterval: {
-        label: "Refresh Interval",
+      refreshIntervalSeconds: {
+        label: "Refresh Interval Seconds",
         helpText: "Auto-refresh (seconds)"
       },
       header: {

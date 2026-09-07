@@ -266,13 +266,13 @@ describe('QueueConfigSchema', () => {
       concurrency: 10,
       rateLimit: {
         max: 100,
-        duration: 60000,
+        durationMs: 60000,
       },
     };
 
     const parsed = QueueConfigSchema.parse(config);
     expect(parsed.rateLimit?.max).toBe(100);
-    expect(parsed.rateLimit?.duration).toBe(60000);
+    expect(parsed.rateLimit?.durationMs).toBe(60000);
   });
 
   it('should accept queue with auto-scaling', () => {
@@ -548,5 +548,35 @@ describe('Worker Integration', () => {
 
     expect(sorted[0].priority).toBe('critical');
     expect(sorted[4].priority).toBe('background');
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B. The old spelling is a
+// `retiredKey()` tombstone; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. The counter-example was already in this file:
+// `TaskExecutionResult.durationMs` spelled the identical measurement correctly
+// ninety lines up, which is what made the bare `rateLimit.duration` a drift
+// rather than a convention. A silent strip here would have left a queue
+// unthrottled with no error.
+describe('QueueConfig.rateLimit.duration carries its unit (#15679)', () => {
+  it('REFUSES the retired `rateLimit.duration` with the rename in the message', () => {
+    const result = QueueConfigSchema.safeParse({
+      name: 'rate_limited_queue',
+      rateLimit: { max: 100, duration: 60000 },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'rateLimit.duration');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`QueueConfig.rateLimit.duration` was renamed to `durationMs`');
+  });
+
+  it('accepts `rateLimit.durationMs` at the same magnitude; `max` stays a bare COUNT', () => {
+    const parsed = QueueConfigSchema.parse({
+      name: 'rate_limited_queue',
+      rateLimit: { max: 100, durationMs: 60000 },
+    });
+    expect(parsed.rateLimit?.durationMs).toBe(60000);
+    expect(parsed.rateLimit?.max).toBe(100);
   });
 });

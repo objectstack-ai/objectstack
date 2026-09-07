@@ -262,9 +262,11 @@ export const PostgresConfigSchema = lazySchema(() => strictObject(
     .meta({ title: 'Application name' }),
 
   /** `statement_timeout` in milliseconds — aborts any statement that runs longer. */
+  // `externalVocabulary` mirror (#14478 ruling B): the camelCase of PostgreSQL's
+  // own `statement_timeout` parameter, which the JSDoc above names directly.
   statementTimeout: z.number().int().positive().optional()
     .describe('Abort statements running longer than this (ms)')
-    .meta({ title: 'Statement timeout (ms)' }),
+    .meta({ title: 'Statement timeout (ms)', externalVocabulary: 'PostgreSQL `statement_timeout`' }),
 
   /** Dev-only, loosen-only schema self-heal (#2186). */
   autoMigrate: SqlAutoMigrateSchema.optional(),

@@ -5,6 +5,7 @@ import {
   collectExpectedEntries,
   extractTranslations,
   renderTranslationModule,
+  stackAuthoredSubtree,
 } from '../src/utils/i18n-extract.js';
 
 const config: any = {
@@ -403,5 +404,101 @@ describe('renderTranslationModule', () => {
       { locale: 'en' },
     );
     expect(ts).toContain('"foo-bar":');
+  });
+});
+
+/**
+ * The module a run WRITES and the baseline companion beside it are disjoint,
+ * and under `kind: 'stack'` the two together are everything the extractor built
+ * (#14894).
+ *
+ * ⚠️ Not "the three kinds partition the leaves", which is how this block was
+ * first written and is wrong: `'objects'` is a SUB-SELECTION of `'stack'`, not
+ * a sibling cell. The invariant is about the PAIR a run emits.
+ *
+ * The pins are a census — which groups, how many leaves — rather than a
+ * substring search, because the defect this closes was one group present in TWO
+ * modules at once, and a substring pin cannot see a duplicate.
+ *
+ * Driven before the fix, `kind: 'stack'` (then `'full'`) rendered `data`
+ * itself: the stack module carried the `metadataForms` baseline as well, so
+ * `--no-metadata-forms` suppressed one copy while the other was written next to
+ * it, and with the flag on the baseline was emitted twice.
+ */
+describe('renderTranslationModule sub-tree selection (#14894)', () => {
+  /** A locale's data with all three groups populated, none of them empty. */
+  const data = {
+    objects: { crm_account: { label: 'Account' } },
+    apps: { kpi: { label: 'KPI Console' } },
+    metadataForms: { object: { label: 'Object', sections: { basics: { label: 'Basics' } } } },
+  } as any;
+
+  /** Top-level groups of the emitted const, read off the rendered module. */
+  const groups = (ts: string): string[] =>
+    [...ts.slice(ts.indexOf(' = {')).matchAll(/^ {2}("[^"]+"|[A-Za-z_$][\w$]*):/gm)].map((m) =>
+      m[1].replace(/"/g, ''),
+    );
+
+  it("kind 'objects' carries the objects sub-tree alone", () => {
+    const ts = renderTranslationModule(data, { locale: 'zh-CN', kind: 'objects' });
+    expect(groups(ts)).toEqual(['crm_account']);
+    expect(ts).toContain("export const zhCNObjects: NonNullable<TranslationData['objects']>");
+  });
+
+  it("kind 'stack' carries everything the stack authors — and NOT the baseline", () => {
+    const ts = renderTranslationModule(data, { locale: 'zh-CN', kind: 'stack' });
+    expect(groups(ts)).toEqual(['objects', 'apps']);
+    expect(groups(ts)).not.toContain('metadataForms');
+    expect(ts).toContain("export const zhCNTranslations: Omit<TranslationData, 'metadataForms'>");
+    // The English source text of the baseline is what a non-English default
+    // locale was shipping; it must not be anywhere in this module.
+    expect(ts).not.toContain('Basics');
+  });
+
+  it("kind 'metadataForms' carries the baseline alone", () => {
+    const ts = renderTranslationModule(data, { locale: 'zh-CN', kind: 'metadataForms' });
+    expect(groups(ts)).toEqual(['object']);
+    expect(ts).toContain("export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']>");
+  });
+
+  it("objectsOnly: false is the legacy alias for kind 'stack', not for the whole bundle", () => {
+    expect(renderTranslationModule(data, { locale: 'zh-CN', objectsOnly: false })).toBe(
+      renderTranslationModule(data, { locale: 'zh-CN', kind: 'stack' }),
+    );
+  });
+
+  it('emits every leaf exactly once across the pair a stack run writes', () => {
+    const leaves = (ts: string) => (ts.match(/: "/g) ?? []).length;
+    const stack = renderTranslationModule(data, { locale: 'zh-CN', kind: 'stack' });
+    const forms = renderTranslationModule(data, { locale: 'zh-CN', kind: 'metadataForms' });
+    // 2 stack leaves (one object label, one app label) + 2 baseline leaves.
+    expect(leaves(stack)).toBe(2);
+    expect(leaves(forms)).toBe(2);
+    expect(leaves(stack) + leaves(forms)).toBe(4);
+  });
+});
+
+/**
+ * `stackAuthoredSubtree` is a pure omission and nothing else (#14894) — the
+ * caller passes the extractor's own bundle object, so a version of it that
+ * mutated its argument would corrupt the data the metadata-forms module is
+ * rendered from a few lines later in the same run.
+ */
+describe('stackAuthoredSubtree', () => {
+  it('drops metadataForms and keeps every other group, without mutating the input', () => {
+    const input = {
+      objects: { a: { label: 'A' } },
+      apps: { b: { label: 'B' } },
+      metadataForms: { object: { label: 'Object' } },
+    } as any;
+    const out = stackAuthoredSubtree(input);
+    expect(Object.keys(out).sort()).toEqual(['apps', 'objects']);
+    expect(out.objects).toBe(input.objects);
+    expect(Object.keys(input).sort()).toEqual(['apps', 'metadataForms', 'objects']);
+  });
+
+  it('is a no-op on data that never had a baseline', () => {
+    const input = { objects: { a: { label: 'A' } } } as any;
+    expect(stackAuthoredSubtree(input)).toEqual(input);
   });
 });

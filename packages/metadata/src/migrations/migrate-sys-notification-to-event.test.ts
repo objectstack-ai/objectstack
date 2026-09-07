@@ -10,6 +10,11 @@ import { describe, it, expect } from 'vitest';
 // (file, verb) pairs sat in the gate's DEBT ledger until #5619 sank the two
 // predicates into a package that depends on neither side.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+// [#16100] The ledger contract and its SHIPPED readers/writers, so the receipt
+// cases below measure what a consumer would really see rather than a literal
+// this file agrees with itself about.
+import { DATA_MIGRATION_FLAG_OBJECT, NOTIFICATION_EVENT_MIGRATION_ID } from '@objectstack/spec/system';
+import { attestFreshDatastore, isDataMigrationVerified } from '@objectstack/platform-objects/system';
 import { migrateSysNotificationToEvent } from './migrate-sys-notification-to-event.js';
 
 /** Columns the legacy (pre-ADR-0030) sys_notification table physically has. */
@@ -40,23 +45,79 @@ function fakeDriver(rows: any[], columns: string[] = LEGACY_TABLE_COLUMNS) {
     };
 }
 
-function fakeEngine() {
+/**
+ * [#16100] The `sys_migration` deployment ledger a host may or may not carry.
+ *
+ * `IDataEngine` does not declare `getObject`, so the receipt writer PROBES for
+ * it — which makes "was a ledger configured on this double?" the difference
+ * between a host that can hold the run receipt and one that cannot. A
+ * `fakeEngine()` built with no argument is the latter, and that is deliberately
+ * what every case predating #16100 exercises: they measure the migration, not
+ * the receipt, and none of them may start writing a ledger row.
+ */
+interface FakeLedger {
+    /** Rows already in `sys_migration` — e.g. a fresh store's birth attestation. */
+    rows?: Array<Record<string, unknown>>;
+    /** Object names this kernel has registered. Defaults to the ledger alone. */
+    registered?: string[];
+    /** Make every `sys_migration` write throw with this message. */
+    failWrites?: string;
+}
+
+const LEDGER_OBJECT = 'sys_migration';
+
+function fakeEngine(ledger?: FakeLedger) {
     const inserts: Array<{ object: string; row: any }> = [];
     const updates: Array<{ object: string; data: any }> = [];
+    const finds: Array<{ object: string; query: any }> = [];
+    const stored = new Map<string, Record<string, unknown>>(
+        (ledger?.rows ?? []).map((r) => [String(r.id), { ...r }]),
+    );
+    const registered = new Set(ledger?.registered ?? [LEDGER_OBJECT]);
     return {
         inserts,
         updates,
+        finds,
+        /** The ledger's contents AFTER the run — the fresh-store assertion's subject. */
+        stored,
         engine: {
+            // Present only when a ledger was configured: the probe's own input.
+            ...(ledger
+                ? {
+                      getObject(name: string) {
+                          return registered.has(name) ? { name } : undefined;
+                      },
+                  }
+                : {}),
             async insert(object: string, row: any) {
                 inserts.push({ object, row });
+                if (object === LEDGER_OBJECT) {
+                    if (ledger?.failWrites) throw new Error(ledger.failWrites);
+                    stored.set(String(row.id), { ...row });
+                }
                 return { id: `${object}_${inserts.length}`, ...row };
             },
             async update(object: string, data: any, options?: Record<string, unknown>) {
                 assertEngineUpdateDispatch(data, options);
                 updates.push({ object, data });
+                if (object === LEDGER_OBJECT) {
+                    if (ledger?.failWrites) throw new Error(ledger.failWrites);
+                    const id = String(data.id);
+                    // MERGE, not replace — that is what an UPDATE does to the
+                    // columns it does not name, and the whole point of the
+                    // fresh-store case is which columns are named.
+                    stored.set(id, { ...(stored.get(id) ?? {}), ...data });
+                }
                 return data;
             },
-            async find() { return []; },
+            async find(object?: string, query?: Record<string, any>) {
+                if (object !== undefined) finds.push({ object, query });
+                if (ledger && object === LEDGER_OBJECT) {
+                    const row = stored.get(String(query?.where?.id));
+                    return row ? [{ ...row }] : [];
+                }
+                return [];
+            },
             async findOne(object: string, query?: EngineFindOneQueryInput) {
                               assertEngineFindOnePredicate(object, query); return null; },
             async delete(_object?: string, options?: Record<string, unknown>) {
@@ -321,5 +382,310 @@ describe('#13998 the timestamp spelling written into the new rows', () => {
         expect(inbox.row.created_at).toBe(REPORTED_INSTANT);
         expect(receipt.row.created_at).toBe(REPORTED_INSTANT);
         expect(receipt.row.at).toBe(REPORTED_READ_INSTANT);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// [#16100] The run receipt in the `sys_migration` deployment ledger.
+//
+// What a run of this migration may claim under `NOTIFICATION_EVENT_MIGRATION_ID`
+// is RULED (maintainer 「同意」 to decision batch #47 item 5, recorded on
+// #15710) and the ruling lives on that constant's docblock in
+// `@objectstack/spec/system`. The spec side already pins the ruling's TEXT and
+// that the receipt shape authorises nothing
+// (`packages/spec/src/system/notification-event-migration-ledger.pin.test.ts`);
+// these cases pin the RUNTIME half — what this writer actually sends, per
+// outcome.
+//
+// ⚠️ There is no operator-reachable run of this migration today: it has no
+// production call site and `os migrate` has no `notification-event`
+// sub-command. Until that changes these cases are the ONLY thing that exercises
+// the writer, which is why every arm of the matrix is pinned separately rather
+// than one happy path standing in for four.
+// ---------------------------------------------------------------------------
+
+/** The run's injected clock — every stamp the receipt writes is this instant. */
+const RUN_AT = '2026-09-06T07:08:09.000Z';
+/** A different instant, so a preserved birth stamp cannot pass by matching it. */
+const BIRTH_AT = '2026-03-04T05:06:07.000Z';
+
+type FakeEngineHarness = ReturnType<typeof fakeEngine>;
+
+/** Every write this run sent to the ledger object, in order. */
+function ledgerWrites(e: FakeEngineHarness) {
+    return [
+        ...e.inserts.filter((i) => i.object === LEDGER_OBJECT).map((i) => ({ verb: 'insert' as const, row: i.row })),
+        ...e.updates.filter((u) => u.object === LEDGER_OBJECT).map((u) => ({ verb: 'update' as const, row: u.data })),
+    ];
+}
+
+/** The ledger row as it stands AFTER the run. */
+function ledgerRow(e: FakeEngineHarness) {
+    return e.stored.get(NOTIFICATION_EVENT_MIGRATION_ID);
+}
+
+/** A legacy row, so the run reports `migrated`. */
+function legacyRow() {
+    return {
+        id: 'n1', recipient_id: 'u1', type: 'mention', title: 'hi', body: null, url: null,
+        actor_name: null, is_read: 0, read_at: null,
+        created_at: '2026-01-01T00:00:00.000Z', organization_id: 'org_1',
+    };
+}
+
+describe('#16100 the run receipt written into sys_migration', () => {
+    it('control: the id and the ledger object are the ones the contract declares', () => {
+        // Without this the cases below could all agree with each other about a
+        // string neither the reader nor the attestation writer uses.
+        expect(NOTIFICATION_EVENT_MIGRATION_ID).toBe('adr-0030-notification-event');
+        expect(DATA_MIGRATION_FLAG_OBJECT).toBe(LEDGER_OBJECT);
+    });
+
+    it('`migrated` — claims last_run_at AND applied_at, never verified_at', async () => {
+        const d = fakeDriver([legacyRow()]);
+        const e = fakeEngine({});
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('migrated');
+        expect(result.receipt).toEqual({ outcome: 'inserted' });
+        const writes = ledgerWrites(e);
+        expect(writes.map((w) => w.verb)).toEqual(['insert']);
+        expect(writes[0]!.row).toMatchObject({
+            id: NOTIFICATION_EVENT_MIGRATION_ID,
+            last_run_at: RUN_AT,
+            applied_at: RUN_AT,
+            verified_at: null,
+            blocking: 0,
+            details: JSON.stringify({ outcome: 'migrated' }),
+        });
+    });
+
+    it.each(['already_done', 'not_applicable'] as const)(
+        '`%s` — claims last_run_at and NOT applied_at',
+        async (outcome) => {
+            // `already_done`: the legacy column is there and no legacy row is.
+            // `not_applicable`: the column was never there at all.
+            const d = outcome === 'already_done'
+                ? fakeDriver([])
+                : fakeDriver([], ['id', 'topic', 'payload', 'severity', 'created_at']);
+            const e = fakeEngine({});
+
+            const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+            expect(result.status).toBe(outcome);
+            expect(result.receipt).toEqual({ outcome: 'inserted' });
+            const writes = ledgerWrites(e);
+            expect(writes.map((w) => w.verb)).toEqual(['insert']);
+            expect(writes[0]!.row).toMatchObject({
+                id: NOTIFICATION_EVENT_MIGRATION_ID,
+                last_run_at: RUN_AT,
+                applied_at: null,
+                verified_at: null,
+                blocking: 0,
+                details: JSON.stringify({ outcome }),
+            });
+        },
+    );
+
+    it('`error` (no raw-SQL surface) — writes NO ledger claim, and does not even read the ledger', async () => {
+        const e = fakeEngine({});
+
+        const result = await migrateSysNotificationToEvent({ driver: {} as any, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('error');
+        expect(result.receipt).toEqual({ outcome: 'not-claimed' });
+        expect(ledgerWrites(e)).toEqual([]);
+        expect(e.stored.size).toBe(0);
+        // Not merely "wrote nothing": an `error` run has no business asking the
+        // ledger anything, so the read never happens either.
+        expect(e.finds.filter((f) => f.object === LEDGER_OBJECT)).toEqual([]);
+    });
+
+    it('`error` (a throw mid-run) — the other error return site claims nothing either', async () => {
+        // The first `error` case returns before the try block; this one comes
+        // out of the catch, with rows already rewritten. Both must be silent in
+        // the ledger, and only a case per return site can say so.
+        const failing = {
+            async raw(sql: string) {
+                if (sql.startsWith('PRAGMA table_info')) return LEGACY_TABLE_COLUMNS.map((name) => ({ name }));
+                if (sql.startsWith('SELECT id, recipient_id')) throw new Error('connection reset');
+                return [];
+            },
+        } as any;
+        const e = fakeEngine({});
+
+        const result = await migrateSysNotificationToEvent({ driver: failing, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('error');
+        expect(result.error).toContain('connection reset');
+        expect(result.receipt).toEqual({ outcome: 'not-claimed' });
+        expect(ledgerWrites(e)).toEqual([]);
+    });
+
+    it('details carries exactly `{ outcome }`, JSON-encoded — nothing else', async () => {
+        const d = fakeDriver([legacyRow()]);
+        const e = fakeEngine({});
+        await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+        expect(JSON.parse(String(ledgerRow(e)!.details))).toEqual({ outcome: 'migrated' });
+    });
+
+    it('the receipt authorises nothing — and the control shows the `false` is the null, not the shape', async () => {
+        const d = fakeDriver([legacyRow()]);
+        const e = fakeEngine({});
+
+        await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        // Read back through the SHIPPED reader, not through the row literal:
+        // "receipt, not gate" is a claim about what a consumer sees.
+        expect(await isDataMigrationVerified(e.engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(false);
+        // Non-vacuity: the same row with a certificate WOULD authorise, so the
+        // `false` above is about `verified_at` and not about an unreadable row.
+        e.stored.set(NOTIFICATION_EVENT_MIGRATION_ID, { ...ledgerRow(e)!, verified_at: RUN_AT });
+        expect(await isDataMigrationVerified(e.engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(true);
+    });
+});
+
+describe('#16100 the fresh-store case — a birth attestation this writer may not touch', () => {
+    /**
+     * Seed the row the way a real fresh store gets it: through the SHIPPED
+     * producer, `attestFreshDatastore`, which sets `verified_at` at birth for
+     * every member of `CREATION_ATTESTED_MIGRATION_IDS` — this id among them.
+     * Hand-writing the row here would pin this file's idea of the birth shape
+     * instead of the producer's.
+     */
+    async function freshStore(rows: any[] = [], columns?: string[]) {
+        const e = fakeEngine({});
+        const attested = await attestFreshDatastore(e.engine, {
+            migrationIds: [NOTIFICATION_EVENT_MIGRATION_ID],
+        });
+        expect(attested, 'the birth attestation did not happen — the case would be vacuous')
+            .toEqual([NOTIFICATION_EVENT_MIGRATION_ID]);
+        const birth = e.stored.get(NOTIFICATION_EVENT_MIGRATION_ID)!;
+        expect(birth.verified_at, 'a fresh store is verified BY BIRTH — nothing to preserve otherwise')
+            .toBeTruthy();
+        // Re-stamp the birth columns to a distinct instant so a value that
+        // merely LOOKS preserved cannot be this run's own stamp echoed back.
+        e.stored.set(NOTIFICATION_EVENT_MIGRATION_ID, {
+            ...birth, verified_at: BIRTH_AT, last_run_at: BIRTH_AT, created_at: BIRTH_AT, updated_at: BIRTH_AT,
+        });
+        e.inserts.length = 0;
+        e.updates.length = 0;
+        e.finds.length = 0;
+        const d = columns ? fakeDriver(rows, columns) : fakeDriver(rows);
+        return { e, d };
+    }
+
+    it('a `not_applicable` run UPDATES the row and never names verified_at or applied_at', async () => {
+        // The realistic fresh-store shape: the table was created after the
+        // cut-over, so it has no `recipient_id` column at all.
+        const { e, d } = await freshStore([], ['id', 'topic', 'payload', 'severity', 'created_at']);
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('not_applicable');
+        expect(result.receipt).toEqual({ outcome: 'updated' });
+
+        const writes = ledgerWrites(e);
+        expect(writes.map((w) => w.verb)).toEqual(['update']);
+        // The payload half: the columns are not sent AT ALL. Asserting the
+        // stored value alone would pass on a writer that sent the old value
+        // back, which is a different (and unwritable) thing to promise.
+        expect(Object.keys(writes[0]!.row).sort()).toEqual(
+            ['blocking', 'details', 'id', 'last_run_at', 'updated_at'],
+        );
+        expect(writes[0]!.row).not.toHaveProperty('verified_at');
+        expect(writes[0]!.row).not.toHaveProperty('applied_at');
+
+        // The stored half: the birth certificate survives, untouched and still
+        // distinguishable from this run's stamp.
+        const row = ledgerRow(e)!;
+        expect(row.verified_at).toBe(BIRTH_AT);
+        expect(row.applied_at).toBe(null);
+        expect(row.last_run_at).toBe(RUN_AT);
+        expect(JSON.parse(String(row.details))).toEqual({ outcome: 'not_applicable' });
+
+        // And it still reads as verified — by birth, never by this run.
+        expect(await isDataMigrationVerified(e.engine, NOTIFICATION_EVENT_MIGRATION_ID)).toBe(true);
+    });
+
+    it('a `migrated` run on a fresh store stamps applied_at and STILL leaves verified_at alone', async () => {
+        const { e, d } = await freshStore([legacyRow()]);
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('migrated');
+        expect(result.receipt).toEqual({ outcome: 'updated' });
+        const writes = ledgerWrites(e);
+        expect(writes[0]!.row).toMatchObject({ last_run_at: RUN_AT, applied_at: RUN_AT });
+        expect(writes[0]!.row).not.toHaveProperty('verified_at');
+        expect(ledgerRow(e)!.verified_at).toBe(BIRTH_AT);
+    });
+
+    it('a later non-`migrated` run does not CLEAR an earlier run\'s applied_at', async () => {
+        // The other half of "applied_at only on `migrated`": only on `migrated`
+        // is it STAMPED — it is never un-stamped, because an earlier backfill
+        // really did happen and a later no-op does not undo it.
+        const e = fakeEngine({});
+        const first = await migrateSysNotificationToEvent({
+            driver: fakeDriver([legacyRow()]).driver, data: e.engine, now: () => BIRTH_AT,
+        });
+        expect(first.status).toBe('migrated');
+        expect(ledgerRow(e)!.applied_at).toBe(BIRTH_AT);
+
+        const second = await migrateSysNotificationToEvent({
+            driver: fakeDriver([]).driver, data: e.engine, now: () => RUN_AT,
+        });
+
+        expect(second.status).toBe('already_done');
+        expect(second.receipt).toEqual({ outcome: 'updated' });
+        expect(ledgerRow(e)!.applied_at).toBe(BIRTH_AT);
+        expect(ledgerRow(e)!.last_run_at).toBe(RUN_AT);
+    });
+});
+
+describe('#16100 when the claim cannot land, the caller is told', () => {
+    it('a host with no object registry reports `no-ledger` and writes nothing', async () => {
+        // `fakeEngine()` with NO argument carries no `getObject` — exactly the
+        // double every case predating #16100 uses, which is why none of them
+        // acquired a ledger write.
+        const d = fakeDriver([legacyRow()]);
+        const e = fakeEngine();
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('migrated');
+        expect(result.receipt.outcome).toBe('no-ledger');
+        expect(result.receipt.reason).toContain('getObject');
+        expect(e.inserts.map((i) => i.object)).toEqual(['sys_inbox_message', 'sys_notification_receipt']);
+    });
+
+    it('an engine without the ledger object registered reports `no-ledger` and names the remedy', async () => {
+        const d = fakeDriver([legacyRow()]);
+        const e = fakeEngine({ registered: [] });
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('migrated');
+        expect(result.receipt.outcome).toBe('no-ledger');
+        expect(result.receipt.reason).toContain(DATA_MIGRATION_FLAG_OBJECT);
+        expect(result.receipt.reason).toContain('PlatformObjectsPlugin');
+        expect(ledgerWrites(e)).toEqual([]);
+    });
+
+    it('a ledger write that throws reports `failed` and leaves the migration result intact', async () => {
+        // The #4420 shape on this row: the data really was rewritten, every
+        // other reading is clean, and the only durable record that it happened
+        // is absent. The caller is told, which is what keeps it from being a
+        // silent degradation.
+        const d = fakeDriver([legacyRow()]);
+        const e = fakeEngine({ failWrites: 'readonly transaction' });
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine, now: () => RUN_AT });
+
+        expect(result.status).toBe('migrated');
+        expect(result.migrated).toBe(1);
+        expect(result.receipt).toEqual({ outcome: 'failed', reason: 'readonly transaction' });
+        expect(e.stored.size).toBe(0);
     });
 });

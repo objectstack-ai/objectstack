@@ -172,5 +172,10 @@ export const jaJP: TranslationData = {
       subtitle:
         'MCP 対応の AI クライアントにこの環境への統制されたアクセスを許可します。すべての呼び出しは、呼び出し元自身の権限と行レベルセキュリティのもとで実行されます。',
     },
+
+    // Platform record pages (#15743) -- see `en.ts` for the key set.
+    sys_user_detail: { label: 'ユーザー' },
+    sys_organization_detail: { label: '組織' },
+    sys_position_detail: { label: 'ポジション' },
   },
 };

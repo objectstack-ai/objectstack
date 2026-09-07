@@ -627,7 +627,14 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // identity forwarded. No `@objectstack/service-ai`.
         listActions: async () => {
             const meta: any = await getMeta();
-            const hasAutomation = Boolean(await actionExec.resolveAutomationService(deps, context, envId));
+            // [#15705] The service instance, not just its presence: a
+            // flow-typed action's input contract lives in the FLOW, and
+            // `getFlow` is the declared door onto it (`IAutomationService`,
+            // the same probe `dispatchFlowAction` uses before it dispatches).
+            // Without it `list_actions` answered with no `params` for every
+            // flow action while promising "its input parameters".
+            const automation: any = await actionExec.resolveAutomationService(deps, context, envId);
+            const hasAutomation = Boolean(automation);
             const out: any[] = [];
             for (const { action, objectName, obj } of await actionExec.collectActionDeclarations(deps, meta)) {
                 if (!objectName || isSystemObjectName(objectName)) continue; // fail-closed on sys_*
@@ -639,7 +646,19 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 if (actionExec.actionAiExposureError(deps, action)) continue;
                 // Hide actions the caller is not permitted to run.
                 if (actionExec.actionPermissionError(deps, action, ec)) continue;
-                out.push(actionExec.summarizeAction(deps, action, obj, objectName));
+                // Resolved per flow action, and only for one: a service that
+                // omits the optional `getFlow` — or a flow the registry does
+                // not hold — simply summarizes as before, since the fallback
+                // is "no `params` key", exactly today's answer.
+                let flow: any;
+                if (action?.type === 'flow' && typeof action?.target === 'string' && typeof automation?.getFlow === 'function') {
+                    try {
+                        flow = await automation.getFlow(action.target);
+                    } catch {
+                        flow = undefined; // a registry that cannot answer is not a listing failure
+                    }
+                }
+                out.push(actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined));
             }
             return out;
         },

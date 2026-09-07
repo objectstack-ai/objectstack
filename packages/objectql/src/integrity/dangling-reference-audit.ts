@@ -77,7 +77,7 @@ import { PLATFORM_OBJECTS_BY_PACKAGE } from '@objectstack/spec/system';
  *
  * `readonly` reference fields used to be skipped outright, on two grounds. The
  * first is #4441's and still holds: a non-system caller's value is stripped
- * before the write (`stripReadonlyFields` / `stripReadonlyForInsert`), so what
+ * before the write (`stripReadonlyFields`, on both write paths since #14147), so what
  * survives was minted by the platform and was never the caller's to answer for.
  * The second was the `recorded_by` sentinel above — the platform wrote a
  * NON-ID into a reference column, and probing it could only ever produce a

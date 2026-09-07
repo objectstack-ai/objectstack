@@ -9,10 +9,10 @@
  * | Rule                                    | Origin                          |
  * |-----------------------------------------|---------------------------------|
  * | security-owd-unset            (error)   | objectui#2348 leave_request 事故 |
- * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum      |
+ * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum — UNPARSED intakes only, see § Intake |
  * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
- * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors          |
+ * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
@@ -26,6 +26,14 @@
  * BUT ONE mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
  * zod enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave)
  * — the lint moves the failure from runtime-deny to author-time fix-it.
+ * `security-anchor-high-privilege` mirrors that gate for the one suggestion a
+ * package can actually declare (`isDefault: true` → the `everyone` anchor,
+ * `suggested-audience-bindings.ts`'s "the only declarable suggestion"); a set
+ * an operator binds to `guest` at install time is a decision ADR-0090 D9
+ * ("a package may suggest bindings … the admin confirms each individually")
+ * puts past authoring, so this rule is not — and cannot be — coverage for an
+ * app-authored anchor set bound to `guest` (#16110). That binding is held by
+ * the runtime's own `describeAnchorForbiddenBits(set, 'guest')` gate instead.
  *
  * The exception INVERTS that argument rather than weakening it.
  * `security-cbp-ambiguous-relation` has no runtime refusal to mirror precisely
@@ -67,6 +75,44 @@
  * Directive #12). Here it also silently downgraded a NAMED rejection into an
  * inert branch — and an inert branch in a security linter reads, to the next
  * author, as a gate that is watching (#4984, #5009, #5017).
+ *
+ * ## Intake — which doors can reach `security-owd-alias` at all (#16109)
+ *
+ * `sharingModel` and `externalSharingModel` are CLOSED enums on `ObjectSchema`
+ * (ADR-0090 D4 / D11): every value `OWD_ALIAS_FIX` names, and every
+ * non-canonical string, is refused by the schema with `invalid_value`. So on
+ * any door that PARSES before the registry runs, this rule's alias branches
+ * are unreachable by construction — the object never arrives. Measured on
+ * this package's dist (the pins live in `authoring-rule-input-tier.test.ts`,
+ * "security-owd-alias reaches the rule only through the unparsed doors"):
+ *
+ * | door                                                        | alias reaches the rule? |
+ * |-------------------------------------------------------------|-------------------------|
+ * | `defineStack(x)` (strict default) — every TS config that     | no — refused at load    |
+ * |   `os init` scaffolds, hence `os validate`/`os build`/       |                         |
+ * |   `os lint` on such a config                                 |                         |
+ * | `os validate` / `os compile` schema step on a RAW config     | no — stops before rules |
+ * | `saveMetaItem` (Studio / REST `/meta` / MCP) — the runtime   | no — 422 before the gate|
+ * |   publish gate runs AFTER `getMetadataTypeSchema('object')`   |                         |
+ * | a pre-D4 stored `sys_metadata` sibling in the gate's universe | no — cancels in the diff|
+ * | **`os lint` on a RAW object-literal config** (never parses;   | **yes — fires**         |
+ * |   `loadConfig` returns the default export as authored, and   |                         |
+ * |   `owd-legacy-read-aliases` is `retiredFromLoadPath`, so      |                         |
+ * |   `normalizeStackInput` leaves the alias intact)              |                         |
+ * | **`defineStack(x, { strict: false })`**                        | **yes — fires**         |
+ * | **`check:doc-security-posture`** (docs gate: statically        | **yes — fires**; its    |
+ * |   evaluated `ObjectSchema.create({...})` literals, no parse)   | self-test asserts it    |
+ * | **`runRuntimeAuthoringRules` / `validateSecurityPosture`      | **yes — fires**         |
+ * |   called directly with an unparsed item** (exported API)      |                         |
+ *
+ * Read the two alias branches below accordingly: they are NOT a second
+ * opinion on the enum, and they are dead on the parsed doors on purpose. They
+ * exist so the UNPARSED doors — `os lint` first, the docs gate second — name
+ * the canonical replacement instead of letting a retired spelling ride to
+ * `os build`, where the enum's generic `invalid_value` is the only message. A
+ * consumer crediting this rule id as live `error` coverage on a
+ * `defineStack`-authored app is crediting the wrong gate: on that door the
+ * credit belongs to the schema's closed enum.
  */
 
 import { describeAnchorForbiddenBits } from '@objectstack/spec/security';
@@ -338,6 +384,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
             `'public_read', 'public_read_write', or 'controlled_by_parent' (master-detail children).`,
         });
       } else if (typeof owd === 'string' && OWD_ALIAS_FIX[owd]) {
+        // Reachable ONLY through the unparsed doors (`os lint` on a raw
+        // config, `strict: false`, the docs gate, a direct call) — the D4 enum
+        // refuses this value on every parsed door before the registry runs.
+        // See "## Intake" in this module's docblock (#16109).
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_ALIAS,
@@ -454,6 +504,8 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // external ≤ internal. controlled_by_parent inherits the master's pair.
     if (typeof external === 'string') {
       if (OWD_ALIAS_FIX[external]) {
+        // Same intake note as the `sharingModel` alias branch above: the D11
+        // enum is closed, so only the unparsed doors can deliver this value.
         findings.push({
           severity: 'error',
           rule: SECURITY_OWD_ALIAS,
@@ -531,6 +583,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // D5: an isDefault set is a SUGGESTED binding to the `everyone` anchor —
     // hold it to the anchor tier at author time (the runtime gate enforces the
     // same predicate at bind time; this moves the failure to the author).
+    // Scope: `isDefault: true` is the only declarable suggestion today — a set
+    // an operator binds to `guest` at install carries no author-time flag for
+    // this rule to key off, so that binding is outside what a package-time
+    // linter can see and is judged by the bind-time gate alone (#16110).
     if (ps.isDefault === true) {
       const offending = describeAnchorForbiddenBits(ps, 'everyone');
       if (offending) {

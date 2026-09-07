@@ -57,7 +57,7 @@ concrete gaps, then the assumption that reshapes the solution:
    loader, installer, or CLI command reads it. Under ADR-0078, an authorable field the
    runtime ignores is a bug class of its own: enforce it or remove it.
 
-2. **Change information is human-readable only.** `packages/spec/api-surface.json`
+2. **Change information is human-readable only.** `packages/spec/api-surface/`
    records the full export surface and its diff gates every PR — then the diff is
    thrown away. Releases ship a prose CHANGELOG and (for 11) a hand-written upgrade
    guide. Nothing machine-consumable maps version N → N+1.

@@ -17,7 +17,7 @@
  * three recovery doors restored the row and the in-memory registry but never
  * called it: a rollback (or a commit revert) left the derived record on the
  * ROLLED-BACK-FROM state until an unrelated save/publish/delete on the same
- * name, or a boot reconciliation (ADR-0094 D3), re-derived it.
+ * name, or a boot reconciliation (ADR-0094 D4), re-derived it.
  *
  * The companion file `protocol.recovery-doors-emit-mutation.test.ts` (a prior
  * card) pins the sibling half of the SAME four call sites — the

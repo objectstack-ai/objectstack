@@ -609,6 +609,17 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
      * What it pins instead is the property the refusal was standing in for —
      * that the predicate is EMITTED, folded on BOTH sides, and folded with the
      * construct the ruling names.
+     *
+     * ⚠️ [#16028] The SPELLING of that construct moved here, and the assertions
+     * were re-aimed rather than regenerated. Neither door in this file answers
+     * a dialect — `compileScopedFilterToSql` is called with no `dialect` option
+     * and `nativeCtx` wires no `sqlDialect` hook — so both compile on the
+     * `unknown` arm, and that arm stopped folding with `translate()`. It had to:
+     * `unknown` is everything `normalizeSqlDialect` could not name, SQLite
+     * included, and `translate()` is a function SQLite does not have, so this
+     * file was pinning a fold that could not run on the very engine it opens a
+     * database on. The property is identical and is what is asserted below —
+     * ASCII-only, applied to BOTH sides — in the portable spelling.
      */
     it('$icontains compiles at both doors, folding ASCII on both sides', async () => {
       const scoped = compileScopedFilterToSql(
@@ -621,13 +632,18 @@ describe('[#5567] analytics LIKE compilers escape their comparand', () => {
       for (const [label, sql] of [['scoped', scoped.sql], ['native', native.sql]] as const) {
         // BOTH sides: folding only the comparand matches just the rows that were
         // already lower-case — a wrong row set that looks like a working filter.
-        expect(sql.match(/translate\(/g) ?? [], label).toHaveLength(2);
+        // 26 nested `REPLACE`s per side, one per letter of the ruled domain.
+        expect(sql.match(/REPLACE\(/g) ?? [], label).toHaveLength(52);
         expect(sql, label).toContain('LIKE');
-        expect(sql, label).toContain("'ABCDEFGHIJKLMNOPQRSTUVWXYZ'");
-        // NOT `LOWER()`: Postgres folds Unicode with it, and the contract is
-        // ASCII-only (#4706 Q1 = A). This is the same assertion the neighbouring
-        // Postgres-shape case makes, aimed at the one operator that folds.
-        expect(sql, label).not.toMatch(/LOWER\s*\(|ILIKE/i);
+        // The domain's endpoints, so a chain that stopped short of `Z` — an
+        // ASCII fold with holes in it — is not read as a fold.
+        expect(sql, label).toContain("'A', 'a')");
+        expect(sql, label).toContain("'Z', 'z')");
+        // ⛔ Still not `LOWER()`, and now not `translate()` either: the first
+        // folds Unicode on Postgres (#4706 Q1 = A forbids it), the second does
+        // not exist on the SQLite this arm can be. Also not MySQL's variant of
+        // the same chain — no `CAST(… AS BINARY)` on this arm.
+        expect(sql, label).not.toMatch(/LOWER\s*\(|ILIKE|translate\s*\(|CAST\s*\(/i);
       }
       // The comparand is still ESCAPED and its ESCAPE character still bound —
       // the fold rides ON TOP of the literal-comparand rule, it does not replace

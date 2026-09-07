@@ -99,9 +99,20 @@ export interface WalkedFlowNode {
   /** Config path, e.g. `flows[0].nodes[1].config.catch.nodes[0]`. */
   path: string;
   /**
-   * The node's config with region slots stripped — what a rule that scans
-   * config RECURSIVELY must read, or it reports every descendant's finding a
-   * second time against this node. `undefined` when the node has no config.
+   * The node's config with the region slots THIS node type declares stripped —
+   * what a rule that scans config RECURSIVELY must read, or it reports every
+   * descendant's finding a second time against this node. `undefined` when the
+   * node has no config.
+   *
+   * "This node type declares" is the load-bearing half, and it is exactly the
+   * set the walk below descends into: remove fewer and a nested finding is
+   * reported twice, remove more and a key that was never a region is deleted
+   * from the view unread. That second failure is not hypothetical — `body` is a
+   * region slot on `loop` AND the canonical request-payload key on an `http`
+   * node, so stripping the flat union blinded every recursive scan to the whole
+   * of `http.config.body`: a `{record.<field>}` token there interpolates at run
+   * time (`http-nodes.ts` interpolates the raw config wholesale) and rendered a
+   * silent empty value into an outbound request with nothing to see it.
    */
   localConfig?: AnyRec;
   /**
@@ -118,10 +129,39 @@ export function flowNodeLabel(node: AnyRec, index: number): string {
   return strName(node.label) ?? strName(node.id) ?? `#${index}`;
 }
 
+const EMPTY_SLOTS: readonly string[] = [];
+
+/** The region slots a node type owns — empty for every non-container type. */
+export function ownRegionKeys(nodeType: unknown): readonly string[] {
+  const type = strName(nodeType);
+  return (type ? REGION_SLOTS.get(type) : undefined) ?? EMPTY_SLOTS;
+}
+
 /**
- * `config` minus the region slots, or `undefined` when there is no config.
+ * `config` minus `regionKeys`, or `undefined` when there is no config.
  *
- * Copy-on-write: a config with no region key comes back by reference.
+ * Copy-on-write: a config carrying none of those keys comes back by reference.
+ *
+ * **Pass the OWNING node's slots** ({@link ownRegionKeys}), not the flat union.
+ * The union is a different question — "every key that holds a region on SOME
+ * node type" — and answering it here deletes keys that are ordinary config on
+ * the node in hand: `body` is `loop`'s region slot and `http`'s request payload,
+ * `branches` and `try` are as available to any other node type. A recursive scan
+ * reading the union view therefore cannot see those keys at all, silently, which
+ * is the reverse of the double-count this view exists to prevent and strictly
+ * worse: a double-count is visible in the output.
+ *
+ * The union stays the DEFAULT to bound this change to the two rules #16111
+ * names — ⛔ NOT because it is the right argument for the caller still taking
+ * it. `lint-flow-patterns.ts` reads the union view for its own recursive
+ * template scan, so it is blind to an `http` node's `body` for exactly the
+ * reason above: the same defect, one call site over, tracked on #16405. Once
+ * that caller passes its own slots this default has no callers left and
+ * `regionKeys` must become REQUIRED, so no later caller inherits the trap by
+ * writing the shorter call.
+ *
+ * `regionKeys: []` is a real answer (strip nothing) and is distinct from
+ * omitting the parameter.
  *
  * Exported since #5383 because {@link WalkedFlowNode.localConfig} is not the only
  * consumer that needs this view. `lint-flow-patterns.ts` walks graphs rather than
@@ -129,11 +169,16 @@ export function flowNodeLabel(node: AnyRec, index: number): string {
  * its recursive config scans hit the identical double-count trap described above —
  * so it reads the same region-stripped view, from this one definition.
  */
-export function stripRegions(config: unknown): AnyRec | undefined {
+export function stripRegions(
+  config: unknown,
+  regionKeys: Iterable<string> = REGION_CONFIG_KEYS,
+): AnyRec | undefined {
   if (!isRec(config)) return undefined;
+  const strip = regionKeys instanceof Set ? regionKeys : new Set(regionKeys);
+  if (strip.size === 0) return config;
   let out: AnyRec | undefined;
   for (const key of Object.keys(config)) {
-    if (!REGION_CONFIG_KEYS.has(key)) continue;
+    if (!strip.has(key)) continue;
     out ??= { ...config };
     delete out[key];
   }
@@ -156,16 +201,20 @@ export function walkFlowNodes(flow: AnyRec, flowPath: string): WalkedFlowNode[] 
     nodes.forEach((raw, index) => {
       if (!isRec(raw)) return;
       const path = `${basePath}[${index}]`;
+      // The slots this node OWNS — the same lookup that decides where the walk
+      // descends below, so `localConfig` removes exactly what was walked
+      // separately and nothing else.
+      const ownSlots = ownRegionKeys(raw.type);
       out.push({
         node: raw,
         path,
-        localConfig: stripRegions(raw.config),
+        localConfig: stripRegions(raw.config, ownSlots),
         regionTrail: trail,
         depth,
       });
 
       const type = strName(raw.type);
-      const slots = type ? REGION_SLOTS.get(type) : undefined;
+      const slots = ownSlots.length > 0 ? ownSlots : undefined;
       if (!slots || !isRec(raw.config)) return;
       const config = raw.config;
       const here = `${type} "${flowNodeLabel(raw, index)}"`;

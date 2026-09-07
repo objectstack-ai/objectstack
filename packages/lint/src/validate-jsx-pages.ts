@@ -21,6 +21,7 @@
 // class of error an AI author is most likely to emit.
 
 import { parseJsx, compile, type Manifest } from '@objectstack/sdui-parser';
+import { collectionEntries } from './collection-entries.js';
 
 export type JsxPageSeverity = 'error' | 'warning';
 
@@ -36,16 +37,13 @@ export interface JsxPageFinding {
 }
 
 type AnyRec = Record<string, unknown>;
-const asArray = (v: unknown): AnyRec[] => (Array.isArray(v) ? (v as AnyRec[]) : []);
 
 export function validateJsxPages(stack: AnyRec, opts: { manifest?: Manifest } = {}): JsxPageFinding[] {
   const findings: JsxPageFinding[] = [];
-  const pages = asArray(stack.pages);
-  for (let p = 0; p < pages.length; p++) {
-    const page = pages[p];
+  for (const { rec: page, path: pagePath } of collectionEntries(stack.pages, 'pages')) {
     // html tier (+ deprecated 'jsx' alias). react pages are not constrained JSX.
     if (!page || (page.kind !== 'html' && page.kind !== 'jsx')) continue;
-    const name = String(page.name ?? `#${p}`);
+    const name = String(page.name ?? pagePath);
     const source = page.source;
     if (typeof source !== 'string' || source.trim() === '') {
       // (PageSchema's superRefine also covers this; keep it for the build path.)
@@ -53,7 +51,7 @@ export function validateJsxPages(stack: AnyRec, opts: { manifest?: Manifest } = 
         severity: 'error',
         rule: 'jsx-page-empty-source',
         where: `page "${name}"`,
-        path: `pages[${p}].source`,
+        path: `${pagePath}.source`,
         message: `kind:'${page.kind}' page has no \`source\`.`,
         hint: 'Author the page as a constrained JSX/Tailwind string in `source`.',
       });
@@ -67,7 +65,7 @@ export function validateJsxPages(stack: AnyRec, opts: { manifest?: Manifest } = 
         severity: d.severity,
         rule: `jsx-${d.code}`,
         where: d.tag ? `page "${name}" › <${d.tag}>` : `page "${name}"`,
-        path: `pages[${p}].source`,
+        path: `${pagePath}.source`,
         message: d.message,
         hint: 'The source is parsed (never executed) and compiled to the SDUI tree at save time — fix the JSX.',
       });

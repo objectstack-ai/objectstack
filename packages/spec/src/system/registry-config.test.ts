@@ -27,14 +27,14 @@ describe('RegistryUpstreamSchema', () => {
 
     expect(upstream.url).toBe('https://registry.objectstack.com');
     expect(upstream.syncPolicy).toBe('auto');
-    expect(upstream.timeout).toBe(30000);
+    expect(upstream.timeoutMs).toBe(30000);
   });
 
   it('should accept full upstream configuration', () => {
     const upstream = RegistryUpstreamSchema.parse({
       url: 'https://registry.example.com',
       syncPolicy: 'manual',
-      syncInterval: 300,
+      syncIntervalSeconds: 300,
       auth: {
         type: 'bearer',
         token: 'my-token',
@@ -43,7 +43,7 @@ describe('RegistryUpstreamSchema', () => {
         enabled: true,
         verifyCertificate: false,
       },
-      timeout: 60000,
+      timeoutMs: 60000,
       retry: {
         maxAttempts: 5,
         backoff: 'linear',
@@ -51,10 +51,10 @@ describe('RegistryUpstreamSchema', () => {
     });
 
     expect(upstream.syncPolicy).toBe('manual');
-    expect(upstream.syncInterval).toBe(300);
+    expect(upstream.syncIntervalSeconds).toBe(300);
     expect(upstream.auth?.type).toBe('bearer');
     expect(upstream.tls?.verifyCertificate).toBe(false);
-    expect(upstream.timeout).toBe(60000);
+    expect(upstream.timeoutMs).toBe(60000);
     expect(upstream.retry?.maxAttempts).toBe(5);
   });
 
@@ -86,20 +86,20 @@ describe('RegistryUpstreamSchema', () => {
     expect(() => RegistryUpstreamSchema.parse({ url: 'not-a-url' })).toThrow();
   });
 
-  it('should reject syncInterval below minimum', () => {
+  it('should reject syncIntervalSeconds below minimum', () => {
     expect(() =>
       RegistryUpstreamSchema.parse({
         url: 'https://registry.example.com',
-        syncInterval: 10,
+        syncIntervalSeconds: 10,
       }),
     ).toThrow();
   });
 
-  it('should reject timeout below minimum', () => {
+  it('should reject timeoutMs below minimum', () => {
     expect(() =>
       RegistryUpstreamSchema.parse({
         url: 'https://registry.example.com',
-        timeout: 500,
+        timeoutMs: 500,
       }),
     ).toThrow();
   });
@@ -147,7 +147,7 @@ describe('RegistryConfigSchema', () => {
       },
       cache: {
         enabled: true,
-        ttl: 7200,
+        ttlSeconds: 7200,
         maxSize: 1073741824,
       },
       mirrors: [
@@ -161,7 +161,7 @@ describe('RegistryConfigSchema', () => {
     expect(config.storage?.backend).toBe('s3');
     expect(config.visibility).toBe('internal');
     expect(config.accessControl?.requireAuthForRead).toBe(true);
-    expect(config.cache?.ttl).toBe(7200);
+    expect(config.cache?.ttlSeconds).toBe(7200);
     expect(config.mirrors).toHaveLength(2);
   });
 
@@ -202,5 +202,53 @@ describe('RegistryConfigSchema', () => {
 
   it('should reject invalid type', () => {
     expect(() => RegistryConfigSchema.parse({ type: 'distributed' })).toThrow();
+  });
+});
+
+// #15679 (stack card 4/6 of #14478) — ruling B. All three old spellings are
+// `retiredKey()` tombstones; asserted on the issue CODE and the prescription,
+// never on a bare `toThrow()`. `RegistryUpstream` is the sharpest case in this
+// card: it declared a SECONDS interval and a MILLISECONDS timeout twenty-five
+// lines apart, both bare, and the `min(1000)` bound on the timeout reads as one
+// second under the right unit and sixteen minutes under the wrong one — both in
+// range, so no parse could have caught the mistake.
+describe('registry duration keys carry their unit (#15679)', () => {
+  const url = 'https://registry.example.com';
+
+  it('REFUSES the retired `syncInterval` with the rename in the message', () => {
+    const result = RegistryUpstreamSchema.safeParse({ url, syncInterval: 300 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'syncInterval');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`RegistryUpstream.syncInterval` was renamed to `syncIntervalSeconds`');
+  });
+
+  it('REFUSES the retired `timeout` with the rename in the message', () => {
+    const result = RegistryUpstreamSchema.safeParse({ url, timeout: 60000 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`RegistryUpstream.timeout` was renamed to `timeoutMs`');
+  });
+
+  it('REFUSES the retired `cache.ttl` with the rename in the message', () => {
+    const result = RegistryConfigSchema.safeParse({ type: 'private', cache: { enabled: true, ttl: 7200 } });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'cache.ttl');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain('`RegistryConfig.cache.ttl` was renamed to `ttlSeconds`');
+  });
+
+  it('accepts the renamed keys and keeps every default and bound', () => {
+    const upstream = RegistryUpstreamSchema.parse({ url, syncIntervalSeconds: 300, timeoutMs: 60000 });
+    expect(upstream.syncIntervalSeconds).toBe(300);
+    expect(upstream.timeoutMs).toBe(60000);
+    expect(RegistryUpstreamSchema.parse({ url }).timeoutMs).toBe(30000);
+    expect(RegistryUpstreamSchema.safeParse({ url, syncIntervalSeconds: 10 }).success).toBe(false);
+    expect(RegistryUpstreamSchema.safeParse({ url, timeoutMs: 500 }).success).toBe(false);
+    expect(RegistryConfigSchema.parse({ type: 'private', cache: { enabled: true } }).cache?.ttlSeconds).toBe(3600);
   });
 });
