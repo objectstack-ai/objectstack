@@ -22,9 +22,9 @@
 //
 //   Layer B -- turbo's task cache. `test` declares `inputs: ["$TURBO_DEFAULT$",
 //     ...]`, which is PACKAGE-LOCAL. `@objectstack/spec#test` therefore hashes
-//     the same before and after any change outside `packages/spec`, so even the
-//     merge-queue and push builds -- which deliberately partition the FULL
-//     package list, not the affected subset -- replay a cached green.
+//     the same before and after any change outside `packages/spec`, so even a
+//     build that partitions the FULL package list -- `push` on `main` today,
+//     the merge queue too until #16453 -- replays a cached green.
 //     Measured: `turbo run test --filter=@objectstack/spec` after the
 //     platform-objects edit printed `>>> FULL TURBO`, 42ms, replaying the
 //     previous run's log, while `--force` on the same tree failed the scan.
