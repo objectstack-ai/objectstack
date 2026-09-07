@@ -55,7 +55,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { AnalyticsQuerySchema } from '@objectstack/spec/data';
-import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
+import type { AnalyticsDateRange, AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 const REAL_TZ = process.env.TZ;
 
@@ -98,7 +98,8 @@ const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.
 /** Ask `range` over rows planted at `instants`; answer which probes came back. */
 async function probesSelected(
     instants: string[],
-    opts: { range?: string; timezone?: string } = {},
+    // `range` is the CLOSED contract (#16041): a preset name or an explicit window.
+    opts: { range?: AnalyticsDateRange; timezone?: string } = {},
 ): Promise<string[]> {
     const driver = new InMemoryDriver({
         initialData: {
@@ -304,32 +305,20 @@ describe('#16042 — the resolution is host-independent and degrades to UTC', ()
 });
 
 describe("#16042 — `last N …` anchors on the zone's calendar too", () => {
-    const c = CELLS[0]; // Asia/Shanghai: local day 2026-09-07, UTC day 2026-09-06
-
-    it("'last 7 days' starts 7 days before the ZONE's day, at the zone's midnight", async () => {
-        // 7 days before Shanghai's 2026-09-07 is 2026-08-31; that day begins at
-        // 2026-08-30T16:00:00.000Z. Computed independently: Shanghai is +08:00
-        // year-round, so its midnight is the previous day's 16:00Z.
-        const tzStart = '2026-08-30T16:00:00.000Z';
-        const utcStart = '2026-08-30T00:00:00.000Z'; // 7 days before UTC's 2026-09-06
-        expect(tzStart).not.toBe(utcStart);
-
-        // The upper bound of a `last N` window is the current INSTANT, so a
-        // probe must sit before it; both probes do.
-        const probes = [utcStart, tzStart, iso(ms(tzStart) - 1)];
-
-        await at('Asia/Tokyo', c.instant, async () => {
-            // AFTER — the window opens at Shanghai's midnight, so the probe one
-            // millisecond earlier is OUT.
-            await expect(probesSelected(probes, { range: 'last 7 days', timezone: c.zone })).resolves.toEqual(
-                [tzStart].sort(),
-            );
-            // BEFORE — with no timezone the window opens 16 hours earlier, at
-            // UTC midnight, and takes all three probes. That extra row IS the
-            // defect, in the `last N` leg.
-            await expect(probesSelected(probes, { range: 'last 7 days' })).resolves.toEqual(
-                [...probes].sort(),
-            );
-        });
-    });
+    // ⛔ RETIRED (#16041 → #16322). This case fed `dateRange: 'last 7 days'`
+    // through `AnalyticsQuerySchema.parse`; #16041 (maintainer ruling, decision
+    // batch #57) closed the string arm to the `date-range-presets.ts`
+    // vocabulary, so that dialect is refused at the schema door. Re-spelling
+    // was MEASURED, not assumed: `parseDateRangeString` matches
+    // `startsWith('last ')`, so the preset `'last_7_days'` takes the
+    // `[range, range]` fallback and matches every row — the case cannot be
+    // expressed until #16322 aligns the parser.
+    //
+    // COVERAGE LOST until #16322 reinstates it as `'last_7_days'`: the driver
+    // is no longer measured on the `last N …` leg anchoring to the SUPPLIED
+    // zone's calendar day and midnight — Asia/Shanghai's window opening at
+    // 2026-08-30T16:00:00.000Z rather than UTC's 2026-08-30T00:00:00.000Z, with
+    // the no-timezone control taking the extra 16 hours of rows. The `'today'`
+    // leg's zone anchoring — both halves — stays covered by the cells above.
+    it.todo("'last 7 days' starts 7 days before the ZONE's day, at the zone's midnight — retired by #16041 (dialect closed at the schema), reinstate under #16322 as 'last_7_days'");
 });
