@@ -539,8 +539,8 @@ export default class I18nExtract extends Command {
          *
          * ⛔ The drift report is deliberately NOT widened into the published
          * payload — no `drift` / `missing` / `stale` member is added here. This
-         * command already has exactly one machine-readable failure envelope,
-         * twenty lines down in the `catch`: `{ error, …errorCodeFields }`,
+         * command already has exactly one machine-readable failure envelope —
+         * the `catch` at the end of this method: `{ error, …errorCodeFields }`,
          * compact, exit 1. Every other way this command can fail already speaks
          * it, the `--check` needs-`--out` refusal above included, so routing
          * drift through the same `throw` is copying the convention rather than
