@@ -25,6 +25,13 @@
  * entry — it is only *suspicious*, and the ceiling for a static check is a
  * warning (the same posture `validate-capability-references` takes).
  *
+ * The only remedies that clear this finding are granting read (a permission set's
+ * `objects` entry with `allowRead: true` or `viewAllRecords`) or dropping the nav
+ * entry. Gating the item with `requiredPermissions` or `visible` does not: those
+ * gate on capabilities/visibility, not the object grant, so a holder who clears
+ * the gate can still lack read and hit permission-denied — honouring either key
+ * here would silence the rule on an object that is genuinely reachable.
+ *
  * Two exemptions keep it quiet:
  *   - **Platform-provided objects** (`sys_user`, `sys_approval_request`, …) are
  *     skipped: the packages that register them ship their own permission sets,
@@ -170,9 +177,10 @@ export function validateNavAccess(stack: AnyRec): NavAccessFinding[] {
         `and breaks for the users the app ships permission sets for.`,
       hint:
         `Add "${objectName}" to a permission set's \`objects\` with \`allowRead: true\` ` +
-        `(or \`viewAllRecords\`), gate the entry with \`requiredPermissions\`/\`visible\` ` +
-        `if it is meant for admins only, or drop it. Ignore this if a permission set ` +
-        `from another installed package grants it.`,
+        `(or \`viewAllRecords\`), or drop the entry. Gating it with \`requiredPermissions\`/` +
+        `\`visible\` does not clear this: those gate visibility, not the object grant, so a ` +
+        `holder can still open the entry and hit permission-denied. Ignore this if a ` +
+        `permission set from another installed package grants it.`,
     });
   }
 
