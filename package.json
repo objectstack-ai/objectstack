@@ -55,6 +55,8 @@
     "check:react-page-adapter-contract": "node scripts/check-react-page-adapter-contract.mjs --self-test && node scripts/check-react-page-adapter-contract.mjs",
     "check:page-declaration-shape": "node scripts/check-page-declaration-shape.mjs --self-test && node scripts/check-page-declaration-shape.mjs",
     "check:template-version-sync": "node scripts/sync-template-versions.mjs --self-test",
+    "gen:scaffold-emission-policy": "node scripts/sync-scaffold-emission-policy.mjs",
+    "check:scaffold-emission-policy": "node scripts/sync-scaffold-emission-policy.mjs --self-test && node scripts/sync-scaffold-emission-policy.mjs --check",
     "check:role-word": "node scripts/check-role-word.mjs --self-test && node scripts/check-role-word.mjs",
     "check:corpus-claim-drift": "node scripts/check-corpus-claim-drift.mjs --self-test && node scripts/check-corpus-claim-drift.mjs",
     "check:skill-identifier-liveness": "node scripts/check-skill-identifier-liveness.mjs --self-test && node scripts/check-skill-identifier-liveness.mjs",

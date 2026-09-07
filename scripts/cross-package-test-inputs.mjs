@@ -532,6 +532,18 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // One file, not `packages/create-objectstack/**`: the test reads that
       // template and nothing else across the boundary.
       'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
+      // The on-ramp's ENTRY POINT and the template it ships, the second pair of
+      // that same shape (#16485). test/scaffold-emission-policy.e2e.test.ts
+      // SPAWNS `bin/create-objectstack.js` into a throwaway directory and reads
+      // the `package.json` it emits, then compares the third-party ranges and
+      // `engines.pnpm` against the five this package renders. Three scaffolders
+      // emit a new project's manifest and only two of them can import the
+      // `SCAFFOLD_*` constants — the third reaches them by generation — so a
+      // diff to either of these files is exactly the divergence that pin exists
+      // to catch, and without the declaration `@objectstack/cli#test` hashes the
+      // same and replays a cached green over it.
+      'packages/create-objectstack/bin/create-objectstack.js',
+      'packages/create-objectstack/src/templates/blank/package.json',
       // The two files that hold the COLUMN authority the CLI's migration
       // generators mirror, READ by
       // src/commands/generate-multiple-json-column.pin.test.ts (#14829). That
