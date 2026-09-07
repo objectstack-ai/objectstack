@@ -1074,7 +1074,7 @@ function selfTest() {
     EXIT_CLEAN,
   );
   t(
-    'a number already declared Part of is RULE 1’s row: RULE 3 does not double-report it',
+    "a number already declared Part of is RULE 1's row: RULE 3 does not double-report it",
     h21NegatedClosingKeyword({ body: 'Part of #8131 — this does not close #8131 yet.' }),
     null,
   );
@@ -1109,7 +1109,7 @@ function selfTest() {
     negatedText.includes('Backticks are NOT the escape in a'),
     true,
   );
-  t('the failure is annotated for the GitHub UI', negatedText.includes('::error::'), true);
+  t('the RULE 3 failure is annotated for the GitHub UI', negatedText.includes('::error::'), true);
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
