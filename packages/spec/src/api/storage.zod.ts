@@ -41,7 +41,14 @@ export const PresignedUrlResponseSchema = lazySchema(() => BaseResponseSchema.ex
     fileId: z.string().describe('Temporary File ID'),
     method: z.enum(['PUT', 'POST']).describe('HTTP Method to use'),
     headers: z.record(z.string(), z.string()).optional().describe('Required headers for upload'),
-    expiresIn: z.number().describe('URL expiry in seconds'),
+    // `externalVocabulary` mirror (#14478 ruling B): this is the AWS SDK
+    // presigner's own option name, carried end to end — `storage-routes.ts`
+    // holds it as `expiresIn`, the adapter interface takes it as
+    // `getSignedUrl(key, expiresIn, …)`, and `s3-storage-adapter.ts` hands it
+    // to `getSignedUrl(client, cmd, { expiresIn })`. Renaming only where the
+    // value surfaces to the client would leave one name for one number.
+    expiresIn: z.number().describe('URL expiry in seconds')
+      .meta({ externalVocabulary: 'AWS S3 presigned URL `expiresIn` (@aws-sdk/s3-request-presigner)' }),
   }),
 }));
 

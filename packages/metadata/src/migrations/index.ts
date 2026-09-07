@@ -50,4 +50,5 @@ export {
     migrateSysNotificationToEvent,
     type SysNotificationMigrationResult,
     type SysNotificationMigrationOptions,
+    type SysNotificationMigrationReceipt,
 } from './migrate-sys-notification-to-event.js';

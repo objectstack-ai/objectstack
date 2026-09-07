@@ -205,6 +205,47 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
     });
   });
 
+  // ─── Digest coverage is stated on the surface, not only in a docblock ────
+  //
+  // There is no digest MECHANISM here to pin: `checksum` is computed by the
+  // control plane and this envelope only carries it. What can silently rot is
+  // the sentence that states what the digest covers — and the shape that
+  // carries it. `checksum` used to inherit the SHARED `Sha256DigestSchema`
+  // describe, which says what the value IS and nothing about what it COVERS;
+  // the coverage sentence therefore belongs on the KEY, and putting it back on
+  // the shared schema would relabel every other digest field in the repo.
+  describe('the checksum describe states its coverage boundary, on the key and not on the shared digest', () => {
+    const checksumDescription = () => EnvironmentArtifactSchema.shape.checksum.description ?? '';
+
+    it('names the `metadata` block as what the digest covers', () => {
+      expect(checksumDescription()).toMatch(/canonical JSON serialization of the `metadata` block/);
+    });
+
+    it('states what it does NOT cover — nothing else on the envelope, `grantedPermissions` included', () => {
+      expect(checksumDescription()).toMatch(/nothing else on the envelope/);
+      expect(checksumDescription()).toMatch(/`grantedPermissions` included/);
+    });
+
+    it('leaves the SHARED Sha256DigestSchema describe untouched — the key-level text did not leak onto it', () => {
+      expect(Sha256DigestSchema.description).toBe('SHA-256 digest (64 hex chars)');
+      expect(EnvironmentArtifactSchema.shape.checksum).not.toBe(Sha256DigestSchema);
+    });
+
+    it('validates exactly as the shared digest still does — describing the key changed no rule', () => {
+      expect(EnvironmentArtifactSchema.shape.checksum.safeParse(WIRE_CHECKSUM).success).toBe(true);
+      expect(EnvironmentArtifactSchema.shape.checksum.safeParse(WIRE_CHECKSUM.toUpperCase()).success).toBe(false);
+      expect(EnvironmentArtifactSchema.shape.checksum.safeParse(WIRE_CHECKSUM.slice(0, 63)).success).toBe(false);
+    });
+
+    // `check:doc-authoring`: describe prose projects into
+    // content/docs/references/** and the generated skill artifacts, where an
+    // internal issue id is a citation-shaped token resolving to nothing. The
+    // card anchor lives in a `//` comment beside the key instead.
+    it('carries no internal issue id — this text is read by customers', () => {
+      expect(checksumDescription()).not.toMatch(/#\d{3,}/);
+    });
+  });
+
   // The v0 keys are tombstoned, not silently stripped: authoring one raises
   // the prescription itself (retiredKey, #3855), and `tsc` types the key
   // `never` at the authoring site.
@@ -381,6 +422,16 @@ describe('grantedPermissions — install-time granted set per plugin manifest `i
       expect(description).toMatch(/not the control-plane `package_id`/);
       expect(description).toMatch(/Absent = no consent record/);
       expect(description).toMatch(/`\{\}` = consent-bearing and consented to nothing/);
+    });
+
+    it('the key description also states the digest boundary and where integrity of the granted set rests', () => {
+      const description = EnvironmentArtifactSchema.shape.grantedPermissions.description ?? '';
+      expect(description).toMatch(/outside the `checksum` digest/);
+      expect(description).toMatch(/covers the `metadata` block/);
+      expect(description).toMatch(/rests on the carrier/);
+      expect(description).toMatch(/ADR-0003 \/ cloud ADR-0007/);
+      // Same `check:doc-authoring` rule as the checksum pin above.
+      expect(description).not.toMatch(/#\d{3,}/);
     });
 
     it('any string key parses — which IS the residual risk: a `package_id`-shaped key is accepted and would simply never be looked up', () => {

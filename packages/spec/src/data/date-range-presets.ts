@@ -99,10 +99,14 @@ export const DATE_RANGE_PRESET_MACRO_WINDOWS: Readonly<
 
 /**
  * The one refusal wording for "a declared preset name authored as a bare
- * ordering comparand", shared by the two moments it can be reported — the
- * schema door in `data/filter.zod.ts` and `@objectstack/lint`'s
- * `filter-preset-comparand` rule — so one condition keeps one wording
- * (the #5240 convention).
+ * filter comparand", shared by the moments it can be reported — the
+ * field-agnostic schema door in `data/filter.zod.ts` (ordering positions
+ * only: without a field type, equality on a select column is legitimate) and
+ * `@objectstack/lint`'s `filter-preset-comparand` rule (the same ordering
+ * positions, plus — with the field type in hand — EVERY comparand position on
+ * a declared `date` / `datetime` field: bare, `$eq` / `$ne`, `$in` / `$nin`
+ * and their view-rule and triple spellings; #16106, maintainer-ruled 1′) — so
+ * one condition keeps one wording (the #5240 convention).
  *
  * Why this is refused at all (#8690, C half, maintainer-ruled 2026-08-15):
  * `last_30_days` and its siblings are REAL declared names — but only for the

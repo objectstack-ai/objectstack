@@ -39,7 +39,7 @@ const result = ApiRoutesSchema.parse(data);
 | **datasources** | `string` | optional | e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; absent when no host mounts it |
 | **email** | `string` | optional | e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it |
 | **approvals** | `string` | optional | e.g. /api/v1/approvals |
-| **realtime** | `string` | optional | e.g. /api/v1/realtime |
+| **realtime** | `string` | optional | e.g. /api/v1/realtime — present only when a realtime transport is actually mounted |
 | **notifications** | `string` | optional | e.g. /api/v1/notifications |
 | **ai** | `string` | optional | e.g. /api/v1/ai |
 | **i18n** | `string` | optional | e.g. /api/v1/i18n |
@@ -94,7 +94,7 @@ const result = ApiRoutesSchema.parse(data);
 | **datasources** | `string` | optional | e.g. /api/v1/datasources — base for the datasources/:name/external/* federation-admin family; absent when no host mounts it |
 | **email** | `string` | optional | e.g. /api/v1/email — base for the email/send endpoint; absent when no host mounts it |
 | **approvals** | `string` | optional | e.g. /api/v1/approvals |
-| **realtime** | `string` | optional | e.g. /api/v1/realtime |
+| **realtime** | `string` | optional | e.g. /api/v1/realtime — present only when a realtime transport is actually mounted |
 | **notifications** | `string` | optional | e.g. /api/v1/notifications |
 | **ai** | `string` | optional | e.g. /api/v1/ai |
 | **i18n** | `string` | optional | e.g. /api/v1/i18n |
@@ -104,7 +104,7 @@ const result = ApiRoutesSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
+| **enabled** | `boolean` | ✅ | Whether the slot is filled by something this host delivers. NOT "a channel exists": subscribing requires handlerReady:true AND a connectable route (isSubscribableChannel). |
 | **status** | `Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>` | ✅ | available = fully operational, registered = route declared but handler unverified, unavailable = not installed, degraded = partial, stub = placeholder that returns 501 |
 | **handlerReady** | `boolean` | optional | Whether the HTTP handler is confirmed to be mounted. Omitted = readiness unknown/unverified; true = handler mounted; false = handler missing or stub (likely 501). |
 | **route** | `string` | optional | e.g. /api/v1/analytics |
@@ -124,7 +124,7 @@ const result = ApiRoutesSchema.parse(data);
 | **export** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports async export |
 | **chunkedUpload** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend supports chunked (multipart) uploads |
 | **transactionalBatch** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend exposes the atomic cross-object batch endpoint (POST `{basePath}`/batch, /ADR-0034): all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction. |
-| **websockets** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12). |
+| **websockets** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. Derived from isSubscribableChannel(services.realtime): handlerReady true AND a connectable route. |
 | **files** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether a file-storage surface (upload/download/attachments) is served |
 | **analytics** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the analytics / BI query surface |
 | **ai** | `{ enabled: boolean; features?: Record<string, boolean>; description?: string }` | ✅ | Whether the backend serves the AI surface (NLQ, chat, agents, suggest) |
@@ -214,7 +214,7 @@ Deployment posture a discovery response advertises. Deliberately three coarse bu
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **enabled** | `boolean` | ✅ |  |
+| **enabled** | `boolean` | ✅ | Whether the slot is filled by something this host delivers. NOT "a channel exists": subscribing requires handlerReady:true AND a connectable route (isSubscribableChannel). |
 | **status** | `Enum<'available' \| 'registered' \| 'unavailable' \| 'degraded' \| 'stub'>` | ✅ | available = fully operational, registered = route declared but handler unverified, unavailable = not installed, degraded = partial, stub = placeholder that returns 501 |
 | **handlerReady** | `boolean` | optional | Whether the HTTP handler is confirmed to be mounted. Omitted = readiness unknown/unverified; true = handler mounted; false = handler missing or stub (likely 501). |
 | **route** | `string` | optional | e.g. /api/v1/analytics |
@@ -278,7 +278,7 @@ Well-known capability flags for frontend intelligent adaptation
 | **export** | `boolean` | ✅ | Whether the backend supports async export |
 | **chunkedUpload** | `boolean` | ✅ | Whether the backend supports chunked (multipart) uploads |
 | **transactionalBatch** | `boolean` | ✅ | Whether the backend exposes the atomic cross-object batch endpoint (POST `{basePath}`/batch, /ADR-0034): all ops commit or roll back together in one transaction. Lets clients skip non-atomic client-side simulation instead of runtime-probing 404/405/501. True ⟺ the /batch route is mounted AND the runtime can honour a transaction. |
-| **websockets** | `boolean` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. False while realtime is an in-process bus with no mounted HTTP/WS surface (ADR-0076 D12). |
+| **websockets** | `boolean` | ✅ | Whether the backend mounts a realtime push surface (WebSocket/SSE) clients can subscribe to. Derived from isSubscribableChannel(services.realtime): handlerReady true AND a connectable route. |
 | **files** | `boolean` | ✅ | Whether a file-storage surface (upload/download/attachments) is served |
 | **analytics** | `boolean` | ✅ | Whether the backend serves the analytics / BI query surface |
 | **ai** | `boolean` | ✅ | Whether the backend serves the AI surface (NLQ, chat, agents, suggest) |

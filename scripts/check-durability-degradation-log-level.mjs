@@ -768,8 +768,10 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // that fix — `67 read seam(s) … (7 … discriminated) (1 pass … through) (1
 // baselined)` on both trees, measured by ablating the fix back to its
 // pre-#8895 `catch { continue }` and re-running. And the seam is not merely
-// unseen: plant a `return []` in that same catch and the gate names it
-// (`engine.ts:10084 (in cascadeDeleteRelations())`, red). So it sits IN the
+// unseen: plant a `return []` in that same catch and the gate names it — red,
+// at `packages/objectql/src/engine.ts#cascadeDeleteRelations` (that catch was
+// on line 10084 when this was measured, a dated reading and not a pointer).
+// So it sits IN the
 // census throughout, reported clean while it was broken and reported clean now
 // that it is fixed — what decides visibility is the SHAPE of the exit, never
 // whether the seam is correct. A real fail-open on an integrity guard was
@@ -1176,24 +1178,28 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // THE DISCRIMINATING RUN. Raising `MAX_READ_WRAPPER_DEPTH` from 2 to 6 while
 // leaving `walkSameTickInclusive` in place admits 5 of the same 8 (70 seams: +8
 // / -2, where the 2 are the SAME try lines re-attributed to a different
-// first-matching callee, engine.ts:9407 and :10572). Saturation checked at
+// first-matching callee, both in `packages/objectql/src/engine.ts`, on lines
+// 9407 and 10572 as measured). Saturation checked at
 // depth 50: 70 and 75, i.e. unchanged. So for those 5 the miss is the DEPTH
 // BOUND, not the callback boundary — `walkAll` merely masks the bound by
 // descending lexically through nested DECLARATIONS instead of counting call
 // hops, which reaches the read at depth 1 no matter how many awaits are between.
 //
-// THE 8 DELTA SEAMS, each read at its call site:
+// THE 8 DELTA SEAMS, each read at its call site. ⚠️ The FILE is named as an
+// anchor and the try line sits beside it as DATA: each number is a reading
+// taken on the date above, not a pointer, and a `file:NNN` pointer written
+// here rots silently — the whole finding of #15765.
 //
-//   | # | seam (try line → wrapper)                                      | why today misses it | invoked now? |
-//   |--:|----------------------------------------------------------------|---------------------|--------------|
-//   | 1 | metadata-protocol protocol.ts:10243 getMetaItemCached→getMetaItem | depth bound       | yes — real   |
-//   | 2 | metadata-protocol protocol.ts:13559 saveMetaItem→getMetaItem      | depth bound       | yes — real   |
-//   | 3 | metadata-protocol protocol.ts:14535 migrateStoredMetadata→saveMetaItem | depth bound   | yes — real   |
-//   | 4 | metadata-protocol protocol.ts:17213 duplicatePackage→saveMetaItem  | depth bound       | yes — real   |
-//   | 5 | metadata-protocol sys-metadata-repository.ts:883 promoteDraft→dropPromotedDraftRow | CALLBACK | yes — real |
-//   | 6 | metadata-protocol sys-metadata-repository.ts:1353 close→terminate  | CALLBACK          | NO — FAKE    |
-//   | 7 | objectql engine.ts:9237 insert→applyAutonumbers                    | CALLBACK          | yes — real   |
-//   | 8 | objectql lifecycle-service.ts:625 sweep→reapObject                 | depth bound       | yes — real   |
+//   | # | file                                                  | try line | seam (wrapper)                     | why today misses it | invoked now? |
+//   |--:|-------------------------------------------------------|---------:|------------------------------------|---------------------|--------------|
+//   | 1 | `packages/metadata-protocol/src/protocol.ts`               |    10243 | getMetaItemCached→getMetaItem      | depth bound       | yes — real   |
+//   | 2 | `packages/metadata-protocol/src/protocol.ts`               |    13559 | saveMetaItem→getMetaItem           | depth bound       | yes — real   |
+//   | 3 | `packages/metadata-protocol/src/protocol.ts`               |    14535 | migrateStoredMetadata→saveMetaItem | depth bound       | yes — real   |
+//   | 4 | `packages/metadata-protocol/src/protocol.ts`               |    17213 | duplicatePackage→saveMetaItem      | depth bound       | yes — real   |
+//   | 5 | `packages/metadata-protocol/src/sys-metadata-repository.ts` |      883 | promoteDraft→dropPromotedDraftRow  | CALLBACK          | yes — real   |
+//   | 6 | `packages/metadata-protocol/src/sys-metadata-repository.ts` |     1353 | close→terminate                    | CALLBACK          | NO — FAKE    |
+//   | 7 | `packages/objectql/src/engine.ts`                          |     9237 | insert→applyAutonumbers            | CALLBACK          | yes — real   |
+//   | 8 | `packages/objectql/src/lifecycle/lifecycle-service.ts`     |      625 | sweep→reapObject                   | depth bound       | yes — real   |
 //
 // All 8 were decidable from the call site; none needed provenance. Seams 1-5,
 // 7 and 8 are genuine members the census does not count: every hop is an
@@ -1205,7 +1211,8 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //
 // ⚠️ SEAM 6 IS A FAKE SEAM, AND IT IS THE REASON `walkAll` IS NOT THE FIX.
 // `close()`'s try calls `w.terminate()`. `terminate` resolves BY NAME to the
-// local const arrow at sys-metadata-repository.ts:1246 — a synchronous, void,
+// local const arrow in `packages/metadata-protocol/src/sys-metadata-repository.ts`
+// (line 1246 as measured) — a synchronous, void,
 // in-memory routine whose only call is `self.watchers.delete(subscription)` on
 // `private readonly watchers = new Set<...>()`. `calleeName` reads that as
 // `delete`, and the wrapper recursion resolves `delete` to THIS FILE'S
@@ -1254,8 +1261,10 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //   | probe, with the `delete` wrapper hop refused      |         72 |
 //
 // ⚠️ THE ABLATION IS THE CONTROL, NOT THE FIX. Refusing the `delete` hop
-// outright drops TWO seams — sys-metadata-repository.ts:1353 `close`->
-// `terminate` (the FAKE) and :883 `promoteDraft`->`dropPromotedDraftRow` (a
+// outright drops TWO seams, both in
+// `packages/metadata-protocol/src/sys-metadata-repository.ts` — `close`->
+// `terminate` (the FAKE, line 1353 as measured) and
+// `promoteDraft`->`dropPromotedDraftRow` (line 883, a
 // REAL `await this.delete(ref, …)`). In a summary that is indistinguishable
 // from the correct outcome, which is why the pair is pinned in the self-test.
 //
@@ -1338,7 +1347,8 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //   - THE ADMITTING STEP IS +6 / -0, not "+8 / -2". The 2 in the filing were
 //     two `try` lines re-attributed to a different first-matching callee, never
 //     seams leaving the population. That re-attribution still happens here —
-//     `engine.ts:9741` and `:10906` move from `resolveMasterDetailParent(s)` to
+//     two try lines in `packages/objectql/src/engine.ts` (9741 and 10906 as
+//     measured) move from `resolveMasterDetailParent(s)` to
 //     `mediaValueShapeStrictFor` — but at depth 4, one level ABOVE the level
 //     that admits anything, and it moves no count. The admitting step is clean.
 //
@@ -1347,14 +1357,16 @@ const FAILURE_PROPAGATION_SITES = new Map([
 // rule's vocabulary names. Chains as the recognizer actually resolves them —
 // two of them are NOT the tails the filing predicted:
 //
-//   | # | seam (try line -> first wrapper)                    | chain to the read |
-//   |--:|-----------------------------------------------------|-------------------|
-//   | 1 | metadata-protocol protocol.ts:10497 getMetaItemCached | getMetaItem -> findDraft -> lookup -> engine.findOne |
-//   | 2 | metadata-protocol protocol.ts:13874 saveMetaItem      | getMetaItem -> findDraft -> lookup -> engine.findOne |
-//   | 3 | metadata-protocol protocol.ts:14850 migrateStoredMetadata | saveMetaItem -> refuseUnmintableMetaType -> metaTypeNamespaceExists -> engine.findOne |
-//   | 4 | metadata-protocol protocol.ts:16502 publishPackageDrafts  | promoteDraftForPublish -> lockWriteRefusal -> getEffectiveLock -> engine.findOne |
-//   | 5 | metadata-protocol protocol.ts:17565 duplicatePackage      | saveMetaItem -> refuseUnmintableMetaType -> metaTypeNamespaceExists -> engine.findOne |
-//   | 6 | objectql lifecycle-service.ts:664 sweep                   | reapObject -> archiveObject -> archivePass -> hot.find |
+//   (the FILE is the anchor, the try line beside it is a dated reading)
+//
+//   | # | file                                                  | try line | first wrapper         | chain to the read |
+//   |--:|-------------------------------------------------------|---------:|-----------------------|-------------------|
+//   | 1 | `packages/metadata-protocol/src/protocol.ts`           |    10497 | getMetaItemCached     | getMetaItem -> findDraft -> lookup -> engine.findOne |
+//   | 2 | `packages/metadata-protocol/src/protocol.ts`           |    13874 | saveMetaItem          | getMetaItem -> findDraft -> lookup -> engine.findOne |
+//   | 3 | `packages/metadata-protocol/src/protocol.ts`           |    14850 | migrateStoredMetadata | saveMetaItem -> refuseUnmintableMetaType -> metaTypeNamespaceExists -> engine.findOne |
+//   | 4 | `packages/metadata-protocol/src/protocol.ts`           |    16502 | publishPackageDrafts  | promoteDraftForPublish -> lockWriteRefusal -> getEffectiveLock -> engine.findOne |
+//   | 5 | `packages/metadata-protocol/src/protocol.ts`           |    17565 | duplicatePackage      | saveMetaItem -> refuseUnmintableMetaType -> metaTypeNamespaceExists -> engine.findOne |
+//   | 6 | `packages/objectql/src/lifecycle/lifecycle-service.ts` |      664 | sweep                 | reapObject -> archiveObject -> archivePass -> hot.find |
 //
 // (3 and 5 reach a read through `saveMetaItem`'s OWN precondition check, not
 // through the `getMetaItem` tail the filing assigned them. Same verdict, and
@@ -1378,8 +1390,9 @@ const FAILURE_PROPAGATION_SITES = new Map([
 //   walkAll @ depth 2 admits   7   (was 8 — #12358's guard deleted the fake seam)
 //   depth 3 admits             6
 //   BOTH                       5   <- the claim, reproduced exactly
-//   depth only                 1   protocol.ts:16502 publishPackageDrafts
-//   walkAll only               2   sys-metadata-repository.ts:883, engine.ts:9571
+//   depth only                 1   `packages/metadata-protocol/src/protocol.ts`, line 16502
+//   walkAll only               2   `packages/metadata-protocol/src/sys-metadata-repository.ts`, line 883
+//                                  and `packages/objectql/src/engine.ts`, line 9571
 //
 // So the NUMBER 5 survives and its DENOMINATOR does not: read it as "5 of 7",
 // the eighth having been the fake seam #12358 removed. And one correction the

@@ -35,11 +35,15 @@ import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/
 import { sendOk, sendError } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-// [#14637] `isPublicSharingEnabled` is the service's OWN reading of the
+// [#14637 -> #14935] `isPublicSharingEnabled` is the CANONICAL reading of the
 // standing switch, imported rather than restated here. A second spelling of
 // `publicSharing.enabled` at this layer is how the probe below came to
-// contradict the gate inside `resolveToken` in the first place.
-import { isPublicSharingEnabled, type ShareLinkService } from './share-link-service.js';
+// contradict the gate inside `resolveToken` in the first place. It now comes
+// from the package that DECLARES the key, which is the same predicate
+// `share-link-service.ts` gates redemption with — one definition, not a
+// service-local one this layer re-exports.
+import { isPublicSharingEnabled } from '@objectstack/spec/data';
+import { type ShareLinkService } from './share-link-service.js';
 import type { SharingEngine } from './sharing-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;

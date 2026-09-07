@@ -71,6 +71,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PENDING_MARKER, entryForPath, ownerDir, ownerOf, ownerRunCommand } from './regen-artifacts.mjs';
+import { inspectBuildStamp, inspectDeclarationStamp } from './build-input-hash.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import {
   EXIT_PREREQUISITE_NOT_MET,
@@ -134,14 +135,96 @@ function newestMtime(dir, pred, depth = 0) {
 }
 
 /**
+ * Did a declaration-emitting build produce `specDir/dist` from the sources on
+ * disk right now? `{ state, recorded, actual }` with state `match` / `mismatch`
+ * / `unstamped` — the reader's docblock in `check-dev-prereqs.mjs` is the
+ * authority on what each verdict means and why every way of not knowing
+ * collapses into `unstamped`.
+ *
+ * Re-exported through this module because `dist-freshness.ts` needs it to NAME
+ * the cause in a refusal and SHOW the two digests behind it, and this file is
+ * already the one place `packages/spec` gates import freshness from. Wrapped
+ * rather than re-exported raw so the repo root is supplied here — a caller that
+ * had to pass it could pass the wrong one, and hashing against the wrong root
+ * reads as `mismatch`, which is a refusal nobody can act on.
+ */
+export function declarationStamp(specDir = SPEC_DIR) {
+  try {
+    return inspectDeclarationStamp(REPO_ROOT, specDir);
+  } catch {
+    return { state: 'unstamped', recorded: null, actual: null };
+  }
+}
+
+/**
+ * Did a BUNDLE-emitting build produce `specDir/dist`'s `.mjs`/`.js` from the
+ * sources on disk right now? Same three verdicts, same one-way meaning, same
+ * wrapping argument as `declarationStamp` above — the repo root is supplied
+ * here so no caller can hash against the wrong one.
+ *
+ * The OTHER stamp file: `dist/.build-input-hash`, which every build writes.
+ * `inspectBuildStamp`'s docblock is the authority on why that is the right
+ * evidence for THIS axis and remains the wrong evidence for the declarations.
+ */
+export function buildStamp(specDir = SPEC_DIR) {
+  try {
+    return inspectBuildStamp(REPO_ROOT, specDir);
+  } catch {
+    return { state: 'unstamped', recorded: null, actual: null };
+  }
+}
+
+/**
  * Is `packages/spec/dist` older than the sources it claims to describe? Missing
  * counts as stale. Deliberately conservative: a false "stale" costs a build, a
  * false "fresh" costs a silently wrong artifact.
+ *
+ * ## The mtime rule accuses; the declaration stamp may acquit
+ *
+ * mtimes are the right primitive here and remain the only one that can convict:
+ * they key on `dist/**` + `.d.ts` against `src/**` + `.ts`, the artifact these
+ * gates actually consume, and they see the hand-edited dist and the toolchain
+ * change that a content digest is blind to.
+ *
+ * What they cannot see is that a rewrite left the BYTES alone. `git merge`,
+ * `git checkout` and `git worktree add` all re-check-out unchanged sources and
+ * bump their mtimes, and the build that follows correctly does not run —
+ * turbo's cache hashes content, so it is a cache hit (measured: `>>> FULL
+ * TURBO`, 56ms) that rewrites nothing, leaving every `dist/` mtime where the
+ * previous build left it. The tree is exactly current and this rule said stale:
+ * a refusal whose only remedy was a full rebuild — minutes — of a dist that was
+ * already correct, under a message naming a cause (`OS_SKIP_DTS=1`) that had
+ * nothing to do with it.
+ *
+ * So the accusation now gets one chance to be answered, by the one piece of
+ * evidence that speaks to exactly this: `dist/.build-input-hash-dts`, written by
+ * a build that DID emit declarations, over the digest of the inputs it emitted
+ * them from. Equal to the inputs on disk ⇒ the declarations describe these
+ * sources ⇒ fresh.
+ *
+ * ## Why this is not #7122's rejected direction
+ *
+ * #7122 proposed replacing this rule with `dist/.build-input-hash`, and that was
+ * measured to be wrong in the dangerous direction: that stamp is written by
+ * EVERY build, `OS_SKIP_DTS=1` included, so it says fresh on the one local flag
+ * that guarantees these declarations are stale. Two things keep this different:
+ *
+ *   - the digest read here is a DIFFERENT file, written only by a build that
+ *     emitted declarations. The `OS_SKIP_DTS=1` build does not refresh it, so
+ *     the shape #7122 named still convicts (pinned in `dist-freshness.test.ts`);
+ *   - it may only ever ACQUIT. `unstamped` — no stamp, unreadable, or a package
+ *     whose build does not stamp at all — leaves the mtime verdict standing, so
+ *     the change can only ever turn a refusal into a pass, never a pass into a
+ *     refusal, and every acquittal carries a digest anyone can recompute.
+ *
+ * The digest costs ~30ms over `packages/spec/src`, and it is spent only on the
+ * branch that was previously about to cost a full rebuild.
  */
 export function distIsStale(specDir = SPEC_DIR) {
   const dist = newestMtime(join(specDir, 'dist'), (n) => n.endsWith('.d.ts'));
   if (!dist) return true;
-  return newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts')) > dist;
+  if (newestMtime(join(specDir, 'src'), (n) => n.endsWith('.ts')) <= dist) return false;
+  return declarationStamp(specDir).state !== 'match';
 }
 
 /**
@@ -211,6 +294,42 @@ export function schemaTreeIsStale(specDir = SPEC_DIR) {
  * Missing counts as stale, and the direction is the same conservative one its
  * two siblings take: a false "stale" costs a build, a false "fresh" costs a
  * verdict nobody can trust.
+ *
+ * ## The mtime rule accuses; the BUILD stamp may acquit
+ *
+ * The blind spot `distIsStale` documents above is shared here, and was measured
+ * on this axis too: after a `git merge`, `git checkout` or `git worktree add`
+ * re-checks-out a source file with IDENTICAL bytes, the build that follows
+ * correctly does not run (turbo's cache hashes content, so it is a cache hit
+ * that rewrites nothing) and every `dist/` mtime stays put — so this rule
+ * refused `check:browser-reachable-entries` over bundles that were exactly
+ * current, and the only remedy on offer was a multi-minute rebuild under the
+ * shared verify lock.
+ *
+ * The evidence that answers it is `dist/.build-input-hash` — the file #7122
+ * proposed for the DECLARATION rule, where it was measured wrong and stays
+ * rejected. It is the right file HERE for a reason that is specific to this
+ * axis, not a relaxation of that ruling:
+ *
+ *   - #7122's hole is that `--stamp` writes this file under `OS_SKIP_DTS=1`,
+ *     which emits JS and skips the declarations. On this axis that flag emits
+ *     exactly the artifact being vouched for — `inspectBundleFreshness`'s own
+ *     refusal already tells the reader "OS_SKIP_DTS=1 is fine for THIS gate";
+ *   - what makes it sound is the build script's ORDER rather than the flag:
+ *     `packages/spec`'s `build` runs the unconditional `tsup` before `--stamp`
+ *     in one `&&` chain, so nothing writes this stamp without having emitted
+ *     bundles first. Only the declaration pass is conditional, and skipping it
+ *     cannot refresh a stamp written after both;
+ *   - the digest's input set is a strict SUPERSET of the source set measured
+ *     above — every file under `src/` (`.test.ts` included) plus
+ *     `tsup.config.ts` and the rest of `PACKAGE_BUILD_CONFIG` plus turbo's
+ *     `globalDependencies` — so a `match` implies every input this rule counts
+ *     is byte-identical to the one the bundles were emitted from. A superset
+ *     can only ever withhold an acquittal, never grant one it should not.
+ *
+ * And it may only ACQUIT. `unstamped` — absent, unreadable, not 64 hex
+ * characters, or a package whose build does not stamp — leaves the mtime
+ * verdict standing (#4690), so nothing that passes today can start failing.
  */
 export function bundlesAreStale(specDir = SPEC_DIR) {
   const bundles = newestMtime(
@@ -224,7 +343,8 @@ export function bundlesAreStale(specDir = SPEC_DIR) {
   );
   const configPath = join(specDir, 'tsup.config.ts');
   const config = existsSync(configPath) ? statSync(configPath).mtimeMs : 0;
-  return Math.max(src, config) > bundles;
+  if (Math.max(src, config) <= bundles) return false;
+  return buildStamp(specDir).state !== 'match';
 }
 
 /**
@@ -928,10 +1048,40 @@ function fixtureSelfTest() {
       'node -e "console.error(\'stub-gate: PREREQUISITE NOT MET — the dependency yaml is not installed\'); process.exit(3)"',
   };
 
+  /**
+   * The pnpm the fixture's stub gate runs under, pinned to the repository's own.
+   *
+   * `runCheck` spawns every gate with `pnpm -s`, and CI reaches pnpm through
+   * Corepack (`.github/actions/setup-pnpm`). Corepack resolves the version from
+   * the project it is invoked IN, so a fixture carrying no `packageManager` field
+   * does not inherit this repo's pin and does not get "whatever the machine has"
+   * either — it gets the registry's `latest` dist-tag, re-resolved on every run.
+   * That made this throwaway fixture a canary for whatever pnpm major npm had
+   * published that morning: the day `latest` moved to a major whose CLI rejects
+   * `-s`, the "clean" stub exited 2 without ever running, and every case that
+   * reads the stub's own exit code went red on a tree nobody had touched. It is
+   * the FIXTURE that was unpinned, never production — the real hook runs `pnpm -s`
+   * in this repository, which is pinned.
+   *
+   * Read off the ROOT manifest rather than written as a literal, so the fixture
+   * cannot drift from the pnpm this repo pins. The case below asserts both halves,
+   * because a missing field on either side would compare equal and silently
+   * restore the bug.
+   */
+  const rootPackageManager = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')).packageManager;
+
   const runHook = (gate, args = []) => {
     writeFileSync(
       join(dir, 'package.json'),
-      `${JSON.stringify({ name: 'os-regen-fixture', scripts: { 'check:spec-changes': GATE_STUBS[gate] } }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          name: 'os-regen-fixture',
+          packageManager: rootPackageManager,
+          scripts: { 'check:spec-changes': GATE_STUBS[gate] },
+        },
+        null,
+        2,
+      )}\n`,
     );
     // `spawnSync`, not `execFileSync`: every message this script prints goes to
     // STDERR, which execFileSync returns only on the failure path — capturing the
@@ -1000,6 +1150,20 @@ function fixtureSelfTest() {
     writeFileSync(marker, `${pendingPath}\n`);
 
     const merge = runHook('stale');
+
+    // The fixture's OWN prerequisite, asserted before any verdict is read out of a
+    // gate's exit code: every case below spawns `pnpm -s` inside this directory, so
+    // an unpinned fixture grades the registry's `latest` pnpm instead of the one
+    // this repository pins, and the failure lands on cases that have nothing to do
+    // with pnpm. ⛔ Not `=== rootPackageManager` on its own: were the root manifest
+    // to lose the field, both sides would read `undefined`, this case would pass,
+    // and the fixture would be back to resolving `latest` in silence.
+    const fixtureManifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+    check("the fixture pins the ROOT's packageManager, so Corepack cannot resolve `latest`",
+      typeof rootPackageManager === 'string'
+        && /^pnpm@\d/.test(rootPackageManager)
+        && fixtureManifest.packageManager === rootPackageManager);
+
     check('a MERGE commit with stale artifacts is ACCEPTED as a deferral', merge.code === 0);
     check('  …and says so — "DEFERRED", not a silent pass', /DEFERRED to the next commit/.test(merge.out));
     check('  …and points at the sanctioned procedure, never at skipping the hook',

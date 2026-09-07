@@ -30,7 +30,7 @@ import type { ApiEndpoint } from '@objectstack/spec/api';
  * target delegation, mapping keys, OpenAPI enrichment) and E7 narrowed the
  * blanket refusal to per-endpoint publish gates. So the premise of the comment
  * is gone, and these come back **unchanged in intent** — same names, same
- * targets, same `authRequired`, same `cacheTtl` — with the ONE edit ADR-0121
+ * targets, same `authRequired`, same `cacheTtlSeconds` — with the ONE edit ADR-0121
  * D1 requires: the paths move under this app's namespace carve-out.
  *
  * ## The namespace carve-out (ADR-0121 D1/D2)
@@ -88,11 +88,11 @@ export const TaskFeedEndpoint: ApiEndpoint = {
   // RLS-trimmed for its caller and a shared cache must never store one and
   // hand it to somebody else. `computeCacheControl` in
   // `packages/runtime/src/endpoint-policy.ts` states that rule and the rest of
-  // the ladder with it — including `cacheTtl: 0`, which is `no-store` rather
+  // the ladder with it — including `cacheTtlSeconds: 0`, which is `no-store` rather
   // than "no header": writing 0 says something, and saying nothing is spelled
-  // by omitting the key. GET-only by rule: publish rejects `cacheTtl` on any
+  // by omitting the key. GET-only by rule: publish rejects `cacheTtlSeconds` on any
   // other method rather than parsing it and ignoring it.
-  cacheTtl: 30,
+  cacheTtlSeconds: 30,
 };
 
 /** Flow-typed endpoint: POST triggers the janitor flow (get+delete demo). */

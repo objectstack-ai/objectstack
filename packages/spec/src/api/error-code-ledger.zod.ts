@@ -280,6 +280,21 @@ export const ERROR_CODE_LEDGER = {
     // operator acts on, and none of them is a synonym of `RESOURCE_CONFLICT`
     // in the detector's sense or in meaning.
     'ACTION_DISABLED',
+    // [#14451] `POST /packages/:id/duplicate` was handed a source that is not a
+    // BASE — a code-loaded or platform/marketplace package. 422 from the
+    // `/packages` door (`domains/packages.ts`), refused BEFORE the protocol
+    // call so the target package record is not minted.
+    //
+    // ⛔ NOT a re-spelling of `WRITABLE_PACKAGE_REQUIRED`, and the distinction
+    // is why it is registered: that code says "this package may not be WRITTEN
+    // to", and its remedy is to use a writable package. Duplicate writes
+    // nothing to its source, so a caller reading that code here hunts for a way
+    // to make a code package writable — there is none, and it is not the point.
+    // This code says the GESTURE does not apply to this source: ADR-0070 D4
+    // duplicates a base's stored rows, a code package's metadata is delivered
+    // as code, and the remedy is a base or an ADR-0005 overlay. Same predicate
+    // (`isWritablePackage`), different consequence.
+    'DUPLICATE_SOURCE_NOT_A_BASE',
     'EXPIRED_OR_REVOKED',         // share link
     // [#9415] the trigger door refused to dispatch a flow that is switched off
     // — `respondToFlowTrigger` (`domains/automation.ts`) reads the engine's
@@ -541,6 +556,23 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
+    // is not an array, breaking the one `return hookContext.result` site in
+    // `engine.ts` that has a concrete declared shape to violate
+    // (`find(): Promise<any[]>`; `findOne`/`update`/`delete` all declare
+    // `Promise<any>`). Refused at the seam — immediately after the dispatch and
+    // ahead of `maskSecretFields` / `stripSearchCompanionFromRead`, which both
+    // already assume the array — rather than surfacing as a `TypeError` at one
+    // of ~140 call sites. SHAPING stays legal: mutating rows, dropping keys,
+    // filtering rows out and assigning a different ARRAY are all untouched;
+    // only the container is protected. Registered rather than left as an `ERR_`
+    // operational code for the same reason as `MULTI_UPDATE_HOOK_KEY_DIVERGENCE`
+    // below — a host has to RECOGNISE this to find its own misbehaving handler,
+    // and an unregistered spelling demotes off `error.code` at every door. Not
+    // a synonym of any standard member: the request is valid and authorized,
+    // and the fault is a server-side extension's, not the caller's.
+    // `FindHookResultNotArrayError`, `find-hook-result-shape.ts`.
+    'FIND_HOOK_RESULT_NOT_ARRAY',
     // [#14010] a hook declared `runAs: 'user'` and its trigger resolved NO user
     // (an `isSystem` plugin/service write, a system-elevated flow node), so its
     // `ctx.api` data operation has no identity to scope to and is REFUSED
@@ -561,6 +593,35 @@ export const ERROR_CODE_LEDGER = {
     // decision. `MultiUpdateHookKeyDivergenceError`,
     // `multi-update-hook-key-divergence.ts`.
     'MULTI_UPDATE_HOOK_KEY_DIVERGENCE',
+    // [#14748] the ADR-0048 Phase 1 install-time namespace gate's refusal: a
+    // package's `manifest.namespace` is already owned by an INSTALLED package
+    // that is not a co-owner of it (ADR-0130 D1), so the install is refused up
+    // front rather than allowed to half-apply and fail later at table
+    // creation. `NamespaceConflictError`, `registry.ts`.
+    //
+    // Registered because the refusal is WIRE-REACHABLE and its condition has a
+    // caller remedy no standard member carries. `POST /api/v1/packages`
+    // (`packages/runtime/src/domains/packages.ts`) calls `installPackage` with
+    // no artifact install SCOPE — which this gate, unlike the ADR-0130 D3
+    // object-name one, does not need — so an ordinary one-package install
+    // reaches it, and the domain's terminal catch answers through
+    // `errorFromThrown`. #14474 gave the throw its ADR-0112 envelope (`code` +
+    // `status: 422`); until this row landed the door's #9106 narrowing demoted
+    // the spelling onto the open `declaredCode` sibling and put the closed
+    // member 422 derives (`VALIDATION_ERROR`) in `error.code`, so a caller
+    // wanting to tell "your namespace is taken, rename it" from every other 422
+    // had to read the channel ADR-0112 declares as NOT guaranteed.
+    //
+    // Not a VALIDATION_ERROR synonym: the manifest parses and every field is
+    // well-formed — what is refused is the INSTALLATION-WIDE uniqueness of the
+    // namespace against packages already present, which the request body cannot
+    // express and the caller fixes by renaming or uninstalling, not by
+    // correcting a field. Nor a duplicate of `@objectstack/metadata-protocol`'s
+    // `NAMESPACE_PREFIX`: that one refuses a metadata NAME that does not carry
+    // its own package's declared prefix (`validateObjectNamespacePrefix`, a
+    // publish pre-flight); this one refuses the PREFIX itself, at install, as
+    // already owned by someone else.
+    'NAMESPACE_CONFLICT',
     // [#11142/#11230] a by-id update carried an `options.where.id` that is not
     // the bound payload `data.id` — a truthy scalar naming a DIFFERENT row
     // (#11142), or a non-scalar predicate over a row SET (#11230, which also

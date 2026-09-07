@@ -248,14 +248,14 @@ parse-time error carrying the prescription.)
 
 ### 3. DatabaseLoader Read-Through Cache
 
-`DatabaseLoader` wraps `load` / `loadMany` / `list` / `stat` results in a generic LRU cache (lazy TTL, promote-on-get, write invalidation). Reads always observe writes performed through the same loader instance; out-of-band SQL writes are honored within `ttl` milliseconds.
+`DatabaseLoader` wraps `load` / `loadMany` / `list` / `stat` results in a generic LRU cache (lazy TTL, promote-on-get, write invalidation). Reads always observe writes performed through the same loader instance; out-of-band SQL writes are honored within `ttlMs` milliseconds.
 
 ```typescript
 new MetadataManager({
   datasource: 'default',
   cache: {
     enabled: true,
-    databaseLoader: { enabled: true, maxSize: 500, ttl: 60_000 },
+    databaseLoader: { enabled: true, maxSize: 500, ttlMs: 60_000 },
   },
 });
 ```

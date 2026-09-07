@@ -88,7 +88,7 @@
  *    outside vitest (it needs git history) and is recorded on the card.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -515,15 +515,28 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     // Same fixtures, same real resolver, posture present: the refusal fires
     // and carries its reason. This is what distinguishes "the refusal was
     // skipped" (§ next) from "the refusal never applied to this fixture".
-    const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
-    const authz = await resolveAuthzContext({
-      ql: qlWith({ memberships: MEMBER_ROWS }),
-      headers,
-      getSession: async () => undefined,
-      tenancyPosture: 'isolated',
-    } as any);
-    expect(authz.authRefusal?.reason).toBe('organization_membership_ended');
-    expect(authz.userId).toBeUndefined();
+    // [#14273 A1] `ResolvedAuthzContext` carries no refusal field any more
+    // (zero readers; removed). The ONE surface that names the refusal is the
+    // server-side `warnApiKeyRefusal` line (#15256 / 2A), so the mechanism
+    // control reads that — and the wire above still answers the anonymous floor.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
+      const authz = await resolveAuthzContext({
+        ql: qlWith({ memberships: MEMBER_ROWS }),
+        headers,
+        getSession: async () => undefined,
+        tenancyPosture: 'isolated',
+      } as any);
+      expect(authz.userId).toBeUndefined();
+      const refused = warnSpy.mock.calls
+        .map((c: unknown[]) => c.map(String).join(' '))
+        .filter((l: string) => l.includes('API key refused'));
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toContain('API key refused (organization_membership_ended)');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('REPAIRED [decision 1 A]: tenancy REGISTERED AND FAILING (factory throws) → 503 outage, no longer a served 200', async () => {
@@ -544,19 +557,28 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
   });
 
   it('⚠️ MEASURED PERMISSIVE (mechanism): with the posture absent the resolver ADMITS the ex-member as a full principal', async () => {
-    const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
-    const authz = await resolveAuthzContext({
-      ql: qlWith({ memberships: MEMBER_ROWS }),
-      headers,
-      getSession: async () => undefined,
-      tenancyPosture: undefined,
-    } as any);
-    expect(authz.authRefusal).toBeUndefined();
-    expect(authz.userId).toBe('u_exmember');
-    // The membership fact is IN HAND and says "not a member of org_A" — the
-    // refusal was gated off by the missing posture, not by missing data.
-    expect(authz.accessible_org_ids).not.toContain('org_A');
-    expect(authz.tenantId).toBe('org_A');
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
+      const authz = await resolveAuthzContext({
+        ql: qlWith({ memberships: MEMBER_ROWS }),
+        headers,
+        getSession: async () => undefined,
+        tenancyPosture: undefined,
+      } as any);
+      // [#14273 A1] No refusal fired — the warn line is the refusal's only
+      // surface and it is silent: an ADMISSION, not a quiet refusal.
+      expect(warnSpy.mock.calls
+        .map((c: unknown[]) => c.map(String).join(' '))
+        .filter((l: string) => l.includes('API key refused'))).toHaveLength(0);
+      expect(authz.userId).toBe('u_exmember');
+      // The membership fact is IN HAND and says "not a member of org_A" — the
+      // refusal was gated off by the missing posture, not by missing data.
+      expect(authz.accessible_org_ids).not.toContain('org_A');
+      expect(authz.tenantId).toBe('org_A');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('THE COLLAPSE IS ENDED: "registered and failed" and "never registered" no longer answer alike', async () => {

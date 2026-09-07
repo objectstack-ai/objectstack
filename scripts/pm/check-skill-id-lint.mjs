@@ -15,7 +15,8 @@
  * 得不偿失。」 Incident learnings are distilled into the rules themselves as
  * self-contained lessons (failure mode + discipline + boundary); an issue-ID
  * citation invites the reader to dereference history, which costs more than it
- * returns. Maintainer-ruling provenance keeps DATE + VERBATIM QUOTE — numbers go.
+ * returns. The scanned corpus carries rules only — no ruling dates, no quotations, no
+ * issue numbers; a rule's provenance lives in the PR that landed it.
  *
  * ## What it scans
  *

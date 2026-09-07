@@ -179,6 +179,10 @@ flowchart TD
 **lookup vs master_detail:** Use `lookup` when the child can exist independently. Use `master_detail` when deleting the parent should delete all children (e.g., order → line items).
 </Callout>
 
+<Callout type="info">
+**`tree` and `reference`:** on a `tree` field, `reference` is optional and, if given, must be this object — a `tree` that names another object is refused at parse. A link to a different object is a `lookup`.
+</Callout>
+
 ### File & Media Types
 
 | Type | Use When | Example |

@@ -22,6 +22,7 @@ import type {
 import type { Logger } from '@objectstack/core';
 import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import type { MetadataSerializer } from '../serializers/serializer-interface.js';
+import { AmbiguousMetadataStemError } from './ambiguous-metadata-stem.js';
 
 /**
  * The pre-#14205 key: a body's own top-level `name`, when it has one. Kept for
@@ -259,36 +260,45 @@ export class FilesystemLoader implements MetadataLoader {
         path.join(typeDir, pattern)
       );
 
+      // [#14921] Matched first, read second. The two-body answer this card
+      // names is produced HERE, not by `list()`: the walk reads both files of
+      // a colliding stem and hands back both bodies while only one of them can
+      // ever be addressed. The refusal therefore has to sit in front of the
+      // whole matched set — not per pattern, and not after `limit` truncates —
+      // so whether a tree is refused cannot depend on how many items the
+      // caller happened to ask for. An absolute pattern makes `glob` answer
+      // with absolute paths, which is what `resolvableNames()` measures.
+      const files: string[] = [];
       for (const pattern of globPatterns) {
-        const files = await glob(pattern, {
-          ignore: ['**/node_modules/**', '**/*.test.*', '**/*.spec.*', '**/*[*]*'],
-          nodir: true,
-        });
+        files.push(
+          ...(await glob(pattern, {
+            ignore: ['**/node_modules/**', '**/*.test.*', '**/*.spec.*', '**/*[*]*'],
+            nodir: true,
+          })),
+        );
+      }
 
-        for (const file of files) {
-          if (limit && items.length >= limit) {
-            break;
-          }
+      this.resolvableNames(type, typeDir, files);
 
-          try {
-            const content = await fs.readFile(file, 'utf-8');
-            const format = this.detectFormat(file);
-            const serializer = this.getSerializer(format);
-
-            if (serializer) {
-              const data = serializer.deserialize<T>(content);
-              items.push({ file, data });
-            }
-          } catch (error) {
-            this.logger?.warn('Failed to load file', {
-              file,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        }
-
+      for (const file of files) {
         if (limit && items.length >= limit) {
           break;
+        }
+
+        try {
+          const content = await fs.readFile(file, 'utf-8');
+          const format = this.detectFormat(file);
+          const serializer = this.getSerializer(format);
+
+          if (serializer) {
+            const data = serializer.deserialize<T>(content);
+            items.push({ file, data });
+          }
+        } catch (error) {
+          this.logger?.warn('Failed to load file', {
+            file,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
 
@@ -366,18 +376,13 @@ export class FilesystemLoader implements MetadataLoader {
   async list(type: string): Promise<string[]> {
     const typeDir = path.join(this.rootDir, type);
 
+    let files: string[];
     try {
-      const files = await glob('**/*', {
+      files = await glob('**/*', {
         cwd: typeDir,
         ignore: ['**/node_modules/**', '**/*.test.*', '**/*.spec.*'],
         nodir: true,
       });
-
-      // `cwd` makes these relative; `resolvableNameForPath()` measures against
-      // the type directory, so hand it the absolute path it expects.
-      return files
-        .map(file => this.resolvableNameForPath(typeDir, path.join(typeDir, file)))
-        .filter((name): name is string => name !== null);
     } catch (error) {
       this.logger?.error('Failed to list', undefined, {
         type,
@@ -385,6 +390,15 @@ export class FilesystemLoader implements MetadataLoader {
       });
       return [];
     }
+
+    // [#14921] Derived OUTSIDE that `catch`, deliberately: the walk failing is
+    // a degradation this method has always swallowed into `[]`, while an
+    // ambiguous stem is an authoring error the caller must see. Left inside,
+    // this method's own diagnostic would eat the refusal and answer `[]` —
+    // the same silence the refusal exists to end.
+    // `cwd` makes these relative; `resolvableNameForPath()` measures against
+    // the type directory, so hand it the absolute path it expects.
+    return this.resolvableNames(type, typeDir, files.map(file => path.join(typeDir, file)));
   }
 
   async save(
@@ -560,6 +574,56 @@ export class FilesystemLoader implements MetadataLoader {
     }
 
     return FilesystemLoader.nameFromFilename(rel);
+  }
+
+  /**
+   * [#14921] The names this loader reports for `files` — and the ONE place an
+   * ambiguous stem is refused.
+   *
+   * Shared by {@link list} and {@link loadManyEntries} so the two can never
+   * disagree about which trees are admissible: a stem that `list()` refuses
+   * must not still be walked and returned as two bodies by `loadMany()`, which
+   * is exactly the split this card measured.
+   *
+   * Refuses on the FIRST colliding name in sorted order, so a tree holding more
+   * than one collision always names the same one — a refusal that moves
+   * between runs reads as flakiness rather than as the fixed authoring error it
+   * is. Paths are deduplicated because two overlapping `patterns` legitimately
+   * match one file twice, and counting that as a collision would refuse a
+   * perfectly good tree.
+   *
+   * ⛔ Not a precedence resolver. Picking a winner here is what the ruling
+   * declined (option 2, keep the precedence and log): the loser would stay
+   * unreachable and the listed set would stay different from the addressable
+   * one.
+   */
+  private resolvableNames(type: string, typeDir: string, files: readonly string[]): string[] {
+    const byName = new Map<string, Set<string>>();
+
+    for (const file of files) {
+      const name = this.resolvableNameForPath(typeDir, file);
+
+      if (name === null) {
+        continue;
+      }
+
+      let paths = byName.get(name);
+      if (!paths) {
+        paths = new Set<string>();
+        byName.set(name, paths);
+      }
+      paths.add(file);
+    }
+
+    for (const name of [...byName.keys()].sort()) {
+      const paths = byName.get(name)!;
+
+      if (paths.size > 1) {
+        throw new AmbiguousMetadataStemError(type, name, [...paths]);
+      }
+    }
+
+    return [...byName.keys()];
   }
 
   /**

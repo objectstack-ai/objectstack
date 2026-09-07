@@ -518,26 +518,32 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
 // assertion judges the authoring site, which is the half the bundle face
 // cannot see. Both directions of that sentence now red instead of shipping.
 //
-// ## What this block deliberately does NOT assert, and the measurement why
+// ## The `pages.*` bundle entry this block once refused -- and the ruling that
+// ## delivered it (#15743)
 //
-// It does not require a `pages.*` BUNDLE entry for these three. That was tried
-// and measured: the three page-level `label`s are the only keys the extractor
-// offers, so translating them is the one piece of real debt here (`User` /
-// `Organization` / `Position` render in English in every locale). Adding those
-// entries turns `check:app-nav-i18n` RED on two of the three --
-// `pages.sys_user_detail` and `pages.sys_organization_detail` are reported as
-// keys "the booted composition contains no page by that name", its phantom-key
-// verdict. That gate's `CONTRIBUTORS` roster is deliberately explicit and
-// deliberately a NAV roster: `@objectstack/plugin-auth`, which contributes
+// This section used to say the block "does not require a `pages.*` BUNDLE entry
+// for these three", and record why: the three page-level `label`s are the only
+// keys the extractor offers, so translating them is the one piece of real debt
+// here (`User` / `Organization` / `Position` rendered in English in every
+// locale), but adding those entries turned `check:app-nav-i18n` RED on two of
+// the three -- `pages.sys_user_detail` and `pages.sys_organization_detail` came
+// back as keys "the booted composition contains no page by that name", its
+// orphan verdict. That gate's `CONTRIBUTORS` roster is deliberately explicit
+// and deliberately a NAV roster: `@objectstack/plugin-auth`, which contributes
 // those two pages, is not in it, and adding it is not a one-line edit --
 // `new AuthPlugin({})` refuses to boot ("secret is required"), and the roster
 // separately requires every entry to land at least one nav id, which
 // plugin-auth's conditional `nav_sso_providers` cannot promise. Only
-// `sys_position_detail` (plugin-security, which IS in the roster) verifies
-// clean. Splitting that roster into a nav population and a page population is a
-// change to a gate's composition contract, so it is escalated rather than taken
-// here. Until it is ruled, a `pages.*` entry for the plugin-auth pages would be
-// exactly the unverifiable key `check:app-nav-i18n` exists to refuse.
+// `sys_position_detail` (plugin-security, which IS in the roster) verified
+// clean. The block escalated rather than deciding.
+//
+// It was ruled at PR #15739 and taken on #15743: option B, move the `pages.*`
+// parity verdict OFF that roster and onto this file, then translate the three
+// labels. Both halves are below -- the moved verdict and its red-shape controls
+// in the next block, the nine delivered translation units in the one after. The
+// three pages now DO carry a `pages.*` entry in all four shipped locales, and
+// the assertion two below still holds: `label` remains the only key the
+// extractor offers them, because nothing about their SHAPE changed.
 
 /** Every page the platform's own `pages` barrel exports, as the plugins take them. */
 const RECORD_PAGES: Array<Record<string, any>> = Object.values(
@@ -646,5 +652,395 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
       .filter((m) => SHIPPED_LOCALES.some((locale) => !m.locales.includes(locale)))
       .map((m) => ({ path: m.path, missing: SHIPPED_LOCALES.filter((l) => !m.locales.includes(l)) }));
     expect(incomplete).toEqual([]);
+  });
+});
+
+// ─── The `pages.*` default-locale parity verdict (#8764, moved here by #15743) ─
+//
+// This verdict used to live in `packages/cli/scripts/check-app-nav-i18n.mjs`,
+// beside that gate's `CONTRIBUTORS` roster. #15743 ruled it out of there
+// (option B, ruled at PR #15739) and into this file. The reason is not tidiness
+// — it is the roster's own defect class:
+//
+//   > the defect class this whole card is about is ONE roster silently serving
+//   > TWO populations — exactly what produced the ambiguous 0
+//
+// `CONTRIBUTORS` is a NAV roster: every entry must land at least one nav id or
+// the gate fails, and it boots each contributor to get them. The pages rode
+// along because the same manifests happened to carry `pages:`. Those two
+// populations are NOT the same set, and the measurement that settles it: the
+// booted composition contains FOUR pages (`cloud_connection_settings`,
+// `connect_agent`, `marketplace_installed`, `sys_position_detail`) while the
+// platform ships SIX. `sys_user_detail` and `sys_organization_detail` come from
+// `@objectstack/plugin-auth`, which cannot join a NAV roster at all —
+// `new AuthPlugin({})` refuses to boot ("secret is required") and its only nav
+// contribution (`nav_sso_providers`) is conditional, so it can never satisfy the
+// at-least-one-nav-id invariant. A bundle entry for either page therefore drew
+// the gate's ORPHAN verdict, "the booted composition contains no page by that
+// name" — true about that composition, false about the platform.
+//
+// ⛔ Option A — splitting the roster into a NAV population and a PAGE
+// population, booting `plugin-auth` with a test secret, and exempting pages
+// from the nav-id invariant — was refused on #15743 and is not to be revived:
+// it makes one roster serve two populations explicitly, with a credential
+// fixture and a hand-carved exemption, which is the original defect with better
+// documentation.
+//
+// Here the population is READ, not rostered: the contributing plugins' UI
+// bundles plus the `@objectstack/platform-objects/pages` barrel, neither of
+// which needs a boot, a credential or a nav id. That is a strict superset of
+// what the gate could reach (six pages against four), so the move ADDS the two
+// pages the roster structurally could not judge rather than trading coverage
+// for placement.
+//
+// What is preserved verbatim from the gate: the three finding kinds, because
+// their REMEDIES differ —
+//
+//   drift      the bundle serves a string the source no longer says. Fix the
+//              bundle (and the other locales, now stale too).
+//   orphan     the bundle names a page no shipped population contains. The
+//              ANTI-VACUITY half: without it, renaming a page silently reduces
+//              this assertion to comparing nothing, and a parity gate that
+//              cannot fail is the exact defect class #8764 is about.
+//   no-source  the bundle declares a key the page has nothing to overlay — a
+//              phantom key that translates nothing (ADR-0078's shape). Delete
+//              the key or restore the field at the source.
+//
+// …and the RED-SHAPE controls the gate ran under `--self-test`, which are now
+// ordinary test cases below. A verdict moved without them would be a verdict
+// nobody has seen fail.
+
+/** The component type whose `title` / `subtitle` the page bundle addresses. */
+const PAGE_HEADER_COMPONENT = 'page:header';
+
+interface PageSourceCopy {
+  label?: string;
+  description?: string;
+  title: string[];
+  subtitle: string[];
+}
+
+/**
+ * The source literals a page offers, keyed the way the bundle addresses them.
+ * The mapping is not invented here — it is the one `translatePage` implements
+ * and `TranslationDataSchema.pages` documents:
+ *
+ *   pages.<name>.label       → the page document's own `label`
+ *   pages.<name>.description → the page document's own `description`
+ *   pages.<name>.title       → every `page:header`'s `properties.title`
+ *   pages.<name>.subtitle    → every `page:header`'s `properties.subtitle`
+ *
+ * `title`/`subtitle` are ARRAYS because the resolver overlays every
+ * `page:header` in the regions, not the first one — so parity has to hold for
+ * all of them or the bundle is right about one header and wrong about another.
+ */
+const pageSourceCopy = (page: Record<string, any> | undefined): PageSourceCopy => {
+  const headers: Array<Record<string, any>> = [];
+  for (const region of page?.regions ?? []) {
+    for (const component of region?.components ?? []) {
+      if (component?.type === PAGE_HEADER_COMPONENT) headers.push(component?.properties ?? {});
+    }
+  }
+  const strings = (key: string): string[] =>
+    headers.map((h) => h?.[key]).filter((v): v is string => typeof v === 'string');
+  return {
+    label: typeof page?.label === 'string' ? page.label : undefined,
+    description: typeof page?.description === 'string' ? page.description : undefined,
+    title: strings('title'),
+    subtitle: strings('subtitle'),
+  };
+};
+
+type PageFindingKind = 'drift' | 'orphan' | 'no-source';
+interface PageFinding {
+  kind: PageFindingKind;
+  path: string;
+  source?: string;
+  served?: string;
+}
+
+/**
+ * Every way the default-locale `pages.*` section can disagree with the page
+ * metadata it copies.
+ *
+ * ⚠️ `title` implements the resolver's fallback: `pages.<name>.title` defaults
+ * to `pages.<name>.label` when omitted. That is not a detail — it is a real
+ * drift path. A header `title` edited to differ from the page `label` would be
+ * silently overwritten by the label in every locale, `en` included, with
+ * nothing else in the repo comparing the two.
+ */
+const defaultLocalePageDrift = (
+  pageTranslations: Record<string, any> | undefined,
+  sourceByName: Map<string, PageSourceCopy>,
+): PageFinding[] => {
+  const findings: PageFinding[] = [];
+  const add = (kind: PageFindingKind, path: string, source?: string, served?: string) =>
+    findings.push({ kind, path, source, served });
+
+  for (const [name, entry] of Object.entries(pageTranslations ?? {})) {
+    const source = sourceByName.get(name);
+    if (!source) {
+      add('orphan', `pages.${name}`);
+      continue;
+    }
+
+    // The page document's own fields.
+    for (const attr of ['label', 'description'] as const) {
+      const served = entry?.[attr];
+      if (typeof served !== 'string') continue; // an undeclared key makes no claim
+      if (typeof source[attr] !== 'string') { add('no-source', `pages.${name}.${attr}`, undefined, served); continue; }
+      if (served !== source[attr]) add('drift', `pages.${name}.${attr}`, source[attr], served);
+    }
+
+    // The `page:header` copy.
+    const explicitTitle = typeof entry?.title === 'string' ? entry.title : undefined;
+    const servedTitle = explicitTitle ?? (typeof entry?.label === 'string' ? entry.label : undefined);
+    const titlePath = `pages.${name}.${explicitTitle !== undefined ? 'title' : 'label'}`;
+    if (servedTitle !== undefined) {
+      // An explicit `title` with no header to land on is a phantom key. The
+      // `label` FALLBACK is not — `label` has already been judged above against
+      // the page's own field, and a page with no header title is not a page the
+      // fallback makes a claim about.
+      if (source.title.length === 0) {
+        if (explicitTitle !== undefined) add('no-source', titlePath, undefined, explicitTitle);
+      } else {
+        for (const t of source.title) if (servedTitle !== t) add('drift', titlePath, t, servedTitle);
+      }
+    }
+    const servedSubtitle = entry?.subtitle;
+    if (typeof servedSubtitle === 'string') {
+      if (source.subtitle.length === 0) add('no-source', `pages.${name}.subtitle`, undefined, servedSubtitle);
+      else for (const s of source.subtitle) if (servedSubtitle !== s) add('drift', `pages.${name}.subtitle`, s, servedSubtitle);
+    }
+  }
+  return findings;
+};
+
+/**
+ * Every page the platform ships that the `pages.*` bundle section can address,
+ * with the package that authors its literals — so a failure names where to go.
+ *
+ * Read from the two carriers rather than listed: the capability plugins' UI
+ * bundles (all of their pages, not just the first) and the platform's own pages
+ * barrel. A fourth page joins this verdict by existing.
+ */
+const ALL_PAGE_SOURCES: Array<{ page: Record<string, any>; authoredBy: string }> = [
+  ...([
+    [MARKETPLACE_INSTALLED_UI_BUNDLE, '@objectstack/cloud-connection'],
+    [CLOUD_CONNECTION_UI_BUNDLE, '@objectstack/cloud-connection'],
+    [CONNECT_AGENT_UI_BUNDLE, '@objectstack/mcp'],
+  ] as Array<[{ pages?: Array<Record<string, any>> }, string]>).flatMap(([bundle, authoredBy]) =>
+    (bundle.pages ?? []).map((page) => ({ page, authoredBy })),
+  ),
+  ...RECORD_PAGES.map((page) => ({ page, authoredBy: '@objectstack/platform-objects/pages' })),
+];
+
+const SOURCE_BY_NAME = new Map<string, PageSourceCopy>(
+  ALL_PAGE_SOURCES.map(({ page }) => [page.name as string, pageSourceCopy(page)]),
+);
+const AUTHORED_BY = new Map<string, string>(
+  ALL_PAGE_SOURCES.map(({ page, authoredBy }) => [page.name as string, authoredBy]),
+);
+
+describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #15743)', () => {
+  it('judges a population that covers every page the shipped bundle addresses', () => {
+    // The anti-vacuity floor, stated before the verdict runs. A verdict over an
+    // empty or shrunken population is the ambiguous `0` this whole card is
+    // about: every loop below would be satisfied and report success.
+    expect(SOURCE_BY_NAME.size).toBeGreaterThanOrEqual(6);
+    expect([...SOURCE_BY_NAME.keys()].sort()).toEqual(
+      expect.arrayContaining([
+        'cloud_connection_settings',
+        'connect_agent',
+        'marketplace_installed',
+        'sys_organization_detail',
+        'sys_position_detail',
+        'sys_user_detail',
+      ]),
+    );
+    // …and it is strictly larger than what the booted nav composition reached,
+    // which is the measured reason the verdict moved: `plugin-auth` cannot join
+    // a NAV roster, so those two pages had no judge at all.
+    expect(SOURCE_BY_NAME.has('sys_user_detail')).toBe(true);
+    expect(SOURCE_BY_NAME.has('sys_organization_detail')).toBe(true);
+  });
+
+  it('holds the `en` bundle in verbatim parity with the page sources', () => {
+    const enPages = pagesOf(EN);
+    // Absence is loud: an `en` section that lost its entries would make the
+    // verdict below compare nothing at all.
+    expect(Object.keys(enPages).length).toBeGreaterThanOrEqual(6);
+
+    const findings = defaultLocalePageDrift(enPages, SOURCE_BY_NAME).map((f) => ({
+      ...f,
+      authoredBy: AUTHORED_BY.get(f.path.split('.')[1]) ?? '(no page by that name)',
+    }));
+    expect(findings).toEqual([]);
+  });
+
+  it('carries a `pages.*` entry for every page in the population', () => {
+    // The reverse of the orphan direction: the bundle must not go SILENT on a
+    // page either. An unaddressed page renders its authored literal in every
+    // locale, which is exactly the debt #15743 was filed for.
+    const enPages = pagesOf(EN);
+    const unaddressed = [...SOURCE_BY_NAME.keys()].filter((name) => !enPages[name]).sort();
+    expect(unaddressed).toEqual([]);
+  });
+
+  // ── The RED-SHAPE controls. These were `--self-test` cases on the gate; a
+  //    verdict moved without them is a verdict nobody has seen fail.
+  const SAMPLE_PAGE = {
+    name: 'marketplace_installed',
+    label: 'Installed Apps',
+    regions: [
+      {
+        name: 'header',
+        components: [
+          {
+            type: 'page:header',
+            properties: {
+              title: 'Installed Apps',
+              subtitle: "Marketplace packages currently installed into this runtime's kernel.",
+            },
+          },
+        ],
+      },
+      { name: 'main', components: [{ type: 'marketplace:installed-list', properties: {} }] },
+    ],
+  };
+  const SAMPLE_SOURCES = new Map([[SAMPLE_PAGE.name, pageSourceCopy(SAMPLE_PAGE)]]);
+  const IN_PARITY = {
+    marketplace_installed: {
+      label: 'Installed Apps',
+      subtitle: "Marketplace packages currently installed into this runtime's kernel.",
+    },
+  };
+
+  it('CONTROL: reads the page label and the header copy out of the regions', () => {
+    const copy = pageSourceCopy(SAMPLE_PAGE);
+    expect({ label: copy.label, title: copy.title, subtitles: copy.subtitle.length })
+      .toEqual({ label: 'Installed Apps', title: ['Installed Apps'], subtitles: 1 });
+    // A bare page yields no header copy rather than throwing.
+    expect(pageSourceCopy({ name: 'x' }).title).toEqual([]);
+  });
+
+  it('CONTROL: a bundle in parity reports nothing', () => {
+    expect(defaultLocalePageDrift(IN_PARITY, SAMPLE_SOURCES)).toEqual([]);
+  });
+
+  it('CONTROL: a source string edited in another package is reported as drift', () => {
+    const findings = defaultLocalePageDrift(
+      { marketplace_installed: { ...IN_PARITY.marketplace_installed, subtitle: 'Packages installed into this kernel.' } },
+      SAMPLE_SOURCES,
+    );
+    expect(findings.map((f) => ({ kind: f.kind, path: f.path }))).toEqual([
+      { kind: 'drift', path: 'pages.marketplace_installed.subtitle' },
+    ]);
+    // The verdict carries BOTH strings — the whole point is that a reader can
+    // see which side moved without opening two packages.
+    expect({
+      source: findings[0]?.source?.startsWith('Marketplace packages'),
+      served: findings[0]?.served?.startsWith('Packages installed'),
+    }).toEqual({ source: true, served: true });
+  });
+
+  it('CONTROL: the title fallback catches a header edited away from the label', () => {
+    // The bundle declares `label` only, so `label` is what serves the header
+    // title. A header title edited to differ from the page label is drift
+    // NOTHING else in the repo compares.
+    const headerEdited = new Map([[
+      'marketplace_installed',
+      pageSourceCopy({
+        ...SAMPLE_PAGE,
+        regions: [{
+          name: 'header',
+          components: [{
+            type: 'page:header',
+            properties: { title: 'Installed Packages', subtitle: IN_PARITY.marketplace_installed.subtitle },
+          }],
+        }],
+      }),
+    ]]);
+    expect(
+      defaultLocalePageDrift(IN_PARITY, headerEdited).some((f) => f.kind === 'drift' && f.source === 'Installed Packages'),
+    ).toBe(true);
+  });
+
+  it('CONTROL: an entry with no page in the population is an orphan, never parity', () => {
+    const findings = defaultLocalePageDrift(IN_PARITY, new Map());
+    expect(findings.map((f) => ({ kind: f.kind, path: f.path }))).toEqual([
+      { kind: 'orphan', path: 'pages.marketplace_installed' },
+    ]);
+  });
+
+  it('CONTROL: a key the page cannot carry is a phantom key, but the label fallback is not', () => {
+    const phantom = defaultLocalePageDrift(
+      { marketplace_installed: { ...IN_PARITY.marketplace_installed, description: 'Anything' } },
+      SAMPLE_SOURCES,
+    );
+    expect(phantom.some((f) => f.kind === 'no-source' && f.path.endsWith('.description'))).toBe(true);
+    // …but a headerless page must raise nothing from the `label` fallback, or
+    // every one of the three record pages would report a finding it cannot act
+    // on: they all author `regions: []`.
+    const headerless = defaultLocalePageDrift(
+      { p: { label: 'P' } },
+      new Map([['p', pageSourceCopy({ name: 'p', label: 'P' })]]),
+    );
+    expect(headerless).toEqual([]);
+  });
+});
+
+describe('platform record page labels are translated in every shipped locale (#15743)', () => {
+  /**
+   * The debt this card was filed for: `User` / `Organization` / `Position` are
+   * page-level `label`s on the three record pages, they are the ONLY keys the
+   * extractor reaches on those pages (the block above pins that), and they
+   * rendered English in every locale — 3 keys × 3 translated locales = 9 units.
+   *
+   * ⚠️ This is a coverage claim of its own, deliberately NOT a restatement of
+   * the key-set assertion further up this file, which compares page-name SETS
+   * and says nothing about the copy inside an entry. It is scoped to these three
+   * pages: requiring every leaf of every page to differ from `en` would be a
+   * different, much larger claim.
+   *
+   * It reads `SetupAppTranslations`, which is the SERVED bundle — the three
+   * translated locales pass through `withSourceFallback` (#8765 Option B), so a
+   * wrong recorded source hash would serve the English source here and red this
+   * assertion rather than shipping a silent regression.
+   */
+  const RECORD_PAGE_NAMES = ['sys_user_detail', 'sys_organization_detail', 'sys_position_detail'];
+  const TRANSLATED_LOCALES = SHIPPED_LOCALES.filter((locale) => locale !== EN);
+
+  it('has a real, non-English label for each of the three in each translated locale', () => {
+    expect(TRANSLATED_LOCALES.length).toBeGreaterThanOrEqual(3);
+
+    const english = pagesOf(EN);
+    const untranslated: Array<{ locale: string; page: string; label: unknown }> = [];
+    for (const locale of TRANSLATED_LOCALES) {
+      const served = pagesOf(locale);
+      for (const name of RECORD_PAGE_NAMES) {
+        const label = served[name]?.label;
+        if (typeof label !== 'string' || label.length === 0 || label === english[name]?.label) {
+          untranslated.push({ locale, page: name, label });
+        }
+      }
+    }
+    expect(untranslated).toEqual([]);
+  });
+
+  it('translates the page label end to end through `translatePage`', () => {
+    // The chain the reader actually meets: page metadata in, localized label
+    // out. Asserting the bundle alone would not prove the resolver reads it.
+    for (const page of RECORD_PAGES) {
+      // Snapshot by value up front — comparing two live reads of the same
+      // object afterwards could not detect a mutation.
+      const before = page.label;
+      const translated = translatePage(page as any, SetupAppTranslations, { locale: 'zh-CN' });
+      expect({ page: page.name, changed: translated.label !== before })
+        .toEqual({ page: page.name, changed: true });
+      // The shared page object is a module-level singleton the kernel
+      // registers once — it must not be mutated.
+      expect({ page: page.name, label: page.label }).toEqual({ page: page.name, label: before });
+    }
   });
 });

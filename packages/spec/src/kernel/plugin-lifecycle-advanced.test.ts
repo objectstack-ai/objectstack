@@ -126,12 +126,12 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
         timestamp: new Date().toISOString(),
         message: 'Plugin is operating normally',
         metrics: {
-          uptime: 3600000,
+          uptimeMs: 3600000,
           memoryUsage: 52428800,
           cpuUsage: 15.5,
           activeConnections: 10,
           errorRate: 0.1,
-          responseTime: 150,
+          responseTimeMs: 150,
         },
         checks: [
           {
@@ -153,7 +153,7 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
       };
       const result = PluginHealthReportSchema.parse(report);
       expect(result.status).toBe('healthy');
-      expect(result.metrics?.uptime).toBe(3600000);
+      expect(result.metrics?.uptimeMs).toBe(3600000);
       expect(result.checks).toHaveLength(2);
     });
 
@@ -300,4 +300,46 @@ describe('Plugin Lifecycle Advanced Schemas', () => {
     });
   });
 
+});
+
+// #15678 (stack card 3/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. Both old spellings are `retiredKey()`
+// tombstones inside the live `metrics` block, so the refusal carries the RENAME
+// and the block's other members must keep parsing beside it.
+describe('PluginHealthReport metrics durations carry their unit (#15678)', () => {
+  const base = { status: 'healthy' as const, timestamp: new Date().toISOString() };
+
+  it.each([
+    ['uptime', 'uptimeMs', 3600000],
+    ['responseTime', 'responseTimeMs', 150],
+  ])('REFUSES the retired `metrics.%s` with the rename to `%s` in the message', (old, next, value) => {
+    const result = PluginHealthReportSchema.safeParse({ ...base, metrics: { [old]: value } });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === `metrics.${old}`);
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toContain(
+      `\`PluginHealthReport.metrics.${old}\` was renamed to \`${next}\``,
+    );
+  });
+
+  it('accepts the suffixed metrics beside their unchanged non-duration siblings', () => {
+    const parsed = PluginHealthReportSchema.parse({
+      ...base,
+      metrics: {
+        uptimeMs: 3600000,
+        responseTimeMs: 150,
+        // Not durations, so this rule does not reach them and they keep their
+        // bare names: bytes, a percentage, a count and a rate.
+        memoryUsage: 52428800,
+        cpuUsage: 15.5,
+        activeConnections: 10,
+        errorRate: 0.1,
+      },
+    });
+    expect(parsed.metrics?.uptimeMs).toBe(3600000);
+    expect(parsed.metrics?.responseTimeMs).toBe(150);
+    expect(parsed.metrics?.memoryUsage).toBe(52428800);
+    expect(parsed.metrics?.activeConnections).toBe(10);
+  });
 });

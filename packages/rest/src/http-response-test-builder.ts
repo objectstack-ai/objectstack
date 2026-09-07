@@ -76,13 +76,45 @@
  * a mirror keeps only the last status where `mock.calls` keeps every one, and
  * `mockClear()` empties one and not the other. One record, not two.
  *
- * ⚠️ Three other files in this package — `analytics-dataset-dimension-gate`,
- * `meta-public-book-grant`, `rest-batch-size-cap` — assert on a mirrored
- * `res.statusCode` / `res.body` built by a local `makeRes()` typed `any`. They
- * are green for the forbidden reason rather than conforming, but they cannot
- * adopt this builder by substitution: converting those reads into spy reads
- * CHANGES the assertion, so it is a decision of its own rather than a mechanical
- * edit. Recorded here so the omission is not read as an oversight.
+ * ⚠️ Most of this package's test files — not the three this paragraph used
+ * to name — assert on a mirrored `res.statusCode` / `res.body` built by a local
+ * `any`-typed fixture instead of reaching for this builder. They are green for
+ * the forbidden reason rather than conforming, but they cannot adopt it by
+ * substitution: converting those reads into spy reads CHANGES the assertion, so
+ * it is a decision of its own rather than a mechanical edit. Recorded here so
+ * the omission is not read as an oversight.
+ *
+ * ⛔ **Do not put the file list back.** The three names this paragraph carried
+ * were wrong in both directions at once. The count was wrong — the real
+ * population is 76, not 3 — and the stated property was wrong for one of the
+ * three it did name: `analytics-dataset-dimension-gate` contains no `makeRes`
+ * at all, because its fixture is spelled `mockRes`. Both errors have one cause,
+ * which is that the population was enumerated by HELPER NAME and the helper name
+ * is the one thing about this shape that varies. So what replaces the list is
+ * the property and the command that derives it, and a reader re-derives instead
+ * of trusting this sentence:
+ *
+ * ```
+ * # builds a mirror AND asserts on it — 76 of 187 test files at a5eccf925
+ * grep -lE 'expect\([A-Za-z_$][A-Za-z0-9_$]*\.(statusCode|body)\b' \
+ *   packages/rest/src/*.test.ts | xargs grep -l 'statusCode = ' | wc -l
+ * ```
+ *
+ * Only **30** of those 76 spell the fixture `makeRes`; the rest spell it
+ * `mockRes` or inline it, which is precisely how a name-keyed hand-list came to
+ * miss 73 of them. The control that shows the filter discriminates rather than
+ * matching everything it sees: **18** further files DO define a `makeRes` and
+ * are correctly excluded, because theirs is a spy-only or closure-capture double
+ * with no mirror to read.
+ *
+ * `src/rest.test.ts` holds one fixture of each kind, which is the reason to
+ * state a property here rather than a filename: its `makeRes` under
+ * `describe('RestServer — object API exposure')` IS a mirror and IS in the 76,
+ * while its `makeRes` under `describe('export handler')` captures status in a
+ * closure and is correctly outside. The mirrored one also feeds that file's only
+ * `route.handler` call whose enclosing binding is untyped, so neither argument
+ * is checked at it — typing it would red the response for the reason above, and
+ * so belongs to the conversion decision rather than to this paragraph.
  *
  * **It takes no parameters.** `httpRequestForRoute` needs them because a
  * request carries fixture DATA that differs per test. A response double carries

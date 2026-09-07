@@ -19,6 +19,7 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
  * Standard Prometheus metric types
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const MetricType = z.enum([
   'counter',    // Monotonically increasing value
   'gauge',      // Value that can go up and down
@@ -319,6 +320,20 @@ export type TimeSeries = z.input<typeof TimeSeriesSchema>;
 /**
  * Metric Aggregation Configuration
  */
+const WINDOW_SIZE_RETIRED =
+  'The aggregation/SLI window key `size` was renamed to `durationSeconds` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. The new name is not `sizeSeconds`: `size` means a byte or '
+  + 'row count everywhere else in this spec, so the rename drops it rather than bolting a '
+  + 'unit onto it. Rename `window.size` to `window.durationSeconds` on both '
+  + 'MetricAggregationConfig and ServiceLevelIndicator; the value (seconds) is unchanged.';
+
+const SLO_PERIOD_DURATION_RETIRED =
+  '`ServiceLevelObjective.period.duration` was renamed to `durationSeconds` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. Rename the key to `durationSeconds`; the value (seconds) '
+  + 'is unchanged.';
+
 export const MetricAggregationConfigSchema = lazySchema(() => z.object({
   /**
    * Aggregation type
@@ -330,9 +345,20 @@ export const MetricAggregationConfigSchema = lazySchema(() => z.object({
    */
   window: z.object({
     /**
-     * Window size in seconds
+     * Window duration in seconds
      */
-    size: z.number().int().positive().describe('Window size in seconds'),
+    // Renamed from `size` (#15679, #14478 ruling B). NOT the gate's mechanical
+    // `sizeSeconds`: `size` is byte-count vocabulary everywhere else in this spec
+    // (`CacheTier.maxSize` is MB, `RegistryConfig.cache.maxSize` is bytes, this
+    // file's own `batch.size` is a row count), so `sizeSeconds` would have kept
+    // the misleading half of the name and bolted a unit onto it. The parent key is
+    // already `window`, so `windowSeconds` would stutter as `window.windowSeconds`.
+    // `durationSeconds` names what the number IS, and matches the sibling period
+    // length one schema down (`ServiceLevelObjective.period.durationSeconds`).
+    durationSeconds: z.number().int().positive().describe('Window duration in seconds'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    size: retiredKey(WINDOW_SIZE_RETIRED),
 
     /**
      * Sliding window (true) or tumbling window (false)
@@ -415,9 +441,20 @@ export const ServiceLevelIndicatorSchema = lazySchema(() => z.object({
    */
   window: z.object({
     /**
-     * Window size in seconds
+     * Window duration in seconds
      */
-    size: z.number().int().positive().describe('Window size in seconds'),
+    // Renamed from `size` (#15679, #14478 ruling B). NOT the gate's mechanical
+    // `sizeSeconds`: `size` is byte-count vocabulary everywhere else in this spec
+    // (`CacheTier.maxSize` is MB, `RegistryConfig.cache.maxSize` is bytes, this
+    // file's own `batch.size` is a row count), so `sizeSeconds` would have kept
+    // the misleading half of the name and bolted a unit onto it. The parent key is
+    // already `window`, so `windowSeconds` would stutter as `window.windowSeconds`.
+    // `durationSeconds` names what the number IS, and matches the sibling period
+    // length one schema down (`ServiceLevelObjective.period.durationSeconds`).
+    durationSeconds: z.number().int().positive().describe('Window duration in seconds'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    size: retiredKey(WINDOW_SIZE_RETIRED),
 
     /**
      * Rolling window (true) or calendar-aligned (false)
@@ -478,7 +515,12 @@ export const ServiceLevelObjectiveSchema = lazySchema(() => z.object({
     /**
      * Duration in seconds (for rolling)
      */
-    duration: z.number().int().positive().optional().describe('Duration in seconds'),
+    // Renamed from `duration` (#15679, #14478 ruling B): the unit lived only in
+    // the describe prose.
+    durationSeconds: z.number().int().positive().optional().describe('Duration in seconds'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    duration: retiredKey(SLO_PERIOD_DURATION_RETIRED),
 
     /**
      * Calendar period (for calendar)

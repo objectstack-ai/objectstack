@@ -130,16 +130,27 @@
 //                                      fourth instance of a defect that is not there.
 //
 // ⚠️ Both citations above name a SYMBOL or a FILE, never a line, and that is
-// deliberate (#15599). The first one read `packages/client/src/index.ts:310`
-// when it was written; the #15094 census found that declaration at `:392` and
-// triage read `:390` the same day -- a cross-file line citation that rotted
-// twice inside one day, which is an argument against citing a line at all
-// rather than for repointing it. The second read `client-sdk.mdx:659`; that
-// sample had drifted off the cited line too. ⛔ Every number in this paragraph
-// is a DATED rot record, not a pointer -- do not repair one. `scripts/**` is
-// outside `check-adr-symbol-anchors`'s corpus (`docs/adr/**`, `.md` only), so
-// nothing resolves these two for you -- but the form is this repo's own
-// declared grammar, whose last line reads
+// deliberate (#15599). The rot record that MADE it deliberate is kept below as
+// DATA -- file and line stated as separate cells, never as a `path:NNN`
+// anchor, because each number is a reading taken on a date rather than a
+// pointer anything can resolve:
+//
+//   the reading                       file                                line
+//   -------------------------------   ---------------------------------   ----
+//   the citation as first written     `packages/client/src/index.ts`        310
+//   the #15094 census found it at     `packages/client/src/index.ts`        392
+//   triage read, the same day         `packages/client/src/index.ts`        390
+//   the second citation, as written   `content/docs/api/client-sdk.mdx`     659
+//
+// One cross-file line citation rotted TWICE inside a single day -- an argument
+// against citing a line at all rather than for repointing it -- and the second
+// one had drifted off its cited line too. ⛔ Every number in this paragraph is
+// a DATED rot record, not a pointer: do not repair one, and do not write one
+// back into `path:NNN` form. Since #15806 this repo DOES resolve citations in
+// `scripts/**` comment prose (`scripts/check-scripts-symbol-anchors.mjs`, a
+// second corpus registration), so an anchor-shaped number here is judged and
+// reds -- which is the same conclusion the grammar already states, whose last
+// line reads
 // `⛔ <dir>/<file>.ts:4901  A LINE NUMBER IS NOT AN ANCHOR FORM.`
 // (`scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR`), and a symbol name stays
 // checkable by grep where a number does not.

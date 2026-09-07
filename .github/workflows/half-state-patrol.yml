@@ -149,6 +149,10 @@ on:
       # place that has to name it. (The adopted objectui copy carries this row
       # already; upstream is catching up to its own port.)
       - 'scripts/invoked-as.mjs'
+      # The closed-card sweep this workflow also calls (#16005). Same reasoning
+      # as the row above, one file along: a step whose script can change without
+      # this trigger firing is a step whose PR-time proof is a coincidence.
+      - 'scripts/pm/sweep-closed-cards.mjs'
       - '.github/workflows/half-state-patrol.yml'
 
 # Least privilege: this job reads the repo and writes exactly one issue BODY.
@@ -247,6 +251,96 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           echo "check-half-states exited $code"
           cat "$RUNNER_TEMP/report.err" >&2 || true
+
+      - name: Sweep the closed cards
+        id: closed-cards
+        # #16005 — the pm-loop state labels are CLAIMS that work is in flight,
+        # and GitHub leaves every label in place when a merged `Fixes` pull
+        # request closes a card. The seat was paying a hand round trip per
+        # landing to remove them (eighteen identical ones in one measured
+        # shift). This step is that stroke, mechanized; the script's header
+        # carries the ruling it obeys and the window that keeps it to
+        # close-time hygiene rather than the backfill the 2026-08-31 maintainer
+        # ruling refused.
+        #
+        # ⛔ Gated on the repository NAME, unlike every other step in this file:
+        # this one is objectstack-only until a sibling has both its patrol
+        # anchor (objectui#5986) and a copy of the script. A verbatim copy of
+        # this workflow in a sibling repo therefore SKIPS this step rather than
+        # failing on a missing file.
+        #
+        # ⛔ This step never fails the job, whatever the sweep returns. The
+        # anchor write below is the patrol's product and must not be starved by
+        # a step that runs before it; the alarm rides an annotation and the run
+        # summary instead. Findings are not a failure condition here either —
+        # the same posture the sweep step above takes.
+        if: github.repository == 'objectstack-ai/objectstack'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same wiring, and the same reason, as the live sweep above: the board
+          # this run acts on is the repo this workflow is installed in.
+          PM_SWEEP_REPO: ${{ github.repository }}
+          PROVENANCE: >-
+            posted by half-state-patrol [run ${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            · trigger `${{ github.event_name }}`
+          # A pull_request run PROVES the step — the transport, the flags and
+          # the rendering on a real runner — and writes nothing, exactly as the
+          # anchor write below is skipped for it. That convention is this file's
+          # and it is load-bearing: a PR must never write to the board.
+          SWEEP_MODE: ${{ github.event_name == 'pull_request' && '--dry-run' || '--write' }}
+        run: |
+          # The judge's own cases first, and the sweep only if they hold: this
+          # step WRITES to other people's cards, and a broken predicate that
+          # still runs is the one failure mode that cannot be undone by the next
+          # run. `check:pm-closed-card-sweep` is the same command under a dev
+          # -facing name; this is the invocation CI holds.
+          set +e
+          node scripts/pm/sweep-closed-cards.mjs --self-test > "$RUNNER_TEMP/closed-cards-selftest.log" 2>&1
+          selftest=$?
+          set -e
+          cat "$RUNNER_TEMP/closed-cards-selftest.log"
+          if [ "$selftest" != "0" ]; then
+            echo "exit_code=$selftest" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Closed-card sweep — SKIPPED: its own self-test failed (exit $selftest)"
+              echo
+              echo '```'
+              cat "$RUNNER_TEMP/closed-cards-selftest.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::closed-card sweep self-test failed (exit $selftest) — the sweep did NOT run and wrote nothing. Nothing here is a reading about the board."
+            exit 0
+          fi
+          set +e
+          node scripts/pm/sweep-closed-cards.mjs "$SWEEP_MODE" --provenance="$PROVENANCE" \
+            > "$RUNNER_TEMP/closed-cards.md" 2> "$RUNNER_TEMP/closed-cards.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between, for the reason the step above
+          # states at length: piped, `$?` is the pipe's status and a red run and
+          # a green one read the same.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Closed-card sweep — exit $code (\`$SWEEP_MODE\`)"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/closed-cards.md" 2>/dev/null || echo '(no report produced)'
+            echo '```'
+            echo
+            echo '<details><summary>stderr</summary>'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/closed-cards.err" 2>/dev/null || true
+            echo '```'
+            echo
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/closed-cards.err" >&2 || true
+          if [ "$code" = "3" ]; then
+            echo "::error::closed-card sweep exited 3 — it could NOT read the board, so it says nothing about whether residue is accumulating. See this run's summary."
+          elif [ "$code" != "0" ]; then
+            echo "::warning::closed-card sweep exited $code — at least one card was left UNJUDGED. An unjudged card is not a clean card; see this run's summary."
+          fi
 
       - name: Resolve the anchor issue
         # An install with no anchor configured has nowhere to land its report,

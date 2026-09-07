@@ -14,10 +14,23 @@ export default defineConfig({
     disableConsoleIntercept: true,
   },
   resolve: {
-    // One entry, for `managed-api-method-affordance-sweep.test.ts` (#7934) —
-    // the only suite here that imports a sibling package as a VALUE. It calls
-    // `validateManagedApiMethods` from `@objectstack/lint` over every
-    // code-shipped managed object in the checkout.
+    // One entry, for `@objectstack/lint`, keyed on the SPECIFIER — so it
+    // governs every suite in this package that imports that package as a
+    // VALUE, not one named suite. `managed-api-method-affordance-sweep.test.ts`
+    // (#7934) is the suite that first needed it — it calls
+    // `validateManagedApiMethods` over every code-shipped managed object in
+    // the checkout — but deleting or rewriting THAT suite does not free this
+    // entry, and a count of the suites written here goes stale silently: this
+    // comment carried one ("the only suite") that was already wrong.
+    //
+    // The dependent set is whatever
+    // `git grep "from '@objectstack/lint'" -- packages/platform-objects/src`
+    // returns, and `pnpm check:test-source-alias` is what decides whether the
+    // entry may go at all: it recomputes the workspace packages this package's
+    // tests import as VALUES, keeps the ones whose entry point resolves under
+    // `dist/`, replays this file's alias entries the way Vite does, and reddens
+    // on anything left unaliased and unregistered. Remove the entry and it is
+    // that gate, not a reading of one test file, that answers.
     //
     // Unaliased, that specifier resolves through `exports` to `lint/dist` — a
     // BUILD ARTIFACT — which would make this sweep a verdict about build state

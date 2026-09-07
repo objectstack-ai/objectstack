@@ -63,7 +63,11 @@ import { SystemObjectName } from '@objectstack/spec/system';
 
 /** The bounded reads this probe performs — every data engine satisfies them. */
 export interface DevAdminSeedProbeEngine {
-  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
+  find(
+    object: string,
+    query: Record<string, unknown>,
+    options?: unknown,
+  ): Promise<Array<Record<string, unknown>>>;
 }
 
 /**
@@ -94,12 +98,6 @@ const SYSTEM_READ = { context: { isSystem: true } } as const;
 /** better-auth's local password provider — the one the dev seed provisions. */
 export const CREDENTIAL_PROVIDER_ID = 'credential';
 
-function asRows(raw: unknown): Record<string, unknown>[] {
-  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
-  const records = (raw as { records?: unknown } | null | undefined)?.records;
-  return Array.isArray(records) ? (records as Record<string, unknown>[]) : [];
-}
-
 /**
  * Decide whether the dev-admin seed should provision on this boot.
  *
@@ -124,34 +122,28 @@ export async function decideDevAdminSeedGate(
     const spellings = [...new Set([seedEmail, seedEmail.trim().toLowerCase()])];
     const seedUserIds = new Set<unknown>();
     for (const spelling of spellings) {
-      for (const row of asRows(
-        await engine.find(
-          SystemObjectName.USER,
-          { where: { email: spelling }, limit: 5 },
-          SYSTEM_READ,
-        ),
+      for (const row of await engine.find(
+        SystemObjectName.USER,
+        { where: { email: spelling }, limit: 5 },
+        SYSTEM_READ,
       )) {
         if (row?.id != null) seedUserIds.add(row.id);
       }
     }
     for (const userId of seedUserIds) {
-      const accounts = asRows(
-        await engine.find(
-          SystemObjectName.ACCOUNT,
-          { where: { user_id: userId }, limit: 1 },
-          SYSTEM_READ,
-        ),
+      const accounts = await engine.find(
+        SystemObjectName.ACCOUNT,
+        { where: { user_id: userId }, limit: 1 },
+        SYSTEM_READ,
       );
       if (accounts.length > 0) return { act: false, reason: 'seed-address-claimed' };
     }
 
     // (2) Does any local password login exist at all?
-    const credentials = asRows(
-      await engine.find(
-        SystemObjectName.ACCOUNT,
-        { where: { provider_id: CREDENTIAL_PROVIDER_ID }, limit: 1 },
-        SYSTEM_READ,
-      ),
+    const credentials = await engine.find(
+      SystemObjectName.ACCOUNT,
+      { where: { provider_id: CREDENTIAL_PROVIDER_ID }, limit: 1 },
+      SYSTEM_READ,
     );
     if (credentials.length > 0) return { act: false, reason: 'local-login-exists' };
 

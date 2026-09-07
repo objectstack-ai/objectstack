@@ -474,7 +474,7 @@ describe('#7314 — the shared libSQL config builder against the real TursoDrive
         concurrency: 7,
         syncUrl: 'libsql://replica.turso.io',
         sync: { intervalSeconds: 30, onConnect: false },
-        timeout: 9000,
+        timeoutMs: 9000,
         mode: 'replica',
       },
     } as const;

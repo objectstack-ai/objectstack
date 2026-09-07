@@ -50,6 +50,7 @@ import {
   publishBoundPort,
   resolveBoundPort,
   runtimeBoundPortChannels,
+  runtimeStateFileName,
   type BoundPortChannels,
 } from './serve.js';
 import { MAX_PORT } from '../utils/port-contract.js';
@@ -287,7 +288,12 @@ describe('#13062 all THREE channels publish that one number', () => {
       publishBoundPort(45063, runtimeBoundPortChannels(() => { /* banner not under test here */ }));
     });
 
-    const runtimeFile = join(home, 'runtime.env_local.json');
+    // ⛔ Not the literal `runtime.env_local.json`: the name is keyed by the
+    // PROJECT as well as the environment (#15733), and a literal here would be
+    // a second copy of that rule — free to keep passing against a writer that
+    // had drifted off it. `runtimeBoundPortChannels` reached outside a boot
+    // anchors on the CWD, which is this runner's.
+    const runtimeFile = join(home, runtimeStateFileName('env_local', process.cwd()));
     expect(existsSync(runtimeFile), 'no runtime state file was written at all').toBe(true);
     const state = JSON.parse(readFileSync(runtimeFile, 'utf8'));
     expect(state.port, 'the state file does not publish the bound port').toBe(45063);

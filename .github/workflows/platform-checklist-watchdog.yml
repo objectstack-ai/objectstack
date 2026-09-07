@@ -1,0 +1,385 @@
+name: Platform-Checklist Watchdog
+
+# The standing caller for `pnpm check:platform-checklist` (#11730).
+#
+# ## What this changes, and the one thing it deliberately does NOT
+#
+# The gate stays OUT of per-PR CI. That is a recorded maintainer decision, kept
+# verbatim in the `lint.yml` NOTE beside the checklist gates and in
+# `docs/qa/platform-checklist/README.md` under "Operating cadence": the
+# checklist is a QA ledger, not a code gate, so an unrelated PR is never blocked
+# by checklist drift. ⛔ This workflow does not touch that. Only the REPORTING
+# CHANNEL changes — which is the whole of what was ruled.
+#
+# So this file carries `schedule:`, `workflow_dispatch:`, and a `pull_request:`
+# trigger `paths`-filtered to THIS FILE AND NOTHING ELSE — the posture
+# `half-state-patrol.yml`, `release-coverage-patrol.yml` and
+# `required-set-patrol.yml` all keep, so a change to the patrol is exercised
+# before it merges. ⛔ NO `merge_group:` and ⛔ NO `pull_request_target:`, ever.
+#
+# The filter is what makes that trigger compatible with the standing decision
+# rather than a back door through it. The decision's own words, in
+# `.github/workflows/lint.yml`: "keeping it out of the per-PR path means an
+# unrelated PR is never blocked by checklist drift." A trigger that fires only
+# on a pull request editing this workflow blocks no unrelated pull request at
+# all — it preserves the decision's purpose while changing its letter, which is
+# exactly what the maintainer ruled on 2026-09-06.
+#
+# ⛔ A `pull_request` run NEVER writes to the board. It runs the gate, publishes
+# the output to the run summary, and stops there.
+#
+# ## Why a workflow, and not "a seat should run it"
+#
+# Measured, twice, not supposed. The gate went RED on `main` (a coverage.json /
+# manifest UNCLASSIFIED reading) and NO lane turned red, because there was no
+# channel: the red was found by a dev who happened to run the gate. Two further
+# checklist cards had their devs run the gate on their own initiative and record
+# the verdict honestly. Three for three is good discipline and says nothing at
+# all about the mechanism — the gate's correctness was resting on somebody
+# remembering, which is the shape a gate exists to replace. An alarm added to a
+# script nobody runs is still silence.
+#
+# ## What lands where — and why this one is NOT a pinned anchor
+#
+# The other three patrols own ONE pinned anchor issue and rewrite its body every
+# run, heartbeat included. This one files or refreshes an issue only when the
+# gate is RED, and does nothing whatsoever on green. That is the ruled
+# behaviour, and the difference is a real trade, stated plainly in both
+# directions:
+#
+#   * Their heartbeat is what tells a reader the patrol is still alive — a
+#     `Swept` timestamp that stops advancing is how a dead caller is noticed.
+#     This workflow has no such tell, so a silent death here reads exactly like
+#     a clean checklist. What stands in for it: this job goes RED (and the
+#     Actions run list shows it) whenever the gate could not run or the report
+#     could not be delivered, and the run history itself is the record.
+#   * In exchange, a green tree has no standing issue to prune, and the card the
+#     devx seat grades is minted only when there is something to grade.
+#
+# ⛔ On green this job files nothing, edits nothing and CLOSES nothing — an open
+# watchdog issue that has gone green is a triage judgement for the devx seat
+# (which owns the filed cards), not a state for an unattended run to clear.
+#
+# ## De-duplication — read off `merge-queue-triage.yml`, whose lesson is negative
+#
+# The anchor lookup keys on an IDENTITY LABEL that is never graded off, plus a
+# stable body marker, plus the exact title as a third way in. Each of those three
+# is there because one of the others fails on its own:
+#
+#   * ⛔ NOT `pm:queue` and ⛔ NOT `tooling`. Those are TRIAGE-STATE labels:
+#     first-touch grading takes `pm:queue` off by definition, and a lookup keyed
+#     on it stops seeing the anchor the moment somebody triages it — turning
+#     every further red into a fresh duplicate. `merge-queue-triage.yml` paid
+#     for that reading already and its header records it; this file inherits the
+#     fix rather than re-deriving it.
+#   * The TITLE is stable across refreshes — it names no failing item, no count
+#     and no date. A title carrying the first failing item would change with the
+#     failure and make the anchor unfindable by title the moment the checklist
+#     drifted somewhere else.
+#   * The BODY MARKER is plain text, ⛔ never an HTML comment: this platform's
+#     body sanitizer is measured to eat short angle-bracket fragments, and a
+#     de-dup key that can be silently swallowed is a de-dup key that files a
+#     duplicate a day. `half-state-patrol.yml`'s generated body uses the same
+#     plain-text marker idiom for the same reason.
+#
+# A CLOSED anchor is evidence too, and is not reopened: the gate going red again
+# after the card was answered is a REGRESSION, so a new issue is filed and it
+# names the one it regressed from. Reopening would bury that distinction.
+
+on:
+  schedule:
+    # Daily. The gate is a ~1s offline read, so cadence is bounded by how long a
+    # red may sit unseen, not by cost; a day is the same order the sibling
+    # patrols settled on and is two orders better than the status quo (never).
+    #
+    # The minute is offset off the top of the hour ON PURPOSE — scheduled
+    # workflows queue behind everyone else's `:00` cron — and off the three
+    # sibling patrols' minutes, so two patrols never contend for the same runner
+    # minute.
+    - cron: '51 2 * * *'
+  # The manual fire, and the smoke test this card exits on.
+  workflow_dispatch: {}
+  # ⛔ PATHS-FILTERED TO THIS ONE FILE, and that filter is the whole reason this
+  # trigger is allowed to exist. The maintainer's standing decision, in its own
+  # words in `.github/workflows/lint.yml`: "keeping it out of the per-PR path
+  # means an unrelated PR is never blocked by checklist drift." A trigger that
+  # fires ONLY on a pull request editing this workflow blocks no unrelated PR at
+  # all, so it preserves that decision's purpose while changing its letter — the
+  # posture every patrol in this repo already keeps, and the one
+  # `scripts/pm/dispatch-gates.mjs` pins tree-wide.
+  #
+  # ⛔ Do NOT widen this list. A second path here would put the checklist gate on
+  # the critical path of pull requests that have nothing to do with it, which IS
+  # the thing the decision forbids;
+  # `scripts/check-platform-checklist-watchdog.mjs` refuses any widening and its
+  # self-test proves that refusal fires.
+  #
+  # ⛔ And a pull_request run NEVER writes to the board — see the `if:` on the
+  # issue step. It proves the transport, the invocation and the rendering on a
+  # real runner, and nothing else.
+  pull_request:
+    paths:
+      - '.github/workflows/platform-checklist-watchdog.yml'
+  # ⛔ NO `merge_group:` and ⛔ NO `pull_request_target:` here, ever — those two
+  # are refused OUTRIGHT, because no `paths:` filter makes either safe in this
+  # workflow. `scripts/check-platform-checklist-watchdog.mjs` fails when either
+  # appears, and fails just as loudly when the `pull_request:` trigger above
+  # loses its filter or gains a second path; its self-test drives every one of
+  # those cases rather than asserting them into the void.
+
+# Least privilege. The gate is read-only against the filesystem by construction
+# (no socket, no token), and this job writes issues and nothing else — no label
+# on anybody's PR, no state, no comment stream.
+permissions:
+  contents: read
+  issues: write
+
+# One watchdog at a time. A scheduled run overlapping a manual dispatch would
+# have two runs racing to file the same anchor, and the loser would mint a
+# duplicate.
+concurrency:
+  group: platform-checklist-watchdog
+  cancel-in-progress: false
+
+env:
+  # The anchor's IDENTITY — all three ways in, single-sourced here so the
+  # workflow and its static pin read the same strings.
+  #
+  # ⛔ The identity label is the machine's and is never graded off. It is NOT a
+  # triage-state label; see the header.
+  ANCHOR_IDENTITY_LABEL: platform-checklist-watchdog
+  ANCHOR_TITLE: 'check:platform-checklist is red on main'
+  ANCHOR_MARKER: os-platform-checklist-watchdog
+  # Applied on CREATE only, beside the identity label: the ruled routing for the
+  # cards this watchdog mints. Never rewritten on a refresh — grading is the
+  # devx seat's and a refresh must not undo it.
+  ANCHOR_ROUTING_LABELS: 'pm:queue,tooling'
+
+jobs:
+  watchdog:
+    # ⛔ This job is NOT a required context and must never become one. It runs on
+    # no pull request at all, so a ruleset naming it would block every PR
+    # forever on a check that cannot report.
+    name: Platform checklist gate sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Kept as this job's own step rather than folded into the composite
+      # below: `scripts/check-node-version.mjs` scans `.github/workflows/*.yml`
+      # only and reports how many setup-node steps it audited, so a step moved
+      # out of sight would silently shrink its census.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # `pnpm` itself is the requirement, NOT the workspace. The gate is invoked
+      # through its PACKAGE SCRIPT (`pnpm check:platform-checklist`), which is a
+      # pinned property of this file — an inlined `node scripts/...` copy would
+      # drift from the script the maintainer's cadence documentation names, and
+      # would silently drop the `checklist-select --self-test` leg the alias runs
+      # first.
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      # No `pnpm install`. Both halves of the alias import `node:` builtins and
+      # repo-local modules only — no npm dependency — so installing the
+      # workspace would buy nothing and would give an unattended daily run a
+      # lockfile it could fail on.
+      - name: Run the platform checklist gate
+        id: gate
+        run: |
+          set +e
+          pnpm check:platform-checklist \
+            > "$RUNNER_TEMP/gate.out" 2> "$RUNNER_TEMP/gate.err"
+          code=$?
+          set -e
+          # Captured with NO pipe in between. `cmd | tail` reports the PIPE's
+          # status — `tail` essentially never fails — so a red gate and a green
+          # one would both read as 0, and this exit code is the entire input to
+          # the decision below.
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "pnpm check:platform-checklist exited $code"
+
+      - name: Publish the gate output to the run summary
+        # Always: on a green run this IS the whole product, and on a red one it
+        # makes the run log self-contained for whoever opens it from the issue.
+        if: always()
+        run: |
+          {
+            echo "### Platform-checklist watchdog — gate exit ${{ steps.gate.outputs.exit_code }}"
+            echo
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "_Board write skipped: a pull_request run proves the sweep without filing or refreshing anything._"
+              echo
+            fi
+            echo '```'
+            cat "$RUNNER_TEMP/gate.out" 2>/dev/null || echo '(no stdout captured)'
+            cat "$RUNNER_TEMP/gate.err" 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: File or refresh the watchdog issue
+        # RED only. On green this step does not run, and nothing else in this
+        # job writes anything — that is the ruled behaviour.
+        #
+        # ⛔ And NEVER on a `pull_request` run, whatever the gate said. A pull
+        # request proves the transport, the invocation and the rendering on a
+        # real runner; it must not touch the board. That is the posture every
+        # patrol in this repo keeps, and
+        # `scripts/check-platform-checklist-watchdog.mjs` refuses a board write
+        # whose `if:` lacks this guard.
+        if: steps.gate.outputs.exit_code != '0' && github.event_name != 'pull_request'
+        uses: actions/github-script@v9
+        env:
+          GATE_EXIT: ${{ steps.gate.outputs.exit_code }}
+        with:
+          # Delivery is retried, never assumed: this write is the entire product
+          # of a red run, and a transient answer from the issues endpoint would
+          # otherwise discard a completed sweep.
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const marker = process.env.ANCHOR_MARKER;
+            const title = process.env.ANCHOR_TITLE;
+            const identityLabel = process.env.ANCHOR_IDENTITY_LABEL;
+            const routingLabels = process.env.ANCHOR_ROUTING_LABELS
+              .split(',').map((s) => s.trim()).filter(Boolean);
+            const gateExit = process.env.GATE_EXIT;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+
+            const read = (name) => {
+              try { return fs.readFileSync(path.join(process.env.RUNNER_TEMP, name), 'utf8'); }
+              catch { return ''; }
+            };
+
+            // The gate's OWN output, verbatim, both streams — the ruling asks
+            // for the gate's output and this workflow does not re-word it.
+            const output = [read('gate.out'), read('gate.err')]
+              .filter((s) => s.trim()).join('\n').trimEnd();
+            if (!output.trim()) {
+              // A red gate that printed nothing is not a finding anybody can
+              // act on, and filing it would mint an empty card that reads like
+              // a judged one. Fail instead: the last step turns the run red.
+              throw new Error(`the gate exited ${gateExit} but produced no output on either stream — refusing to file an empty card`);
+            }
+
+            // ── Anchor lookup ────────────────────────────────────────────────
+            // Three ways in, none of them sufficient alone; see this file's
+            // header. `pull_request` excludes PRs, which the issues endpoint
+            // returns alongside issues.
+            const isThisAnchor = (i) => !i.pull_request
+              && (String(i.body ?? '').includes(marker) || i.title === title);
+            const MAX_PAGES = 3;
+            const candidates = [];
+            let scanComplete = true;
+            for (let page = 1; page <= MAX_PAGES; page += 1) {
+              const res = await github.rest.issues.listForRepo({
+                owner, repo, state: 'all', labels: identityLabel,
+                sort: 'created', direction: 'desc', per_page: 100, page,
+              });
+              candidates.push(...res.data.filter(isThisAnchor));
+              if (res.data.length < 100) break;
+              if (page === MAX_PAGES) scanComplete = false;
+            }
+            if (!scanComplete) {
+              // A truncated scan cannot establish ABSENCE, and filing on an
+              // unestablished absence is how a watchdog mints a duplicate a
+              // day. Refusing is the safe direction: the finding is still in
+              // this run's summary and the next run retries.
+              throw new Error(`the anchor scan hit its ${MAX_PAGES}-page bound without completing — absence is NOT established, so nothing was filed. The gate output is in this run's summary.`);
+            }
+
+            // Resolution order: an OPEN anchor wins, and the OLDEST open one
+            // wins among those — that is the issue any duplicates were closed
+            // against.
+            const open = candidates.filter((i) => i.state !== 'closed')
+              .sort((a, b) => a.number - b.number);
+            const closed = candidates.filter((i) => i.state === 'closed')
+              .sort((a, b) => b.number - a.number);
+            const existing = open[0] ?? null;
+            // A closed anchor that was not closed as a duplicate is an ANSWERED
+            // one: the gate is red again, which is a regression rather than a
+            // continuation, and the new card has to say which issue it
+            // regressed from or the previous answer is lost.
+            const priorAnchor = !existing
+              ? (closed.find((i) => i.state_reason !== 'duplicate') ?? null)
+              : null;
+
+            const body = [
+              `${marker} — machine-findable marker for this generated view. ⛔ Do not delete this line: it is how the watchdog finds this card instead of filing a new one every day.`,
+              '',
+              `# \`check:platform-checklist\` is RED on \`main\``,
+              '',
+              `_Swept ${new Date().toISOString()} · [run log](${runUrl}) · commit \`${process.env.GITHUB_SHA}\` · trigger \`${context.eventName}\` · gate exit ${gateExit}._`,
+              '',
+              'The platform test checklist gate is red. It is **not** wired into per-PR CI (a standing',
+              'maintainer decision — the checklist is a QA ledger, not a code gate), so this card is the',
+              'channel that sees the red. Nothing is blocked by it.',
+              '',
+              '⛔ The remedy is **never** to edit the checklist data to make the gate green. Read the',
+              'output below, fix what it names, and re-run `pnpm check:platform-checklist` locally.',
+              '',
+              ...(priorAnchor
+                ? [
+                  `⚠️ The previous watchdog card #${priorAnchor.number} was closed on its own merits (not as a`,
+                  'duplicate) and the gate is red again ⇒ this is a **regression**; the earlier conclusion is',
+                  'in that issue.',
+                  '',
+                ]
+                : []),
+              "The gate's own output, verbatim:",
+              '',
+              '```',
+              output,
+              '```',
+            ].join('\n');
+
+            if (existing) {
+              // Rewritten in place, never a comment per run: a per-run comment
+              // stream is a second tracker nobody prunes, and this platform's
+              // edit history is already the archive. ⛔ Labels are NOT rewritten
+              // — grading is the devx seat's and a refresh must not undo it.
+              await github.rest.issues.update({
+                owner, repo, issue_number: existing.number, body,
+              });
+              core.info(`refreshed watchdog anchor #${existing.number} (${body.length} chars, gate exit ${gateExit})`);
+              core.notice(`check:platform-checklist is red on main — watchdog card #${existing.number} refreshed.`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner, repo, title, body,
+              // Additive on create; ⛔ nothing here ever replaces a whole label
+              // set (`check:whole-set-label-write` refuses that verb outright).
+              labels: [identityLabel, ...routingLabels],
+            });
+            core.info(`filed watchdog anchor #${created.data.number} (${body.length} chars, gate exit ${gateExit})`);
+            core.notice(`check:platform-checklist is red on main — watchdog card #${created.data.number} filed.`);
+
+      - name: Fail the run if the sweep left no reading
+        # LAST, on purpose: on a red gate the card is filed or refreshed BEFORE
+        # this runs, so the run that raises an alarm has already landed the
+        # truth.
+        #
+        # ⛔ A RED GATE is not a failure condition and never reaches here — a
+        # red gate is a SUCCESSFUL patrol, and a job that went red every day the
+        # checklist was red would teach everyone to skim it, which is the
+        # failure this whole card is about. Delivery failure needs no step
+        # either: the github-script above throws, and a throw fails that step.
+        #
+        # What is left is the one reading that must never look green: a sweep
+        # step that finished without recording an exit code at all. Nothing
+        # downstream could tell that apart from `exit_code=0`, and "the gate was
+        # not read" must never render as "the checklist is clean".
+        if: always() && steps.gate.outputs.exit_code == ''
+        run: |
+          echo "the gate step recorded no exit code, so this run is NOT a reading about the checklist -- it is neither a clean one nor a red one. See this run's summary."
+          exit 1

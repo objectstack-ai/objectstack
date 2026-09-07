@@ -103,10 +103,24 @@ const effective = (row: MatrixRow, verb: Verb): boolean =>
 /** The `sys_*` rows this file does not judge — named so the exclusion is visible. */
 const UNJUDGED_ROWS = matrix.entries.filter((e) => !e.object.startsWith('showcase_'));
 
-/** Marker field per object: what a created row is findable by afterwards. */
+/**
+ * Marker field per object: what a created row is findable by afterwards.
+ *
+ * ⚠️ NOT every object has one. `showcase_project_membership` is a pure
+ * junction — two required master-detail parents, a select and a percent, with
+ * no free-text column to stamp a mark into — so it is deliberately absent here
+ * and the one place that reads this map (the denied-CREATE absence probe)
+ * asserts the entry exists before using it. Today no matrix row denies create
+ * on that object, so the probe never runs for it; when one arrives, the sweep
+ * fails RED naming the object instead of querying `where: { undefined: … }`
+ * and passing vacuously.
+ */
 const MARKER: Record<string, string> = {
   showcase_account: 'name',
   showcase_announcement: 'title',
+  showcase_business_unit: 'name',
+  showcase_cascade: 'name',
+  showcase_category: 'name',
   // [#9308 fixture 2] The share-link object. It enters this sweep because the
   // matrix gained a `showcase_client_liaison × showcase_client_brief` row, and
   // the sweep is DERIVED from the matrix — a new granted object arrives here
@@ -114,13 +128,18 @@ const MARKER: Record<string, string> = {
   // assertion below changes.
   showcase_client_brief: 'title',
   showcase_contact: 'name',
+  showcase_expense_line: 'merchant',
+  showcase_expense_report: 'name',
+  showcase_field_zoo: 'name',
   showcase_inquiry: 'name',
   showcase_invoice: 'name',
   showcase_invoice_line: 'description',
+  showcase_preference: 'name',
   showcase_private_note: 'title',
   showcase_product: 'name',
   showcase_project: 'name',
   showcase_task: 'title',
+  showcase_team: 'name',
 };
 
 interface PayloadCtx {
@@ -131,6 +150,18 @@ interface PayloadCtx {
   projectId: string;
   /** The invoice a line should hang off — the caller's OWN where they have one. */
   invoiceId: string;
+  /**
+   * The expense report an expense line hangs off, and the team a project
+   * membership joins. Both are seeded rows and both stay seeded rows for
+   * EVERY persona — unlike `invoiceId`, which has to be the caller's own.
+   * The difference is record-level and worth naming: `showcase_invoice`
+   * carries an owner-scoped RLS rule, whereas `showcase_expense_report` and
+   * `showcase_team` are `public_read_write`, so a persona reaches the seeded
+   * parent exactly as well as one it made itself. (`showcase_expense_line` is
+   * `controlled_by_parent`, so its record scope is the report's — also open.)
+   */
+  expenseReportId: string;
+  teamId: string;
 }
 
 /**
@@ -147,23 +178,73 @@ interface PayloadCtx {
 const PAYLOAD: Record<string, (c: PayloadCtx) => Record<string, unknown>> = {
   showcase_account: (c) => ({ name: c.mark, status: 'prospect' }),
   showcase_announcement: (c) => ({ title: c.mark }),
+  showcase_business_unit: (c) => ({ name: c.mark }),
+  // `country` / `province` / `tier` are all left unset. The B3 fixture's
+  // narrowing lives on one OPTION (`tier: 'restricted'`, admin-only) and the
+  // objectql rule-validator judges SUBMITTED values, so a payload that submits
+  // none of them cannot turn a CRUD verdict into an `invalid_option` 400 — the
+  // exact confusion the admin control exists to prevent.
+  showcase_cascade: (c) => ({ name: c.mark }),
+  showcase_category: (c) => ({ name: c.mark }),
   // `status` is left at its `draft` default on purpose: this sweep judges CRUD
   // bits, and a brief that is not `published` cannot be mint-eligible for a
   // share link — so a row this sweep leaves behind can never become an
   // accidental share-link fixture for another file.
   showcase_client_brief: (c) => ({ title: c.mark, project: c.projectId }),
   showcase_contact: (c) => ({ name: c.mark, email: `contact-${Date.now()}@probe.test` }),
+  showcase_expense_line: (c) => ({
+    expense_report: c.expenseReportId,
+    merchant: c.mark,
+    amount: 12.5,
+    status: 'submitted',
+  }),
+  // `status: 'draft'` is load-bearing, not filler. Both expense approval flows
+  // (`showcase_expense_signoff`, `showcase_committee_quorum`) start on
+  // `record-after-update` with `status == "submitted" && previous.status !=
+  // "submitted"` and approve with `lockRecord: true`. A row this sweep creates
+  // as `draft`, and only ever PATCHes on its `name` marker, can never launch
+  // one — so a persona's EDIT/DELETE cell can never come back as a record lock
+  // wearing a permission verdict's clothes.
+  showcase_expense_report: (c) => ({ name: c.mark, status: 'draft' }),
+  // `f_master_detail` is the zoo's required master (a project). Everything else
+  // in the zoo is optional by design — it is a catalogue of field types, not a
+  // form with a required core.
+  showcase_field_zoo: (c) => ({ name: c.mark, f_master_detail: c.projectId }),
   showcase_inquiry: (c) => ({ name: c.mark, email: `inq-${Date.now()}@probe.test`, message: 'matrix probe' }),
   showcase_invoice: (c) => ({ name: c.mark, account: c.accountId, status: 'draft', owner: c.email }),
   showcase_invoice_line: (c) => ({ invoice: c.invoiceId, product: c.productId, quantity: 1, description: c.mark }),
+  showcase_preference: (c) => ({ name: c.mark }),
   showcase_private_note: (c) => ({ title: c.mark }),
   showcase_product: (c) => ({ name: c.mark, sku: `SKU-${Date.now()}` }),
   showcase_project: (c) => ({ name: c.mark, account: c.accountId, status: 'planned', owner: c.email }),
+  // The team↔project junction: BOTH master-detail parents are required, and
+  // neither is unique-constrained (the seed dedupes on the pair by `mode:
+  // 'ignore'`, not by an index), so re-joining an already-joined pair is a
+  // legal write rather than a 409 masquerading as a CRUD verdict.
+  showcase_project_membership: (c) => ({ team: c.teamId, project: c.projectId, engagement: 'owner' }),
   showcase_task: (c) => ({ title: c.mark, project: c.projectId, status: 'todo' }),
+  showcase_team: (c) => ({ name: c.mark }),
 };
 
-/** Field patched on the EDIT probe — always an unrestricted one. */
-const EDIT_FIELD: Record<string, string> = { ...MARKER };
+/**
+ * The EDIT probe per object: which field a persona patches, and to what.
+ *
+ * Every object with a free-text MARKER stamps `<mark>-edited` into it. The
+ * junction has no such column (see MARKER), so it names its own pair: a fresh
+ * membership is created `engagement: 'owner'` above and the probe moves it to
+ * `reviewer` — an unrestricted field, a value the option set accepts, and one
+ * that always differs from the created row, which is what makes both the
+ * "persisted" and the "changed nothing" assertions below meaningful.
+ */
+const EDIT_PROBE: Record<string, (mark: string) => { field: string; value: unknown }> = {
+  ...Object.fromEntries(
+    Object.entries(MARKER).map(([object, field]) => [
+      object,
+      (mark: string) => ({ field, value: `${mark}-edited` }),
+    ]),
+  ),
+  showcase_project_membership: () => ({ field: 'engagement', value: 'reviewer' }),
+};
 
 const OBJECTS = [...new Set(ROWS.map((r) => r.object))].sort();
 const SETS = [...new Set(ROWS.map((r) => r.permissionSet))].sort();
@@ -191,7 +272,14 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
   const persona = new Map<string, { token: string; email: string; own: Map<string, string> }>();
   /** Admin-created foreign probe row per object. */
   const foreign = new Map<string, string>();
-  const seed = { accountId: '', productId: '', projectId: '', invoiceId: '' };
+  const seed = {
+    accountId: '',
+    productId: '',
+    projectId: '',
+    invoiceId: '',
+    expenseReportId: '',
+    teamId: '',
+  };
 
   const ctxFor = (email: string, mark: string, invoiceId?: string): PayloadCtx => ({
     mark,
@@ -200,6 +288,8 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
     productId: seed.productId,
     projectId: seed.projectId,
     invoiceId: invoiceId || seed.invoiceId,
+    expenseReportId: seed.expenseReportId,
+    teamId: seed.teamId,
   });
 
   const bodyOf = async (r: Response) => {
@@ -221,8 +311,15 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
     seed.productId = await firstId('showcase_product');
     seed.projectId = await firstId('showcase_project');
     seed.invoiceId = await firstId('showcase_invoice');
+    seed.expenseReportId = await firstId('showcase_expense_report');
+    seed.teamId = await firstId('showcase_team');
     expect(
-      seed.accountId && seed.productId && seed.projectId && seed.invoiceId,
+      seed.accountId &&
+        seed.productId &&
+        seed.projectId &&
+        seed.invoiceId &&
+        seed.expenseReportId &&
+        seed.teamId,
       'the showcase seed provides the lookup parents every payload needs',
     ).toBeTruthy();
 
@@ -301,9 +398,16 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
       } else {
         expect(created.status, why('create')).toBe(403);
         expect(createdJson?.code, `${label}: the ledgered denial code`).toBe('PERMISSION_DENIED');
-        // Clause 2 — a denied CREATE leaves NO row behind.
+        // Clause 2 — a denied CREATE leaves NO row behind. Proving an ABSENCE
+        // needs a field to look the row up by; without one the query below
+        // would find nothing for the wrong reason and pass vacuously.
+        const marker = MARKER[row.object];
+        expect(
+          marker,
+          `${label}: proving a denied create left nothing needs a MARKER field for ${row.object}`,
+        ).toBeTruthy();
         const left = await ql.find(row.object, {
-          where: { [MARKER[row.object]]: mark },
+          where: { [marker]: mark },
           context: SYS,
         });
         expect(left?.length ?? 0, `${label}: the denied create persisted nothing`).toBe(0);
@@ -326,8 +430,7 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
       // otherwise. Either way the target EXISTS, so a refusal cannot be a
       // 404 in disguise.
       const editTarget = p.own.get(row.object) ?? foreign.get(row.object)!;
-      const editField = EDIT_FIELD[row.object];
-      const editValue = `${mark}-edited`;
+      const { field: editField, value: editValue } = EDIT_PROBE[row.object](mark);
       const edited = await stack.apiAs(p.token, 'PATCH', `/data/${row.object}/${editTarget}`, {
         [editField]: editValue,
       });
@@ -444,10 +547,33 @@ describe('showcase: persona × CRUD-cell matrix (#9481)', () => {
     // `showcase_client_liaison` set:
     //   • × showcase_client_brief — create/read/edit allow, delete deny  (3/1)
     //   • × showcase_project      — read allow; create/edit/delete deny  (1/3)
+    //
+    // 54/54 → 87/77 with the fourteen rows #14453 added. That issue closed the
+    // gap where nine showcase objects sat in the shared navigation with no
+    // permission set granting them at all; granting them is what pulled those
+    // objects into this matrix-derived sweep, so the census moves with it
+    // (+33 allow, +23 deny):
+    //   • showcase_contributor × showcase_expense_line      (3/1)
+    //   • showcase_contributor × showcase_expense_report    (3/1)
+    //   • showcase_contributor × showcase_field_zoo         (3/1)
+    //   • showcase_member_default × showcase_business_unit  (1/3)  read-only
+    //   • showcase_member_default × showcase_cascade        (3/1)
+    //   • showcase_member_default × showcase_category       (1/3)  read-only
+    //   • showcase_member_default × showcase_expense_report (1/3)  read-only
+    //   • showcase_member_default × showcase_field_zoo      (1/3)  read-only
+    //   • showcase_member_default × showcase_preference     (3/1)
+    //   • showcase_member_default × showcase_team           (1/3)  read-only
+    //   • showcase_ops × showcase_business_unit             (3/1)
+    //   • showcase_ops × showcase_category                  (3/1)
+    //   • showcase_ops × showcase_project_membership        (4/0)  the only
+    //       row in the whole matrix granting all four bits — `allowDelete` is
+    //       what un-staffs a team from a project.
+    //   • showcase_ops × showcase_team                      (3/1)
     // No pre-existing cell changed side; `git diff` on access-matrix.json is
-    // the check that this is still true.
-    expect(allow.length, 'the ALLOW half is what catches an over-tightening regression').toBe(54);
-    expect(deny.length, 'the DENY half is what catches a widening regression').toBe(54);
+    // the check that this is still true. (None of the nine objects carried ANY
+    // row before, which is also why the baseline-flip count below is unmoved.)
+    expect(allow.length, 'the ALLOW half is what catches an over-tightening regression').toBe(87);
+    expect(deny.length, 'the DENY half is what catches a widening regression').toBe(77);
 
     // Every set and every object of the business-object matrix was really driven.
     expect([...new Set(VERDICTS.map((c) => c.set))].sort()).toEqual(SETS);

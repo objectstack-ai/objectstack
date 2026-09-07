@@ -89,6 +89,10 @@ async function bootTodoKernel(): Promise<{
   // so without this line the completion stamp would not exist here and every
   // completion below would be refused — which is exactly the bug, and exactly
   // why the old version of this file seeded `completed_date` on CREATE.
+  // [#14147] That seed is no longer available as a workaround either: a
+  // non-system create has a `readonly` column stripped just as an update does,
+  // so binding the hook is the only way this harness can complete a task.
+  // `task-recurrence.test.ts` bound it for the same reason.
   objectql.bindHooks([taskHook], { packageId: 'app:com.example.todo' });
 
   for (const flow of allFlows) automation.registerFlow(flow.name, flow);
@@ -227,15 +231,27 @@ describe('#6882 — app-todo `task_completion` is armed, not dead', () => {
  *   update status+completed_date (user ctx): REJECTED -> Completed date is required when status is Completed
  *   update status only           (user ctx): REJECTED -> Completed date is required when status is Completed
  *   update status+completed_date (isSystem): OK
- *   insert already-completed:                OK
+ *   insert already-completed     (user ctx): OK
  *
  * — i.e. every escape was a NON-user path, and `completeTask` always failed.
  *
+ * ⚠️ [#14147] The FOURTH row of that table is history, not a live escape. It
+ * held because the create path was exempt from the static-`readonly` strip; the
+ * maintainer ruling of 2026-09-03 overturned that exemption, so a non-system
+ * create that seeds `completed_date` now has it stripped exactly as an update
+ * does, and an already-completed insert from a user context is refused by the
+ * same rule. The table is left as measured — it is dated evidence of the
+ * defect, and rewriting it would be rewriting the measurement — but nothing
+ * below may be read as saying a create may still seed a server-owned column.
+ * Seeding one at create time is a SYSTEM act (`context.isSystem`,
+ * `runAs: 'system'`, a system hook or a seed).
+ *
  * The repair is the server owning the column: `task.hook.ts` stamps it on the
  * transition, and the strip lets a hook's write through because it only
- * deletes a key that still holds the *caller's own* value (#2948/#5591). The
- * assertions below are written against that seam rather than against the
- * message, so they stay meaningful if the wording changes.
+ * deletes a key that still holds the *caller's own* value (#2948/#5591) — the
+ * same guard on both write paths now. The assertions below are written against
+ * that seam rather than against the message, so they stay meaningful if the
+ * wording changes.
  */
 describe('#7036 — completing a task is possible for a normal user', () => {
   const ctx = { context: { userId: 'u_todo' } };

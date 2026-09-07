@@ -38,7 +38,12 @@
  * round-trip to an auth service that does not implement these paths.
  */
 
-import { IDataEngine, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
+import {
+    assembleExecutionContext,
+    IDataEngine,
+    resolveLocalizationContext,
+    resolveUserAuthzGrants,
+} from '@objectstack/core';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
@@ -555,7 +560,9 @@ export function annotateEffectiveApiOperations(
  * normalization, the platform-admin derivation and the `ai_seat` synthesis
  * arrive with it instead of being re-implemented — one copy fewer to drift.
  */
-export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
+export function makeExecutionContextResolver(
+    ctx: CurrentUserEndpointsContext,
+): (c: any) => Promise<ExecutionContext | undefined> {
     /**
      * The data engine, or `undefined` when the slot is unclaimed. GUARDED: the
      * locator's contract permits `getService` to THROW for an absent slot (the
@@ -568,7 +575,7 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
     const getObjectQL = (): IDataEngine | undefined => {
         try { return ctx.getService<IDataEngine>('objectql'); } catch { return undefined; }
     };
-    const resolveCtx = async (c: any): Promise<any | undefined> => {
+    const resolveCtx = async (c: any): Promise<ExecutionContext | undefined> => {
         try {
             const authService = ctx.getService<IAuthService>('auth');
             if (!authService) return undefined;
@@ -607,27 +614,70 @@ export function makeExecutionContextResolver(ctx: CurrentUserEndpointsContext) {
             if (isPerfDisclosurePrincipal({ isSystem: false, posture: grants.posture } as ExecutionContext)) {
                 allowPerfDisclosure();
             }
-            return {
-                userId,
-                tenantId,
-                email: grants.email,
-                // `positions`, not `roles`: the ExecutionContext field name every
-                // reader here uses (ADR-0090 D3). Carries the ADR-0057 D4
-                // `sys_user_position` assignments, the normalized org-membership
-                // names, the implicit `everyone` anchor and the derived
-                // `platform_admin` — none of which this surface used to see.
-                positions: grants.positions,
-                permissions: grants.permissions,
-                systemPermissions: grants.systemPermissions,
-                tabPermissions: grants.tabPermissions,
-                posture: grants.posture,
-                isSystem: false,
-                org_user_ids: grants.org_user_ids,
-                // [ADR-0105 D2] The caller's org access set — the `group`
-                // posture's Layer 0 wall is `organization_id IN (...)`, so a
-                // context without it fails every read closed on this surface.
-                accessible_org_ids: grants.accessible_org_ids,
-            } as any;
+            // [#15747] THE assembly (the second delegation). This used to be a
+            // hand-rolled object literal cast `as any` — beside the very module
+            // that exists to make that shape unrepresentable. It omitted SIX
+            // fields of the closed entry set (`principalKind`, `onBehalfOf`,
+            // `audience`, `accessToken`, `authGate`, `oauthScopes`), which is
+            // the #6071 drift class exactly: a field exists on
+            // `ExecutionContext`, one transport carries it, another silently
+            // does not. `ExecutionContextEntryFields` closes that set with a
+            // type, so a field added to `ExecutionContext` from here on fails
+            // to COMPILE until this face decides it — and the `as any` that
+            // suppressed the whole question is gone.
+            //
+            // The DEFAULT, fail-closed entry (#6216 Option A), not the guest
+            // one: a sessionless request never reaches this line (the
+            // `session?.user?.id` guard above already returned `undefined`) and
+            // all three handlers answer their own no-session body. Adopting
+            // `assembleExecutionContextOrGuest` here would convert those into
+            // an authorization evaluation over a guest envelope, which is not
+            // these faces' semantics.
+            //
+            // Every per-face divergence below is passed EXPLICITLY, which is
+            // what turns each from an invisible omission into a named decision:
+            //
+            //  - `oauth` — this face resolves its principal from the better-auth
+            //    SESSION and opens no OAuth 2.1 door: `acceptOAuthAccessToken`
+            //    is set by the `/mcp` dispatch path alone, on a resolver this
+            //    one does not call. So `principalKind` here is 'human'
+            //    unconditionally, and `onBehalfOf` / `oauthScopes` are not
+            //    representable — pinned in
+            //    `current-user-endpoints-execution-context-envelope.test.ts`, so
+            //    acquiring such a door turns that pin red rather than silently
+            //    making an absent `principalKind` mean something new.
+            //  - `localization` / `requestLocale` — withheld. #15387 moved this
+            //    surface's `locale` / `timezone` / `currency` to the ENDPOINT,
+            //    which reads the cascade itself (`resolveCurrentUserLocalization`);
+            //    resolving it here too would add a `sys_setting` read to every
+            //    request to all three routes and give the localization endpoint
+            //    two readings of one cascade to keep in agreement.
+            //  - `accessToken` — withheld, the same stance the REST face takes:
+            //    surfacing the session bearer to hooks on a second transport is
+            //    a product decision, not a refactor.
+            //  - `authGate` — withheld. Its consumer reads it off the envelope
+            //    at the REST seam (`RestServer.enforceAuth`); nothing on these
+            //    three routes does, and `core/security/auth-gate.ts` allow-lists
+            //    `/me/apps` + `/me/localization` as endpoints a GATED user must
+            //    still reach, so carrying it here would be an unread copy on a
+            //    surface whose whole point is that the gate does not close it.
+            return assembleExecutionContext({
+                // `grants` IS the `ResolvedAuthzContext` core, minus the two
+                // values only the session knows. `positions`, not `roles`: the
+                // ExecutionContext field name every reader uses (ADR-0090 D3),
+                // carrying the ADR-0057 D4 `sys_user_position` assignments, the
+                // normalized org-membership names, the implicit `everyone`
+                // anchor and the derived `platform_admin`. [ADR-0105 D2]
+                // `accessible_org_ids` rides along: the `group` posture's Layer
+                // 0 wall is `organization_id IN (...)`, so a context without it
+                // fails every read closed on this surface.
+                authz: { ...grants, userId, tenantId },
+                oauth: undefined,
+                localization: undefined,
+                requestLocale: undefined,
+                accessToken: undefined,
+                authGate: undefined,
+            });
         } catch {
             return undefined;
         }

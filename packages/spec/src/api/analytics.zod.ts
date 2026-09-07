@@ -94,7 +94,14 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
     rows: z.array(z.record(z.string(), z.unknown())).describe('Result rows'),
     fields: z.array(z.object({
       name: z.string(),
-      type: z.string(),
+      type: z.string().describe(
+        'Column data type, in the `DimensionType` vocabulary (`string` / `number` / '
+        + '`boolean` / `time` / `geo`). A dimension column carries its cube dimension\'s '
+        + 'type; a measure column is `number` except for `min`/`max` over a '
+        + '`date`/`datetime`/`time` field, which is `time` — those aggregates return a '
+        + 'value of the aggregated field\'s own type. `count`/`count_distinct`, '
+        + '`sum`/`avg` and derived measures stay numeric.',
+      ),
       label: z.string().optional()
         .describe('Human display label (e.g. measure `label`) — for legends/KPIs.'),
       format: z.string().optional()

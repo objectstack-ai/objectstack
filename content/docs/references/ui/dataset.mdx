@@ -84,7 +84,7 @@ const result = DatasetSchema.parse(data);
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | Aggregation (sum/avg/count/...); omit when `derived` is set |
 | **field** | `string` | optional | Aggregated field; optional for count(*) |
 | **filter** | `any` | optional |  |
-| **format** | `string` | optional |  |
+| **format** | `string` | optional | Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued measure never reads a date pattern: `"YYYY-MM-DD"` renders the locale default. A date-only value reads `format` as a display style (`short`, `relative`); a datetime value ignores it. |
 | **currency** | `string` | optional | Display currency code (ISO 4217) |
 | **derived** | `{ op: Enum<'ratio' \| 'sum' \| 'difference' \| 'product'>; of: string[] }` | optional |  |
 
@@ -125,7 +125,7 @@ const result = DatasetSchema.parse(data);
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max' \| 'count_distinct'>` | optional | Aggregation (sum/avg/count/...); omit when `derived` is set |
 | **field** | `string` | optional | Aggregated field; optional for count(*) |
 | **filter** | `any` | optional |  |
-| **format** | `string` | optional |  |
+| **format** | `string` | optional | Numeral pattern for a NUMERIC measure — grouping, decimals, percent; e.g. "0,0.00", "0.0%". An amount takes its symbol from `currency`, not from a "$" in the pattern. A DATE-valued measure never reads a date pattern: `"YYYY-MM-DD"` renders the locale default. A date-only value reads `format` as a display style (`short`, `relative`); a datetime value ignores it. |
 | **currency** | `string` | optional | Display currency code (ISO 4217) |
 | **derived** | `{ op: Enum<'ratio' \| 'sum' \| 'difference' \| 'product'>; of: string[] }` | optional |  |
 

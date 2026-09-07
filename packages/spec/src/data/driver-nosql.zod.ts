@@ -8,6 +8,7 @@ import { DriverConfigSchema } from './driver.zod';
  * Supported NoSQL database types
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const NoSQLDatabaseTypeSchema = lazySchema(() => z.enum([
   'mongodb',
   'couchdb',
@@ -306,8 +307,20 @@ export const NoSQLQueryOptionsSchema = lazySchema(() => z.object({
   
   /**
    * Query timeout in milliseconds
+   *
+   * Renamed from `timeout` (#15680, ruling B on #14478): the unit lived only in
+   * the describe prose. It sits beside `batchSize`, a plain row COUNT, with
+   * nothing at the call site to tell a reader which of the two numbers carries
+   * a unit.
    */
-  timeout: z.number().int().positive().optional().describe('Query timeout (ms)'),
+  timeoutMs: z.number().int().positive().optional().describe('Query timeout (ms)'),
+
+  /** Tombstone for the rename above (#15680, ruling B on #14478). */
+  timeout: retiredKey(
+    '`NoSQLQueryOptions.timeout` was renamed to `timeoutMs` in @objectstack/spec 17 — '
+    + 'the unit of a duration-shaped number lives in the key name, not only in the describe '
+    + 'prose. Rename the key to `timeoutMs`; the value (milliseconds) is unchanged.',
+  ),
   
   /**
    * Use cursor for large result sets

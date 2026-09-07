@@ -41,6 +41,7 @@
       "@objectstack/plugin-dev",
       "@objectstack/plugin-email",
       "@objectstack/plugin-hono-server",
+      "@objectstack/organizations",
       "@objectstack/mcp",
       "@objectstack/plugin-pinyin-search",
       "@objectstack/plugin-reports",

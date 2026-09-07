@@ -1,0 +1,23 @@
+---
+"@objectstack/plugin-auth": patch
+---
+
+The auth catch-all yields only a 404 that disclaims ownership — better-auth's own 404 answers can no longer be replaced by another route's
+
+`registerAuthRoutes` mounts one catch-all over the whole auth namespace (`rawApp.all(`${basePath}/*`)`), and since #4088 that catch-all is deliberately not terminal: when better-auth answers 404 it calls `next()` and lets whatever else matched answer instead. That yield is load-bearing — `plugin-hono-server` mounts `/auth/me/permissions` and `/auth/me/localization` from its own `kernel:ready` hook, and without it those two are reachable only when HonoServerPlugin happens to register first.
+
+What the yield could not express is **which** 404 may be handed on, because it had only the status to go on. So every 404 was yielded, including the ones that are better-auth's own answer on a path its router serves. Measured with the shipped handler on a real Hono app: add one broad downstream mount — `app.all('/api/v1/*', c => c.json({}))`, the shape a composition adds — and
+
+```
+POST /api/v1/auth/delete-user   ->  200  {}
+```
+
+where better-auth answered 404 because `user.deleteUser` is deliberately unconfigured. That route is not hypothetical: `auth-route-ledger.ts` carries it under the `disabled` disposition precisely because it is published and refused — and the same holds for every 404 a routed endpoint produces for a bad token, an unknown id, or an admin family the deployment does mount. Those answers were all up for grabs.
+
+The catch-all now asks better-auth's live instance whether it owns the path before it yields. The seam is `auth.api` — the same one `auth-route-ledger.conformance.test.ts` reads and the same one the `/admin/` dogfood sweep derives from, because there is no route table to enumerate by hand; matching mirrors better-call's own `createRouter` walk, including its `SERVER_ONLY` skip and its `:param` syntax. That skip is load-bearing rather than cosmetic: measured on the stock boot, the nine `/admin/oauth2/*` endpoints are in `auth.api` and every one carries `SERVER_ONLY: true`, so better-call never routes them — their 404 is an unrouted one and stays yieldable, because ownership is "does better-call route this", not "is it in `auth.api`". An ownership table that cannot be built answers "not owned", so an enumeration failure degrades to the previous behaviour rather than taking the #4088 surface down with it.
+
+**The mount is untouched.** It still claims exactly `${basePath}/*` and still forwards every request under it to better-auth. What narrowed is only which 404 may be handed on.
+
+**Upgrade note — a composition that mounts a route matching paths under the auth base path may see a 404 where it previously saw its own answer.** Affected: deployments that register a route which also matches `/api/v1/auth/...` — most often a broad wildcard over the API prefix — mounted *after* AuthPlugin. Before this release, any request to a path better-auth serves but answers 404 on (a switched-off capability, not an unknown path) was passed to that route and the caller received *its* response, commonly `200` with an empty object. From this release the caller receives better-auth's 404. Callers that treated such a response as success — `res.ok`, `status === 200`, "no error thrown" — will start seeing the refusal that was always the real answer; that is the point of the change, and the wire shape they now get is the one a deployment without the extra mount has always returned. Nothing to do if you mount no such route: paths better-auth does **not** own are yielded as before, so `/auth/me/permissions`, `/auth/me/localization` and any other sibling route under the auth prefix are unaffected in either registration order.
+
+**One carve-out to that sentence, measured and bounded.** A **trailing-slash or doubled-slash spelling of a path better-auth DOES own** — `/api/v1/auth/delete-user/`, `/api/v1/auth//sign-in/social` — is now claimed rather than yielded. better-call treats those spellings as unrouted (it refuses on a `//` and on trailing-slash parity before it looks the route up), while this ownership table strips the trailing slash and drops empty segments and so counts them as owned. On a composition with a broad downstream mount, such a spelling therefore answers better-auth's 404 instead of that mount's response. Only those two spellings, only of a path better-auth already owns, and only where such a mount exists: no route in this repo registers a spelling of that shape, and every genuinely unowned path — every `/auth/me/*` route included — is yielded exactly as it was. Aligning the table with better-call's own pre-checks is tracked as a follow-up rather than carried here.

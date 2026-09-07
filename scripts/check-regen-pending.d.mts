@@ -11,7 +11,7 @@
 // guard exists to prevent — would type-check clean.
 //
 // Declared rather than inferred (no `allowJs`) because the module sits at the
-// repo root, outside the consuming program's `rootDir`. The surface is three
+// repo root, outside the consuming program's `rootDir`. The surface is five
 // functions with one optional argument; keep this file in step with them by
 // hand, and keep it small enough that doing so stays trivial.
 
@@ -22,6 +22,23 @@
  * @param specDir Absolute path to the spec package; defaults to this repo's.
  */
 export function distIsStale(specDir?: string): boolean;
+
+/**
+ * Did a declaration-emitting build produce `specDir/dist` from the sources on
+ * disk right now? `'match'` is the only verdict that clears an mtime
+ * accusation; `'unstamped'` is "no evidence" and covers every way of not being
+ * able to tell. `recorded` is the digest the stamp holds and `actual` the one
+ * the sources hash to now — both `null` when there is nothing to report. Read
+ * the function's own docblock before reusing it: it may only ever ACQUIT a tree
+ * `distIsStale` has already accused.
+ *
+ * @param specDir Absolute path to the spec package; defaults to this repo's.
+ */
+export function declarationStamp(specDir?: string): {
+  state: 'match' | 'mismatch' | 'unstamped';
+  recorded: string | null;
+  actual: string | null;
+};
 
 /**
  * Is `packages/spec/json-schema` older than the sources it was generated from?
@@ -44,3 +61,20 @@ export function schemaTreeIsStale(specDir?: string): boolean;
  * @param specDir Absolute path to the spec package; defaults to this repo's.
  */
 export function bundlesAreStale(specDir?: string): boolean;
+
+/**
+ * Did a bundle-emitting build produce `specDir/dist`'s `.mjs`/`.js` from the
+ * sources on disk right now? The bundle axis's counterpart to
+ * `declarationStamp`, reading the OTHER stamp file (`dist/.build-input-hash`,
+ * written by every build). `'match'` is the only verdict that clears an mtime
+ * accusation; `'unstamped'` is "no evidence". Read the function's own docblock
+ * before reusing it — the same file is deliberately NOT evidence about
+ * `dist/**\/*.d.ts`.
+ *
+ * @param specDir Absolute path to the spec package; defaults to this repo's.
+ */
+export function buildStamp(specDir?: string): {
+  state: 'match' | 'mismatch' | 'unstamped';
+  recorded: string | null;
+  actual: string | null;
+};

@@ -740,6 +740,7 @@
     "isNowDefaultToken": "src/data/default-value-tokens.ts#isNowDefaultToken (function)",
     "isOrganizationUnique": "src/data/field.zod.ts#isOrganizationUnique (function)",
     "isPlainRecord": "src/data/authoring-key-lint.ts#isPlainRecord (function)",
+    "isPublicSharingEnabled": "src/data/object.zod.ts#isPublicSharingEnabled (function)",
     "isRuntimeDefaultToken": "src/data/default-value-tokens.ts#isRuntimeDefaultToken (function)",
     "isTenancyDisabled": "src/data/object.zod.ts#isTenancyDisabled (function)",
     "isTextFilterOperator": "src/data/filter-text-operator-declared-type.ts#isTextFilterOperator (function)",

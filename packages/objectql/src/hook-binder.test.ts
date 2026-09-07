@@ -323,7 +323,7 @@ describe('wrapDeclarativeHook', () => {
   it('honours timeout by rejecting slow handlers', async () => {
     const meta: Hook = {
       name: 'timeout', object: 'a', events: ['beforeInsert'], priority: 100,
-      timeout: 20,
+      timeoutMs: 20,
       handler: () => new Promise((r) => setTimeout(r, 200)),
     };
     const wrapped = wrapDeclarativeHook(meta, meta.handler as any);

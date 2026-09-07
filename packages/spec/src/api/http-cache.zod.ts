@@ -68,9 +68,23 @@ export type CacheDirective = z.input<typeof CacheDirective>;
  */
 export const CacheControlSchema = lazySchema(() => z.object({
   directives: z.array(CacheDirective).describe('Cache control directives'),
-  maxAge: z.number().optional().describe('Maximum cache age in seconds'),
-  staleWhileRevalidate: z.number().optional().describe('Allow serving stale content while revalidating (seconds)'),
-  staleIfError: z.number().optional().describe('Allow serving stale content on error (seconds)'),
+  // The three keys below are the camelCase of the HTTP response directives they
+  // carry, and the `directives` enum above spells the same names on the wire
+  // (`max-age`). They are `externalVocabulary` mirrors under #14478 ruling B:
+  // renaming them to `maxAgeSeconds` would break the correspondence that lets a
+  // reader match this object to the `Cache-Control` header it becomes. The
+  // describe still states the unit, and the reference page prints it as "unit
+  // per the named standard".
+  //
+  // `stale-while-revalidate` and `stale-if-error` are RFC 5861, NOT RFC 9111 —
+  // RFC 9111 defines neither. Attribution corrected against the directives
+  // themselves rather than inherited (#15676).
+  maxAge: z.number().optional().describe('Maximum cache age in seconds')
+    .meta({ externalVocabulary: 'HTTP Cache-Control `max-age` (RFC 9111 §5.2.2.1)' }),
+  staleWhileRevalidate: z.number().optional().describe('Allow serving stale content while revalidating (seconds)')
+    .meta({ externalVocabulary: 'HTTP Cache-Control `stale-while-revalidate` (RFC 5861 §3)' }),
+  staleIfError: z.number().optional().describe('Allow serving stale content on error (seconds)')
+    .meta({ externalVocabulary: 'HTTP Cache-Control `stale-if-error` (RFC 5861 §4)' }),
 }));
 
 export type CacheControl = z.input<typeof CacheControlSchema>;

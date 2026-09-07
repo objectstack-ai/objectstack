@@ -97,9 +97,9 @@
     },
     "readonly": {
       "status": "live",
-      "evidence": "packages/objectql/src/validation/rule-validator.ts (UPDATE strip); packages/metadata-protocol/src/protocol.ts (INSERT ingress strip)",
+      "evidence": "packages/objectql/src/validation/rule-validator.ts (stripReadonlyFields — the one strip, UPDATE and INSERT); packages/objectql/src/engine.ts (INSERT call site, isSystem-gated, since the 2026-09-03 ruling)",
       "proof": "packages/qa/dogfood/test/showcase-static-readonly.dogfood.test.ts#readonly-static-write",
-      "note": "renderer + server write path: a non-system write to the field is silently dropped on BOTH UPDATE (#2948/#3003 — engine stripReadonlyFields; was renderer-only, i.e. false compliance for approval/status columns) and INSERT (#3043 — stripped at the DataProtocol createData/import ingress so external REST/GraphQL/MCP creates can't seed approval_status:'approved' a step shorter than #3003, while trusted internal engine writers that legitimately seed readonly columns are unaffected); a stripped INSERT field falls back to its defaultValue; symmetric with readonlyWhen (which stays INSERT-exempt, needing a prior record)."
+      "note": "renderer + server write path: a non-system write to the field is silently dropped on BOTH UPDATE (#2948/#3003 — engine stripReadonlyFields; was renderer-only, i.e. false compliance for approval/status columns) and INSERT — first (#3043) at the DataProtocol createData/import ingress only, so external REST/GraphQL/MCP creates couldn't seed approval_status:'approved' a step shorter than #3003 while a direct engine.insert caller still could; since the maintainer ruling of 2026-09-03 (option C, #14147) inside engine.insert itself, by the SAME stripReadonlyFields under the SAME isSystem gate as UPDATE, with the ingress copy deleted, so every non-system caller is stripped and seeding a readonly column at create time is a system act (isSystem / runAs:'system' / seeds); a stripped INSERT field falls back to its defaultValue; symmetric with readonlyWhen (which stays INSERT-exempt, needing a prior record)."
     },
     "hidden": {
       "status": "live",

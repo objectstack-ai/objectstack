@@ -2864,10 +2864,32 @@ function mysqlAsciiLowerBinary(expr: string): string {
  * - **SQLite → `GLOB`.** `LIKE`'s ASCII fold cannot be turned off per-statement;
  *   `PRAGMA case_sensitive_like` is a CONNECTION-global switch, so one query
  *   would change every other query's meaning. Of the operand-level tricks,
- *   `CAST(col AS BLOB) LIKE ?` was measured to return NOTHING at all (SQLite's
- *   LIKE is false for a BLOB operand), so the operator has to change. `GLOB` is
- *   case-exact by definition and carries its own escape mechanism
- *   ({@link escapeGlobComparand}). `lower()` in front of it is still the
+ *   `CAST(col AS BLOB) LIKE ?` is disqualified by something worse than
+ *   failing: it means TWO DIFFERENT THINGS on the two SQLite builds this repo
+ *   ships. Whether `LIKE` is false for a BLOB operand is not a property of
+ *   SQLite the language — it is set when SQLite is COMPILED, by
+ *   `SQLITE_LIKE_DOESNT_MATCH_BLOBS`. Measured over the shared
+ *   `FILTER_TEXT_ROWS` fixture, `{name: {$contains: 'acme'}}` compiled to that
+ *   construct:
+ *
+ *   | build | `SQLITE_LIKE_DOESNT_MATCH_BLOBS` | rows |
+ *   |---|---|---|
+ *   | better-sqlite3 13.0.3 (SQLite 3.53.4) | compiled in | `[]` |
+ *   | sql.js 1.14.1 (SQLite 3.49.1) | absent | `['1','2']` — `ACME Corp` AND `acme corp` |
+ *
+ *   So one build silently answers nothing and the other silently answers
+ *   exactly the ASCII over-fold this whole function exists to end, and which
+ *   one a caller gets is decided by a flag upstream of us. That divergence is
+ *   the rejection on its own: a construct whose meaning depends on how the
+ *   driver's SQLite was BUILT cannot carry a read scope (#3948) whatever value
+ *   it happens to return in any one container — the `[]` above is a build's
+ *   answer, not SQLite's. The CAST itself is not the part that differs:
+ *   `typeof CAST(name AS BLOB)` is `'blob'` on BOTH builds, so what diverges is
+ *   purely `LIKE`'s rule for a blob operand, which is the compile-time half. So
+ *   the operator has to change. `GLOB` is case-exact by definition, answers
+ *   `['2']` on BOTH builds above, and carries its own
+ *   escape mechanism ({@link escapeGlobComparand}). `lower()` in front of it is
+ *   still the
  *   `$icontains` fold, and still ASCII-only: measured, `lower('CAFÉ')` is
  *   `'cafÉ'`, so `lower(name) GLOB '*café*'` answers row 4 and `'*cafÉ*'`
  *   answers row 3 — the Q1 = A boundary, executed rather than argued.
@@ -11794,6 +11816,12 @@ export class SqlDriver implements IDataDriver {
    *   data that already violates it gets the SAME disposition, where it used to
    *   throw the database's raw error and take the boot down naming no rows and
    *   no remedy.
+   * - #15479: the same disposition on the HASH-SHADOW route (the MySQL arm
+   *   #11627 added, taken when the server refuses to key the column directly).
+   *   Its guard asked `nullSafe.size > 0` as well, so a plain unique reached
+   *   neither branch and took the boot down carrying the UNKEYABLE-COLUMN
+   *   refusal instead of the duplicate rows. Measured on live MySQL 8.0.46 in
+   *   `sql-driver-15479-shadow-plain-unique-duplicates.test.ts`.
    */
   protected async syncDeclaredIndexes(
     tableName: string,
@@ -11928,6 +11956,56 @@ export class SqlDriver implements IDataDriver {
                       .map((c) => (nullSafe.has(c) ? `COALESCE(${c}, '${GLOBAL_TENANT}')` : c))
                       .join(', ')}' is NOT enforced until the data is deduplicated: run "os migrate plan" ` +
                     `for the conflicting rows (ADR-0120 D4).`,
+                  shadowMsg,
+                );
+                continue;
+              }
+              if (isUniqueViolationError(shadowErr)) {
+                // #15479 — the PLAIN unique on the SHADOW route: no
+                // organization key part at all (`tenancy: { enabled: false }`
+                // or an explicit `unique: 'global'`), reached here because
+                // MySQL refused to key the column directly. The uniqueness
+                // limb is supplied by the enclosing `if (unique)` a few lines
+                // above, which is why this asks only the violation question --
+                // the same load-bearing role the explicit `unique &&` limb
+                // plays on the direct arm below, where no enclosing block
+                // supplies it.
+                //
+                // This branch used to be part of the NULL-safe one above,
+                // behind `nullSafe.size > 0`, so with no organization key part
+                // NOTHING fired: the code fell through to
+                // `logDurabilityFailure(unkeyable, msg)` + `throw` and the boot
+                // DIED carrying `ER_BLOB_KEY_WITHOUT_LENGTH` -- a message about
+                // an unkeyable TEXT column, telling the operator to declare a
+                // `maxLength` the field already declares, naming NO rows and NO
+                // remedy -- while the actual cause was duplicate rows. #14902
+                // fixed exactly that on the direct arm; the two arms of one
+                // `catch` then disagreed about one question.
+                //
+                // The message is deliberately NOT the NULL-safe one above.
+                // Neither of its clauses is true here: nothing "admitted" these
+                // rows (there was no previous void constraint, #5030), and
+                // there is no NULL-safe key. Widening the guard while keeping
+                // one message would ship a factually FALSE durability log --
+                // worse than the throw it replaces, because it sends the
+                // operator hunting a NULL-distinct index that never existed.
+                // The sentence below is the direct arm's, verbatim; only the
+                // route noun ("hash-shadow") is this arm's own, because it is
+                // what honestly names which physical route was attempted, and
+                // the NULL-safe branch above already spells it that way.
+                let report = '';
+                try {
+                  const duplicates = await this.probeNullSafeUniqueDuplicates(tableName, columns, []);
+                  if (duplicates.length > 0) {
+                    report = ` Conflicting group(s): ${formatDuplicateGroups(duplicates)}.`;
+                  }
+                } catch {
+                  // The probe is a diagnostic; the report below stands without it.
+                }
+                this.logDurabilityFailure(
+                  `[sql-driver] cannot create hash-shadow unique index '${name}' on "${tableName}" — existing ` +
+                    `rows violate it.${report} The constraint '${columns.join(', ')}' is NOT enforced until the ` +
+                    `data is deduplicated: run "os migrate plan" for the conflicting rows.`,
                   shadowMsg,
                 );
                 continue;
@@ -16008,12 +16086,30 @@ export class SqlDriver implements IDataDriver {
         // not anything this field declared. Measured on MySQL 8.0.46: the FK
         // itself is content with mismatched widths (`varchar(20)` child →
         // `varchar(255)` parent `id` creates cleanly, and Postgres 16 accepts
-        // it too), so the type system gives no warning — but the first write
-        // is refused, because a platform id is 26 characters and
-        // `INSERT … VALUES ('01JQ8XKZ9M4N7P2R5T6V8W0Y3B')` into `varchar(20)`
-        // is `ERROR 1406 Data too long`. Honouring `maxLength` here would make
-        // the column structurally incapable of holding ANY id — a strictly
-        // worse defect than the one #11431 fixes.
+        // it too), so the type system gives no warning — the refusal arrives on
+        // the first write too wide for the child, as `ERROR 1406 Data too long`.
+        //
+        // [#15522] ⛔ An id's width is NOT a fixed number, and it is NOT this
+        // field's to declare. Both halves are this driver's own behaviour: when
+        // the caller supplies no id it mints `nanoid(DEFAULT_ID_LENGTH)` — 16
+        // characters, from the constant above and the three mint sites it feeds
+        // — and when the caller DOES supply one it is stored verbatim at
+        // whatever width the caller chose (measured on this arm's own driver:
+        // 10-, 17- and 18-character ids all landed unaltered). Nothing on this
+        // path bounds an id's width at all, so `maxLength: 20` already cannot
+        // hold a 24-character supplied id, and any `maxLength` under 16 cannot
+        // hold even a minted one. Honouring it here would make the column
+        // structurally incapable of holding ids it will be asked to hold — a
+        // strictly worse defect than the one #11431 fixes.
+        //
+        // ⛔ Do not restore the number this sentence used to carry. It called a
+        // platform id 26 characters long and spelled out a ULID
+        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`). `DEFAULT_ID_LENGTH` has been 16 for the
+        // whole life of this file and no ULID is minted anywhere in this repo, so
+        // at the real numbers the worked example did not hold either — 16
+        // characters FIT in `varchar(20)`. Four `packages/cli` sites still cite
+        // this arm BY NAME for that number; they are filed as #16114, not fixed
+        // here.
         //
         // [#11567] ⛔ This arm emits NO `FOREIGN KEY`, and that is the ruled
         // contract rather than an omission. It used to carry

@@ -101,6 +101,7 @@
  */
 
 import { SYSTEM_FIELDS } from './system-fields.js';
+import { recordsOf } from './object-graph.js';
 
 export const PAGE_VISUALIZATION_WITHOUT_BINDING = 'page/visualization-without-binding';
 
@@ -230,13 +231,6 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-/** Coerce a collection (array or name-keyed map) to an array of records. */
-function asArray(v: unknown): AnyRec[] {
-  if (Array.isArray(v)) return v.filter(isRec);
-  if (isRec(v)) return Object.entries(v).map(([name, def]) => ({ name, ...(isRec(def) ? def : {}) }));
-  return [];
-}
-
 /** The slice of one field the predicates read, in DECLARATION order. */
 interface DerivableField {
   name: string;
@@ -258,7 +252,7 @@ function derivableFields(obj: AnyRec): DerivableField[] | undefined {
   if (!isRec(declared) && !Array.isArray(declared)) return undefined;
   let declaredNames = 0;
   const out: DerivableField[] = [];
-  for (const f of asArray(declared)) {
+  for (const f of recordsOf(declared)) {
     const name = strName(f.name);
     if (!name) continue;
     declaredNames++;
@@ -339,7 +333,7 @@ function namedViewsFor(stack: AnyRec, obj: AnyRec | undefined, objectName: strin
   // `defineView` aggregates that target this object. A per-view
   // `data.object` binding wins over the aggregate's own, the resolution order
   // `validate-list-view-field-refs` reads.
-  for (const view of asArray(stack.views)) {
+  for (const view of recordsOf(stack.views)) {
     const aggregateObject = strName(view.objectName) ?? strName(view.object);
     const boundTo = (lv: AnyRec): string | undefined =>
       (isRec(lv.data) ? strName(lv.data.object) : undefined) ?? aggregateObject;
@@ -413,12 +407,12 @@ export function validatePageVisualizationBindings(stack: AnyRec): PageVisualizat
   if (!isRec(stack)) return findings;
 
   const objects = new Map<string, AnyRec>();
-  for (const obj of asArray(stack.objects)) {
+  for (const obj of recordsOf(stack.objects)) {
     const name = strName(obj.name);
     if (name && !objects.has(name)) objects.set(name, obj);
   }
 
-  const pages = asArray(stack.pages);
+  const pages = recordsOf(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
     const page = pages[pi];
     // Skip 1 — only a `list` page mounts `InterfaceListPage`.

@@ -31,7 +31,7 @@ describe('KernelContextSchema', () => {
     mode: 'production',
     version: '1.0.0',
     cwd: '/app',
-    startTime: Date.now(),
+    startedAt: Date.now(),
     features: {},
   };
 
@@ -84,10 +84,10 @@ describe('KernelContextSchema', () => {
     expect(() => KernelContextSchema.parse({ instanceId: '550e8400-e29b-41d4-a716-446655440000' })).toThrow();
   });
 
-  it('should reject non-integer startTime', () => {
+  it('should reject non-integer startedAt', () => {
     expect(() => KernelContextSchema.parse({
       ...validContext,
-      startTime: 1.5,
+      startedAt: 1.5,
     })).toThrow();
   });
 
@@ -114,7 +114,7 @@ describe('TenantRuntimeContextSchema', () => {
     mode: 'production' as const,
     version: '1.0.0',
     cwd: '/app',
-    startTime: Date.now(),
+    startedAt: Date.now(),
     features: {},
   };
 

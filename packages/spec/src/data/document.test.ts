@@ -190,8 +190,6 @@ describe('ESignatureConfigSchema', () => {
           order: 2,
         },
       ],
-      expirationDays: 30,
-      reminderDays: 7,
     };
 
     expect(() => ESignatureConfigSchema.parse(validConfig)).not.toThrow();
@@ -230,38 +228,43 @@ describe('ESignatureConfigSchema', () => {
     expect(parsed.enabled).toBe(false);
   });
 
-  it('should default expirationDays to 30', () => {
-    const config = {
+  // `expirationDays` / `reminderDays` were retiredKey() tombstones since #14477
+  // (ADR-0049): the two former default pins (30 / 7) pinned exactly the branch
+  // that left, so they are replaced, not adjusted. The full kit — refusal on
+  // the base schema and through `DocumentSchema.eSignature`, the no-materialize
+  // pin, the tsc `never` channel and the ADR-0087 registration — lives in
+  // `esignature-deadline-keys-retirement.test.ts`; these two are the family
+  // tests' one-line refusal witnesses (the #14477 house shape).
+  it('REFUSES an authored `expirationDays` — a retiredKey() tombstone since #14477 (ADR-0049)', () => {
+    const wellFormed = {
       provider: 'custom',
-      signers: [
-        {
-          email: 'test@example.com',
-          name: 'Test',
-          role: 'Test',
-          order: 1,
-        },
-      ],
+      signers: [{ email: 'test@example.com', name: 'Test', role: 'Test', order: 1 }],
     };
-
-    const parsed = ESignatureConfigSchema.parse(config);
-    expect(parsed.expirationDays).toBe(30);
+    const result = ESignatureConfigSchema.safeParse({ ...wellFormed, expirationDays: 30 });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'expirationDays');
+    expect(issue?.code).toBe('invalid_type');
+    expect(issue?.message).toMatch(/^`ESignatureConfig\.expirationDays` was removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\)/);
+    // Attribution control: the same config WITHOUT the key parses, and the
+    // parsed value carries neither the key nor its former default.
+    const parsed = ESignatureConfigSchema.parse(wellFormed);
+    expect(parsed).not.toHaveProperty('expirationDays');
   });
 
-  it('should default reminderDays to 7', () => {
-    const config = {
+  it('REFUSES an authored `reminderDays` — a retiredKey() tombstone since #14477 (ADR-0049)', () => {
+    const wellFormed = {
       provider: 'docusign',
-      signers: [
-        {
-          email: 'test@example.com',
-          name: 'Test',
-          role: 'Test',
-          order: 1,
-        },
-      ],
+      signers: [{ email: 'test@example.com', name: 'Test', role: 'Test', order: 1 }],
     };
-
-    const parsed = ESignatureConfigSchema.parse(config);
-    expect(parsed.reminderDays).toBe(7);
+    const result = ESignatureConfigSchema.safeParse({ ...wellFormed, reminderDays: 7 });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.path.join('.') === 'reminderDays');
+    expect(issue?.code).toBe('invalid_type');
+    expect(issue?.message).toMatch(/^`ESignatureConfig\.reminderDays` was removed in @objectstack\/spec 17 \(ADR-0049 enforce-or-remove\)/);
+    const parsed = ESignatureConfigSchema.parse(wellFormed);
+    expect(parsed).not.toHaveProperty('reminderDays');
   });
 
   it('should accept all provider types', () => {
@@ -422,8 +425,6 @@ describe('DocumentSchema', () => {
             order: 1,
           },
         ],
-        expirationDays: 15,
-        reminderDays: 3,
       },
     };
 
@@ -601,8 +602,6 @@ describe('DocumentSchema', () => {
             order: 3,
           },
         ],
-        expirationDays: 45,
-        reminderDays: 5,
       },
       access: {
         isPublic: false,

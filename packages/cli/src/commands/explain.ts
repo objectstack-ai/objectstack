@@ -238,7 +238,7 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
       { name: 'label', type: 'string', description: 'Display name' },
       { name: 'widgets', type: 'Widget[]', description: 'Dashboard widget definitions' },
       { name: 'layout', type: 'GridLayout', description: 'Widget positioning' },
-      { name: 'refreshInterval', type: 'number', description: 'Auto-refresh interval in seconds' },
+      { name: 'refreshIntervalSeconds', type: 'number', description: 'Auto-refresh interval in seconds' },
     ],
     example: `{
   name: 'project_overview',

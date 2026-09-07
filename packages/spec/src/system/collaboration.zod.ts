@@ -21,6 +21,7 @@ import { z } from 'zod';
  * Types of operations in Operational Transformation
  */
 import { lazySchema } from '../shared/lazy-schema';
+import { retiredKey } from '../shared/retired-key';
 export const OTOperationType = z.enum([
   'insert',      // Insert characters at position
   'delete',      // Delete characters at position
@@ -460,18 +461,44 @@ export type CollaborationMode = z.input<typeof CollaborationMode>;
  * Collaboration Session Config
  * Configuration for a collaboration session
  */
+const SESSION_IDLE_TIMEOUT_RETIRED =
+  '`CollaborationSessionConfig.idleTimeout` was renamed to `idleTimeoutMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. This one was the live 1000x collision the rule exists to '
+  + 'remove: the tenant surface carried its own `idleTimeout` in SECONDS, so the same bare '
+  + 'name meant five minutes here and three and a half days there. Rename the key to '
+  + '`idleTimeoutMs`; the value (milliseconds) and the 300000 default are unchanged.';
+
+const SNAPSHOT_INTERVAL_RETIRED =
+  '`CollaborationSessionConfig.snapshot.interval` was renamed to `intervalMs` in '
+  + '@objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not '
+  + 'only in the describe prose. Rename the key to `intervalMs`; the value (milliseconds) '
+  + 'is unchanged.';
+
 export const CollaborationSessionConfigSchema = lazySchema(() => z.object({
   mode: CollaborationMode.describe('Collaboration mode to use'),
   enableCursorSharing: z.boolean().optional().default(true).describe('Enable cursor sharing'),
   enablePresence: z.boolean().optional().default(true).describe('Enable presence tracking'),
   enableAwareness: z.boolean().optional().default(true).describe('Enable awareness state'),
   maxUsers: z.number().int().positive().optional().describe('Maximum concurrent users'),
-  idleTimeout: z.number().int().positive().optional().default(300000).describe('Idle timeout in milliseconds'),
+  // Renamed from `idleTimeout` (#15679, #14478 ruling B): the unit lived only in
+  // the describe prose, and a SECONDS-valued `idleTimeout` existed on the tenant
+  // surface at the same time — 300000 meant five minutes here and three and a half
+  // days there, with nothing at either authoring site to tell them apart.
+  idleTimeoutMs: z.number().int().positive().optional().default(300000).describe('Idle timeout in milliseconds'),
+
+  /** Tombstone for the rename above (#15679, ruling B on #14478). */
+  idleTimeout: retiredKey(SESSION_IDLE_TIMEOUT_RETIRED),
   conflictResolution: z.enum(['ot', 'crdt', 'manual']).optional().default('ot').describe('Conflict resolution strategy'),
   persistence: z.boolean().optional().default(true).describe('Enable operation persistence'),
   snapshot: z.object({
     enabled: z.boolean().describe('Enable periodic snapshots'),
-    interval: z.number().int().positive().describe('Snapshot interval in milliseconds'),
+    // Renamed from `interval` (#15679, #14478 ruling B): the unit lived only in
+    // the describe prose.
+    intervalMs: z.number().int().positive().describe('Snapshot interval in milliseconds'),
+
+    /** Tombstone for the rename above (#15679, ruling B on #14478). */
+    interval: retiredKey(SNAPSHOT_INTERVAL_RETIRED),
   }).optional().describe('Snapshot configuration'),
 }));
 

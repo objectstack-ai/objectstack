@@ -79,7 +79,7 @@ const result = HotReloadConfigSchema.parse(data);
 | **status** | `Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>` | ✅ | Current health status of the plugin |
 | **timestamp** | `string` | ✅ |  |
 | **message** | `string` | optional |  |
-| **metrics** | `{ uptime?: number; memoryUsage?: number; cpuUsage?: number; activeConnections?: number; … }` | optional |  |
+| **metrics** | `{ uptimeMs?: number; memoryUsage?: number; cpuUsage?: number; activeConnections?: number; … }` | optional |  |
 | **checks** | `{ name: string; status: Enum<'passed' \| 'failed' \| 'warning'>; message?: string; data?: Record<string, any> }[]` | optional |  |
 | **dependencies** | `{ pluginId: string; status: Enum<'healthy' \| 'degraded' \| 'unhealthy' \| 'failed' \| 'recovering' \| 'unknown'>; message?: string }[]` | optional |  |
 
@@ -87,12 +87,14 @@ const result = HotReloadConfigSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **uptime** | `number` | optional | Plugin uptime in milliseconds |
+| **uptimeMs** | `number` | optional | Plugin uptime in milliseconds |
 | **memoryUsage** | `number` | optional | Memory usage in bytes |
 | **cpuUsage** | `number` | optional | CPU usage percentage |
 | **activeConnections** | `number` | optional | Number of active connections |
 | **errorRate** | `number` | optional | Error rate (errors per minute) |
-| **responseTime** | `number` | optional | Average response time in ms |
+| **responseTimeMs** | `number` | optional | Average response time in ms |
+| **uptime** | `never` | optional | [REMOVED] `PluginHealthReport.metrics.uptime` was renamed to `uptimeMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose, and this platform already spells a SECONDS-valued uptime with the same bare name on GET /health. Rename the key to `uptimeMs`; the value (milliseconds, `Date.now() - startTime`) is unchanged. |
+| **responseTime** | `never` | optional | [REMOVED] `PluginHealthReport.metrics.responseTime` was renamed to `responseTimeMs` in @objectstack/spec 17 — the unit of a duration-shaped number lives in the key name, not only in the describe prose. Rename the key to `responseTimeMs`; the value (milliseconds) is unchanged. |
 
 ### Nested Shape: `PluginHealthReport.checks[number]`
 

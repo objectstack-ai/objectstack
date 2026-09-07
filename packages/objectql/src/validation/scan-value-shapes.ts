@@ -48,7 +48,14 @@ export interface ValueShapeFinding {
   count: number;
   /** A few offending record ids, so an operator can go and look. */
   sampleRecordIds: string[];
-  /** The first parse issue seen — the prescription an author acts on. */
+  /**
+   * The prescription an author acts on: the undeclared-key issue when the
+   * rejection carries one (it names the key AND the rename its schema
+   * curates), else the first issue seen. Deliberately not positional —
+   * zod sorts per-member issues ahead of the object-level one, so on the
+   * renamed `{latitude, longitude}` location this header names, the
+   * actionable message is last.
+   */
   detail: string;
 }
 

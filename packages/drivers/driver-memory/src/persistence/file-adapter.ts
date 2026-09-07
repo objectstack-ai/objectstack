@@ -13,14 +13,14 @@ import * as path from 'node:path';
  */
 export class FileSystemPersistenceAdapter {
   private readonly filePath: string;
-  private readonly autoSaveInterval: number;
+  private readonly autoSaveIntervalMs: number;
   private dirty = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private currentDb: Record<string, any[]> | null = null;
 
-  constructor(options?: { path?: string; autoSaveInterval?: number }) {
+  constructor(options?: { path?: string; autoSaveIntervalMs?: number }) {
     this.filePath = options?.path || path.join('.objectstack', 'data', 'memory-driver.json');
-    this.autoSaveInterval = options?.autoSaveInterval ?? 2000;
+    this.autoSaveIntervalMs = options?.autoSaveIntervalMs ?? 2000;
   }
 
   /**
@@ -67,7 +67,7 @@ export class FileSystemPersistenceAdapter {
         await this.writeToDisk(this.currentDb);
         this.dirty = false;
       }
-    }, this.autoSaveInterval);
+    }, this.autoSaveIntervalMs);
 
     // Allow process to exit even if timer is running
     if (this.timer) {

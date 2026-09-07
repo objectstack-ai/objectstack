@@ -133,6 +133,8 @@ export const EMPTY_CREDENTIAL_REFUSAL_STATUS = 400;
 export class EmptyCredentialWriteError extends Error {
   readonly code = EMPTY_CREDENTIAL_REFUSAL_CODE;
   readonly status = EMPTY_CREDENTIAL_REFUSAL_STATUS;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = EMPTY_CREDENTIAL_REFUSAL_STATUS;
   readonly object: string;
   readonly field: string;
   readonly fieldType: 'secret' | 'password';

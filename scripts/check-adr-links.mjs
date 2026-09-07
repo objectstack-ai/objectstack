@@ -11,8 +11,9 @@
 // checked by nothing, and records link each other heavily: most carry a
 // `**Builds on**:` line with 3-10 relative links in it.
 //
-// That is not a theoretical hole. `0057-erp-authorization-core-business-units-
-// and-scope-depth.md:5` pointed at `./0010-metadata-protection.md`, a file that
+// That is not a theoretical hole.
+// `docs/adr/0057-erp-authorization-core-business-units-and-scope-depth.md`
+// (line 5 as measured) pointed at `./0010-metadata-protection.md`, a file that
 // has never existed (the record is `0010-metadata-protection-model.md`). It sat
 // there long enough that a triage comment inherited the wrong attribution and
 // repeated it. PD #13 sends the next author to "go read that decision"; a dead

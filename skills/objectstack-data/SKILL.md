@@ -271,7 +271,7 @@ export const Invoice = ObjectSchema.create({
   incoming changes when the predicate is `TRUE`.
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
   A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
-  the field **silently stripped** from an UPDATE payload; the write reports
+  the field **stripped** from any non-system write; the write reports
   success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
   and DO write it. So the pattern "users can't edit this, but automation

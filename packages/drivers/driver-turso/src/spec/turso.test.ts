@@ -62,13 +62,13 @@ describe('TursoConfigSchema', () => {
         intervalSeconds: 120,
         onConnect: false,
       },
-      timeout: 30000,
+      timeoutMs: 30000,
       wasm: true,
     });
 
     expect(config.encryptionKey).toBe('my-secret-key-256');
     expect(config.concurrency).toBe(50);
-    expect(config.timeout).toBe(30000);
+    expect(config.timeoutMs).toBe(30000);
     expect(config.wasm).toBe(true);
   });
 
@@ -83,7 +83,7 @@ describe('TursoConfigSchema', () => {
     expect(config.syncUrl).toBeUndefined();
     expect(config.localPath).toBeUndefined();
     expect(config.sync).toBeUndefined();
-    expect(config.timeout).toBeUndefined();
+    expect(config.timeoutMs).toBeUndefined();
     expect(config.wasm).toBeUndefined();
   });
 
@@ -124,11 +124,40 @@ describe('TursoConfigSchema', () => {
     })).toThrow();
   });
 
-  it('should reject config with negative timeout', () => {
+  it('should reject config with negative timeoutMs', () => {
     expect(() => TursoConfigSchema.parse({
       url: ':memory:',
-      timeout: -1,
+      timeoutMs: -1,
     })).toThrow();
+  });
+
+  // [#15682, ruling B on #14478] The rename's tombstone. Asserted on the
+  // REFUSAL ENVELOPE — which key was refused and what the message prescribes —
+  // rather than on `toThrow()` alone: a bare `toThrow()` here stays green for a
+  // schema that lost the tombstone entirely and simply required `url`, and it
+  // would stay green for a strip that never refused at all. What must hold is
+  // that the old spelling is REFUSED and that the refusal names the new key.
+  it('refuses the retired `timeout` spelling, and the refusal names `timeoutMs`', () => {
+    const result = TursoConfigSchema.safeParse({ url: ':memory:', timeout: 30000 });
+
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'timeout');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('timeoutMs');
+    expect(issue!.message).toContain('milliseconds');
+    // The standardized closing sentence — the one channel an upgrading author
+    // is guaranteed to hit carries the command, not just the diagnosis.
+    expect(issue!.message).toContain('os migrate meta --from 17');
+  });
+
+  // The other half of the tombstone: it refuses a VALUE, it does not make the
+  // whole config unparseable. A tombstone that took the object down with it
+  // would read identically in the case above.
+  it('the tombstone leaves a config that never wrote `timeout` untouched', () => {
+    const config = TursoConfigSchema.parse({ url: ':memory:', timeoutMs: 5000 });
+
+    expect(config.timeoutMs).toBe(5000);
+    expect('timeout' in config).toBe(false);
   });
 
   it('should accept config with environment variable patterns', () => {
@@ -150,13 +179,13 @@ describe('TursoConfigSchema', () => {
     expect(config.concurrency).toBe(100);
   });
 
-  it('should accept zero timeout (no timeout)', () => {
+  it('should accept zero timeoutMs (no timeout)', () => {
     const config = TursoConfigSchema.parse({
       url: ':memory:',
-      timeout: 0,
+      timeoutMs: 0,
     });
 
-    expect(config.timeout).toBe(0);
+    expect(config.timeoutMs).toBe(0);
   });
 });
 

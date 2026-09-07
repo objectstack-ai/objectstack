@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { ObjectStackDefinitionSchema } from '@objectstack/spec';
+import { PROTOCOL_MAJOR, PROTOCOL_VERSION } from '@objectstack/spec/kernel';
 import { childEnv } from './helpers/serve-process.js';
 
 const execFileP = promisify(execFile);
@@ -442,4 +443,72 @@ export default defineStack({
     }
     expect(refused, '`os validate` must still reject a retired key').toBe(true);
   }, 180_000);
+});
+
+/**
+ * The chain line states this build's protocol in the protocol's own units.
+ *
+ * `PROTOCOL_VERSION` is the protocol major padded to a semver ('17.0.0') and is
+ * never the installed package version. Printed here as a bare semver under the
+ * word "runtime", it read as one: on a 17.3.0 install the operator saw
+ * "runtime 17.0.0" beside the real package versions of the same upgrade
+ * session, which reads as an apparent downgrade or a stale install. Nothing
+ * about the VALUE was wrong; the label and the semver FORM were.
+ *
+ * Both halves are asserted, because either one alone is satisfiable the wrong
+ * way. A line that merely stopped saying "runtime" could still print the padded
+ * semver in a version position; and a line that dropped the parenthetical
+ * altogether would lose the one fact it carries -- with `--to` stopping below
+ * this build's major it is the only place the operator is told where the
+ * runtime actually stands, which is why the third case drives exactly that.
+ *
+ * The `--json` `runtime` key is pinned UNCHANGED here on purpose. It is a
+ * machine-readable key on a published payload, so moving it is a contract
+ * change owing a reader census and a deprecation window of its own. This pin is
+ * what makes that move loud instead of silent.
+ */
+describe('os migrate meta — the chain line names the protocol, not a package version', () => {
+  const LABEL_CONFIG = `
+export default {
+  manifest: { id: 'chain_label_e2e', name: 'Chain Label E2E', version: '1.0.0', type: 'app' },
+  objects: [{ name: 'label_ticket', label: 'Ticket', fields: { title: { type: 'text', label: 'Title' } } }],
+};
+`;
+  let labelDir: string;
+
+  beforeAll(() => {
+    labelDir = mkdtempSync(join(tmpdir(), 'os-migrate-meta-label-'));
+    writeFileSync(join(labelDir, 'objectstack.config.ts'), LABEL_CONFIG);
+  });
+
+  afterAll(() => {
+    try { rmSync(labelDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it("names this build's protocol major, in majors", async () => {
+    const stdout = await runMeta(['--from', String(PROTOCOL_MAJOR)], labelDir);
+    expect(stdout).toContain(
+      `Chain:  protocol ${PROTOCOL_MAJOR} → ${PROTOCOL_MAJOR} (this runtime implements protocol ${PROTOCOL_MAJOR})`,
+    );
+  }, 120_000);
+
+  it('prints no padded protocol semver in the human output, under any label', async () => {
+    const stdout = await runMeta(['--from', String(PROTOCOL_MAJOR)], labelDir);
+    expect(stdout).not.toContain(PROTOCOL_VERSION);
+    expect(stdout).not.toMatch(/runtime \d+\.\d+\.\d+/);
+  }, 120_000);
+
+  it('still says where the runtime stands when --to stops below this build\'s major', async () => {
+    const below = PROTOCOL_MAJOR - 1;
+    const stdout = await runMeta(['--from', String(below), '--to', String(below)], labelDir);
+    expect(stdout).toContain(
+      `Chain:  protocol ${below} → ${below} (this runtime implements protocol ${PROTOCOL_MAJOR})`,
+    );
+    expect(stdout).not.toContain(PROTOCOL_VERSION);
+  }, 120_000);
+
+  it('leaves the --json `runtime` key exactly as published', async () => {
+    const parsed = JSON.parse(await runMeta(['--from', String(PROTOCOL_MAJOR), '--json'], labelDir));
+    expect(parsed.runtime).toBe(PROTOCOL_VERSION);
+  }, 120_000);
 });

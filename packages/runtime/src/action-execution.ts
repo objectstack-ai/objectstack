@@ -981,7 +981,7 @@ export function actionLooksDestructive(_deps: ActionExecutionDeps, action: any):
     return Boolean(action?.mode === 'delete' || action?.variant === 'danger');
 }
 
-export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string): any {
+export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any, objectName: string, flow?: any): any {
     // [#15079] `operation` before `type`, on the LISTING face. A declarative
     // update always requires a current record — that is contract point 7, and
     // the executor refuses without one — so the answer cannot be left to
@@ -999,7 +999,7 @@ export function summarizeAction(deps: ActionExecutionDeps, action: any, obj: any
     const description =
         (typeof action?.ai?.description === 'string' ? action.ai.description : undefined) ??
         (typeof action?.label === 'string' ? action.label : undefined);
-    const params = summarizeActionParams(deps, action, obj);
+    const params = summarizeActionParams(deps, action, obj, flow);
     return {
         name: action.name,
         objectName,
@@ -1029,7 +1029,7 @@ export function jsonTypeOf(_deps: ActionExecutionDeps, t: string | undefined): '
     }
 }
 
-export function summarizeActionParams(deps: ActionExecutionDeps, action: any, obj: any): any[] {
+export function summarizeActionParams(deps: ActionExecutionDeps, action: any, obj: any, flow?: any): any[] {
     const fields: Record<string, any> = obj?.fields ?? {};
     const out: any[] = [];
     for (const p of (Array.isArray(action?.params) ? action.params : [])) {
@@ -1055,7 +1055,87 @@ export function summarizeActionParams(deps: ActionExecutionDeps, action: any, ob
             ...(enumVals.length > 0 ? { enum: enumVals } : {}),
         });
     }
+    // [#15705] A FLOW action's input contract is its flow's `isInput`
+    // variables, not `action.params` — a flow-typed action almost never
+    // declares `params`, so this listing answered with no `params` key at all
+    // while the MCP `list_actions` tool description promised "its input
+    // parameters". An agent could see the action, could invoke it, and had no
+    // way to learn a single input name.
+    //
+    // Second, never first: a declaration the AUTHOR wrote on the action wins
+    // outright, so this can only fill a silence. `flow` is optional and the
+    // caller resolves it (`domains/mcp.ts` asks the automation service's
+    // `getFlow`), which keeps this function pure and leaves every existing
+    // 3-argument call site — and every non-flow action — byte-identical.
+    if (out.length === 0) out.push(...summarizeFlowInputParams(deps, flow));
     return out;
+}
+
+/**
+ * A screen flow's input contract, projected onto the same param shape
+ * {@link summarizeActionParams} emits for a declared param (#15705).
+ *
+ * The flow's `isInput` variables ARE the contract — they are what
+ * `seedDeclaredVariables` binds from the caller's `params`, so their names are
+ * exactly the keys an invoker must send. The variable declaration carries only
+ * `name` / `type` / `defaultValue`, so everything an agent needs beyond the
+ * name (`label`, `required`, select `options`) is read off the screen node
+ * that collects the variable — the same field spec a paused run surfaces.
+ *
+ * `required` comes from the screen field alone: a flow variable has no
+ * `required` key, and inferring one from "declares no `defaultValue`" would
+ * invent a contract the author never wrote. A variable no screen collects is
+ * still listed — it is a real input, and omitting it would hide the very names
+ * this exists to publish — just without the screen-only enrichments.
+ */
+export function summarizeFlowInputParams(deps: ActionExecutionDeps, flow: any): any[] {
+    const variables: any[] = Array.isArray(flow?.variables) ? flow.variables : [];
+    if (variables.length === 0) return [];
+    const screenFields = collectScreenFieldSpecs(flow);
+    const out: any[] = [];
+    for (const v of variables) {
+        const name: unknown = v?.name;
+        if (v?.isInput !== true || typeof name !== 'string' || !name) continue;
+        const field = screenFields.get(name);
+        const type = jsonTypeOf(deps, field?.type ?? v?.type);
+        const description = typeof field?.label === 'string' && field.label ? field.label : undefined;
+        const enumVals = Array.isArray(field?.options)
+            ? field.options
+                  .map((o: any) => (typeof o === 'string' ? o : o?.value))
+                  .filter((x: any): x is string => typeof x === 'string')
+            : [];
+        out.push({
+            name,
+            type,
+            required: field?.required === true,
+            ...(description ? { description } : {}),
+            ...(enumVals.length > 0 ? { enum: enumVals } : {}),
+        });
+    }
+    return out;
+}
+
+/**
+ * Every screen field a flow declares, by field name, first declaration
+ * winning. Walks ALL `screen` nodes rather than just the first: a multi-step
+ * wizard collects its inputs across several screens, and a contract that
+ * stopped at screen one would publish a subset while looking complete.
+ *
+ * Object-form screens contribute nothing by construction — their `fields` is
+ * empty because the client renders the object's own form — so they are simply
+ * skipped rather than special-cased.
+ */
+function collectScreenFieldSpecs(flow: any): Map<string, any> {
+    const byName = new Map<string, any>();
+    for (const node of Array.isArray(flow?.nodes) ? flow.nodes : []) {
+        if (node?.type !== 'screen') continue;
+        for (const field of Array.isArray(node?.config?.fields) ? node.config.fields : []) {
+            const name: unknown = field?.name;
+            if (typeof name !== 'string' || !name || byName.has(name)) continue;
+            byName.set(name, field);
+        }
+    }
+    return byName;
 }
 
 /**

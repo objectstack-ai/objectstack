@@ -499,7 +499,7 @@ describe('DataLoaderConfigSchema', () => {
       batchScheduleFn: 'timeout',
       cacheEnabled: false,
       cacheKeyFn: 'customKeyFn',
-      cacheTtl: 60,
+      cacheTtlSeconds: 60,
       coalesceRequests: false,
       maxConcurrency: 4,
     });
@@ -508,7 +508,7 @@ describe('DataLoaderConfigSchema', () => {
     expect(config.batchScheduleFn).toBe('timeout');
     expect(config.cacheEnabled).toBe(false);
     expect(config.cacheKeyFn).toBe('customKeyFn');
-    expect(config.cacheTtl).toBe(60);
+    expect(config.cacheTtlSeconds).toBe(60);
     expect(config.maxConcurrency).toBe(4);
   });
 
@@ -520,8 +520,8 @@ describe('DataLoaderConfigSchema', () => {
     });
   });
 
-  it('should reject negative cacheTtl', () => {
-    expect(() => DataLoaderConfigSchema.parse({ cacheTtl: -1 })).toThrow();
+  it('should reject negative cacheTtlSeconds', () => {
+    expect(() => DataLoaderConfigSchema.parse({ cacheTtlSeconds: -1 })).toThrow();
   });
 });
 
@@ -664,5 +664,31 @@ describe('makeApiErrorSchema (federated ledger, #4805)', () => {
     });
     expect(parsed.httpStatus).toBe(402);
     expect(parsed.requestId).toBe('req_1');
+  });
+});
+
+// #15677 (stack card 2/6 of #14478) — ruling B: the unit of a duration-shaped
+// number lives in the key NAME. The old spellings are `retiredKey()` tombstones,
+// so the refusal carries the RENAME (the prescription IS the payload) rather
+// than a bare unrecognized-key error, and the value survives at the same
+// magnitude. Asserting the message, not just `.toThrow()`: a bare throw stays
+// green when the schema throws for some unrelated reason.
+describe('DataLoaderConfig.cacheTtl \u2192 cacheTtlSeconds (#15677)', () => {
+  it('REFUSES the retired `cacheTtl` spelling with the rename in the message', () => {
+    const result = DataLoaderConfigSchema.safeParse({ cacheTtl: 60 });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find((i) => i.path.join('.') === 'cacheTtl');
+    expect(issue).toBeDefined();
+    expect(issue!.code).not.toBe('unrecognized_keys');
+    expect(issue!.message).toMatch(
+      /`DataLoaderConfig\.cacheTtl` was renamed to `cacheTtlSeconds`/,
+    );
+  });
+
+  it('accepts `cacheTtlSeconds` at the same magnitude, and keeps the min(0) bound', () => {
+    const parsed = DataLoaderConfigSchema.parse({ cacheTtlSeconds: 60 });
+    expect(parsed.cacheTtlSeconds).toBe(60);
+    expect(parsed).not.toHaveProperty('cacheTtl');
+    expect(DataLoaderConfigSchema.safeParse({ cacheTtlSeconds: -1 }).success).toBe(false);
   });
 });

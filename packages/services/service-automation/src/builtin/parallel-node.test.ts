@@ -96,11 +96,18 @@ describe('parallel block executor (ADR-0031)', () => {
     const stepA = runs[0].steps.find(s => s.nodeId === 'a');
     const stepB = runs[0].steps.find(s => s.nodeId === 'b');
     expect(stepA?.parentNodeId).toBe('par');
-    expect(stepA?.iteration).toBe(0);
+    expect(stepA?.branch).toBe(0);
     expect(stepA?.regionKind).toBe('parallel-branch');
     expect(stepB?.parentNodeId).toBe('par');
-    expect(stepB?.iteration).toBe(1);
+    expect(stepB?.branch).toBe(1);
     expect(stepB?.regionKind).toBe('parallel-branch');
+    // #15230: the branch index moved off `iteration`, which is now single-valued
+    // — the enclosing LOOP's row. This `parallel` sits in no loop, so there is
+    // nothing for it to report and it stays absent. Asserting the absence is the
+    // point: re-spelling the assertion alone would leave the retired overload
+    // free to come back as a second writer.
+    expect(stepA?.iteration).toBeUndefined();
+    expect(stepB?.iteration).toBeUndefined();
   });
 
   it('joins only after the slowest branch completes', async () => {

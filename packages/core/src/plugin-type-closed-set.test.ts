@@ -66,8 +66,10 @@ describe('Plugin.type closed set — runtime parity with the spec enum (#13925)'
 
     it('a non-member is refused by PluginSchema with invalid_value at ["type"]', () => {
         // `'plugin'` / `'module'` are PACKAGE manifest types (ManifestSchema.type),
-        // never plugin types; `'ui-plugin'` is the spelling a stale describe()
-        // string still uses; the casing variant guards against a lax comparator.
+        // never plugin types; `'ui-plugin'` is the LEGACY spelling of today's
+        // `'ui'` — once live, so callers outside this repo may still send it, and
+        // the closed set must keep REFUSING it rather than grow a tolerant alias
+        // (Prime Directive #12); the casing variant guards against a lax comparator.
         for (const type of ['bogus', 'ui-plugin', 'plugin', 'module', 'Standard']) {
             const result = PluginSchema.safeParse({ type });
             expect(result.success, `PluginSchema accepted non-member '${type}'`).toBe(false);

@@ -48,8 +48,10 @@
  * older than `src/`. On a stale dist this script does not fail, it writes a
  * baseline missing every export added since the build — and `--check` then
  * agrees with it against the same stale dist, so the phantom breaking removal is
- * green at every step. See lib/dist-freshness.ts for the mechanism and for why
- * the mtime rule, not `dist/.build-input-hash`, is the primitive that covers it.
+ * green at every step. See lib/dist-freshness.ts for the mechanism, for why the
+ * mtime rule — not `dist/.build-input-hash` — is the primitive that convicts,
+ * and for the sibling stamp (`dist/.build-input-hash-dts`) that may acquit a
+ * tree whose sources were re-checked-out unchanged.
  */
 import ts from 'typescript';
 import { createHash } from 'node:crypto';

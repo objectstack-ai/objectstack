@@ -31,6 +31,12 @@ export const ExecutionStatus = z.enum([
   'cancelled',   // Manually cancelled
   'timed_out',   // Exceeded max execution time
   'retrying',    // Failed and retrying
+  // #14945 — the run reached an `end` node declaring `outcome: 'refused'`: a
+  // successful evaluation that said no. Terminal, never resumed, and DISTINCT
+  // from `failed` (nothing threw; the flow refused on purpose). The rendered
+  // refusal text rides beside it on the run row as `refusalMessage`. Appended
+  // last so every reader that indexes `.options` keeps its positions.
+  'refused',     // Terminal: the flow refused (an `end` node with outcome: 'refused')
 ]);
 export type ExecutionStatus = z.input<typeof ExecutionStatus>;
 
@@ -299,6 +305,21 @@ export const ExecutionLogSchema = lazySchema(() => z.object({
 
   /** Execution status */
   status: ExecutionStatus.describe('Current execution status'),
+
+  /**
+   * #14945: the rendered refusal. Set when `status` is `refused` — the `end`
+   * node's `message` template, interpolated against the run's variables at
+   * the moment the run reached it (per-record text, the same rendering a
+   * `screen` node's `description` gets). Absent on every other status: a
+   * refusal is the only terminal that carries AUTHORED text on the run row —
+   * a failure's reason is the failing step's `error`, and a completion's
+   * `successMessage` is copied from the flow definition onto the RESULT, not
+   * stored here.
+   */
+  refusalMessage: z.string().optional().describe(
+    'Rendered `end` node `message` when `status` is `refused` — the per-record text the flow refused with. '
+    + 'Absent on every other status.',
+  ),
 
   /** Trigger context */
   trigger: z.object({

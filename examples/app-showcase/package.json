@@ -38,6 +38,7 @@
     "@objectstack/cli": "workspace:*",
     "@objectstack/core": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/lint": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/plugin-approvals": "workspace:*",
     "@objectstack/plugin-email": "workspace:*",

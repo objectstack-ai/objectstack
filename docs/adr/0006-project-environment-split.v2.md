@@ -219,5 +219,7 @@ Each phase is independently shippable behind a feature flag
   §12.3 — original three-layer-model recommendation
 - `packages/services/service-tenant/src/objects/sys-project.object.ts`
   — current single-table model; relabelled in Phase 0
+  *(Path note, 2026-09: historical and deliberately unlinked — the object was renamed to
+  `sys-environment.object.ts` by `0ee839c53`, and then the `packages/services/service-tenant/` package left this repository with the control-plane split to `objectstack-ai/cloud` (`473fce590`, 2026-05-21).)*
 
 

@@ -132,9 +132,9 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       → `git -C /tmp/pr apply /tmp/fix.patch` → 确认 `git -C /tmp/pr status` *只*列你的文件。
 - [ ] 加 **changeset**(`.changeset/<slug>.md`,`"@objectstack/<pkg>": patch`)——
       发布包的改动过不了 CI 的「Check Changeset」门。
-- [ ] 提交(信息末尾带 `Co-Authored-By:` trailer)、推送、`gh pr create`,然后
-      `gh pr merge --squash --auto --delete-branch`(先移除 worktree,本地分支才不被
-      锁:`git worktree remove /tmp/pr --force`)。
+- [ ] 提交(信息末尾带 `Co-Authored-By:` trailer)、推送、开 **draft** PR(dev 容器走 REST 端点;
+      人手上 `gh pr create --draft`),PR 报给派发你的席位;ready / 入队 / 人工合并归该席位。
+- [ ] `git worktree remove /tmp/pr`:⛔ 不带 `--force`,被拒说明有东西没提交,先读 `git status`。
 
 ## 6. Shell 卫生
 

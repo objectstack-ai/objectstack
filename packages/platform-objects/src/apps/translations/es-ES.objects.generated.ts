@@ -328,11 +328,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       revoked_at: {
         label: "Revoked At",
-        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin). System-managed."
+        help: "When set, this session was revoked (idle / absolute-max / concurrent-cap / admin / organization membership ended). System-managed."
       },
       revoke_reason: {
         label: "Revoke Reason",
-        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, …)."
+        help: "Why the session was revoked (idle_timeout, absolute_max, concurrent_cap, user_revoked, admin, organization_membership_ended, …)."
       },
       active_organization_id: {
         label: "Organización activa"
@@ -533,6 +533,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       require_mfa: {
         label: "Exigir autenticación multifactor",
         help: "Si es true, todos los miembros de esta organización deben registrar una aplicación de autenticación para acceder a los datos."
+      },
+      timezone: {
+        label: "Zona horaria",
+        help: "Zona horaria IANA (p. ej. UTC, Asia/Shanghai) en la que se calculan los límites de fecha de esta organización: el valor raíz que hereda toda unidad de negocio sin zona propia. Sin definir significa UTC."
       },
       parent_organization_id: {
         label: "Parent Organization",
@@ -856,6 +860,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       parent_business_unit_id: {
         label: "Unidad de negocio principal",
         help: "Autorreferencia para el árbol organizativo. Null = raíz del tenant."
+      },
+      timezone: {
+        label: "Zona horaria",
+        help: "Zona horaria IANA (p. ej. Asia/Shanghai) en la que se calculan los límites de fecha de esta unidad. Déjala sin definir para heredar la zona de la unidad de negocio principal, luego la de la organización y, por último, UTC."
       },
       organization_id: {
         label: "Organización",

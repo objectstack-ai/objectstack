@@ -32,6 +32,7 @@ import {
   ScreenFieldConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod.js';
+import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionSchema } from '../shared/expression.zod.js';
 import {
   LEDGER_DECLARED_NODE_CONFIG_SCHEMAS,
   SCHEMALESS_NODE_CONFIG_SCHEMAS,
@@ -328,8 +329,11 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
   });
 
   it.each([
-    ['no `source` (and no `ast`)', { dialect: 'cel' }, ['assignments', 'digest'], 'Expression requires at least one of'],
-    ['an empty `source`', { dialect: 'cel', source: '' }, ['assignments', 'digest', 'source'], ''],
+    // Flipped by #15430: `{ dialect: 'cel' }` used to be refused by the
+    // persistence contract's source-or-ast rule at the envelope's own path; the
+    // evaluated-slot rule now answers first, at `source`, with its one sentence.
+    ['no `source` (and no `ast`)', { dialect: 'cel' }, ['assignments', 'digest', 'source'], 'non-blank `source`'],
+    ['an empty `source`', { dialect: 'cel', source: '' }, ['assignments', 'digest', 'source'], 'non-blank `source`'],
     ['a non-string `source`', { dialect: 'cel', source: 42 }, ['assignments', 'digest', 'source'], ''],
     ['an unknown dialect', { dialect: 'javascript', source: '1 + 1' }, ['assignments', 'digest', 'dialect'], ''],
   ] as ReadonlyArray<[string, unknown, ReadonlyArray<string>, string]>)(
@@ -360,7 +364,9 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
       assignments: { fine: DIGEST_ENVELOPE, broken: { dialect: 'cel' }, alsoFine: '{x}' },
     });
     expect(result.success).toBe(false);
-    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['assignments.broken']);
+    // `{ dialect: 'cel' }` is refused by the evaluated-slot rule at its `source`
+    // (#15430) — one segment deeper than the envelope, still naming the variable.
+    expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['assignments.broken.source']);
   });
 
   it('refuses the legacy array form as a type error carrying the map as the prescription', () => {
@@ -397,5 +403,61 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
     const projected = getSchemalessNodeConfigJsonSchemas().assignment as
       { properties?: Record<string, { additionalProperties?: Record<string, unknown> }> };
     expect(projected.properties?.assignments?.additionalProperties?.xExpression).toBe('value');
+  });
+});
+
+/**
+ * The `value` slot is EVALUATED (#15430): `AssignmentExpressionValueSchema`
+ * composes `EvaluatedExpressionSchema`, so the two shapes the persistence
+ * contract accepts while no engine can run them — an `ast`-only envelope and a
+ * whitespace-only `source` — are refused at authoring, by ONE rule with one
+ * message, at the value's own `source` path. Before this they validated,
+ * registered, and faulted at run time (the `ast`-only one with the engine's
+ * own prescription; the blank one with a parse error on `"   "`).
+ */
+describe('assignment value envelope — an evaluated slot requires what the engine can evaluate (#15430)', () => {
+  const AST_ONLY = { dialect: 'cel', ast: { kind: 'const', value: 1 } };
+  const BLANK_SOURCE = { dialect: 'cel', source: '   ' };
+
+  /** Every issue beneath `assignments.<key>`, flattened to what a pin asserts. */
+  function issuesAt(key: string, value: unknown) {
+    const result = AssignmentConfigSchema.safeParse({ assignments: { [key]: value } });
+    if (result.success) return [];
+    return result.error!.issues
+      .filter((i) => i.path[0] === 'assignments' && i.path[1] === key)
+      .map((i) => ({ code: i.code, path: i.path.map(String).join('.'), message: i.message }));
+  }
+
+  it.each([
+    ['an `ast`-only envelope', AST_ONLY],
+    ['a whitespace-only `source`', BLANK_SOURCE],
+  ])('REFUSES %s through the node config: ONE issue, code `custom`, at the value\'s `source`, refusal sentence first', (_label, value) => {
+    const issues = issuesAt('digest', value);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.code).toBe('custom');
+    expect(issues[0]!.path).toBe('assignments.digest.source');
+    expect(issues[0]!.message.startsWith(ASSIGNMENT_VALUE_ENVELOPE_REFUSAL)).toBe(true);
+    expect(issues[0]!.message).toContain(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+  });
+
+  it('REFUSES both spellings on the narrowed schema directly, with the same sentence at `source`', () => {
+    for (const value of [AST_ONLY, BLANK_SOURCE]) {
+      const result = AssignmentExpressionValueSchema.safeParse(value);
+      expect(result.success).toBe(false);
+      expect(result.error!.issues).toHaveLength(1);
+      expect(result.error!.issues[0]!.path).toEqual(['source']);
+      expect(result.error!.issues[0]!.message).toBe(EVALUATED_EXPRESSION_SOURCE_REQUIRED);
+    }
+  });
+
+  it('ACCEPTS a well-formed envelope unchanged — `source` present, even beside an `ast`', () => {
+    const good = { dialect: 'cel', source: 'a > 1' };
+    expect(issuesAt('digest', good)).toEqual([]);
+    expect(AssignmentExpressionValueSchema.safeParse({ ...good, ast: { kind: 'x' } }).success).toBe(true);
+  });
+
+  it('CONTROL — `ExpressionSchema`, the persistence contract, still ACCEPTS both shapes', () => {
+    expect(ExpressionSchema.safeParse(AST_ONLY).success).toBe(true);
+    expect(ExpressionSchema.safeParse(BLANK_SOURCE).success).toBe(true);
   });
 });

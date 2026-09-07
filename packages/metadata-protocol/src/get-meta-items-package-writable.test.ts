@@ -10,8 +10,13 @@
  * enforce — #8146's "one answer to 'is this package writable?'" applied to the
  * read side. It reads `engine.manifests` FIRST: a package booted from an
  * artifact through `registerApp` is read-only whatever its scope says, and a
- * scope-less `type: module` carried by a multi-package artifact lands there
- * too, while a scope-less Studio-created base does not. Only the server holds
+ * scope-less BOOTED package — a marketplace install / offline file import,
+ * which reaches the registry with no `ManifestSchema` parse — lands there
+ * too, while a scope-less Studio-created base (`POST /api/v1/packages`) does
+ * not. ⛔ Neither is a module carried by a multi-package artifact:
+ * `defineStack` parses every `packages[]` entry through `ManifestSchema`, whose
+ * `scope` is `.default('project')`, so no package of a compiled artifact is
+ * ever scope-less. Only the server holds
  * `engine.manifests`, which is why the client could never derive this.
  *
  * The engine is the same shape `meta-overlay-cache.test.ts` drives: the
@@ -24,7 +29,7 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 
 /** Booted code package, explicit `scope: 'project'`. */
 const CODE_PROJECT = 'app.acme.crm';
-/** Booted, SCOPE-LESS module — the multi-package-artifact sub-package. */
+/** Booted and SCOPE-LESS — a marketplace / offline import, registered unparsed. */
 const CODE_MODULE = 'app.acme.crm.billing';
 /** Platform / marketplace delivered. */
 const SYSTEM_SCOPED = 'com.objectstack.platform';
@@ -47,7 +52,9 @@ function make() {
         row(DB_BASE),
     ];
     const byId = new Map(records.map((r) => [r.manifest.id as string, r]));
-    // What `ObjectQL.registerApp` records for every package of a loaded artifact.
+    // What `ObjectQL.registerApp` records — for every package of a loaded artifact
+    // (CODE_PROJECT, parsed and therefore `scope: 'project'`) and for a
+    // marketplace / offline import (CODE_MODULE, unparsed and therefore scope-less).
     const manifests = new Map<string, unknown>([
         [CODE_PROJECT, byId.get(CODE_PROJECT)!.manifest],
         [CODE_MODULE, byId.get(CODE_MODULE)!.manifest],

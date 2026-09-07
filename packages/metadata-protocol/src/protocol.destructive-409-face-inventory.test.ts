@@ -59,13 +59,39 @@
  *
  * `duplicatePackage` reports a per-item failure as **response DATA on a 200**
  * (`POST /packages/:id/duplicate`), so no HTTP boundary is involved and
- * `details.issues` never exists. And unlike `publishPackageDrafts` — whose
- * `failed[]` #10895 could extend because `PublishPackageDraftsResponseSchema`
- * exists — `duplicatePackage` has **no response schema in `packages/spec` at
- * all**; its `failed[]` is typed inline as
+ * `details.issues` never exists. Its declared return types `failed[]` inline as
  * `Array<{ type: string; name: string; error: string }>` and the push adds no
- * `issues` key. Declaring a structured channel there is a `packages/spec`
- * change and is deliberately NOT part of this card.
+ * `issues` key — section 3 pins exactly that, at runtime, on a real refusal.
+ *
+ * ⚠️ [#15853] The contrast with `publishPackageDrafts` is REAL, but it is
+ * **not** 「one has a response schema and the other has none」. This block used
+ * to argue that `duplicatePackage` had *no response schema in `packages/spec`
+ * at all*. That clause has EXPIRED — re-measured on `a4816a79d`, it is FALSE,
+ * and the live argument runs on the declared SHAPE instead:
+ *
+ *  - `DuplicatePackageResponseSchema` DOES exist
+ *    (`packages/spec/src/api/package-lifecycle.zod.ts`) and the route IS bound
+ *    to it (`packages/runtime/src/route-ledger.ts`). But it is a describe-only
+ *    TRANSCRIPTION of the inline return above: its `failed[]` element declares
+ *    exactly `type`, `name` and `error` — **no `issues`**, and no `code`.
+ *  - `PublishPackageDraftsResponseSchema`'s `failed[]`
+ *    (`packages/spec/src/api/protocol.zod.ts`) DOES declare
+ *    `issues: z.array(RuntimeAuthoringIssueSchema).optional()`. That DECLARED
+ *    channel is what #10524 / #10895 trimmed the message against.
+ *
+ * ⇒ The verdict is unchanged and the axis is sharper: #10524's order —
+ * declare a structured channel, and only then trim — is still unsatisfied
+ * here, because what row 6 lacks is a declared `issues`, not a schema. The
+ * schema's existence does not supply the missing channel; it FREEZES its
+ * absence into a published, route-bound surface. That RAISES the bar rather
+ * than lowering it: declaring `issues` here now moves a spec schema carrying
+ * its own conformance pin (`packages/spec/src/api/package-lifecycle.test.ts`)
+ * as well as the inline producer type, and is deliberately NOT part of this
+ * card.
+ *
+ * ⚠️ The same expired sentence still stands at the RAISE SITE, in
+ * `protocol.ts`'s comment on the 409 refusal. Filed as #16125 and deliberately
+ * not touched here — that file was held by another in-flight claim.
  *
  * ⚠️ Row 6's reachability was MEASURED, not argued, and the obvious first
  * attempt says the wrong thing: a plain duplicate re-namespaces every object

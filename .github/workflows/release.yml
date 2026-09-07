@@ -387,6 +387,12 @@ jobs:
       #                                 nothing to do cannot be observed working.
       #     check:template-version-sync the template stamper's, for the same
       #                                 reason.
+      #     check:release-index-currency-sync
+      #                                 the release-index stamper's (#15332), for the
+      #                                 same reason again — on a train whose index is
+      #                                 already current it rewrites nothing, and a
+      #                                 rewriter with nothing to do cannot be observed
+      #                                 working.
       #     check:nul-bytes             lint.yml's one UNCONDITIONAL gate whose
       #                                 corpus is every byte in the tree. The 76
       #                                 generated CHANGELOGs are the only prose
@@ -539,13 +545,30 @@ jobs:
             exit 1
           fi
 
-          # Same three filters cut-rc.yml applies to the same surface: the fixed
-          # release paths by pattern, then the two declared lists by WHOLE-LINE
-          # EXACT match, so neither derived filter can accept a path its
-          # declaration does not name and neither needs regex-escaping.
+          # The release-index surface the currency stamper writes, on the same terms
+          # again: resolved from `syncedPaths()` in the rewriter, which derives it
+          # from `INDEX_PATH` in the gate whose finding it clears. Third rewriter,
+          # third resolved list, zero restated literals.
+          INDEX_LIST="${RUNNER_TEMP}/post-version-release-index-surfaces.txt"
+          if ! node --input-type=module \
+                 -e 'import { syncedPaths } from "./scripts/sync-release-index-currency.mjs"; for (const p of syncedPaths()) console.log(p);' \
+                 > "${INDEX_LIST}"; then
+            echo "::error::could not resolve syncedPaths() from scripts/sync-release-index-currency.mjs, so the release-index half of the post-version surface is unknown. Refusing to call this tree validated."
+            exit 1
+          fi
+          if [ ! -s "${INDEX_LIST}" ]; then
+            echo "::error::syncedPaths() in scripts/sync-release-index-currency.mjs resolved EMPTY, so the release index the version pass rewrites would read as an unexpected path. Refusing to call this tree validated."
+            exit 1
+          fi
+
+          # Same four filters cut-rc.yml applies to the same surface: the fixed
+          # release paths by pattern, then the three declared lists by WHOLE-LINE
+          # EXACT match, so no derived filter can accept a path its declaration
+          # does not name and none needs regex-escaping.
           UNEXPECTED="$(grep -vE '(^|/)package\.json$|(^|/)CHANGELOG\.md$|^\.changeset/|^packages/spec/src/kernel/protocol-version\.ts$' "${MOVED_FILE}" \
             | grep -vxF -f "${TEMPLATE_LIST}" \
-            | grep -vxF -f "${SURFACE_LIST}" || true)"
+            | grep -vxF -f "${SURFACE_LIST}" \
+            | grep -vxF -f "${INDEX_LIST}" || true)"
           if [ -n "${UNEXPECTED}" ]; then
             printf '%s\n' "${UNEXPECTED}" | sed 's/^/::error::  unexpected: /'
             echo "::error::the version pass wrote outside the reviewed post-version surface (paths above). This is the treadmill guard: a new version-time output must arrive together with the gate that judges it. Add the surface to the declaration its rewriter reads, and its gate to the content half below — deliberately, in one reviewed diff."
@@ -591,6 +614,7 @@ jobs:
           run_gate pnpm check:docs-image-tag
           run_gate pnpm check:docs-image-tag-sync
           run_gate pnpm check:template-version-sync
+          run_gate pnpm check:release-index-currency-sync
           run_gate pnpm check:nul-bytes
           run_gate pnpm check:release-notes
           run_gate pnpm check:release-page-status
@@ -1224,10 +1248,47 @@ jobs:
 
           # `changeset publish` skips versions already on the registry, so a
           # re-dispatch over a partially-published release is a repair, not a
-          # duplicate. What is NOT optional is that the version is on npm when
+          # duplicate. What is NOT optional is that EVERY package is on npm when
           # this step ends.
-          if ! npm view "@objectstack/cli@$VERSION" version >/dev/null 2>&1; then
-            echo "::error::publish ran but @objectstack/cli@$VERSION is still not on npm"
+          #
+          # ⚠️ This checks what happens AFTER a publish, never WHETHER one runs.
+          # The gating above it — `environment: release`, the `publish-pending`
+          # predicate and its parenthesisation, `force`'s dispatch-only
+          # semantics — is the "ONLY A HUMAN PUBLISHES" invariant and is not
+          # this check's business.
+          #
+          # It used to be one `npm view` of @objectstack/cli, and #15321 is the
+          # two ways that failed on the 17.3.0 release, which had succeeded
+          # completely:
+          #
+          #   ① It raced the registry. npm committed cli@17.3.0 at 10:53:25.108
+          #      and this read at 10:53:32 — seven seconds later — and got an
+          #      absence. The write path and the CDN-fronted read path are
+          #      eventually consistent; a single shot immediately after a
+          #      69-package burst bets the release on how fast reads settle.
+          #      scripts/release-verify-npm.mjs retries with bounded backoff for
+          #      15 minutes, derived from that release's own npm `time` field:
+          #      the last package (@objectstack/runtime) committed 7m07s after
+          #      the first read.
+          #
+          #   ② It looked at 1 package of 69. Had a package genuinely failed to
+          #      publish, this step could not have seen it — and the false red
+          #      on `cli` would have MASKED it. The verifier now derives the
+          #      whole publishable set from the workspace (never a transcribed
+          #      list) and names, on failure, exactly which packages are absent,
+          #      so the `force` repair dispatch has something to act on.
+          #
+          # ⛔ It still fails CLOSED. The retry absorbs LATENCY, never absence:
+          # a package still missing when the budget is spent exits non-zero, and
+          # so does a registry that could not be read at all. No `|| true`, no
+          # downgrade to a warning — the value of this step is that it reds.
+          # `published=true` below is written only on its success.
+          #
+          # `$VERSION` is handed over as RELEASE_VERSION — the spelling the two
+          # steps below already use for the same value — so the verifier refuses
+          # outright if the workspace it derives targets from disagrees with the
+          # version this run was approved for.
+          if ! RELEASE_VERSION="$VERSION" node scripts/release-verify-npm.mjs; then
             exit 1
           fi
           echo "published=true" >> "$GITHUB_OUTPUT"

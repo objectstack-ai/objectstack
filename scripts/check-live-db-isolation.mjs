@@ -214,8 +214,8 @@ const SOLE_INTERPOLATION = /^\$\{\s*([A-Za-z_$][\w$]*)\s*\}$/;
  * Source with block and line comments BLANKED -- replaced space-for-space
  * rather than deleted, so prose is never a hit and the line numbers this gate
  * reports are still the line numbers in the real file. Deleting the comments
- * was the first spelling and it reported `…live-mysql.test.ts:45` for a
- * statement that lives on line 81; a gate that points at the wrong line is a
+ * was the first spelling and it reported the live-mysql isolation test at line
+ * 45 for a statement that lives on line 81; a gate that points at the wrong line is a
  * gate the next author stops believing.
  */
 export function codeOf(source) {

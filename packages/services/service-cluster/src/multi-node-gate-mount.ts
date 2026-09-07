@@ -66,6 +66,18 @@ import { hasMultiNodeGate } from './multi-node-gate.js';
  * A carrier's obligation is: **register the gate as a side effect of module
  * load** (`registerMultiNodeGate` at module scope), so that being imported —
  * by any route — is sufficient to mount it.
+ *
+ * ⚠️ `@objectstack/organizations` is ONE NAME over TWO packages since ADR-0132:
+ * the framework publishes an Apache-2.0 package of that name and the commercial
+ * repo keeps a private licence-gated subclass of it, each resolved from the
+ * manifest that declares it. Only the commercial one carries the gate, and that
+ * asymmetry is deliberate (ADR-0132 boundary 2 — the open package must not
+ * acquire the carrier). What changed for an OPEN install is the DIAGNOSTIC and
+ * nothing else: this carrier's import used to fail, recording `unavailable`, and
+ * now succeeds while registering nothing, recording `loaded-without-gate`. Both
+ * leave `registered: false`, so the gate's fail-closed default refuses a
+ * multi-node verdict exactly as before. ⛔ Do not "repair" the new outcome by
+ * teaching the open package to register a gate.
  */
 export const MULTI_NODE_GATE_CARRIER_PACKAGES: readonly string[] = Object.freeze([
     '@objectstack/security-enterprise',

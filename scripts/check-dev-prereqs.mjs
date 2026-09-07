@@ -124,6 +124,13 @@
  *       so; the declarations may not be. This gate has never probed `.d.ts`
  *       (dev boot needs JS), and AGENTS.md §9 already names the flag as the one
  *       that cannot serve `gen:api-surface`. Recorded, not silently inherited.
+ *       STILL TRUE OF THIS GATE, and it stays that way: `pnpm dev` boots JS, so
+ *       narrowing THIS verdict on account of the declarations would be a false
+ *       red on the documented fast local build. What changed is that the hole is
+ *       no longer unattended — `--stamp` now writes a SECOND file next door,
+ *       `dist/.build-input-hash-dts`, which it skips under this flag exactly so
+ *       that a `.d.ts` reader can tell the two builds apart. Nothing here reads
+ *       it; see DTS_STAMP_BASENAME and `declarationStampState` below.
  *     - A HAND-EDITED dist. The hash covers inputs, not outputs. Nothing here
  *       can see someone editing `dist/index.mjs` directly, and nothing should
  *       have to.
@@ -232,11 +239,19 @@
  *      layout, an amplifier or its build inputs could not be read (a gate that
  *      cannot enumerate members must fail loudly, not pass vacuously — #4690)
  */
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
+import {
+  CoverageError,
+  DTS_STAMP_BASENAME,
+  STAMP_BASENAME,
+  buildInputHash,
+  inspectDeclarationStamp,
+  posixRel,
+  rel,
+} from './build-input-hash.mjs';
 import {
   WorkspaceEnumerationError,
   selfTest as workspaceEnumeratorSelfTest,
@@ -277,11 +292,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '14. Every other way the freshness half can lose its subject is red too.': 4,
   '15. The hash reads the inputs it claims to. A global build input (from': 3,
   '16. Existence outranks freshness: a workspace that is not built reports': 4,
+  '17. The DECLARATIONS stamp (#14985), whose only job is to be written by a': 9,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 16;
+const SELF_TEST_BATTERY_FLOOR = 17;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -301,17 +317,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  */
 const AMPLIFIERS = ['packages/spec'];
 
-/** Where a build records the hash of the inputs it was built from. */
-const STAMP_BASENAME = '.build-input-hash';
-
 /** What an amplifier's build script must contain for its stamp to be maintained. */
 const STAMP_INVOCATION = 'check-dev-prereqs.mjs --stamp';
-
-/** Per-package build configuration that changes the output without being under src/. */
-const PACKAGE_BUILD_CONFIG = ['package.json', 'tsconfig.json', 'tsconfig.build.json', 'tsup.config.ts', 'tsdown.config.ts'];
-
-/** Thrown for conditions that must fail the gate rather than shrink its coverage. */
-class CoverageError extends Error {}
 
 /**
  * Workspace member directories, from pnpm-workspace.yaml — the workspace's own
@@ -352,95 +359,6 @@ function declaredEntry(pkg) {
 }
 
 const isBuildArtifact = (entry) => /(^|\/)dist\//.test(entry.replace(/^\.\//, ''));
-const rel = (root, p) => path.relative(root, p) || '.';
-const posixRel = (root, p) => rel(root, p).split(path.sep).join('/');
-
-/**
- * Global build inputs, read from turbo.json's own `globalDependencies` rather
- * than restated here: the build's declaration of what invalidates every package
- * is the freshness definition's too, and a new entry there is covered without
- * anyone remembering this file. Only literal paths are understood — a glob would
- * silently hash fewer inputs, so it throws.
- */
-function globalBuildInputs(root) {
-  const file = path.join(root, 'turbo.json');
-  if (!existsSync(file)) throw new CoverageError(`turbo.json is missing — cannot determine the build's global inputs, so freshness cannot be judged.`);
-  let cfg;
-  try {
-    cfg = JSON.parse(readFileSync(file, 'utf-8'));
-  } catch (err) {
-    throw new CoverageError(`turbo.json is not readable as JSON (${err.message}) — cannot determine the build's global inputs.`);
-  }
-  const declared = cfg.globalDependencies ?? [];
-  if (!Array.isArray(declared)) throw new CoverageError(`turbo.json 'globalDependencies' is not an array — cannot determine the build's global inputs.`);
-  return declared.map((entry) => {
-    if (typeof entry !== 'string' || entry.includes('*') || entry.startsWith('$')) {
-      throw new CoverageError(
-        `turbo.json globalDependencies entry ${JSON.stringify(entry)} is not a shape this gate can hash.\n` +
-          `  Teach scripts/check-dev-prereqs.mjs the new shape — hashing fewer inputs than the build\n` +
-          `  reads would make the freshness verdict pass vacuously.`,
-      );
-    }
-    return path.join(root, entry);
-  });
-}
-
-/** Every file under `dir`, sorted, node_modules excluded. */
-function filesUnder(dir, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue;
-    const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) filesUnder(p, out);
-    else if (entry.isFile()) out.push(p);
-  }
-  return out;
-}
-
-/**
- * sha256 over a package's build inputs — the freshness definition, in one place,
- * used by BOTH `--stamp` (at build time) and the gate (at boot time). They must
- * be the same function or the comparison means nothing, which is why the stamper
- * lives in this file rather than in a script of its own.
- *
- * Framing is length-prefixed (`<path>:<bytes>` then the bytes), so no separator
- * can be forged by a file's contents and no control character is needed to
- * delimit records.
- */
-function buildInputHash(root, pkgDir) {
-  const src = path.join(pkgDir, 'src');
-  if (!existsSync(src)) {
-    throw new CoverageError(`${posixRel(root, pkgDir)}/src does not exist, so there is nothing to hash — this gate cannot vouch for its dist.`);
-  }
-  const inputs = [...filesUnder(src)];
-  for (const name of PACKAGE_BUILD_CONFIG) inputs.push(path.join(pkgDir, name));
-  inputs.push(...globalBuildInputs(root));
-
-  const seen = new Set();
-  const records = [];
-  for (const file of inputs) {
-    const key = posixRel(root, file);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    records.push([key, file]);
-  }
-  records.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
-
-  const hash = createHash('sha256');
-  for (const [key, file] of records) {
-    // An ABSENT input is hashed as absent rather than skipped: creating a
-    // tsconfig where there was none changes how the package builds, so it has
-    // to change the hash.
-    if (!existsSync(file)) {
-      hash.update(`${key}:absent\n`);
-      continue;
-    }
-    const bytes = readFileSync(file);
-    hash.update(`${key}:${bytes.length}\n`);
-    hash.update(bytes);
-  }
-  return hash.digest('hex');
-}
-
 /**
  * The freshness verdict for the declared amplifiers. Every way of NOT being able
  * to answer throws (#4690): a listed package that is not a workspace member, has
@@ -618,8 +536,24 @@ function stamp(root, cwd, amplifiers = AMPLIFIERS) {
   const hash = buildInputHash(root, dir);
   writeFileSync(path.join(dist, STAMP_BASENAME), `${hash}\n`);
   console.log(`✓ ${relDir}/dist/${STAMP_BASENAME} ← ${hash.slice(0, 16)}…`);
+
+  // The declarations half, written ONLY by a build that actually emitted them.
+  // Under OS_SKIP_DTS=1 the previous file is left exactly as it was: whatever
+  // `.d.ts` are on disk still came from the build that wrote it, so the old
+  // digest is the true one and refreshing it here is precisely the false green
+  // this stamp exists to avoid.
+  if (process.env.OS_SKIP_DTS) {
+    console.log(
+      `ℹ ${relDir}/dist/${DTS_STAMP_BASENAME} left as-is — OS_SKIP_DTS=1 skipped the declaration pass,\n` +
+        `  so this build cannot vouch for ${relDir}/dist/**/*.d.ts.`,
+    );
+    return 0;
+  }
+  writeFileSync(path.join(dist, DTS_STAMP_BASENAME), `${hash}\n`);
+  console.log(`✓ ${relDir}/dist/${DTS_STAMP_BASENAME} ← ${hash.slice(0, 16)}…`);
   return 0;
 }
+
 
 /**
  * --self-test — a gate only ever observed green is indistinguishable from a gate
@@ -891,6 +825,46 @@ function selfTest() {
     const halfRed = capture(() => report(v));
     expect('precedence/verdict-lines', halfRed.text.split('\n').filter((l) => l.startsWith('✗')).length, 1);
     expect('precedence/is-the-build-one', halfRed.text.includes('The workspace is not built'), true);
+
+    // 17. The DECLARATIONS stamp (#14985), whose only job is to be written by a
+    //     build that emitted `.d.ts` and NOT by one that skipped them. Nothing
+    //     in this file reads it — `distIsStale` does — so its whole value is
+    //     that OS_SKIP_DTS=1 leaves it alone. A stamp written unconditionally
+    //     here would restore, one file over, exactly the false green the mtime
+    //     rule was chosen over `.build-input-hash` to avoid.
+    battery('17. The DECLARATIONS stamp (#14985), whose only job is to be written by a');
+    const dts = amplifierFixture('dts');
+    const dtsSpec = path.join(dts, 'packages/spec');
+    capture(() => stamp(dts, dtsSpec, ['packages/spec']));
+    expect('dts/full-build-stamps', inspectDeclarationStamp(dts, dtsSpec).state, 'match');
+    expect('dts/reports-both-digests', inspectDeclarationStamp(dts, dtsSpec).recorded, buildInputHash(dts, dtsSpec));
+
+    write(dts, 'packages/spec/src/index.ts', 'export const token = 3;\n');
+    const moved = inspectDeclarationStamp(dts, dtsSpec);
+    expect('dts/source-edit-is-mismatch', moved.state, 'mismatch');
+    expect('dts/mismatch-shows-both', moved.recorded !== moved.actual && moved.actual !== null, true);
+
+    // The whole point: re-stamping under the flag must NOT adopt the new digest.
+    const previousFlag = process.env.OS_SKIP_DTS;
+    try {
+      process.env.OS_SKIP_DTS = '1';
+      capture(() => stamp(dts, dtsSpec, ['packages/spec']));
+    } finally {
+      if (previousFlag === undefined) delete process.env.OS_SKIP_DTS;
+      else process.env.OS_SKIP_DTS = previousFlag;
+    }
+    expect('dts/skip-dts-does-not-refresh', inspectDeclarationStamp(dts, dtsSpec).state, 'mismatch');
+    // …while the JS half, which that build really did re-emit, is refreshed.
+    expect('dts/skip-dts-still-stamps-js', inspect(dts, ['packages/spec']).freshness[0]?.state, 'fresh');
+
+    // No evidence and unreadable evidence are the same answer, and it is never
+    // an acquittal (#4690).
+    const noDts = amplifierFixture('no-dts-stamp');
+    const noDtsSpec = path.join(noDts, 'packages/spec');
+    expect('dts/absent-is-unstamped', inspectDeclarationStamp(noDts, noDtsSpec).state, 'unstamped');
+    expect('dts/absent-computes-nothing', inspectDeclarationStamp(noDts, noDtsSpec).actual, null);
+    write(noDts, 'packages/spec/dist/' + DTS_STAMP_BASENAME, 'not-a-hash\n');
+    expect('dts/garbled-is-unstamped', inspectDeclarationStamp(noDts, noDtsSpec).state, 'unstamped');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -953,7 +927,7 @@ function selfTest() {
     console.error('');
     return 1;
   }
-  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (16 cases), plus the shared workspace enumerator.');
+  console.log('✓ check:dev-prereqs --self-test — every verdict reachable, exclusions and freshness coverage pinned (17 cases), plus the shared workspace enumerator.');
   selfTestReachedVerdict = true;
   return 0;
 }

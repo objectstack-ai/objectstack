@@ -15,8 +15,14 @@
  * synthesis live in ONE place now (`@objectstack/core`), shared with the REST
  * server, so the two entry points can never drift on authorization again.
  *
- * Always resolves — never throws. Anonymous requests yield
- * `{ isSystem: false, positions: [], permissions: [] }`.
+ * Resolves for every request it can ANSWER — anonymous requests yield the
+ * guest envelope (`{ isSystem: false, positions: [], permissions: [] }`) —
+ * and throws `AuthzStoreUnavailableError` (503) for the one class of fault
+ * that leaves the answer undetermined: an authorization INPUT that exists and
+ * could not be read (a permission-store read that failed, #13279; a `tenancy`
+ * service that is registered and failed to build, #13906 decision 1 A). The
+ * dispatcher's net (`HttpDispatcher.resolveRequestScope`) re-raises exactly
+ * that class and degrades everything else to anonymous, as before.
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -30,6 +36,13 @@ import {
   assembleExecutionContextOrGuest,
   type EntryLocalization,
   effectiveTenancyPosture,
+  // [#13906 decision 1 A] The loud answer for an authorization input that
+  // exists and could not be read, and the REGISTRY's own "never registered"
+  // brand that lets the tenancy seam absorb the supported no-tenancy
+  // composition while every other rejection stays loud. Never message text
+  // (#13905).
+  AuthzStoreUnavailableError,
+  isServiceNotRegisteredError,
 } from '@objectstack/core';
 
 /**
@@ -168,11 +181,35 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // Layer 0 wall, so admission and the wall can never disagree. Deliberately not
   // `OS_TENANCY_POSTURE`: that is what the operator ASKED for, and under
   // ADR-0093 D4/D5 a requested-but-unenforceable wall resolves to `single`.
-  // Absent service ⇒ undefined ⇒ no posture-conditional refusal.
+  //
+  // [#13906 decision 1 A, at this door] `undefined` is not a neutral value
+  // here: `resolveAuthzContext` gates BOTH posture-conditional API-key
+  // refusals (`organization_required`, `organization_membership_ended`) on a
+  // PRESENT posture, so "no posture" means "no wall". The seam used to resolve
+  // EVERY rejection to that — and a `tenancy` service that was registered and
+  // FAILED to build read as a deployment with no tenancy at all. Two facts,
+  // told apart by the registry's own brand, the way `rest-server.ts` already
+  // does on both of its wirings:
+  //
+  //  - never registered → branded → `undefined`, quiet. The supported
+  //    no-tenancy composition: no wall exists, and refusing there would break
+  //    every single-organization embedder.
+  //  - registered and FAILED to build → unbranded → re-raised as the same loud
+  //    answer a failed permission-store read gives (#13279): the posture is an
+  //    authorization INPUT, so admission was never decided. A posture that
+  //    could not be READ is not a posture that is ABSENT.
+  //
+  // A facade that resolves `undefined` instead of rejecting (the dispatcher's
+  // capability PROBE, `resolveService`) still reads as absent — which is why
+  // `HttpDispatcher.resolveRequestScope` hands THIS read the classified
+  // rejection rather than the probe's collapsed answer.
   let tenancyPosture;
   try {
     tenancyPosture = effectiveTenancyPosture(await opts.getService('tenancy'));
-  } catch {
+  } catch (err) {
+    if (!isServiceNotRegisteredError(err)) {
+      throw new AuthzStoreUnavailableError('tenancy', err);
+    }
     tenancyPosture = undefined;
   }
 

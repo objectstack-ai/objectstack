@@ -233,11 +233,13 @@ export const GetMetaItemsRequestSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name (e.g., "object", "plugin")'),
   packageId: z.string().optional().describe('Optional package ID to filter items by'),
   organizationId: z.string().optional().describe(
-    'Organization (tenant) scope for the read. Selects the org partition in the '
-    + 'ADR-0005 overlay read order — org overlay wins over env-wide overlay wins '
-    + 'over packaged artifact — so it decides which tenant\'s customization rows '
-    + 'are merged into the list. Absent = environment-wide read: only env-level '
-    + 'overlays apply and no org partition is consulted.',
+    'Organization (tenant) scope for the read. When an org partition applies, '
+    + 'this selects it in the ADR-0005 overlay read order — org overlay wins '
+    + 'over env-wide overlay wins over packaged artifact — so it decides which '
+    + 'tenant\'s customization rows are merged into the list. Supplying a value '
+    + 'does not by itself guarantee an org partition is consulted; where none '
+    + 'applies, and whenever it is absent, the read is environment-wide and '
+    + 'only env-level overlays apply.',
   ),
   previewDrafts: z.boolean().optional().describe(
     'Draft-visibility switch (ADR-0033 draft-overlay preview): when true, '
@@ -1973,7 +1975,8 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied fields that were LEGALLY stripped ' +
     'before the record was written — a non-system create cannot seed a static `readonly` ' +
-    'column (ingress strip), so those keys are dropped and the field re-derives its ' +
+    'column (the strip runs inside `engine.insert`, after the `beforeInsert` hooks, ' +
+    '`isSystem`-gated), so those keys are dropped and the field re-derives its ' +
     'default. Present ONLY when ≥1 field was dropped; the create still succeeded without ' +
     'them (status/success semantics unchanged). REST additionally surfaces this as the ' +
     '`X-ObjectStack-Dropped-Fields` response header. Optional — omit-when-empty keeps the ' +
@@ -1993,9 +1996,11 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
  * stable and server-produced): `cloneData` builds exactly
  * `{ object, id, sourceId, record }` — the structural sibling of
  * {@link CreateDataResponseSchema} plus `sourceId`. A clone IS a create (the
- * copy runs the insert path: engine-owned columns re-derived, the #3043
- * readonly ingress strip applied, internal fields omitted from the response,
- * #7823) — but unlike `createData` the producer emits no `droppedFields`
+ * copy runs the insert path: engine-owned columns re-derived, the static
+ * `readonly` strip applied inside `engine.insert` for a non-system caller —
+ * the 2026-09-03 ruling, #14147; the #3043 ingress copy is deleted — and
+ * internal fields omitted from the response, #7823) — but unlike `createData`
+ * the producer emits no `droppedFields`
  * member, so none is declared: a key the producer never writes would be a
  * promise conformance cannot measure.
  */
@@ -2122,6 +2127,30 @@ export const UpdateDataResponseSchema = lazySchema(() => z.object({
 
 /**
  * Delete Data Request
+ *
+ * [#13852] The request contract of {@link DataProtocol.deleteData} — its
+ * declared parameter type is the `DeleteDataRequest` alias below. That
+ * protocol boundary is this schema's whole job: it is consumed statically, by
+ * the compiler, and parsed at runtime nowhere in the tree. A grep that finds
+ * "exported, documented, zero `safeParse` call sites" is reading the wrong
+ * surface — #13852 is that grep, filed once already.
+ *
+ * It deliberately carries no REST-door `requestSchema` (#3899):
+ * `DELETE /api/v1/data/:object/:id` reads no body — `object` and `id` are
+ * path-bound, `expectedVersion` rides `?expectedVersion` / `If-Match` — so a
+ * schema on that door would promise a validation nothing can violate. The
+ * catalog entry in `plugin-rest-api.zod.ts` says so in place of the key, and
+ * the pin in `plugin-rest-api.schema-refs.test.ts` ("requestSchema appears
+ * only on body-carrying methods") goes red if one is added. ⛔ Do not wire
+ * one, and do not retire this schema either — it types a shipped interface
+ * method.
+ *
+ * Drift between this schema and that door is caught at COMPILE time, not by a
+ * runtime parse: the door's request literal is typed against
+ * `DeleteDataRequest` (`ServerScopedDataRequest` in
+ * `packages/rest/src/rest-server.ts`, #15866 / PR #16071), so a field added
+ * here as REQUIRED reddens that file at build, naming the route that would
+ * otherwise have gone on not sending it.
  */
 export const DeleteDataRequestSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
@@ -2311,8 +2340,8 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   records: z.array(z.record(z.string(), z.unknown())).describe('Created records'),
   count: z.number().describe('Number of records created'),
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
-    'Write-observability: caller-supplied `readonly` fields the ' +
-    'create-ingress strip removed before the rows were written. AGGREGATED across the batch ' +
+    'Write-observability: caller-supplied `readonly` fields the in-engine create-side ' +
+    'strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch ' +
     '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
     'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +
     'drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +

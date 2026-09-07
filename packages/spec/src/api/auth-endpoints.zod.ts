@@ -284,7 +284,23 @@ export const DeviceRequestResponseSchema = lazySchema(() => z.object({
   code: z.string().describe('Short-lived device code used for polling'),
   verificationUrl: z.string().url().describe('URL the user should open in a browser'),
   expiresAt: z.string().datetime().describe('ISO timestamp when the code expires'),
-  interval: z.number().default(2).describe('Recommended polling interval in seconds'),
+  // Renamed from `interval` (#15677, #14478 ruling B): the unit lived only in
+  // the describe prose. Verified NOT an RFC 8628 mirror before renaming —
+  // this schema already renames every RFC field it carries (`code` is not
+  // `device_code`, `verificationUrl` is not `verification_uri`, `expiresAt` is
+  // not `expires_in`, and carries an ISO-8601 string where the RFC has a
+  // relative lifetime), so it mirrors no standard as a set and cannot claim
+  // the standard fixes this one name.
+  intervalSeconds: z.number().default(2).describe('Recommended polling interval in seconds'),
+
+  /** Tombstone for the rename above (#15677, ruling B on #14478). */
+  interval: retiredKey(
+    '`DeviceRequestResponse.interval` was renamed to `intervalSeconds` in @objectstack/spec 17 — '
+    + 'the polling cadence is a duration and its unit lived only in the '
+    + 'describe prose. Rename the key to `intervalSeconds`; the value (seconds) is unchanged. '
+    + 'This response is not an RFC 8628 device-authorization payload — it renames every RFC '
+    + 'field it carries — so the standard does not fix the bare spelling here.',
+  ),
 }));
 
 /**

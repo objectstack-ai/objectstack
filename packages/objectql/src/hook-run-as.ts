@@ -98,6 +98,8 @@ export class HookUnscopedDataAccessError extends Error {
   override readonly name = 'HookUnscopedDataAccessError';
   readonly code = HOOK_UNSCOPED_DATA_ACCESS_CODE;
   readonly status = HOOK_UNSCOPED_DATA_ACCESS_STATUS;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = HOOK_UNSCOPED_DATA_ACCESS_STATUS;
   readonly hook: string;
   readonly object?: string;
   readonly event?: string;

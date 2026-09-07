@@ -968,6 +968,9 @@
     row that has no registry presence (durable-only) carries no verdict, and the
     REST detail door's database-first row does not either — the registry item is
     the only carrier, by design.
+  - **Correction (2026-09-07):** no package of a compiled artifact is
+    scope-less — `ManifestSchema` defaults `scope` to `project`; the
+    "scope-less `type: module`" clause above is withdrawn, see #14803 / #16122.
 - 95464ed: fix(metadata-protocol): the three recovery doors run the ADR-0094 mutation projector
   
   `rollbackMetaItem`, both limbs of `revertCommit`, and `deleteMetaItem`'s

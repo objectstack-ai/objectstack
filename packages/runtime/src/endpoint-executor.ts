@@ -485,7 +485,7 @@ async function executeObjectOperation(
  * applied to the `200`-wrapped FAILURE body and could present it as data. The
  * policy chain is upstream of this function and is untouched: a refusal here
  * is reached only by a request that already passed `rateLimit` /
- * `authRequired`, and `Cache-Control` from `cacheTtl` rides success only,
+ * `authRequired`, and `Cache-Control` from `cacheTtlSeconds` rides success only,
  * again on the same `status < 400` test.
  */
 async function executeFlow(
