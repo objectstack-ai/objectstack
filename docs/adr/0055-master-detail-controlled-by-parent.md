@@ -1,6 +1,6 @@
 # ADR-0055: Master-detail "controlled by parent" permissions — derived access via pre-resolved master-id membership
 
-**Status**: Accepted (2026-06-19) — implemented in this PR (P0–P2)
+**Status**: Accepted (2026-06-19) — implemented in this PR (P0–P2) · **Amended** (2026-09-07, #11082 / PR #11183 — the "Single-level only in v1" limit under Consequences and the "Transitive nested master-detail chains" **Non-goal** are both **reversed**: since `@objectstack/plugin-security` 17.3.0 (merged 2026-08-23) the read derivation and the write gate compose `controlled_by_parent` across a chain, bounded by a cycle guard and a cost ceiling that both fail **closed**. Nothing else in this record changes — §1–§4, the mechanism choice, the set-size limit and the share-table non-goal all stand. See **"Amendment (2026-09-07, #11082): transitive chains compose — the single-level non-goal is reversed"** at the end.)
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0054](./0054-runtime-proof-for-authorable-surface.md) (prove-it-runs)
 **Surfaced by**: an audit of master-detail permission semantics — `OWDModel.controlled_by_parent` is **declared but unenforced** (zero runtime consumers; not reachable through the object's `sharingModel` enum; the RLS compiler is relationship-blind). This is *false compliance* (ADR-0049) and *unproven liveness* (ADR-0054).
@@ -73,6 +73,7 @@ A `@objectstack/dogfood` RLS proof, bound in the liveness ledger on `object.shar
   - **Set-size ceiling.** A user with very many accessible masters produces a large `IN (...)`. Acceptable for typical cardinalities; **large-tenant scale (≫ thousands of masters) is a known limit** — a future share-table/join mechanism would replace the id list. v1 documents this, not solves it.
   - **Per-request resolution cost.** One extra master-id query per controlled_by_parent object per request (cached within the request).
   - **Single-level only in v1.** Nested master-detail chains (a detail whose master is itself a detail) are **not** traversed transitively in v1.
+    ⚠️ **Amended 2026-09-07 — this limit was lifted on 2026-08-23** by #11082 (PR #11183), released in `@objectstack/plugin-security` 17.3.0. The bullet is kept rather than deleted because it was true, and correctly recorded, **for v1**; what changed is the version it describes. ⛔ It is no longer a statement of the **enforced boundary** — both halves walk the chain now. Read the Amendment at the end before deriving any invariant from this line.
 
 ## Phasing
 
@@ -83,7 +84,7 @@ A `@objectstack/dogfood` RLS proof, bound in the liveness ledger on `object.shar
 ## Non-goals
 
 - **Large-scale share-table/join** for huge master sets (v1 uses the id-set; flagged as a future limit).
-- **Transitive nested master-detail chains** (v1 is single-level).
+- **Transitive nested master-detail chains** (v1 is single-level). ⚠️ **Reversed 2026-08-23** by #11082 (PR #11183) — kept as the record of a decision that was taken and later overturned, ⛔ not as a live non-goal. Chains now compose, bounded and fail-closed; see the Amendment at the end.
 - **A permission-model rewrite** — explicitly rejected; this closes one gap on the existing engine.
 - **ServiceNow-style scripted/per-row ACL scripts** — over-engineering for an AI-authored platform; the four-form fail-closed compiler is the deliberate ceiling.
 - **Client-side enforcement** — authorization is server-enforced; UI affordances are presentation (ADR-0054 §Non-goals).
@@ -92,3 +93,59 @@ A `@objectstack/dogfood` RLS proof, bound in the liveness ledger on `object.shar
 
 - **Rewrite the permission model against a mainstream blueprint.** Rejected: the model is already Salesforce-shaped; a rewrite re-opens hard-won invariants (the #1994 by-id-write fix, org-scoping stripping, the fail-closed compiler) for no foundational gain. Gaps are enumerable and closable individually.
 - **(a) / (c) access-resolution mechanisms** — see §2 trade-off table.
+
+---
+
+## Amendment (2026-09-07, #11082): transitive chains compose — the single-level non-goal is reversed
+
+**What changed and when.** PR #11183 (card #11082) merged to `main` on 2026-08-23 — commit subject *fix(plugin-security): compose controlled_by_parent across a chain (#11082) (#11183)* — and shipped in `@objectstack/plugin-security` 17.3.0. Two statements in this record stopped describing the runtime that day:
+
+- **Consequences → Negative / limits (honest) → "Single-level only in v1."** — a statement of the **enforced limit**. It was true, and correctly recorded, for v1; it is now a dated record of v1, not a description of enforcement.
+- **Non-goals → "Transitive nested master-detail chains"** — a record of a **decision that was taken**. It is **reversed**.
+
+⛔ Neither was deleted. Deleting them would erase that the limit existed and that the non-goal was once chosen — the part of a decision record that cannot be reconstructed from the code, and the reason a reversed decision is written up as a reversal.
+
+### Why v1's limit was a defect, not an unfinished feature
+
+Below the first level the derivation was not enforced narrowly — it was not enforced **at all**. A `controlled_by_parent` detail whose master is *itself* `controlled_by_parent` was readable and writable **org-wide**, through two independent mechanisms:
+
+- **Read.** §2 composed the master's RLS filter with the master's ownership/share filter and nothing else. For a master that is itself derived, both halves answer "no restriction": the RLS half is `null`, because a derived object authors no policy — §1 says so ("The author writes **no RLS policy** for this") — and the sharing half is `null` too, because `packages/plugins/plugin-sharing/src/sharing-service.ts#effectiveSharingModel` maps `controlled_by_parent` to `public` and `packages/plugins/plugin-sharing/src/sharing-service.ts#buildReadFilter` opts out of every non-`private` model. Composed `null`, the master query ran as **system** with an empty predicate and returned **every master row**.
+- **Write.** §3's master gate asked `canEdit` on the master row, and `packages/plugins/plugin-sharing/src/sharing-service.ts#checkEdit` answers **`abstain`** for a `public`-mapped model. ⛔ `abstain` is not `deny`, so it answered `true` for every master row. The read-side fix does not reach this path: the two halves are separate mechanisms and are pinned separately.
+
+So a two-level chain was enforced at level one and open at level two, under metadata that reads as though it were narrowed. §1 forbids exactly that shape where it can see it — an unsatisfiable declaration "must not silently fall open" — and the chained case had slipped past it.
+
+### What both halves do now
+
+- **Read.** `packages/plugins/plugin-security/src/security-plugin.ts#computeControlledByParentFilter` AND-composes the master's **own** `controlled_by_parent` derivation as a third layer, resolved through **that same method**, so the recursive answer cannot drift from the top-level one. The master set is therefore point-for-point equal to what a direct read of the master returns **at every level** — the equality §2 established for one.
+- **Write.** `packages/plugins/plugin-security/src/security-plugin.ts#assertControlledByParentWrite` walks the chain hop by hop, running the same three master-edit legs — extracted verbatim as `packages/plugins/plugin-security/src/security-plugin.ts#assertMasterRowEditable` — on every hop until it reaches a master that governs its own rows. Each added refusal keeps the `403 PERMISSION_DENIED` envelope named for the **caller's own** object and operation, never for an ancestor the caller never asked about.
+
+**Cost.** The per-request resolution cost booked under Consequences is now paid **per hop** — one extra master-id query per `controlled_by_parent` object on the chain, bounded as below.
+
+### The two guards, and what the depth bound is NOT
+
+Both fail **closed**, and that is the load-bearing property: what they replace was a fall-open to "no restriction".
+
+- **Cycle guard.** Each walk carries the objects already being resolved on that branch and refuses to re-enter one (`A` mastered by `B`, `B` by `A`, or an object mastered by itself). Read side: the **empty master set**. Write side: **deny**.
+- **Depth bound.** `packages/plugins/plugin-security/src/security-plugin.ts#CBP_MAX_CHAIN_DEPTH`, currently `8`. At the bound the read derivation returns the **empty master set** and the write gate **denies**, each logging the chain it refused.
+
+⚠️ **The bound is not a supported chain length, and this record does not claim it is one.** The constant's own header is the authority on that framing and states it in as many words:
+
+> This is a COST ceiling, not a semantic rule, and it is deliberately not a "supported chain length".
+
+An ADR sentence reading the bound as "chains up to 8 levels are supported" would record something the code does not claim. Two consequences, both checkable:
+
+- **Termination does not depend on the bound.** The visited set grows strictly over a finite schema registry, so the cycle guard already guarantees termination. What the bound caps is **work**.
+- ⛔ **Overflow never widens.** A bound that fell open past its limit would reintroduce at depth 9 exactly the defect that was fixed at depth 2. That is why both arms of it deny.
+
+The value is not derivable from this tree; the constant's header records how it was chosen and is where a change to it is argued.
+
+### What is unchanged
+
+- The **mechanism** (§2's pre-resolved accessible-master-id set, zero RLS-compiler changes) and the **rule** (§3: editing a detail requires *edit* access to its master; reading requires *read* access) are unchanged. The walk runs §3's existing rule once per hop.
+- The **single-level case is byte-for-byte unchanged**, and this is ⛔ **not** a blanket refusal for chained declarations: a detail whose whole chain is reachable stays readable and writable.
+- The **set-size ceiling** limit and the **large-scale share-table/join** non-goal both stand. This amendment moves one bullet in each list, not both.
+- §1's spec contract is untouched: exactly one required `master_detail` field, no author-written RLS policy, fail closed.
+
+### Why this was worth amending rather than left to the code
+
+An ADR recording a **narrower** enforcement than the runtime performs errs in the safe direction for users and the **unsafe direction for reviewers**. Someone reviewing a later change to this surface derives the invariant from this record, and would have read the chain walk as a deviation from a documented single-level boundary — the concrete hazard being that they "restore" single-level behaviour believing they are fixing a drift, re-opening the org-wide read and write above. That is why the two statements are marked **in place** rather than left to be rediscovered — and why the read derivation's own header points back at this record, naming the scope line it closes and noting that the ADR is amended separately. This is that amendment.
