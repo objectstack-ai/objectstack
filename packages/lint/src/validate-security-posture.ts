@@ -12,7 +12,7 @@
  * | security-owd-alias            (error)   | ADR-0090 D4 canonical enum      |
  * | security-external-wider       (error)   | ADR-0090 D11 external ≤ internal|
  * | security-wildcard-vama        (error)   | ADR-0066 superuser wildcard     |
- * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors          |
+ * | security-anchor-high-privilege(error)   | ADR-0090 D5/D9 anchors — declared `everyone` suggestions (`isDefault: true`) only; a `guest`-bound set is outside a package-time linter's sight and is the bind-time gate's alone (#16110) |
  * | security-role-word            (error)   | ADR-0090 D3 vocabulary freeze — own function/registry entry since #8310 |
  * | security-book-audience-unknown-set(warn)| ADR-0046 §6.7 { permissionSet } |
  * | security-private-no-readscope (info)    | admin-intent mismatch class     |
@@ -26,6 +26,14 @@
  * BUT ONE mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
  * zod enum + fail-closed evaluator, D5/D9 anchor binding gate, D3 rename wave)
  * — the lint moves the failure from runtime-deny to author-time fix-it.
+ * `security-anchor-high-privilege` mirrors that gate for the one suggestion a
+ * package can actually declare (`isDefault: true` → the `everyone` anchor,
+ * `suggested-audience-bindings.ts`'s "the only declarable suggestion"); a set
+ * an operator binds to `guest` at install time is a decision ADR-0090 D9
+ * ("a package may suggest bindings … the admin confirms each individually")
+ * puts past authoring, so this rule is not — and cannot be — coverage for an
+ * app-authored anchor set bound to `guest` (#16110). That binding is held by
+ * the runtime's own `describeAnchorForbiddenBits(set, 'guest')` gate instead.
  *
  * The exception INVERTS that argument rather than weakening it.
  * `security-cbp-ambiguous-relation` has no runtime refusal to mirror precisely
@@ -531,6 +539,10 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
     // D5: an isDefault set is a SUGGESTED binding to the `everyone` anchor —
     // hold it to the anchor tier at author time (the runtime gate enforces the
     // same predicate at bind time; this moves the failure to the author).
+    // Scope: `isDefault: true` is the only declarable suggestion today — a set
+    // an operator binds to `guest` at install carries no author-time flag for
+    // this rule to key off, so that binding is outside what a package-time
+    // linter can see and is judged by the bind-time gate alone (#16110).
     if (ps.isDefault === true) {
       const offending = describeAnchorForbiddenBits(ps, 'everyone');
       if (offending) {
