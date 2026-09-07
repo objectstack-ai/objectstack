@@ -306,10 +306,15 @@ export function analyticsDateRangeRefusalMessage(input: unknown): string {
  * an explicit `[start, end]` window.
  *
  * @example
+ * <!-- os:check -->
  * ```ts
- * { dimension: 'created_at', granularity: 'day', dateRange: 'last_7_days' }
- * { dimension: 'created_at', granularity: 'month', dateRange: ['2023-01-01', '2023-01-31'] }
- * { dimension: 'created_at', dateRange: ['{30_days_ago}', '{today}'] }
+ * import type { AnalyticsQuery } from '@objectstack/spec/data';
+ *
+ * const timeDimensions: AnalyticsQuery['timeDimensions'] = [
+ *   { dimension: 'created_at', granularity: 'day', dateRange: 'last_7_days' },
+ *   { dimension: 'created_at', granularity: 'month', dateRange: ['2023-01-01', '2023-01-31'] },
+ *   { dimension: 'created_at', dateRange: ['{30_days_ago}', '{today}'] },
+ * ];
  * ```
  *
  * A value that is neither raises ONE issue at the field's own path with the
