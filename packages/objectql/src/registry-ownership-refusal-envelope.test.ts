@@ -30,7 +30,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { ObjectOwnershipConflictError, SchemaRegistry } from './registry.js';
+import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { OBJECT_OWNERSHIP_CONFLICT_CODE, ObjectOwnershipConflictError, SchemaRegistry } from './registry.js';
 
 const APP_PKG = 'app.myapp';
 const OTHER_PKG = 'app.otherapp';
@@ -154,5 +155,22 @@ describe('#14367 — the cross-package ownership refusal is an ADR-0112 envelope
     expect(refused).toBeUndefined();
     expect(kinds(r, 'myapp_invoice')).toEqual(['own', 'extend']);
     expect(r.getObjectOwner('myapp_invoice')?.packageId).toBe(APP_PKG);
+  });
+});
+
+describe('#16449 — the ownership refusal code is a member of the closed ADR-0112 vocabulary', () => {
+  it('OBJECT_OWNERSHIP_CONFLICT parses against ErrorCode, and 422 cannot have derived it', () => {
+    // The #16404 ruling: a code that ships in `dist` is the published face,
+    // door or no door. No door answers with this refusal on this tree (every
+    // path aborts boot or is caught below any HTTP boundary), so the ledger
+    // row changes no body — what it fixes is the face: `e.code` on the thrown
+    // value is a member of the union a consumer's `switch` is exhaustive over,
+    // and should a door ever answer with it, `error.code` carries THIS code
+    // rather than the status-derived member plus `declaredCode`.
+    expect(ErrorCode.safeParse(OBJECT_OWNERSHIP_CONFLICT_CODE).success).toBe(true);
+    // The control that makes the first line discriminating: 422 does NOT
+    // derive this member, so a body carrying it would prove the producer's
+    // code was carried through, never re-derived from the status.
+    expect(standardErrorCodeForHttpStatus(422)).not.toBe(OBJECT_OWNERSHIP_CONFLICT_CODE);
   });
 });

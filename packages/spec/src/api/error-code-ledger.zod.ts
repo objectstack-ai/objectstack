@@ -90,6 +90,39 @@
  * registration is a recorded waiver, never drift. A code registered NOWHERE
  * (a tenant app's own spelling) still reaches the wire, in `declaredCode`.
  *
+ * ## Door or no door — every code that ships in `dist` is registered (#16404)
+ *
+ * Ruled by the director seat (decision batch #62, 2026-09-07, option D;
+ * maintainer 「同意」): **the published contract face for error codes is THIS
+ * ledger together with `StandardErrorCode`.** Any `code` that ships in a
+ * package's `dist` is registered here whether or not an HTTP door can ever
+ * answer with it — a thrown value's `code` is what a consumer's
+ * `catch (e) { switch (e.code) }` pins, and once shipped it cannot be renamed
+ * without breaking that consumer. Registering a code widens this face and is
+ * therefore a Clause-② change (`needs:contract-review`), door or no door; a
+ * code present in `dist` and absent here is a protocol gap, not a tier
+ * question.
+ *
+ * ONE shape, no second list: a `door: 'none'` code is a row like any other —
+ * the string under the package that stamps it, and a comment that states its
+ * `status` and the reachability reading ("no HTTP door on this tree; the
+ * thrown value is the boundary"). The dispatcher vocabulary's `boot-refusal`
+ * verdict (`packages/runtime/src/dispatcher-error-vocabulary.ts`) records
+ * that same reachability for the codes NOT yet registered, and a row here
+ * ratchets its vocabulary row out exactly as a `pending-registration`
+ * registration does. What registration changes for such a code is the face,
+ * not the wire: nothing demotes today, and if a door ever does answer with
+ * it, `error.code` carries the specific code instead of the status-derived
+ * member plus `declaredCode`. The `declaredCode` demotion (#9106) stays for
+ * genuinely unknown / third-party spellings only.
+ *
+ * `packages/spec/src/**` is held to this mechanically:
+ * `check:dispatcher-error-vocabulary` refuses to classify a stamp site under
+ * that tree as anything but `foreign-vocabulary` (a different vocabulary that
+ * merely spells itself `code`) or `runtime-pinned` — a `boot-refusal` or
+ * `pending-registration` row for a spec site is a finding
+ * (`spec-face-unregistered`), and the only way out is the row here.
+ *
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.
  *
@@ -122,6 +155,12 @@
  * best-effort catch that logs and continues. Its throw site and constant
  * (`MULTI_TENANT_UNSUPPORTED_CODE`, `@objectstack/driver-mongodb`) live on:
  * host boot matching is not wire vocabulary.
+ * ⚠️ That SECOND ground is superseded by #16404 ("Door or no door" above): a
+ * boot refusal that ships in `dist` is owed a row, so the codes left out or
+ * retired on the "not wire vocabulary" reasoning — the remaining
+ * `boot-refusal` rows of `dispatcher-error-vocabulary.ts` — are registrations
+ * owed under the ruling, not re-argued per card. What still retires a row is
+ * the FIRST ground only: no producer left anywhere in `packages/**` source.
  * Before deleting a row, check that no producer remains repo-wide AND
  * that no consumer — including `objectui` and `cloud` — reads the literal;
  * tests that merely CONSTRUCT the code are not producers, and a test pinned to
@@ -659,6 +698,25 @@ export const ERROR_CODE_LEDGER = {
     // publish pre-flight); this one refuses the PREFIX itself, at install, as
     // already owned by someone else.
     'NAMESPACE_CONFLICT',
+    // [#16449] ADR-0029 D3 — a package claims `own` on an object name a
+    // DIFFERENT package already owns, refused by `SchemaRegistry.registerObject`
+    // (`ObjectOwnershipConflictError`, `registry.ts`; `status: 422`; the
+    // remedy the message names is `extend`). Registered under the #16404
+    // ruling — door or no door — and this one has NO door on this tree: every
+    // path to it aborts boot or is caught below any HTTP boundary
+    // (`ObjectQL.registerPlugin` and the metadata bridge `logger.warn`;
+    // metadata-protocol's `applyRegistryWriteThrough` `console.warn` and
+    // `loadMetaFromDb`'s per-record `errors` count — the only two non-test
+    // `registerObject` callers outside this package; the two HTTP install
+    // sites call `installPackage`, which never calls `registerObject`). So
+    // nothing demotes today; the row is the FACE — `e.code` on the thrown
+    // value is a member of the closed union a consumer pins — and should a
+    // door ever answer with it, `error.code` carries this code rather than
+    // `VALIDATION_ERROR` + `declaredCode`. Not a synonym of any standard
+    // member: `OWNERSHIP` is a token none carries, and the condition (two
+    // packages claiming one name) is neither bad input nor a missing
+    // precondition.
+    'OBJECT_OWNERSHIP_CONFLICT',
     // [#11142/#11230] a by-id update carried an `options.where.id` that is not
     // the bound payload `data.id` — a truthy scalar naming a DIFFERENT row
     // (#11142), or a non-scalar predicate over a row SET (#11230, which also
@@ -940,6 +998,35 @@ export const ERROR_CODE_LEDGER = {
     'EXTERNAL_SCHEMA_MISMATCH',
     'EXTERNAL_SCHEMA_MODE_VIOLATION',
     'EXTERNAL_WRITE_FORBIDDEN',
+    // [#16449] The eight rows below are `door: 'none'` codes — raised at
+    // authoring / boot, before any HTTP boundary exists — registered under the
+    // #16404 ruling (door or no door; see the header). Each ships in this
+    // package's `dist`, so its spelling is the face a consumer's
+    // `catch (e) { switch (e.code) }` pins; none reaches a wire on this tree,
+    // so registering them changes no HTTP body. The `boot-refusal` rows they
+    // carried in `dispatcher-error-vocabulary.ts` ratcheted out with this
+    // batch — that reachability reading now lives here, one line per row.
+    //
+    // `PluginSchema`'s one conditional requirement — `type: 'ui'` owes
+    // `staticPath` and `slug` (#16334). Stamped by the schema's `superRefine`
+    // on the zod ISSUE (`params.code`, and at the head of `message`), never on
+    // a thrown error; `PluginLoader.validatePluginContract` re-raises the issue
+    // inside its `PLUGIN_CONTRACT_VIOLATION` envelope at `kernel.use()`. No
+    // `status` of its own — it rides that envelope's.
+    'PLUGIN_UI_REQUIRED_KEY_MISSING',
+    // The seven `defineStack` refusals (#14552, #15963) — one code per raise
+    // site, every one `status: 422` (`StackRefusalError`, `stack.zod.ts`), the
+    // findings the site collected on `issues`. Raised by `os validate` /
+    // `os build` and the `os serve` / `os migrate` host configs, where a throw
+    // aborts before any HTTP boundary exists (measured: zero `defineStack`
+    // call sites under `packages/runtime/src` + `packages/rest/src`).
+    'STACK_CAPABILITY_UNKNOWN',                  // `requires` names a token no runtime provides
+    'STACK_CROSS_REFERENCE_INVALID',             // items name objects the stack does not define (the ADR-0130 matrix, plus the duplicate-action-key / global-`update` / mapping-transform findings the same aggregate carries)
+    'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED', // a HIERARCHY permission scope while `requires` omits `hierarchy-security`
+    'STACK_NAMESPACE_PREFIX_INVALID',            // an object name lacks the `manifest.namespace` prefix
+    'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
+    'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
+    'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers`
   ],
 } as const satisfies Record<string, readonly string[]>;
 
