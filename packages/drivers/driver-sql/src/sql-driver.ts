@@ -8302,7 +8302,7 @@ export class SqlDriver implements IDataDriver {
         (typeof code === 'string' && code.length > 0 ? ` (${code})` : '') +
         '. The statement and the dialect message below are kept server-side: the message ' +
         'carries the compiled statement, and on the dialects that inline them the bound ' +
-        `literals too (#7929, #8931). statement: ${command}; dialect: ` +
+        `literals too. statement: ${command}; dialect: ` +
         `${typeof detail === 'string' ? detail : String(error)}`,
     );
     return rawStatementFaultError(error);
