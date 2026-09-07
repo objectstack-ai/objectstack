@@ -237,6 +237,193 @@ describe('validateChartBindings — report charts', () => {
 });
 
 /**
+ * #16105 — a report is dataset-bound whether or not it draws a chart.
+ *
+ * Four pins, mirroring the four injections the card measured on a real app,
+ * and each reads the findings ARRAY rather than a pass/fail: the tier that
+ * moved here is `error`, but `chart-axis-not-selected` rides along at
+ * `warning` and changes no exit code, so a test that only asked "did it fail"
+ * could not tell the two apart. Two of the four are NEGATIVE controls — the
+ * behaviour that already worked before the walk was restructured — because the
+ * failure mode this rule is now exposed to is a later refactor breaking the
+ * charted path while the new chartless assertions stay green.
+ */
+describe('validateChartBindings — a report binds a dataset with or without a chart', () => {
+  /** The card's `pipeline_coverage_by_quarter`: a matrix report, no chart. */
+  const chartlessMatrix = (over: Record<string, unknown> = {}) => ({
+    ...baseStack(),
+    reports: [
+      {
+        name: 'coverage_by_quarter',
+        type: 'matrix',
+        dataset: 'task_metrics',
+        rows: ['status'],
+        columns: ['priority'],
+        values: ['task_count'],
+        ...over,
+      },
+    ],
+  });
+
+  /** The card's `opportunities_by_stage`: the same binding, plus a chart. */
+  const chartedReport = (over: Record<string, unknown> = {}) => ({
+    ...baseStack(),
+    reports: [
+      {
+        name: 'hours_by_status',
+        type: 'summary',
+        dataset: 'task_metrics',
+        rows: ['status'],
+        values: ['est_hours'],
+        chart: { type: 'bar', xAxis: 'status', yAxis: 'est_hours' },
+        ...over,
+      },
+    ],
+  });
+
+  // P1 — the card's Fact 1. Before the lift the ONLY site that received
+  // `report.dataset` was the chart closure, whose first line returned on a
+  // report with no `chart` key.
+  it('P1 · resolves a CHARTLESS report\'s dataset — the entrance the chart early-return used to own', () => {
+    const findings = validateChartBindings(chartlessMatrix({ dataset: 'task_metrics_nope' }));
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_DATASET_UNKNOWN, 'reports[0].dataset', 'error'],
+    ]);
+    // The path names the key the author wrote. It used to be spelled
+    // `reports[0].chart.dataset` — a position a report does not have, and one
+    // a chartless report cannot have at all.
+    expect(findings[0].hint).toContain('Did you mean "task_metrics"?');
+    // The dataset is unresolvable, so nothing downstream of it is resolved
+    // against anything: no dimension or measure finding piles on the typo.
+    expect(findings).toHaveLength(1);
+  });
+
+  // P2 — the card's Fact 2, on the CHARTED report: on one and the same report
+  // object the measure selection was resolved and the dimension selection
+  // beside it was not.
+  it('P2 · resolves `rows` on a charted report — the selection `values` was resolved without', () => {
+    const findings = validateChartBindings(chartedReport({ rows: ['status_nope'] }));
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_DIMENSION_UNKNOWN, 'reports[0].rows[0]', 'error'],
+    ]);
+    expect(findings[0].message).toContain('not a dimension declared by dataset "task_metrics"');
+    expect(findings[0].hint).toContain('Did you mean "status"?');
+  });
+
+  it('P2 · resolves `columns` — the across axis a `matrix` pivots on (ADR-0021 D2)', () => {
+    const findings = validateChartBindings(chartlessMatrix({ columns: ['priority_nope'] }));
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_DIMENSION_UNKNOWN, 'reports[0].columns[0]', 'error'],
+    ]);
+  });
+
+  it('P2 · resolves `rows` on a chartless report too — Fact 2 says every report', () => {
+    const findings = validateChartBindings(chartlessMatrix({ rows: ['status_nope'] }));
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_DIMENSION_UNKNOWN, 'reports[0].rows[0]', 'error'],
+    ]);
+  });
+
+  // The same entrance, one collection down: `values` was resolved only when a
+  // chart existed, so a chartless report's measure selection was as invisible
+  // as its dimensions.
+  it('resolves a chartless report\'s `values` measures', () => {
+    const findings = validateChartBindings(chartlessMatrix({ values: ['task_count_nope'] }));
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_MEASURE_UNKNOWN, 'reports[0].values[0]', 'error'],
+    ]);
+    expect(findings[0].message).toContain('this series comes back empty');
+  });
+
+  // Every position of a joined report's block, which declares the same keys.
+  it('resolves a joined BLOCK\'s dataset and `rows` with no chart on the block', () => {
+    const findings = validateChartBindings({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'overview',
+          type: 'joined',
+          blocks: [
+            { name: 'b1', dataset: 'task_metrics', rows: ['status_nope'], values: ['task_count'] },
+            { name: 'b2', dataset: 'task_metrics_nope', rows: ['status'], values: ['task_count'] },
+          ],
+        },
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.path, f.where])).toEqual([
+      [
+        CHART_DIMENSION_UNKNOWN,
+        'reports[0].blocks[0].rows[0]',
+        'report "overview" · block "b1"',
+      ],
+      [
+        CHART_DATASET_UNKNOWN,
+        'reports[0].blocks[1].dataset',
+        'report "overview" · block "b2"',
+      ],
+    ]);
+  });
+
+  // N1 — the working control the card ran beside P1: the SAME edit on a report
+  // that does have a chart. It gated before the lift and must still gate, and
+  // exactly once: the dataset is resolved per report surface, not per group of
+  // positions, so restructuring must not double-report the one typo.
+  it('N1 · a charted report\'s unresolvable dataset still gates — exactly ONE finding, not one per position group', () => {
+    const findings = validateChartBindings(chartedReport({ dataset: 'task_metrics_nope' }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(CHART_DATASET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('reports[0].dataset');
+  });
+
+  // N2 — the card's other working control: the measure selection renamed on a
+  // charted report. Both tiers, in order, and the tiers are the point: the
+  // `error` is what an exit code sees, the `warning` rides along and does not
+  // change it (the card's third implementer note).
+  it('N2 · a charted report\'s renamed `values` still gates, with the advisory tier riding along unchanged', () => {
+    const findings = validateChartBindings(
+      chartedReport({
+        values: ['est_hours_nope', 'est_hours'],
+        chart: {
+          type: 'bar',
+          xAxis: 'status',
+          yAxis: 'est_hours',
+          series: [{ name: 'task_count' }],
+        },
+      }),
+    );
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [CHART_MEASURE_UNKNOWN, 'reports[0].values[0]', 'error'],
+      [CHART_AXIS_NOT_SELECTED, 'reports[0].chart.series[0].name', 'warning'],
+    ]);
+    expect(findings.filter((f) => f.severity === 'error')).toHaveLength(1);
+  });
+
+  // N3 — the floor on both shapes. A clean report of either kind says nothing,
+  // which is what makes the four pins above readings rather than noise.
+  it('N3 · a clean charted report and a clean chartless report both report nothing', () => {
+    expect(validateChartBindings(chartedReport())).toEqual([]);
+    expect(validateChartBindings(chartlessMatrix())).toEqual([]);
+  });
+
+  // A `joined` container selects nothing itself (`ReportSchema` puts its data
+  // on `blocks`), so it binds no dataset and has nothing to resolve.
+  it('N3 · a joined container with no dataset of its own reports nothing for itself', () => {
+    const findings = validateChartBindings({
+      ...baseStack(),
+      reports: [
+        {
+          name: 'overview',
+          type: 'joined',
+          blocks: [{ name: 'b1', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] }],
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+});
+
+/**
  * #15575 — the per-position tier and consequence, pinned per surface against
  * the `@object-ui` revision `.objectui-sha` names. Each title names the
  * renderer line that decides it, as the `chart-field-unknown` tests do: the
@@ -735,7 +922,13 @@ describe('validateChartBindings — floor', () => {
     expect(validateChartBindings(null as unknown as Record<string, unknown>)).toEqual([]);
   });
 
-  it('ignores a report with no chart', () => {
+  // #16105 re-scoped this from "ignores a report with no chart" — a global
+  // zero that held for the wrong reason. The report below is CLEAN: its
+  // dataset resolves, `status` is a declared dimension and `task_count` a
+  // declared measure. The zero is now a reading about this fixture rather than
+  // about the walk skipping it; the readings about the walk are the pins in
+  // the "with or without a chart" block above.
+  it('says nothing about a chartless report whose every binding resolves', () => {
     const findings = validateChartBindings({
       ...baseStack(),
       reports: [{ name: 'plain', dataset: 'task_metrics', rows: ['status'], values: ['task_count'] }],

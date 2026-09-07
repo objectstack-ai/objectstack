@@ -79,7 +79,7 @@
 // authorization RUNG off the execution context, which is where "platform
 // operator, NOT a tenant user role" (ADR-0068 D2) still means that. The
 // built-in identity NAME is deliberately no longer imported: see the doc block.
-import { effectiveTenancyPosture } from '@objectstack/core';
+import { effectiveTenancyPosture, AuthzStoreUnavailableError } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
@@ -147,6 +147,26 @@ export const ACTION_ACTIVATION_SUBJECT: ActivationSubject = {
  * validation, so a refused caller writes nothing and learns nothing about the
  * contract. "Write first, refuse second" is the worst shape here — it is
  * #10243 with an audit trail.
+ *
+ * ⚠️ It has THREE exits, not two: a refusal, `undefined` to proceed, and a
+ * THROW. See the posture read below for the class that throws and why a caller
+ * must not absorb it into "no gate to enforce".
+ *
+ * ⚠️ TWO DOORS, one gate body — so every exit above, the throw included,
+ * reaches BOTH of them and neither is "the" activation door:
+ *
+ *   - `./actions.ts` — `POST /actions/_activation/:object/:action`, calling
+ *     this function directly with {@link ACTION_ACTIVATION_SUBJECT};
+ *   - `./automation.ts` — `POST /automation/:name/toggle`, through its
+ *     `refuseUngrantedFlowActivationWrite` wrapper and
+ *     {@link FLOW_ACTIVATION_SUBJECT}.
+ *
+ * Both `await` the call, so the throw exit is a rejected promise the domain
+ * handler propagates and the dispatcher's error exit renders — nothing is
+ * unhandled at either door. Written down because a change to this body is a
+ * change to two routes: a claim about "the gate" that was measured at one door
+ * is a claim about half the surface, and both doors are pinned together in
+ * `./tenancy-posture-outage-gates.test.ts` for that reason.
  */
 export async function refuseUngrantedActivationWrite(
     deps: DomainHandlerDeps,
@@ -156,11 +176,48 @@ export async function refuseUngrantedActivationWrite(
     const ec: any = context?.executionContext;
     if (ec?.isSystem) return undefined;
 
+    // [#15900, ruled 2026-09-06 — option A] The posture is an authorization
+    // INPUT here, so the two ways it can be missing are two different facts:
+    //
+    //  - **never registered** ⇒ no posture, and no refusal. Unchanged, and load
+    //    bearing: ADR-0093 D4/D5 makes a deployment with no tenancy service the
+    //    same shape as `single`, where install-level and org-level are ONE
+    //    scope and the org admin who already cleared `manage_metadata` is the
+    //    right authority. Refusing here would lock every single-organization
+    //    operator out of their own switch.
+    //  - **registered and unable to answer** ⇒ how far this install-wide row
+    //    reaches was never READ, so whether the operator is required was never
+    //    DECIDED. Serving the write there is #13906 decision 1 option A's
+    //    permissive direction at a second door — 「A posture that could not be
+    //    READ is not a posture that is ABSENT.」 — so it is answered as an
+    //    outage (503), never as a permit.
+    //
+    // Told apart by the REGISTRY's brand (#13905) inside `resolveServiceOrLoud`,
+    // never by message text; the branded class is already absorbed there, so
+    // anything reaching this `catch` is a `tenancy` that is wired and broke.
+    //
+    // ⛔ The plain `resolveService` probe is what this gate used to read, and it
+    // collapses the two: a factory that threw and a name nothing registered
+    // both arrived as the same absent posture, and this gate then returned
+    // `undefined` — no refusal — for both.
+    //
+    // ⚠️ THE SCOPE ID IS PART OF THE READ, not an optimisation. `tenancy` may be
+    // registered `ServiceLifecycle.SCOPED`, and a scoped registration resolved
+    // without a scope id rejects UNBRANDED (`Scope ID required for scoped
+    // service 'tenancy'`) — which the classified lookup correctly re-raises,
+    // and this gate would then answer as a 503 it MANUFACTURED itself on a
+    // perfectly healthy deployment, locking the platform operator out of the
+    // switch that is theirs. `context.environmentId` is the same scope the
+    // identity step and `./keys.ts` already resolve this exact name with, so
+    // all three read one deployment's posture through one scope: an outage
+    // answered here is the service's, never this call site's omission.
     let posture;
     try {
-        posture = effectiveTenancyPosture(await deps.resolveService(context, 'tenancy'));
-    } catch {
-        posture = undefined;
+        posture = effectiveTenancyPosture(
+            await deps.resolveServiceOrLoud(context, 'tenancy', context.environmentId),
+        );
+    } catch (err) {
+        throw new AuthzStoreUnavailableError('tenancy', err);
     }
     if (!posture || !postureEnforcesWall(posture)) return undefined;
 

@@ -9,6 +9,15 @@ import path from 'path';
 // `satisfies Record<FieldType, …>`, which is what makes a field type added to
 // the spec a named compile error here instead of a silent fallback (#14657).
 import type { FieldType } from '@objectstack/spec/data';
+// #16091 — IMPORTED, not transcribed. Both are on `@objectstack/spec/data`'s
+// exported surface, and spec is not a driver package: the #5726 constraint the
+// transcriptions below cite forbids a static value import of an
+// `@objectstack/driver-*` package and nothing else, so it never reached these.
+// The two driver-side readers that consume them — `isUniqueScopeDeclared` and
+// `computeTenantField` — are spelled here in the driver's own terms ON TOP of
+// these, so the part that can be shared is shared and only the part that
+// genuinely lives on `driver-sql` is mirrored.
+import { isTenancyDisabled, isUniqueDeclared } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 
@@ -983,10 +992,13 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  *   `lookup` /    VARCHAR(36) → VARCHAR(255), with the migration switch's
  *   `master_detail`             `table.uuid` corrected in the same breath. The
  *                 `uuid` half is the only HARD failure of the five: a platform
- *                 id is 26 characters (`createColumn`'s lookup arm says so and
- *                 spells one out — `01JQ8XKZ9M4N7P2R5T6V8W0Y3B`), and Postgres
- *                 refuses one in a `uuid` column with `22P02`. The width half
- *                 is the same rule for the whole REFERENCE_VALUE_TYPES class:
+ *                 id is NOT a uuid, and its width is not a fixed number at all
+ *                 (`createColumn`'s lookup arm states both): the driver mints a
+ *                 16-character nanoid when the caller supplies none, and stores
+ *                 a SUPPLIED id verbatim at whatever width the caller chose.
+ *                 Postgres refuses either in a `uuid` column with `22P02`. The
+ *                 width half is the same rule for the whole
+ *                 REFERENCE_VALUE_TYPES class:
  *                 `user` and `tree` moved with them, because a reference column
  *                 holds the TARGET's `id` — which the driver itself emits as
  *                 `table.string('id').primary()`, i.e. `varchar(255)` — and
@@ -1004,7 +1016,33 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
  * so it cannot be mistaken for coverage.
  */
 const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
-  text: 'VARCHAR(255)',
+  // #16091 — TEXT, not VARCHAR(255). `text` heads the SAME text-family arm as
+  // the seven types below it, and that arm's column is
+  // `keyable === null ? table.text(name) : table.string(name, keyable)` with
+  // `keyable = keyed ? this.keyableTextLength(field) : null`.
+  //
+  // This entry is the UNKEYED answer, and it is the only one a table keyed on
+  // the TYPE can give: `keyed` is a property of the field's declaration, not of
+  // its type. {@link keyableTextChars} supplies the keyed one, asked by
+  // {@link fieldTypeToSql} after this lookup.
+  //
+  // Unkeyed, a declared `maxLength` does not reach the column, and it is not
+  // lost either: it is enforced at the write seam (the record validator's
+  // `max_length` branch over BOUNDED_STRING_FIELD_TYPES), which is the
+  // invariant `schema-drift.ts` states in as many words: "A TEXT column refuses
+  // nothing a `maxLength` allows … the bound is enforced at the write seam."
+  //
+  // Driven on live PostgreSQL 16.13, one 300-character value into three tables
+  // built from one object by the three producers:
+  //
+  //   driver   f_text  text          ACCEPTED — read back at length 300
+  //   sql gen  f_text  varchar(255)  REFUSED  — value too long for type character varying(255)
+  //   ts gen   f_text  varchar(255)  REFUSED  — same
+  //
+  // This is the hard-failure class, not the schema-diff class: a row the
+  // platform stores today cannot be stored in a table generated for the same
+  // object.
+  text: 'TEXT',
   textarea: 'TEXT',
   richtext: 'TEXT',
   html: 'TEXT',
@@ -1032,9 +1070,30 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // producers, so neither moves.
   datetime: 'TIMESTAMPTZ',
   time: 'TIME',
+  // #16091 — the STRING family (`email` / `url` / `phone` / `password`) is ONE
+  // arm in `createColumn`, and its width is the field's own
+  // {@link SqlDriver.declaredVarcharLength}: `maxLength` verbatim when it is a
+  // positive integer up to the varchar ceiling, knex's 255 when there is no
+  // usable declaration, and TEXT above the ceiling. These entries are the
+  // NO-DECLARATION outcome only — {@link declaredVarchar} supplies the other
+  // two, because a lookup table keyed on the type alone cannot express an
+  // answer that depends on the field.
+  //
+  // `VARCHAR(50)` and `VARCHAR(2048)` were widths this file invented for a
+  // shape it never read. Measured on live PostgreSQL 16.13, all three
+  // producers driven from one object:
+  //
+  //   f_phone  driver varchar(255)   sql gen varchar(50)    ts gen varchar(255)
+  //   f_url    driver varchar(255)   sql gen varchar(2048)  ts gen varchar(255)
+  //
+  // Both directions are real. The narrow one is the card's own hard failure a
+  // type over — a 60-character phone number the platform stores is refused by
+  // the generated table. The wide one fails the other way: a 300-character url
+  // was ACCEPTED by the sql format's table and REFUSED by the driver's own, so
+  // the scaffold invited a value the platform will not keep.
   email: 'VARCHAR(255)',
-  phone: 'VARCHAR(50)',
-  url: 'VARCHAR(2048)',
+  phone: 'VARCHAR(255)',
+  url: 'VARCHAR(255)',
   select: 'VARCHAR(255)',
   // #14828 — MULTI_OPTION_TYPES seeds `driver-sql`'s `JSON_COLUMN_TYPES`, so
   // the runtime stores this in a JSON column; `json: 'JSONB'` below is the
@@ -1057,7 +1116,15 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   file: 'VARCHAR(2048)',
   image: 'VARCHAR(2048)',
   password: 'VARCHAR(255)',
-  color: 'VARCHAR(7)',
+  // #16091 — `color` is not cased in `createColumn` at all: it falls to the
+  // catch-all, `JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) :
+  // table.string(name)`, which is knex's varchar(255). `VARCHAR(7)` was this
+  // file's own guess at `#RRGGBB` and the platform never agreed with it —
+  // measured on live PostgreSQL 16.13, the driver's column is varchar(255). So
+  // every longer color an author can write (`#RRGGBBAA`, an `rgba(…)` string,
+  // a design-token name) is a value the platform stores and a table generated
+  // for the same object refuses.
+  color: 'VARCHAR(255)',
   rating: 'INTEGER',
   // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
   // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
@@ -1113,6 +1180,303 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
 } satisfies Record<FieldType, string | null>;
 
 /**
+ * The STRING family, cased exactly as `SqlDriver.createColumn` cases it (#16091).
+ *
+ * The driver's arm is `case 'string': case 'email': case 'url': case 'phone':
+ * case 'password':`. `string` is absent here and that is not an omission: it is
+ * not a `FieldType` member at all — there is no `Field.string` builder,
+ * `FieldType.options` omits it, and `FieldSchema.safeParse({ type: 'string' })`
+ * fails at `[type]` (#12593) — so it cannot arrive through an authored object.
+ *
+ * ⛔ This set is NOT "the types whose values are strings". `select` / `radio` /
+ * `secret` / `color` / `tree` and the reference types all hold strings and all
+ * take the driver's catch-all, which never reads `maxLength`: their stored
+ * value is an option code, an opaque ref or another row's id, so sizing them
+ * from the author's bound would size the wrong string. `createColumn`'s own
+ * catch-all says exactly that. Membership here is read off the driver's arm and
+ * nothing else.
+ */
+const STRING_FAMILY_TYPES: ReadonlySet<string> = new Set(['email', 'url', 'phone', 'password']);
+
+/**
+ * The widest `varchar(n)` any dialect this platform speaks will declare —
+ * `SqlDriver.MAX_VARCHAR_CHARS`, whose own comment records the measurement
+ * (MySQL 8.0.46 refuses `varchar(16384)` with `ERROR 1074`; it is the LOWEST of
+ * the three dialects' ceilings and is applied to all of them deliberately).
+ *
+ * Transcribed rather than imported for ONE reason, and that reason is a CHOICE
+ * this package makes rather than anything about the constant:
+ *
+ *   - #5726 forbids a CLI production module any static value import of an
+ *     `@objectstack/driver-*` package, and `schema-migrate.lazy-driver-import.test.ts`
+ *     enforces it over every non-test `.ts` under `packages/cli/src`. oclif
+ *     `import()`s every command module on every invocation, so one such edge
+ *     here charges an unbuilt driver to whatever command the operator actually
+ *     ran. What #5726 leaves open is `await import()` at the point of use —
+ *     and these generators are SYNCHRONOUS, so they cannot take it. Make them
+ *     async and the transcription can go.
+ *
+ * ⛔ NOT "because `packages/cli` does not depend on the driver at runtime" —
+ * it does: `@objectstack/driver-sql` is in this package's `dependencies` at
+ * `workspace:^`. A missing dependency was never the reason, and stating it as
+ * one invites the next reader to "simplify" the transcription away.
+ *
+ * ⛔ NOR "because it is `protected static`, so it reaches no exported surface"
+ * — this block gave that as its FIRST reason and it is false. `protected` is
+ * compile-time visibility only; it removes the member from neither the exported
+ * class nor the published types. `SqlDriver` is exported from
+ * `@objectstack/driver-sql`, `SqlDriver.MAX_VARCHAR_CHARS` is an own static
+ * property that reads `16383` at runtime, and the built `dist/index.d.ts`
+ * declares it as `protected static readonly MAX_VARCHAR_CHARS`. The pin test
+ * reaches this and the driver's other `protected` judgments by subclassing,
+ * which is the same point. The constant IS reachable; what is unavailable
+ * here is a SYNCHRONOUS import of it.
+ *
+ * Pinned rather than trusted: `generate-string-family-width.pin.test.ts` reads
+ * the constant out of `sql-driver.ts` and fails here if the two part.
+ */
+const MAX_VARCHAR_CHARS = 16383;
+
+/**
+ * The widest `varchar(n)` ONE utf8mb4 index key part can hold —
+ * `SqlDriver.MAX_KEYABLE_VARCHAR_CHARS`, whose own comment records the
+ * measurement (MySQL 8.0.46: `varchar(768) UNIQUE` creates, `varchar(769)
+ * UNIQUE` is refused with `ER_TOO_LONG_KEY`).
+ *
+ * Transcribed and pinned for exactly the reasons {@link MAX_VARCHAR_CHARS}
+ * gives. ⚠️ A DIFFERENT number from that one, and the two are not
+ * interchangeable: this bounds a KEY PART, that bounds a COLUMN.
+ */
+const MAX_KEYABLE_VARCHAR_CHARS = 768;
+
+/**
+ * The TEXT family, cased exactly as `SqlDriver.createColumn` cases it (#16091).
+ *
+ * The driver's arm is `case 'text': case 'textarea': case 'html': case
+ * 'markdown': case 'richtext': case 'code': case 'signature': case 'qrcode':`
+ * and its column is `keyable === null ? table.text(name) : table.string(name,
+ * keyable)`. Membership is read off those case labels and nothing else — a type
+ * that joins or leaves the arm moves this set, and the pin fails until it does.
+ */
+const TEXT_FAMILY_TYPES: ReadonlySet<string> = new Set([
+  'text',
+  'textarea',
+  'html',
+  'markdown',
+  'richtext',
+  'code',
+  'signature',
+  'qrcode',
+]);
+
+/**
+ * `SqlDriver.keyableTextLength`'s decision, for a generated migration: the
+ * `varchar(n)` a KEYED text-family column takes, or `null` to leave it TEXT.
+ *
+ * `null` has two causes and both leave the column unbounded — no usable
+ * declaration (there is no bound to emit, and inventing one would impose a
+ * truncation boundary the author never wrote), and a declaration wider than a
+ * single key part can be (a `varchar(n)` there only trades
+ * `ER_BLOB_KEY_WITHOUT_LENGTH` for `ER_TOO_LONG_KEY`).
+ *
+ * ⚠️ Deliberately NOT {@link declaredVarchar}, and the two must not be merged.
+ * They ask different questions of the same key: that one asks "how wide is this
+ * column?" and answers knex's 255 for a field that declares nothing, this one
+ * asks "can this KEY?" and answers `null`. The driver keeps them apart for the
+ * same reason and says so on `declaredVarcharLength`.
+ */
+function keyableTextChars(maxLength: unknown): number | null {
+  const n = typeof maxLength === 'string' ? Number(maxLength) : maxLength;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return null;
+  if (n > MAX_KEYABLE_VARCHAR_CHARS) return null;
+  return n;
+}
+
+/**
+ * The three outcomes `SqlDriver.declaredVarcharLength` has for a string-family
+ * field, kept as three named answers rather than collapsed to a number (#16091).
+ *
+ * Collapsing them is what a `?? 255` would do, and it loses the one that is not
+ * a width at all: a declaration PAST the ceiling makes the driver emit TEXT,
+ * never a clamp to the ceiling — because clamping would reinstate the very
+ * defect (a column narrower than the declaration, refusing writes the
+ * declaration allows), while TEXT refuses nothing the author declared and the
+ * bound is still enforced at the write seam.
+ *
+ *   - `default`   — no usable declaration. The answer is this file's own table
+ *                   entry, which is knex's 255; the caller reads it there
+ *                   rather than having it restated here.
+ *   - `sized`     — a declaration this dialect can express, verbatim, in BOTH
+ *                   directions. Wider than 255 is the reported defect; narrower
+ *                   is the same defect's other half.
+ *   - `unbounded` — past {@link MAX_VARCHAR_CHARS}.
+ */
+type VarcharAnswer =
+  | { kind: 'default' }
+  | { kind: 'sized'; chars: number }
+  | { kind: 'unbounded' };
+
+/**
+ * `SqlDriver.declaredVarcharLength`'s decision, for a generated migration.
+ *
+ * The coercion is the driver's too, character for character — a `maxLength` may
+ * arrive as a string from an unvalidated authoring door, and a non-integer or
+ * non-positive one is NOT a bound.
+ */
+function declaredVarchar(maxLength: unknown): VarcharAnswer {
+  const n = typeof maxLength === 'string' ? Number(maxLength) : maxLength;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n <= 0) return { kind: 'default' };
+  return n > MAX_VARCHAR_CHARS ? { kind: 'unbounded' } : { kind: 'sized', chars: n };
+}
+
+/**
+ * `schema-drift.ts`'s `isUniqueScopeDeclared` — the FIELD-level unique
+ * vocabulary.
+ *
+ * Spelled as the driver spells it, over the SAME spec predicate the driver
+ * calls: `unique === 'organization' || isUniqueDeclared(unique)`. The disjunct
+ * is the driver's SPELLING, kept so the mirror matches it character for
+ * character — ⛔ not a scope this predicate adds on top of spec's. Measured
+ * against the built spec, `isUniqueDeclared('organization')` is already `true`
+ * (`packages/spec/src/data/field.zod.ts` lists all three spellings), so the
+ * disjunct is redundant today and BOTH halves are spec's. The driver's own
+ * comment still reads as though the word were accepted ahead of the spec
+ * helper (ADR-0120 D1, driver first); that was true when it was written, it is
+ * not now, and a mirror must not restate it in the present tense.
+ */
+function isUniqueScopeDeclared(unique: unknown): boolean {
+  return unique === 'organization' || isUniqueDeclared(unique);
+}
+
+/**
+ * `schema-drift.ts`'s `isOrganizationScopedUnique` — the FIELD-level spellings
+ * whose index also keys the organization column.
+ *
+ * ⛔ Not the scope judgment for a DECLARED index, and it must not be reached
+ * for there: `normalizeDeclaredIndex` takes a declared `unique: true` VERBATIM
+ * as global. That the two paths read the same token differently is a maintainer
+ * ruling (2026-08-13), not an oversight, so the two readings stay apart here
+ * too.
+ *
+ * ⚠️ "Not exported" is not the reason this is spelled here — and it is not the
+ * reason {@link MAX_VARCHAR_CHARS} is either: both reach `driver-sql`'s
+ * exported surface, that block says why, and neither is spelled here for it.
+ * The reason is one and the same for both: these generators are SYNCHRONOUS,
+ * and #5726 leaves a CLI production module only `await import()` for a driver
+ * package, which a synchronous function cannot use. Spec's own
+ * `isOrganizationUnique` is not a substitute either: it detects the WORD and
+ * not the scope, so it omits the bare `true` this predicate exists to include.
+ * What makes the spelling safe is the AUTHORITY in
+ * `generate-string-family-width.pin.test.ts` — `SqlDriver.initObjects` on an
+ * in-memory database, read back with `PRAGMA table_info` — which fails when
+ * the column the platform creates and the one these generators emit disagree.
+ * The leaf differential over the driver's exported builders is kept beneath it
+ * and is explicitly NOT the authority: recomposing the leaves' answers here is
+ * exactly what once left every layer between them and the real chain unread.
+ */
+function isOrganizationScopedUnique(unique: unknown): boolean {
+  return unique === true || unique === 'organization';
+}
+
+/**
+ * `SqlDriver.computeTenantField` — the organization column an
+ * organization-scoped unique index prepends its key part from.
+ *
+ * Computable from the object alone, which is why it is mirrored rather than
+ * skipped: explicit opt-out wins, then a declared `tenancy.tenantField` that
+ * names a real field, then a field literally named `organization_id`.
+ *
+ * The opt-out itself is spec's `isTenancyDisabled`, IMPORTED — the driver calls
+ * that same function here (ADR-0066: one judgment for the registry, the engine
+ * and every driver), so re-deriving `tenancy?.enabled === false` locally would
+ * be a fourth copy of the thing that helper exists to stop.
+ */
+function tenantFieldOf(obj: Record<string, any>): string | null {
+  const tenancy = obj?.tenancy;
+  if (isTenancyDisabled(obj)) return null;
+  const fields = obj?.fields;
+  if (tenancy?.tenantField) {
+    const declared = String(tenancy.tenantField);
+    if (fields && Object.prototype.hasOwnProperty.call(fields, declared)) return declared;
+  }
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'organization_id')) return 'organization_id';
+  return null;
+}
+
+/**
+ * Every column some declared index on this object will use as a KEY PART —
+ * `schema-drift.ts`'s `indexedKeyColumns`, minus the UNIQUE flag, which only
+ * the driver's MySQL key diagnostics read (#16091).
+ *
+ * ⭐ This is what the text family branches on, and it is read off the OBJECT'S
+ * DECLARATIONS — `field.unique` and `indexes[]` — never off anything either
+ * generator emits. A generated migration still emits no `CREATE INDEX`; that is
+ * a fact about this generator's OUTPUT and it is not the question. The driver
+ * asks what the object DECLARES, so a `Field.text({ unique: true, maxLength:
+ * 100 })` is `varchar(100)` on the platform and must be `varchar(100)` here.
+ * Reasoning from the emitted output instead ("no index is emitted, so nothing
+ * is ever keyed") is how this arm was first got wrong.
+ *
+ * ⚠️ Deliberately NOT filtered by which columns this generator goes on to emit,
+ * for the same reason the driver's is not filtered by `physicalColumns`:
+ * deciding a column's TYPE is the whole reason the question is asked.
+ */
+function indexKeyColumns(obj: Record<string, any>): ReadonlySet<string> {
+  const fields = (obj?.fields ?? {}) as Record<string, any>;
+  const tenantField = tenantFieldOf(obj);
+  const out = new Set<string>();
+  // Field-level `unique` — `uniqueIndexesFromFields`. The field's own column is
+  // a key part at every scope; an organization-scoped one keys the tenant
+  // column too, unless the tenant column IS this field ("one row per tenant"
+  // cannot be scoped to the tenant).
+  for (const [name, field] of Object.entries(fields)) {
+    if (!isUniqueScopeDeclared(field?.unique)) continue;
+    out.add(name);
+    if (isOrganizationScopedUnique(field.unique) && tenantField != null && tenantField !== name) {
+      out.add(tenantField);
+    }
+  }
+  // Object-level `indexes[]` — `normalizeDeclaredIndex`. Every listed column is
+  // a key part whether or not the index is unique: `indexedKeyColumns` records
+  // both, because a bounded key part is a storage choice for an ordinary index
+  // and the constraint itself for a unique one.
+  for (const idx of Array.isArray(obj?.indexes) ? obj.indexes : []) {
+    const listed: string[] = Array.isArray(idx?.fields)
+      ? idx.fields.filter((f: unknown): f is string => typeof f === 'string' && f.length > 0)
+      : [];
+    if (listed.length === 0) continue;
+    for (const column of listed) out.add(column);
+    // An ALREADY-NORMALIZED entry carries its own resolved key parts and is
+    // honoured verbatim, so no tenant column is prepended a second time.
+    // Unreachable from an authored config — `IndexSchema` is a `strictObject`
+    // with no `nullSafeColumns` key — but mirrored anyway, because the driver
+    // answers this shape and a generated column has to be the column the driver
+    // would build for the same object however the object got here.
+    //
+    // ⭐ The condition is the driver's OWN: a non-empty `nullSafeColumns`
+    // ARRAY, nothing more. `normalizeDeclaredIndex` filters that array against
+    // the listed columns, but the filter narrows only `nullSafeColumns` — its
+    // `columns` stay the listed ones in every branch of that arm, so an entry
+    // whose `nullSafeColumns` names no listed column still prepends NOTHING.
+    // Asking `.some(c => listed.includes(c))` here instead read that filter as
+    // if it decided the KEY PARTS: on `{ fields: ['f'], unique: 'organization',
+    // nullSafeColumns: ['zzz'] }` the driver keys `{f}` and this keyed
+    // `{organization_id, f}` — a column bounded here that the platform leaves
+    // unbounded, this card's defect pointed the other way. Found by the
+    // differential in `generate-string-family-width.pin.test.ts`, whose
+    // authority is now the real chain — `SqlDriver.initObjects` on an
+    // in-memory database, read back with `PRAGMA table_info`. The leaf
+    // differential that recomputes this set from the driver's own exported
+    // builders is kept beneath that chain and is NOT the authority.
+    const preNormalized = Array.isArray(idx?.nullSafeColumns) && idx.nullSafeColumns.length > 0;
+    if (!preNormalized && idx?.unique === 'organization' && tenantField && !listed.includes(tenantField)) {
+      out.add(tenantField);
+    }
+  }
+  return out;
+}
+
+/**
  * The column one field takes.
  *
  * `multiple` is answered FIRST, before the type is looked up at all, because
@@ -1152,11 +1516,44 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
  * inherited key, and the unvalidated authoring door can deliver one as a
  * `type` string.
  */
-function fieldTypeToSql(fieldType: string, multiple?: boolean): string | null {
+function fieldTypeToSql(
+  fieldType: string,
+  multiple?: boolean,
+  maxLength?: unknown,
+  keyed?: boolean,
+): string | null {
   if (multiple) return FIELD_TYPE_SQL_MAP.json;
-  return Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
+  const base = Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
     ? FIELD_TYPE_SQL_MAP[fieldType]
     : 'TEXT';
+  // #16091 — TWO families depend on the FIELD and not only on its type, because
+  // those are the two arms `createColumn` reads a declaration in. They read
+  // DIFFERENT things and must not be collapsed into one.
+  //
+  // The TEXT family branches on KEYED: `keyable === null ? table.text(name) :
+  // table.string(name, keyable)` over `keyed ? this.keyableTextLength(field) :
+  // null`. `keyed` is {@link indexKeyColumns}, which reads the object's own
+  // `field.unique` and `indexes[]` — so a declared-unique text field IS keyed
+  // here, and it is keyed whether or not this generator emits an index.
+  if (TEXT_FAMILY_TYPES.has(fieldType)) {
+    const keyable = keyed ? keyableTextChars(maxLength) : null;
+    // The unbounded spelling is READ from this table's own entry for the type
+    // rather than restated, so the two cannot drift.
+    return keyable === null ? base : `VARCHAR(${keyable})`;
+  }
+  // The STRING family branches on the declaration ALONE — `declared === null ?
+  // table.text(name) : table.string(name, declared)` over
+  // `declaredVarcharLength(field)`, which has no keyed requirement. Asked AFTER
+  // the table lookup, so the no-declaration outcome is the table's own entry
+  // rather than a second spelling of 255 that could drift from it.
+  if (!STRING_FAMILY_TYPES.has(fieldType)) return base;
+  const declared = declaredVarchar(maxLength);
+  if (declared.kind === 'sized') return `VARCHAR(${declared.chars})`;
+  // The unbounded spelling is READ from this table's own `text` entry rather
+  // than restated, the same discipline `FIELD_TYPE_SQL_MAP.json` above already
+  // uses, so the two cannot drift about how this file spells an unbounded column.
+  if (declared.kind === 'unbounded') return FIELD_TYPE_SQL_MAP.text;
+  return base;
 }
 
 /**
@@ -1221,8 +1618,16 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     lines.push('  "id" VARCHAR(255) PRIMARY KEY,');
 
     const fieldLines: string[] = [];
+    // #16091 — resolved once per object, off the object's own declarations. See
+    // {@link indexKeyColumns}: the text family's width depends on it.
+    const keyColumns = indexKeyColumns(obj);
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
-      const sqlType = fieldTypeToSql(String(fieldDef.type || 'text'), !!fieldDef.multiple);
+      const sqlType = fieldTypeToSql(
+        String(fieldDef.type || 'text'),
+        !!fieldDef.multiple,
+        fieldDef.maxLength,
+        keyColumns.has(fieldName),
+      );
       // #14828 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
       // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
       // answers false for it, so a column here is one the runtime never writes.
@@ -1327,6 +1732,10 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
     const tableName = String(obj.name || 'unknown');
     const fields = (obj.fields ?? {}) as Record<string, Record<string, unknown>>;
 
+    // #16091 — resolved once per object, off the object's own declarations. See
+    // {@link indexKeyColumns}: the text family's width depends on it.
+    const keyColumns = indexKeyColumns(obj);
+
     lines.push(`  await db.schema.createTable('${tableName}', (table: any) => {`);
     // #15040 — the driver's own line for this column, emitted verbatim:
     // `table.string('id').primary()`. See `generateMigrationSql` above for the
@@ -1358,20 +1767,69 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // `generate-field-type-vocabulary.pin.test.ts` measures.
       let colMethod: string | null;
       switch (fType) {
-        case 'text': case 'email': case 'phone': case 'url': case 'select':
-        case 'password': case 'color':
+        // #16091 — the STRING family takes an arm of its own, because it is the
+        // one family whose column depends on the FIELD and not only on its
+        // type: `createColumn`'s arm is `declared === null ? table.text(name) :
+        // table.string(name, declared)` over `declaredVarcharLength(field)`.
+        // All four used to spell a bare `table.string(name)` — knex's
+        // varchar(255) — so a `Field.email({ maxLength: 400 })` was
+        // `varchar(400)` on the platform and `varchar(255)` in the migration
+        // generated for the same object. Driven on live PostgreSQL 16.13: a
+        // 300-character value into that field was accepted by the driver's
+        // table (read back at length 300) and refused by both generated ones
+        // with `value too long for type character varying(255)`.
+        case 'email': case 'phone': case 'url': case 'password': {
+          const declared = declaredVarchar(fieldDef.maxLength);
+          colMethod =
+            declared.kind === 'sized'
+              ? `table.string('${fieldName}', ${declared.chars})`
+              : declared.kind === 'unbounded'
+                ? `table.text('${fieldName}')`
+                : `table.string('${fieldName}')`;
+          break;
+        }
+        // The catch-all family. `createColumn` cases none of these: each lands
+        // in its `table.string(name)` at knex's default width, and none of them
+        // reads `maxLength` — the stored value is an option code, an opaque
+        // `sys_secret` ref or a color code rather than the declared string, so
+        // a declared bound would size the wrong string. That is the driver's
+        // own stated reason, not an inference from its silence.
+        case 'select': case 'color':
         // #14657 — `secret` holds the opaque `sys_secret` ref, not the
         // credential (ADR-0100); `radio` is a single option code like `select`.
         case 'secret': case 'radio':
           colMethod = `table.string('${fieldName}')`;
           break;
+        // #16091 — `text` MOVED here, out of the string arm above. It heads
+        // `createColumn`'s text-family arm, whose column is
+        // `keyable === null ? table.text(name) : table.string(name, keyable)`
+        // with `keyable = keyed ? this.keyableTextLength(field) : null`.
+        //
+        // The branch is on KEYED, and `keyed` is the DECLARATION's answer, not
+        // this generator's: `indexedKeyColumns` reads `field.unique` and the
+        // object's `indexes[]`. So an unkeyed field takes `table.text`,
+        // `maxLength` or no `maxLength` — measured on live PostgreSQL 16.13,
+        // driver `text` against both generators' `varchar(255)`, a
+        // 300-character value accepted by the platform's table and refused by
+        // both generated ones — while a field the object declares unique takes
+        // the width `keyableTextLength` gives it, measured the other way round:
+        // `{ type: 'text', unique: true, maxLength: 100 }` was `varchar(100)`
+        // on the platform, refusing that same 300-character value, and TEXT in
+        // both generated tables, accepting it.
+        case 'text':
         case 'textarea': case 'richtext': case 'html': case 'markdown':
         // #14657 — `driver-sql`'s own DDL switch puts these three in the text
-        // family (#11794, #11875): the declared `maxLength`, when there is one,
-        // is enforced at the write seam rather than by the column.
-        case 'code': case 'signature': case 'qrcode':
-          colMethod = `table.text('${fieldName}')`;
+        // family (#11794, #11875): the declared `maxLength`, when there is one
+        // and the column is not keyed, is enforced at the write seam rather
+        // than by the column.
+        case 'code': case 'signature': case 'qrcode': {
+          const keyable = keyColumns.has(fieldName) ? keyableTextChars(fieldDef.maxLength) : null;
+          colMethod =
+            keyable === null
+              ? `table.text('${fieldName}')`
+              : `table.string('${fieldName}', ${keyable})`;
           break;
+        }
         case 'number': case 'currency': case 'percent':
         // #14657 — NUMERIC_VALUE_TYPES: `valueSchemaFor` gives all of these
         // `z.number()`, and `driver-sql` gives them a float column.
@@ -1431,10 +1889,12 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
         // answer: `createColumn`'s `case 'lookup': case 'user':` is
         // `table.string(name)`, and `master_detail` reaches the same call
         // through its catch-all. `table.uuid` was the one HARD failure among
-        // this card's five rows — a platform id is 26 characters
-        // (`01JQ8XKZ9M4N7P2R5T6V8W0Y3B`, spelled out in that same driver arm),
-        // and Postgres refuses one in a `uuid` column with `22P02 invalid
-        // input syntax for type uuid` on the very first insert.
+        // this card's five rows — a platform id is NOT a uuid, and its width
+        // is not a fixed number at all: that same driver arm mints a
+        // 16-character nanoid when the caller supplies no id, and stores a
+        // SUPPLIED one verbatim at whatever width the caller chose. Postgres
+        // refuses either in a `uuid` column with `22P02 invalid input syntax
+        // for type uuid` on the very first insert.
         case 'lookup': case 'master_detail':
         case 'user': case 'tree':
         case 'image': case 'file': case 'avatar': case 'video': case 'audio':

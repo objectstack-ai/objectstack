@@ -28,15 +28,18 @@
 //
 //   1. template copy + identity rewrite + AGENTS.md/copilot-instructions.md
 //   2. `<pm> install`                      -> pnpm-lock.yaml, node_modules/
-//   3. `npx skills add … --all`            -> .agents/, agent/, .claude/,
-//                                             skills-lock.json
+//   3. `npx skills add … --agent …`        -> .claude/, skills-lock.json
 //
 // and the list was printed between (1) and (2). Phases 2 and 3 are third-party
 // processes whose outputs this package does not choose and cannot enumerate
-// ahead of time — the `skills` CLI fans out to every agent runtime it knows,
-// and that set changes with ITS releases, not ours. So any hand-maintained
-// list is not merely incomplete, it is unmaintainable: it drifts the next time
-// a dependency learns a new destination, silently, in the one direction that
+// ahead of time. Phase 3's destination set was the sharpest case: the run
+// measured above used `--all`, which fanned the catalog out to `.agents/`,
+// `agent/` AND `.claude/` — three trees, all committed, which is the defect
+// `skills-install.ts` now closes by naming one agent. Naming it does not make
+// the destination OURS to enumerate: the path is still the skills CLI's
+// choice, and it moves with ITS releases. So any hand-maintained list is not
+// merely incomplete, it is unmaintainable: it drifts the next time a
+// dependency learns a new destination, silently, in the one direction that
 // hides files rather than inventing them.
 //
 // Reading the directory afterwards is what makes the summary self-correcting.

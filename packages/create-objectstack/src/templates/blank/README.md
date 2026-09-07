@@ -100,6 +100,8 @@ After editing any metadata, run:
 
 ```bash
 pnpm validate     # schema + CEL predicates + widget bindings (no artifact)
+pnpm lint         # authoring rules validate does not run — e.g. a handler that
+                  # stopped lowering to a metadata-only body
 pnpm typecheck    # TypeScript types against @objectstack/spec
 ```
 
@@ -138,5 +140,10 @@ covered in [Self-Hosted Deployment](https://objectstack.ai/docs/deployment/self-
 - Add a flow or automation: see `objectstack-automation`.
 - Add an AI agent: see `objectstack-ai`.
 
-Skills are installed with `npx skills add objectstack-ai/objectstack/skills`
-(see `AGENTS.md`) and also show up in the in-IDE assistant catalog.
+Skills live in `.claude/skills/` and are committed with this project, once.
+They are installed one agent runtime at a time (see `AGENTS.md`), and also show
+up in the in-IDE assistant catalog:
+
+```bash
+npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
+```
