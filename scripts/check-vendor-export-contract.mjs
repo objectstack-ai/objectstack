@@ -106,6 +106,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { workspacePackages } from './workspace-enumerator.mjs';
+import { isEntrypoint } from './invoked-as.mjs';
 import { EXIT_PREREQUISITE_NOT_MET, requireDefaultExport } from './import-prerequisite.mjs';
 
 const semver = await requireDefaultExport('semver', () => import('semver'), import.meta.url);
@@ -548,11 +549,12 @@ function selfTest() {
 
 // ── entry ──────────────────────────────────────────────────────────────────
 
-// Only when RUN, never when imported: the self-test and the checklist tests
-// import the collector, and a module that runs its verdict on import would
-// make every importer inherit this gate's exit code.
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-const args = isMain ? process.argv.slice(2) : ['--noop'];
+// Only when RUN, never when imported: a caller that imports the collector must
+// not inherit this gate's exit code. `isEntrypoint` is the one predicate in
+// scripts/ that survives a symlinked checkout — a hand-typed process.argv[1]
+// comparison goes inert there, silently, at exit 0.
+const isMain = isEntrypoint(import.meta.url);
+const args = isMain ? process.argv.slice(2) : [];
 if (!isMain) {
   /* imported for its exports */
 } else if (args.includes('--self-test')) {
