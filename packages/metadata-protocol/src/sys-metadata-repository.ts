@@ -132,8 +132,9 @@ import { isWritablePackage } from './package-writability.js';
  * `"Invalid Date"` instead.
  *
  * The terminal value is chosen **per call site**, and this one's is
- * `undefined`: both callers (`getByHash` and `rowToItem`) already end in
- * `?? new Date(...).toISOString()`, the branch an absent column takes today.
+ * `undefined`: every caller already carries such a chain — `getByHash` and
+ * `rowToItem` end in `?? new Date(...).toISOString()`, `listDrafts` (#14938)
+ * in `?? null` — the branch an absent column takes at each of them today.
  * The ruling assigns `undefined` exactly where "the field is optional and the
  * caller already carries a `?? default` chain". ⛔ NOT the visible text
  * `"Invalid Date"` — the fields fed from here are read by machines
@@ -1175,7 +1176,27 @@ export class SysMetadataRepository implements MetadataRepository {
       name: row.name,
       organizationId: row.organization_id ?? null,
       packageId: row.package_id ?? null,
-      updatedAt: row.updated_at ?? row.created_at ?? null,
+      // [#14938] `updated_at` / `created_at` are the BUILTIN audit columns,
+      // so on Postgres and MySQL they arrive here as a JS `Date`: the audit
+      // repair and the declared-datetime fold both sit inside
+      // `SqlDriver#formatOutput`'s `if (this.isSqlite)` arm, and
+      // `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
+      // alone because those are instants. `rows` is cast `as any[]` above,
+      // so tsc never saw the `Date` land in a field this signature declares
+      // `string | null`. Canonicalised at the producer — the same adapter
+      // boundary `rowToItem` uses, never a tolerant `??` in the console or a
+      // reshape at the driver's read door (#13973's two standing
+      // prohibitions).
+      //
+      // The terminal is chosen PER CALL SITE (#14078) and this one is
+      // `null`, not `rowToItem`'s `?? new Date(...).toISOString()`: this
+      // projection declares `updatedAt: string | null` and the chain being
+      // replaced already ended in `?? null`, so `null` is what "absent"
+      // already means to every consumer of this list. An Invalid `Date`
+      // takes that same branch (the total `Date` arm), so a row the driver
+      // could not materialise reads as absent rather than as the visible
+      // text `"Invalid Date"`.
+      updatedAt: canonicalIsoInstant(row.updated_at ?? row.created_at) ?? null,
       updatedBy: row.updated_by ?? row.created_by ?? null,
     }));
   }
