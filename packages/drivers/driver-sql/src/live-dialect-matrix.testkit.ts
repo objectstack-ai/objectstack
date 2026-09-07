@@ -390,25 +390,35 @@ export function declareUnprovisionedCell(cell: DialectCell, matrix: string): voi
  *
  * This package sets no `testTimeout`, so every cell inherited vitest's default
  * 5000 ms — the SQLite cell, which does no I/O, and the live cells, which talk
- * to a separate server over a socket. Measured on this container against a live
- * Postgres 16.13, `sql-driver-11224-update-stamp-precision.test.ts` §2 (six
+ * to a separate server over a socket. Measured against a live Postgres 16.13
+ * and a live MySQL 8.0.46 in ONE run, on the cell that actually timed out:
+ * `sql-driver-11224-update-stamp-precision.test.ts` §2 on live mysql (six
  * rounds of create → read → update → a server-side cursor comparison, so 24
  * live round-trips in one test body):
  *
  * ```
- *              idle loop   loop held by a re-scheduling 12 ms hog (8 on 4 CPUs)
- *   sqlite §2      8 ms                                              25 ms
- *   live pg §2    31 ms                                              64 ms
+ *   §2               idle loop    loop held by a re-scheduling 12 ms hog (8 on 4 CPUs)
+ *   sqlite              21 ms                                            24 ms
+ *   live postgres       50 ms                                            50 ms
+ *   live mysql          64 ms                                           121 ms
  * ```
  *
- * ⚠️ Read what that does NOT license. The observed cost does not derive this
- * number and cannot: the queue build that dequeued PR #16430 spent MORE than
- * 5000 ms in that same test body, which is over 75x the loaded figure above.
- * A budget written as "measured cost times a margin" would have landed in the
- * hundreds of milliseconds and been wrong by two orders of magnitude. What the
- * measurement establishes is the opposite — that the cost of the WORK is not
- * what sets this bound — so the bound is derived from what it has to sit
- * between instead.
+ * ⚠️ Read what that does NOT license, in three directions.
+ *
+ *  - It does not derive this number, and cannot. The queue build that dequeued
+ *    PR #16430 spent MORE than 5000 ms in that same live-mysql body — 40x to
+ *    75x the figures above. A budget written as "measured cost times a margin"
+ *    would have landed in the low hundreds of milliseconds and been wrong by
+ *    two orders of magnitude. What the measurement establishes is the opposite:
+ *    the cost of the WORK is not what sets this bound, so the bound is derived
+ *    from what it has to sit BETWEEN instead.
+ *  - It is not the cost of live cells in general. This file is one of the
+ *    heavier ones; `sql-driver-12998-shadow-null-safe-key.test.ts`'s live cells
+ *    were measured on this same container at 248 ms for the slowest of them.
+ *    ⛔ Nothing here claims any live cell is normally near this ceiling.
+ *  - The numbers above are ONE world. Earlier readings taken on this container
+ *    with only `OS_TEST_POSTGRES_URL` set are not comparable with them: the box
+ *    and the cell population both differ. Whole-row comparisons only.
  *
  * ## The two bounds it sits between, both read off the code it guards
  *
@@ -440,7 +450,15 @@ export function declareUnprovisionedCell(cell: DialectCell, matrix: string): voi
  * sites: 60 explicit `60_000` budgets across 22 files — #13688 and its sweep
  * #13902 put them on live test BODIES, #14213 and #14628 on the hooks that pay
  * a live connect. Adopting it leaves the live matrix with ONE live budget
- * instead of two, so a red at 60_000 ms is unambiguous about which bound it hit. ⛔ It is NOT `driver-mongodb`'s 30_000 carried over
+ * instead of two, so a red at 60_000 ms is unambiguous about which bound it hit.
+ *
+ * ⭐ That convention states its own reasoning, and states its own limit —
+ * `sql-driver-12998-shadow-null-safe-key.test.ts`, on the four budgets #13902
+ * gave it: "Sized like this package's siblings — 60_000 is 7 of its 9 explicit
+ * budgets — and NOT an assertion that these tests are normally anywhere near
+ * that slow." So the precedent picked the value by convention and said so; what
+ * it never had is a CORRIDOR the value must lie in. That is what this constant
+ * adds, and it is the half that is derived. ⛔ It is NOT `driver-mongodb`'s 30_000 carried over
  * by analogy — that is that package's number, and this one is this package's.
  *
  * It clears the derived floor by 4x — arithmetically, room for four
@@ -502,9 +520,9 @@ export function declareDialectCell(
   //
   // ⛔ Deliberately NOT a package-wide `testTimeout` in `vitest.config.ts`.
   // That is the one knob with no cell-level discrimination, so it would raise
-  // the ceiling for the SQLite cell too — measured at 8 ms idle / 25 ms hogged
-  // for the same test body — and this package's fast in-memory cells are where
-  // a 5 s guard is doing real work.
+  // the ceiling for the SQLite cell too — measured at 21 ms idle / 24 ms hogged
+  // for the same test body the live-mysql cell spends 64-121 ms on — and this
+  // package's fast in-memory cells are where a 5 s guard is doing real work.
   //
   // A suite-level `timeout` cascades to the tests the consumer's own describes
   // declare, and an explicit per-`it` third argument still wins over it — both
