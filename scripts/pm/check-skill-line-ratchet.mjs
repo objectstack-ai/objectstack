@@ -1058,7 +1058,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/checklist-test/SKILL.md', 221],
   ['.claude/skills/checklist-author/SKILL.md', 0],
   ['.claude/skills/dogfood-verification/SKILL.md', 0],
-  ['.claude/skills/spec-property-retirement/SKILL.md', 328],
+  ['.claude/skills/spec-property-retirement/SKILL.md', 326],
   // Lowered 1081 → 768 by the rules-only rewrite: the translations row lost its
   // in-cell narrative; the widest survivor is that same row. Landed width, headroom 0.
   ['AGENTS.md', 768],

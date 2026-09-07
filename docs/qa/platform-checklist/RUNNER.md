@@ -67,13 +67,14 @@ test-run output the clause's `evidence` field names.
      the run issue, not a tracking or extracted card, not a comment. Relocating it is not a
      mitigation — a tracking card is a public issue in a public repo just the same. Such a
      `fail` **is a completed verdict** when it records the item id, the clause, and `detail
-     withheld pending maintainer`; the reproduction stays in the runner session, and the
-     runner stops there and waits for the maintainer. Existence published, recipe withheld,
-     is a complete and actionable report — getting a defect fixed never requires handing
-     anyone a working exploit. (Maintainer disclosure ruling, 2026-08-18, recorded on
-     #9387; the `checklist-test` skill states the same guardrail in the same terms — one
-     rule written in both places, not a precedence claim by either.) **No other failure
-     class is softened by this**: everything else owes its reproduction rule in full.
+     withheld pending maintainer`; the reproduction stays in the runner session, and the run
+     ends there with that report — a one-shot runner has no channel to wait on. Existence
+     published, recipe withheld, is a complete and actionable report — getting a defect
+     fixed never requires handing anyone a working exploit. (Maintainer disclosure ruling,
+     2026-08-18, recorded on #9387; the `checklist-test` skill states the same guardrail in
+     the same terms — one rule written in both places, not a precedence claim by either.)
+     **No other failure class is softened by this**: everything else owes its reproduction
+     rule in full.
 3. **Classify blockers honestly.** Missing seed/persona/fixture → `blocked(fixture)`,
    and *record the gap on the item* (`fixtures.knownGaps` or `blocked`) so the next
    sweep doesn't rediscover it. A defect in the fixture itself (seed silently failing,
