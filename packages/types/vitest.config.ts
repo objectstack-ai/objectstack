@@ -18,12 +18,33 @@ const REPO_TESTS: string[] = JSON.parse(readFileSync(path.join(__dirname, 'vites
 
 export default defineConfig({
   test: {
+    // Each project re-declares the root block's test options: a ROOT-level
+    // value is inert for a project run (measured on vitest 4.1.10, see
+    // check-registry-log-declared / check-console-intercept-disarm).
     projects: [
       {
         extends: true,
-        test: { name: 'local', include: configDefaults.include, exclude: [...configDefaults.exclude, ...REPO_TESTS] },
+        test: {
+          name: 'local',
+          include: configDefaults.include,
+          exclude: [...configDefaults.exclude, ...REPO_TESTS],
+          // A late console.* must not redden a green suite (#10374); see the root
+          // block. A ROOT-level value is inert for a project run, so it is
+          // declared here as well (scripts/check-console-intercept-disarm.mjs).
+          disableConsoleIntercept: true,
+        },
       },
-      { extends: true, test: { name: 'repo', include: REPO_TESTS } },
+      {
+        extends: true,
+        test: {
+          name: 'repo',
+          include: REPO_TESTS,
+          // A late console.* must not redden a green suite (#10374); see the root
+          // block. A ROOT-level value is inert for a project run, so it is
+          // declared here as well (scripts/check-console-intercept-disarm.mjs).
+          disableConsoleIntercept: true,
+        },
+      },
     ],
     // A late console.* must not redden a green suite (#10374): vitest's worker
     // forwards console output over RPC and discards the promise, and a write
