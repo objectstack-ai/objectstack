@@ -1485,8 +1485,12 @@ export interface SuspensionRestoreResult {
  *  - `'NO_CONSUMED_SUSPENSION'` — neither witness holds anything: the run
  *    reached a terminal state that was NOT a strand (completed, cancelled,
  *    cascade-failed — `failSuspendedRun` consumes an ancestor's pause and
- *    journals nothing) or never paused at all. Deliberately does not claim
- *    which: nothing in the engine can tell those apart.
+ *    journals nothing), never paused at all, or DID strand and its snapshot
+ *    is no longer held (the journal evicted a copy whose write never landed;
+ *    the run was restored and then finished; a store class without
+ *    `loadTerminal`, after a restart). Deliberately does not claim which:
+ *    nothing in the engine can tell those apart, and the restore verb's own
+ *    refusal text names the same three.
  *  - `'RUN_SUSPENDED'` — a live suspension exists, so the run is resumable
  *    already (typically: it was restored). Nothing to repair.
  */
@@ -6673,6 +6677,16 @@ export class AutomationEngine implements IAutomationService {
      * honoured. A hot copy answers alone where there is no row to ask: no
      * store, no run history, a write that never landed or is still in flight.
      *
+     * ⚠️ Sampling instant (#15358 contract review): the hot copy is read HERE,
+     * i.e. AFTER the caller's `await loadTerminal(...)`, where the inline read
+     * this replaced took it BEFORE that await. The decision table is the same;
+     * the sample time is later. With {@link MAX_CONSUMED_SUSPENSIONS} bounding
+     * the journal, an eviction that lands during that await now answers a
+     * refusal (`NO_CONSUMED_SUSPENSION`) where the old read would have restored
+     * from the copy it had already captured. The direction is refusal, never a
+     * double-run — the copy is gone either way; only which of the two verbs
+     * notices moved.
+     *
      * @param terminal - The durable terminal row, already loaded by the
      *   caller (each caller owns its own outage posture for that read).
      */
@@ -7056,7 +7070,14 @@ export class AutomationEngine implements IAutomationService {
      * consumed suspension to put back for `runId`? Answers from the SAME two
      * witnesses that verb reads — this process's hot journal and the durable
      * terminal row, reconciled by {@link resolveConsumedSuspensionWitnesses}
-     * — and re-arms nothing, drops nothing, writes nothing.
+     * — and re-arms nothing and writes nothing. The one incidental mutation is
+     * the strict suspension read's own: {@link loadSuspendedRunStrict} may
+     * evict a phantom `suspendedRuns` entry the store has already answered
+     * "no row" for (#15832; `evictConsumedSuspension` touches `suspendedRuns`
+     * only, never the consumed-suspension journal) — identical to
+     * {@link hasSuspendedRun} today. A stale hot copy the row supersedes is
+     * REPORTED by the shared read and left in place; only the restore verb
+     * drops it.
      *
      * ## Why a dedicated member, and not a field on the run
      *

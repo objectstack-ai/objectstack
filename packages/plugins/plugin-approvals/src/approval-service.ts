@@ -488,8 +488,13 @@ function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunSt
  *  - `unrepairable` — the engine holds NO consumed suspension: the run was
  *    cascade-failed (`failAncestors` → `failSuspendedRun`, which consumes the
  *    ancestor's pause and journals nothing — #15222's shape, the one the
- *    engine's own words call not a strand) or never paused at all. Nothing
- *    re-arms it; the remedy is a new run, not a restore.
+ *    engine's own words call not a strand), never paused at all, or did
+ *    strand and its snapshot is no longer held (the journal evicted a copy
+ *    whose write never landed; the run was restored and then finished; a
+ *    store class without `loadTerminal`, after a restart) — the engine's
+ *    `NO_CONSUMED_SUSPENSION` covers all three and does not say which. The
+ *    label is faithful to the verb: nothing re-arms it; the remedy is a new
+ *    run, not a restore.
  *  - `failed` — the engine COULD NOT BE ASKED which of the three it is: the
  *    attached surface has no `inspectConsumedSuspension` (an engine build
  *    older than this plugin, or a test double). Today's undifferentiated
