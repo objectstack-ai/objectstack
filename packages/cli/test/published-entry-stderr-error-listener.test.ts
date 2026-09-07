@@ -74,7 +74,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
-import { childEnv, requireBuiltCli } from './helpers/serve-process.js';
+import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** `packages/cli` — this package's own root, never another package's. */
@@ -82,17 +82,6 @@ const PACKAGE_ROOT = resolve(HERE, '..');
 const RUN_JS = join(PACKAGE_ROOT, 'bin', 'run.js');
 const SERVE_COMMAND = join(PACKAGE_ROOT, 'src', 'commands', 'serve.ts');
 const PROBE = join(HERE, 'fixtures', 'published-entry-stderr-error-probe.mjs');
-
-/**
- * Why a `bin/run.js` child needs `packages/cli/dist`, in this file's own terms.
- *
- * ⚠️ The mechanism is the caller's to supply and must be TRUE OF THIS CALLER —
- * a borrowed sentence is a false explanation attached to a true refusal.
- */
-const PUBLISHED_ENTRY_NEEDS_DIST =
-  'This file drives bin/run.js with NODE_ENV unset, so oclif resolves the command from dist/ and the ' +
-  'entry point reaches its own prologue; on an unbuilt tree the child answers "command not found" before ' +
-  'the probe can read anything, and every assertion below would be about a run that never happened.';
 
 /**
  * The one ceiling, a CONSTANT for the reason both neighbouring files record: a
@@ -155,8 +144,28 @@ function runPublishedEntry(arm: 'guarded' | 'unguarded'): Promise<Arm> {
   });
 }
 
+// ⛔ NO `requireBuiltCli()` here, and the absence is MEASURED rather than an
+// oversight. Everything this file reads lives in source: the listener is
+// attached in `bin/run.js` itself — the file npm packs as the `bin` target
+// however `files` is written (#14874) — and both `../dist/` imports in that
+// entry are wrapped in a `try/catch` that degrades to silence, so an absent
+// `dist` costs the child nothing it is measured on here. `--version` is
+// answered by oclif's own config and never reaches `dist/commands`.
+//
+// Measured on this tree with `packages/cli/dist` moved aside: the child printed
+// its version, the guarded arm read `LISTENER ATTACHED … WROTE … SURVIVED …
+// EXIT code=7` and the unguarded arm `UNCAUGHT code=EPIPE … EXIT code=1` — every
+// case below green, and still RED under the listener ablation, with no build in
+// the tree at all.
+//
+// ⚠️ That is exactly where this file differs from its neighbour
+// `published-entry-stderr-nonblocking.e2e.test.ts`, whose subject
+// (`keepStderrNonBlocking`) IS the compiled `../dist/utils/stderr-nonblocking.js`
+// import: that file's gate is true OF THAT FILE, and it keeps both its gate and
+// its `.e2e` name. ⛔ Do not borrow it back here. A gate copied without its
+// reason is a false explanation attached to a true refusal — the failure class
+// the helper's own docblock above `RUN_JS_RESOLVES_FROM_DIST` names.
 beforeAll(async () => {
-  requireBuiltCli(PUBLISHED_ENTRY_NEEDS_DIST);
   dir = mkdtempSync(join(tmpdir(), 'os-published-entry-stderr-error-'));
   guarded = await runPublishedEntry('guarded');
   unguarded = await runPublishedEntry('unguarded');
@@ -300,10 +309,13 @@ describe('the premise the measurement rests on', () => {
     // covering a live hazard.
     //
     // ⛔ ANCHORED ON `printDiagnostic`'S OWN BODY, not on the file. `serve.ts`
-    // holds about a dozen `process.stderr.write(` sites, so a whole-file
-    // `toContain` stays green while the ONE writer this reproduction rests on
-    // — the boot diagnostic, #7915, the line the crash was measured at — moves
-    // to `console.error` and stops being able to crash anything.
+    // holds one OTHER `process.stderr.write(` site — the `warn:` adapter it
+    // hands `resolveArtifactReference`, for the cache-fallback note an operator
+    // must not miss — so a whole-file `toContain` stays green while the ONE
+    // writer this reproduction rests on — the boot diagnostic, #7915, the line
+    // the crash was measured at — moves to `console.error` and stops being able
+    // to crash anything. (Counted on this head: 2 code-position sites, comments
+    // masked; the docblocks nearby DISCUSS several more.)
     //
     // ⚠️ Located BY SYMBOL, never by line number. Comments are masked so the
     // docblocks that DISCUSS `process.stderr.write` — including the one

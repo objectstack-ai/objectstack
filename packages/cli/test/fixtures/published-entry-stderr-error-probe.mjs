@@ -2,7 +2,7 @@
 
 /**
  * The #14858 crash class, manufactured INSIDE the published entry point's own
- * process — driven by `published-entry-stderr-error-listener.e2e.test.ts`.
+ * process — driven by `published-entry-stderr-error-listener.test.ts`.
  *
  * Loaded with `node --import <this> bin/run.js …` against a read end the parent
  * has destroyed, so everything below runs in the same process as the shipped

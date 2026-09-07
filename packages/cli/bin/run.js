@@ -142,7 +142,7 @@ try {
 // "something is listening" is briefly true in any process and cannot tell this
 // listener apart from that one — a pin that polled the COUNT passed against a
 // tree with this whole block deleted, measured. The name is what
-// `published-entry-stderr-error-listener.e2e.test.ts` waits for and asserts on;
+// `published-entry-stderr-error-listener.test.ts` waits for and asserts on;
 // it also puts a legible frame in any listener dump.
 process.stderr.on('error', function objectstackStderrErrorIsNotFatal() {
   // Nothing to report, and nowhere left to report it.
