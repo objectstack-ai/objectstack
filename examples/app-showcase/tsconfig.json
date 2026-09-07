@@ -37,9 +37,18 @@
     // a star is an EXACT match, and the `@objectstack/plugin-email*` spelling would
     // fold every subpath onto this one target and type-check green against the wrong
     // module.
+    //
+    // Same rule, third instance, and the one where a stale `dist` is quietest:
+    // `test/nav-and-detail-grants.test.ts` (#14453) runs `@objectstack/lint`'s
+    // `validateNavAccess` / `validateSecurityPosture` over this app's own stack.
+    // Both are ADVISORY rules that return findings rather than throwing, so a
+    // `dist` merely BEHIND this checkout raises nothing at all — it answers with
+    // the OLD rule and the pin passes. The runtime half is the matching alias in
+    // vitest.config.ts; this is the type half.
     "paths": {
       "@objectstack/formula": ["../../packages/formula/src/index.ts"],
-      "@objectstack/plugin-email": ["../../packages/plugins/plugin-email/src/index.ts"]
+      "@objectstack/plugin-email": ["../../packages/plugins/plugin-email/src/index.ts"],
+      "@objectstack/lint": ["../../packages/lint/src/index.ts"]
     }
   },
   // This package took the widened-`include` route rather than a sibling

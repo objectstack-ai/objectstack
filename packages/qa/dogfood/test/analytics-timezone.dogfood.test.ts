@@ -42,14 +42,34 @@ describe('dogfood: org timezone drives analytics date bucketing (#1982/#2018)', 
     stack = await bootStack(crmStack);
 
     // Deterministic fixture: N leads pinned to the tz-boundary instant, inserted
-    // as system so the write path's defaults/validation don't fight the setup.
+    // as system so the write path's defaults/validation don't fight the setup,
+    // and with `preserveAudit` because a BACK-DATED `created_at` is exactly what
+    // that flag exists to permit.
+    //
+    // [#15964] `preserveAudit` is REQUIRED here and is not decoration. The audit
+    // binder's `beforeInsert` stamp used to be `record.created_at ?? now` — a
+    // caller-supplied value won on EVERY insert, with no flag — which is the
+    // hole a plain REST `POST` reached to forge the audit anchor. It is now the
+    // same shape as `updated_at`, `preserveAudit ? (… ?? now) : now`, on the
+    // maintainer ruling of 2026-09-06 (decision batch #54, option A). This
+    // fixture is a LEGITIMATE back-dating consumer of the old behaviour — the
+    // first one measured — so it moves to the explicit channel the same ruling
+    // preserved rather than the accident it used to ride on.
+    //
+    // ⚠️ `isSystem` alone does NOT do this and never did: it exempts the engine's
+    // readonly STRIP, not the audit binder's stamp, which is why this fixture
+    // used to depend on the `??` rather than on its own elevation. Measured
+    // both ways in `@objectstack/objectql`'s
+    // `plugin-audit-created-at-create-side.test.ts`. `preserveAudit` is the flag
+    // REST's `treatAsHistorical` import sets on the write context
+    // (`packages/rest/src/import-runner.ts`), reaching this same hook.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ql = await stack.kernel.getServiceAsync<any>('objectql');
     for (let i = 0; i < N_LEADS; i++) {
       await ql.insert(
         'crm_lead',
         { name: `tz-lead-${i}`, status: 'new', created_at: BOUNDARY },
-        { context: { isSystem: true } },
+        { context: { isSystem: true, preserveAudit: true } },
       );
     }
     // Sanity: confirm created_at actually persisted as the boundary instant

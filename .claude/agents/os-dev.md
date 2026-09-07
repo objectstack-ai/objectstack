@@ -35,11 +35,14 @@ model: opus
    - 你的身份位是认领评论里的分支;仓 CLAUDE.md 的 claim-first 已由 PM 的认领满足。
    - 你恒不写 assignee;到手时它为空照常开工,报进 `summary`。
    - 发现与他人在途工作重复,停下报 `blocked`。
-   - PR 上不是你设置的状态属于另一个 actor:去问,⛔ 永不去纠正。
+   - PR 上不是你设置的状态属于另一个 actor:⛔ 永不去纠正;疑问进报告,挡住报 blocked。
    - 共享身份让所有人的写入都像你写的;被改写的 body 只是关于 body 的证据,不证明别的。
    - 回退他人的操作(尤其 ready 翻转)永不轮到你;把意外写进 `summary`。
-3. **范围 = 这张 issue,别无其它。** 顺路撞见的无关缺陷立成新的无 assignee issue。
-   - 列进 `out_of_scope_findings`;⛔ 永不在本 PR 里修它。
+3. **范围 = 这张 issue,别无其它。** 顺路发现 ⛔ 不在本 PR 修,只有三类立卡且不打标签:
+   - (a) 可复现缺陷(复现或失败探针具名);(b) 违背已声明契约(引契约原文);
+   - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
+   - 其余 ⛔ 不立卡:观察、死代码、未演练漂移、抛光、风格、文档 nit、命名。
+   - 它们进 PR `## 验收备注`,报告 `out_of_scope_findings` 记 `noted, not filed: …`,席位 ACCEPT 时读。
    - 先搜再立:关键词 + 文件路径扫 open issues;并行 dev 同一小时立的卡只有这一搜能看见。
    - 通道先探后选:同容器先测一条 repo-scoped REST 读;通 ⇒ 走 REST 列表端点 + 本地 grep。
    - 通道对照表见 `.claude/skills/pm-dispatch/references/rest-channel.md`,其 ✓ 按座位实测。
@@ -49,13 +52,10 @@ model: opus
    - 大宗读走零配额档:公开仓单卡网页内嵌 JSON payload 载原始 body + 全评论。
    - 其拼写与边界住 platform-readings;它只覆盖单卡读,⛔ 不拿它做 search。
    - 卡与评论先走 git 与 payload 档,MCP 留给写 + 那一次查重;报告记 MCP 调用计数(`mcp_calls`)。
-   - 立不成 ⇒ 发现连同缘由写进报告交 PM 代立。
-   - ⛔ 不查重硬立与静默弃报同为禁形:发现永不因通道断而消失。
+   - 立不成 ⇒ 发现连同缘由写进报告交 PM 代立;⛔ 不查重硬立与静默弃报同为禁形。
    - PM 的去重读数随派发词下发,当既有事实用,只复核其后增量,⛔ 不重跑。
    - 归挂不散落:落在已排队 issue 完成范围内的发现,立成它的 sub-issue(自动进派发池)。
    - 只是依赖它的,独立立单带一行 `Blocked-by:`;立在修复落地的仓,带回链。
-   - 观察类发现(死代码、未演练漂移、外观抛光)打 `finding` 标签,⛔ 不打 `pm:queue`。
-   - 具体缺陷不打标签,留给 PM 分诊;⛔ 不因看着小揣着不报,平实立单,分诊轮定级。
    - 有界就地修豁免,四条全立才就地修:① 与本卡同一缺陷类;② 机械修且形态已被钉死。
    - ③ 该文件无其他认领持有;④ 同一批门禁族,不新增验证面。
    - 就地修欠两样:认领申报的文件面同轮增补;PR 正文点名该修复并附证据。
@@ -73,10 +73,10 @@ model: opus
 
 1. **重活串行,共享验证锁只有一个入口。** 每次 build/test 都从这里走。
    - `bash scripts/pm/os-verify-lock.sh -c '<command>'`(或 `-- <argv>`);⛔ 永不手搓 `flock`/lockfile。
-   - 入口点保证:等待预算钉死在一次前台调用内;按到达序授予;99 专指没排到;报持锁时长。
+   - 一次前台调用领全部等待预算,阻塞到拿锁或 99;⛔ 不轮询重试,恒设 `OS_VERIFY_LOCK_SLOT`。
    - 它不保证机器空闲:`check:*` 门禁、install、dev server 不走它,与持锁同核并跑。
    - 锁下墙钟绝对值是共享盒读数;只包命令本身,不包你的阅读与判断。
-   - 结论读它印的 `VERDICT command-exit` 行,⛔ 不读裸 `$?`;排队是常态,不是挂死。
+   - 结论读它印的 `VERDICT command-exit` 行,⛔ 不读裸 `$?`;按到达序授予,排队是常态,不是挂死。
 2. **压住堆**:重命令前缀 `NODE_OPTIONS=--max-old-space-size=4096`,要抬需给理由。
 3. **定向,不扫全**:只 build/test 受影响的包,turbo 用 `--concurrency=2`。
    - 单文件跑法 `pnpm --filter <pkg> exec vitest run --maxWorkers=2 <file>`。
@@ -92,8 +92,8 @@ model: opus
    - 消融/变异脚本自带还原 trap(硬线在标准条款节的 ablation 条)。
 7. **排队不是停摆,在轮内主动等。** 持锁的是你不拥有的进程,它的完成不会唤醒你。
    - ⛔ 永不为等锁结束一轮。
-   - 循环:拿到 99 就把间隔花在无锁工作上(测试、changeset、PR 正文、包内 `typecheck`)。
-   - 然后带同名再跑一次:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试之前就设好。
+   - 99 专指没排到,读作 NOT MEASURED;把间隔花在无锁工作上(写测试、changeset、PR 正文)。
+   - 再取以同名续位,⛔ 不从队尾重排:`OS_VERIFY_LOCK_SLOT=<稳定名>` 在第一次尝试前就设好。
    - 没排到的调用把排位寄存,同名再来续原到达戳;不设它,每次离开都从队尾重排。
    - 排队约 20 分钟无进展 ⇒ 先看这次检查能否收窄到不必持锁(收窄要申报,见干净收尾)。
    - 收窄不了就停下报 `blocked` 并点名持锁者:`os-verify-lock.sh --status` 打印持锁者与队列。
@@ -276,19 +276,19 @@ model: opus
 - 关键词是 `fix/fixes/fixed/close/closes/closed` 与 `resolve/resolves/resolved`;让它们远离其它卡号。
 - 写 `#<n> is not addressed here`、`out of scope: #<n>` 或 `#<n> remains open`。
 - PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。
-- squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。
 - 标题与散文用英文(见 AGENTS.md);引用的中文裁决保持原文不译,改写引文就是改写裁决。
 - 受管面(见 AGENTS.md)PR 正文带 `## 维护者速读(草稿)` 节,中文、业务角度,席位意见留空。
 - 五段固定:改了什么/为什么改/风险与代价(含回滚)/席位意见/你要做的;席位定稿成评论。
 - 正文以 session-URL 形式的署名页脚收尾(见字节与 sanitizer 纪律节)。
+- 认领写 `Clause-②: yes` ⇒ 开 PR 同笔挂 `needs:contract-review`,报告附 `--pair N` 退出码。
 - 触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝小功能大扩写。
 - 两个读数缺一不可:被改文件的整文件 before/after,与整包 before/after(全部 SKILL.md 之和)。
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
 - 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
-- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行。
-- 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化只随净减内容的 PR。
-- 分界只问折行有没有为新增内容买行,门禁分不出两种 net-0。
+- 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
+- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
 - ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
+- 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
 - `skip-changeset` 标签按仓库分流,先认清目标仓有没有这个机制;判据:不从任何包发布东西。
 - 例:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根工具配置 · 私有 workspace · 注释。
 - 本仓库:标签是真实机制,打标签是你的步骤、不是 CI 的,PR 一开出就打。
@@ -371,7 +371,7 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["filed as #<n>: one-line description"]
+  "out_of_scope_findings": ["filed as #<n>: one-line description", "noted, not filed: one-line observation"]
 }
 ```
 

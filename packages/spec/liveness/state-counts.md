@@ -59,8 +59,8 @@ for both corollaries.
 | `qa` | 4 | 0 | 0 | 5 | 0 | 9 |
 | `manifest` | 23 | 0 | 1 | 15 | 0 | 39 |
 | `crud_endpoints` | 6 | 0 | 0 | 2 | 0 | 8 |
-| `metadata_endpoints` | 6 | 0 | 0 | 2 | 0 | 8 |
+| `metadata_endpoints` | 7 | 0 | 0 | 2 | 0 | 9 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **845** | **5** | **1** | **94** | **12** | **957** |
+| **total** | **846** | **5** | **1** | **94** | **12** | **958** |

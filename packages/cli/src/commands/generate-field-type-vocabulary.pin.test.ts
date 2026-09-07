@@ -512,8 +512,10 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
       expect(
         tsColumn(type),
         `os generate migration (typescript) gave a ${type} column something other than a string ` +
-        'column. A platform id is 26 characters (driver-sql spells one out in its lookup arm), ' +
-        'so a `uuid` column refuses it outright on Postgres with 22P02.',
+        'column. A platform id is not a uuid, and its width is not a fixed number (driver-sql\'s ' +
+        'lookup arm states both: it mints a 16-character nanoid, and stores a supplied id at ' +
+        'whatever width the caller chose), so a `uuid` column refuses it outright on Postgres ' +
+        'with 22P02.',
       ).toBe(`table.string('f_${type}')`);
     }
     // The width is knex's default for a bare `table.string(name)`, which is the
@@ -567,7 +569,18 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     expect(tsInterfaceType('number')).toBe('number');
     // The driver's own answer for the headline member, read where it lives.
     expect(createColumnArm('autonumber')).toContain('table.string(name)');
-    expect(sqlColumn('autonumber')).toBe(sqlColumn('text'));
+    // #16091 — compared against `lookup`, not against `text`. Both were
+    // `VARCHAR(255)` when this line was written, which made `text` a usable
+    // stand-in for "the driver's default string column"; it is not one any
+    // more. `createColumn` gives `text` its text-family arm (an unbounded TEXT
+    // for every unkeyed column) and gives `lookup` the same bare
+    // `table.string(name)` it gives `autonumber` — asserted here, from the
+    // driver, so the comparator cannot silently become a different question again.
+    expect(createColumnArm('lookup')).toContain('table.string(name)');
+    expect(sqlColumn('autonumber')).toBe(sqlColumn('lookup'));
+    // Anti-vacuity: the comparator is a real, DIFFERENT answer from the
+    // text family's, so this equality is a measurement rather than a tautology.
+    expect(sqlColumn('autonumber')).not.toBe(sqlColumn('text'));
     expect(tsColumn('autonumber')).toBe("table.string('f_autonumber')");
   });
 

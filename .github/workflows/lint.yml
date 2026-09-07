@@ -3597,6 +3597,29 @@ jobs:
       - name: Published-files whitelist guard
         run: pnpm check:published-files
 
+      # The PROVENANCE half of the same packaging hygiene (#15991). The guard
+      # above owns published package CONTENTS — what the tarball contains — and
+      # says nothing about where the tarball claims its source lives. npm renders
+      # `repository.directory` as the package page's "source" deep link, and
+      # until this gate NOTHING in this repo read the field: two
+      # `packages/triggers/*` manifests shipped a value naming
+      # `packages/plugins/plugin-trigger-*`, a path removed when the family was
+      # promoted, so both npm pages published a 404 on the one link a consumer
+      # follows to read the code. The history is why it is a state check over the
+      # whole population rather than a rule about moves: one of the three commits
+      # involved moved nothing at all — it edited `repository.url` in the same
+      # JSON object with the stale `directory` line as visible hunk context, and
+      # it shipped. Humans looked and missed it twice. ⛔ It judges only manifests
+      # that DECLARE the field; whether declaring is mandatory for a publishable
+      # package is an open policy question and a maintainer's to answer, so
+      # silence is counted and never a finding. Runs its own --self-test first:
+      # this population is `git ls-files` plus a field predicate, so a changed
+      # glob or a renamed field empties it silently and the production run would
+      # print exactly what a clean tree prints. Static read of tracked manifests;
+      # no build, no network, sub-second.
+      - name: Manifest repository.directory guard
+        run: pnpm check:manifest-repository-directory
+
       # Engine test-double contract gate (#4550, from #4434). A test double
       # LOOSER than the implementation it replaces turns a green suite into no
       # suite at all, silently, on exactly the paths a double was introduced

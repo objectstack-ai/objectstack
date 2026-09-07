@@ -58,6 +58,7 @@
  * `notifications.hono.integration.test.ts` (#6928).
  */
 
+import { ExecutionStatus } from '@objectstack/spec/automation';
 import { describe, it, expect, vi } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -317,13 +318,22 @@ describe('#7300 — every value that had a defensible answer keeps it', () => {
         expect(listRuns).toHaveBeenCalledWith('welcome_flow', { limit: 2, cursor: undefined, status: 'failed' });
     });
 
-    it.each(
-        ['pending', 'running', 'paused', 'completed', 'failed', 'cancelled', 'timed_out', 'retrying'],
-    )('forwards every declared ExecutionStatus member — ?status=%s', async (member) => {
-        // The gate reads its members from the spec's `ExecutionStatus` enum, the
-        // same one `ListRunsRequestSchema` is built from, so this pins that the
+    it.each(ExecutionStatus.options)('forwards every declared ExecutionStatus member — ?status=%s', async (member) => {
+        // The rows are READ off the spec's `ExecutionStatus` — the same enum
+        // `ListRunsRequestSchema` is built from, and the same one the boundary
+        // hands `parseEnumParam` as its accepted set — so this pins that the
         // wire's declared set and the boundary's accepted set are one set. A
         // member added to the enum and refused here would fail this row.
+        //
+        // The members used to be re-listed inline here: identical to the enum
+        // on the day it was written, and short by one the day `refused` was
+        // appended (#14945), with this row still green under a name that says
+        // EVERY declared member — a test named for a property it no longer
+        // measured. Reading the vocabulary is what makes the name true, and it
+        // is the discipline the boundary and the wire schema already apply
+        // (#7359); `automation-api.zod.test.ts` turned the same copy into the
+        // same read. ⛔ Iterating `.options` does not reorder it — the enum's
+        // own note reserves those positions for readers that index them.
         const { result, listRuns } = await listWith({ status: member });
 
         expect(result.response?.status).toBe(200);

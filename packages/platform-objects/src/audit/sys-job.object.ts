@@ -61,10 +61,44 @@ export const SysJob = ObjectSchema.create({
       group: 'Schedule',
     }),
 
+    // [#15872] Validated on write by `valueDomain: 'iana_time_zone'` — the same
+    // declaration `sys_business_unit.timezone` / `sys_organization.timezone`
+    // carry (#14238), and the same shared `Intl.DateTimeFormat` probe, never the
+    // `Intl.supportedValuesOf('timeZone')` enumeration (which omits `UTC`).
+    // Written values only: the `min`/`max`/`maxLength` transition-gate class, so
+    // a stored non-member is never re-read and no migration is owed.
+    //
+    // WHAT READS THIS COLUMN, measured on #15872 before the declaration was
+    // added, because it decides what the declaration is worth: NOTHING does.
+    // `DbJobAdapter` writes it (`upsertJobRow`, `schedule.timezone ?? null`) and
+    // its three `sys_job` read sites take `id` / `run_count` / `failure_count`
+    // only — the tree's one `row.timezone` read belongs to `sys_report_schedule`.
+    // The value the scheduler actually honours travels in memory
+    // (`toBoundaryJobSchedule` -> `CronJobAdapter.schedule` -> croner), and
+    // `DbJobAdapter.schedule` awaits that call BEFORE `upsertJobRow`, so a
+    // non-member cannot reach this column through the scheduler at all: croner
+    // constructed WITH a callback throws on a non-member zone, `AppPlugin`
+    // catches it per job as `Background job FAILED TO SCHEDULE — it will never
+    // run` (error + `jobScheduleFailuresTotal`), and the row is never written.
+    // The door this declaration actually closes is the OTHER one: a direct write
+    // to the object (Studio, REST, a script), which had no validation whatever.
+    //
+    // ⚠️ `maxLength` deliberately still says 100 while `sys_report_schedule`
+    // says 64. Converging it is the card's third dimension and is NOT landed
+    // here: `maxLength` is not only a write bound, it reaches DDL — narrowing a
+    // physical `varchar(100)` produces `driver-sql`'s `narrow_varchar` op at
+    // severity `error`, category destructive ("narrowing may truncate",
+    // `os migrate apply --allow-destructive`). What this column physically holds
+    // in a deployment cannot be read from the repo, and 「IANA names are short」
+    // is an argument about the domain, not a reading of the data. Left to a
+    // separate decision (#15872 stays open on that row). Note what the line
+    // above already costs it: no `valueDomain` member is longer than 32
+    // characters on this Node baseline, so 100 now admits nothing 64 would not.
     timezone: Field.text({
       label: 'Timezone',
       required: false,
       maxLength: 100,
+      valueDomain: 'iana_time_zone',
       group: 'Schedule',
     }),
 

@@ -1282,7 +1282,8 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
 // half, and the cheap half is the one that removes a false signal today.
 //
 // A citation is a colon-then-digits reached one of two ways, because the ledger
-// spelled it both ways: anchored to a source filename (`manifest.zod.ts:158`),
+// spelled it both ways: anchored to a source filename (`<file>.ts:158`, the
+// placeholder spelling `scripts/symbol-anchors.mjs#ANCHOR_GRAMMAR` uses),
 // or BARE, continuing a filename named earlier in the same sentence
 // (`ManifestSchema id :140 and version :202`). The bare half is why a plain
 // "filename followed by a colon" rule is not enough — and the bare half is the

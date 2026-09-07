@@ -611,48 +611,6 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
     },
 
-    // ── pending registration [#14474]: an install-time refusal that GAINED an
-    // ── envelope, so the scan can see it for the first time ────────────────
-    // Not a widened scan and not a new producer: `NamespaceConflictError` has
-    // thrown from `SchemaRegistry.installPackage` since ADR-0048 Phase 1, but
-    // it carried no `code` at all, so there was no stamp for any pattern to
-    // match. #14474 gave it the ADR-0112 envelope its three install-time
-    // siblings already carried, which is what put a site here to classify.
-    // The door narrowing its `why` names is #9106's — the file header above
-    // carries it. The anchor lives here rather than in the string, because a
-    // runtime string reaches operators who cannot resolve a tracker id.
-    {
-        code: 'NAMESPACE_CONFLICT',
-        file: 'packages/objectql/src/registry.ts',
-        // [#16159] `classconst`, not `classfield`, since the literal became the
-        // exported `NAMESPACE_CONFLICT_CODE` constant in the producer. The VALUE is
-        // byte-identical and the scanner resolves the constant back to it; only the
-        // spelling the scan matches on moved. The verdict below is untouched.
-        shape: 'classconst',
-        door: 'dispatcher',
-        verdict: 'pending-registration',
-        why:
-            'ADR-0048 Phase 1 — the install-time namespace gate\'s refusal, raised by ' +
-            '`SchemaRegistry.installPackage` when a package\'s `manifest.namespace` is already owned by an ' +
-            'installed package that is not a co-owner of it (ADR-0130 D1). ⭐ Its reachability is what ' +
-            'separates it from the three ADR-0130 install-time rows below, whose `door: none` turns on ' +
-            'needing an artifact install SCOPE that no HTTP caller builds: this gate needs no scope, so the ' +
-            'ordinary one-package install reaches it. MEASURED on a booted stack (`@objectstack/verify` ' +
-            '`bootStack`, dev admin, two `POST /api/v1/packages` installs declaring one namespace), not ' +
-            'inferred from the call graph. Before the envelope the door answered `500` with ' +
-            '`code: INTERNAL_ERROR` — `packages/runtime/src/domains/packages.ts` catches and calls ' +
-            '`errorFromThrown(e, 500)`, and `resolveThrownHttpError` found neither `.status` nor `.code` to ' +
-            'read, so the caller\'s fallback stood. With the envelope the SAME request answers `422` and ' +
-            'the body carries `declaredCode: NAMESPACE_CONFLICT` beside `code: VALIDATION_ERROR` (the ' +
-            'member 422 derives through `standardErrorCodeForHttpStatus`, which does not name 422 and ' +
-            'buckets it as a client error). That demote is the door narrowing described in this file\'s ' +
-            'header, and it is exactly what ' +
-            'a `pending-registration` row records: the body PARSES, and what the producer loses instead is ' +
-            'its semantic code, silently absent from `error.code` until a ledger row lands. ⛔ Registering ' +
-            'it is the `packages/spec` lane\'s call and is NOT made here — this row is that batch\'s input, ' +
-            'and registering the code is what ratchets the row out again.',
-    },
-
     // ── pending registration [#14921]: a metadata-tree refusal that reaches a
     // ── dispatcher-door read ───────────────────────────────────────────────
     // Not a widened scan and not a demotion: this producer is NEW. #14921 made
@@ -793,6 +751,31 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'migration-journal runner refusals above — a composition fact caught in-process is not wire ' +
             'vocabulary. If a transport ever ANSWERS with this fact, the verdict becomes ' +
             'pending-registration and the code belongs in the ledger batch.',
+    },
+    // [#16049] The plugin-contract refusal `kernel.use()` now raises. Same
+    // pre-HTTP class as the rows above; the ruling that created it is the
+    // 2026-09-06 ADR-0049 enforce-or-remove call on `PluginSchema`.
+    {
+        code: 'PLUGIN_CONTRACT_VIOLATION',
+        file: 'packages/core/src/plugin-loader.ts',
+        shape: 'assignconst',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'Raised by `PluginLoader.validatePluginContract` when a plugin object does not satisfy the '
+            + 'declared `PluginSchema` on any of the EIGHT keys that enforcement covers — `id`, `type`, '
+            + '`staticPath`, `slug`, `default`, `description`, `author`, `homepage` — including an explicit '
+            + '`null` on any of them, since all eight are `.optional()` and admit absence but not `null`. '
+            + '`version` is excluded from the enforcement, and unknown keys are not refused at all (the '
+            + 'schema carries no `.strict()`), so the narrowing stops at those eight. It is '
+            + 'raised while the kernel is still registering plugins, before bootstrap and therefore before '
+            + 'any HTTP boundary exists: `ObjectKernel.use()` re-wraps it into a fresh `Error` that the host '
+            + 'rethrows and the process aborts on, so no door can answer with it and no door can demote it. '
+            + 'Same class as the migration-journal runner refusals and the service-resolution discriminator '
+            + 'above, ruled by the same reasoning those rows cite: a composition fact raised pre-HTTP is not wire '
+            + 'vocabulary. The code is repeated at the head of the message because that re-wrap keeps only '
+            + '`message`. If a transport ever ANSWERS with this fact, the verdict becomes '
+            + 'pending-registration and the code belongs in the ledger batch.',
     },
     // [ADR-0130 D4] The artifact load path's three wrapper refusals, added with the
     // N-package load path itself. The pre-HTTP reasoning is the one the rows above

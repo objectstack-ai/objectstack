@@ -118,6 +118,7 @@ import { validateCapabilityReferences } from './validate-capability-references.j
 import { validateFlowTriggerReadiness } from './validate-flow-trigger-readiness.js';
 import { validateApprovalApprovers } from './validate-approval-approvers.js';
 import { validateRecordTitle } from './validate-record-title.js';
+import { validateFieldConsumers } from './validate-field-consumers.js';
 import { validateSemanticRoles } from './validate-semantic-roles.js';
 import { validateFormLayout } from './validate-form-layout.js';
 import { validateSeedReplaySafety } from './validate-seed-replay-safety.js';
@@ -927,6 +928,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_ONLY,
     surfaceReason: RUNTIME_OBJECT_ADVISORY_VOLUME,
     run: (stack) => validateRecordTitle(stack),
+  },
+  // [#15922] A declared field that nothing in the stack reads or displays —
+  // the field-level remainder of #4698's "declared but never read" class,
+  // landed here under the hotcrm#1543 ruling. Object-aware (the same name on
+  // two objects gets two verdicts) and advisory: a consumer can live outside
+  // the stack (an API client, another package's hook, a Studio-authored view),
+  // so the ceiling for a static check is a warning — a refusal would narrow
+  // the authorable surface and is the maintainer's call. `normalized` because
+  // it needs no parsed stack (it resolves names, not shapes), so `os lint`
+  // runs it too.
+  //
+  // CLI-only for the FULL-SNAPSHOT reason, and it is the sharpest instance of
+  // that reason in the table: the rule's whole verdict is the ABSENCE of a
+  // reference across views / pages / flows / datasets, none of which the
+  // per-write snapshot carries, so on an object write it would report every
+  // field of the written object as inert.
+  {
+    name: 'validateFieldConsumers',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-field-consumers.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateFieldConsumers(stack),
   },
   // ADR-0085 — `stageField` / `highlightFields` / `Field.group` are pointers
   // into the object's field map; a dangling one is Zod-valid and silently inert

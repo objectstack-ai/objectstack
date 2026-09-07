@@ -12,10 +12,11 @@ import type {
 // has declared for every one of these context parameters since #6523 (the
 // #6206 ruling: no per-site subset contracts).
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-// [#7795] The built-in platform-operator position (ADR-0068 D2) — one of the
-// two spellings of platform authority the ruling names; see
-// {@link SharingRuleService.assertCanDeletePlatformGlobalRule}.
-import { BUILTIN_IDENTITY_PLATFORM_ADMIN } from '@objectstack/spec/identity';
+// [#15981] The built-in platform-operator position NAME is deliberately NOT
+// imported here any more. It used to spell the second half of
+// {@link SharingRuleService.hasPlatformAuthority}, and reading it as authority
+// became an escalation channel once `positions[]` started carrying ADR-0057 D4
+// `sys_user_position` names; that predicate now reads the ADR-0095 rung.
 // [#8710] The ONE predicate for `sys_position.active` / `sys_permission_set.active`
 // (#8613). Reused rather than re-spelled: two notions of "is this row active"
 // — one honouring the 1/0 and 'false' storage shapes, one not — is how the
@@ -316,18 +317,32 @@ export class SharingRuleService implements ISharingRuleService {
    * accepting either is the fail-safe reading: they are two independent
    * channels by which the same unscoped `admin_full_access` grant reaches an
    * `ExecutionContext` (a `scope: 'platform'` capability on
-   * `systemPermissions`; the ADR-0068 D2 built-in position on `positions`),
-   * and a hand-built context may carry only one.
+   * `systemPermissions`; the ADR-0095 posture RUNG).
    *
    * It is asked TWICE now — once to authorize destroying a platform-global
    * rule, once to decide whether an org-less caller may read across tenants —
    * so it is one predicate rather than two spellings that can drift apart.
+   *
+   * ⛔ [#15981] The second spelling is the RUNG, never
+   * `positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN)`. The two stopped
+   * being the same channel when `positions[]` became the security axis: it
+   * carries ADR-0057 D4 `sys_user_position` names, that table is `apiEnabled`
+   * with unconstrained `position` values, and `resolveUserAuthzGrants` §4
+   * pushes a minted row's name straight onto the array. `resolve-authz-context.ts`
+   * states the rule at `hasPlatformAdminStanding`, and
+   * `grants.posture === 'PLATFORM_ADMIN'` is byte-for-byte what that predicate
+   * returns — the unscoped `admin_full_access` evidence, which is what this
+   * doc block meant by the built-in position all along.
+   *
+   * Driven, not argued: with the minted row present and only the ORG-scoped
+   * `manage_sharing` capability held, the old read admitted an org-less caller
+   * to every tenant's rules through {@link listRules}. See
+   * `sharing-rule-positions-name-authority.test.ts`.
    */
   private hasPlatformAuthority(context: ExecutionContext): boolean {
     const caps = Array.isArray(context?.systemPermissions) ? context.systemPermissions : [];
     if (caps.includes('manage_platform_settings')) return true;
-    const positions = Array.isArray(context?.positions) ? context.positions : [];
-    return positions.includes(BUILTIN_IDENTITY_PLATFORM_ADMIN);
+    return context?.posture === 'PLATFORM_ADMIN';
   }
 
   /**

@@ -1727,6 +1727,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata/src/loaders/database-loader-14078-invalid-date-total-arm.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata/src/loaders/database-loader-update-id-fold-wins.test.ts",
       "verb": "update",
       "pinned": 1
@@ -2139,6 +2144,16 @@
     {
       "file": "packages/plugins/plugin-approvals/src/admin-exemption-retired.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-positions-name-authority.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-approvals/src/approval-positions-name-authority.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

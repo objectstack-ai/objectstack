@@ -138,7 +138,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
+import { maskComments, maskCommentsAndLiterals, scanSource } from './js-comment-mask.mjs';
+export { maskCommentsAndLiterals };
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
@@ -277,28 +278,22 @@ export function classifyFloor(code) {
 // Instrument 2 -- the dynamic verdict-handshake probe
 // ---------------------------------------------------------------------------
 
-/**
- * The source a DEFINITION may be anchored in: comments AND the content of every
- * string, template and regex literal blanked, every other byte -- and every
- * offset and line number -- left exactly where it was, so a match found here
- * slices the ORIGINAL text.
- *
- * BOTH halves of "where is the definition" read it: `selfTestDefs` below, which
- * says WHICH definitions a file holds, and `injectEarlyReturn`, which says where
- * ONE of them begins. They are one question asked twice, and asking them of two
- * different texts is the drift #14963's repair exists to end (#15574).
- *
- * ⛔ NOT for the population criterion above, which must keep reading
- * `maskComments`. Every `--self-test` dispatch names the flag with a string
- * literal, so this mask blanks the dispatch out of every file in the tree; a
- * control below pins the two masks to their opposite answers.
- */
-export function maskCommentsAndLiterals(source) {
-  const { comment, literal } = scanSource(source);
-  const both = new Uint8Array(source.length);
-  for (let i = 0; i < both.length; i++) both[i] = comment[i] | literal[i];
-  return blank(source, both);
-}
+// The source a DEFINITION may be anchored in is `maskCommentsAndLiterals` --
+// comments AND the content of every string, template and regex literal blanked,
+// every other byte (and every offset and line number) left exactly where it was,
+// so a match found there slices the ORIGINAL text. This file used to spell that
+// projection out itself, under the shared name; it imports the module's export
+// now and re-exports it under the same name (#15776).
+//
+// BOTH halves of "where is the definition" read it: `selfTestDefs` below, which
+// says WHICH definitions a file holds, and `injectEarlyReturn`, which says where
+// ONE of them begins. They are one question asked twice, and asking them of two
+// different texts is the drift #14963's repair exists to end (#15574).
+//
+// ⛔ NOT for the population criterion above, which must keep reading
+// `maskComments`. Every `--self-test` dispatch names the flag with a string
+// literal, so this mask blanks the dispatch out of every file in the tree; a
+// control below pins the two masks to their opposite answers.
 
 /**
  * Every `/self.?test/i`-named function DEFINED in this source, read from the

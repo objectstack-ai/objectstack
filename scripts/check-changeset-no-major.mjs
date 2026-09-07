@@ -687,7 +687,8 @@ export function render(result) {
     // nothing final ships until `changeset pre exit`. Surface the introduced
     // majors for the RC curator, but do not fail. The guard re-arms once
     // pre-mode exits: `changeset pre exit` rewrites pre.json's mode to `"exit"`
-    // (@changesets/pre@2.0.2, changesets-pre.cjs.js:117), which is not `pre`.
+    // (@changesets/pre@2.0.2, its `changesets-pre.cjs.js` bundle, line 117 as
+    // pinned — a dependency file, outside this tree), which is not `pre`.
     case 'exempt':
       stdout.push(
         `✓ Changesets is in pre-release mode (tag: ${result.tag}) — ` +
