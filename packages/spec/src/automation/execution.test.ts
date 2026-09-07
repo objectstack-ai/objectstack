@@ -80,6 +80,19 @@ describe('ExecutionStepMetricsSchema', () => {
     expect(doc).toContain('`summary.failed`');
     expect(doc).toContain('NOT this execution');
   });
+
+  it('states the failed-child rule for the MIXED case, the departure from `acted`, and the third absence arm — at the point of use', () => {
+    // A child that contained failures and THEN failed is not a third case: the
+    // failed-child rule holds whether or not the child also contained, and
+    // that has to be readable on the field, because `acted` does the opposite
+    // (it carries a failed child's writes) and an implementer who mirrors
+    // `acted` here double-counts on the failed arm. The third absence arm is
+    // the window between this landing and the producer populating the slot.
+    const doc = ExecutionStepMetricsSchema.shape.failures.description ?? '';
+    expect(doc).toContain('whether or not it also contained failures before it failed');
+    expect(doc).toContain('unlike `acted`');
+    expect(doc).toContain('or the producer did not track it');
+  });
 });
 
 describe('ExecutionStepLogSchema', () => {
@@ -463,6 +476,25 @@ describe('FlowRunSummarySchema', () => {
     const nodeStatusDoc = FlowRunNodeSummarySchema.shape.status.description ?? '';
     expect(nodeStatusDoc).toContain('OWN executions');
     expect(nodeStatusDoc).toContain('`failures > 0`');
+
+    // The mixed case and the departure from `acted` are stated on the total
+    // itself, not only on the slot that feeds it.
+    expect(failedDoc).toContain('whether or not it also contained failures before it failed');
+    expect(failedDoc).toContain('unlike `acted`');
+  });
+
+  it('a delegating node\'s `failures` may exceed its `runs` — `runs: 5, failures: 15` is a legal shape, and the describe says so', () => {
+    // Five subflow executions whose children each contained three failures:
+    // the node ran five times, succeeded five times, and rolled fifteen up.
+    // `failures` is no longer only this node's own failed executions.
+    const node = FlowRunNodeSummarySchema.parse({
+      nodeId: 'call', nodeType: 'subflow', status: 'success' as const, runs: 5, failures: 15, skipped: 0, selected: 5, acted: 5,
+    });
+    expect(node.failures).toBe(15);
+    expect(node.runs).toBe(5);
+    const nodeFailuresDoc = FlowRunNodeSummarySchema.shape.failures.description ?? '';
+    expect(nodeFailuresDoc).toContain('may therefore exceed `runs`');
+    expect(nodeFailuresDoc).toContain('no longer only this node');
   });
 
   it('leaves `failed` absent on a run that never tracked it — absent is not zero, and is not defaulted', () => {

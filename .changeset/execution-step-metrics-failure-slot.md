@@ -2,7 +2,7 @@
 '@objectstack/spec': minor
 ---
 
-feat(spec): `ExecutionStepMetrics` gains an optional `failures` slot, and `FlowRunSummary.failed` is declared as the fold INCLUDING what a delegating node rolled up from its child — the rule `acted` already follows (maintainer ruling 2026-09-06 on #15617, spec half)
+feat(spec): `ExecutionStepMetrics` gains an optional `failures` slot, and `FlowRunSummary.failed` is declared as the fold INCLUDING what a delegating node rolled up from its child (maintainer ruling 2026-09-06 on #15617, spec half)
 
 Additive. Nothing an author writes is renamed, retired or narrowed; no accept
 set shrinks. One optional key is declared on a runtime-produced schema and the
@@ -27,15 +27,19 @@ the services seat (#15617): parent `loop { subflow(child) }` → parent
   that failed inside a child run this execution delegated to and went on from
   — a `subflow` child or a `map` item whose run COMPLETED while containing
   failures, i.e. the child's `summary.failed`, rolled up. It folds into the
-  delegating node's `nodes[].failures` and so into the run-level `failed`, by
-  exactly the path the child's writes take into `acted`. Absent means the
-  step delegated nothing or its child tracked no count — not zero.
+  delegating node's `nodes[].failures` and so into the run-level `failed` —
+  the same fold shape `acted` has, but not the same rule at the failed-child
+  boundary (next bullet). Absent means the step delegated nothing, or its
+  child tracked no count, or the producer did not track it (every step the
+  engine emits between this release and the engine half) — never zero.
 - It is NOT the step's own outcome. A step that failed is `status: 'failure'`
   and counts once through `nodes[].failures`, as before; a child that FAILED
-  rather than contained is precisely that step failure — its own `failed`
+  — whether or not it also contained failures before it failed — is
+  precisely that step failure: its own `failed`, contained and fatal alike,
   stays on the child's run row and nothing rides up, so one failure is never
-  counted twice. The control the card measured (a failing child → parent
-  `failed=1`) keeps counting exactly as today.
+  counted twice. This is where the rule parts from `acted`, which does carry
+  a failed child's writes up to the parent. The control the card measured (a
+  failing child → parent `failed=1`) keeps counting exactly as today.
 - `FlowRunSummary.failed` is declared, at the field, as the fold of
   `nodes[].failures` INCLUDING what a delegating node rolled up; the
   `FlowRunNodeSummary.failures` describe names the roll-up path, and its
@@ -56,4 +60,12 @@ both halves are in.
 **Consumers.** A reader of `ExecutionStepMetrics` sees one more optional
 number and nothing else changes shape; a consumer that already sums
 `nodes[].failures` to cross-check `failed` keeps agreeing with it, because the
-fold is unchanged — the roll-up enters the per-node array, not beside it.
+fold is unchanged — the roll-up enters the per-node array, not beside it. Two
+consequences of that placement are part of the contract from this release,
+even though no producer populates the slot yet: on a delegating node
+`nodes[].failures` may exceed `runs` (`runs: 5, failures: 15` is a legal
+shape — five subflow executions whose children each contained three), and it
+is no longer only that node's own failed executions, so a reader that derived
+"this node's executions that failed" or a failure RATE from `failures / runs`
+must read a delegating node's number as "failures this node caused, its
+child's contained ones included".
