@@ -249,6 +249,7 @@
     "ReportSchedule": "src/contracts/report-service.ts#ReportSchedule (interface)",
     "ResolveDependenciesInput": "src/contracts/package-service.ts#ResolveDependenciesInput (interface)",
     "ResolveShareLinkResult": "src/contracts/share-link-service.ts#ResolveShareLinkResult (interface)",
+    "ResumeFailureReport": "src/contracts/approval-service.ts#ResumeFailureReport (interface)",
     "ResumeSignal": "src/contracts/automation-service.ts#ResumeSignal (interface)",
     "RlsMembershipContext": "src/contracts/rls-membership-resolver.ts#RlsMembershipContext (interface)",
     "RollbackInput": "src/contracts/package-service.ts#RollbackInput (interface)",
