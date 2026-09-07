@@ -401,3 +401,55 @@ describe('declaresServerFault', () => {
         expect(declaresServerFault({ statusCode: 503, message: 'Data service not available' })).toBe(false);
     });
 });
+
+/**
+ * [#16019] The list is FROZEN — a phrasing it does not cover is closed by the
+ * producer declaring its fault, never by a new row (maintainer ruling
+ * 2026-09-06, decision batch #57, option 3).
+ *
+ * The standing example is SQLite's `no such function:`, the sibling of the
+ * covered `no such (?:table|column):` limb and the same error family arriving
+ * by the same route. The card measured `false` on it and asked whether the
+ * list should learn it; the ruling went the other way — #5367 retired message
+ * sniffing on the analytics door on purpose — and `SqlDriver.execute()` now
+ * declares the fault instead (`driver-sql`'s own pin drives the real engine).
+ *
+ * ⛔ The first case asserts `false`, and as the block above says, a `false` here
+ * is NOT a verdict that the text is safe: it is the list being silent on a
+ * phrase it never learned. ⛔ Do not "fix" it by teaching the list — that is the
+ * option the ruling declined. The second case is the reason the `false` costs
+ * nothing on the path that matters: the DECLARED shape is withheld with the
+ * phrase still uncovered, so the declaration wins over the heuristic.
+ */
+describe('looksLikeInternalErrorLeak — frozen as a fallback; a new phrasing is closed by declaration (#16019)', () => {
+    it("is silent on SQLite's `no such function:` — the sibling of the covered `no such (table|column):` limb, deliberately NOT added", () => {
+        expect(looksLikeInternalErrorLeak('no such function: translate')).toBe(false);
+        // Controls, both directions. The covered sibling fires; and the knex shape
+        // of the SAME refusal fires on its statement prefix alone, which is why the
+        // production path through knex was withheld by accident before #16019.
+        expect(looksLikeInternalErrorLeak('no such column: bogus_dim')).toBe(true);
+        expect(looksLikeInternalErrorLeak("select translate('ABC', 'ABC', 'abc') as x - no such function: translate")).toBe(true);
+    });
+
+    it('the declared path wins: the shape SqlDriver.execute() raises is withheld with the phrase still uncovered', () => {
+        // The composed envelope: nothing for the heuristic to recognise, and it needs nothing.
+        const composed = {
+            status: 500,
+            code: 'DATABASE_ERROR',
+            message: 'The database refused to run a raw statement. The driver could not attribute the failure to any part of the request.',
+        };
+        expect(looksLikeInternalErrorLeak(composed.message)).toBe(false);
+        expect(declaresServerFault(composed)).toBe(true);
+
+        // And the bare engine text itself, once a producer declares it: still
+        // uncovered by the list, still withheld — by the declaration.
+        const bare = { status: 500, code: 'DATABASE_ERROR', message: 'no such function: translate' };
+        expect(looksLikeInternalErrorLeak(bare.message)).toBe(false);
+        expect(declaresServerFault(bare)).toBe(true);
+
+        // The residual the ruling leaves by design: the same text with NO
+        // declaration is neither covered nor withheld. A producer outside a
+        // driver that throws it bare is answered by declaring, not by a row.
+        expect(declaresServerFault(new Error('no such function: translate'))).toBe(false);
+    });
+});
