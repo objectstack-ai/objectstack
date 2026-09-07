@@ -441,10 +441,46 @@ describe('#15416 the stdio refusal never names an operation it also allows', () 
   });
 
   it('gates only single-conjunct operations, which is WHY the class is unreachable', () => {
-    // The structural statement of the paragraph above: with no options passed,
-    // the gate verdict IS membership in the serialized set. `bulk ∧ child` and
-    // the writeMode-refined `import` are the two shapes that break that
-    // identity, and neither is in the gated set.
+    // ⭐ Falsifiable, and deliberately not "verdict === membership": with no
+    // options passed that identity holds for EVERY operation word, so asserting
+    // it would be a phantom check that no drift could ever break. The property
+    // that actually protects this surface is narrower — the gated set must
+    // contain no operation whose verdict MOVES when options are supplied — and
+    // it is DERIVED from the spec here rather than hand-copied, so a new
+    // conjunction-bearing verb is caught the day it is added.
+    const PROBES = [
+      { bulkChild: 'create' }, { bulkChild: 'update' }, { bulkChild: 'delete' },
+      { bulkChild: 'upsert' }, { writeMode: 'insert' }, { writeMode: 'update' },
+      { writeMode: 'upsert' },
+    ];
+    const conjunctionRefined = new Set<string>();
+    for (const apiMethods of EVERY_WHITELIST) {
+      const eff = resolveEffectiveApiMethods({ apiMethods });
+      for (const operation of Object.values(DATA_ACTION_TO_API_OPERATION)) {
+        const bare = isApiOperationAllowed(eff, operation);
+        for (const opts of PROBES) {
+          if (isApiOperationAllowed(eff, operation, opts) !== bare) conjunctionRefined.add(operation);
+        }
+      }
+    }
+    // The derivation has to have FOUND the shapes #15416 was filed about, or the
+    // assertion below is measuring an empty set.
+    expect([...conjunctionRefined].sort()).toEqual(['bulk', 'import']);
+
+    for (const action of Object.values(GATED_ACTIONS)) {
+      const operation = DATA_ACTION_TO_API_OPERATION[action] ?? action;
+      expect(
+        conjunctionRefined.has(operation),
+        `bridge gates on "${action}" → "${operation}", whose verdict moves under OperationCheckOptions; ` +
+          'this surface passes none, so its refusal can now name a conjunct its own allowed set contains',
+      ).toBe(false);
+    }
+  });
+
+  it('the serialized set is the same one the verdict is read from', () => {
+    // The half that makes the paragraph above load-bearing rather than lucky:
+    // for the operations this surface DOES gate, the verdict and the array the
+    // refusal ships are two reads of one set.
     for (const apiMethods of EVERY_WHITELIST) {
       const eff = resolveEffectiveApiMethods({ apiMethods });
       const serialized = effectiveOperationsArray(eff) as string[];
