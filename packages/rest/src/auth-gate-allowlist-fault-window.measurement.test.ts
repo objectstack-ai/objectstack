@@ -388,3 +388,54 @@ describe('[#15021] §3 reachability — which MOUNTED REST routes carry an allow
     expect(isAuthGateAllowlisted('/api/v1/data/sys_user')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §4 — GRADING INPUTS. Triage named exactly two conditions that would move the
+// grade off `priority:p3`: "if the window is not transient, or if the gate's
+// own re-read fails independently of a broader outage." Both are measured
+// here; ⛔ neither is re-graded here — that is triage's call.
+// ---------------------------------------------------------------------------
+
+describe('[#15021] §4 grading inputs — is the window transient, and can the re-read fail alone?', () => {
+  it('TRANSIENT: the refusal is not sticky — the very next request is served once the backend recovers', async () => {
+    // One auth service across both requests, so this is recovery, not a fresh
+    // fixture. The memo is keyed on the per-request object (a WeakMap), so the
+    // question is real rather than rhetorical: a memo keyed any wider would
+    // carry the rejection forward.
+    let failing = true;
+    let reads = 0;
+    const auth = {
+      isAuthGateActive: () => true,
+      api: {
+        getSession: async () => {
+          reads++;
+          if (failing && reads > 1) throw new Error('session backend unavailable');
+          return { user: GATED_USER };
+        },
+      },
+    };
+    const rest = serverWith(auth, qlFixture());
+
+    const during = await drive(rest, '/api/v1/auth/change-password');
+    expect(during.error).toMatchObject({ status: 503, object: 'auth_gate' });
+
+    failing = false;
+    const after = await drive(rest, '/api/v1/auth/change-password');
+    expect(after.error).toBeUndefined();
+    expect(after.ctx?.userId).toBe('u_gated');
+    expect(after.blocked).toBe(false);
+    // ⇒ the window lasts exactly as long as the fault. Nothing latches.
+  });
+
+  it('INDEPENDENT: the seam issues TWO session reads per request and refuses on the SECOND alone — a fault confined to the re-read produces the refusal while identity resolution was healthy', async () => {
+    const { rec, auth } = gateActiveRereadFails();
+    const r = await drive(serverWith(auth, qlFixture()), '/api/v1/auth/change-password');
+    expect(r.error).toMatchObject({ status: 503, object: 'auth_gate' });
+    // Exactly two reads: the first RESOLVED (identity was established — the
+    // request got as far as the gate), the second THREW.
+    expect(rec.reads).toBe(2);
+    // ⚠️ What this shows is that the code path ADMITS such a fault, because the
+    // two reads are separate calls. ⛔ It is not evidence about how often a
+    // real session backend fails on only one of two consecutive reads.
+  });
+});
