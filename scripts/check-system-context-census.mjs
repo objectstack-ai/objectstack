@@ -252,7 +252,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⛔ and the half that must NOT have moved: the contract still reds': 2,
   'absence is loud': 1,
   '⛔ --fix rewrites NOTHING, and says so': 2,
-  '⭐ THE RULED RED-FIRST PAIR: a symbol rename REDS, a pure line move does NOT': 4,
+  '⭐ THE RULED RED-FIRST PAIR: a symbol rename REDS, a pure line move does NOT': 5,
   '⭐ the precision this trades away, pinned so nobody rediscovers it as a bug': 2,
   'the refusal has to SHOW its work (both counts, the symbol, the file)': 2,
   '⭐ CORPUS REGISTRATION: one resolver, not a second implementation': 3,
@@ -296,6 +296,14 @@ const PAGE_FILE = /^system-context\.mdx$/;
  * citations, every one of them spelled in full from the repository root, so a
  * bare path that resolves to nothing is a real finding and not a corpus-wide
  * cleanup.
+ *
+ * ⚠️ For anyone registering the NEXT corpus: `sweepCorpus` resolves through
+ * `git ls-files` and passes no environment of its own, so a sweep of a SYNTHETIC
+ * root inherits whatever `GIT_DIR` / `GIT_INDEX_FILE` the caller was launched
+ * with. In-repo callers are unaffected (the inherited values name this
+ * repository, which is the right answer); a test that builds a throwaway tree is
+ * not. This gate's self-test detaches from those variables before its first case
+ * — see `buildRedFirstCorpus`, which carries the measured incident.
  */
 export const CORPUS = defineCorpus({
   id: 'system-context',
@@ -1660,9 +1668,35 @@ function fixturePage({ anchor = 'pkg/a.ts#handler', helper = 'pkg/a.ts#isSystemO
  * ⛔ Nothing here ever touches the real repository. Every case reads back what it
  * wrote and the temp dir is removed in a `finally`.
  *
+ * ## ⛔ Why every `git` call below runs with a STRIPPED environment (measured)
+ *
+ * This self-test shells out to `git` -- here, and one frame down inside
+ * `sweepCorpus`, which asks `git ls-files` what a corpus's tracked files are.
+ * From a plain shell that is harmless. From INSIDE A GIT HOOK it is not: git
+ * exports `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`, every child `git`
+ * inherits them, and then the throwaway corpus's `git init` creates nothing
+ * while its `git add -A` writes THE REPOSITORY'S INDEX.
+ *
+ * ⭐ That is not hypothetical and it is not a rare path: `check-regen-pending`
+ * runs this gate from `pre-commit`, which is precisely where an os-regen merge
+ * lap lands. Measured once, on this file's own branch, during exactly that lap:
+ * 8,190 paths staged as deleted and the fixture's own `pkg/a.ts` staged into the
+ * real index, from a self-test whose every case still printed `ok`.
+ *
+ * ⛔ The failure is SILENT in the direction that matters -- the self-test passes,
+ * and the damage is to a tree nobody was looking at. So the environment is
+ * stripped for the duration of the self-test AND passed stripped to each child
+ * here, rather than relying on either one alone.
+ *
  * @param {{ symbol?: string, pad?: number }} shape
  * @returns {{ dir: string, sourceLine: number }}
  */
+function gitFreeEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.startsWith('GIT_')) delete env[key];
+  return env;
+}
+
 function buildRedFirstCorpus({ symbol = 'handler', pad = 0 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'system-context-corpus-'));
   mkdirSync(join(dir, 'content', 'docs', 'permissions'), { recursive: true });
@@ -1679,8 +1713,9 @@ function buildRedFirstCorpus({ symbol = 'handler', pad = 0 } = {}) {
     join(dir, 'content', 'docs', 'permissions', 'system-context.mdx'),
     ['---', 'title: red-first fixture', '---', '', 'the elevation read lives at `pkg/a.ts#handler`.', ''].join('\n')
   );
-  execFileSync('git', ['init', '-q'], { cwd: dir });
-  execFileSync('git', ['add', '-A'], { cwd: dir });
+  const env = gitFreeEnv();
+  execFileSync('git', ['init', '-q'], { cwd: dir, env });
+  execFileSync('git', ['add', '-A'], { cwd: dir, env });
   return { dir, sourceLine: pad + 2 };
 }
 
@@ -1814,6 +1849,17 @@ function fixtureUnenforcedTable({ linesTotal = 6, dropTestsRow = false, dated = 
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  /* ⛔ Detach from any inherited git environment BEFORE the first case. See
+   * `buildRedFirstCorpus`'s header for the measured incident: under `pre-commit`
+   * this function's children would otherwise write the REPOSITORY's index. This
+   * covers `sweepCorpus`'s own `git ls-files` too, which lives in the shared
+   * resolver and is not this gate's to change. Restored before the return, so an
+   * in-process caller gets its environment back. */
+  const savedGitEnv = Object.fromEntries(
+    Object.keys(process.env).filter((key) => key.startsWith('GIT_')).map((key) => [key, process.env[key]])
+  );
+  for (const key of Object.keys(savedGitEnv)) delete process.env[key];
+
   // The battery ledger this self-test's floor is evaluated against (#13489).
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
@@ -2215,6 +2261,48 @@ function selfTest() {
         movedSweep.findings.filter((f) => !f.soft).length === 0,
       `read moved ${control.sourceLine} -> ${moved.sourceLine}; ` + formatFindings(movedSweep.findings)
     );
+    /* ⛔ THE REGRESSION PIN for the measured incident above, and it pins the WRITE
+     * side, which is the side that did the damage: a hook's exported `GIT_DIR`
+     * must not reach `git init` / `git add -A`, or the throwaway corpus is never
+     * created and the REPOSITORY's index is written instead.
+     *
+     * A bogus `GIT_DIR` is injected, the corpus is built under it, and the temp
+     * tree is then read back with a stripped environment: two files staged, in
+     * ITS OWN repository. If the builder had leaked, `git init` would have
+     * created nothing there and `git ls-files` would answer with someone else's
+     * tree — or with nothing at all.
+     *
+     * ⚠️ Deliberately NOT sweeping under the injected variable. `sweepCorpus`
+     * asks `git ls-files` through the shared resolver, which passes no
+     * environment of its own, so a sweep is protected by the process-level strip
+     * at the top of this function rather than by anything here — and that strip
+     * is what the second half of this case asserts. Hardening the shared
+     * resolver is not this gate's to do. */
+    const priorGitDir = process.env.GIT_DIR;
+    process.env.GIT_DIR = join(tmpdir(), 'a-git-dir-that-does-not-exist');
+    let staged = null;
+    try {
+      const guarded = buildRedFirstCorpus();
+      corpora.push(guarded.dir);
+      staged = execFileSync('git', ['ls-files'], { cwd: guarded.dir, encoding: 'utf8', env: gitFreeEnv() })
+        .split('\n')
+        .filter(Boolean)
+        .sort();
+    } catch (err) {
+      staged = err;
+    } finally {
+      if (priorGitDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = priorGitDir;
+    }
+    t(
+      '⛔ ENV LEAK: an inherited GIT_DIR (what `pre-commit` exports) never reaches the corpus builder, ' +
+        'and the self-test itself runs detached — measured incident: 8,190 paths staged as deleted in ' +
+        'the REAL index by a self-test whose every case still printed ok',
+      Array.isArray(staged) &&
+        staged.join(' ') === 'content/docs/permissions/system-context.mdx pkg/a.ts' &&
+        Object.keys(process.env).filter((key) => key.startsWith('GIT_')).length === 0,
+      staged instanceof Error ? String(staged.message).slice(0, 200) : JSON.stringify(staged)
+    );
   } finally {
     for (const dir of corpora) rmSync(dir, { recursive: true, force: true });
   }
@@ -2579,6 +2667,7 @@ function selfTest() {
     );
   }
 
+  Object.assign(process.env, savedGitEnv);
   process.stdout.write(
     failures === 0
       ? '\ncheck-system-context-census --self-test: all cases passed\n'
