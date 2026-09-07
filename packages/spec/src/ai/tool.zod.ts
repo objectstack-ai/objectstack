@@ -56,6 +56,16 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '`tool.builtIn` was removed in @objectstack/spec 17.0.0 (audit close-out) — no ' +
     'runtime branches on it; it never affected registration, selection or execution. Delete ' +
     'the key.',
+  // This prescription is deliberately CONTRACT-REFERENTIAL.
+  // `contracts/ai-service.ts` declares the confirmation member and
+  // `ACTION_CONFIRMATION_REQUIRED` names the refusal (#16293), but the runtime
+  // door that performs it lands in #15942. Until then a present-tense "the call
+  // is refused" here would send an author to test a destructive operation
+  // without the member and watch it EXECUTE — the exact declared-but-unenforced
+  // class ADR-0049 retired this key for. Tense follows enforcement: promote it
+  // in the change that lands the door, not before. The ids stay in this comment
+  // and out of the string: `check:doc-authoring` reds on an internal tracker id
+  // inside a customer-facing prescription.
   requiresConfirmation:
     '`tool.requiresConfirmation` was removed from @objectstack/spec in the 16.x line ' +
     '(ADR-0033 §2) — it never had a consumer, and a SAFETY flag that is merely ' +
@@ -65,10 +75,19 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     '`ToolRegistry.execute`, not `POST /ai/tools/:name/execute`, and not the MCP bridge ' +
     '(which derives `destructiveHint` from a hardcoded name list). Delete the key. For a ' +
     'REAL gate on a destructive operation, put it behind an action and set ' +
-    '`action.ai.requiresConfirmation` — that is the flag the HITL approval queue reads ' +
-    '(packages/runtime/src/action-execution.ts), and it is the only path that actually ' +
-    'stops execution. For AI metadata mutations the ADR-0033 draft/publish workspace is ' +
-    'the gate: nothing is live until a human publishes.',
+    '`action.ai.requiresConfirmation: true` — the flag the platform\'s confirmation ' +
+    'CONTRACT is written against (`AIActionConfirmation`, `@objectstack/spec/contracts`). ' +
+    'That contract DECLARES that an AI-facing call on an action declaring the flag must ' +
+    'carry an explicit confirmation member on the request and is to be refused without ' +
+    'it, the refusal naming the action and the exact member to set so the caller confirms ' +
+    'and retries. It specifies a GATE, not a queue: nothing is parked and nothing is held ' +
+    'for an operator to find later. Read this before you rely on it: the declaration is ' +
+    'the contract, not yet the behaviour — the runtime door that performs the refusal ' +
+    'ships separately, and until it does, setting the flag does NOT stop an unconfirmed ' +
+    'call. Do not try to verify the gate by invoking the operation without the member: ' +
+    'until that door lands, such a call simply RUNS. For AI metadata mutations the ' +
+    'ADR-0033 draft/publish workspace is the gate: nothing is live until a human ' +
+    'publishes.',
 };
 
 /**

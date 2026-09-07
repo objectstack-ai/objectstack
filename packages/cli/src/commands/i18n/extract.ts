@@ -32,6 +32,107 @@ import {
 const FILL_STRATEGIES: FillStrategy[] = ['empty', 'default', 'todo'];
 
 /**
+ * A path for one of this command's output lines: relative to the cwd while that
+ * is still a NAME for the file, absolute once it stops being one.
+ *
+ * Every path this command printed used to be a bare `path.relative(cwd, file)`,
+ * and for an `--out` outside the project that is not a name — it is a walk.
+ * Driven from `packages/cli` with `--out=/tmp/os-i18n-repro-jNrZ`, the `--check`
+ * failure reported
+ * `missing:    ../../../../../tmp/os-i18n-repro-jNrZ/zh-CN.objects.generated.ts`
+ * for a directory the operator had just typed in full (#14895). Nothing in that
+ * string is recognisable as what they wrote, and it only resolves against a cwd
+ * the line does not state.
+ *
+ * The threshold is "does the relative form still descend from here", not a
+ * length: an in-tree `--out` — which is what all nine of this repo's extract
+ * configs use — keeps the short form it has always had, and only a path that
+ * has to climb out of the cwd is printed absolute.
+ */
+function displayPath(file: string): string {
+  const rel = path.relative(process.cwd(), file);
+  // `path.relative` answers with an ABSOLUTE path across Windows drive roots,
+  // where no relative form exists at all; that is already the answer wanted.
+  if (!rel || path.isAbsolute(rel)) return file;
+  return rel === '..' || rel.startsWith(`..${path.sep}`) ? file : rel;
+}
+
+/** One argv token, spelled so a POSIX shell hands it back byte-for-byte. */
+function shellToken(token: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(token)) return token;
+  // Close the quote, emit an escaped quote, reopen — the only way a literal
+  // `'` survives single quoting.
+  return `'${token.split("'").join("'\\''")}'`;
+}
+
+/**
+ * This run's own invocation with `--check` taken out of it — the ONLY command
+ * the `--check` failure hint may print.
+ *
+ * ## Why a deletion and never an assembly
+ *
+ * The hint used to be BUILT, from four things this file happened to have in
+ * scope: the config arg, the emitted locales minus the default one, `--fill`
+ * and `--out`. Everything else the operator passed was simply not in the
+ * expression, so it was not in the advice either. Driven on the reporter's
+ * invocation (#14895):
+ *
+ *     $ os i18n extract stack.config.ts --locales=zh-CN --no-metadata-forms
+ *       --no-objects-only --filter=kpi_ --out=OUT --check
+ *     ✗ Translation bundles have drifted from the schema. Regenerate and commit:
+ *     os i18n extract stack.config.ts --locales= --fill=empty --out=OUT
+ *
+ * `--locales=` came out EMPTY — the emitted locale was the default locale, and
+ * the filter that drops the default one from the echo then drops the only
+ * locale there was — while `--no-metadata-forms`, `--no-objects-only` and
+ * `--filter=kpi_` were never candidates for the line to begin with. Running
+ * what it printed emitted 775 keys across two files instead of 2 across one,
+ * including a `metadata-forms` companion the operator had explicitly switched
+ * off; the next `--check` then failed AGAIN, on `out of date:` instead of
+ * `missing:`, and printed the same wrong command. That loop is the defect: the
+ * failure is self-healable and the advice is what stops it healing.
+ *
+ * An assembled command is wrong in exactly one way and it is unbounded — every
+ * flag that exists now, and every flag added later, has to be remembered at
+ * this print site or it silently goes missing. So this does not enumerate
+ * flags at all. It takes the argv oclif was handed and removes one token from
+ * it, which makes the echo correct for flags this file has never heard of.
+ *
+ * ⛔ It also never GUESSES. If `--check` is not in the argv the flag was not
+ * spelled there, this function cannot point at what it removed, and the caller
+ * prints "re-run the same command without `--check`" instead — the degraded
+ * line the report itself asked for, on the grounds that a correct vague
+ * sentence beats a complete-looking wrong command. Today's flag surface has no
+ * other way to set `--check` (no `env`, no default, no `allowNo`), so that is
+ * defence rather than a path a user can reach; it is what keeps "assemble an
+ * approximation" from ever becoming the fallback.
+ *
+ * `--` is honoured because it changes what a token MEANS: after it, `--check`
+ * is a positional argument and removing it would rewrite the invocation rather
+ * than trim it.
+ *
+ * @param bin  `config.bin` — `os`, the name the command is installed under
+ * @param id   `this.id` — `i18n:extract`, oclif's colon spelling of the path
+ * @param argv `this.argv` — the arguments as typed, the command id stripped
+ * @returns the command to print, or `undefined` when it cannot be built
+ */
+function rerunWithoutCheck(bin: string, id: string | undefined, argv: readonly string[]): string | undefined {
+  const kept: string[] = [];
+  let dropped = 0;
+  let afterTerminator = false;
+  for (const token of argv) {
+    if (!afterTerminator && token === '--') afterTerminator = true;
+    else if (!afterTerminator && (token === '--check' || token.startsWith('--check='))) {
+      dropped += 1;
+      continue;
+    }
+    kept.push(token);
+  }
+  if (dropped === 0) return undefined;
+  return [bin, ...(id ?? 'i18n:extract').split(':'), ...kept.map(shellToken)].join(' ');
+}
+
+/**
  * `os i18n extract` — scaffold translation skeletons.
  *
  * Walks the normalized stack config and emits ready-to-edit `TranslationData`
@@ -471,22 +572,27 @@ export default class I18nExtract extends Command {
         const stale: string[] = [];
         const missing: string[] = [];
         for (const { file, content } of emitted) {
-          const rel = path.relative(process.cwd(), file);
-          if (!fs.existsSync(file)) missing.push(rel);
-          else if (fs.readFileSync(file, 'utf8') !== content) stale.push(rel);
+          const shown = displayPath(file);
+          if (!fs.existsSync(file)) missing.push(shown);
+          else if (fs.readFileSync(file, 'utf8') !== content) stale.push(shown);
         }
         if (missing.length === 0 && stale.length === 0) {
           console.log('');
           printSuccess(`${emitted.length} bundle(s) are in sync with the schema ${chalk.dim(`(${timer.display()})`)}`);
           return;
         }
-        for (const rel of missing) printError(`missing:    ${rel}`);
-        for (const rel of stale) printError(`out of date: ${rel}`);
+        for (const shown of missing) printError(`missing:    ${shown}`);
+        for (const shown of stale) printError(`out of date: ${shown}`);
         console.log('');
+        // The command that regenerates these bytes is THIS run without
+        // `--check` — the two branches share the `emitted` list above, so the
+        // write path cannot produce anything other than what was just
+        // compared. {@link rerunWithoutCheck} says why it is spelled as a
+        // deletion and what the degraded line is for.
+        const rerun = rerunWithoutCheck(this.config.bin, this.id, this.argv);
         printError(
           'Translation bundles have drifted from the schema. Regenerate and commit:\n' +
-          `  os i18n extract ${args.config ?? ''} --locales=${localesEmitted.filter((l) => l !== defaultLocale).join(',')} ` +
-          `--fill=${flags.fill} --out=${flags.out}`.replace(/\s+/g, ' '),
+          (rerun ? `  ${rerun}` : '  re-run the same command without `--check`'),
         );
         process.exit(1);
       }
@@ -496,7 +602,7 @@ export default class I18nExtract extends Command {
       for (const { file, content, keys } of emitted) {
         fs.writeFileSync(file, content, 'utf8');
         written += 1;
-        printInfo(`Wrote ${chalk.white(path.relative(process.cwd(), file))} (${keys} keys)`);
+        printInfo(`Wrote ${chalk.white(displayPath(file))} (${keys} keys)`);
       }
       if (!anyMetadataForms) {
         printInfo('(no metadataForms keys discovered for these locales)');

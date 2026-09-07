@@ -4,7 +4,7 @@
 - **Date:** 2026-07-13
 - **Deciders:** ObjectStack Protocol Architects
 - **Implementation:** #2882 (Phase 0 — tactical create-user bind, merged) → this PR (Phases 1–3 — `tenancy` service, fail-fast boot guard, membership reconciler, consumer migration, backfill, docs). One revision from the original plan, ratified in D2: the endpoint-level create-user bind **delegates to the shared reconciler** (one implementation, two call sites) instead of being deleted. Runtime verification confirmed the hook fires for `admin.createUser`, but better-auth *defers* `user.create.after` post-commit (#1881), so the endpoint keeps its delegated call to report `organizationId` / `membershipCreated` deterministically in its response. Cloud-host semantics (personal-org hook precedence, multi-org non-binding, D5 blast radius) verified against `objectstack-ai/cloud` — see D2/D3/D5.
-- **Relates to:** [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (org-scoped identity optionality), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0092](./0092-sys-user-profile-field-delegation.md) (identity write guard), the default-org bootstrap (`plugin-auth/src/ensure-default-organization.ts`, referenced in code as "ADR-0081 D1" — that decision record predates this repo's ADR series), #2766 (admin user management), PR #2882 (single-org create-user membership bind — the tactical fix this ADR generalizes)
+- **Relates to:** [ADR-0049](./0049-no-unenforced-security-properties.md) (no unenforced security properties), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (org-scoped identity optionality), [ADR-0068](./0068-unified-user-context-and-built-in-identity-roles.md) (platform-admin gate), [ADR-0092](./0092-sys-user-profile-field-delegation.md) (identity write guard), the default-org bootstrap (`plugin-auth/src/ensure-default-organization.ts`, referenced in code as "cloud ADR-0081 D1" — identified 2026-09-04: that record is **cloud ADR-0081**, *Organization Management — Open Basics, Enterprise `@objectstack/organizations`*, Accepted 2026-07-09 in the `objectstack-ai/cloud` repo's own ADR series, where its **D1** is this bootstrap; it predates *this* repo's series because it lives in that one, where it is current), #2766 (admin user management), PR #2882 (single-org create-user membership bind — the tactical fix this ADR generalizes)
 
 ## TL;DR
 
@@ -65,8 +65,9 @@ Decision:
   resolves a session's `activeOrganizationId` from the caller's `sys_member`
   row (owner-preferred, else oldest), only when the draft lacks one,
   best-effort, opt-out via `autoActiveOrganization: false`. Shipped behaviour,
-  previously cited in code as a pre-repo "ADR-0081 D1" whose number now
-  collides with this repo's ADR-0081; anchored here because it reads exactly
+  previously cited in code as an unqualified "ADR-0081 D1" — the record is
+  cloud ADR-0081 (identified 2026-09-04), and written without that qualifier
+  the number collides with this repo's ADR-0081; anchored here because it reads exactly
   the invariant D1 states and D2 owns.
 
 ## Context
@@ -384,7 +385,9 @@ admin surfaces.
    different, larger decision — refused here to keep this ADR mechanical.
 2. **The dual frontend flags keep their meaning.** `features.organization`
    (member management available) vs `features.multiOrgEnabled` (org management
-   available) is a deliberate ADR-0081-D1 distinction; only their *backing
+   available) is a deliberate cloud ADR-0081 D1/D2 distinction — D1 keeps
+   basic member management OPEN, D2 closes multi-org into the enterprise
+   `@objectstack/organizations` package; only their *backing
    fact* moves to the tenancy service.
 3. **better-auth keeps owning `sys_member` CRUD.** The reconciler writes
    through the system context exactly as `ensureDefaultOrganization` does; no
@@ -398,12 +401,15 @@ admin surfaces.
 > **This decision is a RECORDING, not a new ruling.** The behaviour below has
 > shipped since before this ADR, and nothing about it changes. What changes is
 > that it now has an anchor. The code carried it as **"ADR-0081 D1"**, a label
-> inherited from a decision record that predates this repo's ADR series (the
-> same pre-repo record the *Relates to* line names for the default-org
-> bootstrap). That number now collides with this repo's
+> inherited from **cloud ADR-0081** — *Organization Management — Open Basics,
+> Enterprise `@objectstack/organizations`*, Accepted 2026-07-09 in the
+> `objectstack-ai/cloud` repo's ADR series (identified 2026-09-04; the same
+> record the *Relates to* line names for the default-org bootstrap). Written
+> without that qualifier the number collides with this repo's
 > [ADR-0081](./0081-trusted-react-page-tier.md) — the trusted `kind:'react'`
 > page tier — so a reader following the citation landed in a document about
-> React pages with no signal they were in the wrong record. The decision is
+> React pages with no signal they were in the wrong record; the surviving
+> citations elsewhere in this repo now carry the `cloud ` qualifier. The decision is
 > restated here because this is the record that owns the fact it depends on:
 > `sys_member` and the membership lifecycle (D1/D2).
 

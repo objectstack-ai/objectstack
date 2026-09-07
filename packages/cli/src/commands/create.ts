@@ -211,8 +211,49 @@ export function validateEmittedPackageName(packageName: string): string | null {
   );
 }
 
-function toCamelCase(str: string): string {
-  return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+/**
+ * The JavaScript identifier the emitted plugin's exported symbol is built from
+ * — DERIVED from the project name, never copied out of it.
+ *
+ * ## The defect this replaces
+ *
+ * `validateProjectName` accepts exactly what npm accepts, and that is correct:
+ * `foo.bar` is a legal npm package name and `@objectstack/plugin-foo.bar` is
+ * publishable. The same string is then interpolated into an *identifier*
+ * position (`export const <ident>Plugin`), where npm's charset is far wider
+ * than JavaScript's. The predecessor of this function folded `-x` into `X` and
+ * passed everything else straight through, so
+ *
+ *     os create plugin foo.bar   ->   export const foo.barPlugin: Plugin = {
+ *
+ * exited 0 having written a property access where a binding name belongs.
+ * `1foo` (npm-legal) reached the same position as `1fooPlugin`, and `a_b` as
+ * `a_bPlugin` — legal, but not the camel fold the `-` case promises.
+ *
+ * ## The rule
+ *
+ * The fold is GENERALISED, not narrowed: every run of characters illegal in a
+ * JS identifier is the separator `-` already was — dropped, with the character
+ * after it upper-cased — and a leading digit takes the `'a'` prefix that
+ * `sanitizeNamespace()` (imported one line away) has always used for exactly
+ * this rule. Ordinary names are unchanged: `my-app` still yields `myApp`.
+ *
+ * ⛔ This normalises the CODE identifier and nothing else. The package name,
+ * its scope and the emitted directory name stay byte-for-byte what the user
+ * typed, and what `os create` accepts is unchanged.
+ *
+ * ⛔ No reserved-word handling, deliberately: every emission site appends
+ * `Plugin`, so the identifier that lands is never a bare keyword.
+ */
+export function sanitizeIdentifier(name: string): string {
+  const stem = name.replace(/^@[^/]+\//, ''); // drop an npm scope if present
+  let ident = stem.replace(
+    /[^A-Za-z0-9]+(.)?/g,
+    (_match: string, next?: string) => (next ? next.toUpperCase() : ''),
+  );
+  if (!ident) ident = 'plugin';
+  if (/^[0-9]/.test(ident)) ident = `a${ident}`;
+  return ident;
 }
 
 const PLUGIN_IN_REPO_DIR = 'packages/plugins';
@@ -278,7 +319,7 @@ export const templates: Record<string, CreateTemplate> = {
 /**
  * ${name} Plugin for ObjectStack
  */
-export const ${toCamelCase(name)}Plugin: Plugin = {
+export const ${sanitizeIdentifier(name)}Plugin: Plugin = {
   name: '${name}',
   version: '0.1.0',
   
@@ -293,7 +334,7 @@ export const ${toCamelCase(name)}Plugin: Plugin = {
   },
 };
 
-export default ${toCamelCase(name)}Plugin;
+export default ${sanitizeIdentifier(name)}Plugin;
 `,
         'README.md': (name: string) => `# @objectstack/plugin-${name}
 
@@ -307,13 +348,19 @@ pnpm add @objectstack/plugin-${name}
 
 ## Usage
 
+The plugin is exported as \`${sanitizeIdentifier(name)}Plugin\` — a JavaScript
+identifier derived from the package name \`${name}\`. Characters that npm allows
+in a package name but JavaScript does not allow in an identifier (a dot, a
+hyphen, an underscore, a leading digit) are folded away, so the exported symbol
+can differ from the name.
+
 \`\`\`typescript
-import { ${toCamelCase(name)}Plugin } from '@objectstack/plugin-${name}';
+import { ${sanitizeIdentifier(name)}Plugin } from '@objectstack/plugin-${name}';
 
 // Use the plugin in your ObjectStack configuration
 export default {
   plugins: [
-    ${toCamelCase(name)}Plugin,
+    ${sanitizeIdentifier(name)}Plugin,
   ],
 };
 \`\`\`

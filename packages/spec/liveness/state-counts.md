@@ -39,7 +39,7 @@ for both corollaries.
 | `skill` | 16 | 0 | 0 | 1 | 0 | 17 |
 | `dataset` | 27 | 0 | 0 | 0 | 0 | 27 |
 | `page` | 23 | 0 | 0 | 0 | 1 | 24 |
-| `view` | 79 | 0 | 0 | 9 | 0 | 88 |
+| `view` | 78 | 0 | 0 | 10 | 0 | 88 |
 | `report` | 21 | 0 | 0 | 0 | 0 | 21 |
 | `dashboard` | 34 | 0 | 0 | 8 | 0 | 42 |
 | `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
@@ -53,7 +53,7 @@ for both corollaries.
 | `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
 | `seed` | 12 | 0 | 0 | 0 | 0 | 12 |
 | `translation` | 23 | 0 | 0 | 0 | 2 | 25 |
-| `validation` | 15 | 0 | 0 | 3 | 0 | 18 |
+| `validation` | 18 | 0 | 0 | 0 | 0 | 18 |
 | `api` | 25 | 0 | 0 | 1 | 2 | 28 |
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 0 | 5 | 0 | 9 |
@@ -63,4 +63,4 @@ for both corollaries.
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
 | `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
 | `realtime_subscription` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **846** | **5** | **1** | **94** | **12** | **958** |
+| **total** | **848** | **5** | **1** | **92** | **12** | **958** |

@@ -1775,7 +1775,7 @@ export class RestServer {
         }
         // 3. Single-project default fallback. Registered by
         //    `createSingleEnvironmentPlugin()` so bare `/api/v1/data/...` URLs
-        //    (no `/projects/<id>` prefix, no hostname mapping, no header)
+        //    (no `/environments/<id>` prefix, no hostname mapping, no header)
         //    resolve to the lone project's kernel rather than the control
         //    plane.
         if (this.defaultEnvironmentIdProvider) {

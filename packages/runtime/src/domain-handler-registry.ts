@@ -68,6 +68,27 @@ export interface DomainRoute {
     match?: 'prefix' | 'exact' | 'segment';
     /** Restrict to these UPPERCASE HTTP methods. Omit = all methods. */
     methods?: string[];
+    /**
+     * This route is a LIVENESS probe: `dispatch()` runs its handler WITHOUT the
+     * per-request identity step or the gates that follow it.
+     *
+     * Declared here, on the route itself, and nowhere else — that is the whole
+     * point of the field. "Which routes are liveness" is a question with exactly
+     * one honest source, the table `dispatch()` already routes on, so
+     * {@link DomainHandlerRegistry.resolveLiveness} answers it through the SAME
+     * matcher that picks the handler. A separate array of liveness paths would
+     * be a second list of routes, and this repo has measured what those cost:
+     * they drift from the thing they describe and the drift is silent.
+     *
+     * ⛔ Do not set this on a route whose body reads configuration, credentials
+     * or any service. A liveness handler may report process-local facts only
+     * (the process is executing code, the server is listening) — anything else
+     * puts a configuration fault back on the route whose consumer answers by
+     * restarting the pod, and a restart cannot fix a service that cannot build.
+     * Readiness is where a dependency check belongs; its failure mode (leave the
+     * load-balancer rotation) is the one that helps.
+     */
+    liveness?: boolean;
     handler: DomainHandler;
 }
 
@@ -300,6 +321,23 @@ export class DomainHandlerRegistry {
             if (DomainHandlerRegistry.matches(route, path)) return route;
         }
         return undefined;
+    }
+
+    /**
+     * The route claiming `path` (+`method`) when — and only when — it declared
+     * itself a liveness probe ({@link DomainRoute.liveness}); otherwise
+     * `undefined`.
+     *
+     * DERIVED, not listed: it is {@link resolve} plus one field read, so the
+     * liveness set is a projection of the live route table and cannot name a
+     * route that is not registered, miss one that is, or disagree with the
+     * matcher about which route a path reaches. First-match-wins is inherited
+     * too — a non-liveness route registered earlier shadows here exactly as it
+     * shadows in `resolve`, because that is the route the request would get.
+     */
+    resolveLiveness(path: string, method: string): DomainRoute | undefined {
+        const route = this.resolve(path, method);
+        return route?.liveness ? route : undefined;
     }
 
     private static matches(route: DomainRoute, path: string): boolean {

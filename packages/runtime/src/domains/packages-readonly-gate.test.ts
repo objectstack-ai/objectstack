@@ -14,7 +14,7 @@
  * One API call took platform functionality out of a live deployment. `DELETE`
  * came back on restart (the packages are code-loaded, so nothing is permanently
  * destroyed); `disable` did NOT — `setPackageDisabled` persists the choice to
- * `<OS_HOME>/package-state/<env>.json` and the registry replays it at boot.
+ * `<OS_HOME>/package-state/<env>.<project>.json` and the registry replays it at boot.
  *
  * ## Two axes, not one
  *
