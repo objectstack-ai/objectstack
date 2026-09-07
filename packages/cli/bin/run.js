@@ -137,7 +137,14 @@ try {
  * it is a real behaviour change for a supervisor that destroyed the read end
  * and relied on the crash to end the child.
  */
-process.stderr.on('error', () => {
+// ⚠️ NAMED, and not for tidiness. Node parks an anonymous `once('error')` on
+// this stream for the duration of a `console.error` (`ignoreErrors`), so
+// "something is listening" is briefly true in any process and cannot tell this
+// listener apart from that one — a pin that polled the COUNT passed against a
+// tree with this whole block deleted, measured. The name is what
+// `published-entry-stderr-error-listener.e2e.test.ts` waits for and asserts on;
+// it also puts a legible frame in any listener dump.
+process.stderr.on('error', function objectstackStderrErrorIsNotFatal() {
   // Nothing to report, and nowhere left to report it.
 });
 

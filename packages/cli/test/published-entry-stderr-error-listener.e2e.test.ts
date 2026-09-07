@@ -60,8 +60,8 @@
  * between the two entries is what #15564 refused to accept as evidence, and a
  * case asserting it would smuggle that reading back in.
  *
- * The reachability half is not left unheld either — case 3 keeps the premise
- * the measurement rests on: `serve` still writes to stderr RAW.
+ * The reachability half is not left unheld either — the last case below keeps
+ * the premise the measurement rests on: `serve` still writes to stderr RAW.
  */
 
 import { spawn } from 'node:child_process';
@@ -166,19 +166,44 @@ afterAll(() => {
 });
 
 describe('the published entry point survives a failed stderr write', () => {
-  it('attaches the listener before anything of its own can write', () => {
+  it('attaches its OWN listener before anything of its own can write', () => {
     // The probe reports what it SAW rather than being assumed to have found it:
     // `LISTENER ABSENT` is the reading when `bin/run.js` stops attaching one,
     // and it is a different sentence from "the probe never ran".
+    //
+    // ⚠️ It looks for the listener BY NAME, and that is a correction rather
+    // than a flourish: node parks an anonymous `once('error', noop)` across
+    // every `console.error`, so a count-based version of this case reported
+    // `LISTENER ATTACHED after 20 ms` against a tree with the whole block
+    // deleted — measured, under the ablation below. The count is carried in
+    // the markers as evidence and decides nothing.
     expect(
       guarded.marks,
       `the probe never reached the listener check, so it measured NOTHING — a zero reading, not a pass. Markers:\n${guarded.marks}`,
     ).toMatch(/LISTENER (ATTACHED|ABSENT)/);
     expect(
       guarded.marks,
-      `bin/run.js no longer attaches an \`error\` listener to process.stderr — a failed stderr write is an ` +
+      `bin/run.js no longer attaches its \`error\` listener to process.stderr — a failed stderr write is an ` +
         `uncaught exception again on the entry point a customer's install runs (#14858, #15564). Markers:\n${guarded.marks}`,
     ).toContain('LISTENER ATTACHED');
+  });
+
+  it("keeps the probe's mirror of the listener name equal to the entry's own", () => {
+    // The probe cannot import the name — `bin/run.js` runs the CLI at module
+    // top — so it mirrors it, and a mirror with nothing holding it is how a
+    // synchronisation point ends up waiting for a spelling that moved. Same
+    // discipline as `run-dev-unbuilt-workspace.e2e.test.ts` keeps over the
+    // shim's drain bound. ⛔ A renamed listener would not red the cases above:
+    // the probe would simply time out and write early, which on a fast box
+    // still survives.
+    const mirrored = /const LISTENER_NAME = '([A-Za-z0-9_$]+)';/.exec(readFileSync(PROBE, 'utf8'))?.[1];
+    expect(mirrored, `no LISTENER_NAME declaration found in ${PROBE}`).toBeDefined();
+    const entry = maskComments(readFileSync(RUN_JS, 'utf8'));
+    expect(
+      entry,
+      `${RUN_JS} does not attach a listener named ${mirrored}, which is the name the probe waits for — ` +
+        `either the entry renamed it or it stopped attaching one at all.`,
+    ).toContain(`function ${mirrored}(`);
   });
 
   it('outlives a failed write and ends with its own status, not a crash', () => {

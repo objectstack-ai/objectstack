@@ -40,6 +40,16 @@
  * Markers go to a file: stderr is the thing under test and, on the arm that is
  * supposed to fail, the thing that is already broken.
  *
+ * ## Why it waits for a NAMED listener and not for a count
+ *
+ * Node parks an anonymous `once('error', noop)` on this stream for the duration
+ * of every `console.error` (`ignoreErrors`), so `listenerCount('error') > 0` is
+ * briefly true in any process. An earlier version of this probe polled the
+ * count, and under the ablation that deletes the entry's listener entirely it
+ * still reported `LISTENER ATTACHED after 20 ms` — a green reading against a
+ * tree with nothing guarding it. The name is the only thing that identifies
+ * THIS listener, so it is what the poll waits for.
+ *
  * env: `OS_PUBLISHED_ENTRY_ERROR_PROBE_MARKS` — the marker file.
  * env: `OS_PUBLISHED_ENTRY_ERROR_PROBE_ARM`   — `guarded` (default) | `unguarded`.
  */
@@ -66,6 +76,18 @@ const ATTACH_WAIT_MS = 15_000;
 
 /** Comfortably finer than anything being timed. */
 const POLL_MS = 10;
+
+/**
+ * The listener `bin/run.js` attaches, by name. Mirrored rather than imported —
+ * that file runs the CLI at module top, so there is nothing to import from it —
+ * and held equal to the entry's spelling by a case in the driving suite, the
+ * same discipline `run-dev-unbuilt-workspace.e2e.test.ts` uses for the shim's
+ * drain bound.
+ */
+const LISTENER_NAME = 'objectstackStderrErrorIsNotFatal';
+
+/** Is the entry's OWN listener on the stream right now? */
+const guardAttached = () => process.stderr.listeners('error').some((fn) => fn?.name === LISTENER_NAME);
 
 /**
  * ⛔ This probe installs NO `error` listener of its own on `process.stderr`.
@@ -103,13 +125,15 @@ function writeAndOutliveIt() {
 
 let waited = 0;
 const poll = setInterval(() => {
-  const attached = process.stderr.listenerCount('error') > 0;
+  const attached = guardAttached();
   if (!attached && waited < ATTACH_WAIT_MS) {
     waited += POLL_MS;
     return;
   }
   clearInterval(poll);
   mark(attached ? `LISTENER ATTACHED after ${waited} ms` : `LISTENER ABSENT after ${waited} ms`);
+  // The raw count too, as EVIDENCE in a failure message — never as the oracle.
+  mark(`LISTENERS count=${process.stderr.listenerCount('error')}`);
   if (UNGUARDED) {
     // The live positive control — in this process only, never on disk.
     process.stderr.removeAllListeners('error');
