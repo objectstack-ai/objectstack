@@ -261,7 +261,11 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
         error: (msg: string) => logs.push(String(msg)),
       };
       const bare = orgUniqueOn('os12998_tail');
-      await driver.initObjects([{ ...bare, indexes: [] }]);
+      // Bound to a variable, like the fixture above: `initObjects`' parameter
+      // type does not declare `indexes`, and an inline literal would be
+      // rejected by tsc for a key the driver reads regardless (#16570).
+      const withoutIndex = { ...bare, indexes: [] };
+      await driver.initObjects([withoutIndex]);
       const knex = (driver as any).knex;
       // Six DISTINCT values, each doubled under a NULL organization: six
       // conflicting groups once the declared key folds NULL into the global
