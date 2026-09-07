@@ -253,9 +253,14 @@ describe('rendered scaffold templates are followable by a stranger', () => {
   // The second scaffolder, named — so a future edit that drops it from the
   // population fails with this card's own vocabulary rather than a bare
   // count that a shrinking sweep satisfies just as well.
+  //
+  // `create:example` was in this list until #16483 retired the template. Its
+  // ABSENCE is asserted for the same reason its presence was: a shrinking sweep
+  // must fail loudly, and the retirement is the one reason this one may shrink.
   it('sweeps the `os create` scaffolder, not just `os init`', () => {
     const ids = [...new Set(rendered.map((r) => r.scaffoldId))];
-    expect(ids).toContain('create:example');
+    expect(ids).not.toContain('create:example');
+    expect(Object.keys(createTemplates)).not.toContain('example');
     expect(ids).toContain('create:plugin');
     expect(ids.filter((id) => id.startsWith('init:')).length).toBe(Object.keys(TEMPLATES).length);
     expect(ids.filter((id) => id.startsWith('create:')).length).toBe(Object.keys(createTemplates).length);

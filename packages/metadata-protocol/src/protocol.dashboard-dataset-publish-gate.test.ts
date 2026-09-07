@@ -111,14 +111,30 @@ const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
 
 function makeStubEngine() {
-    const rows = new Map<string, Row>();
+    // ⚠️ Keyed BY TABLE, and that is a correctness property of this harness
+    // rather than tidiness. One flat row map answers a read of `sys_metadata`
+    // with rows the protocol wrote to `sys_metadata_history` and
+    // `sys_metadata_commit`: a DRAFT save appends a history row carrying no
+    // `state`, the declared `defaultValue: 'active'` modelled below fills it
+    // in, and the draft comes back as an ACTIVE metadata row. Measured in
+    // #16223, where one assertion's polarity was the only thing that caught it.
+    const tables = new Map<string, Map<string, Row>>();
+    const tableOf = (table: string): Map<string, Row> => {
+        const existing = tables.get(table);
+        if (existing) return existing;
+        const created = new Map<string, Row>();
+        tables.set(table, created);
+        return created;
+    };
+    /** The store table these tests assert on; the journals get their own. */
+    const rows = tableOf('sys_metadata');
     let nextId = 0;
-    const findRow = (w: Record<string, unknown>): { key: string; row: Row } | null => {
+    const findRow = (table: string, w: Record<string, unknown>): { key: string; row: Row } | null => {
         if (w.id !== undefined) {
-            for (const [k, r] of rows) if (r.id === w.id) return { key: k, row: r };
+            for (const [k, r] of tableOf(table)) if (r.id === w.id) return { key: k, row: r };
             return null;
         }
-        for (const [k, r] of rows) {
+        for (const [k, r] of tableOf(table)) {
             if (w.type !== undefined && r.type !== w.type) continue;
             if (w.name !== undefined && r.name !== w.name) continue;
             if (w.organization_id !== undefined && r.organization_id !== w.organization_id) continue;
@@ -128,12 +144,12 @@ function makeStubEngine() {
         return null;
     };
     const engine: any = {
-        async findOne(_t: string, opts: { where: Record<string, unknown> }) {
-            assertEngineFindOnePredicate(_t, opts);
-            return findRow(opts.where)?.row ?? null;
+        async findOne(table: string, opts: { where: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts);
+            return findRow(table, opts.where)?.row ?? null;
         },
-        async find(_t: string, opts: { where: Record<string, unknown> }) {
-            return Array.from(rows.values()).filter((r) => {
+        async find(table: string, opts: { where: Record<string, unknown> }) {
+            return Array.from(tableOf(table).values()).filter((r) => {
                 if (opts.where.type && r.type !== opts.where.type) return false;
                 if (opts.where.organization_id !== undefined
                     && r.organization_id !== opts.where.organization_id) return false;
@@ -141,25 +157,24 @@ function makeStubEngine() {
                 return true;
             });
         },
-        async insert(_t: string, data: Record<string, unknown>) {
-            if (_t === 'sys_metadata_audit') return { id: 'audit_skip' };
+        async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;
-            rows.set(keyOf(data), row);
+            tableOf(table).set(keyOf(data), row);
             return { id: row.id };
         },
-        async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+        async update(table: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
             assertEngineUpdateDispatch(data, opts);
-            const found = findRow(opts.where);
+            const found = findRow(table, opts.where);
             if (!found) return { id: null };
-            rows.set(found.key, { ...found.row, ...(data as any) });
+            tableOf(table).set(found.key, { ...found.row, ...(data as any) });
             return { id: found.row.id };
         },
-        async delete(_t: string, opts: { where: Record<string, unknown> }) {
+        async delete(table: string, opts: { where: Record<string, unknown> }) {
             assertEngineDeleteDispatch(opts);
-            const found = findRow(opts.where);
+            const found = findRow(table, opts.where);
             if (!found) return { deleted: 0 };
-            rows.delete(found.key);
+            tableOf(table).delete(found.key);
             return { deleted: 1 };
         },
         registry: {
@@ -196,14 +211,14 @@ function makeStubEngine() {
             getItem: () => undefined,
         },
     };
-    return { engine, rows };
+    return { engine, rows, tableOf };
 }
 
 /** A protocol on the ordinary tenant posture (environment id, default channel). */
 function makeProtocol() {
-    const { engine, rows } = makeStubEngine();
+    const { engine, rows, tableOf } = makeStubEngine();
     const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test');
-    return { protocol: protocol as any, rows };
+    return { protocol: protocol as any, engine, rows, tableOf };
 }
 
 const dashboardRows = (rows: Map<string, Row>) =>
@@ -343,5 +358,81 @@ describe('dashboard dataset bindings at the publish door (#7529)', () => {
         const result = await protocol.publishMetaItem({ type: 'dashboard', name: 'ops_board' });
         expect(result.success).toBe(true);
         expect(dashboardRows(rows).length).toBeGreaterThan(0);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #16225 — the stub answers the table it was asked about, and only that one
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// This block is what makes the table-keying above a MEASUREMENT rather than a
+// rename. Every other test in this file passes identically with the tables
+// merged back into one map, because none of them reads `sys_metadata` as a
+// table — which is exactly how the shape survived in eight harnesses.
+//
+// The incident it pins is #16223's: one save writes `sys_metadata`,
+// `sys_metadata_history` and `sys_metadata_audit`, all three addressed to the
+// same `(type, name)`, and the two journal rows carry no `state` of their own.
+// A flat map hands them back to a `sys_metadata` read; a harness that also
+// models `sys_metadata.state`'s declared `defaultValue: 'active'` — correctly,
+// which is what made it convincing — serves a DRAFT-only artifact back as an
+// ACTIVE metadata row.
+describe('#16225 a `sys_metadata` read is not answered from the journal tables', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+    afterEach(() => { warn.mockRestore(); });
+
+    it('serves the store row only, never the history/audit rows the same save wrote', async () => {
+        const { protocol, engine, tableOf } = makeProtocol();
+
+        const saved = await save(protocol, legitBoard(), { mode: 'draft' });
+        expect(saved.success).toBe(true);
+        expect(saved.state, 'the artifact exists as a DRAFT and nothing else').toBe('draft');
+
+        // The firing control. If one save ever stops writing the journals, the
+        // read below is measuring an empty universe rather than a separation,
+        // and this line says so instead of going quietly green. It is read
+        // through `tableOf`, so it stays satisfied under a re-merge — the pin
+        // and not the control is what a re-merge is meant to break.
+        const journal = [
+            ...tableOf('sys_metadata_history').values(),
+            ...tableOf('sys_metadata_audit').values(),
+            // `Partial<Row>` and not `Record<string, unknown>`: `Row` declares no
+            // index signature, so that widening is a TS2352, and `Partial` is
+            // the honest type anyway — a journal row carries `type` and `name`
+            // and does NOT carry the `state` the assertions below look for.
+        ] as Partial<Row>[];
+        expect(
+            journal.length,
+            'the firing control: one save must WRITE the journal tables, or the read below '
+            + 'proves nothing about which table answered it',
+        ).toBeGreaterThan(0);
+
+        // ── The pin ──────────────────────────────────────────────────────────
+        // Asserted on a STORE-ONLY column rather than on the row count, because
+        // a journal row is addressed to the same `(type, name, organization_id)`
+        // as the store row and can therefore COLLIDE with it under `keyOf` —
+        // a merged map can hold the audit row in the store row's place and
+        // still answer with one row of the right name. `checksum` and `state`
+        // are written by the store leg alone, so this fails either way.
+        const stored = await engine.find('sys_metadata', { where: { type: 'dashboard' } });
+        expect(
+            stored.map((r: Row) => r.state),
+            'a `sys_metadata` read must answer with the store row and nothing else',
+        ).toEqual(['draft']);
+        expect(
+            stored.map((r: Row) => typeof r.checksum),
+            'and the row it answers with must be a STORE row, not a journal row wearing '
+            + 'the same `(type, name)`',
+        ).toEqual(['string']);
+
+        // The mechanics of the incident, recorded once the separation holds:
+        // every journal row is addressed to the same `(type, name)` as the
+        // store row, and none of them declares a `state` — so a harness
+        // modelling `sys_metadata.state`'s declared `defaultValue: 'active'`
+        // hands a DRAFT-only artifact back as an ACTIVE metadata row (#16223).
+        expect(journal.map((r) => `${r.type}|${r.name}`))
+            .toEqual(new Array(journal.length).fill('dashboard|ops_board'));
+        expect(journal.some((r) => 'state' in r)).toBe(false);
     });
 });

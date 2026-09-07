@@ -2107,6 +2107,9 @@ importers:
       '@objectstack/driver-sqlite-wasm':
         specifier: workspace:*
         version: link:../../drivers/driver-sqlite-wasm
+      '@objectstack/hono':
+        specifier: workspace:*
+        version: link:../../adapters/hono
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
