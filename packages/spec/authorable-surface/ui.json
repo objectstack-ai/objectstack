@@ -778,6 +778,7 @@
     "ui/ObjectKanbanProps:filter",
     "ui/ObjectKanbanProps:groupBy",
     "ui/ObjectKanbanProps:grouping",
+    "ui/ObjectKanbanProps:limit",
     "ui/ObjectKanbanProps:objectName",
     "ui/ObjectKanbanProps:quickAdd",
     "ui/ObjectKanbanProps:swimlaneField",

@@ -1805,15 +1805,63 @@ function walk(dir, out) {
   }
 }
 
-function main() {
-  const update = process.argv.includes('--update');
-
+/**
+ * The source corpus every derivation in this file reads: `SCAN_ROOT` walked
+ * under `repoRoot`, keyed by repo-relative path.
+ *
+ * @param {string} repoRoot directory the scan root is resolved against
+ * @returns {Map<string, string>} repo-relative path → source text
+ */
+function scanSources(repoRoot) {
   const files = [];
-  walk(SCAN_ROOT, files);
+  walk(join(repoRoot, SCAN_ROOT), files);
   const sources = new Map();
-  for (const f of files.sort()) sources.set(relative('.', f).replace(/\\/g, '/'), readFileSync(f, 'utf8'));
+  for (const f of files.sort()) sources.set(relative(repoRoot, f).replace(/\\/g, '/'), readFileSync(f, 'utf8'));
+  return sources;
+}
 
-  const errorsZod = readFileSync(ERRORS_ZOD, 'utf8');
+/**
+ * THE derivation, in one place: the corpus walk, the runtime side, the doc
+ * side, the reconciled vocabulary — and the WIRE FACE that vocabulary leaves
+ * once the door's translations are subtracted.
+ *
+ * `main()` is a consumer of this rather than an inlining of it, because a
+ * SECOND consumer now needs the same answer:
+ * `packages/spec/src/api/error-catalog-docs.test.ts`, the ADR-0112 D7 catalog
+ * guard. The #15631 ruling (2026-09-07) re-points that guard from the ENUM at
+ * the published wire face, and requires it to read the translation set "from
+ * the one place the conformance script already derives it — ⛔ no second
+ * hand-written list". A `DUPLICATE_RECORD` the door translates away is an
+ * in-process spelling; a guard carrying its own list of those would be exactly
+ * the second copy of a table this file's header argues against, and it would go
+ * stale in silence the day a door gains or loses an arm.
+ *
+ * ## `wireCodes` — what the catalog page is a catalog OF
+ *
+ * `vocabulary` is every `StandardErrorCode` member plus every other code a
+ * scanned page publishes a status for (the ledger codes that have reached the
+ * docs). Subtracting `translatedCodes` from it leaves the codes that can appear
+ * in an envelope on the wire — which is the face the catalog page documents,
+ * and the face the D7 guard compares its headings against in BOTH directions.
+ *
+ * The subtraction is what makes the two halves of the ruling consistent: the
+ * translated member is exempt from "must have a heading" BECAUSE it is not a
+ * wire code, not by a special case written next to it.
+ *
+ * `catalogEntries` are the entries the doc parser READ on the catalog page, in
+ * every shape `ENTRY_HEADING_SHAPES` recognises. The guard matches headings by
+ * that same rule rather than by a bare-heading regex of its own — which is what
+ * closes the `INVALID_REQUEST` suffix accident the #15631 ruling names: those
+ * two entries were invisible to the old guard only because they carry a
+ * descriptive suffix, and an unread heading is an UNCHECKED heading.
+ *
+ * @param {string} repoRoot directory every repo-relative path is resolved
+ *        against; the paths inside the result stay repo-relative regardless.
+ */
+export function deriveWireFace(repoRoot = '.') {
+  const sources = scanSources(repoRoot);
+
+  const errorsZod = readFileSync(join(repoRoot, ERRORS_ZOD), 'utf8');
   const members = parseStandardErrorCodes(errorsZod);
   const index = buildConstantIndex(sources);
   const translations = deriveDoorTranslations(sources);
@@ -1828,11 +1876,32 @@ function main() {
   }
 
   const doc = parseDocumentedStatuses({
-    handling: readFileSync(DOC_HANDLING, 'utf8'),
-    catalog: readFileSync(DOC_CATALOG, 'utf8'),
+    handling: readFileSync(join(repoRoot, DOC_HANDLING), 'utf8'),
+    catalog: readFileSync(join(repoRoot, DOC_CATALOG), 'utf8'),
   });
   const { vocabulary, docPublishedBeyondStandard } = reconciledVocabulary({ members, ...doc });
   const translatedCodes = new Set(derived.translated.map((t) => t.code));
+
+  return {
+    sources,
+    members,
+    derived,
+    doc,
+    vocabulary,
+    docPublishedBeyondStandard,
+    translated: derived.translated,
+    translatedCodes,
+    wireCodes: vocabulary.filter((code) => !translatedCodes.has(code)),
+    catalogEntries: doc.entries.filter((e) => e.where.startsWith(`${DOC_CATALOG}:`)),
+    catalogPath: DOC_CATALOG,
+  };
+}
+
+function main() {
+  const update = process.argv.includes('--update');
+
+  const { sources, members, derived, doc, vocabulary, docPublishedBeyondStandard, translatedCodes } =
+    deriveWireFace();
   const result = reconcile({ vocabulary, emitted: derived.emitted, translatedCodes, ...doc });
 
   const baseline = existsSync(BASELINE_PATH)

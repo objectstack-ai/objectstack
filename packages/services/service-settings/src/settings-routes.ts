@@ -13,7 +13,13 @@
  * `SettingsService`.
  */
 
-import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/contracts';
+import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+// [#15999] The BRAND predicate, never `instanceof` — this error crosses package
+// boundaries and a monorepo resolves the same module through more than one path
+// (`src` under vitest aliases, `dist` under the published `exports`), so two
+// copies of the class make `instanceof` answer FALSE for a genuine instance.
+// See `packages/core/src/security/authz-store-unavailable.ts`.
+import { isAuthzStoreUnavailableError } from '@objectstack/core';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // Its `extra` is `ApiError`'s own optional fields, so the undeclared siblings
 // #4224 retired from this module cannot come back through it either.
@@ -56,6 +62,48 @@ export interface SettingsRoutesOptions {
 // wire a verified `contextFromRequest` (the plugin does).
 const defaultContext = (_req: IHttpRequest): SettingsContext => ({ enforced: true });
 
+/**
+ * [#15999, ruling item 3] Relay an authorization-store OUTAGE as the envelope
+ * it declares, instead of flattening it into this layer's untyped `500
+ * INTERNAL_ERROR` tail.
+ *
+ * `SettingsServicePlugin`'s `verifiedContextFromRequest` already re-raises the
+ * brand rather than returning an enforced-but-empty context the routes would
+ * read as a denial (#13279). But it is called as `await ctxOf(req)` from INSIDE
+ * each route's own `try`, so until now the brand was caught here and re-encoded
+ * — `message` survived, `code` and `status` did not, and those are the two a
+ * client branches on. The declared `503` / `SERVICE_UNAVAILABLE` never reached
+ * the caller.
+ *
+ * RELAYED rather than re-raised, deliberately. A bare re-raise escapes to the
+ * transport, which today answers a bare `500 INTERNAL_ERROR "No response from
+ * handler"` — losing the message too — and the shared render that would give an
+ * escaped envelope its declared status does not exist yet (#16545). A relay
+ * answers before the throw escapes, so it is correct today and stays correct
+ * once #16545 lands (the shared render then only sees what no route relayed).
+ * The same shape `badRequest` in `service-datasource`'s `admin-routes.ts` has
+ * used for a service-thrown `503`/`SERVICE_UNAVAILABLE` since #6504.
+ *
+ * `status` / `code` are read OFF the error rather than written as digits: the
+ * envelope answered is the one the producer declared.
+ *
+ * Written once and called by all four route catches — this registrar's four
+ * `catch` blocks are one decision reached four ways, and a copy per handler is
+ * exactly how a family drifts apart on the arm that matters least often.
+ *
+ * ⛔ Scoped to the brand. Every other throw keeps its existing arm, including
+ * the untyped `500` tail — widening this to "anything carrying a status" would
+ * let an unrelated coded throw pick this layer's status.
+ *
+ * Returns `true` when the outage envelope was answered and the caller must
+ * stop.
+ */
+function relayAuthzStoreOutage(res: IHttpResponse, err: unknown): boolean {
+  if (!isAuthzStoreUnavailableError(err)) return false;
+  sendError(res, err.status, err.code, err.message);
+  return true;
+}
+
 export function registerSettingsRoutes(
   http: IHttpServer,
   service: SettingsService,
@@ -70,6 +118,7 @@ export function registerSettingsRoutes(
       const manifests = service.listManifests(ctx);
       sendOk(res, { manifests });
     } catch (err: any) {
+      if (relayAuthzStoreOutage(res, err)) return;
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else {
@@ -89,6 +138,7 @@ export function registerSettingsRoutes(
       // "configured" state and the env-lock affordances read the same as before.
       sendOk(res, { ...payload, values: redactSecretValues(payload.values, service.secretKeysOf(ns)) });
     } catch (err: any) {
+      if (relayAuthzStoreOutage(res, err)) return;
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else if (err instanceof UnknownNamespaceError) {
@@ -140,6 +190,7 @@ export function registerSettingsRoutes(
       // have set). Same boundary, same redaction.
       sendOk(res, { values: redactSecretValues(result, secretKeys) });
     } catch (err: any) {
+      if (relayAuthzStoreOutage(res, err)) return;
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else if (err instanceof SettingsLockedError) {
@@ -204,6 +255,7 @@ export function registerSettingsRoutes(
         });
       }
     } catch (err: any) {
+      if (relayAuthzStoreOutage(res, err)) return;
       if (err instanceof SettingsForbiddenError) {
         sendError(res, 403, 'SETTINGS_FORBIDDEN', err.message, { details: { namespace: err.namespace } });
       } else if (err instanceof UnknownNamespaceError) {

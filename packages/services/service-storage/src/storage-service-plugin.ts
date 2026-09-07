@@ -866,16 +866,18 @@ function buildAuthSessionResolver(
  * (`isAuthzStoreUnavailableError(err)` re-raises instead of returning
  * `'deny'`). Deliberately NOT a second net.
  *
- * ⚠️ MEASURED on this tree, and worth knowing before reading that relay as a
- * 503: `registerStorageRoutes`' `authorizeDownload` wraps this authorizer in
- * `catch { verdict = 'deny' }`, so on THIS door the re-raise is absorbed one
- * frame up and a failed posture read renders as the download gate's own 403
- * refusal. Fail-CLOSED — never an admission — but not the branded status
- * either. That flattening is PRE-EXISTING (it has swallowed the #13279
- * permission-store outage at this door since that card landed, out of the same
- * `catch`), it is not something this card opened, and it is ⛔ not repaired
- * here; the pin below asserts the outage CLASS rather than the digits so a
- * later status repair does not have to redden a security test.
+ * ⚠️ Read as a 503 ON THE WIRE since #15999, and it was NOT one before. Until
+ * that card, `registerStorageRoutes`' `authorizeDownload` wrapped this
+ * authorizer in `catch { verdict = 'deny' }`, so the re-raise was absorbed one
+ * frame up and a failed posture read rendered as the download gate's own 403
+ * refusal — fail-CLOSED, never an admission, but wearing the costume of a
+ * capability denial, which is the confusion #13279 exists to prevent. That
+ * flattening was PRE-EXISTING (it had swallowed the #13279 permission-store
+ * outage at this door since that card landed, out of the same `catch`) and was
+ * repaired by #15999's ruling item 3: the `catch` now RELAYS the declared
+ * `503` / `SERVICE_UNAVAILABLE` envelope. The pin below still asserts the
+ * outage CLASS — never 200, never a minted capability — and its 403 arm retired
+ * with that repair.
  *
  * ## Why `getServiceAsync`, and why its ABSENCE stays quiet ON THIS DOOR
  *
