@@ -22,27 +22,27 @@
  * CONFIRMED. tsx reads the CWD's tsconfig, not the entry file's, and applies
  * its `compilerOptions.paths` to every specifier it resolves — the CLI's own
  * included. From `examples/app-multi-package`, `import.meta.resolve` answers
- * `…/packages/spec/src/data/index.ts` for `@objectstack/spec/data`; from the
- * repo root it answers the dist target. Ten in-tree directories carry such a
- * rule, written so `tsc --noEmit` grades against a producer's SOURCE rather
- * than its last build (`check:type-source-resolution` requires them), and
- * #11094 named the runtime half "a latent runtime redirect for any
- * tsx-honouring tool".
+ * the spec package's `data` SOURCE index for `@objectstack/spec/data`; from
+ * the repo root it answers that package's dist target. Ten in-tree
+ * directories carry such a rule, written so `tsc --noEmit` grades against a
+ * producer's SOURCE rather than its last build
+ * (`check:type-source-resolution` requires them), and #11094 named the
+ * runtime half "a latent runtime redirect for any tsx-honouring tool".
  *
  * ⛔ CORRECTED. The card read the failure as the source subpath's export set
- * DIFFERING from `dist`. It does not. `packages/spec/src/data/index.ts`
+ * DIFFERING from `dist`. It does not. The spec package's `data` source index
  * exports the very name the failure blames — 470 names through
  * `await import()`, `DATABASE_DRIVER_SELECTION_IDS` among them. What breaks is
- * the STATIC LINK, and the reason is module FORMAT: `packages/spec` and
- * `packages/types` declare no `"type": "module"`, so tsx loads their `.ts`
- * sources as CommonJS; a static ESM named import can then bind only what
+ * the STATIC LINK, and the reason is module FORMAT: the spec and types
+ * packages declare no `"type": "module"`, so tsx loads their `.ts` sources as
+ * CommonJS; a static ESM named import can then bind only what
  * `cjs-module-lexer` detects statically, and the lexer does not follow the
- * two-hop `export *` chain (`data/index.ts` → `./driver/index` →
- * `./config-registry.zod`) that publishes this name. Measured with a two-leg
- * fixture whose ONLY difference was that field — CJS leg `SyntaxError: … does
- * not provide an export named 'DEEP_NAME'`, ESM leg links and prints 42.
- * `packages/cli` IS `"type": "module"`, which puts every one of its command
- * modules on the failing side of that seam.
+ * two-hop `export *` chain (the data index → its driver index → the driver
+ * config registry) that publishes this name. Measured with a two-leg fixture
+ * whose ONLY difference was that field — CJS leg `SyntaxError: … does not
+ * provide an export named 'DEEP_NAME'`, ESM leg links and prints 42. This CLI
+ * IS `"type": "module"`, which puts every one of its command modules on the
+ * failing side of that seam.
  *
  * That correction is why this file asserts on the RESOLUTION and never on an
  * export set: the export set is a red herring, and a suite written against it
@@ -132,24 +132,42 @@ function runCli(cwd: string, env: Record<string, string | undefined>): Promise<R
 }
 
 /**
- * A cwd that redirects ONE workspace specifier to real source on disk.
+ * The specifier the fixture redirects. Any workspace package this CLI declares
+ * as a dependency would do; this one is named because it is the one the card
+ * reproduced on.
+ */
+const REDIRECTED_SPECIFIER = '@objectstack/spec';
+
+/** What the redirect points AT — a stub this suite writes, never real source. */
+const STUB_BASENAME = 'spec-stub.ts';
+
+/**
+ * A cwd that redirects one workspace specifier this CLI imports to a TypeScript
+ * file that is not that package.
  *
- * `baseUrl` is the repo root and the target is repo-relative, because a `paths`
- * target that resolves to nothing on disk is not a redirect at all: get-tsconfig
- * falls back to node resolution, the run succeeds, and the case would pass
- * against an unfixed shim. The target has to exist for this fixture to bite.
+ * ⚠️ Two properties, and BOTH are load-bearing.
+ *
+ * The target must EXIST. A `paths` target that resolves to nothing on disk is
+ * not a redirect at all — get-tsconfig falls back to node resolution, the run
+ * succeeds, and every case here would pass against an unfixed shim.
+ *
+ * The target must be THIS SUITE'S OWN FILE, not a path into another package.
+ * Pointing at real workspace source would make this suite's inputs wider than
+ * its package — invisible to the affected-subset filter and to turbo's cache,
+ * the defect `check:cross-package-test-inputs` exists to refuse — and it would
+ * buy nothing: the assertions below are about what the SHIM does with a
+ * redirect, and a stub redirects exactly as well as the real thing. It is also
+ * the stronger fixture: a stub that exports nothing the CLI imports cannot
+ * quietly start satisfying those imports the way a real package could.
  */
 let redirectingCwd: string;
 
 beforeAll(() => {
   redirectingCwd = mkdtempSync(join(tmpdir(), 'os-16547-'));
+  writeFileSync(join(redirectingCwd, STUB_BASENAME), 'export const NOT_THE_REAL_PACKAGE = true;\n');
   writeFileSync(
     join(redirectingCwd, 'tsconfig.json'),
-    `${JSON.stringify(
-      { compilerOptions: { baseUrl: REPO_ROOT, paths: { '@objectstack/spec': ['packages/spec/src/index.ts'] } } },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify({ compilerOptions: { baseUrl: '.', paths: { [REDIRECTED_SPECIFIER]: [`./${STUB_BASENAME}`] } } }, null, 2)}\n`,
   );
 });
 
@@ -170,7 +188,7 @@ describe('bin/run-dev.js under a cwd tsconfig that redirects a workspace package
       expect(run.stderr).toContain('Config file not found');
       // Not silent. A second process appearing with no explanation is its own
       // kind of misdirection, so the shim names the specifier and the pin.
-      expect(run.stderr).toContain("redirects '@objectstack/spec' to TypeScript source");
+      expect(run.stderr).toContain(`redirects '${REDIRECTED_SPECIFIER}' to TypeScript source`);
       expect(run.stderr).toContain(CLI_TSCONFIG);
     },
     RUN_TIMEOUT_MS,
@@ -188,14 +206,14 @@ describe('bin/run-dev.js under a cwd tsconfig that redirects a workspace package
 
       expect(run.code).toBe(2);
       expect(run.stderr).toContain('NOT A MISSING COMMAND');
-      expect(run.stderr).toContain("The unmet precondition is NOT @objectstack/spec's build output");
+      expect(run.stderr).toContain(`The unmet precondition is NOT ${REDIRECTED_SPECIFIER}'s build output`);
       // The evidence, carried rather than summarised.
-      expect(run.stderr).toContain('packages/spec/src/index.ts');
+      expect(run.stderr).toContain(STUB_BASENAME);
       // ⛔ THE assertion this card is graded on. `packages/spec/dist` is present
       // and fresh in this tree — the whole suite depends on a built workspace —
       // so a prescription to rebuild it is an action that succeeds and changes
       // nothing, which is worse for an agent than a bare failure.
-      expect(run.stderr).not.toContain('turbo run build --filter=@objectstack/spec');
+      expect(run.stderr).not.toContain(`turbo run build --filter=${REDIRECTED_SPECIFIER}`);
       expect(run.stderr).toContain("tsx reads the CWD's tsconfig");
     },
     RUN_TIMEOUT_MS,
