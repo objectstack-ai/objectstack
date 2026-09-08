@@ -247,12 +247,19 @@ describe('the artifact door never stamps a column constraint (ADR-0113, #16693)'
    * them green for the wrong reason.
    */
   it('still replays other retired conversions in that same window (the instrument fires)', () => {
-    const result = applyArtifactForwardConversions(legacyPermissionDefinition('^17.0.0'), {
-      runtimeSpecVersion: '17.3.0',
-    });
+    const def = legacyPermissionDefinition('^17.0.0');
+    const result = applyArtifactForwardConversions(def, { runtimeSpecVersion: '17.3.0' });
     expect(result.verdict).toBe('converted-forward');
     expect(result.notices.length).toBeGreaterThan(0);
-    expect(result.definition).not.toBe(undefined);
+    // A rewrite actually landed on the same floor the assertions above use:
+    // the retired permission bits are gone, and copy-on-write proves it by
+    // handing back a DIFFERENT object than it was given.
+    const objects = (result.definition as { permissions: { objects: Record<string, Record<string, unknown>> }[] })
+      .permissions[0]!.objects;
+    expect(objects.crm_ticket!.allowRestore).toBeUndefined();
+    expect(objects.crm_ticket!.allowPurge).toBeUndefined();
+    expect(objects.crm_ticket!.allowRead, 'only the retired bits move').toBe(true);
+    expect(result.definition).not.toBe(def);
   });
 });
 
