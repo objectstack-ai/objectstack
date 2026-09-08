@@ -366,9 +366,12 @@ describe('extractHookBody', () => {
     } catch (err) {
       message = (err as Error).message;
     }
-    expect(message).toMatch(/\.insert\(\{ \.\.\. \}\)/);
-    expect(message).toMatch(/insert \/ update \/ delete \/ updateMany \/ deleteMany \/ upsert/);
+    expect(message).toMatch(/`\.insert\(\{ \.\.\. \}\)`/);
+    expect(message).toMatch(/`insert` \/ `update` \/ `delete` \/ `updateMany` \/ `deleteMany` \/ `upsert`/);
     expect(message).toMatch(/no `create` leaf/);
+    // The carve-out is stated in the refusal itself, so an author who hits it
+    // over an `Object.create()` false positive is told it is not the subject.
+    expect(message).toMatch(/`Object\.create\(\)` is unaffected/);
   });
 
   it('rejects the aliased receiver too — `const repo = ctx.api.object(x); repo.create()` (#16249)', () => {

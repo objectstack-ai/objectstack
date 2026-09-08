@@ -275,7 +275,7 @@ export const READONLY_HOOK_METHOD_EXCLUSIONS: readonly { method: string; reason:
     // one. ⛔ Do not restore the old sentence: it would describe a route the
     // build has closed.
     reason:
-      'the shape can no longer reach this rule: since #16249 `objectstack build` refuses `.create(` at ' +
+      'the shape can no longer reach this rule: `objectstack build` refuses `.create(` at ' +
       'lowering, so a handler spelling it is bundled and never becomes a body.source this rule can parse, ' +
       'and the shared extractor no longer recognises the verb either. What that refusal encodes: this rule ' +
       'reads L2 bodies, which run in QuickJS, and the VM-side ctx.api.object() installs no `create` leaf ' +
