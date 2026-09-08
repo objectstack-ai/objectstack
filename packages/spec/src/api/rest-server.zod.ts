@@ -21,6 +21,33 @@ import { retiredKey } from '../shared/retired-key';
  * - Salesforce: REST API with Object CRUD
  * - Microsoft Dynamics: Web API with entity operations
  * - Strapi: Auto-generated REST endpoints
+ *
+ * WHO CAN WRITE THIS CONFIG (#15543) — read this before planning a deployment
+ * around any key below. A `RestServerConfig` is the ARGUMENT a host passes when
+ * it constructs the server: never a stack collection member, never a stored
+ * metadata row, never a file the CLI reads. Both doors are programmatic —
+ * `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`) and
+ * `createHonoServerPlugin({ restConfig })`
+ * (`packages/plugins/plugin-hono-server/src/hono-plugin.ts`).
+ *
+ * No shipped boot path opens either door with a config of its own. `os serve`
+ * (`packages/cli/src/commands/serve.ts`) constructs the plugin with a fixed
+ * argument carrying exactly two CLI-derived keys — `api.enableProjectScoping`
+ * and `api.projectResolution` — and the dev plugin
+ * (`packages/plugins/plugin-dev/src/dev-plugin.ts`) calls
+ * `createRestApiPlugin()` with no config at all. So on a CLI-started deployment
+ * every OTHER key here is EMBEDDER-ONLY: the whole of `crud`, `metadata` and
+ * `batch`, and the rest of `api`. Its value is whatever the `.default()` below
+ * says, and no flag, env var or config file moves it. That is the recorded
+ * posture, not a gap awaiting a fix: the keys keep their runtime reads and
+ * their embedder consumer, and the reachability answer ADR-0049 asks for is
+ * written per key in the liveness ledger
+ * (`packages/spec/liveness/crud_endpoints.json`, `metadata_endpoints.json`,
+ * `batch_endpoints.json`).
+ *
+ * ⛔ So a docblock here must never describe a key as a deployment posture
+ * without saying who can actually set it. An operator reading this page is
+ * entitled to learn from it that they cannot set these.
  */
 
 // ==========================================
@@ -97,11 +124,17 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
   enableOpenApi: z.boolean().default(true).describe('Enable OpenAPI 3.1 spec & docs viewer endpoints'),
 
   /**
-   * Deployment-wide switch for the structured-search surface. `false` skips
-   * mounting the search endpoints entirely (`registerSearchEndpoints` is never
-   * called, so the routes 404), and the discovery capability block reports
-   * `search.enabled: false` regardless of what the underlying protocol could
-   * serve — declared and enforced at the mount, not advertised past it.
+   * Server-wide switch for the structured-search surface — and, like every key
+   * of this block except `enableProjectScoping` / `projectResolution`,
+   * ⛔ EMBEDDER-ONLY (#15543; see WHO CAN WRITE THIS CONFIG in the file
+   * header). `os serve` does not thread it, so a CLI-started deployment always
+   * gets the default and the search endpoints are mounted.
+   *
+   * For the host that CAN write it: `false` skips mounting the search endpoints
+   * entirely (`registerSearchEndpoints` is never called, so the routes 404),
+   * and the discovery capability block reports `search.enabled: false`
+   * regardless of what the underlying protocol could serve — declared and
+   * enforced at the mount, not advertised past it.
    *
    * Before this key had a declared seat the REST layer honoured it anyway,
    * reading its config raw through a cast — and this schema (a non-strict
@@ -109,7 +142,8 @@ export const RestApiConfigSchema = lazySchema(() => z.object({
    * silently turned search back on. Declared here so the opt-out survives its
    * own contract's parse.
    */
-  enableSearch: z.boolean().default(true).describe('Enable structured search endpoints (deployment-wide search opt-out)'),
+  enableSearch: z.boolean().default(true)
+    .describe('Enable structured search endpoints (server-wide search opt-out; embedder-only, not settable from `os serve`)'),
 
   /**
    * Enable project-scoped routing (/api/v1/environments/:environmentId/data/...)
@@ -214,6 +248,12 @@ export type CrudOperation = z.input<typeof CrudOperation>;
 /**
  * CRUD Endpoints Configuration Schema
  * Configuration for automatic CRUD endpoint generation
+ *
+ * Reachability: EMBEDDER-ONLY (#15543). Every key below is parsed and read at
+ * construction, and none of them is authorable from a CLI-started deployment —
+ * `os serve` passes only the two `api.*` keys named in the file header and the
+ * dev plugin passes nothing. `operations.*` and `dataPrefix` are therefore
+ * whatever their defaults say unless a host constructs the config itself.
  */
 export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
   /**
@@ -276,6 +316,15 @@ export type CrudEndpointsConfigParsed = z.infer<typeof CrudEndpointsConfigSchema
 /**
  * Metadata Endpoint Configuration Schema
  * Configuration for metadata API endpoints
+ *
+ * Reachability: EMBEDDER-ONLY (#15543). Every key below is parsed and read at
+ * construction, and none of them is authorable from a CLI-started deployment —
+ * `os serve` passes only the two `api.*` keys named in the file header and the
+ * dev plugin passes nothing. `prefix`, `enableCache`, `maskObjectFields` and
+ * the four `endpoints.*` switches are therefore whatever their defaults say
+ * unless a host constructs the config itself. The one metadata-masking opt-out
+ * a deployment CAN reach is the env var `OS_ALLOW_UNMASKED_OBJECT_METADATA`
+ * (see `maskObjectFields`).
  * 
  * @example
  * {
@@ -325,16 +374,21 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
    * name, label, type, picklist options, formula, `visibleWhen` predicate,
    * `defaultValue`, nor the `requiredPermissions` capability guarding it.
    *
-   * `false` opts this server out and serves the full schema to every
-   * authenticated caller, as releases before ADR-0106 did. The change is
-   * **disclosure only**: the data plane masks values and refuses forbidden
-   * writes either way, and the console reads field affordances from
-   * `/auth/me/permissions`, so toggling it never changes UI correctness.
+   * `false` serves the full schema to every authenticated caller, as releases
+   * before ADR-0106 did — but ⛔ only an EMBEDDER can write that `false`. This
+   * key is not reachable from a CLI-started deployment at all (see WHO CAN
+   * WRITE THIS CONFIG in the file header), so under `os serve` and the dev
+   * plugin the mask is on and stays on. The change is **disclosure only**: the
+   * data plane masks values and refuses forbidden writes either way, and the
+   * console reads field affordances from `/auth/me/permissions`, so toggling it
+   * never changes UI correctness.
    *
-   * Deployment-wide counterpart: `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, which
-   * also covers the runtime `/metadata` dispatcher (that path has no per-server
-   * REST config to read). Either opt-out disables the mask; neither is needed
-   * to keep it on.
+   * The opt-out a DEPLOYMENT can actually reach is the env var
+   * `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, which also covers the runtime
+   * `/metadata` dispatcher (that path has no per-server REST config to read).
+   * Either opt-out disables the mask and neither is needed to keep it on — but
+   * of the two only the env var is reachable without embedding, so a deployment
+   * that must serve unmasked schemas sets the env var, not this key.
    */
   maskObjectFields: z.boolean().default(true)
     .describe('[ADR-0106 D8] Mask served object schemas to the caller\'s readable fields'),
@@ -414,6 +468,13 @@ export type MetadataEndpointsConfigParsed = z.infer<typeof MetadataEndpointsConf
 /**
  * Batch Operation Endpoint Configuration Schema
  * Configuration for batch/bulk operation endpoints
+ *
+ * Reachability: EMBEDDER-ONLY (#15543). Every key below is parsed and read at
+ * construction, and none of them is authorable from a CLI-started deployment —
+ * `os serve` passes only the two `api.*` keys named in the file header and the
+ * dev plugin passes nothing. The cap `maxBatchSize` and the four bulk-door
+ * switches are therefore whatever their defaults say (cap 200, all doors on)
+ * unless a host constructs the config itself.
  * 
  * @example
  * {
@@ -606,17 +667,20 @@ export const RestServerConfigSchema = lazySchema(() => z.object({
   /**
    * CRUD endpoints configuration
    */
-  crud: CrudEndpointsConfigSchema.optional().describe('CRUD endpoints configuration'),
+  crud: CrudEndpointsConfigSchema.optional()
+    .describe('CRUD endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin)'),
   
   /**
    * Metadata endpoints configuration
    */
-  metadata: MetadataEndpointsConfigSchema.optional().describe('Metadata endpoints configuration'),
+  metadata: MetadataEndpointsConfigSchema.optional()
+    .describe('Metadata endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin)'),
   
   /**
    * Batch endpoints configuration
    */
-  batch: BatchEndpointsConfigSchema.optional().describe('Batch endpoints configuration'),
+  batch: BatchEndpointsConfigSchema.optional()
+    .describe('Batch endpoints configuration (embedder-only: written by a host that constructs this config, never by `os serve` or the dev plugin)'),
   
   /**
    * Route generation configuration
