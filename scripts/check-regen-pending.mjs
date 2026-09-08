@@ -837,15 +837,15 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 //
 // STOP -- the three callees' own inner sinks are NOT batteries here, and they
 // are worth naming because all three are different shapes: `fixtureSelfTest`'s
-// `check()` helper (14 calls), `decisionTableSelfTest`'s literal 8-row table
-// with its driving loop, and `prePushIsArmedSelfTest`'s bare boolean. Recipe A
-// (PR #15271, `check-sdui-manifest`) does make a table row a battery -- for a
-// file whose SELF-TEST *is* the table: one literal table, one driving loop over
-// it, one sink. Here the table is a local of ONE callee among three, and that
-// callee already reduces its rows to a single returned verdict of its own.
-// Flooring those rows would floor one callee's internals while the other two
-// stayed at callee granularity -- a roster whose unit changes per entry. The
-// rule: the battery is the unit the DISPATCH names.
+// `check()` helper, `decisionTableSelfTest`'s literal table with its driving
+// loop, and `prePushIsArmedSelfTest`'s bare boolean. Recipe A (PR #15271,
+// `check-sdui-manifest`) does make a table row a battery -- for a file whose
+// SELF-TEST *is* the table: one literal table, one driving loop over it, one
+// sink. Here the table is a local of ONE callee among three, and that callee
+// already reduces its rows to a single returned verdict of its own. Flooring
+// those rows would floor one callee's internals while the other two stayed at
+// callee granularity -- a roster whose unit changes per entry. The rule: the
+// battery is the unit the DISPATCH names.
 //
 // STOP -- the TWO assertions written INLINE in the dispatch block (`noDist`,
 // `noTree`) are deliberately OUTSIDE this roster, and that is a DECLARED GAP,
