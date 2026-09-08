@@ -3308,7 +3308,7 @@ export class SecurityPlugin implements Plugin {
       if (insertCheckSeam && insertCheckSeam.honoured !== true) {
         const developerMessage =
           `[Security] Access denied: the insert on '${opCtx.object}' was executed without the row-level CHECK ` +
-          `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck (#16608). ` +
+          `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck. ` +
           `The write is NOT vouched for by this gate.`;
         // Contract arg order (#5637): `error(message, error?: Error, meta?)` —
         // the structured fields ride in the THIRD position. There is no `Error`

@@ -2682,6 +2682,21 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/insert-check-post-image.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/invitation-placement.test.ts",
       "verb": "findOne",
       "pinned": 1
