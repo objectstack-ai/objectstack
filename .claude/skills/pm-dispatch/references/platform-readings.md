@@ -362,7 +362,7 @@
 - 落地探针除命名代码形外,还必须在落地前的 tip 上读出不同值,否则它分不开两棵树。
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
-- `check:pm-dispatch-gates` ≈13 分钟超 600 秒前台上限 ⇒ detach 加 `tail --pid` 等;超时不是读数。
+- `check:pm-dispatch-gates`(1534 例)逾 600 秒前台上限 ⇒ detach 加 `tail --pid` 等;超时不是读数。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
 
 ## 闭合关键词解析(PR 正文写侧)
