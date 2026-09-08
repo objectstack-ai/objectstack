@@ -350,7 +350,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Context reading: presence, not truthiness.': 4,
   'The wiring itself. A gate whose workflow step is deleted or whose': 6,
   'The predicate source this gate reuses must still be there to reuse.': 1,
-  'RULE 2 — every card-relation spelling in a commit message is a finding,': 19,
+  'RULE 2 — every card-relation spelling in a commit message is a finding,': 22,
   'The regression fixture: the squash that assembled a contradiction no': 4,
   'RULE 2 delegates to the sweep extractors at the commit-message reading.': 3,
   'The commit list input. An absent, broken or empty list can never read': 8,
@@ -443,6 +443,17 @@ const PREDICATE_SOURCE = 'scripts/pm/check-half-states.mjs';
 /** The wiring that gives this gate a PR to judge. */
 const WIRING_WORKFLOW = '.github/workflows/partof-closing-keyword-guard.yml';
 
+/**
+ * The file RELATION_CONTRACT quotes — a REAL input, read by the self-test.
+ *
+ * Quoted as a path literal on purpose, unlike the paths in the header. The
+ * derivation turns a quoted path in this file into a watch hint, and this one
+ * is a hint that tells the truth: editing the sentence at the other end of it
+ * breaks the citation pin below, so a card touching that file really does want
+ * this gate run. The header's last section is the authority on the distinction.
+ */
+const AGENT_RULES_SOURCE = '.claude/agents/os-dev.md';
+
 export const EXIT_CLEAN = 0;
 export const EXIT_CONTRADICTION = 1;
 export const EXIT_NOT_WIRED = 2;
@@ -458,17 +469,54 @@ export const COMMITS_FILE_ENV = 'PR_COMMITS_FILE';
  * copying it. Quoted verbatim, in its own language, because a translation of a
  * ruling is a rewrite of it.
  *
- * Named in prose rather than as a bare path literal on purpose: the
- * dispatch-gates derivation turns quoted path literals in this file into watch
- * hints, and a sentence with spaces in it cannot become one. The header's last
- * section is the authority on that.
+ * ⛔ Nothing inside the corner brackets may be written HERE. An earlier revision
+ * carried a second sentence in them — that the squash concatenates the commit
+ * messages and can assemble a contradiction out of individually honest parts —
+ * which was true on the facts and had never been in the rules file at all. That
+ * is the same failure as a translation, in the other direction: it attributes to
+ * the ruling a claim the ruling does not make, and it prints that attribution to
+ * the very population that reads the rules file. The squash fact is this gate's
+ * own, and this gate already states it in its own words twice — in the RULE 2
+ * header section and in the printed finding below — so it is not restated here
+ * a third time.
+ *
+ * The brackets are held to their source MECHANICALLY, not by care: the self-test
+ * reads AGENT_RULES_SOURCE and requires every sentence between them to appear in
+ * it verbatim. Comparing the printed finding with this constant cannot do that —
+ * both sides move together when the constant is edited, which is precisely how
+ * the added sentence survived a self-test that already claimed to check the
+ * citation.
+ *
+ * The path is named in prose here rather than as a literal because it is spelled
+ * once, as a literal, at AGENT_RULES_SOURCE; that declaration carries the
+ * watch-hint note.
  */
 const RELATION_CONTRACT =
   'The contract is written down in the agent rules at .claude/agents/os-dev.md — '
-  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。'
-  + 'squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。」 '
+  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。」 '
   + '(The PR body and the commit messages are parsed separately: the card relation is declared ONCE, '
   + 'in the body, and a commit carries no card trailer.)';
+
+/**
+ * Every sentence inside the corner brackets of a citation, in order.
+ *
+ * Split rather than compared whole so the pin stays honest if the quotation ever
+ * grows a second sentence legitimately: each is held to the source on its own,
+ * and a sentence added here without being added there is named individually.
+ *
+ * Returns an empty array when there are no brackets at all, which the self-test
+ * refuses explicitly — an extractor that silently found nothing would make the
+ * citation pin vacuously green, the phantom-check shape this file exists to
+ * refuse elsewhere.
+ */
+function citedSentences(text) {
+  const quoted = /「([^」]*)」/.exec(String(text ?? ''));
+  if (quoted === null) return [];
+  return quoted[1]
+    .split(/(?<=。)/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
 
 /**
  * The commit rows the wiring gathered, as JSON Lines — one object per line,
@@ -941,6 +989,22 @@ function selfTest() {
     'the finding CITES the contract rather than restating it in its own words',
     named.includes(RELATION_CONTRACT),
     true,
+  );
+  // The case above compares the printed finding with THIS FILE'S constant, so
+  // both sides move together whenever the constant is edited: a sentence that
+  // was never in the rules file passes it, and one did — see the constant's
+  // docblock. These three hold the quotation to its SOURCE instead. An absent
+  // rules file reds here rather than passing quietly: a citation check that
+  // cannot read the cited file has verified nothing.
+  const agentRulesPath = join(ROOT, AGENT_RULES_SOURCE);
+  const agentRules = existsSync(agentRulesPath) ? readFileSync(agentRulesPath, 'utf8') : '';
+  const citedFromRules = citedSentences(RELATION_CONTRACT);
+  t(`the cited rules file is readable (${AGENT_RULES_SOURCE})`, agentRules !== '', true);
+  t('the citation carries quoted sentences at all (never a vacuous zero)', citedFromRules.length > 0, true);
+  t(
+    'every sentence inside the corner brackets is verbatim in the cited rules file',
+    citedFromRules.filter((sentence) => !agentRules.includes(sentence)),
+    [],
   );
   // The guidance text itself, pinned. This gate once told the author to push
   // reworded commits while also forbidding a rewrite — unsatisfiable on a
