@@ -273,9 +273,9 @@ export interface IDataEngine {
    *
    * [#6300] `query` is the author state (`z.input`), same as `find` above.
    */
-  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<Record<string, unknown> | null>;
+  findOne(objectName: string, query?: EngineQueryOptions, options?: BaseEngineOptions): Promise<Record<string, any> | null>;
   insert(objectName: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any>;
-  update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, unknown> | number | null>;
+  update(objectName: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null>;
   delete(objectName: string, options?: EngineDeleteOptions): Promise<boolean | number>;
   count(objectName: string, query?: EngineCountOptions, options?: BaseEngineOptions): Promise<number>;
   aggregate(objectName: string, query: EngineAggregateOptions, options?: BaseEngineOptions): Promise<any[]>;

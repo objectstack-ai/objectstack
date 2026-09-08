@@ -94,6 +94,14 @@ import { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
 import { FindHookResultNotArrayError } from './find-hook-result-shape.js';
 import {
+  isFindOneResultShape,
+  isUpdateResultShape,
+  isDeleteResultShape,
+  FindOneHookResultNotRecordError,
+  UpdateHookResultNotWriteShapeError,
+  DeleteHookResultNotWriteShapeError,
+} from './verb-hook-result-shape.js';
+import {
   DriverConnectError,
   DatasourceUnavailableError,
   emitDegradedBootBanner,
@@ -9702,7 +9710,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<Record<string, unknown> | null> {
+  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<Record<string, any> | null> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -9807,6 +9815,27 @@ export class ObjectQL implements IObjectQLEngine {
       hookContext.event = 'afterFind';
       hookContext.result = result;
       await this.triggerHooks('afterFind', hookContext);
+
+      // [#16231] `findOne()` now DECLARES what it answers — the one record the
+      // query selects, or `null` — so the seam that can break the declaration
+      // is closed here, on the terms #15823 set for `find()`. An `afterFind`
+      // handler may SHAPE the record (mutate it, drop keys, assign a different
+      // RECORD built from it); replacing it with something that is neither a
+      // record nor `null` is a hook-contract violation, refused loudly rather
+      // than returned as a value the caller's type says cannot occur.
+      //
+      // ⛔ Placement is load-bearing and not the `return`, exactly as on
+      // `find()`: `maskSecretFields` and `stripSearchCompanionFromRead` below
+      // both run on `hookContext.result`, so the check has to precede them —
+      // otherwise the first consumer to walk a replaced value is the one that
+      // reports the problem, from the wrong place.
+      if (!isFindOneResultShape(hookContext.result)) {
+        throw new FindOneHookResultNotRecordError({
+          object: objectName,
+          event: 'afterFind',
+          result: hookContext.result,
+        });
+      }
 
       // Mask secret fields — plaintext never leaves through the read path.
       this.maskSecretFields(objectName, hookContext.result);
@@ -10868,7 +10897,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `catch` also sees the `afterUpdate` dispatch and the roll-up recompute, and
    * a violation raised by a nested driver call in there is not this object's.
    */
-  async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, unknown> | number | null> {
+  async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, any> | number | null> {
      object = this.resolveObjectName(object);
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
@@ -12071,6 +12100,28 @@ export class ObjectQL implements IObjectQLEngine {
              }
            } else {
              await this.triggerHooks('afterUpdate', hookContext);
+           }
+
+           // [#16231] The `update()` twin of `find()`'s #15823 refusal, now
+           // that this verb declares the union its two dispatch paths answer:
+           // a post-write record (or `null`), or the affected-row COUNT a
+           // predicate write resolves. An `afterUpdate` handler may SHAPE what
+           // it is handed; replacing it with a shape outside the declaration
+           // is refused.
+           //
+           // ⛔ Ahead of `stripSearchCompanion` and the realtime publish for
+           // the same reason `find()`'s guard precedes its consumers: both
+           // read this value already assuming it is a record or a non-object
+           // they may skip, so a replaced container would be diagnosed from
+           // whichever of them tripped over it first. AFTER the per-row
+           // `afterUpdate` fan-out (#5038), because the batch context is the
+           // one this call returns and a per-row handler can reassign it.
+           if (!isUpdateResultShape(hookContext.result)) {
+             throw new UpdateHookResultNotWriteShapeError({
+               object,
+               event: 'afterUpdate',
+               result: hookContext.result,
+             });
            }
 
            // Roll-up: recompute parent summaries; pass priorRecord too so a child
@@ -13529,6 +13580,21 @@ export class ObjectQL implements IObjectQLEngine {
             }
           } else {
             await this.triggerHooks('afterDelete', hookContext);
+          }
+
+          // [#16231] The `delete()` twin, on its own declaration: whether the
+          // by-id row was there (`boolean`), or how many rows a predicate
+          // delete removed (`number`). ⚠️ `false` and `0` are the two most
+          // ordinary answers this verb gives, so `isDeleteResultShape` is a
+          // pair of `typeof` tests and never a truthiness check — a lenient
+          // guard here would refuse exactly the answers
+          // `metadata-protocol`'s `deleteData` turns into its 404.
+          if (!isDeleteResultShape(hookContext.result)) {
+            throw new DeleteHookResultNotWriteShapeError({
+              object,
+              event: 'afterDelete',
+              result: hookContext.result,
+            });
           }
 
           // Roll-up: recompute the parent summary now that the child is gone,

@@ -655,10 +655,12 @@ export const ERROR_CODE_LEDGER = {
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
     // [#15823] an `afterFind` handler REPLACED `ctx.result` with something that
-    // is not an array, breaking the one `return hookContext.result` site in
-    // `engine.ts` that has a concrete declared shape to violate
-    // (`find(): Promise<any[]>`; `findOne`/`update`/`delete` all declare
-    // `Promise<any>`). Refused at the seam — immediately after the dispatch and
+    // is not an array, breaking `find()`'s declared `Promise<any[]>`. It was the
+    // FIRST of the four `return hookContext.result` sites in `engine.ts` to be
+    // closed, and for a while the only one that could be: `findOne`/`update`/
+    // `delete` declared `Promise<any>` and so had nothing to violate. #16231
+    // ruled that gap shut — all four verbs declare now, and the three refusals
+    // below are this one's twins. Refused at the seam — immediately after the dispatch and
     // ahead of `maskSecretFields` / `stripSearchCompanionFromRead`, which both
     // already assume the array — rather than surfacing as a `TypeError` at one
     // of ~140 call sites. SHAPING stays legal: mutating rows, dropping keys,
@@ -671,6 +673,19 @@ export const ERROR_CODE_LEDGER = {
     // and the fault is a server-side extension's, not the caller's.
     // `FindHookResultNotArrayError`, `find-hook-result-shape.ts`.
     'FIND_HOOK_RESULT_NOT_ARRAY',
+    // [#16231] The `findOne` twin of the refusal above, admitted once that verb
+    // DECLARED what it answers. `findOne(): Promise<Record<string, any> | null>`
+    // — the one record the query selects, or `null`, which its own docblock has
+    // said in prose since #4419 and which callers already branch on with
+    // `if (!row)`. An `afterFind` handler that replaces `ctx.result` with
+    // anything else (an envelope, an array, `undefined`) is refused at the same
+    // position `find()`'s is: after the dispatch, ahead of `maskSecretFields`
+    // and `stripSearchCompanionFromRead`, both of which already assume it.
+    // SHAPING stays legal — mutating the record, dropping keys, assigning a
+    // different RECORD are all untouched. Registered for the same reason as its
+    // sibling: a host has to RECOGNISE this to find its own misbehaving
+    // handler. `FindOneHookResultNotRecordError`, `verb-hook-result-shape.ts`.
+    'FIND_ONE_HOOK_RESULT_NOT_RECORD',
     // [#14010] a hook declared `runAs: 'user'` and its trigger resolved NO user
     // (an `isSystem` plugin/service write, a system-elevated flow node), so its
     // `ctx.api` data operation has no identity to scope to and is REFUSED
@@ -691,6 +706,25 @@ export const ERROR_CODE_LEDGER = {
     // decision. `MultiUpdateHookKeyDivergenceError`,
     // `multi-update-hook-key-divergence.ts`.
     'MULTI_UPDATE_HOOK_KEY_DIVERGENCE',
+    // [#16231] The `delete` twin. `delete(): Promise<boolean | number>` — the
+    // two answers its two dispatch paths give: whether the by-id row was there
+    // (`driver.delete`), or how many rows a predicate delete removed
+    // (`driver.deleteMany`, #4639). An `afterDelete` handler that replaces
+    // `ctx.result` with anything outside that union is refused. ⚠️ `false` and
+    // `0` are ORDINARY answers and are not refused — `metadata-protocol`'s
+    // `deleteData` turns the `false` into its 404. A handler that wants to
+    // refuse a delete throws. `DeleteHookResultNotWriteShapeError`,
+    // `verb-hook-result-shape.ts`.
+    'DELETE_HOOK_RESULT_NOT_WRITE_SHAPE',
+    // [#16231] The `update` twin.
+    // `update(): Promise<Record<string, any> | number | null>` — the post-write
+    // record (or `null` when the readback leaves the caller's row scope) from
+    // the by-id exit, or the affected-row COUNT from the predicate exit
+    // (#4639), which names no row. An `afterUpdate` handler may SHAPE what it
+    // is handed; replacing it with a shape outside the union is refused, at the
+    // seam and ahead of `stripSearchCompanion` and the realtime publish.
+    // `UpdateHookResultNotWriteShapeError`, `verb-hook-result-shape.ts`.
+    'UPDATE_HOOK_RESULT_NOT_WRITE_SHAPE',
     // [#14748] the ADR-0048 Phase 1 install-time namespace gate's refusal: a
     // package's `manifest.namespace` is already owned by an INSTALLED package
     // that is not a co-owner of it (ADR-0130 D1), so the install is refused up
