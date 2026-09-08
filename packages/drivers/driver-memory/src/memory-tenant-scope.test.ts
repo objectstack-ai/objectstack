@@ -27,6 +27,28 @@
  * and it never boots a walled posture, because the boot guard refuses one and
  * that refusal has its own suite (`memory-tenancy-guard.test.ts`). `distinct()`
  * is absent for a structural reason named in its own case below.
+ *
+ * ## Which of these cases can actually fail, MEASURED
+ *
+ * Ablating the driver-side chokepoint (`InMemoryDriver.tenantScope` forced to
+ * `null`, rebuilt, marker verified in `dist/`) turns **16 of 23** red. The
+ * seven that stay green are accounted for rather than assumed:
+ *
+ *  - **five are negative controls whose SUBJECT is the unscoped answer** — no
+ *    `tenantId`, `tenancy.enabled: false`, no tenant column, the sticky
+ *    opt-out, and unscoped `distinct()`. A mutation that forces "no scope"
+ *    cannot redden a case that expects no scope, and that is the point of
+ *    them: they are the half that catches OVER-scoping, which is the failure
+ *    direction the ablation cannot produce.
+ *  - **two test the pure predicate**, `tenantScopePredicate`, which the
+ *    chokepoint ablation deliberately does not touch — a different layer,
+ *    named rather than left to look like coverage of the doors.
+ *
+ * ⭐ An eighth case used to be in that list for a BAD reason: with only two
+ * organizations seeded, the union case's `[ORG_A, ORG_B]` covered the whole
+ * table, so "the union widened the scope" and "no scope ran" were the same
+ * answer. It carries its own third organization now. The ablation is what
+ * found it; ⛔ do not remove that row.
  */
 
 import { describe, it, expect } from 'vitest';
