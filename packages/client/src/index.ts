@@ -430,14 +430,24 @@ export interface CreateDataResult<T = any> {
  * Spec: CloneDataResponseSchema (#11924)
  *
  * `CreateDataResult`'s structural sibling plus `sourceId` — `id` names the NEW
- * record, `sourceId` the record it was copied from. No `droppedFields`: unlike
- * `createData`, the clone producer emits no write-observability event.
+ * record, `sourceId` the record it was copied from. Since #15703 it carries
+ * `droppedFields` too: the clone producer reports the engine's readonly-strip
+ * verdict exactly as `createData` does.
  */
 export interface CloneDataResult<T = any> {
   object: string;
   id: string;
   sourceId: string;
   record: T;
+  /**
+   * [#15703] Fields the server LEGALLY stripped before the clone was written —
+   * a non-system clone cannot seed a static `readonly` column, whether the value
+   * was COPIED from the source row or supplied through `overrides`, so those
+   * keys are dropped and the field re-derives its default. Present only when
+   * ≥1 field was dropped; the clone still succeeded. Body only: unlike `create`,
+   * the clone route sets no `X-ObjectStack-Dropped-Fields` header.
+   */
+  droppedFields?: DroppedFieldsEvent[];
 }
 
 /** Spec: UpdateDataResponseSchema */

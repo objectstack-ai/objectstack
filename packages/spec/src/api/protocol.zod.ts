@@ -1999,10 +1999,14 @@ export const CreateDataResponseSchema = lazySchema(() => z.object({
  * copy runs the insert path: engine-owned columns re-derived, the static
  * `readonly` strip applied inside `engine.insert` for a non-system caller —
  * the 2026-09-03 ruling, #14147; the #3043 ingress copy is deleted — and
- * internal fields omitted from the response, #7823) — but unlike `createData`
- * the producer emits no `droppedFields`
- * member, so none is declared: a key the producer never writes would be a
- * promise conformance cannot measure.
+ * internal fields omitted from the response, #7823) — and since #15703 it
+ * reports the engine's `onFieldsDropped` verdict as `droppedFields` exactly as
+ * `createData` does (maintainer ruling 2026-09-08, option 1): the producer
+ * passes the listener and the member is declared in the same change, so the
+ * key stays one conformance can measure. A clone is the one create shape that
+ * can carry a read-only column WITHOUT the caller typing it — the source row's
+ * `approval_status: 'approved'` is copied before `overrides` are applied — so
+ * this is the face where a silent strip was least discoverable.
  */
 export const CloneDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('The object name.'),
@@ -2013,6 +2017,17 @@ export const CloneDataResponseSchema = lazySchema(() => z.object({
     + '(injected system/audit columns, autonumbers, computed formula/summary fields) are '
     + 're-derived by the insert path rather than copied from the source; caller-supplied '
     + '`overrides` win over copied values.'
+  ),
+  droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
+    'Write-observability: fields that were LEGALLY stripped before the clone was written — '
+    + 'a non-system clone cannot seed a static `readonly` column, whether the value was '
+    + 'COPIED from the source row or supplied through `overrides` (the strip runs inside '
+    + '`engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on '
+    + '`createData`), so those keys are dropped and the field re-derives its default. '
+    + 'Present ONLY when ≥1 field was dropped; the clone still succeeded without them '
+    + '(status/success semantics unchanged). Carried in the 201 body only — this route '
+    + 'relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. '
+    + 'Optional — omit-when-empty keeps the shape backward-compatible for existing clients.'
   ),
 }));
 
