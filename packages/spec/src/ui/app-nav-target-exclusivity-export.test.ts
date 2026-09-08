@@ -259,11 +259,12 @@ describe('the mount — the union branch carries the check, the exported ObjectN
 
 describe('app.zod.ts attaches the export BY IDENTIFIER — no inline copy', () => {
   const src = fs.readFileSync(path.join(HERE, 'app.zod.ts'), 'utf8');
-  // An attachment is a CODE line that begins (after indentation) with
-  // `.superRefine(name)` — the door chains the check on its own line; a
-  // docblock naming the same spelling sits on a ` * ` line and is not counted.
+  // An attachment is a CODE line carrying `.superRefine(name)` — here the
+  // door chains it mid-line (`}).strict().superRefine(name),`), so unlike the
+  // `check*` pin the match is not anchored at line start. Docblock (` * `)
+  // and `//` lines are excluded, so prose naming the same spelling is not counted.
   const attachments = (name: string): number =>
-    src.match(new RegExp(`^[ \\t]*\\.superRefine\\(${name}\\)`, 'gm'))?.length ?? 0;
+    src.split(/\r?\n/).filter((line) => !/^[ \t]*(\*|\/\/)/.test(line) && line.includes(`.superRefine(${name})`)).length;
   // A NAME is only a sound key for that count if the module declares it exactly
   // once — a second, shadowing binding would satisfy the count while the door
   // chains a different function object.
