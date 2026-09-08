@@ -66,6 +66,8 @@ printf 'packages:\n  - packages/*\n' > "$UP/pnpm-workspace.yaml"
 printf '{"name":"a"}\n' > "$UP/packages/a/package.json"
 printf 'export const a = 1;\n' > "$UP/packages/a/src/index.ts"
 printf 'export const t = 1;\n' > "$UP/packages/a/src/index.test.ts"
+printf '{"rows":[]}\n' > "$UP/packages/a/src/data.json"
+printf 'dist/\n' > "$UP/packages/a/.gitignore"
 printf 'console.log(1);\n' > "$UP/packages/a/scripts/build.mjs"
 printf 'export const site = 1;\n' > "$UP/apps/site/src/page.tsx"
 printf '# guide\n' > "$UP/docs/guide.md"
@@ -394,23 +396,37 @@ expect_all_run
 
 # ── merge_group: the per-family read-sets ──────────────────────────────────
 S=$(scenario M:packages/a/src/index.ts)
-run_case 'merge_group: a packages TS edit runs both ratchets and the corpus, not the PM or lock self-tests' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a packages TS edit runs both ratchets, the corpus AND the PM self-test (it reads every source), not the lock self-test' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_warnings '' ''
-expect_verdicts query_options_erasure slot_lookup comment_mask_corpus
+expect_verdicts pm_dispatch_gates query_options_erasure slot_lookup comment_mask_corpus
 expect_reason query_options_erasure '(M, workspace)'
 expect_reason comment_mask_corpus packages/a/src/index.ts
+expect_reason pm_dispatch_gates packages/a/src/index.ts
 
 S=$(scenario M:apps/site/src/page.tsx)
-run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) but inside the corpus' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) but inside the corpus and the PM census' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts comment_mask_corpus
+expect_verdicts pm_dispatch_gates comment_mask_corpus
 
 S=$(scenario M:packages/a/package.json)
-run_case 'merge_group: a package manifest runs the PM self-test only' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a package manifest runs the PM self-test and the lock self-test (workspace enumeration), no ratchet' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_verdicts pm_dispatch_gates verify_lock
+expect_reason pm_dispatch_gates packages/a/package.json
+expect_reason verify_lock packages/a/package.json
+
+S=$(scenario M:packages/a/.gitignore)
+run_case 'merge_group: a nested .gitignore runs the PM self-test (exposed-scratch-dir sweep) alone' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_verdicts pm_dispatch_gates
-expect_reason pm_dispatch_gates packages/a/package.json
+expect_reason pm_dispatch_gates packages/a/.gitignore
+
+S=$(scenario M:packages/a/src/data.json)
+run_case 'merge_group: a non-source, non-manifest workspace file skips every family' "$REPO" merge_group '' "$C0"
+expect_rc 0
+expect_warnings '' ''
+expect_verdicts
 
 S=$(scenario M:packages/a/scripts/build.mjs)
 run_case 'merge_group: a package-local script is a gate source (PM) and a masked source (corpus)' "$REPO" merge_group '' "$C0"
@@ -424,9 +440,10 @@ expect_verdicts pm_dispatch_gates verify_lock
 expect_reason verify_lock '(M, verify-lock)'
 
 S=$(scenario M:scripts/helper.mjs)
-run_case 'merge_group: a top-level scripts module is imported by the ratchets and is a masked source' "$REPO" merge_group '' "$C0"
+run_case 'merge_group: a top-level scripts module is imported by the ratchets AND the lock preflight, and is a masked source' "$REPO" merge_group '' "$C0"
 expect_rc 0
-expect_verdicts pm_dispatch_gates query_options_erasure slot_lookup comment_mask_corpus
+expect_all_run
+expect_reason verify_lock scripts/helper.mjs
 
 S=$(scenario M:scripts/slot-lookup-baseline.json)
 run_case 'merge_group: a ratchet baseline runs the ratchets and the PM self-test' "$REPO" merge_group '' "$C0"

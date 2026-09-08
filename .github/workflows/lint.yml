@@ -812,11 +812,15 @@ jobs:
       # self-test's MEASURED read-set (every workflow, every gate source under
       # `scripts/**` and `packages/*/scripts/**`, every `package.json`,
       # `.claude/**`, `skills/**`, `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
-      # `.gitignore`, and the tracked NAME set it sweeps -- so any added,
-      # deleted or renamed file runs it too), and skips this step only when
-      # every path is one the test provably never reads. Every doubt runs it,
-      # the self-test of the selector pins that, and `push` on main keeps it
-      # unconditional.
+      # every `.gitignore` -- nested ones included -- the CONTENT of every
+      # JS/TS file in the tree (the compound-anchor census of
+      # `function ...SelfTest...(` declarations and the exposed-scratch-dir
+      # sweep of every mkdtempSync/mkdirSync caller both assert over it), and
+      # the tracked NAME set it sweeps -- so any added, deleted or renamed
+      # file runs it too), and skips this step only when every path is one
+      # the test provably never reads: a modified doc, changeset or non-source
+      # workspace file. Every doubt runs it, the self-test of the selector
+      # pins that, and `push` on main keeps it unconditional.
       #
       # The gate runs the SELF-TEST only. The live derivation
       # (`node scripts/pm/dispatch-gates.mjs <path>`) answers a question about a
@@ -1394,12 +1398,16 @@ jobs:
       # same. No network; median 100 s over the ten merge-group runs measured
       # for #16496.
       #
-      # Scoped (#16496): the suite reads exactly one file in the tree -- the
-      # script itself (`$SELF`) -- and a private temp dir, so a group that does
-      # not touch `scripts/pm/os-verify-lock.sh` skips it. That is not the
-      # exemption the self-tests above refuse (a label or a paths filter with
-      # no reader behind it): the selection step at the top of this job runs
-      # this step on every doubt, and `push` on main keeps it unconditional.
+      # Scoped (#16496): the suite reads the script itself (`$SELF`) and a
+      # private temp dir, and its case (h) runs the real entry point from the
+      # repo root, which routes through filter_preflight ->
+      # scripts/pnpm-filter-targets.mjs --preflight and so reads the top-level
+      # scripts/*.mjs helpers that imports, pnpm-workspace.yaml and every
+      # workspace package.json. A group touching none of those skips it. That
+      # is not the exemption the self-tests above refuse (a label or a paths
+      # filter with no reader behind it): the selection step at the top of
+      # this job runs this step on every doubt, and `push` on main keeps it
+      # unconditional.
       - name: Verify-lock entry-point self-test
         if: steps.gate-families.outputs.verify_lock != 'skip'
         run: bash scripts/pm/os-verify-lock.sh --self-test

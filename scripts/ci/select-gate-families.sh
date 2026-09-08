@@ -60,12 +60,18 @@
 #                          skills/** (the frame-sync COPIES table),
 #                          `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
 #                          .gitignore, and sweeps `git ls-files` for hint
-#                          reachability and test-file residue. Because the
-#                          sweep reads the tracked NAME set, an ADDED file
-#                          anywhere runs it too; only modifications inside
-#                          the classes it never reads (docs, changesets,
-#                          workspace source that is neither a manifest nor a
-#                          script) skip it.
+#                          reachability and test-file residue. It also reads
+#                          the CONTENT of every JS/TS file in the tree: the
+#                          compound-anchor census of `function ...SelfTest...(`
+#                          declarations asserts none is unlisted, and the
+#                          exposed-scratch-dir sweep reads every
+#                          mkdtempSync/mkdirSync caller and consults nested
+#                          .gitignore files. So any masked source file and any
+#                          .gitignore runs it, and because the name sweep reads
+#                          the tracked NAME set an ADDED file anywhere runs it
+#                          too; only modifications of docs, changesets and
+#                          non-source workspace files that are neither a
+#                          manifest nor a script skip it.
 #   query_options_erasure  `pnpm check:query-options-erasure`. Lints
 #                          packages/**/*.{ts,tsx,mts,cts} under
 #                          `eslint.config.mjs`, reads its baseline
@@ -75,8 +81,13 @@
 #   slot_lookup            `pnpm check:slot-lookup`. Same shape and the same
 #                          population, with scripts/slot-lookup-baseline.json.
 #   verify_lock            `bash scripts/pm/os-verify-lock.sh --self-test`.
-#                          Reads itself and a private temp dir; nothing else
-#                          in the tree.
+#                          Reads itself and a private temp dir, and its case
+#                          (h) runs the real entry point from the repo root,
+#                          which routes through filter_preflight ->
+#                          scripts/pnpm-filter-targets.mjs --preflight: the
+#                          top-level scripts/*.mjs helpers that imports,
+#                          pnpm-workspace.yaml and every workspace
+#                          package.json.
 #   comment_mask_corpus    `node scripts/check-comment-mask-corpus.mjs`. Walks
 #                          every `.ts .tsx .mts .cts .js .mjs .cjs .jsx` file
 #                          in the tree outside build directories.
@@ -300,6 +311,13 @@ family_reads() {
   case "$id" in
     pm_dispatch_gates)
       [ "$status" = M ] || return 0
+      # The self-test reads the CONTENT of every JS/TS file in the tree (the
+      # compound-anchor census of `function ...SelfTest...(` declarations, the
+      # exposed-scratch-dir sweep of every mkdtempSync/mkdirSync caller) and
+      # consults nested .gitignore files, so any masked source and any
+      # .gitignore runs it whatever class it sits in.
+      is_masked_source "$path" && return 0
+      case "$path" in */.gitignore) return 0 ;; esac
       case "$class" in
         docs|changeset) return 1 ;;
         workspace)
@@ -333,9 +351,24 @@ family_reads() {
       esac
       ;;
     verify_lock)
+      # Case (h) of its self-test runs `bash "$SELF" -c ...` from the real
+      # repo root, which routes through filter_preflight ->
+      # scripts/pnpm-filter-targets.mjs --preflight, importing top-level
+      # scripts/*.mjs helpers and reading pnpm-workspace.yaml (root config)
+      # plus every workspace package.json.
+      case "$path" in
+        */package.json) return 0 ;;
+      esac
       case "$class" in
         verify-lock) return 0 ;;
-        docs|changeset|workflow|agent-config|scripts|workspace) return 1 ;;
+        scripts)
+          case "$path" in
+            scripts/*/*) return 1 ;;
+            *.mjs) return 0 ;;
+            *) return 1 ;;
+          esac
+          ;;
+        docs|changeset|workflow|agent-config|workspace) return 1 ;;
         *) return 0 ;;
       esac
       ;;
