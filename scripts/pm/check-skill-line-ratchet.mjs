@@ -1105,7 +1105,7 @@ export const CROSS_FILE_MOVES = new Map([
         {
           // The SEVENTH increment, under the same STANDING exception — the same
           // words, quoted again rather than cross-referenced, because a record
-          // that quotes no ruling is RED and each record stands alone. The +6 is
+          // that quotes no ruling is RED and each record stands alone. The +7 is
           // accounted for line by line beside this entry's ceiling above.
           ruling:
             'the standing one-file exception for'
