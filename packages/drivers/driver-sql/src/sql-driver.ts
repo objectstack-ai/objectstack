@@ -20,7 +20,7 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
-import { AggregationFunction } from '@objectstack/spec/data';
+import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
@@ -8498,6 +8498,12 @@ export class SqlDriver implements IDataDriver {
     // See {@link presentReadColumns}.
     const presentedOutput = new Map<string, ReadPresentationKind>();
 
+    // [#15546] Result columns whose NULL answer folds to the identity the
+    // platform declares for that aggregate over NOTHING (`emptyGroupValueFor`,
+    // spec `data/aggregation-policy.ts`), keyed like `presentedOutput` by the
+    // column name the caller will read. See {@link foldEmptyAggregateAnswers}.
+    const foldedOutput = new Map<string, number>();
+
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
@@ -8627,6 +8633,12 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [fieldExpr]));
           }
+          // [#15546] What this aggregate answers over NOTHING, read from the
+          // policy rather than restated: `sum` (and the two counts, which never
+          // arrive as NULL) fold to `0`; `avg`/`min`/`max` have no identity and
+          // their NULL passes through. See {@link foldEmptyAggregateAnswers}.
+          const identity = emptyGroupValueFor(funcName);
+          if (identity !== undefined) foldedOutput.set(agg.alias, identity);
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
           // the only ones whose result still needs the column's presentation.
@@ -8718,7 +8730,60 @@ export class SqlDriver implements IDataDriver {
       // {@link SqlDriver.aggregateBackendFault}.
       throw this.aggregateBackendFault(object, query, error);
     }
-    return this.presentReadColumns(rows, presentedOutput);
+    return this.presentReadColumns(this.foldEmptyAggregateAnswers(rows, foldedOutput), presentedOutput);
+  }
+
+  /**
+   * [#15546] Fold the NULL a SQL aggregate answers over an all-NULL aggregand
+   * to the identity the platform declares for that aggregate over NOTHING.
+   *
+   * SQL `SUM` skips NULLs, and once it has skipped every row of a group it
+   * answers NULL — on every dialect this driver targets. Measured 2026-09-07
+   * on better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46: `sum` over
+   * a group of three rows whose column is NULL in each of them is `null` on
+   * all three, for `number` and `currency` columns alike. The engine's
+   * in-memory aggregate tier (`objectql`'s `in-memory-aggregation.ts`) answers
+   * `0` for the same rows, as do `driver-memory` and `driver-mongodb`'s
+   * lowering, and `emptyGroupValueFor` (spec `data/aggregation-policy.ts`)
+   * rules that summing nothing is `0` — a measured fact, not missing data.
+   * Which face answered was decided by a driver capability bit the caller
+   * never sees (`engine.ts`'s `typeof drv.aggregate === 'function'` fork), so
+   * one grouped list view rendered a blank total on one deployment and `0` on
+   * another. Maintainer ruling 2026-09-07 on #15546 (option A): three rows
+   * whose aggregand is absent and zero rows are the SAME case for `sum` — the
+   * addend set is empty either way — and this face is the one that moves.
+   *
+   * The identity is READ from the policy rather than restated here, so the
+   * other half of the same rule holds by construction: an aggregate whose
+   * `emptyGroupValueFor` is `undefined` (`avg`/`min`/`max`) has no answer over
+   * nothing, is never registered, and its NULL reaches the caller untouched.
+   * `count`/`count_distinct` register too but never arrive as NULL — `COUNT`
+   * answers `0` on its own — so the entry is inert for them, deliberately
+   * rather than special-cased away.
+   *
+   * Presentation, not compilation. The statement is unchanged — no `COALESCE`
+   * — so the emitted-SQL pins and the per-dialect result-type parsing above
+   * are untouched, and the answer is the JS number `0` on every dialect, the
+   * same value the in-memory tier produces. Only `null` folds: an `undefined`
+   * would mean the column was never projected, a different defect that must
+   * stay visible. Rows are mutated in place, as {@link presentReadColumns}
+   * does. The unaliased branch of {@link SqlDriver.aggregate} is not tracked,
+   * for the reason `presentedOutput` gives: `alias` is required by
+   * `AggregationNodeSchema`, and that branch lands under a dialect-dependent
+   * column name.
+   *
+   * Pinned on every enrolled face by the `sum(amount)` cases of
+   * `AGGREGATION_CASES` (spec `data/aggregation-conformance.ts`).
+   */
+  protected foldEmptyAggregateAnswers(rows: any, identities: Map<string, number>): any {
+    if (identities.size === 0 || !Array.isArray(rows)) return rows;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [column, identity] of identities) {
+        if (row[column] === null) row[column] = identity;
+      }
+    }
+    return rows;
   }
 
   /**

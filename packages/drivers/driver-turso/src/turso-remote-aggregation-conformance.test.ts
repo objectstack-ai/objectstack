@@ -73,6 +73,10 @@ const CONFORMANCE_OBJECT = {
     // Nullable, and it must stay that way — see `AggregationRow.stage`.
     stage: { type: 'string' },
     score: { type: 'number' },
+    // [#15546] Nullable, like `stage` — see `AggregationRow.amount`: the `east`
+    // group is NULL in every row, the cell the ruled `sum` → `0` answer is
+    // pinned on.
+    amount: { type: 'number' },
     // [#11152] Declared `type: 'boolean'` on purpose — see `AggregationRow.flag`.
     // SQLite stores it 0/1 INTEGER, and the ruled boolean cases (min=0/max=1,
     // sum=3, avg=0.5) are answered in exactly that numeric domain.
