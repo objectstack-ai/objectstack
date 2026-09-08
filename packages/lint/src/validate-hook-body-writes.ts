@@ -734,10 +734,13 @@ export function extractHookBodyWriteSet(source: string): ExtractedHookBodyWriteS
  *   scaffold validate       `runScaffoldAuthoringRules` (`os init` / `dev` over
  *                           a rendered template) lowers before it parses too —
  *                           REACHED, always was, and pinned since #16095.
- *   `os validate`           parses the normalized stack WITHOUT lowering — NOT
- *                           reached; the body-authored control fires there.
- *                           Changing that changes what `os validate` refuses
- *                           and is its own decision, not this card's.
+ *   `os validate`           lowers before it parses since #16544 — the same
+ *                           `lowerCallables` call, between its pre-parse
+ *                           unknown-key lints and its parse — REACHED since
+ *                           #16544. Measured NOT reached under #16095, when it
+ *                           parsed the normalized stack without lowering while
+ *                           the body-authored control fired; closing it was
+ *                           its own accept/reject decision, taken on #16544.
  *   direct call             judges exactly the stack it is given — NOT reached
  *                           unless the caller lowers first; measured both ways.
  *
