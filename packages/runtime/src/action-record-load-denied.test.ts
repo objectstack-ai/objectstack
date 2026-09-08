@@ -53,6 +53,21 @@
  *     read the context the automation service is actually handed, through BOTH
  *     doors, and pin that the two agree.
  *
+ * ## [#16370] What this file pins CHANGED at the doors
+ *
+ * The verdict is now CONSUMED by all three doors (`refuseDeniedSubjectLoad`)
+ * rather than forwarded by two of them: a row-scoped flow or script action
+ * invoked with a `recordId` whose caller-scope load was denied is refused with
+ * the shared not-found envelope (404 `RECORD_NOT_FOUND`) BEFORE a run is
+ * created and BEFORE a trusted body is entered. So the four door-level "denied"
+ * cases below assert the REFUSAL, and #15168's flow-context assertions moved
+ * onto `dispatchFlowAction` itself, where a denied subject is still
+ * constructible. Everything else is untouched — the producer, the stamp, the
+ * absence convention, the sandbox face, and the record-less / new-record
+ * carve-outs. The full refusal matrix (both doors × both surfaces × denied ·
+ * nonexistent id · record-less · a load that succeeds) lives in
+ * `action-door-record-load-denied.test.ts`.
+ *
  * ## The RLS double is faithful on the one point that matters
  *
  * `find` here honours `options.context.userId`: the row exists and is returned
@@ -71,6 +86,7 @@ import { HttpDispatcher } from './http-dispatcher.js';
 import {
     callData,
     invokeBusinessAction,
+    dispatchFlowAction,
     loadActionSubjectRecord,
     actionRecordLoadSignal,
     GLOBAL_ACTION_OBJECT_KEY,
@@ -175,23 +191,22 @@ async function dispatchMcp(userId: string, ql: any, input: Record<string, unknow
     return { actionCtx: ql.executeAction.mock.calls[0]?.[2] };
 }
 
-describe('#14143 — REST /actions tells a handler its caller-scope load was refused', () => {
-    it('a caller who CANNOT read the row reaches the handler with recordLoadDenied === true', async () => {
+describe('#14143 — REST /actions and the caller-scope load verdict', () => {
+    it('a caller who CANNOT read the row never reaches the handler — the door refuses', async () => {
         const ql = makeQl();
-        const { actionCtx } = await dispatchRest(STRANGER, ql);
+        const { response, actionCtx } = await dispatchRest(STRANGER, ql);
 
-        expect(actionCtx).toBeDefined();
-        expect(actionCtx.recordLoadDenied).toBe(true);
-
-        // ⛔ The stamp is NOT removed — a record-less action depends on it, and
-        // this is the coincidence that made the natural guard useless: the id
-        // is here whether or not the caller can see the row, which is why the
-        // flag above (and not `record.id`) is the authorization predicate.
-        expect(actionCtx.record.id).toBe(RECORD_ID);
-        expect(Boolean(actionCtx.record?.id)).toBe(true);
-        // …and nothing of the row itself leaked to a caller who cannot read it.
-        expect(actionCtx.record.status).toBeUndefined();
-        expect(actionCtx.record.owner_id).toBeUndefined();
+        // [#16370] SUPERSEDED AT THE DOOR — re-pinned, ⛔ not deleted. This case
+        // used to assert that the handler was reached carrying
+        // `recordLoadDenied === true`. The door now CONSUMES that verdict
+        // (`refuseDeniedSubjectLoad`) instead of forwarding it, so the handler is
+        // never entered at all: the same guarantee, moved from a guard an author
+        // had to remember to write into the platform. The full refusal matrix
+        // lives in `action-door-record-load-denied.test.ts`.
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('RECORD_NOT_FOUND');
+        expect(actionCtx).toBeUndefined();
+        expect(ql.executeAction).not.toHaveBeenCalled();
     });
 
     it('the row OWNER reaches the handler with the real row and no flag at all', async () => {
@@ -217,14 +232,16 @@ describe('#14143 — REST /actions tells a handler its caller-scope load was ref
     });
 });
 
-describe('#14143 — MCP run_action emits the SAME signal as the REST door', () => {
-    it('a caller who CANNOT read the row reaches the handler with recordLoadDenied === true', async () => {
+describe('#14143 — MCP run_action answers the SAME way as the REST door', () => {
+    it('a caller who CANNOT read the row never reaches the handler — the door refuses', async () => {
         const ql = makeQl();
-        const { actionCtx } = await dispatchMcp(STRANGER, ql);
 
-        expect(actionCtx.recordLoadDenied).toBe(true);
-        expect(actionCtx.record.id).toBe(RECORD_ID);   // stamp preserved
-        expect(actionCtx.record.status).toBeUndefined();
+        // [#16370] Superseded at the door, exactly as on the REST side above —
+        // and asserted here too, because a refusal on one door and a pass on the
+        // other is the divergence this whole file exists to prevent.
+        await expect(dispatchMcp(STRANGER, ql))
+            .rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(ql.executeAction).not.toHaveBeenCalled();
     });
 
     it('the row OWNER reaches the handler with the real row and no flag at all', async () => {
@@ -374,8 +391,14 @@ async function dispatchRestFlow(userId: string, ql: any, path = `/crm_case/escal
 }
 
 /** MCP — `run_action` on the same flow action, through the REAL `callData`. */
-async function dispatchMcpFlow(userId: string, ql: any, input: Record<string, unknown> = { recordId: RECORD_ID }) {
-    const automation = makeAutomation();
+async function dispatchMcpFlow(
+    userId: string,
+    ql: any,
+    input: Record<string, unknown> = { recordId: RECORD_ID },
+    // [#16370] Injectable so a case that expects the door to THROW can still
+    // assert on the double afterwards — a rejected call returns nothing.
+    automation: ReturnType<typeof makeAutomation> = makeAutomation(),
+) {
     const deps: any = {
         resolveService: async (_ctx: any, name: string) => (name === 'automation' ? automation : undefined),
         getObjectQL: async () => ql,
@@ -393,31 +416,19 @@ async function dispatchMcpFlow(userId: string, ql: any, input: Record<string, un
     return { automation, flowCtx: flowContextOf(automation) };
 }
 
-describe('[#15168] the FLOW face receives the signal — REST /actions', () => {
-    it('a caller who CANNOT read the row starts the flow with ctx.recordLoadDenied === true', async () => {
+describe('[#15168] the FLOW door and its verdict — REST /actions', () => {
+    it('a caller who CANNOT read the row never starts the flow — the door refuses', async () => {
         const ql = makeQl();
-        const { automation, flowCtx } = await dispatchRestFlow(STRANGER, ql);
+        const { response, automation } = await dispatchRestFlow(STRANGER, ql);
 
-        expect(automation.execute).toHaveBeenCalledTimes(1);
-        expect(automation.execute.mock.calls[0][0]).toBe(FLOW_NAME);
-        expect(flowCtx).toBeDefined();
-        // The contract's own predicate, verbatim (`AutomationContext`): a flow
-        // reads `recordLoadDenied === true`, never a truthiness of `false`.
-        expect(flowCtx.recordLoadDenied).toBe(true);
-
-        // ⛔ Sibling of `record`, never a key ON it — a flow node reading
-        // `{{record.recordLoadDenied}}` must find nothing, or the signal would
-        // arrive as a phantom field of the subject row.
-        expect('recordLoadDenied' in flowCtx.record).toBe(false);
-
-        // The stamp survives here exactly as it does on the handler face — it
-        // is why `record.id` cannot be the authorization predicate.
-        expect(flowCtx.record.id).toBe(RECORD_ID);
-        expect(flowCtx.record.status).toBeUndefined();
-        expect(flowCtx.record.owner_id).toBeUndefined();
-        // The rest of the envelope is untouched by this card.
-        expect(flowCtx.object).toBe(OBJECT_DEF.name);
-        expect(flowCtx.userId).toBe(STRANGER);
+        // [#16370] Superseded at the door. `AutomationContext.recordLoadDenied`
+        // is still DERIVED and still spread — pinned directly on
+        // `dispatchFlowAction` in the describe below, where it is reachable —
+        // but this door no longer hands the dispatcher a denied subject, so no
+        // persisted run is created for a row the caller cannot read.
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('RECORD_NOT_FOUND');
+        expect(automation.execute).not.toHaveBeenCalled();
     });
 
     it('the row OWNER starts the flow with the key ABSENT — not `false`', async () => {
@@ -442,16 +453,17 @@ describe('[#15168] the FLOW face receives the signal — REST /actions', () => {
     });
 });
 
-describe('[#15168] the FLOW face receives the signal — MCP run_action', () => {
-    it('a caller who CANNOT read the row starts the flow with ctx.recordLoadDenied === true', async () => {
+describe('[#15168] the FLOW door and its verdict — MCP run_action', () => {
+    it('a caller who CANNOT read the row never starts the flow — the door refuses', async () => {
         const ql = makeQl();
-        const { automation, flowCtx } = await dispatchMcpFlow(STRANGER, ql);
+        const automation = makeAutomation();
 
-        expect(automation.execute).toHaveBeenCalledTimes(1);
-        expect(flowCtx.recordLoadDenied).toBe(true);
-        expect('recordLoadDenied' in flowCtx.record).toBe(false);
-        expect(flowCtx.record.id).toBe(RECORD_ID);   // stamp preserved
-        expect(flowCtx.record.status).toBeUndefined();
+        // [#16370] The MCP half of the same supersession. `ok: true` with a
+        // `runId` for a row the caller cannot read is the reported defect
+        // verbatim; the door throws the shared not-found envelope instead.
+        await expect(dispatchMcpFlow(STRANGER, ql, { recordId: RECORD_ID }, automation))
+            .rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+        expect(automation.execute).not.toHaveBeenCalled();
     });
 
     it('the row OWNER starts the flow with the key ABSENT — not `false`', async () => {
@@ -473,6 +485,76 @@ describe('[#15168] the FLOW face receives the signal — MCP run_action', () => 
 });
 
 /**
+ * [#15168] The verdict is still DERIVED and still spread onto the flow context
+ * — pinned where it is reachable.
+ *
+ * [#16370] closed both doors ahead of `dispatchFlowAction`, so no door hands it
+ * a denied subject any more. That does NOT make #15168's contract optional:
+ * `AutomationContext.recordLoadDenied` is a declared spec key
+ * (`contracts/automation-service.ts`, pinned in `packages/spec`), the
+ * dispatcher is its ONE populator, and a populator that quietly stopped
+ * populating would be exactly the inert-signal shape #14143 was filed for. So
+ * the assertions #15168 wrote at the doors are re-pinned HERE, on the
+ * dispatcher itself, where a denied subject can still be constructed.
+ *
+ * ⚠️ Stated plainly, because it is the honest reading and not a comfortable
+ * one: through the two doors this repo ships, the `true` arm of the signal is
+ * now unreachable — the platform refuses first. The key stays declared and
+ * populated for any future caller of this dispatcher that legitimately does not
+ * refuse; surfacing the verdict to an MCP caller is a separate card.
+ */
+describe('[#15168] dispatchFlowAction derives the verdict from the subject load', () => {
+    const flowDeps = (automation: any): any => ({
+        resolveService: async (_ctx: any, name: string) => (name === 'automation' ? automation : undefined),
+    });
+
+    it('a denied subject reaches the automation context as recordLoadDenied === true', async () => {
+        const automation = makeAutomation();
+        const subject = await loadActionSubjectRecord(OBJECT_DEF.name, RECORD_ID, async () => {
+            throw Object.assign(new Error('Record case_1 not found in crm_case'), {
+                code: 'RECORD_NOT_FOUND', status: 404,
+            });
+        });
+
+        await dispatchFlowAction(flowDeps(automation), { request: {}, environmentId: 'platform' } as any, FLOW_ACTION, {
+            objectName: OBJECT_DEF.name, subject, params: {}, recordId: RECORD_ID, ec: ec(STRANGER), envId: 'platform',
+        });
+
+        const flowCtx = flowContextOf(automation);
+        // The contract's own predicate, verbatim (`AutomationContext`): a flow
+        // reads `recordLoadDenied === true`, never a truthiness of `false`.
+        expect(flowCtx.recordLoadDenied).toBe(true);
+        // ⛔ Sibling of `record`, never a key ON it — a flow node reading
+        // `{{record.recordLoadDenied}}` must find nothing, or the signal would
+        // arrive as a phantom field of the subject row.
+        expect('recordLoadDenied' in flowCtx.record).toBe(false);
+        // The stamp survives, which is why `record.id` cannot be the predicate.
+        expect(flowCtx.record.id).toBe(RECORD_ID);
+        expect(flowCtx.record.status).toBeUndefined();
+        expect(flowCtx.object).toBe(OBJECT_DEF.name);
+        expect(flowCtx.userId).toBe(STRANGER);
+    });
+
+    it('a delivered row reaches it with the key ABSENT — not `false`', async () => {
+        const automation = makeAutomation();
+        const row = { id: RECORD_ID, status: 'open', owner_id: OWNER };
+        const subject = await loadActionSubjectRecord(OBJECT_DEF.name, RECORD_ID, async () => ({ record: row }));
+
+        await dispatchFlowAction(flowDeps(automation), { request: {}, environmentId: 'platform' } as any, FLOW_ACTION, {
+            objectName: OBJECT_DEF.name, subject, params: {}, recordId: RECORD_ID, ec: ec(OWNER), envId: 'platform',
+        });
+
+        const flowCtx = flowContextOf(automation);
+        expect(flowCtx.record).toMatchObject(row);
+        // The assertion that catches the most likely wrong implementation —
+        // spreading `{ recordLoadDenied: false }`. Its firing positive control is
+        // the case above: same rig, same expectation shape, reports `true`.
+        expect('recordLoadDenied' in flowCtx).toBe(false);
+        expect(flowCtx.recordLoadDenied).toBeUndefined();
+    });
+});
+
+/**
  * [#15168] The convergence itself. A per-door assertion is satisfied by two
  * copies of a rule, and two copies drifting apart is the defect #14143 was
  * filed for and the reason this card had to move both doors in one stroke — so
@@ -480,32 +562,43 @@ describe('[#15168] the FLOW face receives the signal — MCP run_action', () => 
  * signal is compared as a set.
  */
 describe('[#15168] the two flow doors agree — the same caller, the same row, the same signal', () => {
-    it('both doors deny for the stranger and both stay silent for the owner', async () => {
-        const deniedRest = (await dispatchRestFlow(STRANGER, makeQl())).flowCtx;
-        const deniedMcp = (await dispatchMcpFlow(STRANGER, makeQl())).flowCtx;
-        const okRest = (await dispatchRestFlow(OWNER, makeQl())).flowCtx;
-        const okMcp = (await dispatchMcpFlow(OWNER, makeQl())).flowCtx;
+    it('both doors REFUSE for the stranger and both run for the owner', async () => {
+        const deniedRest = await dispatchRestFlow(STRANGER, makeQl());
+        const deniedMcpAutomation = makeAutomation();
+        const deniedMcpErr = await dispatchMcpFlow(STRANGER, makeQl(), { recordId: RECORD_ID }, deniedMcpAutomation)
+            .then(() => null, (e: any) => e);
+        const okRest = await dispatchRestFlow(OWNER, makeQl());
+        const okMcp = await dispatchMcpFlow(OWNER, makeQl());
 
-        // Read as a SET: a collapse to one answer on both doors reddens here
-        // whatever that one answer is.
+        // [#16370] Read as a SET, exactly as before: a collapse to one answer on
+        // both doors reddens here whatever that one answer is. What changed is
+        // which answer the denied halves carry — a refusal, not a started run.
         expect([
-            deniedRest.recordLoadDenied,
-            deniedMcp.recordLoadDenied,
-            okRest.recordLoadDenied,
-            okMcp.recordLoadDenied,
-        ]).toEqual([true, true, undefined, undefined]);
+            deniedRest.response.status,
+            deniedMcpErr?.status,
+        ]).toEqual([404, 404]);
+        expect([
+            deniedRest.response.body.error.code,
+            deniedMcpErr?.code,
+        ]).toEqual(['RECORD_NOT_FOUND', 'RECORD_NOT_FOUND']);
 
+        // ⛔ Neither denied door created a run…
         expect([
-            'recordLoadDenied' in deniedRest,
-            'recordLoadDenied' in deniedMcp,
-            'recordLoadDenied' in okRest,
-            'recordLoadDenied' in okMcp,
-        ]).toEqual([true, true, false, false]);
+            deniedRest.automation.execute.mock.calls.length,
+            deniedMcpAutomation.execute.mock.calls.length,
+        ]).toEqual([0, 0]);
 
-        // And the stamp is present on all four, which is what makes the flag —
-        // not `record.id` — the only usable predicate on either door.
+        // …and both owner doors did, with the verdict key ABSENT — the firing
+        // control that stops the two zeros above from being a rig that
+        // dispatches nothing.
         expect([
-            deniedRest.record.id, deniedMcp.record.id, okRest.record.id, okMcp.record.id,
-        ]).toEqual([RECORD_ID, RECORD_ID, RECORD_ID, RECORD_ID]);
+            okRest.automation.execute.mock.calls.length,
+            okMcp.automation.execute.mock.calls.length,
+        ]).toEqual([1, 1]);
+        expect([
+            'recordLoadDenied' in okRest.flowCtx,
+            'recordLoadDenied' in okMcp.flowCtx,
+        ]).toEqual([false, false]);
+        expect([okRest.flowCtx.record.id, okMcp.flowCtx.record.id]).toEqual([RECORD_ID, RECORD_ID]);
     });
 });
