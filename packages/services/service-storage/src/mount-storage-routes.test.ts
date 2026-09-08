@@ -44,6 +44,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ObjectKernel } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
+// The producer's own dispatch predicates open every scanned verb of the engine
+// double below (#4434 / #5619): a fake looser than `ObjectQL` is how a dead
+// route ships with its suite green. Resolved through the package `exports` to
+// `dist/` on purpose (`KNOWN_UNALIASED_TEST_IMPORTS`).
+import {
+  assertEngineDeleteDispatch,
+  assertEngineFindOnePredicate,
+  assertEngineUpdateDispatch,
+} from '@objectstack/objectql';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { mountStorageRoutes, type MountStorageRoutesOptions } from './mount-storage-routes.js';
@@ -137,16 +146,26 @@ function makeEngine() {
       const rows = readRows(object).filter((row) => matchesWhere(row, q.where));
       return typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
-    findOne: async (object: string, q: Record<string, unknown> = {}) =>
-      readRows(object).find((row) => matchesWhere(row, q.where)) ?? null,
+    findOne: async (object: string, q: Record<string, unknown> = {}) => {
+      assertEngineFindOnePredicate(object, q);
+      return readRows(object).find((row) => matchesWhere(row, q.where)) ?? null;
+    },
     insert: async (object: string, row: Record<string, unknown>) => {
       writeRows(object).push({ ...row });
       return row;
     },
     update: async (object: string, patch: Record<string, unknown>, q: Record<string, unknown> = {}) => {
+      assertEngineUpdateDispatch(patch, q);
       for (const row of writeRows(object)) if (matchesWhere(row, q.where)) Object.assign(row, patch);
     },
-    delete: async () => {},
+    delete: async (object: string, q: Record<string, unknown> = {}) => {
+      assertEngineDeleteDispatch(q);
+      const rows = writeRows(object);
+      const keep = rows.filter((row) => !matchesWhere(row, q.where));
+      const removed = rows.length - keep.length;
+      rows.splice(0, rows.length, ...keep);
+      return removed;
+    },
   };
 }
 
