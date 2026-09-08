@@ -163,7 +163,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
-import { stripRegions, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
+import { stripRegions, ownRegionKeys, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
 
 export interface FlowLintFinding {
@@ -1552,14 +1552,27 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
           }
         }
 
-        // Region-STRIPPED: this scan is recursive and a container's config
-        // physically contains every descendant's, which the walk above already
-        // visits in its own right. Without the strip a `{{ }}` in a loop body
-        // would be reported twice — once here against the `loop`, once against the
-        // node that carries it. With it, the count stays 1 and the finding lands
-        // on the right node (before #5383 it landed only on the container).
+        // Region-STRIPPED, by THIS node type's own slots (#16405). The scan is
+        // recursive and a container's config physically contains every
+        // descendant's, which the walk above already visits in its own right:
+        // without the strip a `{{ }}` in a loop body would be reported twice —
+        // once here against the `loop`, once against the node that carries it.
+        // With it, the count stays 1 and the finding lands on the right node
+        // (before #5383 it landed only on the container).
+        //
+        // `ownRegionKeys(node.type)` rather than the flat union of every region
+        // key on ANY node type, which is what this call site passed until #16405
+        // by taking `stripRegions`' default. That union deleted `body` from every
+        // node's view — and `body` is `loop`'s region slot AND the canonical
+        // request payload on an `http` node, so the whole of an `http` node's
+        // payload was invisible to both rules below. That is the one key where an
+        // uninterpolated token has an outbound consequence: `http-nodes.ts`
+        // interpolates the raw config wholesale, so a `{{ }}` or a bare `$ref.x`
+        // there ships to the endpoint as literal text. Remove fewer than the
+        // node's own slots and the double-count returns; remove more and a key
+        // that was never a region is deleted unread.
         const strings: string[] = [];
-        collectTemplateStrings(stripRegions(node.config), undefined, strings);
+        collectTemplateStrings(stripRegions(node.config, ownRegionKeys(node.type)), undefined, strings);
         for (const str of strings) {
           if (DOUBLE_BRACE.test(str)) {
             findings.push({

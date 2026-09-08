@@ -39,7 +39,9 @@ export interface ReactInteractionProp {
    * Deprecate-first retirement of a react-tier spelling (#11284, maintainer
    * ruling 2026-08-23): the react tier converges on the metadata-tier
    * vocabulary. A deprecated prop stays published and accepted for the whole
-   * deprecation window — removal is a later card, never a side effect here.
+   * deprecation window — removal is a later card, never a side effect here, and
+ * lands as a {@link REACT_RETIRED_OVERLAY_PROPS} entry so the lint refuses the
+ * retired spelling by name.
    *
    * `replacedBy` names the canonical prop ON THE SAME BLOCK (a spec-schema
    * prop surfaced via `dataProps`, or another overlay prop); `note` is the
@@ -74,11 +76,48 @@ export interface ReactInteractionProp {
  * MEANING-PRESERVING, and the reason has to be written down next to it.
  */
 export const REACT_OVERLAY_SHADOWS: Readonly<Record<string, readonly string[]>> = {
-  // Same prop, same meaning. The overlay restates it to publish the JSX
-  // shorthand an author writes (`navigation={{ mode: 'none' }}`) together with
-  // the React-side rule that pairs it with `onRowClick` — neither of which the
-  // declarative schema has anywhere to say.
-  ListView: ['navigation'],
+  // `navigation` — same prop, same meaning. The overlay restates it to publish
+  // the JSX shorthand an author writes (`navigation={{ mode: 'none' }}`)
+  // together with the React-side rule that pairs it with `onRowClick` —
+  // neither of which the declarative schema has anywhere to say.
+  // `data` — same prop, same meaning (#14791). The overlay restates it to say
+  // the one thing the declarative schema cannot: a metadata page's host stamps
+  // the bound object, a `kind:'react'` page's does not, so the data source is
+  // REQUIRED to write on this tier — the binding `objectName` carried until
+  // its retirement, now spelled `data={{ provider: 'object', object }}` only.
+  ListView: ['data', 'navigation'],
+};
+
+/**
+ * Overlay props RETIRED from a block, per tag — the react-tier twin of
+ * `retiredKey()` on a metadata schema (#14791, maintainer ruling 2026-09-07:
+ * the #11284 aliases go with no deprecation window). The spelling is gone
+ * from {@link REACT_BLOCKS}, so the generated contract no longer publishes it;
+ * this ledger is what lets `validate-react-page-props` refuse it BY NAME, with
+ * the prescription, instead of passing it as an unknown prop the renderer may
+ * happen to still read.
+ *
+ * `replacedBy` names the prop on the same block that carries the binding now
+ * (a spec-schema prop surfaced via `dataProps`, or an overlay prop); `note` is
+ * the one-line fix the lint quotes verbatim. An entry must not also be a live
+ * prop of its block — `react-blocks.test.ts` pins both directions.
+ */
+export const REACT_RETIRED_OVERLAY_PROPS: Readonly<
+  Record<string, Readonly<Record<string, { replacedBy: string; note: string }>>>
+> = {
+  ListView: {
+    // #11284 published these as deprecated aliases of ListViewSchema's own
+    // `data` / `type`; #14791 retires them outright, the consumer fold having
+    // landed (objectui `normalizeListViewSchema`, console pin a472b071).
+    objectName: {
+      replacedBy: 'data',
+      note: "Write data={{ provider: 'object', object: '…' }} — the metadata-tier data source, the same spelling a metadata list view authors.",
+    },
+    viewType: {
+      replacedBy: 'type',
+      note: 'Write type="kanban" — ListViewSchema\'s own `type`, the metadata-tier view kind.',
+    },
+  },
 };
 
 /**
@@ -164,7 +203,7 @@ export const REACT_RECORD_BLOCK_ALTERNATIVES: Readonly<Record<string, string>> =
   'record:highlights':
     '<ObjectForm objectName="…" mode="view" recordId={…} fields={[…]} />, or read the record with useAdapter().findOne and lay the strip out in JSX.',
   'record:related_list':
-    '<ListView objectName="<child object>" filters={[\'<lookup field>\', \'=\', parentId]} columns={[…]} /> — the parent binding is an ordinary filter on a react page.',
+    "<ListView data={{ provider: 'object', object: '<child object>' }} filters={['<lookup field>', '=', parentId]} columns={[…]} /> — the parent binding is an ordinary filter on a react page.",
   'record:path':
     'read the record with useAdapter().findOne and render the stage bar in JSX (layout is this tier\'s job).',
 };
@@ -250,42 +289,31 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
   {
     tag: 'ListView',
     schemaType: 'list-view',
-    summary: "Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema. Bind the object with the metadata-tier data source — data={{ provider: 'object', object: '…' }} — and pick the visualization with `type`; `objectName` / `viewType` are the deprecated spellings of the same two bindings.",
+    summary: "Server-connected object table with toolbar and switchable visualizations (grid/kanban/calendar/gantt/…). Config props come from the spec ListView schema. Bind the object with the metadata-tier data source — data={{ provider: 'object', object: '…' }} — and pick the visualization with `type`: the same two keys a metadata list view authors, and the only spellings (the `objectName` / `viewType` aliases are retired).",
     schema: ListViewSchema,
     // #11284 (maintainer ruling 2026-08-23): the react tier converges on the
-    // metadata-tier vocabulary, deprecate-first. `type` and `data` are the
-    // canonical spellings (ListViewSchema's own props — objectui#2890 A6:
-    // `objectName` → `data: { provider: 'object', object }`, `viewType` →
-    // `type`); the two overlay aliases below stay published for the window.
+    // metadata-tier vocabulary — `type` and `data` are ListViewSchema's own
+    // props (objectui#2890 A6). #14791 (maintainer ruling 2026-09-07) retired
+    // the overlay aliases `objectName` / `viewType` with no window once the
+    // consumer fold landed (objectui `normalizeListViewSchema`, console pin
+    // a472b071): the canonical spelling is the ONLY spelling, and
+    // `REACT_RETIRED_OVERLAY_PROPS` carries the tombstone the lint quotes.
     // `type` rides the generator's explicit-allow (the #3729 ObjectChart
     // precedent — the react-page wrapper parks an author `type` beside the
     // SDUI discriminator as `specType`, objectui#2880).
     dataProps: ['type', 'data', 'columns', 'sort', 'searchableFields', 'userFilters', 'pagination', 'grouping', 'rowHeight', 'selection', 'rowActions', 'inlineEdit'],
     interactions: [
-      // #11284 deprecate-first: NOT the shared OBJECT_NAME — ListView's object
-      // binding converges on the schema's `data` data source; this alias stays
-      // required so the contract keeps saying "bind something" (the lint lets
-      // the canonical `data` prop satisfy it).
+      // NOT the shared OBJECT_NAME: ListView's object binding IS the schema's
+      // `data` data source. Restated here — ledgered in REACT_OVERLAY_SHADOWS —
+      // because the react tier has to say what the declarative schema cannot:
+      // a metadata page's host stamps the bound object, a react page's does
+      // not, so on this tier the data source is required to WRITE.
       {
-        name: 'objectName',
-        type: 'string',
+        name: 'data',
+        type: "ViewData — { provider: 'object', object: string } binds an object",
         kind: 'binding',
         required: true,
-        deprecated: {
-          replacedBy: 'data',
-          note: "Write the metadata-tier data source instead: data={{ provider: 'object', object: '…' }} — the same spelling a metadata list view authors. objectName keeps working during the deprecation window.",
-        },
-        description: "[DEPRECATED → `data={{ provider: 'object', object }}`] The object this block binds to (server-connected). Converging on the metadata-tier spelling; this alias is removed after the deprecation window.",
-      },
-      {
-        name: 'viewType',
-        type: "'grid' | 'kanban' | 'gallery' | 'calendar' | 'timeline' | 'gantt' | 'map'",
-        kind: 'binding',
-        deprecated: {
-          replacedBy: 'type',
-          note: 'Write type="kanban" (ListViewSchema\'s own `type`, the metadata-tier view kind) instead. viewType keeps working during the deprecation window.',
-        },
-        description: '[DEPRECATED → `type`] Which visualization to render (default grid). Converging on the metadata-tier spelling: write `type`, the same key a metadata list view authors.',
+        description: "The object this block binds to, written as the metadata-tier data source: data={{ provider: 'object', object: '…' }}. Any ViewData provider is accepted (a 'value' provider renders static rows); nothing stamps the object on a react page, so this prop is required.",
       },
       { name: 'filters', type: "FilterArray e.g. ['status','=','active']", kind: 'controlled', description: 'ObjectQL base filter; drive from React state for tabbed/searched lists. ([field, op, value]; ops =, !=, >, <, contains, in; compound: [\"and\", […], […]]).' },
       { name: 'navigation', type: "{ mode: 'page' | 'drawer' | 'modal' | 'split' | 'none' }", kind: 'binding', description: 'What a row click does. Use { mode: \"none\" } when you handle clicks via onRowClick.' },

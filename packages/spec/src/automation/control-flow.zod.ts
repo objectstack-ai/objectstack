@@ -406,7 +406,16 @@ export function analyzeRegion(region: { nodes: FlowNodeParsed[]; edges?: FlowEdg
     return { errors: ['region has no nodes'] };
   }
 
-  // Unique ids.
+  // Unique ids — an invariant this analysis needs (the degree maps below key
+  // on id), and the author-facing rule's last line of defence. A flow has ONE
+  // node-id space, judged by `FlowSchema` at parse over every depth
+  // `collectFlowGraphs` walks — nesting up to `MAX_REGION_DEPTH` (#16134) — so
+  // within that ceiling a parsed flow never arrives here carrying a collision.
+  // Beyond it a region is left raw and reaches this line through
+  // `validateControlFlow`, where this is the ONLY refusal of a within-region
+  // duplicate: delete it and the degree maps would silently de-duplicate the
+  // collision instead. It also guards direct callers that hand in a raw region
+  // (`bpmn-mapping`).
   const ids = new Set<string>();
   for (const n of nodes) {
     if (ids.has(n.id)) errors.push(`duplicate node id '${n.id}'`);
@@ -681,6 +690,15 @@ export interface FlowGraph {
    * `loop 'sweep' body → try_catch 'guard' catch`.
    */
   readonly scope: string;
+  /**
+   * The same location as {@link scope}, as the key path from the flow root to
+   * the object holding this graph's `nodes` / `edges`: `[]` for the flow
+   * itself, `['nodes', 1, 'config', 'body']` for a loop body,
+   * `['nodes', 1, 'config', 'branches', 0]` for a parallel branch. A Zod issue
+   * about a region node is anchored where the author wrote it —
+   * `[...path, 'nodes', i, 'id']` — rather than described in prose (#16134).
+   */
+  readonly path: readonly (string | number)[];
   readonly nodes: readonly FlowNodeParsed[];
   readonly edges: readonly FlowEdgeParsed[];
 }
@@ -706,23 +724,34 @@ export function collectFlowGraphs(
     nodes: readonly FlowNodeParsed[],
     edges: readonly FlowEdgeParsed[],
     scope: string,
+    path: readonly (string | number)[],
     depth: number,
   ): void => {
-    graphs.push({ scope, nodes, edges });
+    graphs.push({ scope, path, nodes, edges });
     if (depth >= MAX_REGION_DEPTH) return;
-    for (const node of nodes) {
+    nodes.forEach((node, index) => {
+      // A region its own schema refused is left RAW by `parseFlowNodeRegions`
+      // for `validateControlFlow` to name, so an element here can be whatever
+      // the author typed — `null` included. Skip what is not a node object
+      // rather than read `.config` off it: this walk runs inside `FlowSchema`'s
+      // parse (#16134), where a thrown TypeError would escape `safeParse`. The
+      // schema refusal that owns the malformed region still fires — reached now,
+      // where the throw used to pre-empt it.
+      const raw: unknown = node;
+      if (raw === null || typeof raw !== 'object') return;
       for (const slot of regionSlotsOf(node)) {
         if (!isRegionDict(slot.raw) || !Array.isArray(slot.raw.nodes)) continue;
         visit(
           slot.raw.nodes as FlowNodeParsed[],
           Array.isArray(slot.raw.edges) ? (slot.raw.edges as FlowEdgeParsed[]) : [],
           scope ? `${scope} → ${slot.label}` : slot.label,
+          [...path, 'nodes', index, 'config', slot.key, ...(slot.index === undefined ? [] : [slot.index])],
           depth + 1,
         );
       }
-    }
+    });
   };
 
-  visit(flow.nodes ?? [], flow.edges ?? [], '', 0);
+  visit(flow.nodes ?? [], flow.edges ?? [], '', [], 0);
   return graphs;
 }
