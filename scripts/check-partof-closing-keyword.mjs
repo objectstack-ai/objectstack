@@ -139,6 +139,17 @@
  * it is RULE 2's premise: a trailer left on a pushed commit really does reach
  * the default branch's permanent history.
  *
+ * What DISCHARGES a pushed-branch red is therefore the merge, and only a merge
+ * whose squash message is the PR BODY — then the trailer never reaches the
+ * default branch. Whether that happens by itself is the repository setting
+ * `squash_merge_commit_message`: at `COMMIT_MESSAGES` (the value behind the
+ * measurement above) it takes the lander replacing the assembled commit list
+ * with the PR body by hand at the merge button, which a queue merge never does;
+ * at `PR_BODY` every squash does it, queue included. The output states that
+ * CONDITION rather than the value the setting holds today, so it stays true
+ * whichever way the repository is configured when it is read — and discharging
+ * the red never rewrites history.
+ *
  * What that costs depends on the spelling, and the output says so rather than
  * flattening it: Part-of and Refs land as a reference and move no card, while a
  * CLOSING keyword lands on the surface GitHub's parser reads. The asymmetry is
@@ -769,6 +780,13 @@ export function judge(ctx) {
         "  card, while a CLOSING keyword lands on the surface GitHub's parser reads. ⛔ Weigh that under the",
         '  landing rules that bind you — this gate found a real contradiction between your commits and your',
         '  body, and it does not decide whether the pull request merges.',
+        '',
+        '  What DISCHARGES it is the merge, and only a merge whose squash message is the PR BODY: then the',
+        '  trailer above never reaches the default branch. Whether that happens by itself is the repository',
+        '  setting `squash_merge_commit_message`. At `COMMIT_MESSAGES` (the state fact 2 measured) it takes',
+        '  the lander replacing the assembled commit list with the PR body BY HAND at the merge button — a',
+        '  queue merge edits nothing, so there the residue lands. At `PR_BODY` every squash does it, queue',
+        '  included. Until that merge the red stays on this branch; ⛔ discharging it never rewrites history.',
       );
     }
     return { exit: EXIT_CONTRADICTION, lines: [...lines, ...(unread.length ? ['', ...unread] : [])] };
@@ -1041,6 +1059,31 @@ function selfTest() {
   t(
     'the guidance leaves the landing decision to the lander rather than ordering a merge',
     named.includes('does not decide whether the pull request merges'),
+    true,
+  );
+  // The discharge sentence. Saying that nothing clears the red on the branch is
+  // half of the pushed case; the other half is WHAT discharges it — the merge,
+  // and only a merge whose squash message is the PR body — and the setting that
+  // decides whether that is by hand or automatic. It is stated as a CONDITION on
+  // the setting's value, never as today's value, so these three hold whichever
+  // way the repository is configured when they run; and the sentence must sit
+  // beside the prohibition, never in place of it.
+  t(
+    'the already-pushed case says what DISCHARGES the red: a merge whose squash message is the PR body',
+    named.includes('What DISCHARGES it is the merge') && named.includes('squash message is the PR BODY'),
+    true,
+  );
+  t(
+    'and names the setting that decides by-hand versus automatic, with both of its values',
+    named.includes('`squash_merge_commit_message`') &&
+      named.includes('`COMMIT_MESSAGES`') &&
+      named.includes('`PR_BODY`') &&
+      named.includes('BY HAND'),
+    true,
+  );
+  t(
+    'and the discharge sentence sits BESIDE the prohibition, never in place of it',
+    named.includes('discharging it never rewrites history') && /⛔ Do NOT amend, rebase or force-push/.test(named),
     true,
   );
   t(
