@@ -27,6 +27,8 @@ That narrowing is deliberate, and the three shapes did **not** all behave the sa
 
 No migration is owed even so. No caller in this repository is affected, and the shape could never have reached `detectManagedDrift` on the same class either, which publishes the very same `any[]` spelling for the very same key — so a `readonly` caller was already unable to use half of this driver's declared-index surface. A caller in that position spells the array without `as const`, or widens it at the call site.
 
+The disposition on that corrected ground, recorded here because the ground itself moved: **no `BREAKING` banner and no ADR-0087 disposition**, resting on grounds (i) and (iii) alone — zero affected callers, and the `any[]` spelling already published on `detectManagedDrift` for the same key on the same class. The ground that every newly rejected shape had already been discarded at run time is **not** among them: it is false for the `readonly` tuple, and nothing here leans on it.
+
 `@objectstack/driver-sqlite-wasm` is named because `SqliteWasmDriver extends SqlDriver` and overrides neither method, so both widened signatures land in its own published `.d.ts` and its consumers see the identical change. The two packages are in the same fixed version group, so this is a CHANGELOG effect rather than a version one.
 
 The `IDataDriver` contract itself did not move: `registerObjectMetadata?(schemas: unknown[])` in `@objectstack/spec` already accepted `unknown[]`, and `SqlDriver` narrowed it on its own. What grew is `SqlDriver`'s own published accept set.
