@@ -112,9 +112,18 @@ function makeEngine() {
     sys_attachment: [],
   };
   const contractVisibility: Record<string, string[]> = { rec_open: ['u_member'], rec_closed: [] };
-  const rowsOf = (object: string) => {
+  /**
+   * READS of an undeclared object answer empty: `resolveAuthzContext` reads the
+   * permission store (roles, permission sets, memberships) for a session
+   * principal, and a fixture that refused those reads would relay every
+   * admitted caller as the 503 outage instead of reaching the verdict. WRITES
+   * stay strict — a row landing in a table this fixture never declared is a
+   * fixture bug, not a behaviour.
+   */
+  const readRows = (object: string) => tables[object] ?? [];
+  const writeRows = (object: string) => {
     const rows = tables[object];
-    if (!rows) throw new Error(`fixture engine: unknown object '${object}'`);
+    if (!rows) throw new Error(`fixture engine: write to undeclared object '${object}'`);
     return rows;
   };
   return {
@@ -125,17 +134,17 @@ function makeEngine() {
         const userId = ((q.context ?? {}) as { userId?: string }).userId;
         return userId && (contractVisibility[id] ?? []).includes(userId) ? [{ id }] : [];
       }
-      const rows = rowsOf(object).filter((row) => matchesWhere(row, q.where));
+      const rows = readRows(object).filter((row) => matchesWhere(row, q.where));
       return typeof q.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     findOne: async (object: string, q: Record<string, unknown> = {}) =>
-      rowsOf(object).find((row) => matchesWhere(row, q.where)) ?? null,
+      readRows(object).find((row) => matchesWhere(row, q.where)) ?? null,
     insert: async (object: string, row: Record<string, unknown>) => {
-      rowsOf(object).push({ ...row });
+      writeRows(object).push({ ...row });
       return row;
     },
     update: async (object: string, patch: Record<string, unknown>, q: Record<string, unknown> = {}) => {
-      for (const row of rowsOf(object)) if (matchesWhere(row, q.where)) Object.assign(row, patch);
+      for (const row of writeRows(object)) if (matchesWhere(row, q.where)) Object.assign(row, patch);
     },
     delete: async () => {},
   };
