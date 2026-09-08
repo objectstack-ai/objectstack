@@ -1,0 +1,7 @@
+{
+  "$comment": [
+    "PLACEHOLDER — seeded empty so the first run of the #16431 ratchet reports the",
+    "population against an empty ledger. Filled in the same session."
+  ],
+  "entries": {}
+}
