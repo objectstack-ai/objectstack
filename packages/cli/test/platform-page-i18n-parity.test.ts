@@ -29,7 +29,7 @@ import {
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
 import * as PlatformPages from '@objectstack/platform-objects/pages';
-import { PAGE_COMPONENT_COPY_KEYS, translatePage } from '@objectstack/spec/system';
+import { PAGE_COMPONENT_COPY_KEYS, translatePage, walkAddressedPageComponents } from '@objectstack/spec/system';
 import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
 
 /** The pages exactly as the plugins register them with the kernel. */
@@ -791,31 +791,35 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
   });
 
-  it('records that the extractor now reaches under `slots` — and that every site it reaches there is an inline locale map with no seed', () => {
-    // A BOUNDARY PIN, not an endorsement — moved, not removed. Until #16772
-    // this pinned `offered: ['label']`: the shared walk rooted at
-    // `regions[].components[]`, these pages author `regions: []`, and the 45
-    // inline sites under `slots.*` had no bundle face. #16772 widened the
-    // walk to the `slots.<slot>` roots and to `items[].children`, so the
-    // notice the old pin promised has fired, and this is the answer to it:
-    // these pages' copy is authored as inline locale maps (the ruled route for
-    // page copy, judged complete by the next case), so what the extractor
-    // offers for them is a set of `inlineLocales` rows — authored-with-no-
-    // seed, never a string to translate. The bundle surface they gained
-    // therefore needs NO entries, and their coverage home stays this file.
-    // What this pin holds: the reach is real (more than the label alone), and
-    // it exposes no seeded string for a translator to be asked for.
+  it('records that the walk now reaches under `slots`, that these pages author no component id there, and so the extractor still offers the label alone', () => {
+    // A BOUNDARY PIN, not an endorsement — re-measured, and the reason moved.
+    // Until #16772 `offered: ['label']` held because the shared walk rooted at
+    // `regions[].components[]` and these pages author `regions: []`: the 45
+    // inline sites under `slots.*` were UNREACHABLE. #16772 widened the walk
+    // to the `slots.<slot>` roots and to `items[].children`, and the notice the
+    // old pin promised fired — so this is the answer to it, measured off the
+    // documents: the walk now VISITS every component under `slots` (`reached`
+    // below), and not one of them carries an `id`, so nothing is addressable
+    // by `pages.<name>.components.<id>` and the extractor still offers the
+    // page label alone. These pages gained no bundle surface, need no entries,
+    // and their coverage home stays this file (the inline-map case below).
+    // Both halves are held so the next change is told precisely: `reached`
+    // reds if the roots narrow again; `offered` grows the day one of these
+    // components takes an id, and that component then needs a bundle entry.
     for (const page of RECORD_PAGES) {
-      const entries = collectExpectedEntries({ pages: [page] } as any)
-        .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name);
-      const offered = entries.map((e) => e.path.slice(2).join('.')).sort();
-      expect(page.regions).toEqual([]);
-      expect(offered).toContain('label');
-      expect(offered.filter((k) => k.startsWith('components.')).length).toBeGreaterThan(0);
-      const seeded = entries
-        .filter((e) => e.path[2] === 'components' && e.inline !== undefined)
-        .map((e) => e.path.slice(2).join('.'));
-      expect({ page: page.name, seededUnderSlots: seeded }).toEqual({ page: page.name, seededUnderSlots: [] });
+      let visited = 0;
+      let addressed = 0;
+      walkAddressedPageComponents(page as any, (component, ctx) => {
+        visited += 1;
+        if (ctx.addressed) addressed += 1;
+        return component;
+      });
+      const offered = collectExpectedEntries({ pages: [page] } as any)
+        .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
+        .map((e) => e.path.slice(2).join('.'))
+        .sort();
+      expect({ page: page.name, regions: page.regions, reached: visited > 0, addressed, offered })
+        .toEqual({ page: page.name, regions: [], reached: true, addressed: 0, offered: ['label'] });
     }
   });
 

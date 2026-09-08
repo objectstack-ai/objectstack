@@ -232,7 +232,7 @@ Translation data for objects, apps, and UI messages
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
-| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
@@ -283,6 +283,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
 | **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+| **globalFilters** | `Record<string, { label?: string; options?: Record<string, string> }>` | optional | Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`) |
 
 ### Nested Shape: `TranslationData.datasets[string]`
 
@@ -382,7 +383,7 @@ One locale of translations — the `translation` metadata type
 | **apps** | `Record<string, { label: string; description?: string; navigation?: Record<string, object> }>` | optional | App translations keyed by app name |
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
-| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object>; … }>` | optional | Dashboard translations keyed by dashboard name |
 | **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
@@ -443,6 +444,7 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
 | **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+| **globalFilters** | `Record<string, { label?: string; options?: Record<string, string> }>` | optional | Global-filter translations keyed by the filter `name` (a filter that authors no `name` is keyed by its `field`) |
 
 ### Nested Shape: `TranslationItem.datasets[string]`
 
