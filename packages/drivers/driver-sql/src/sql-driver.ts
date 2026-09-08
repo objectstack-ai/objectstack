@@ -22,6 +22,9 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+// [#16318] The per-field-type physical representation of the NUMERIC family.
+// `os generate migration` reads the SAME table, in both of its formats — that
+// shared table IS the repair, so ⛔ never restate one of its numbers here.
 import { numericColumnFor } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
@@ -15935,12 +15938,12 @@ export class SqlDriver implements IDataDriver {
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
         return null;
-      // The non-string primitives: INTEGER / REAL / NUMERIC / BOOLEAN / DATE /
+      // The non-string primitives: INTEGER / REAL / DECIMAL / BOOLEAN / DATE /
       // DATETIME / TIME columns. None of them is a varchar, so none is sized
       // from `maxLength` — which is the only question this mirror answers.
-      // ⚠️ The numeric members ARE sized from metadata since #16318, by
-      // `numericColumnFor` off `scale`; that is a different key and a different
-      // mirror, and answering `null` here stays correct.
+      // ⚠️ Since #16318 the numeric members ARE sized, by `numericColumnFor`,
+      // but from the field's TYPE and not from any declaration; `null` here
+      // stays the correct answer to the question actually asked.
       case 'integer':
       case 'int':
       case 'float':
@@ -16418,23 +16421,24 @@ export class SqlDriver implements IDataDriver {
       case 'int':
         col = table.integer(name);
         break;
-      // `float` is a DRIVER-side alias, not a `FieldType` — no `Field.float`
-      // builder exists and `NUMERIC_VALUE_TYPES` does not carry it — so
-      // `numericColumnFor` has no opinion about it and it keeps the column it
-      // has always had. #16318 moved the seven real members below; this one is
-      // out of that class and out of its scope.
+      // `float` is a DRIVER-SIDE ALIAS, not a `FieldType`: there is no
+      // `Field.float` builder and `NUMERIC_VALUE_TYPES` does not carry it, so
+      // #16318's table has no opinion about it and it keeps the column it has
+      // always had.
       case 'float':
         col = table.float(name);
         break;
-      // [#16318] `number`/`currency`/`percent`/`slider`/`progress`/`summary`/
-      // `rating` take the physical representation `packages/spec` states for
-      // them ({@link numericColumnFor}) — the same table both `os generate
-      // migration` formats read, so one declaration cannot produce three
-      // different columns. The spec module carries the measurements and the
-      // ruling; ⛔ do not restate its numbers here.
+      // [#16318] The seven members of `NUMERIC_VALUE_TYPES` take the physical
+      // representation `packages/spec` states for them ({@link
+      // numericColumnFor}) — the same table both `os generate migration`
+      // formats read, so one declaration can no longer produce three different
+      // columns (measured on live PostgreSQL 16.13: this arm's `real`, the sql
+      // format's `numeric(18,2)`/`numeric(5,2)`, and the typescript format's
+      // `numeric(8,2)`). The spec module carries the measurements, the ruling
+      // and the residual bound; ⛔ do not restate its numbers here.
       //
-      // What this arm still owes the reader is the SQLite half, because that is
-      // why these three were moved into a float arm in the first place:
+      // What this arm still owes its reader is the SQLite half, because that is
+      // why three of these types were put in a float arm in the first place:
       //
       // `rating`/`slider`/`progress` are authored as numeric scalars (a star
       // count, a slider position, a percent-of-completion). Without an explicit
@@ -16444,12 +16448,20 @@ export class SqlDriver implements IDataDriver {
       // affinity round-trips them as JS numbers (#field-zoo).
       //
       // That leak stays defeated, and MEASURED rather than argued: knex
-      // compiles `table.decimal(...)` and `table.float(...)` to the IDENTICAL
-      // `float` column on SQLite, so the SQLite DDL for every one of these
-      // types is byte-identical to what this arm emitted before. `table.integer`
-      // gives `rating` INTEGER affinity there, which stores `4` as an integer
-      // and still accepts `4.5` as a REAL — SQLite refuses no fractional value,
-      // so nothing this dialect accepts today stops being accepted.
+      // compiles `table.decimal(name, p, s)` and `table.float(name)` to the
+      // IDENTICAL `float` column on SQLite
+      // (`ColumnCompiler_SQLite3.prototype.decimal` is the literal `'float'`),
+      // so the six exact-decimal members emit byte-identical SQLite DDL to what
+      // this arm emitted before and keep REAL affinity. `rating` moves to
+      // INTEGER affinity, where SQLite stores `4` as an integer and still
+      // accepts `4.5` as a REAL — it refuses no fractional value — so nothing
+      // this dialect accepts today stops being accepted.
+      //
+      // ⚠️ The read path is what makes the move safe on the server dialects:
+      // node-postgres parses `numeric` to a STRING and `real` to a number, and
+      // it is `NUMERIC_SCALAR_TYPES`' existing `numericFields` coercion —
+      // already registered for all seven of these types — that turns it back
+      // into a JS number on the way out.
       case 'number':
       case 'currency':
       case 'percent':
@@ -16457,10 +16469,11 @@ export class SqlDriver implements IDataDriver {
       case 'slider':
       case 'progress':
       case 'summary': {
-        const numeric = numericColumnFor(field);
-        // ⛔ Not `?? table.float(name)`: a missing answer here would mean the
-        // spec table and this arm's case labels have parted, and a silent
-        // fallback is exactly the drift #16318 exists to close. The pin
+        const numeric = numericColumnFor(type);
+        // ⛔ Not `?? table.float(name)`: an undefined answer for a type named
+        // in these very case labels would mean the labels and
+        // `NUMERIC_VALUE_TYPES` have parted, and a silent fallback is exactly
+        // the drift #16318 exists to close. The spec-side pin
         // (`numeric-column-representation.test.ts`) holds the two equal, and
         // `NUMERIC_VALUE_TYPES` is the single membership authority both read.
         col =

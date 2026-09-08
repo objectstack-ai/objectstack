@@ -1,24 +1,24 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The NUMERIC column family's physical representation — one explicit,
+ * The NUMERIC column family's PHYSICAL REPRESENTATION — one explicit,
  * per-field-type table that every producer of DDL reads (#16318).
  *
- * Ruled C ∩ ④ (maintainer, decision batch #86, 2026-09-08). ⛔ Quoted, not
+ * Ruled C ∩ ④ (director seat, decision batch #86, 2026-09-08). Quoted, not
  * translated:
  *
  * > One explicit per-field-type physical-representation table lives in
  * > `packages/spec` (the protocol is the baseline) and both producers —
  * > `SqlDriver.createColumn` and `os generate migration` (sql + typescript
  * > formats) — read it … **New tables only**: no migration of existing
- * > columns (「不考虑现有数据」).
+ * > columns (「不考虑现有数据」); SQLite affinity consequences stated per type.
  *
- * ## The divergence this closes, measured rather than argued
+ * ## The divergence this closes — measured, not argued
  *
  * One object, seven plain numeric declarations, three producers, driven into
- * one live PostgreSQL 16.13 and read back out of `information_schema.columns`
- * — `numeric_precision` / `numeric_scale` included, which is the half the
- * original report's `data_type` read hid:
+ * live PostgreSQL 16.13 and read back out of `information_schema.columns`
+ * with `numeric_precision` / `numeric_scale` — the half a bare `data_type`
+ * read hides:
  *
  * ```
  *              driver    sql gen         ts gen
@@ -31,223 +31,222 @@
  * rating       real      integer         integer
  * ```
  *
- * 7 of 7 diverge, and six of them are a THREE-way split, not the two-way one
- * the card reported: `table.decimal(name)` with no arguments is knex's
- * `decimal(8, 2)`, so the typescript format never agreed with the sql format
- * either. Every one of the three is lossy, in three different directions:
+ * 7 of 7 diverge, and six of them THREE ways rather than the two the report
+ * named: `table.decimal(name)` with no arguments is knex's `decimal(8, 2)`,
+ * so the two halves of one command never agreed with each other either. A
+ * control family already unified (#16091: `text` / `email` / `boolean` /
+ * `date`) came back 0-of-4 divergent in the same run, so AGREE is a reading
+ * the instrument can produce.
  *
- *   - `real` is IEEE-754 binary32. Measured: `1234567.89` reads back as
- *     `1.2345679e+06` — nine cents gone from one value, silently.
- *   - `numeric(8,2)` REFUSES `1234567.89` outright (`numeric field overflow`),
- *     so a money value the platform stores today cannot be stored in a table
- *     the typescript format generates for the same object.
- *   - `numeric(5,2)` and `numeric(18,2)` silently ROUND — `33.333 → 33.33`,
- *     `33.336 → 33.34`. ⚠️ ROUND, not truncate: the original inference was
- *     read off the DDL literal and named truncation. The direction it was
- *     used for is unchanged (the loss is silent either way), and the platform
- *     has already ruled on exactly this behaviour — see the `scale` block
- *     below.
+ * ## Why a NARROW scale could not stay, and what the loss actually is
  *
- * ## Why a scale is not free to invent: `scale` is REFUSED, never rounded
+ * The report's reason was an INFERENCE off the DDL literal — that a
+ * `DECIMAL(5,2)` column truncates a legitimate 33.333 to 33.33. Executed on
+ * PostgreSQL 16.13, the direction is wrong and the substance holds: the
+ * column ROUNDS half-up (33.336 arrives as 33.34), it does not truncate. The
+ * loss is silent either way.
  *
- * The write seam's own contract, and the reason no member of this family gets
- * a narrow scale "because two decimals is what money has":
- * `record-validator.ts` states it as a maintainer ruling of 2026-08-11
- * (#7501) — "an over-scale value is refused the way an out-of-range one is;
- * **silent rounding is silently altering data**". A `numeric(p, s)` column
- * whose `s` is narrower than what that seam accepts does the one thing the
- * ruling forbids, on the way to disk, with nobody to tell. So the column's
- * scale is chosen to be at least as wide as the seam's, never narrower.
+ * Nothing upstream prevents it. Measured at the write seam: a `percent` /
+ * `currency` / `number` field that declares no `scale` ACCEPTS 0.33333 and
+ * 1234567.89 unchanged (4 of 4), while the same seam REFUSES both the moment
+ * the field declares `scale: 2` (2 of 2 controls fired). So there is no
+ * upstream rounding and no upstream validation to fall back on — for a field
+ * with no declared `scale` the COLUMN is the only thing deciding, and a
+ * narrow one silently alters data. `record-validator.ts` states the platform's
+ * position on exactly that (#7501, maintainer ruling 2026-08-11): an
+ * over-scale value "is refused the way an out-of-range one is; silent
+ * rounding is silently altering data".
  *
- * ## Where {@link DEFAULT_NUMERIC_SCALE} comes from — measured, not chosen
+ * ⚠️ `summary` has no seam at all — it is platform-computed, and
+ * `validateRecord`'s type door excludes it — so for that member the column is
+ * the ONLY guard.
  *
- * A value reaches the column as a JavaScript number (`valueSchemaFor` gives
- * every member of this family `z.number().finite()`), so the widest thing a
- * column has to preserve is an IEEE-754 **binary64** significand — at most 17
- * significant decimal digits in its shortest round-trip form. Candidate widths
- * were driven against a corpus of fourteen values (the card's own, the money
- * magnitudes, one satoshi, one basis point, a 16-significant-digit integer and
- * a 16-significant-digit fraction), each written and read back as `float8`:
+ * ## Where the two numbers come from — both are dialect maxima, not taste
+ *
+ * Every candidate column was driven against a nine-value corpus on live
+ * PostgreSQL 16.13, written and read back through the driver's own pg type
+ * parsing, with `12.5` as the firing control (a dyadic rational every
+ * candidate holds exactly — it came back EXACT from all five, 0 of 5 lost):
  *
  * ```
- *   numeric(5,2)    12/14 lost or refused      real              12/14
- *   numeric(8,2)    12/14 lost or refused      numeric(38,6)      3/14
- *   numeric(18,2)    8/14 lost                 numeric(38,8)      2/14
- *   numeric(38,10)   2/14 lost                 numeric(38,17)     0/14
+ *   real            3/9 altered   <- the driver today
+ *   numeric(8,2)    9/9 altered   <- the typescript format today
+ *   numeric(18,2)   7/9 altered   <- the sql format today
+ *   numeric(38,17)  2/9 altered
+ *   numeric(65,30)  0/9 altered   <- this table
  * ```
  *
- * 17 is therefore not a taste: it is the narrowest scale on that sweep that
- * loses nothing, and it is the digit count an IEEE-754 binary64 needs.
+ * `real` is IEEE-754 binary32 and its 3 are the ones that matter most:
+ * `1234567.89` reads back `1234567.9` and `Number.MAX_SAFE_INTEGER` reads
+ * back `9007199000000000`. That is the money-fidelity defect the report
+ * named, in a reading rather than an argument.
  *
- * ## Where {@link NUMERIC_COLUMN_PRECISION} comes from — the PORTABLE ceiling
+ * {@link NUMERIC_COLUMN_SCALE} is 30 and {@link NUMERIC_COLUMN_PRECISION} is
+ * 65 because those are MySQL's documented `DECIMAL` maxima — the binding
+ * constraint among the dialects this platform speaks, PostgreSQL's ceiling
+ * being 1000 digits and SQLite having none. Taking the maximum is what makes
+ * the residual bound as far out as any portable exact-decimal column can put
+ * it; ⛔ neither number is chosen for how it reads.
  *
- * ⚠️ An unconstrained `numeric` would be the honest shape on PostgreSQL, and
- * it is NOT portable: measured through knex's own compilers, `decimal(name,
+ * ⚠️ An unconstrained `numeric` would be the honest shape on PostgreSQL and it
+ * is NOT portable: measured through knex's own compilers, `decimal(name,
  * null)` compiles to `decimal` on `pg`, to `float` on `better-sqlite3`, and
- * **throws** on `mysql2` ("Specifying no precision on decimal columns is not
- * supported") — knex refuses it there because MySQL's own default for a bare
- * `DECIMAL` is `DECIMAL(10,0)`, an INTEGER column. A stated pair is the only
- * spelling all three dialects accept, which is what the ruling asked for.
+ * THROWS on `mysql2` ("Specifying no precision on decimal columns is not
+ * supported"). A stated pair is the only spelling all three accept, which is
+ * what the ruling asked for.
  *
- * MySQL caps `DECIMAL` at 65 total digits and a scale of 30; PostgreSQL and
- * SQLite impose no lower bound. `38` sits inside that cap and leaves 21 digits
- * left of the point with the default scale — comfortably past
- * `Number.MAX_SAFE_INTEGER`'s 16, so no value a JS number can carry exactly is
- * refused for magnitude.
+ * ## The residual bound, stated rather than assumed
  *
- * ## SQLite, per type — the constraint the card raised, answered
+ * An exact-decimal column is bounded where a float is not, so this table is
+ * not lossless in every direction. Magnitudes below 1e-30 round to zero and
+ * magnitudes at or above 1e35 are REFUSED, where today's `real` keeps about
+ * seven significant digits out to ~1e38. Two things make that the right
+ * trade: a refusal is loud and a silent rounding is not, and the sql format's
+ * `numeric(18,2)` already refuses everything at or above 1e16 today. It is a
+ * bound, and it is stated here so no reader has to rediscover it.
  *
- * `SqlDriver.createColumn`'s float arm records why `rating`/`slider`/`progress`
- * were put in it: without an explicit case they fell to `table.string`, the
- * column took TEXT affinity, and SQLite stored `'4'` rather than `4`. That
- * hazard is untouched here, and the measurement says so in the only terms that
- * matter — knex compiles **`table.decimal(...)` and `table.float(...)` to the
- * identical `float` column on SQLite**, so every type this table moves out of
- * the float arm emits byte-identical SQLite DDL and keeps REAL affinity.
- * Driven on better-sqlite3, one row per declared type:
+ * ## SQLite, per type — the constraint the report raised, answered
+ *
+ * `SqlDriver.createColumn`'s float arm records why `rating`/`slider`/
+ * `progress` are in it: without an explicit case they fell to `table.string`,
+ * the column took TEXT affinity, and SQLite stored `'4'` rather than `4`.
+ * Measured on knex 3.3.0 / better-sqlite3, compiled DDL and live storage
+ * class:
  *
  * ```
- *   declared          4        4.5      33.333    0.33333
- *   real / float      real:4   real:4.5 real:33.333 real:0.33333
- *   decimal(38,17)    int:4    real:4.5 real:33.333 real:0.33333   <- NUMERIC affinity
- *   integer           int:4    real:4.5 real:33.333 real:0.33333
- *   varchar(255)      text:"4.0"  ...                              <- the fossil's own leak
+ *   table.float(c)           -> float      real:4  real:4.5  real:33.333
+ *   table.decimal(c, 65, 30) -> float      real:4  real:4.5  real:33.333
+ *   table.integer(c)         -> integer    integer:4  real:4.5  real:33.333
+ *   table.string(c)          -> varchar(255)  text:4.0   <- the fossil's leak
  * ```
  *
- * Two per-type consequences, stated rather than assumed:
+ * Two per-type consequences follow, and neither is assumed:
  *
- *   - The six decimal members take NUMERIC affinity instead of REAL. SQLite
- *     applies no precision or scale, converts a lossless real to an integer
- *     storage class (`4` reads back as the integer `4`, not `4.0`), and
- *     converts nothing else — no truncation, no TEXT.
- *   - `rating` takes INTEGER affinity, which on SQLite does NOT refuse a
- *     fractional value: `4.5` is stored as REAL `4.5`. So the half-star
- *     refusal below is a PostgreSQL/MySQL effect and SQLite keeps accepting
- *     what it accepts today.
+ *   - The six exact-decimal members emit BYTE-IDENTICAL SQLite DDL to the
+ *     float arm they leave — `ColumnCompiler_SQLite3.prototype.decimal` is the
+ *     literal `'float'`, the same string `floating` resolves to — so they keep
+ *     REAL affinity and the fossil's leak stays defeated. SQLite applies no
+ *     precision and no scale, so the exactness this table buys is a
+ *     PostgreSQL/MySQL property; SQLite behaves exactly as it does today.
+ *   - `rating` moves to INTEGER affinity. `4` is then stored as the integer
+ *     `4` rather than the real `4.0`, and SQLite still accepts `4.5` as a REAL
+ *     — it refuses no fractional value — so nothing this dialect accepts today
+ *     stops being accepted. The refusal `rating` gains is a
+ *     PostgreSQL/MySQL-only effect.
  *
- * ## `rating` — integer, and the half-star need was measured
+ * A `table.string` control in the same run still compiled to `varchar(255)`
+ * and still stored `text:4.0`, so "identical" above is a discriminating
+ * reading and not a constant.
+ *
+ * ## `rating` — integer, and the half-star need was looked for
  *
  * The ruling made `rating` integer "unless the executor measures a half-star
- * need". There is none to measure: `allowHalf` was RETIRED in 2026-06 as dead
- * surface with no runtime reader (see `field.zod.ts`'s prune block and
- * `docs/audits/2026-06-dead-surface-disposition-plan.md`), and `Field.rating`
- * takes a star COUNT (`rating(max = 5)`) and nothing else. What remains
- * reachable is the generic `scale` key, which the record validator's numeric
- * branch does enforce for `rating` — so a field that declares one takes the
- * exact-decimal answer and no column ever refuses a value that seam accepts.
+ * need". There is no capability to measure: `Field.rating` takes a star COUNT
+ * and the spec declares no half-star key for it. A field that genuinely wants
+ * fractional stars is a `slider`, which is in the exact-decimal set above.
+ *
+ * ## Scope — NEW COLUMNS ONLY
  *
  * ⛔ This table decides what a NEW column is created as, and nothing else. It
- * retypes no existing column (the schema sync is additive), and no drift
- * finding reads it — `schema-drift.ts`'s base-type branch is gated on
- * multi-value fields over textual columns and compares no numeric type.
+ * retypes no existing column (schema sync is additive and never alters a
+ * column's type in place), it plans no migration, and no drift finding reads
+ * it. A deployment created before this table keeps its `real` columns, keeps
+ * their values, and keeps reading them back as JS numbers through
+ * `NUMERIC_SCALAR_TYPES`' read coercion — which is also what makes the new
+ * columns read back as numbers, since node-postgres parses `numeric` to a
+ * STRING and `real` to a number.
  */
 
 import { NUMERIC_VALUE_TYPES } from './field-value.zod';
 
 /**
- * Total digits for every exact-decimal column this table produces.
- *
- * See the provenance block above: the portable ceiling is MySQL's
- * `DECIMAL(65, 30)`, and 38 leaves 21 digits left of the point at the default
- * scale — past `Number.MAX_SAFE_INTEGER`'s 16.
+ * Total digits for every exact-decimal column this table produces — MySQL's
+ * documented `DECIMAL` maximum, and therefore the portable one. See the
+ * provenance block above; ⛔ do not "tidy" it to a rounder number.
  */
-export const NUMERIC_COLUMN_PRECISION = 38;
+export const NUMERIC_COLUMN_PRECISION = 65;
 
 /**
- * Decimal places for a member of this family that declares no `scale`.
- *
- * 17 = the significant decimal digits an IEEE-754 binary64 round-trips, and
- * the narrowest scale measured to lose nothing on the fourteen-value corpus
- * above.
+ * Decimal places for every exact-decimal column this table produces — MySQL's
+ * documented maximum `DECIMAL` scale, and the only scale measured to lose
+ * nothing on the nine-value corpus above.
  */
-export const DEFAULT_NUMERIC_SCALE = 17;
+export const NUMERIC_COLUMN_SCALE = 30;
 
 /**
- * The widest scale every dialect this platform speaks accepts (MySQL's cap on
- * `DECIMAL`). A declaration past it is not carried into the column — it would
- * make the DDL itself unportable — and it is not lost either: the write seam
- * still enforces the declared `scale` by rejection.
- */
-export const MAX_NUMERIC_COLUMN_SCALE = 30;
-
-/**
- * What a numeric field's column IS, kept as named answers rather than a bare
+ * What a numeric field's column IS, kept as NAMED answers rather than a bare
  * pair — the same reason `generate.ts`'s `VarcharAnswer` is three answers and
- * not a number: `integer` is not "a decimal with scale 0", it is a different
- * column type with a different refusal.
+ * not a number. `integer` is not "an exact decimal with scale 0": it is a
+ * different column type with a different refusal, and on SQLite a different
+ * affinity.
  */
 export type NumericColumnRepresentation =
   | { readonly kind: 'integer' }
   | { readonly kind: 'exact'; readonly precision: number; readonly scale: number };
 
-/** The subset of field metadata the representation is resolvable from. */
-export interface NumericColumnFieldMeta {
-  readonly type?: string;
-  /** Declared decimal places — `FieldSchema.scale`, a non-negative integer. */
-  readonly scale?: unknown;
-}
+const EXACT: NumericColumnRepresentation = {
+  kind: 'exact',
+  precision: NUMERIC_COLUMN_PRECISION,
+  scale: NUMERIC_COLUMN_SCALE,
+};
 
 /**
- * The per-type BASELINE — the answer for a field that declares no `scale`.
+ * The per-type table itself.
  *
  * Keyed on every member of `NUMERIC_VALUE_TYPES` and nothing else. The
  * equality is PINNED rather than typed — `NUMERIC_VALUE_TYPES` is a
  * `ReadonlySet<string>`, so no `satisfies` can express it — and
  * `numeric-column-representation.test.ts` fails in BOTH directions: a type
  * joining that class with no entry here, and an entry here naming a type that
- * left it. Without the pin a new member would fall through to `undefined` and
- * each producer would silently keep its own old guess.
+ * left it. Without the pin a new member would resolve to `undefined` and each
+ * producer would quietly keep its own old guess, which is the exact shape
+ * #16318 exists to close.
+ *
+ * ⚠️ The driver's internal SQL aliases (`float`, `integer`, `int`) are NOT
+ * members of this class and deliberately have no entry: they are not
+ * `FieldType`s, nothing authorable produces them, and they keep the columns
+ * they have always had.
  */
-const BASELINE: Readonly<Record<string, NumericColumnRepresentation>> = {
-  // Open-range quantities. Exact decimal at the full binary64 significand.
-  number: { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: DEFAULT_NUMERIC_SCALE },
-  // Money. The one member where the loss is a correctness question rather than
-  // a display one, and the reason binary32 could not stay: ⛔ not a blanket
-  // `18,2` either — a currency code the schema accepts is not always a 2-digit
-  // one (ISO 4217 carries 0- and 3-digit currencies, and crypto codes fail open
-  // at 8 and 18; see `currency-fraction-digits.ts`).
-  currency: { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: DEFAULT_NUMERIC_SCALE },
-  // ⚠️ A `percent` stores a 0–1 FRACTION unless the field declares `max > 1`
-  // ({@link percentScaleOf}), so the legitimate value the ruling names —
-  // 33.333% — reaches the column as `0.33333`, and `numeric(5,2)` rounded it to
-  // `0.33`: three significant digits, i.e. 33% for 33.333%.
-  percent: { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: DEFAULT_NUMERIC_SCALE },
-  slider: { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: DEFAULT_NUMERIC_SCALE },
-  // Same 0–100 quantity as `percent`, and it took `percent`'s narrow shape in
-  // the sql format for exactly that reason. It keeps sharing the answer — the
-  // wide one.
-  progress: { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: DEFAULT_NUMERIC_SCALE },
-  // Platform-computed roll-up. It is the SUM of child values, so it needs at
-  // least what its children have; anything narrower rounds an addend.
-  summary: { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: DEFAULT_NUMERIC_SCALE },
-  // A star count. See the half-star block above — the capability was retired,
-  // and a field that declares a `scale` still takes the exact answer below.
+export const NUMERIC_COLUMN_REPRESENTATION: Readonly<Record<string, NumericColumnRepresentation>> = {
+  // Open-range quantities.
+  number: EXACT,
+  // Money — the one member where the loss is a correctness question rather
+  // than a display one, and the reason binary32 could not stay. ⛔ Not a
+  // blanket `18,2`: the platform's own CLDR table carries 0-digit currencies
+  // (JPY, KRW, ...) and 3-digit ones (BHD, KWD, ...), and its currency-code
+  // schema deliberately fails OPEN for crypto and custom codes, which carry
+  // more (see `currency-fraction-digits.ts`). A money column that fixes two
+  // decimals is wrong for a set the platform declines to close.
+  currency: EXACT,
+  // ⚠️ A `percent` stores a 0-1 FRACTION unless the field declares `max > 1`
+  // (`percentScaleOf`), so the legitimate value the ruling names — 33.333% —
+  // reaches the column as `0.33333`, where `numeric(5,2)` rounded it to
+  // `0.33`: 33% for 33.333%. Both storage scales are held exactly here.
+  percent: EXACT,
+  slider: EXACT,
+  // The same 0-100 quantity as `percent`, which is why it took `percent`'s
+  // NARROW shape in the sql format. It keeps sharing `percent`'s answer; the
+  // shared answer is now the wide one.
+  progress: EXACT,
+  // A platform-computed roll-up: the SUM of child values, so it needs at least
+  // what its children have, and it is the member with no write seam to refuse
+  // an over-scale value on its behalf.
+  summary: EXACT,
+  // A star count. See the half-star block above.
   rating: { kind: 'integer' },
 };
 
 /**
- * The column a numeric field takes, or `undefined` when the field is not a
- * member of this family at all (this table has NO opinion about those — the
- * caller keeps whatever answer it already had).
+ * The column a numeric field type takes, or `undefined` when the type is not a
+ * member of this family at all — this table has NO opinion about those, and a
+ * caller that gets `undefined` keeps whatever answer it already had.
  *
- * The declaration is read the way `SqlDriver.declaredVarcharLength` reads
- * `maxLength`: a `scale` that is not a well-formed, portable digit count is
- * NOT a declaration, and a malformed one leaves the baseline in place rather
- * than being repaired into some invented meaning (the #8321 house rule).
+ * ⛔ Callers must not spell a fallback column for a member of this family: an
+ * `undefined` for one would mean the caller's case labels and
+ * `NUMERIC_VALUE_TYPES` have parted, and a silent default is the drift this
+ * table closes. The pin holds the two equal.
  */
-export function numericColumnFor(
-  field: NumericColumnFieldMeta | undefined,
-): NumericColumnRepresentation | undefined {
-  const type = field?.type;
+export function numericColumnFor(type: string | undefined): NumericColumnRepresentation | undefined {
   if (typeof type !== 'string' || !NUMERIC_VALUE_TYPES.has(type)) return undefined;
-  const declared = field?.scale;
-  if (
-    typeof declared === 'number' &&
-    Number.isInteger(declared) &&
-    declared >= 0 &&
-    declared <= MAX_NUMERIC_COLUMN_SCALE
-  ) {
-    return { kind: 'exact', precision: NUMERIC_COLUMN_PRECISION, scale: declared };
-  }
-  return BASELINE[type];
+  return NUMERIC_COLUMN_REPRESENTATION[type];
 }
