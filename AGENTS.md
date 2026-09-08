@@ -466,7 +466,7 @@ Even inside your own worktree, operate defensively:
    tooling represents it: squash landing destroys the ancestry link, so every descendant rewinds behind what landed and
    pays a rebuild lap per landing; and a breaking changeset's ADR-0087 disposition is base-relative, so a stacked card's
    two bases demand contradictory markers. A multi-card change uses a **trunk branch**: correct the trunk's disposition
-   to `registered` before it merges, and pay the rebase laps. ⛔ No gate rule and no merge-policy change is made for it.
+   to `registered` before it merges, and pay the rebase laps. ⛔ No gate or merge-policy change is made for it.
 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
    force-push can clobber a parallel agent's work; `main` is shared — land all via PR.
 4. **Verify the current branch before every commit/push**
