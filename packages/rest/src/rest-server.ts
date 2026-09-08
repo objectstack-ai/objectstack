@@ -4525,9 +4525,19 @@ export class RestServer {
 
                         // Align auth route with the versioned base path if present.
                         // Auth is a control-plane concern, so use the unscoped base.
+                        //
+                        // [#16538] The strip names BOTH spellings, exactly as the MCP
+                        // sibling above does. It used to name only the retired
+                        // `/projects/:environmentId`, while `isScoped` — the condition
+                        // guarding this very branch — keys on `/environments/:environmentId`
+                        // alone. So the replace could never match where it ran: it returned
+                        // `basePath` unchanged and a scoped `/discovery` advertised
+                        // `/api/v1/environments/:environmentId/auth`, keeping both the scope
+                        // this comment says to drop and a literal, unsubstituted route
+                        // parameter. Pinned in `discovery-per-request-protocol.test.ts`.
                         if (discovery.routes.auth) {
                             const unscopedBase = isScoped
-                                ? basePath.replace(/\/projects\/:environmentId$/, '')
+                                ? basePath.replace(/\/(environments|projects)\/:environmentId$/, '')
                                 : basePath;
                             discovery.routes.auth = `${unscopedBase}/auth`;
                         }
