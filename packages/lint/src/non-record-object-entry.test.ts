@@ -399,7 +399,7 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  * "nothing throws" would have had to be deleted or weakened on the day it was
  * written, and would then never have caught the next one.
  *
- * Three rows have come out since it was written, each because the sweep went
+ * Four rows have come out since it was written, each because the sweep went
  * red demanding a throw that no longer happens — which is the both-directions
  * half earning its keep, since no removal started with anyone going looking:
  *
@@ -413,19 +413,23 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  *    field readers already did.
  *  - `flows[].nodes` / `validateStackExpressions` — the two casts #15793
  *    repaired, and the reason the two graph-shaped arms below exist at all.
+ *  - `flows[].nodes` / `lintFlowPatterns` — the SAME two spellings one file
+ *    over. `lint-flow-patterns.ts` inline-cast `flow.nodes` and then read
+ *    `.type` off each member, and double-cast `graph.nodes` at two further
+ *    readers; `flow-variable-scope.ts` walked `graph.nodes` with no member
+ *    guard while guarding `flow.variables` seven lines up. All re-pointed at
+ *    `recordsOf` by #16751, with the COERCED array — never `flow.nodes` raw —
+ *    handed on to `collectFlowGraphs`, so the crash is removed rather than
+ *    relocated into `packages/spec`.
  *
- * ## The rows it holds today, both found by the arms that added them
+ * ## The row it holds today, found by the arm that added it
  *
  * It went from empty to two the moment a flow's inner node list became
  * addressable, which is the point #15793 was filed to make: this class was
  * closed three times over collections while the same defect stood untouched one
- * addressing mode away.
+ * addressing mode away. #16751 has since taken the consumer-side half back out;
+ * what stands below is the producer-side one.
  *
- *  - `flows[].nodes` / `lintFlowPatterns` (#16751) — `lint-flow-patterns.ts`
- *    holds the SAME two spellings #15793 removed from `validate-expressions.ts`
- *    (`:1426` inline-casts `flow.nodes`, then `:1430` reads `.type` off each
- *    member; `:456` and `:1522` double-cast `graph.nodes`). Shallowly
- *    reachable — an ordinary flow with an empty YAML list item.
  *  - `flows[].nodes[].config.body.nodes` / `validateStackExpressions` +
  *    `lintFlowPatterns` (#16752) — neither rule's own reader is at fault here:
  *    both throw from INSIDE `collectFlowGraphs`, whose region walk reads
@@ -435,10 +439,6 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  *    `packages/spec` contract to tolerate malformed members.
  */
 const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
-  // 2026-09-08 — #16751. Removed when `lint-flow-patterns.ts` reads its node
-  // lists through `recordsOf`, as `validate-expressions.ts` now does.
-  'flows[].nodes · null': ['lintFlowPatterns'],
-  'flows[].nodes · undefined': ['lintFlowPatterns'],
   // 2026-09-08 — #16752. Both entries are ONE defect in `collectFlowGraphs`,
   // surfacing through the two rules that call it. Removed together.
   'flows[].nodes[].config.body.nodes · null': ['lintFlowPatterns', 'validateStackExpressions'],

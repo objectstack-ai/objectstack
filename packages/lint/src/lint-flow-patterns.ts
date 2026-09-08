@@ -447,13 +447,19 @@ function findDataNodeAnywhere(
   edges: AnyRec[],
 ): { readonly node: AnyRec; readonly scope: string } | null {
   // A cast, not a parse — same contract as the main per-graph walk below: the
-  // walk touches only `type` / `config`, and the guarded arrays are passed so a
-  // malformed region cannot make this throw (this module never throws).
+  // walk touches only `type` / `config`, and the arrays handed in are the ones
+  // the caller already coerced through `recordsOf`, so a malformed member
+  // cannot make this throw (this module never throws).
   for (const graph of collectFlowGraphs({
     nodes: nodes as unknown as FlowNodeParsed[],
     edges: edges as unknown as FlowEdgeParsed[],
   })) {
-    for (const node of graph.nodes as unknown as AnyRec[]) {
+    // `recordsOf`, not `as unknown as AnyRec[]` (#16751). The top-level list is
+    // clean by the caller's coercion, but a NESTED region's node list is only
+    // `Array.isArray`-checked by `collectFlowGraphs` before it becomes a graph
+    // — it carries the producer's word about its members, not a check. Same
+    // decision made once more where that guarantee stops, through the one home.
+    for (const node of recordsOf(graph.nodes)) {
       if (DATA_NODE_TYPES.has(typeof node.type === 'string' ? (node.type as string) : '')) {
         return { node, scope: graph.scope };
       }
@@ -1423,7 +1429,16 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
   for (const flow of recordsOf(stack.flows)) {
     const flowName = typeof flow.name === 'string' ? flow.name : '(unnamed flow)';
-    const nodes = Array.isArray(flow.nodes) ? (flow.nodes as AnyRec[]) : [];
+    // `Array.isArray` proves the LIST, never its MEMBERS. A YAML `nodes:` item
+    // left empty deserialises to `null`, and `nodes.find(n => n.type === …)`
+    // four lines down dereferenced it (#16751). Read through `recordsOf` — the
+    // one home for this coercion (`object-graph.ts`) — and note that THIS array
+    // is also what goes to `collectFlowGraphs` below, never `flow.nodes` raw:
+    // that producer is transparent about members (it forwards the caller's
+    // array and re-exposes the same objects), so coercing only for the local
+    // read relocates the crash into `packages/spec` instead of removing it —
+    // measured on #15793, and measured again here.
+    const nodes = recordsOf(flow.nodes);
     const edges = Array.isArray(flow.edges) ? (flow.edges as AnyRec[]) : [];
 
     // (a) #1874 — date-equality time condition on a record-change start node.
@@ -1519,7 +1534,11 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       edges: edges as unknown as FlowEdgeParsed[],
     })) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
-      const graphNodes = graph.nodes as unknown as AnyRec[];
+      // `recordsOf`, not `as unknown as AnyRec[]` (#16751) — the same reason as
+      // in `findDataNodeAnywhere`: the top-level graph is clean by the coercion
+      // at the call site above, and a nested region's node list arrives here
+      // with only `Array.isArray` behind it.
+      const graphNodes = recordsOf(graph.nodes);
       const graphEdges = graph.edges as unknown as AnyRec[];
 
       // (b) #1315 — wrong interpolation syntax in any node's template values. Flow
