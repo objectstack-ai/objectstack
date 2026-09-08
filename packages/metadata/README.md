@@ -167,13 +167,15 @@ generic LRU cache (see `src/utils/lru-cache.ts`). Writes invalidate the
 affected entries, so reads always observe writes made through the same loader
 instance; out-of-band SQL writes are honored within `ttlMs` milliseconds.
 
-Configuration lives under `cache.databaseLoader`:
+Configuration lives under `cache.databaseLoader` — the only live member of the
+`cache` block (the outer `cache.enabled` / `cache.ttlSeconds` / `cache.maxSize`
+were removed in #15624: nothing ever read them, and authoring one is now a
+compile-time and parse-time error naming this nested half):
 
 ```typescript
 new MetadataManager({
   datasource: 'default',
   cache: {
-    enabled: true,
     databaseLoader: {
       enabled: true,
       maxSize: 500,        // Max cached (type, name) entries

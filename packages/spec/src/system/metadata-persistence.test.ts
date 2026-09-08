@@ -475,7 +475,7 @@ describe('MetadataManagerConfigSchema', () => {
     const config = MetadataManagerConfigSchema.parse({
       rootDir: '/app',
       watch: true,
-      cache: { enabled: true },
+      cache: { databaseLoader: { enabled: true } },
       formats: ['json', 'yaml'],
     });
 

@@ -4,6 +4,7 @@
   "exports": [
     "ACCEPTED_FILTER_COMPARAND_TYPES (const)",
     "ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE (const)",
+    "AGGREGATE_FIELD_TYPE_COMPATIBILITY (const)",
     "AGGREGATION_CASES (const)",
     "AGGREGATION_ROWS (const)",
     "ALL_OPERATORS (const)",
@@ -738,6 +739,7 @@
     "hookForm (const)",
     "injectedSystemColumnDefs (function)",
     "isAcceptedFilterComparand (function)",
+    "isAggregateCompatibleWithFieldType (function)",
     "isAnalyticsDateRangeRefusalIssue (function)",
     "isApiOperationAllowed (function)",
     "isApiPrimitive (function)",

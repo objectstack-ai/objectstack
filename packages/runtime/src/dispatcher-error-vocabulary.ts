@@ -211,9 +211,21 @@ export type CodeVerdict =
     | 'foreign-vocabulary'
     /**
      * A refusal raised before any HTTP boundary exists — the CLI rethrows it
-     * and aborts. The ledger's own note ratifies this class by name:
-     * `MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 for exactly
-     * this reason, and "host boot matching is not wire vocabulary".
+     * and aborts. Until #16404 the ledger's own note ratified this class as
+     * NOT owed a row (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by
+     * #8035 on "host boot matching is not wire vocabulary").
+     *
+     * [#16404] That exemption is gone: the published face is the ledger, and
+     * every code that ships in `dist` is registered there, door or no door.
+     * This verdict now records REACHABILITY only — no door answers with the
+     * code, so registering it changes no HTTP body — and a row carrying it is
+     * a registration OWED, exactly like `pending-registration`: the row
+     * ratchets out when the ledger row lands (#16449 took the nine measured on
+     * that card's tree; the rows still here are the follow-up named in the
+     * running log below). ⛔ Under `packages/spec/src/**` the gate refuses
+     * this verdict outright (`spec-face-unregistered`): a spec stamp site is a
+     * ledger member, a foreign vocabulary or a runtime-pinned template —
+     * nothing between.
      */
     | 'boot-refusal'
     /**
@@ -282,6 +294,18 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // future unswept producer lands here as an `unclassified-site` finding and
     // gets a new row (then a spec-lane registration, then the row comes out
     // again). ──
+    //
+    // ── [#16449] Third full cycle, under the #16404 ruling (the ledger is the
+    // published face; every code shipped in `dist` is registered, door or no
+    // door): the nine `boot-refusal` rows measured unregistered on that card's
+    // tree — `OBJECT_OWNERSHIP_CONFLICT` (`@objectstack/objectql`), the seven
+    // `STACK_*` `defineStack` refusals and `PLUGIN_UI_REQUIRED_KEY_MISSING`
+    // (`@objectstack/spec`) — were registered and ratcheted out; the
+    // reachability each row recorded now lives on its ledger row. The
+    // `boot-refusal` rows still below are the same class and owe the same
+    // registration (#16649); `packages/spec/src/**` can no longer carry
+    // one at all — `check:dispatcher-error-vocabulary` refuses any verdict
+    // there but `foreign-vocabulary` / `runtime-pinned`. ──
 
     // ── runtime-pinned: an interpolated family, checked where it can be ─────
     {
@@ -800,31 +824,6 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             + '`message`. If a transport ever ANSWERS with this fact, the verdict becomes '
             + 'pending-registration and the code belongs in the ledger batch.',
     },
-    // [#16334] The spec's own code for the one CONDITIONAL requirement
-    // `PluginSchema` carries — `type: 'ui'` owes `staticPath` and `slug` —
-    // stamped by the schema's `superRefine` onto the zod ISSUE (`params.code`,
-    // and at the head of `message`), never onto a thrown error. The scanner
-    // sees it as an `objlitconst` site because the literal sits inside
-    // `ctx.addIssue({ …, params: { code } })` in a `.zod.ts` file.
-    {
-        code: 'PLUGIN_UI_REQUIRED_KEY_MISSING',
-        file: 'packages/spec/src/kernel/plugin.zod.ts',
-        shape: 'objlitconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'Stamped on a zod ISSUE, not on a thrown error: `PluginSchema`\'s `superRefine` adds one '
-            + '`custom` issue per missing key when a `type: \'ui\'` plugin omits `staticPath` or `slug`, '
-            + 'with this code on `params.code` and at the head of `message`. MEASURED reachability: the '
-            + 'only runtime caller of `PluginSchema` is `PluginLoader.validatePluginContract` '
-            + '(`packages/core/src/plugin-loader.ts`, the `PLUGIN_CONTRACT_VIOLATION` row above), which '
-            + 'reads the first issue\'s `path` and `message` and re-raises them inside the '
-            + '`PLUGIN_CONTRACT_VIOLATION` envelope at `kernel.use()` — before bootstrap, and therefore '
-            + 'before any HTTP boundary exists. So this code reaches a reader only as a substring of that '
-            + 'boot refusal\'s message; no door answers with it and `error.code` never carries it. Same '
-            + 'class and same reasoning as the row above. If a door ever answers with it, the verdict '
-            + 'becomes pending-registration and it belongs in the ledger batch.',
-    },
     // [ADR-0130 D4] The artifact load path's three wrapper refusals, added with the
     // N-package load path itself. The pre-HTTP reasoning is the one the rows above
     // cite; what is specific to these three is the second half recorded in each `why`
@@ -947,194 +946,6 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             '`status: 422` is the ADR-0112 envelope shape this repo\'s rejection tests assert on, not ' +
             'evidence of a door. If an install door ever answers with this code itself, the verdict becomes ' +
             'pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'OBJECT_OWNERSHIP_CONFLICT',
-        file: 'packages/objectql/src/registry.ts',
-        // [#16159] `classconst`, not `classfield`, since the literal became the
-        // exported `OBJECT_OWNERSHIP_CONFLICT_CODE` constant in the producer. The VALUE is
-        // byte-identical and the scanner resolves the constant back to it; only the
-        // spelling the scan matches on moved. The verdict below is untouched.
-        shape: 'classconst',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0029 D3 — the refusal for a package claiming `own` on an object name a DIFFERENT package ' +
-            'already owns, raised by `SchemaRegistry.registerObject` (the ONE spelling of this refusal — ' +
-            'the ADR-0029 D9 §6.1 late-install branch beside it re-classifies a tenant-authored ' +
-            'sitting owner and refuses nothing). Measured on this tree, every path to it either aborts boot ' +
-            'or catches below any door. `ObjectQL.registerApp` (`packages/objectql/src/engine.ts`) lets it ' +
-            'propagate to `ManifestService.register()` (`packages/objectql/src/plugin.ts`), whose callers ' +
-            'are the population the three ADR-0130 rows above record: boot-time `manifest.register()` ' +
-            'inside plugin init (`packages/runtime/src/app-plugin.ts`, the platform app plugins, the ' +
-            'service plugins), where a throw aborts boot before any HTTP boundary exists; the rehydrate ' +
-            'loop in `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, which catches per ' +
-            'entry and logs; and the import route in that same file, which catches and answers with its ' +
-            'OWN registered `PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into ' +
-            'that envelope. Every other caller catches it in-process: `ObjectQL.registerPlugin` ' +
-            '(`logger.warn`), the `ObjectQLPlugin` metadata bridge\'s reload ingest and `subscribe(\'object\')` ' +
-            'handler (`logger.warn`), and `metadata-protocol`\'s `applyObjectRegistryMutation` ' +
-            '(`console.warn`) and `loadMetaFromDb` (the per-record `errors` count). The two HTTP install ' +
-            'sites — `POST /packages` in `packages/runtime/src/domains/packages.ts` and ' +
-            '`protocol.installPackage` — call `SchemaRegistry.installPackage`, which records the package ' +
-            'and never calls `registerObject`, so neither can raise it; `MetadataFacade.register(\'object\')` ' +
-            'would propagate it, and has no production instantiation. So the code reaches a reader only ' +
-            'inside a message string, never as `error.code`. Its `status: 422` is the ADR-0112 envelope ' +
-            'shape this repo\'s rejection tests assert on, not evidence of a door. If a door ever answers ' +
-            'with this code itself, the verdict becomes pending-registration and it belongs in the ledger ' +
-            'batch.'
-    },
-    {
-        code: 'STACK_CROSS_REFERENCE_INVALID',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0130 — the AUTHORING gate\'s cross-reference refusal, raised by `defineStack` when a ' +
-            'stack\'s items name objects the stack does not define. One raise site for the whole rule ' +
-            'family: `validateCrossReferences` returns every finding as a `string[]` and `defineStack` ' +
-            'throws the collected set once, so the code names the family and the individual classes ride ' +
-            'the error\'s `issues` field (the five REFUSED ADR-0130 matrix classes — action `objectName`, ' +
-            'view `data.object`, permission-set `objects`, seed dataset `object`, import mapping ' +
-            '`targetObject` — plus the `hooks[].object` rule, and the wider duplicate-action-key, ' +
-            'global-`update`-action and mapping `javascript`-transform findings the same aggregate ' +
-            'carries). Before this envelope it threw a bare `Error`, so those classes were separable only ' +
-            'by message text. ⭐ MEASURED, not inferred from the call graph: `defineStack` is an ' +
-            'authoring/boot-time entry point, and no HTTP domain handler calls it. Every non-test ' +
-            'occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` (25 of them) ' +
-            'is a docstring or comment; the shipped callers are the CLI (`os validate`, `os build`) and ' +
-            'the `os serve` / `os migrate` host configs and `DevPlugin`, which load a stack module at ' +
-            'boot, where a throw aborts before any HTTP boundary exists. The two HTTP install sites — ' +
-            '`POST /packages` in `packages/runtime/src/domains/packages.ts` and `protocol.installPackage` ' +
-            '— call `SchemaRegistry.installPackage`, which never calls `defineStack`. So the code reaches ' +
-            'a reader only inside a message string, never as `error.code`. Its `status: 422` is the ' +
-            'ADR-0112 envelope shape this repo\'s rejection tests assert on, not evidence of a door. If a ' +
-            'door ever answers with this code itself, the verdict becomes pending-registration and it ' +
-            'belongs in the ledger batch.'
-    },
-    // ── [#15963] the six remaining `defineStack` refusals, one code each ──
-    //
-    // Same raiser, same reachability and same verdict as the
-    // STACK_CROSS_REFERENCE_INVALID row above, which was the ONE of seven
-    // `defineStack` refusal sites carrying an envelope. One row per code
-    // rather than one shared `STACK_VALIDATION_FAILED`: this `boot-refusal`
-    // class is already at one-row-per-refusal granularity (14 rows before
-    // these six), and the cross-reference row is an instance of it, not an
-    // exception. The reachability measurement was RE-TAKEN on the tree these
-    // landed against and is recorded once, on the STACK_SCHEMA_INVALID row;
-    // the five rows after it cite that reading by its numbers.
-    {
-        code: 'STACK_SCHEMA_INVALID',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — the AUTHORING gate\'s SCHEMA refusal: `ObjectStackDefinitionSchema.safeParse` failed ' +
-            'inside `defineStack`, thrown as `StackSchemaInvalidError` with the zod issues on `issues`. ' +
-            'Its own arm rather than a reuse, on a reading taken before it was written: `packages/spec` ' +
-            'has no zod-failure envelope to reuse (`formatZodError` / `safeParsePretty` return prose; no ' +
-            '`extends Error` there wraps a `ZodError`); the ledger\'s two zod-shaped refusals are both ' +
-            'spelled `*_SCHEMA_INVALID` — `METADATA_SCHEMA_INVALID` (metadata-core\'s `SchemaValidationError`, ' +
-            'the `issues`-carrying precedent; nothing in the tree assigns it a status) and ' +
-            '`FLOW_INPUT_SCHEMA_INVALID` (422 in `packages/runtime/src/flow-dispatch-status.ts`) — and the ' +
-            'zod-shaped refusal `metadata-protocol` actually stamps at 422 is `INVALID_METADATA`; ' +
-            'and the two other channels a zod failure travels on — `400 VALIDATION_ERROR` (request ' +
-            'syntax) and `VALIDATION_FAILED` + `fields[]` (record validation, which ' +
-            '`validationFailureDetails` duck-types on `name === \'ValidationError\'`) — would each file an ' +
-            'authored stack as something it is not. ⭐ MEASURED on the tree it landed against: every ' +
-            'non-test occurrence of `defineStack` under `packages/runtime/src` and `packages/rest/src` ' +
-            '(33 of them) is a docstring, a comment or this table\'s own prose — zero call sites. The ' +
-            'shipped callers are the CLI (`os validate`, `os build`) and the `os serve` / `os migrate` ' +
-            'host configs and `DevPlugin`, which load a stack module at boot, where a throw aborts before ' +
-            'any HTTP boundary exists; the two HTTP install sites call `SchemaRegistry.installPackage`, ' +
-            'which never calls `defineStack`. So the code reaches a reader only inside a message string, ' +
-            'never as `error.code`; its `status: 422` is the ADR-0112 envelope shape this repo\'s ' +
-            'rejection tests assert on, not evidence of a door. If a door ever answers with this code ' +
-            'itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
-    },
-    {
-        code: 'STACK_CAPABILITY_UNKNOWN',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s capability refusal, raised through `validateKnownCapabilities` when ' +
-            '`requires` names a token no runtime provides; one `issues` entry per ' +
-            'distinct unknown token, thrown as `StackCapabilityUnknownError`. Reachability is the ' +
-            'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
-            '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
-            'boot-time host configs, where a throw aborts before any HTTP boundary exists. The code ' +
-            'reaches a reader only inside a message string; `status: 422` is envelope shape, not a door. ' +
-            'If a door ever answers with it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_NAMESPACE_PREFIX_INVALID',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s namespace-prefix refusal, raised through `validateNamespacePrefix` ' +
-            'when an object\'s name lacks the `manifest.namespace` prefix; one `issues` entry per object, ' +
-            'the writing-style hint kept in the message only, thrown as `StackNamespacePrefixInvalidError`. ' +
-            'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
-            'occurrences under `packages/runtime/src` + `packages/rest/src`, zero call sites; callers are ' +
-            'the CLI and the boot-time host configs, where a throw aborts before any HTTP boundary exists. ' +
-            'The code reaches a reader only inside a message string; `status: 422` is envelope shape, not ' +
-            'a door. If a door ever answers with it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_SINGLE_APP_VIOLATION',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s single-app refusal, raised through `validateSingleApp` when an `app` ' +
-            'package declares more than one app (the banned "suite contains apps" shape, ADR-0019 D3); ' +
-            'thrown as `StackSingleAppViolationError`. Reachability is the STACK_SCHEMA_INVALID reading on ' +
-            'the same tree: 33 non-test `defineStack` occurrences under `packages/runtime/src` + ' +
-            '`packages/rest/src`, zero call sites; callers are the CLI and the boot-time host configs, ' +
-            'where a throw aborts before any HTTP boundary exists. The code reaches a reader only inside ' +
-            'a message string; `status: 422` is envelope shape, not a door. If a door ever answers with ' +
-            'it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s hierarchy-scope capability refusal, raised through ' +
-            '`validateHierarchyScopeCapability` when a permission grant uses a HIERARCHY scope while ' +
-            '`requires` omits `hierarchy-security` (ADR-0057 — the declared-capability class that fails ' +
-            'CLOSED); one `issues` entry per grant, thrown as `StackHierarchyScopeCapabilityRequiredError`. ' +
-            'Reachability is the STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` ' +
-            'occurrences under `packages/runtime/src` + `packages/rest/src`, zero call sites; callers are ' +
-            'the CLI and the boot-time host configs, where a throw aborts before any HTTP boundary exists. ' +
-            'The code reaches a reader only inside a message string; `status: 422` is envelope shape, not ' +
-            'a door. If a door ever answers with it, the verdict becomes pending-registration.'
-    },
-    {
-        code: 'STACK_TRIGGER_CAPABILITY_REQUIRED',
-        file: 'packages/spec/src/stack.zod.ts',
-        shape: 'classfield',
-        door: 'none',
-        verdict: 'boot-refusal',
-        why:
-            'ADR-0112 — `defineStack`\'s trigger capability refusal, raised through ' +
-            '`validateTriggerCapability` when an auto-launched flow is declared while `requires` omits ' +
-            '`triggers` (the declared-capability class that fails SILENT); one `issues` entry per ' +
-            'flow, thrown as `StackTriggerCapabilityRequiredError`. Reachability is the ' +
-            'STACK_SCHEMA_INVALID reading on the same tree: 33 non-test `defineStack` occurrences under ' +
-            '`packages/runtime/src` + `packages/rest/src`, zero call sites; callers are the CLI and the ' +
-            'boot-time host configs, where a throw aborts before any HTTP boundary exists. The code ' +
-            'reaches a reader only inside a message string; `status: 422` is envelope shape, not a door. ' +
-            'If a door ever answers with it, the verdict becomes pending-registration.'
     },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
