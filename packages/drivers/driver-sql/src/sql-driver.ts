@@ -13125,8 +13125,11 @@ export class SqlDriver implements IDataDriver {
    * `formatOutput` gates its row reads that way (#11782; SQLite-only before,
    * which is how a declared boolean answered `1`/`0` on MySQL). Postgres
    * stores a real `boolean` node-pg parses, so there the stored form already
-   * IS the presented form. The numeric repair stays SQLite-only: it exists
-   * for legacy TEXT-affinity columns, which no other dialect has.
+   * IS the presented form. The numeric repair ran SQLite-only on the premise
+   * that string-valued numerics exist only for legacy TEXT-affinity columns;
+   * #16318 falsified that premise by moving the numeric family to an exact
+   * decimal, which node-postgres and mysql2 both hand back as a string, so it
+   * runs on every dialect now.
    */
   protected readPresentationKind(
     table: string | null | undefined,
@@ -13139,7 +13142,11 @@ export class SqlDriver implements IDataDriver {
     if ((this.isSqlite || this.isMysql) && this.booleanFields[table]?.includes(field)) {
       return 'boolean';
     }
-    if (!this.isSqlite) return null;
+    // [#16318] Every dialect, for the reason `formatOutput`'s own numeric pass
+    // records: an exact-decimal column is handed back as a STRING by
+    // node-postgres and by mysql2, so `aggregate()` / `distinct()` would present
+    // a declared numeric field as a string on exactly the dialects `find()` now
+    // presents it as a number. One class, one answer, on every door.
     if (this.numericFields[table]?.includes(field)) return 'number';
     return null;
   }
@@ -17057,23 +17064,40 @@ export class SqlDriver implements IDataDriver {
         }
       }
 
-      // Numeric scalars stored on a legacy TEXT-affinity column come back as
-      // strings ('4'); coerce numeric-looking strings back to numbers so the
-      // declared type wins regardless of when the column was created. Only
-      // touch strings — a fresh REAL/INTEGER column already yields a number,
-      // and a genuinely non-numeric value (junk legacy data) is left intact
-      // rather than turned into NaN. See NUMERIC_SCALAR_TYPES.
-      const numericFields = this.numericFields[object];
-      if (numericFields && numericFields.length > 0) {
-        for (const field of numericFields) {
-          const v = data[field];
-          if (typeof v === 'string' && v.trim() !== '') {
-            const n = Number(v);
-            if (!Number.isNaN(n)) data[field] = n;
-          }
+    }
+
+    // Numeric scalars handed back as STRINGS are coerced to numbers, on EVERY
+    // dialect, so the declared type wins regardless of which dialect stored the
+    // value or when the column was created. Only strings are touched — a
+    // REAL/INTEGER column already yields a number — and a genuinely non-numeric
+    // value (junk legacy data) is left intact rather than turned into NaN.
+    // See NUMERIC_SCALAR_TYPES.
+    //
+    // ⚠️ [#16318] This pass was SQLite-only until the numeric family moved to an
+    // exact-decimal column, on the stated premise that string-valued numerics
+    // "exist for legacy TEXT-affinity columns, which no other dialect has".
+    // That premise is now false and it is THIS change that falsified it, so it
+    // is corrected here rather than left as a fossil: measured on live
+    // PostgreSQL 16.13, node-postgres parses `real` to a JS `number` and
+    // `numeric` to a STRING (`1234567.89` arrives as
+    // `'1234567.890000000000000000000000000000'`), and mysql2 does the same for
+    // `DECIMAL`. Without this line every `number` / `currency` / `percent` /
+    // `slider` / `progress` / `summary` field would start reading back as a
+    // string on the two server dialects — a wire-contract break, since
+    // `valueSchemaFor` gives the whole class `z.number().finite()`.
+    //
+    // Two SQLite readings stay exactly as they were: the legacy TEXT-affinity
+    // repair this pass was written for, and a fresh column, which knex declares
+    // `float` for both the old float arm and the new decimal one.
+    const numericFields = this.numericFields[object];
+    if (numericFields && numericFields.length > 0) {
+      for (const field of numericFields) {
+        const v = data[field];
+        if (typeof v === 'string' && v.trim() !== '') {
+          const n = Number(v);
+          if (!Number.isNaN(n)) data[field] = n;
         }
       }
-
     }
 
     // [ADR-0053 D-F1] (#13973) — the two instant classes present as ONE shape
