@@ -423,8 +423,17 @@ describe('#16569 — the rebuilt endpoint is the vendor\'s contract with one pre
     const rebuilt = plugin.endpoints.listUserInvitations;
     expect(rebuilt).not.toBe(vendor);
     expect(rebuilt.path).toBe(LIST_USER_INVITATIONS_PATH);
-    // The SAME options object — no second copy of the request contract exists.
-    expect(rebuilt.options).toBe(vendor.options);
+    // The request contract is the vendor's own objects, by IDENTITY — no
+    // second copy exists to drift. (`createAuthEndpoint` shallow-copies the
+    // options record to append its own base middleware to `use`, measured on
+    // better-call 1.4.0 `createEndpoint.create`; the vendor's entries are all
+    // still there.)
+    expect(rebuilt.options.method).toBe(vendor.options.method);
+    expect(rebuilt.options.query).toBe(vendor.options.query);
+    expect(rebuilt.options.metadata).toBe(vendor.options.metadata);
+    for (const middleware of vendor.options.use ?? []) {
+      expect(rebuilt.options.use).toContain(middleware);
+    }
     // No endpoint added, none dropped: one owner for the path.
     expect(Object.keys(plugin.endpoints).sort()).toEqual(keysBefore);
   });
@@ -438,9 +447,11 @@ describe('#16569 — the rebuilt endpoint is the vendor\'s contract with one pre
   it('the locally restated refusal is the vendor\'s own $ERROR_CODES entry', async () => {
     const { organization } = await import('better-auth/plugins/organization');
     const plugin: any = organization({});
-    expect(plugin.$ERROR_CODES?.EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION).toEqual(
-      EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION,
-    );
+    // `code` and `message` are the wire contract; the vendor's entry also
+    // carries a `toString` helper that never reaches the wire.
+    const vendorEntry = plugin.$ERROR_CODES?.EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION;
+    expect(vendorEntry?.code).toBe(EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.code);
+    expect(vendorEntry?.message).toBe(EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION.message);
   });
 });
 
