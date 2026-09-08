@@ -44,11 +44,14 @@ import { retiredKey } from '../shared/retired-key';
  * written per key in the liveness ledger
  * (`packages/spec/liveness/crud_endpoints.json`, `metadata_endpoints.json`,
  * `batch_endpoints.json`).
- *
- * ⛔ So a docblock here must never describe a key as a deployment posture
- * without saying who can actually set it. An operator reading this page is
- * entitled to learn from it that they cannot set these.
  */
+
+// ⛔ CONTRIBUTOR RULE, deliberately a line comment and not part of the docblock
+// above: `build-docs.ts` renders the module docblock verbatim onto the public
+// reference page, and this sentence is addressed to whoever edits this file, not
+// to the operator reading that page. No docblock here may describe a key as a
+// deployment posture without saying who can actually set it — an operator
+// reading the schema is entitled to learn from it that they cannot set these.
 
 // ==========================================
 // REST API Configuration
