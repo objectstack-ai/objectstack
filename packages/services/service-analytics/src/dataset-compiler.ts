@@ -10,6 +10,7 @@ import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spe
 import { resolveI18nLabel } from '@objectstack/spec/ui';
 import type { FilterCondition } from '@objectstack/spec/data';
 import { datasetInvalidError } from './dataset-refusal.js';
+import { TEMPORAL_SOURCE_FIELD_TYPES } from './measure-result-type.js';
 
 /**
  * Dataset → Cube compiler (ADR-0021 D-A=(c), WS2).
@@ -240,10 +241,43 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
  * is the whole of `derived` coverage — there is no second gate to keep in step,
  * which is why the refusal is placed on the measure and not on the consumer.
  *
+ * ## ⚠️ Scope: TEMPORAL source fields only, and why the rest of the table waits
+ *
+ * The verdict is the spec predicate's — ⛔ no row is restated here, and
+ * `min`/`max` over a temporal field stay ACCEPTED because the table accepts
+ * them. What is scoped is which FIELDS this gate judges at all: the temporal
+ * class (`TEMPORAL_SOURCE_FIELD_TYPES` — this package's own shipped statement
+ * of it, the set `measureResultType` already reads), and no other.
+ *
+ * ⛔ That is a deliberate stop, not an oversight, and it is not a rule invented
+ * ahead of the table. Executing every row of the table today REFUSES pairs this
+ * platform currently answers, on purpose, with tests:
+ *
+ * - `min` / `max` over the STRING classes (`text`, `select`, `lookup`,
+ *   `autonumber`, …). `measureResultType` (#15768) types exactly those results
+ *   as `'string'`, and `__tests__/measure-result-type.test.ts` pins them end to
+ *   end through `queryDataset` — 15 cases that go red the moment those rows are
+ *   enforced. The spec module's own header records this as an OVERRIDE of an
+ *   existing opinion rather than agreement with it.
+ * - `sum` / `avg` / `min` / `max` over `boolean` / `toggle`. Maintainer ruling
+ *   #11152 pins booleans aggregating as numbers on every backend
+ *   (`AGGREGATION_CASES`), and the spec header refers the collision between
+ *   that ruling and batch #59 back to the maintainer as its own decision.
+ *
+ * Refusing those would break uses that work today, which is a product judgement
+ * and not a dev's to take mid-flight. The temporal rows carry no such
+ * collision, and were measured on both dialects before this gate was written:
+ * SQLite answers a silent average YEAR, Postgres refuses at 42883, no shipped
+ * dataset in this repo pairs them, and there is no reading on which the mean of
+ * a set of instants is a duration. So the temporal rows are executed and the
+ * remainder stays with #16099, whose full-table leg is blocked on those two
+ * collisions being ruled.
+ *
  * ## Tiering — "cannot answer, do not block", the same as every sibling probe
  *
  * - No `declaredFieldType` hook (no data engine wired) → not judged.
  * - A field the hook cannot resolve → not judged.
+ * - A field outside the temporal class → not judged HERE (see the scope note).
  * - A RELATIONSHIP-PATH field (`account.closed_at`) → not judged. The hook
  *   resolves a column on the BASE object, so it would answer about a different
  *   column of the same name, or about nothing; the spec module says exactly
@@ -270,6 +304,9 @@ function assertAggregateFieldTypeCompatible(
   if (field.includes('.')) return;
   const fieldType = declaredFieldType(objectName, field);
   if (!fieldType) return;
+  // Scoped to the temporal class — see the scope note above. The VERDICT still
+  // comes from the spec table, never from this condition.
+  if (!TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)) return;
   if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return;
 
   const accepted = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate];

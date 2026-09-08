@@ -41,6 +41,21 @@
  * so a row changed upstream changes these expectations with it rather than
  * leaving a second, drifting account of the contract.
  *
+ * ## ⚠️ The compile leg lands SCOPED to temporal source fields, and says why
+ *
+ * The verdict is the table's; what is scoped is which FIELDS the gate judges.
+ * Executing every row today refuses two families this platform answers on
+ * purpose, with tests: `min` / `max` over the STRING classes (typed `'string'`
+ * by `measureResultType`, #15768, and pinned end to end in
+ * `measure-result-type.test.ts`), and the boolean rows (maintainer ruling
+ * #11152 has booleans aggregate as numbers on every backend). The spec module's
+ * own header records both as OVERRIDES of existing opinions rather than
+ * agreement, and refers the boolean one back to the maintainer. Refusing them
+ * would break uses that work today — a product judgement, and #16099's
+ * full-table leg is where it belongs. The temporal rows carry no such
+ * collision, which is why they are the ones executed here. The last suite in
+ * this file pins that boundary so it cannot widen by accident.
+ *
  * ## Dissolution verification — direction predicted BEFORE running
  *
  * Deleting the `assertAggregateFieldTypeCompatible` call in
@@ -145,8 +160,10 @@ const FIELD_TYPES: Record<string, string> = {
   submitted_at: 'datetime',
   approved_at: 'datetime',
   close_date: 'date',
+  shift_start: 'time',
   cycle_days: 'number',
   amount: 'currency',
+  note: 'text',
 };
 
 /**
@@ -455,5 +472,40 @@ describe('#16737 — the gate stands down rather than guessing', () => {
     });
     const result: any = await svc.queryDataset(rel, { dimensions: ['status'], measures: ['avg_acct'] });
     expect(result.rows.length).toBe(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The scope boundary, pinned — so it cannot widen (or narrow) unnoticed
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('#16737 — the compile leg is scoped to temporal source fields, on purpose', () => {
+  it('a `min` over a TEXT field still compiles here, though the table refuses the pair', async () => {
+    // ⚠️ Not an endorsement of the pair — a statement about WHO refuses it.
+    // `measureResultType` (#15768) types this result as `'string'` and
+    // `measure-result-type.test.ts` pins it end to end, so enforcing the
+    // table's string rows is a product judgement that belongs to #16099, not a
+    // side effect of this card. The table's verdict is asserted directly, so
+    // this case reads as "the contract says no, this gate does not act on it".
+    expect(isAggregateCompatibleWithFieldType('min', 'text')).toBe(false);
+    const { svc } = makeService([{ status: 'open', first_note: 'Archive the backlog' }]);
+    const result: any = await svc.queryDataset(
+      dataset([{ name: 'first_note', aggregate: 'min', field: 'note' }]),
+      { dimensions: ['status'], measures: ['first_note'] },
+    );
+    expect(result.rows[0].first_note).toBe('Archive the backlog');
+  });
+
+  it('every temporal member IS judged — the scope is the class, not the one type the card named', async () => {
+    for (const [field, label] of [['submitted_at', 'datetime'], ['close_date', 'date'], ['shift_start', 'time']] as const) {
+      const { svc } = makeService();
+      const err = await refusalOf(() =>
+        svc.queryDataset(
+          dataset([{ name: 'avg_temporal', aggregate: 'avg', field }]),
+          { dimensions: ['status'], measures: ['avg_temporal'] },
+        ),
+      );
+      expect(err.code, `avg over a ${label} field`).toBe('DATASET_INVALID');
+    }
   });
 });

@@ -312,8 +312,17 @@ const dataset = DatasetSchema.parse({
     { name: 'task_count', aggregate: 'count', label: 'Tasks' },
     { name: 'counted_touches', aggregate: 'count', field: 'last_update_at', label: 'Touched' },
     { name: 'counted_subjects', aggregate: 'count', field: 'subject', label: 'Subjects' },
-    { name: 'summed_touches', aggregate: 'sum', field: 'last_update_at', label: 'Summed touches' },
-    { name: 'avg_touch', aggregate: 'avg', field: 'last_update_at', label: 'Average touch' },
+    // ⚠️ [#16737] These two used to aggregate `last_update_at`, and section D's
+    // comment on them read "nothing refuses the pair". That is no longer true:
+    // `sum` / `avg` over a temporal field is now refused at COMPILE time
+    // (`dataset-compiler`, the #16099 leg), so a dataset declaring the pair
+    // cannot exist to be queried. What these two are here to pin is unchanged —
+    // that `sum` / `avg` keep saying `number` — so they moved to the numeric
+    // column and keep pinning it. ⛔ Do not point them back at a temporal field:
+    // that pins a shape the platform refuses, and the suite would be asserting
+    // the absence of this card's fix.
+    { name: 'summed_touches', aggregate: 'sum', field: 'estimate_hours', label: 'Summed estimates' },
+    { name: 'avg_touch', aggregate: 'avg', field: 'estimate_hours', label: 'Average estimate' },
     { name: 'min_estimate', aggregate: 'min', field: 'estimate_hours', label: 'Smallest estimate' },
     { name: 'min_flag', aggregate: 'min', field: 'is_urgent', label: 'Min urgency flag' },
     { name: 'min_payload', aggregate: 'min', field: 'payload', label: 'Min payload' },
@@ -487,7 +496,7 @@ describe('C) both strategy producers move together — the correction is downstr
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('D) the columns that are genuinely numeric keep saying number', () => {
-  it('count / count_distinct / sum / avg over the SAME datetime column, and a derived measure', async () => {
+  it('count / count_distinct over the SAME datetime column, sum / avg over a numeric one, and a derived measure', async () => {
     const result = await objectqlService().queryDataset(
       dataset,
       {
@@ -500,8 +509,10 @@ describe('D) the columns that are genuinely numeric keep saying number', () => {
     // otherwise would be a new bug, so this is a load-bearing control.
     expect(typeOf(result.fields, 'task_count')).toBe('number');
     expect(typeOf(result.fields, 'counted_touches')).toBe('number');
-    // `sum`/`avg` over a temporal column: nothing refuses the pair and the value
-    // is backend-decided, so no type is invented for it.
+    // `sum`/`avg` keep saying `number`, which is correct for them over the
+    // numeric column they now aggregate. [#16737] Over a TEMPORAL column the
+    // pair no longer reaches a type at all — it is refused at compile time, and
+    // `aggregate-datetime-measure-refusal.test.ts` is where that is pinned.
     expect(typeOf(result.fields, 'summed_touches')).toBe('number');
     expect(typeOf(result.fields, 'avg_touch')).toBe('number');
     // A derived measure has no aggregate and is numeric by construction.
