@@ -77,9 +77,10 @@ export function manifestPrescription(opts: { repoRoot: string; checkedIn: boolea
       '  non-zero exit from THIS gate is a reading, not an unavailable input — do not report',
       '  it as EXTERNAL_INPUT_REQUIRED or NOT MEASURED (#16715).',
       '',
-      '  The committed manifest tracks the objectui pin: `pnpm sdui:manifest` rewrites it when',
-      '  .objectui-sha moves (docs/releases-maintenance.md). Re-dump only when you are moving',
-      '  the pin — reading it is what the command above already does.',
+      '  The committed manifest tracks the objectui pin: when .objectui-sha moves, regenerate it',
+      '  and its record with `node scripts/gen-sdui-manifest-node.mjs` (check-sdui-manifest.mjs',
+      '  prints the exact call). ⛔ `pnpm sdui:manifest` does NOT rewrite this file: it dumps to',
+      '  packages/console/dist/, not to the root.',
     ].join('\n');
   }
 

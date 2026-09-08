@@ -559,6 +559,20 @@ describe('check:react-declaration-parity — the prescription is probed, not ass
       expect(text).not.toContain('contains no copy of it');
       expect(text).not.toContain('pnpm objectui:build');
       expect(text).not.toContain('OBJECTUI_ROOT=../objectui');
+      // ⭐ And it must name the RIGHT regenerator. `pnpm sdui:manifest` is
+      // scripts/gen-sdui-manifest.sh, whose TARGET is packages/console/dist — it never
+      // writes the root artefact or scripts/sdui-manifest.record.json.
+      // `node scripts/gen-sdui-manifest-node.mjs` owns both, which is what the record's
+      // own `generator` field and check-sdui-manifest.mjs both say. Sending a reader to
+      // the wrong one is this card's defect class again: a confident false claim about
+      // the tree, in the text consulted when deciding what to run.
+      expect(text).toContain('gen-sdui-manifest-node.mjs');
+      // The wrong tool may appear ONLY as the correction naming it wrong — never as a
+      // command to run. Pinning the spelling's absence outright would be the weaker
+      // test AND would forbid the correction: in the absent branch the same spelling
+      // legitimately opens a command line, which is exactly what this discriminates.
+      expect(text).not.toMatch(/^\s*pnpm sdui:manifest/m);
+      expect(text).toContain('`pnpm sdui:manifest` does NOT rewrite this file');
       // …and it says, in words, what the two devs got wrong.
       expect(text).toMatch(/NOT MEASURED/);
     });
