@@ -96,8 +96,13 @@ const astFor = (c: AggregationCase): Pick<QueryAST, 'groupBy' | 'aggregations'> 
 
 const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) => {
   const groupKey = c.groupByAlias ?? c.groupBy;
+  // [#15546] A NULL answer stays `null` — `Number(null)` is `0`, the ruled
+  // answer for the all-null `sum` cell, so coercing would let a tier that
+  // answered null there pass as if it had folded. This face answers `0` on
+  // its own (the reduce starts at the identity); the pin has to be able to
+  // see it stop doing so.
   return rows
-    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: Number(r.n) }))
+    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n === null ? null : Number(r.n) }))
     .sort((x, y) => String(x.group).localeCompare(String(y.group)));
 };
 
