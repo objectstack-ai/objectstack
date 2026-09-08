@@ -286,7 +286,44 @@
 //   That fence is a CHARACTER CLASS, and #9610 measured what happens when it is
 //   spelled as a consuming alternation instead of a zero-width assertion: the
 //   receiver in `kernel.use(SomePlugin.configure(…))` became unreachable, because
-//   the outer call had already eaten the `(` in front of it. See extractMemberCalls.
+//   the outer call had already eaten the `(` in front of it. See memberCallSites.
+//
+// ## The PROPERTY PATH, and the blind spot that was in NEITHER half (#16209)
+//
+// #9870 left ONE dot in the matcher, so a call reached through a property of a
+// typed receiver -- `client.ai.chat(…)` -- matched nothing at all. Not "checked
+// and clean", and not "counted as unread" either: the second dot puts `chat`
+// behind the lookbehind, so the site was invisible to the checked half AND to
+// the half whose entire job is to publish what the checked half missed. That is
+// a strictly worse state than an unread site, and it is the state
+// `packages/client`'s namespace tour was in -- the npm front page of
+// `@objectstack/client`, ~30 calls, contributing exactly THREE unread sites, all
+// of them `console.log`, `console.error` and `Math.pow`.
+//
+// ⚠️ The card that filed it read that backwards, and correcting it here rather
+// than pointing at the card is the point: it reported the tour as sitting INSIDE
+// the `NOT read` bucket and asked for `new X(…)` to be resolved. `new X(…)` off
+// an import-bound `X` has been resolved since #9870 (`extractLocalBindings`);
+// `client` was already one of the `name(s) built from one` the green line
+// counts. The defect was the matcher's ARITY, not the receiver rule -- which is
+// why adding an import to that fence moved the import half by one and the
+// call-site half by zero, exactly as the card measured and exactly not for the
+// reason it gave.
+//
+// The population, swept with this file's own `publishedDocs()` before anything
+// changed: **53** sites of the shape `root.p1[.p2…].member(`, **42** of them on
+// a root this gate ALREADY types -- 36 the tour, 3 each in `service-i18n` and
+// `service-storage`, every one `client.<ns>.<method>(` on a `client` built with
+// `new ObjectStackClient(…)`. A property of a typed value is typed, and walking
+// to it is `memberAtPath`. Measured after: the call-site half 78 -> 120, and
+// `NOT read` 122 -> **133**.
+//
+// ⭐ The blind-spot pair going UP is the point, not a regression. The 11 that
+// rise is made of are chained sites on untyped roots (`this.connections.set(`,
+// `ctx.logger.info(`) that were previously invisible to both halves; nothing
+// about what the bucket REPORTS was narrowed, and #9870's "Visibility, not a
+// verdict" line is untouched. A change that made that number fall by hiding the
+// tour would have been the opposite of this one.
 //
 // ## Namespace imports, and why an empty population was WIRED here (#10367)
 //
@@ -605,51 +642,115 @@ export function extractImports(markdown) {
 }
 
 /**
- * `Name.member(` call sites inside code fences, restricted to the local names
- * given -- which the caller supplies as "names this document imported from a
- * workspace package and which resolved". That restriction is the whole
- * false-positive defence: pseudo-code in these READMEs is overwhelmingly method
- * calls on locally-bound variables (`analytics.count(...)`,
- * `kernel.getService(...)`), and none of those are import-bound.
+ * EVERY member-call site inside the code fences of a document, deduped, in
+ * document order -- the ONE population both halves of the call-site ledger are
+ * views over.
+ *
+ * ## Why this is one function and not two identical regexes (#16209)
+ *
+ * `extractMemberCalls` (what was CHECKED) and `unreadCallSites` (what was NOT)
+ * carried a byte-identical matcher, a byte-identical fence skip and a
+ * byte-identical dedup, in two places, and the green line prints their sizes
+ * side by side as ONE population split in two. Two derivations of one
+ * population disagree the first time either is edited -- silently, each still
+ * green -- which is the discipline this file's header states for
+ * `publishedDocs`, and which `countUnreadCalls` was already collapsed into once
+ * for exactly this reason. Both halves are now FILTERS over this walk, so the
+ * split cannot stop being a split.
+ *
+ * ## The fence, and the one shape it newly admits
+ *
+ * ⛔ The leading boundary is ASSERTED, never consumed (#9610). The obvious
+ * spelling -- `(^|[^\w$.'"`])` -- eats the character in front of the receiver,
+ * and the regex is global, so a receiver beginning at the very next character
+ * after a previous match has no boundary left to match against. A match always
+ * ends at its own `(`, which makes the swallowed position exactly
+ * `outer(Inner.m(` -- and `kernel.use(SomePlugin.configure({…}))` is the house
+ * spelling of every README this gate was built for, so the blind spot was the
+ * NORMAL position, not a corner. Measured on the published regex, one space
+ * apart:
+ *
+ *   kernel.use(CacheServicePlugin.configure({…}))   -> extracted: kernel.use
+ *   kernel.use( CacheServicePlugin.configure({…}))  -> extracted: both
+ *
+ * A negative lookbehind is zero-width, so nothing is consumed and the `^` arm
+ * folds in (a negative lookbehind is satisfied at position 0). The character
+ * class is byte-for-byte the old one.
+ *
+ * What IS new is the PROPERTY PATH between receiver and member. `client.ai.nlq(`
+ * used to match nothing at all -- in NEITHER half -- because the old matcher
+ * took exactly one dot and `nlq` is preceded by one, so the lookbehind turned
+ * it away. `countUnreadCalls`' docblock called that fence deliberate, and
+ * against the population it was written for it was: with no receiver typed
+ * through a chain, `a.b` was untypeable, and folding it in would have inflated
+ * the blind spot with text the gate is right to ignore.
+ *
+ * That is no longer the population. Measured on this tree with this file's own
+ * `publishedDocs()`: **53** sites of the shape `root.p1[.p2…].member(`, of which
+ * **42 sit on a root this gate ALREADY types** -- 36 in `packages/client`'s
+ * namespace tour, 3 each in `service-i18n` and `service-storage`, every one of
+ * them `client.<ns>.<method>(` on a `client` the fence builds with
+ * `new ObjectStackClient(…)`. A property of a typed value is typed, and reading
+ * it is `memberAtPath`. The other 11 sit on untyped roots, and they become
+ * VISIBLE in the `NOT read` pair rather than invisible to both halves -- the
+ * direction #9870 exists to push, so the pair is expected to RISE by them.
+ *
+ * ⛔ Still out, and for the reason #9610 gave: a CALL EXPRESSION anywhere in the
+ * path (`kernel.getService('mcp').registerTool(`, `z.string().url(`). The path
+ * is identifiers and dots only, so the `(` that ends a match is the call's own.
+ * `'str'.trim(` stays out on the same lookbehind as before.
+ *
+ * @returns `[{ line, object, path, member, key }]` -- `path` is the property
+ *          segments BETWEEN receiver and member (`[]` for the two-segment
+ *          shape, so every pre-existing consumer reads the site it always did),
+ *          and `key` is the dedup key `object.p1….member` this walk deduped by
+ *          WITHIN the document.
  */
-export function extractMemberCalls(markdown, localNames) {
-  const wanted = new Set(localNames);
-  if (wanted.size === 0) return [];
+export function memberCallSites(markdown) {
   const out = [];
   const seen = new Set();
   for (const fence of readFences(markdown)) {
     for (const { n, text } of fence.lines) {
       // Skip the import statements themselves and single-line comments.
       if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
-      // ⛔ The leading boundary is ASSERTED, never consumed (#9610). The obvious
-      // spelling -- `(^|[^\w$.'"`])` -- eats the character in front of the receiver,
-      // and `rx` is global, so a receiver beginning at the very next character after
-      // a previous match has no boundary left to match against. A match always ends
-      // at its own `(`, which makes the swallowed position exactly `outer(Inner.m(`
-      // -- and `kernel.use(SomePlugin.configure({…}))` is the house spelling of every
-      // README this gate was built for, so the blind spot was the NORMAL position,
-      // not a corner. Measured on the published regex, one space apart:
-      //
-      //   kernel.use(CacheServicePlugin.configure({…}))   -> extracted: kernel.use
-      //   kernel.use( CacheServicePlugin.configure({…}))  -> extracted: both
-      //
-      // A negative lookbehind is zero-width, so nothing is consumed and the `^` arm
-      // folds in (a negative lookbehind is satisfied at position 0). The character
-      // class is byte-for-byte the old one, so the fence is unchanged: `a.b.c(` and
-      // `'str'.trim(` stay out -- now in the nested position too, which is the only
-      // position this change newly reaches.
-      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
+      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)((?:\s*\.\s*[A-Za-z_$][\w$]*)+)\s*\(/g;
       let m;
       while ((m = rx.exec(text)) !== null) {
-        if (!wanted.has(m[1])) continue;
-        const key = `${m[1]}.${m[2]}`;
+        const segments = m[2]
+          .split('.')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const member = segments.pop();
+        const key = `${m[1]}.${[...segments, member].join('.')}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        out.push({ line: n, object: m[1], member: m[2] });
+        out.push({ line: n, object: m[1], path: segments, member, key });
       }
     }
   }
   return out;
+}
+
+/**
+ * The member-call sites whose RECEIVER this gate can type -- the half that is
+ * CHECKED.
+ *
+ * The caller supplies the local names as "names this document imported from a
+ * workspace package and which resolved, plus the names the fence builds out of
+ * one". That restriction is the whole false-positive defence: pseudo-code in
+ * these READMEs is overwhelmingly method calls on locally-bound variables
+ * (`analytics.count(...)`, `kernel.getService(...)`), and none of those are
+ * reachable.
+ *
+ * ⛔ A FILTER over `memberCallSites`, never its own walk -- see there for why.
+ * Deduping there and filtering here is the same set as filtering there and
+ * deduping here, because the dedup key BEGINS with the receiver this predicate
+ * reads.
+ */
+export function extractMemberCalls(markdown, localNames) {
+  const wanted = new Set(localNames);
+  if (wanted.size === 0) return [];
+  return memberCallSites(markdown).filter((site) => wanted.has(site.object));
 }
 
 /**
@@ -791,49 +892,41 @@ export function extractLocalBindings(markdown, importBound) {
  * per-document breakdown `--unread-report` prints are one population, computed
  * once, split two ways.
  *
- * Dedup is by `<receiver>.<member>` WITHIN the document, matching
+ * Dedup is by `<receiver>[.<path>].<member>` WITHIN the document, matching
  * `extractMemberCalls`, so the two numbers on the green line stay
  * commensurable. `line` is the first line the deduped site was seen on -- the
  * one a hand read opens the file at -- and is carried rather than counted, so
  * adding it moved no number.
  *
- * @returns `{ sites: [{ line, object, member }], receivers: [string] }`, both in
- *          document order.
+ * ⭐ It is the EXACT COMPLEMENT of `extractMemberCalls` over `memberCallSites`
+ * (#16209): the two predicates are `known.has(site.object)` and its negation,
+ * over one walk, so every site the matcher admits lands in exactly one half and
+ * `callChecks + unreadCalls` cannot drift apart from the size of the
+ * population. The `--self-test` pins that partition.
+ *
+ * @returns `{ sites: [{ line, object, path, member, key }], receivers: [string] }`,
+ *          both in document order.
  */
 export function unreadCallSites(markdown, readableNames) {
   const known = new Set(readableNames);
-  const receivers = new Set();
-  const seen = new Set();
-  const sites = [];
-  for (const fence of readFences(markdown)) {
-    for (const { n, text } of fence.lines) {
-      if (/^\s*(import\b|\/\/|\*|\/\*)/.test(text)) continue;
-      const rx = /(?<![\w$.'"`])([A-Za-z_$][\w$]*)\s*\.\s*([A-Za-z_$][\w$]*)\s*\(/g;
-      let m;
-      while ((m = rx.exec(text)) !== null) {
-        if (known.has(m[1])) continue;
-        const key = `${m[1]}.${m[2]}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        sites.push({ line: n, object: m[1], member: m[2] });
-        receivers.add(m[1]);
-      }
-    }
-  }
-  return { sites, receivers: [...receivers] };
+  const sites = memberCallSites(markdown).filter((site) => !known.has(site.object));
+  return { sites, receivers: [...new Set(sites.map((site) => site.object))] };
 }
 
 /**
  * How many `X.y(…)` call sites this run could NOT type, and on how many
  * distinct receivers -- the number the GREEN line was missing (#9870).
  *
- * Counted with the SAME matcher and the SAME dedup as `extractMemberCalls`, so
- * the two numbers the green line prints are commensurable: "checked 117, could
- * not read 153" is one population split in two, not two different censuses. A
- * shape the matcher's fence excludes on purpose (`a.b.c(`, `'str'.trim(`) is
- * neither checked nor counted here -- it is not a receiver this gate has an
- * opinion about, and folding it in would inflate the blind spot with text the
- * gate is right to ignore.
+ * Counted over the SAME walk and the SAME dedup as `extractMemberCalls`
+ * (`memberCallSites`), so the two numbers the green line prints are
+ * commensurable: "checked 117, could not read 153" is one population split in
+ * two, not two different censuses. A shape the matcher's fence excludes on
+ * purpose (a call expression in the path, `'str'.trim(`) is neither checked nor
+ * counted here -- it is not a receiver this gate has an opinion about, and
+ * folding it in would inflate the blind spot with text the gate is right to
+ * ignore. ⚠️ `a.b.c(` USED to be named in that sentence and no longer is: it is
+ * now matched, checked when the root types and counted here when it does not
+ * (#16209).
  *
  * ⚠️ This is VISIBILITY, never a verdict. It is printed by the SUCCESS path and
  * changes no exit code: the remedy for an unread call site is a human reading
@@ -1051,6 +1144,65 @@ function typeSurface(absEntries) {
     for (const info of checker.getIndexInfosOfType?.(type) ?? []) if (info) return true;
     return false;
   };
+  // The type a RECEIVER stands for, in one place, so the three questions below
+  // cannot disagree about what `via` means. `null` is "not knowable" -- every
+  // caller turns that into "no finding", which is the asymmetry `hasMemberVia`
+  // argues: a wrong green leaves a site unread, a wrong red accuses a correct
+  // README.
+  //
+  // ⛔ A MODULE symbol with no `via` returns `null` here for `memberAtPath`'s
+  // sake and is handled by `hasMember`'s own arm for the two-segment question.
+  // Walking a namespace's exports through a property PATH would be a rule with
+  // a tree population of zero (#10367 measured it: all 5 namespace imports in
+  // the published documents are relative specifiers `splitSpecifier` turns
+  // away), and this file raises an unexercised scanner to a hard error rather
+  // than shipping it (#4690). Refusing to answer only ever under-reports.
+  const receiverType = (symbol, via) => {
+    const s = unwrapAlias(symbol);
+    if (!s) return null;
+    if (!via && s.flags & ts.SymbolFlags.Module) return null;
+    const decl = s.valueDeclaration ?? s.declarations?.[0];
+    if (!decl) return null;
+    const value = checker.getTypeOfSymbolAtLocation(s, decl);
+    if (!value) return null;
+    // No `via`: the receiver IS the imported name, so its own type -- the
+    // static side of a class, the type of a const -- is what a member sits on.
+    if (!via) return value;
+    // Both extra hops are gated on there being EXACTLY ONE signature. Zero
+    // means the name is not constructible/callable as the fence writes it,
+    // which is a different claim and one the import half already owns; more
+    // than one means overload resolution, which needs the ARGUMENTS this gate
+    // deliberately does not parse. Both answer "not knowable".
+    const signatures =
+      via === 'instance' ? value.getConstructSignatures() : value.getCallSignatures();
+    if (signatures.length !== 1) return null;
+    const returned = checker.getReturnTypeOfSignature(signatures[0]);
+    if (!returned) return null;
+    return checker.getAwaitedType?.(returned) ?? returned;
+  };
+  // One hop along a property path: `found` with the property's own type,
+  // `absent` (the only state that can become a finding), or `unknowable`.
+  // ⭐ The three states are what separates this from `typeHasProperty`, which
+  // folds `unknowable` and `found` into one `true` -- correct for the LAST
+  // segment, and wrong for an intermediate one, where collapsing them would
+  // make an `any` hop indistinguishable from a real object and let the walk
+  // continue into a type nobody has.
+  const propertyHop = (type, name) => {
+    if (!type) return { state: 'unknowable' };
+    const f = type.getFlags();
+    if (f & ts.TypeFlags.Any || f & ts.TypeFlags.Unknown || f & ts.TypeFlags.TypeParameter) {
+      return { state: 'unknowable' };
+    }
+    const prop = checker.getPropertyOfType(type, name);
+    if (prop) {
+      const decl = prop.valueDeclaration ?? prop.declarations?.[0];
+      if (!decl) return { state: 'unknowable' };
+      const t = checker.getTypeOfSymbolAtLocation(prop, decl);
+      return t ? { state: 'found', type: t } : { state: 'unknowable' };
+    }
+    for (const info of checker.getIndexInfosOfType?.(type) ?? []) if (info) return { state: 'unknowable' };
+    return { state: 'absent' };
+  };
   const moduleSymbol = (abs) => {
     if (!cache.has(abs)) {
       const sf = program.getSourceFile(abs);
@@ -1112,18 +1264,50 @@ function typeSurface(absEntries) {
      * -- the same rule that keeps `any` and index signatures quiet above.
      */
     hasMemberVia(symbol, member, via) {
-      const s = unwrapAlias(symbol);
-      if (!s) return true;
-      const decl = s.valueDeclaration ?? s.declarations?.[0];
-      if (!decl) return true;
-      const value = checker.getTypeOfSymbolAtLocation(s, decl);
-      if (!value) return true;
-      const signatures =
-        via === 'instance' ? value.getConstructSignatures() : value.getCallSignatures();
-      if (signatures.length !== 1) return true;
-      const returned = checker.getReturnTypeOfSignature(signatures[0]);
-      if (!returned) return true;
-      return typeHasProperty(checker.getAwaitedType?.(returned) ?? returned, member);
+      const type = receiverType(symbol, via);
+      return type ? typeHasProperty(type, member) : true;
+    },
+    /**
+     * The same question again for a call site that reaches the member through a
+     * PROPERTY PATH -- `client.ai.nlq(…)`, where `ai` is a namespace object on
+     * the instance and `nlq` is the member being claimed (#16209).
+     *
+     * The receiver's type is resolved exactly as the two questions above
+     * resolve it (`receiverType`, one copy), then each path segment is one
+     * `propertyHop`. A hop that is not knowable stops the walk with NO finding;
+     * a hop that is knowably ABSENT is the finding, and it names the segment
+     * that failed rather than the member at the end -- a README writing
+     * `client.notThere.list(…)` is wrong at `notThere`, and pointing the author
+     * at `list` would send them to fix the wrong token.
+     *
+     * ⛔ Returns a RECORD, not a boolean, because the two callers need different
+     * halves of it: the verdict, and which segment produced it. Squeezing that
+     * into `false` and re-deriving the segment at the call site would be the
+     * second derivation of one fact this file refuses everywhere else.
+     *
+     * @param path the segments BETWEEN receiver and member; never empty (a
+     *             two-segment site is `hasMember`/`hasMemberVia`'s question)
+     * @returns `{ known: boolean, missing: string|null, depth: number }` --
+     *          `known: true` for both "the member is there" and "not knowable",
+     *          so `missing` is the only thing that ever becomes a finding, and
+     *          `depth` is how many path segments resolved before it (`-1` when
+     *          nothing is missing). The caller needs `depth` to name the OWNER
+     *          of the missing segment; re-deriving it there with `indexOf`
+     *          would silently pick the wrong hop the first time a path repeats
+     *          a segment name.
+     */
+    memberAtPath(symbol, path, member, via) {
+      let type = receiverType(symbol, via);
+      if (!type) return { known: true, missing: null };
+      for (let depth = 0; depth < path.length; depth++) {
+        const hop = propertyHop(type, path[depth]);
+        if (hop.state === 'unknowable') return { known: true, missing: null, depth: -1 };
+        if (hop.state === 'absent') return { known: false, missing: path[depth], depth };
+        type = hop.type;
+      }
+      return typeHasProperty(type, member)
+        ? { known: true, missing: null, depth: -1 }
+        : { known: false, missing: member, depth: path.length };
     },
   };
 }
@@ -1250,6 +1434,7 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
         symbol,
         hasMember: target.hasMember,
         hasMemberVia: target.hasMemberVia,
+        memberAtPath: target.memberAtPath,
         specifier: imp.specifier,
         imported,
       });
@@ -1276,6 +1461,7 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
           symbol: ns,
           hasMember: target.hasMember,
           hasMemberVia: target.hasMemberVia,
+          memberAtPath: target.memberAtPath,
           specifier: imp.specifier,
           imported: '*',
         });
@@ -1304,7 +1490,14 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
     // stays out of `readable`, which keeps it out of `callChecks` and puts it in
     // the `NOT read` count, where a vacuous widening announces itself as a
     // widening that widened nothing.
+    //
+    // ⛔ `memberAtPath` is held to the SAME bar and for the same reason
+    // (#16209): 36 of this tree's 42 newly-reachable chained sites sit on a
+    // derived receiver, so a target that supplies `hasMemberVia` and not
+    // `memberAtPath` would announce a widening onto them and answer every one
+    // with a default. Both or neither.
     if (typeof origin.hasMemberVia !== 'function') continue;
+    if (typeof origin.memberAtPath !== 'function') continue;
     readable.set(local, { ...origin, via, source });
   }
   if (measured) {
@@ -1316,33 +1509,58 @@ export function analyzeDocument(doc, resolveTarget, measured = null) {
     const b = readable.get(call.object);
     if (!b) continue;
     if (measured) measured.callChecks++;
-    // A derived receiver's member lives on the instance / returned type, never
-    // on the static side — so it is a DIFFERENT question, asked by a different
-    // method, and a target that cannot answer it answers "not knowable".
-    const known = b.via
-      ? b.hasMemberVia(b.symbol, call.member, b.via)
-      : b.hasMember(b.symbol, call.member);
+    // Three questions, one per receiver shape, and the file keeps them apart on
+    // purpose: a derived receiver's member lives on the instance / returned
+    // type, never on the static side, and a member reached through a PROPERTY
+    // PATH lives on neither — it lives on whatever that path resolves to
+    // (#16209). Each is asked by its own method, and a target that cannot
+    // answer answers "not knowable".
+    const walked = call.path.length > 0;
+    const verdict = walked
+      ? b.memberAtPath(b.symbol, call.path, call.member, b.via ?? null)
+      : null;
+    const known = walked
+      ? verdict.known
+      : b.via
+        ? b.hasMemberVia(b.symbol, call.member, b.via)
+        : b.hasMember(b.symbol, call.member);
     if (known) continue;
     const how = b.via === 'instance' ? `new ${b.source}(…)` : b.via ? `${b.source}(…)` : null;
+    // The dotted prefix that OWNS the missing segment, so the author is sent at
+    // the token that is actually wrong: `client.ai.nlq(…)` against a client
+    // whose `ai` has no `nlq` reads "`client.ai` has no `nlq`", and the same
+    // site against a client with no `ai` at all reads "`client` has no `ai`".
+    const owner = walked
+      ? [call.object, ...call.path.slice(0, verdict.depth)].join('.')
+      : call.object;
     findings.push({
-      id: `${doc.pkg}|${doc.file}|${b.via ?? 'member'}|${b.specifier}|${b.imported}.${call.member}`,
+      id:
+        `${doc.pkg}|${doc.file}|${b.via ?? 'member'}|${b.specifier}|${b.imported}.` +
+        `${walked ? `${call.path.join('.')}.` : ''}${call.member}`,
       line: call.line,
-      text: how
-        ? `documents \`${call.object}.${call.member}(…)\` on a value the fence builds with ` +
-          `\`${how}\`, but what ${b.imported} (from '${b.specifier}') ` +
-          `${b.via === 'instance' ? 'constructs' : 'returns'} has no \`${call.member}\` member ` +
-          'in its published types.'
-        : b.imported === '*'
-          ? // A namespace binding has no imported NAME, so the arm below would
-            // interpolate the literal `*` and hand the author "but * (from
-            // '@objectstack/spec') has no …". The claim is a different one
-            // anyway: not "this name lacks a member" but "this package does not
-            // export this at all" (#10367).
-            `documents \`${call.object}.${call.member}(…)\` on a namespace import of ` +
-            `'${b.specifier}', but that package's published types export no ` +
-            `\`${call.member}\`.`
-          : `documents \`${call.object}.${call.member}(…)\`, but ${b.imported} (from ` +
-            `'${b.specifier}') has no \`${call.member}\` member in its published types.`,
+      // ⛔ ONE chained arm, not one per receiver shape: a namespace receiver
+      // cannot reach it at all (`memberAtPath` refuses a module symbol, see
+      // `receiverType`), so a `*` arm here would be text no run can print.
+      text: walked
+        ? `documents \`${call.key}(…)\`${how ? ` on a value the fence builds with \`${how}\`` : ''}, ` +
+          `but \`${owner}\` has no \`${verdict.missing}\` member in the published types ` +
+          `${b.imported} (from '${b.specifier}') reaches.`
+        : how
+          ? `documents \`${call.object}.${call.member}(…)\` on a value the fence builds with ` +
+            `\`${how}\`, but what ${b.imported} (from '${b.specifier}') ` +
+            `${b.via === 'instance' ? 'constructs' : 'returns'} has no \`${call.member}\` member ` +
+            'in its published types.'
+          : b.imported === '*'
+            ? // A namespace binding has no imported NAME, so the arm below would
+              // interpolate the literal `*` and hand the author "but * (from
+              // '@objectstack/spec') has no …". The claim is a different one
+              // anyway: not "this name lacks a member" but "this package does not
+              // export this at all" (#10367).
+              `documents \`${call.object}.${call.member}(…)\` on a namespace import of ` +
+              `'${b.specifier}', but that package's published types export no ` +
+              `\`${call.member}\`.`
+            : `documents \`${call.object}.${call.member}(…)\`, but ${b.imported} (from ` +
+              `'${b.specifier}') has no \`${call.member}\` member in its published types.`,
     });
   }
   if (measured) {
@@ -1589,7 +1807,10 @@ export function unreadReport(measured) {
   const body = ordered.flatMap((r) => [
     `  ${pad(r.sites.length, callW)} unread call(s) / ` +
       `${pad(r.receivers.length, recvW)} unread receiver(s)  ${r.file}`,
-    ...r.sites.map((s) => `      line ${pad(s.line, lineW)}  ${s.object}.${s.member}(…)`),
+    // `key`, not `object.member`: a site reached through a property path
+    // (#16209) would otherwise be printed as `res.json(…)` when the document
+    // says `res.body.json(…)`, sending a hand read at a token that is not there.
+    ...r.sites.map((s) => `      line ${pad(s.line, lineW)}  ${s.key}(…)`),
   ]);
 
   return [
@@ -1898,6 +2119,7 @@ export function surfaceTarget(surface, abs) {
     namespaceSymbol: surface.moduleSymbolOf(abs),
     hasMember: (sym, member) => surface.hasMember(sym, member),
     hasMemberVia: (sym, member, via) => surface.hasMemberVia(sym, member, via),
+    memberAtPath: (sym, path, member, via) => surface.memberAtPath(sym, path, member, via),
   };
 }
 
@@ -2268,6 +2490,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the population, MEASURED off a fixture rather than typed': 2,
   'the header: the line where this half was invisible': 1,
   'END TO END on the #9870 shape: the receiver is never import-bound': 5,
+  'THE PROPERTY PATH, and the partition it must preserve (#16209)': 10,
   'THE NAMESPACE BRANCH (#10367)': 10,
   '⭐ `--unread-report`: `NOT read:` DECOMPOSED, AND THE CHECKSUM (#10815)': 4,
   'THE POPULATION AXIS, and the third refusal on it (#9911)': 7,
@@ -2278,7 +2501,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 25;
+const SELF_TEST_BATTERY_FLOOR = 26;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2561,10 +2784,10 @@ function selfTest() {
     unreadCallSites(unreadDoc, ['ObjectKernel']),
     {
       sites: [
-        { line: 4, object: 'kernel', member: 'bootstrap' },
-        { line: 5, object: 'kernel', member: 'shutdown' },
-        { line: 6, object: 'kernel', member: 'getService' },
-        { line: 7, object: 'other', member: 'registerTool' },
+        { line: 4, object: 'kernel', path: [], member: 'bootstrap', key: 'kernel.bootstrap' },
+        { line: 5, object: 'kernel', path: [], member: 'shutdown', key: 'kernel.shutdown' },
+        { line: 6, object: 'kernel', path: [], member: 'getService', key: 'kernel.getService' },
+        { line: 7, object: 'other', path: [], member: 'registerTool', key: 'other.registerTool' },
       ],
       receivers: ['kernel', 'other'],
     },
@@ -2636,10 +2859,18 @@ function selfTest() {
   // fixture pass against the static surface — the exact confusion #9870's
   // widening exists to avoid.
   battery('END TO END, both directions, on the shape #9532 measured');
+  // A FOURTH surface arrives with #16209: what a PROPERTY PATH off one of the
+  // three above resolves to. `nested: { instance: { ai: ['chat'] } }` models a
+  // client whose instance carries an `ai` namespace holding `chat` — so
+  // `client.ai.chat(…)` resolves, `client.ai.nlq(…)` is missing at `nlq`, and
+  // `client.nope.x(…)` is missing at `nope`. A `via` with no `nested` entry
+  // answers "not knowable", exactly as the real surface does for a receiver
+  // whose type it cannot resolve.
   const fakeSymbol = (members, derived = {}) => ({
     __members: new Set(members),
     __instance: new Set(derived.instance ?? []),
     __return: new Set(derived.return ?? []),
+    __nested: derived.nested ?? {},
   });
   const target = (names, memberMap = {}, derivedMap = {}) => ({
     declared: true,
@@ -2652,6 +2883,20 @@ function selfTest() {
     namespaceSymbol: fakeSymbol(names),
     hasMember: (sym, m) => sym.__members.has(m),
     hasMemberVia: (sym, m, via) => (via === 'instance' ? sym.__instance : sym.__return).has(m),
+    memberAtPath: (sym, path, m, via) => {
+      let node = sym.__nested[via ?? 'static'];
+      if (node === undefined) return { known: true, missing: null, depth: -1 };
+      for (let d = 0; d < path.length; d++) {
+        if (!node || Array.isArray(node) || !(path[d] in node)) {
+          return { known: false, missing: path[d], depth: d };
+        }
+        node = node[path[d]];
+      }
+      const members = Array.isArray(node) ? node : Object.keys(node);
+      return members.includes(m)
+        ? { known: true, missing: null, depth: -1 }
+        : { known: false, missing: m, depth: path.length };
+    },
   });
   const resolveFake = (name) => {
     if (name === '@objectstack/service-analytics') return target([]);
@@ -3037,6 +3282,213 @@ function selfTest() {
     'analyzeDocument — a target that CANNOT answer it checks nothing there, and says so',
     { derived: silent.derivedReceivers, checked: silent.callChecks, unread: silent.unreadCalls },
     { derived: 0, checked: 0, unread: 2 },
+  );
+
+  // -- THE PROPERTY PATH, and the partition it must preserve (#16209) -----------
+  //
+  // ## What was measured, and why the card that filed it read it backwards
+  //
+  // #16209 reported that `packages/client`'s namespace tour — the npm front page
+  // of `@objectstack/client`, and the densest block of documented call sites in
+  // the repo — was entirely inside the `NOT read` bucket, and asked for a
+  // receiver bound by `new X(…)` to be resolved. Re-measured on this tree before
+  // anything was changed, BOTH halves of that read false:
+  //
+  //   · `new X(…)` with an import-bound `X` was ALREADY resolved — that is
+  //     `extractLocalBindings`, above, and `client` was already one of the 49
+  //     `name(s) built from one` on the green line.
+  //   · the tour was NOT in the `NOT read` bucket. That document contributed
+  //     exactly THREE unread sites — `console.log`, `console.error`, `Math.pow`
+  //     — and not one call on `client`. Its ~30 calls were in NEITHER half:
+  //     every one is `client.<ns>.<method>(`, and the old matcher took exactly
+  //     one dot, so the lookbehind turned `nlq` away for being preceded by one.
+  //
+  // Invisible to the checked half AND to the half whose whole job is to publish
+  // what the checked half missed. That is the defect, and it is a worse one than
+  // the card claimed: the blind spot was not merely unread, it was unreported.
+  //
+  // ## The population, and the direction each half moves
+  //
+  // 53 sites of the shape `root.p1[.p2…].member(` across the 61 published
+  // documents; 42 on a root this gate already types (36 of them the tour), 11 on
+  // roots it does not. So the call-site half rises by 42 and the `NOT read` pair
+  // RISES by 11 — ⭐ the bucket is not shrunk, and nothing about what it reports
+  // is narrowed (#9870's honesty line is untouched). The 11 were previously
+  // invisible to both halves; they are now stated.
+  //
+  // ## What is pinned here
+  //
+  // The matcher's new admission and its unchanged refusals, the PARTITION (every
+  // matched site lands in exactly one half — the invariant that makes
+  // `checked`/`NOT read` one population split in two rather than two censuses),
+  // and `memberAtPath` in BOTH directions including the intermediate-hop case
+  // that decides WHICH token an author is sent at.
+  battery('THE PROPERTY PATH, and the partition it must preserve (#16209)');
+  const tour = [
+    '```typescript',
+    "import { ObjectStackClient } from '@objectstack/client';",
+    'const client = new ObjectStackClient({ baseUrl: "http://localhost:3000" });',
+    'await client.connect();',
+    'await client.ai.chat({ messages: [] });',
+    'await client.ai.nlq({ query: "how many" });',
+    'await client.nowhere.list();',
+    'await client.getService("mcp").registerTool({});',
+    'await other.ai.chat({});',
+    '```',
+  ].join('\n');
+  eq(
+    'memberCallSites — a property path is ONE site, carrying the segments between receiver and member',
+    memberCallSites(tour)
+      .filter((s) => s.path.length > 0)
+      .map((s) => `${s.key}[${s.path.join('/')}]`),
+    ['client.ai.chat[ai]', 'client.ai.nlq[ai]', 'client.nowhere.list[nowhere]', 'other.ai.chat[ai]'],
+  );
+  // ⛔ The #9610 fence is NOT widened by any of this: a call expression anywhere
+  // in the path still ends the match at its own `(`, so `getService("mcp")` is
+  // read as the two-segment site it is and `registerTool` is not reached.
+  eq(
+    'memberCallSites — a CALL EXPRESSION in the path is still refused',
+    memberCallSites(tour)
+      .map((s) => s.key)
+      .filter((k) => k.includes('registerTool') || k === 'client.getService'),
+    ['client.getService'],
+  );
+  // ⭐ THE PARTITION. `callChecks` and `unreadCalls` are printed side by side as
+  // one population split in two, and until #16209 they were two identical
+  // regexes in two functions — a split held together by nothing but both copies
+  // being edited together. Asserted by MEASURING the two halves against the
+  // single walk, because reading the source proves only what today's source
+  // says: every site lands in exactly one half, and neither half invents one.
+  const partitionRead = ['ObjectStackClient', 'client'];
+  const partChecked = extractMemberCalls(tour, partitionRead).map((s) => s.key);
+  const partUnread = unreadCallSites(tour, partitionRead).sites.map((s) => s.key);
+  eq(
+    'the CHECKED and NOT-READ halves partition `memberCallSites` — no site in both, none in neither',
+    {
+      overlap: partChecked.filter((k) => partUnread.includes(k)),
+      covers: [...partChecked, ...partUnread].sort().join(','),
+      all: memberCallSites(tour)
+        .map((s) => s.key)
+        .sort()
+        .join(','),
+    },
+    {
+      overlap: [],
+      covers: 'client.ai.chat,client.ai.nlq,client.connect,client.getService,client.nowhere.list,other.ai.chat',
+      all: 'client.ai.chat,client.ai.nlq,client.connect,client.getService,client.nowhere.list,other.ai.chat',
+    },
+  );
+  eq(
+    'unreadCallSites — an unread chained site is reported by its FULL key, not by receiver and member',
+    unreadCallSites(tour, partitionRead).sites.map((s) => s.key),
+    ['other.ai.chat'],
+  );
+  // The resolver end, both directions over one document, which is the assertion
+  // a "no findings" fixture cannot make: `ai.chat` is real and must stay silent,
+  // `ai.nlq` is not and must be reported — the exact pair #16142's content
+  // defect was made of, and the criterion #16209 wrote for itself.
+  const clientTarget = target(
+    ['ObjectStackClient'],
+    { ObjectStackClient: [] },
+    {
+      ObjectStackClient: {
+        // `getService` is real here so the two-segment site in the fixture stays
+        // silent and the assertion below isolates the PATH question.
+        instance: ['connect', 'getService'],
+        nested: { instance: { ai: ['chat'] } },
+      },
+    },
+  );
+  const tourDoc = { pkg: '@objectstack/client', file: 'packages/client/README.md', text: tour };
+  eq(
+    'analyzeDocument — a fabricated method on a namespace of a `new`-built receiver IS reported, the real one is not',
+    analyzeDocument(tourDoc, (name) => (name === '@objectstack/client' ? clientTarget : null))
+      .map((f) => f.id.split('|').slice(2).join('|'))
+      .sort(),
+    [
+      'instance|@objectstack/client|ObjectStackClient.ai.nlq',
+      'instance|@objectstack/client|ObjectStackClient.nowhere.list',
+    ],
+  );
+  // ⭐ WHICH TOKEN THE AUTHOR IS SENT AT. `client.nowhere.list(…)` is wrong at
+  // `nowhere`, not at `list`; naming the member would send the author to fix a
+  // call that is fine on a namespace that does not exist. The owner prefix is
+  // in the text for the same reason.
+  const pathFindings = analyzeDocument(tourDoc, (name) =>
+    name === '@objectstack/client' ? clientTarget : null,
+  );
+  eq(
+    'analyzeDocument — a missing INTERMEDIATE hop names that hop and its owner, never the member at the end',
+    pathFindings.find((f) => f.id.endsWith('nowhere.list')).text,
+    'documents `client.nowhere.list(…)` on a value the fence builds with ' +
+      '`new ObjectStackClient(…)`, but `client` has no `nowhere` member in the published ' +
+      "types ObjectStackClient (from '@objectstack/client') reaches.",
+  );
+  eq(
+    'analyzeDocument — and a missing LEAF names the leaf, with the namespace that lacks it as owner',
+    pathFindings.find((f) => f.id.endsWith('ai.nlq')).text,
+    'documents `client.ai.nlq(…)` on a value the fence builds with ' +
+      '`new ObjectStackClient(…)`, but `client.ai` has no `nlq` member in the published ' +
+      "types ObjectStackClient (from '@objectstack/client') reaches.",
+  );
+  // The same both-or-neither refusal `hasMemberVia` gets, for the same reason:
+  // 36 of the 42 newly-reachable sites sit on a DERIVED receiver, so a target
+  // that answers one question and not the other would announce a widening onto
+  // them and default every one of them to "not knowable".
+  const halfMute = { ...clientTarget, memberAtPath: undefined };
+  const halfMuted = blank();
+  analyzeDocument(tourDoc, () => halfMute, halfMuted);
+  eq(
+    'analyzeDocument — a target that answers `hasMemberVia` but NOT `memberAtPath` binds no derived receiver',
+    { derived: halfMuted.derivedReceivers, checked: halfMuted.callChecks, unread: halfMuted.unreadCalls },
+    { derived: 0, checked: 0, unread: 6 },
+  );
+  // ⚠️ A chain off an IMPORT-BOUND name (no `via`) has a tree population of ZERO
+  // today — all 42 sites are on derived receivers. It is the same `receiverType`
+  // walk with `via` null, so it is pinned over a fixture rather than left to be
+  // discovered, exactly as #10367's namespace branch is.
+  const staticChain = {
+    pkg: '@objectstack/client',
+    file: 'packages/client/README.md',
+    text: [
+      '```typescript',
+      "import { ObjectStackClient } from '@objectstack/client';",
+      'ObjectStackClient.defaults.merge({});',
+      'ObjectStackClient.defaults.explode({});',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — a chain off an IMPORT-BOUND name is read against the STATIC side, both directions',
+    analyzeDocument(staticChain, () =>
+      target(
+        ['ObjectStackClient'],
+        { ObjectStackClient: [] },
+        { ObjectStackClient: { nested: { static: { defaults: ['merge'] } } } },
+      ),
+    ).map((f) => f.id.split('|').slice(2).join('|')),
+    ['member|@objectstack/client|ObjectStackClient.defaults.explode'],
+  );
+  // ⛔ And a NAMESPACE receiver refuses the chain rather than defaulting through
+  // it: walking a module's exports along a property path is a rule with a tree
+  // population of zero (#10367 measured that all five namespace imports in the
+  // published documents are relative specifiers), and this file raises an
+  // unexercised scanner to a hard error rather than shipping one. Refusing
+  // under-reports; it never accuses.
+  const namespaceChain = {
+    pkg: '@objectstack/spec',
+    file: 'packages/spec/README.md',
+    text: [
+      '```typescript',
+      "import * as spec from '@objectstack/spec';",
+      'spec.nowhere.atAll({});',
+      '```',
+    ].join('\n'),
+  };
+  eq(
+    'analyzeDocument — a chain off a NAMESPACE import is refused, never answered with a default',
+    analyzeDocument(namespaceChain, resolveFake),
+    [],
   );
 
   // -- THE NAMESPACE BRANCH (#10367) -------------------------------------------

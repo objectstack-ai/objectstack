@@ -339,14 +339,41 @@ function timeoutWindow(config: TursoDriverConfig): number | undefined {
 /**
  * Whether a remote url rides `@libsql/client`'s WebSocket transport.
  *
- * The client routes on the literal scheme (`lib-esm/node.js`: `wss` / `ws` →
- * its ws client, `https` / `http` → its HTTP client); `libsql://` is expanded
- * by `@libsql/core` before that switch, and the entry this driver imports
- * expands it to HTTPS. So these two spellings are the whole population that
- * reaches the WebSocket arm from this driver.
+ * The client's routing switch matches the literal lowercase (`lib-esm/node.js`:
+ * `wss` / `ws` → its ws client, `https` / `http` → its HTTP client), but it
+ * never sees the url as the author spelled it: the node entry is
+ * `_createClient(expandConfig(config, true))`, and `expandConfig` has ALREADY
+ * lowercased the scheme by then — `@libsql/core@0.17.4`,
+ * `lib-esm/config.js`: `const originalUriScheme = uri.scheme.toLowerCase();`.
+ * Executed against that version:
+ * `expandConfig({ url: 'WSS://db.example.turso.io' }, true).scheme === 'wss'`
+ * and `'Ws://127.0.0.1:8080'` → `'ws'`; the control that makes those a reading
+ * is `'LIBSQL://…'` → `'https'`, the same call answering something other than
+ * the input's own letters. (`libsql://` is expanded before the switch too, and
+ * the entry this driver imports expands it to HTTPS.)
+ *
+ * ⇒ Case is folded HERE so this predicate agrees with the client it hands the
+ * url to. Reading the switch alone says an uppercase `WSS://` cannot reach the
+ * WebSocket arm; it can, and a window beside it would be accepted and never
+ * delivered — the corner {@link refuseWebSocketTimeout} exists to close. Only
+ * the comparison is folded: the url itself is passed on exactly as authored, so
+ * the refusal message echoes the operator's own spelling and stays greppable
+ * against their config.
+ *
+ * ⚠️ DELIBERATE INCONSISTENCY, and it is deliberate: `TursoDriver.detectMode`
+ * matches the same two schemes CASE-SENSITIVELY and is left that way. Folding
+ * case there as well would delete its uppercase → `'local'` fall-through — a
+ * mode-detection change on a published driver that predates this refusal
+ * entirely and is out of scope here; it must be argued on its own, not slipped
+ * in as a tidy-up. So the two readers of one url disagree on purpose: this one
+ * answers "does the WINDOW reach anything", `detectMode` answers "which
+ * transport is this", and only the first question is settled by the scheme the
+ * libsql client will actually route on. ⛔ Do not "unify" them without that
+ * argument.
  */
 function ridesWebSocketTransport(url: string): boolean {
-  return url.startsWith('wss://') || url.startsWith('ws://');
+  const scheme = url.toLowerCase();
+  return scheme.startsWith('wss://') || scheme.startsWith('ws://');
 }
 
 /**

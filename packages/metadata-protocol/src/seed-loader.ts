@@ -1718,6 +1718,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     organizationId?: string,
   ): Promise<void> {
     for (const deferred of deferredUpdates) {
+      // [#16488] How the messages below NAME this record. `recordExternalId`
+      // is a map KEY joined with `\u0000` (see {@link externalIdKey}) and stays
+      // one — the `insertedRecords` fallback lookup below depends on it — but a
+      // raw NUL in a log line turns the whole log binary for `grep`, so every
+      // message renders it instead of pasting it.
+      const recordName = this.externalIdDisplay(deferred.recordExternalId);
       // A multi-value field deferred its WHOLE authored array (see pass 1), so
       // re-resolve every element here; a single-value field has exactly one.
       const items = Array.isArray(deferred.attemptedValue)
@@ -1790,7 +1796,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             const causeSentence = seedFailureCause(err);
             this.logger.error(
               `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} stays NULL ` +
-                `on record '${deferred.recordExternalId}'. The row itself was seeded, so every row counter looks healthy ` +
+                `on record '${recordName}'. The row itself was seeded, so every row counter looks healthy ` +
                 `while the circular relationship is HALF-WRITTEN: nothing links it to ${deferred.targetObject}.` +
                 `${deferred.targetField} = '${this.formatAttempted(deferred.attemptedValue)}'. Nothing retries this — ` +
                 `fix the write error below (a transient failure that outlasted the retry budget, or a validation rule ` +
@@ -1877,11 +1883,11 @@ export class SeedLoaderService implements ISeedLoaderService {
           } else {
             this.logger.error(
               `[SeedLoader] Deferred reference DROPPED — ${deferred.objectName}.${deferred.field} is never written ` +
-                `on record '${deferred.recordExternalId}'. Pass 2 RESOLVED the target (${where}) and then had ` +
+                `on record '${recordName}'. Pass 2 RESOLVED the target (${where}) and then had ` +
                 `nowhere to write it: this load registered no internal id for that ${deferred.objectName} record, ` +
                 `because its pass-1 write FAILED (reported as its own \`error\` above) or returned no id. Nothing ` +
                 `retries this: pass 2 back-fills only rows this load actually seeded, and it is the last pass. ` +
-                `Fix the pass-1 write error reported for ${deferred.objectName} '${deferred.recordExternalId}' ` +
+                `Fix the pass-1 write error reported for ${deferred.objectName} '${recordName}' ` +
                 `and re-run the seed — the row and this link land together or not at all.`,
               undefined,
               {
@@ -1895,7 +1901,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             this.recordDeferredError(deferred, allResults, allErrors,
               `Deferred reference dropped: ${deferred.objectName}.${deferred.field} = '${missedTarget}' → ` +
                 `${deferred.targetObject}.${deferred.targetField} resolved, but no internal id was registered for ` +
-                `${deferred.objectName} '${deferred.recordExternalId}' in this load (its pass-1 write failed), so ` +
+                `${deferred.objectName} '${recordName}' in this load (its pass-1 write failed), so ` +
                 `the back-fill could not be written`);
           }
         }
@@ -1914,7 +1920,7 @@ export class SeedLoaderService implements ISeedLoaderService {
         const missedValue = this.formatAttempted(stillUnresolved ? missingItem : deferred.attemptedValue);
         this.logger.error(
           `[SeedLoader] Deferred reference UNRESOLVED after pass 2 — ${deferred.objectName}.${deferred.field} ` +
-            `stays NULL on record '${deferred.recordExternalId}'. The row itself was seeded, so every row ` +
+            `stays NULL on record '${recordName}'. The row itself was seeded, so every row ` +
             `counter looks healthy while the relationship is MISSING: nothing links it to ` +
             `${deferred.targetObject}.${deferred.targetField} = '${missedValue}', because no such ` +
             `${deferred.targetObject} row exists — neither seeded in this load nor already in the database. ` +
@@ -2288,9 +2294,11 @@ export class SeedLoaderService implements ISeedLoaderService {
    * [#8442] Every STRUCTURED key is unchanged — `sourceObject`, `field`,
    * `targetObject`, `targetField`, `attemptedValue`, `recordIndex` are built
    * from the seed declaration and the record, never from the caught error, so
-   * "which record, which key" is untouched by the withhold. The authored prefix
-   * is unchanged byte for byte too (two runtime pins read it). What changes is
-   * only what follows the colon: a DECLARED refusal — a 4xx, or the data
+   * "which record, which key" is untouched by the withhold. For a single-field
+   * key the authored prefix is unchanged byte for byte too (two runtime pins
+   * read it); #16488 renders the VALUE side of a COMPOSITE key — see
+   * {@link externalIdDisplay} — so its `\u0000` joiner cannot reach the log.
+   * What #8442 changes is only what follows the colon: a DECLARED refusal — a 4xx, or the data
    * engine's `VALIDATION_FAILED` shape, which is where "which field and why"
    * lives — is quoted whole; a driver fault is replaced by
    * {@link WITHHELD_WRITE_REASON} and goes to the log instead. See
@@ -2311,9 +2319,14 @@ export class SeedLoaderService implements ISeedLoaderService {
       field: '(write)',
       targetObject: objectName,
       targetField: label,
+      // [#16488] The STRUCTURED key keeps the real key — a datum a machine
+      // reads, and JSON / util.inspect escape a control character rather than
+      // emitting it. Only the message is rendered.
       attemptedValue: keyValue || null,
       recordIndex,
-      message: `Failed to write ${objectName} record #${recordIndex} (${label}=${keyValue}): ${detail}`,
+      message:
+        `Failed to write ${objectName} record #${recordIndex} ` +
+        `(${label}=${this.externalIdDisplay(keyValue)}): ${detail}`,
     };
   }
 
@@ -2662,6 +2675,36 @@ export class SeedLoaderService implements ISeedLoaderService {
     return Array.isArray(externalId) ? externalId.join('+') : externalId;
   }
 
+  /**
+   * Human-readable rendering of a natural key built by {@link externalIdKey}.
+   *
+   * The key is not a display string, and it is not free to become one:
+   * `externalIdKey` joins a composite key's parts with `\u0000` precisely
+   * because that byte cannot occur in a natural-key value, so `('a','b')` and
+   * `('a\0b','')` never collide. That separator stays exactly where it is
+   * — every Map keyed by this string depends on it (framework#3434).
+   *
+   * What must not happen is the KEY reaching a MESSAGE. One raw NUL makes
+   * `grep` classify the whole server log as binary, so every later `grep -n` /
+   * `grep -c` over it silently returns nothing until the reader remembers
+   * `-a`: the reader's main instrument disabled by one byte, at the moment
+   * someone is diagnosing a failed boot (#16488, measured while investigating
+   * objectstack-ai/ats#20).
+   *
+   * A key with no `\u0000` in it — every single-field key — is returned
+   * BYTE-IDENTICAL, so non-composite diagnostics do not move. A composite key
+   * renders as a JSON array of its PARTS rather than a `+`-joined string:
+   * `externalIdLabel` already spends `+` on the FIELD-name side, and a value
+   * is an arbitrary string that may contain `+` (or ` + `) itself, so a joined
+   * form is ambiguous exactly where a composite key is interesting. JSON is
+   * also NUL-free by construction — it escapes control characters rather than
+   * passing them through — so a value carrying one of its own cannot
+   * reintroduce the defect through this path.
+   */
+  private externalIdDisplay(key: string): string {
+    return key.includes('\u0000') ? JSON.stringify(key.split('\u0000')) : key;
+  }
+
   private buildEmptyResult(config: SeedLoaderConfigParsed, durationMs: number): SeedLoaderResultParsed {
     return {
       success: true,
@@ -2772,7 +2815,9 @@ interface DeferredUpdate {
    * The source record's natural key, as {@link SeedLoaderService.externalIdKey}
    * computed it in pass 1 — pass 2's FALLBACK lookup into `insertedRecords`
    * when {@link internalId} is absent, and the name error messages call the
-   * record by.
+   * record by. It is the KEY, `\u0000` joiner and all; the messages render it
+   * through {@link SeedLoaderService.externalIdDisplay} rather than pasting it
+   * (#16488).
    *
    * May legitimately be `''`: `externalIdKey` returns the empty string when the
    * dataset declares no `externalId` and the row carries no `name`, when the

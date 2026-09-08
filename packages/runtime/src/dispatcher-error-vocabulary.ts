@@ -523,6 +523,24 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             "into a code this repo owns by accident: it is still the vendor's string on the vendor's " +
             'wire, and a vendor rename turns the pin red rather than silently minting a local code.',
     },
+    {
+        code: 'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
+        file: 'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.2's own organization-plugin vocabulary — verified in the then-installed " +
+            'vendor at `dist/plugins/organization/error-codes`, spelled there exactly as it is here — ' +
+            'and read at runtime off `plugin.$ERROR_CODES`; the local restatement is only the fallback ' +
+            'for a plugin object carrying no `$ERROR_CODES`, and ' +
+            "`list-user-invitations-verification.test.ts` pins it equal to the vendor's own entry so a " +
+            'vendor rename turns the pin red rather than silently minting a local code. Raised ' +
+            "`APIError.from('FORBIDDEN', verificationRequired)` inside the rebuilt " +
+            '`/organization/list-user-invitations` better-auth endpoint, so it leaves as the ' +
+            "vendor's own `Response` on the vendor's wire — the identical refusal the vendor handler " +
+            'raised unconditionally before the rebuild — and never as a throw this repo classifies.',
+    },
 
     {
         code: 'OS_METADATA_CONVERTED',

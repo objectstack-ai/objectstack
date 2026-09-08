@@ -245,20 +245,82 @@ function valueWithinRange(value: any, min: any, max: any): boolean {
 }
 
 /**
+ * [#16810] Equality for a comparand this face compares by VALUE.
+ *
+ * `==` is kept for everything it was chosen for — the reasons the arm below
+ * records, "undefined/null mismatch" and "string/number coercion", both of
+ * which are about PRIMITIVES and both of which still hold. What `==` cannot do
+ * is the one type the contract's accepted comparand set names that is not a
+ * primitive: between two objects `==` compares REFERENCES, so a `Date`
+ * comparand matched only the very object it was handed and never an equal
+ * instant.
+ *
+ * The rule is `@objectstack/formula`'s `looseEq`, arm for arm — the sibling
+ * record-at-a-time matcher this face's conformance suites are held against, so
+ * the two agree by construction rather than by coincidence:
+ *
+ * - Date vs Date — equal when their time values are equal;
+ * - Date vs string / number — the counterpart is read as an instant first,
+ *   which is the case that actually reaches a stored row here: this driver
+ *   canonicalises a declared `datetime` to ISO TEXT on write
+ *   (`memory-temporal.ts`, ADR-0053 D-B1), so a `Date` comparand meets a
+ *   STRING in storage and `==` stringified the Date to `"Wed Jan 01 2026 …"`,
+ *   which no ISO value equals;
+ * - everything else — the unchanged `==`.
+ *
+ * An Invalid Date has no time value (`NaN`), so it equals nothing, itself
+ * included — JS `Date` convention, `formula`'s answer, and ADR-0053 D-F1's
+ * reading that an Invalid Date has no canonical text.
+ */
+function comparandEquals(value: any, condition: any): boolean {
+    if (value instanceof Date && condition instanceof Date) {
+        return value.getTime() === condition.getTime();
+    }
+    if (value instanceof Date && (typeof condition === 'string' || typeof condition === 'number')) {
+        return value.getTime() === new Date(condition).getTime();
+    }
+    if (condition instanceof Date && (typeof value === 'string' || typeof value === 'number')) {
+        return new Date(value).getTime() === condition.getTime();
+    }
+    // Loose equality to handle undefined/null mismatch or string/number coercion if desired.
+    // But stick to == for JS loose equality which is often convenient in weakly typed queries.
+    return value == condition;
+}
+
+/**
  * Evaluate a specific condition against a value
  */
 function checkCondition(value: any, condition: any): boolean {
+    // [#16810] An ARRAY comparand is REFUSED, by `assertFilterConditionShape` in
+    // `filter-refusal.ts` — the one gate every face of this package runs before
+    // it evaluates anything, so the live query path and this matcher cannot
+    // answer it differently. It used to fall into the equality arm below and be
+    // compared by REFERENCE, which no deep-equal array satisfies; mingo, one
+    // file away, deep-equalled the same filter and returned the row.
+    //
+    // This arm is the totality floor for a DIRECT call that skips the gate, the
+    // same role `$between`'s surviving `Array.isArray` guard plays below and the
+    // same answer `@objectstack/formula`'s matcher gives ("a bare array value is
+    // not a valid field spec"). ⛔ It must not be deleted in favour of falling
+    // through: the operator-object arm further down would then read `['a','b']`
+    // as a key bag and JSON-compare it, inventing the array-equality semantics
+    // this cell was ruled AGAINST.
+    if (Array.isArray(condition)) return false;
+
     // Case A: Implicit Equality (e.g. status: 'active')
-    // If condition is a primitive or Date/Array (exact match), treat as equality.
+    // If condition is a primitive or Date (exact match), treat as equality.
+    //
+    // [#16810] `Date` stays in this arm — the contract's accepted comparand set
+    // (`ACCEPTED_FILTER_COMPARAND_TYPES`) names it, and the conformance table
+    // requires that "a Date comparand must pass the door and execute
+    // everywhere" — but the comparison is {@link comparandEquals}, which
+    // compares an instant rather than an object identity.
     if (
         typeof condition !== 'object' || 
         condition === null || 
-        condition instanceof Date ||
-        Array.isArray(condition)
+        condition instanceof Date
     ) {
-        // Loose equality to handle undefined/null mismatch or string/number coercion if desired.
-        // But stick to == for JS loose equality which is often convenient in weakly typed queries.
-        return value == condition;
+        return comparandEquals(value, condition);
     }
     
     // Case B: Operator Object (e.g. { $gt: 10, $lt: 20 })
@@ -379,11 +441,17 @@ function checkCondition(value: any, condition: any): boolean {
         }
 
         switch (op) {
+            // [#16810] `$eq` / `$ne` are the operator spelling of the implicit
+            // comparand above, so they take the same equality — otherwise one
+            // predicate would answer two ways depending on which spelling the
+            // author used, on the very type (`Date`) the accepted comparand set
+            // names. An ARRAY target never reaches either arm: the shape gate
+            // refuses it for both spellings.
             case '$eq': 
-                if (value != target) return false; 
+                if (!comparandEquals(value, target)) return false; 
                 break;
             case '$ne': 
-                if (value == target) return false; 
+                if (comparandEquals(value, target)) return false; 
                 break;
             
             // Numeric / Date

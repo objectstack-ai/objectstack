@@ -1362,6 +1362,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-deferred-dropped.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2443,6 +2458,21 @@
     },
     {
       "file": "packages/plugins/plugin-auth/src/impersonation-bearer-rotation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
       "verb": "update",
       "pinned": 1
     },

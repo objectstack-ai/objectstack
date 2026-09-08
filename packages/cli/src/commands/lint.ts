@@ -960,6 +960,61 @@ export default class Lint extends Command {
         const { mod } = await bundleRequire({
           filepath: flags.generator,
           external: BUNDLE_REQUIRE_EXTERNALS,
+          // [#16358] Under `--json` this call site had TWO channels, and only
+          // one of them was ours. esbuild's own logger writes straight to
+          // stderr from inside the bundle, BEFORE anything throws, so the
+          // `catch` below — which does produce a correct one-key `{error}`
+          // document on stdout — never gets the chance to suppress it.
+          // Measured on this entry at 7f96e1417e, both doors:
+          //
+          //   os lint --eval --json --generator /tmp/os16358/nope.mjs
+          //     exit 1 · stdout 143 B (well-formed `{error}`) · stderr 55 B
+          //     `✘ [ERROR] Could not resolve "/tmp/os16358/nope.mjs"`
+          //   os lint --eval --json --generator ./warns-but-loads.mjs
+          //     exit 0 · stdout 3158 B (the eval report) · stderr 340 B
+          //     `▲ [WARNING] The "typeof" operator will never evaluate to …`
+          //
+          // ⇒ the leak is NOT confined to the failure branch. `--json` is a
+          // machine face; anything on stderr is a human-channel emission the
+          // caller did not ask for, and both of those are an internal
+          // bundler's diagnostic rather than an ObjectStack refusal.
+          //
+          // ⛔ NOTHING is lost from the refusal. esbuild still THROWS its
+          // `BuildFailure` with `errors` populated — `logLevel` governs only
+          // whether esbuild PRINTS — and that message is already the tail of
+          // the `{error}` string the `catch` builds:
+          // `… Build failed with 1 error:\nerror: Could not resolve "…"`.
+          // Silencing the logger must not silence the refusal, and it does
+          // not; `test/lint-eval-generator-load-envelope.e2e.test.ts` pins
+          // both halves on the same run.
+          //
+          // ⚠️ WHAT THIS DOES SUPPRESS, stated rather than shipped quietly:
+          // under `--json`, an esbuild WARNING on a generator that loads fine
+          // (the second run above) reached stderr before and now reaches
+          // nothing — a warning is not thrown, so no `catch` carries it onto
+          // stdout. That is inside the defect, not beyond it: the property
+          // the sibling pin's comment states is about the `--json` face as a
+          // whole, not about its error branch.
+          //
+          // ⛔ The human face is NOT touched, and is not touched BY
+          // CONSTRUCTION rather than by restating a default: when `--json` is
+          // absent this passes no `esbuildOptions` at all, so bundle-require's
+          // own esbuild defaults apply exactly as before. A `logLevel:
+          // 'warning'` written out here would be me copying a default I would
+          // then own.
+          //
+          // ⛔ Scope is this ONE call site. The other `bundleRequire` callers
+          // in this package (`utils/config.ts`, `utils/scaffold-validate.ts`,
+          // `commands/serve.ts`) keep their diagnostics; a global esbuild
+          // silence would trade one under-read for a larger one.
+          //
+          // Why `logLevel` and not the two alternatives the card left open:
+          // esbuild's JS API exposes no logger hook to install (its whole
+          // logging surface is `logLevel` plus the `errors`/`warnings` arrays
+          // on the result), and capturing `process.stderr.write` around an
+          // await is a process-global monkey-patch that would swallow
+          // concurrent writes that are not esbuild's.
+          ...(flags.json ? { esbuildOptions: { logLevel: 'silent' as const } } : {}),
         });
         const fn = (mod as any).default ?? (mod as any).generate;
         if (typeof fn !== 'function') {

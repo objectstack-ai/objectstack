@@ -226,6 +226,27 @@ export interface HttpDispatcherOptions {
 }
 
 /**
+ * Whether `path` IS `prefix` or lies UNDER it — a prefix test that stops at a
+ * segment boundary (#16263).
+ *
+ * The boundary is `'/'`, `'?'` or end-of-string. `charCodeAt` past the end
+ * yields `NaN`, and `NaN` fails both comparisons, so the end-of-string case is
+ * the `prefix.length === path.length` equality that `startsWith` already
+ * established — no separate length check.
+ *
+ * ⛔ Not a general path utility and deliberately not exported: it exists for
+ * the CONTROL-PLANE SKIP LIST, where the query form has to keep matching. A
+ * domain's route claim is a different question with a different answer —
+ * `DomainHandlerRegistry`'s `match: 'segment'`, which does not accept `'?'`
+ * because a `?`-suffixed prefix is spelled as its own route there.
+ */
+function isPathWithinPrefix(path: string, prefix: string): boolean {
+    if (!path.startsWith(prefix)) return false;
+    const next = path.charCodeAt(prefix.length);
+    return Number.isNaN(next) || next === 47 /* '/' */ || next === 63 /* '?' */;
+}
+
+/**
  * `services.search`'s in-process remedy string (#7939), kept out of the
  * shared `inProcessServiceMessage('search')` path on purpose: that helper's
  * wording ("Kernel-internal service — consumed in-process via the service
@@ -1312,8 +1333,34 @@ export class HttpDispatcher {
         if (!this.enforceMembership) return null;
 
         // Control-plane paths — never gated by project membership.
+        //
+        // [#16263] The membership skip list stops at a SEGMENT BOUNDARY. It
+        // was `skipPaths.some(p => path.startsWith(p))`, the same bare
+        // `startsWith` the domain registry defaulted to — and it is the same
+        // mistake about the same prefix: `/authentication/foo` is not under
+        // `/auth`, yet it satisfied `startsWith('/auth')` and was waved past
+        // this check.
+        //
+        // ⚠️ Why this site is repaired ahead of the domain claims even though
+        // it is the harder one to make fire: a domain claim that is too wide
+        // sends traffic SOMEWHERE WRONG, while a skip list that is too wide
+        // sends traffic PAST A CHECK. Nothing claims `/authentication/*`
+        // today, so such a request 404s further down before the missing
+        // membership check can matter — LATENT, not harmless. It goes live the
+        // day any domain claims a path of that shape, and on that day the
+        // symptom is a non-member reading a scoped route, not a 404.
+        //
+        // The boundary is `'/'`, `'?'` or end-of-string, matching the
+        // `acceptOAuthAccessToken` spelling in `resolveRequestScope`
+        // (`/^…\/mcp(?:[/?]|$)/`). `'?'` is load-bearing rather than
+        // decorative: `cleanPath` here has only had a trailing slash stripped,
+        // so an adapter that passes the query through in `path` presents
+        // `/auth?redirect=…` — skipped before this change, and it must stay
+        // skipped. A repair that only accepted `'/'` would newly gate the
+        // control plane on membership, which is a WIDER change than the one
+        // this card asks for and in the dangerous direction.
         const skipPaths = ['/auth', '/cloud', '/health', '/ready', '/discovery'];
-        if (skipPaths.some(p => path.startsWith(p))) return null;
+        if (skipPaths.some(p => isPathWithinPrefix(path, p))) return null;
 
         // Public share-link resolve/messages — the token IS the authorisation,
         // so never gate them on project membership (a signed-in non-member
