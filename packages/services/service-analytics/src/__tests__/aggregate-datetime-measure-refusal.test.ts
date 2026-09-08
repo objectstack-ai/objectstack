@@ -44,17 +44,19 @@
  * ## ⚠️ The compile leg lands SCOPED to temporal source fields, and says why
  *
  * The verdict is the table's; what is scoped is which FIELDS the gate judges.
- * Executing every row today refuses two families this platform answers on
- * purpose, with tests: `min` / `max` over the STRING classes (typed `'string'`
- * by `measureResultType`, #15768, and pinned end to end in
- * `measure-result-type.test.ts`), and the boolean rows (maintainer ruling
- * #11152 has booleans aggregate as numbers on every backend). The spec module's
- * own header records both as OVERRIDES of existing opinions rather than
- * agreement, and refers the boolean one back to the maintainer. Refusing them
- * would break uses that work today — a product judgement, and #16099's
- * full-table leg is where it belongs. The temporal rows carry no such
- * collision, which is why they are the ones executed here. The last suite in
- * this file pins that boundary so it cannot widen by accident.
+ * Executing every row of the table today would refuse `min` / `max` over the
+ * STRING classes — typed `'string'` by `measureResultType` (#15768) and pinned
+ * end to end in `measure-result-type.test.ts` — which this platform answers on
+ * purpose. #16785 has since **ruled C** on those rows: the TABLE is to be
+ * amended to accept them, so enforcing them from here would pre-empt a ruling
+ * that goes the other way. The BOOLEAN rows are settled and are not a collision
+ * any more: #16685 was ruled A and #16750 added `boolean` / `toggle` to
+ * `sum` / `avg` / `min` / `max` (maintainer ruling #11152 — booleans aggregate
+ * as numbers on every backend), so the table ACCEPTS them and nothing refuses
+ * them anywhere. The temporal rows carry no such counter-evidence, which is why
+ * they are the ones executed here; the full-table leg stays with #16099. The
+ * last suite in this file pins that boundary so it cannot widen by accident —
+ * ⛔ without pinning any verdict the table itself is still under ruling for.
  *
  * ## Dissolution verification — direction predicted BEFORE running
  *
@@ -480,20 +482,39 @@ describe('#16737 — the gate stands down rather than guessing', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('#16737 — the compile leg is scoped to temporal source fields, on purpose', () => {
-  it('a `min` over a TEXT field still compiles here, though the table refuses the pair', async () => {
-    // ⚠️ Not an endorsement of the pair — a statement about WHO refuses it.
-    // `measureResultType` (#15768) types this result as `'string'` and
-    // `measure-result-type.test.ts` pins it end to end, so enforcing the
-    // table's string rows is a product judgement that belongs to #16099, not a
-    // side effect of this card. The table's verdict is asserted directly, so
-    // this case reads as "the contract says no, this gate does not act on it".
-    expect(isAggregateCompatibleWithFieldType('min', 'text')).toBe(false);
-    const { svc } = makeService([{ status: 'open', first_note: 'Archive the backlog' }]);
+  it('a `min` over a TEXT field still compiles here — WHATEVER the table says about that pair', async () => {
+    // ⚠️ Not an endorsement of the pair, and ⛔ deliberately NOT a pin on the
+    // table's verdict for it. `min` × `text` is the row #16785 is ruled C on —
+    // the table is to be AMENDED to accept it — so asserting today's `false`
+    // here would make this file go red when that ruling lands, and would make a
+    // test of this card the thing standing in the way of a decision this card
+    // does not own. What this case owns is one fact, true on either side of
+    // that amendment: a NON-TEMPORAL field is not judged by this gate, so the
+    // measure compiles and reaches the driver.
+    const { svc, sqls } = makeService([{ status: 'open', first_note: 'Archive the backlog' }]);
     const result: any = await svc.queryDataset(
       dataset([{ name: 'first_note', aggregate: 'min', field: 'note' }]),
       { dimensions: ['status'], measures: ['first_note'] },
     );
     expect(result.rows[0].first_note).toBe('Archive the backlog');
+    // Not vacuous: the gate refuses BEFORE any SQL, so a widened gate would
+    // leave `sqls` empty and this assertion is what would catch it.
+    expect(sqls.length).toBe(1);
+  });
+
+  it('a `sum` over a TEXT field also compiles here — the boundary, on a row no ruling is moving', async () => {
+    // The refutable half of the boundary. #16785 C amends only `min` / `max`
+    // for the string classes, so `sum` × `text` stays a pair the TABLE refuses
+    // and this GATE does not act on — before that amendment and after it. If
+    // the gate ever widened past the temporal class, this case goes red.
+    expect(isAggregateCompatibleWithFieldType('sum', 'text')).toBe(false);
+    const { svc, sqls } = makeService([{ status: 'open', note_sum: 0 }]);
+    const result: any = await svc.queryDataset(
+      dataset([{ name: 'note_sum', aggregate: 'sum', field: 'note' }]),
+      { dimensions: ['status'], measures: ['note_sum'] },
+    );
+    expect(result.rows.length).toBe(1);
+    expect(sqls.length).toBe(1);
   });
 
   it('every temporal member IS judged — the scope is the class, not the one type the card named', async () => {

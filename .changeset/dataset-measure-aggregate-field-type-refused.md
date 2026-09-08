@@ -58,14 +58,34 @@ schema, not `os validate` / `os lint`, not the analytics service, not the render
   `sourceFieldMeta`, an unresolvable field, or a `relationship.field` path (whose
   column lives on a joined object) leaves the pair unjudged.
 
+## ⚠️ Scope: the compile leg executes the TEMPORAL rows only
+
+The gate judges only a measure whose field is declared `date` / `datetime` /
+`time`; a field of any other class is never handed to the predicate. The
+verdict for the pairs it does judge is the table's — no row is restated — but
+which FIELDS are judged is narrower than the table, on purpose:
+
+- **String rows** (`min` / `max` over `text`, `select`, `lookup`,
+  `autonumber`, …) are **not enforced here**. They are under #16785, **ruled
+  C**: the table itself is to be amended to accept them, because
+  `measureResultType` (#15768) already types those results as `'string'` and
+  pins them end to end. Enforcing them from this card would pre-empt that
+  ruling.
+- **Boolean rows** are not a refusal at all any more: #16685 was ruled A and
+  #16750 added `boolean` / `toggle` to `sum` / `avg` / `min` / `max`, so the
+  table ACCEPTS them and this gate never judged them.
+- The table's `sum` × `percent` row is likewise **not** executed by this leg;
+  `sum` over a `percent` compiles exactly as it did before.
+
+⇒ The only pairs whose behaviour changes in this release are `avg` / `sum`
+over a `date` / `datetime` / `time` field. The full-table leg remains #16099's.
+
 ## FROM → TO
 
 | you wrote | write instead |
 |:--|:--|
-| `{ aggregate: 'avg', field: <a datetime field> }` | `{ aggregate: 'min' \| 'max', field: <same> }` — a real instant of the field's own type |
+| `{ aggregate: 'avg', field: <a date/datetime/time field> }` | `{ aggregate: 'min' \| 'max', field: <same> }` — a real instant of the field's own type |
 | `{ aggregate: 'sum', field: <a date/datetime/time field> }` | store the duration as a number (a computed "days open" field) and `sum`/`avg` that |
-| `{ aggregate: 'avg', field: <a percent field> }` | unchanged — `avg` accepts `percent` |
-| `{ aggregate: 'sum', field: <a percent field> }` | `avg`, or sum the underlying amounts — a rate does not add |
 | `derived: { op: 'difference', of: ['avg_a', 'avg_b'] }` over temporal averages | fix the two operand measures; the `derived` spec itself is unchanged |
 
 ⭐ A duration is not recoverable from an aggregate over instants on any backend.
@@ -79,10 +99,18 @@ filtering — is unchanged; this is about aggregation only. `avg` over a genuine
 numeric measure, `min` / `max` over a temporal one, and `count` / `count_distinct`
 over anything all behave exactly as before.
 
-Alongside the refusal, `service-analytics`' four contradictory annotations about
-what a SQLite `Field.datetime` column physically holds are reconciled to one
-statement. Two said it holds an INTEGER epoch and ISO TEXT at once; one said flatly
-that it IS an INTEGER epoch. Neither is current: since #3912 the column has ONE
+⚠️ **Two faces stay uncovered, deliberately.** The refusal lives in
+`compileDataset` and reads a `declaredFieldType` probe, so it applies only where
+a host wires one: `/analytics/query` — the non-dataset face, whose measures a
+Cube infers rather than an author declaring them — is NOT covered, and neither
+is any other `compileDataset` caller that passes no probe (those stand down
+unjudged rather than guessing). Closing those is #16099's, not this card's.
+
+Alongside the refusal, `service-analytics`' contradictory annotations about what a
+SQLite `Field.datetime` column physically holds are reconciled to one statement —
+**seven** source sites plus two test narratives, not the four the card quoted. Some
+said the column holds an INTEGER epoch and ISO TEXT at once; one said flatly that it
+IS an INTEGER epoch. Neither is current: since #3912 the column has ONE
 storage form, canonical UTC text, with the epoch surviving only in a database not
 yet converged by `backfillCanonicalDatetimes`. The fact is now stated once, on
 `AnalyticsServiceConfig.coerceTemporalFilterValue`, and the other sites link to it.

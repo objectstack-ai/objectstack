@@ -126,9 +126,16 @@ import {
  * `DimensionType` does carry a `boolean` word, so a correction is SPELLABLE
  * here — which is exactly why it is not made: spelling it would ship one of
  * three disagreeing readings as a published declaration. The column keeps the
- * `number` it has (the accurate word for the raw SQLite value), and the
- * missing refusal is owned by the `needs-user-decision` card for "no layer
- * refuses an incoherent aggregate / field-type pair".
+ * `number` it has (the accurate word for the raw SQLite value).
+ *
+ * ⚠️ ⛔ This is NOT a missing refusal, and it is no longer referred onward.
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` ACCEPTS `sum` / `avg` / `min` / `max`
+ * over `boolean` / `toggle` — #16685 ruled A, landed as #16750, on the
+ * authority of maintainer ruling #11152 — so the pair is deliberately allowed
+ * and the compile leg (#16737) never judges it. What stays open here is only
+ * the RESULT-TYPE question above: three readings that disagree about what the
+ * one answering backend reports. A refusal would not settle it, and none is
+ * owed.
  *
  * ### The JSON-column classes: array- and object-valued types
  *

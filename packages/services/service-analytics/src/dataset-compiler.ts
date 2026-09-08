@@ -254,24 +254,29 @@ function aggregateToMetricType(m: DatasetMeasure): Metric['type'] {
  * platform currently answers, on purpose, with tests:
  *
  * - `min` / `max` over the STRING classes (`text`, `select`, `lookup`,
- *   `autonumber`, …). `measureResultType` (#15768) types exactly those results
- *   as `'string'`, and `__tests__/measure-result-type.test.ts` pins them end to
- *   end through `queryDataset` — 15 cases that go red the moment those rows are
- *   enforced. The spec module's own header records this as an OVERRIDE of an
- *   existing opinion rather than agreement with it.
- * - `sum` / `avg` / `min` / `max` over `boolean` / `toggle`. Maintainer ruling
- *   #11152 pins booleans aggregating as numbers on every backend
- *   (`AGGREGATION_CASES`), and the spec header refers the collision between
- *   that ruling and batch #59 back to the maintainer as its own decision.
+ *   `autonumber`, …) — refused by the table, and ⛔ NOT enforced here.
+ *   `measureResultType` (#15768) types exactly those results as `'string'`, and
+ *   `__tests__/measure-result-type.test.ts` pins them end to end through
+ *   `queryDataset` — 15 cases that would go red the moment those rows were
+ *   enforced. #16785 has since **ruled C** on exactly this: the TABLE is to be
+ *   amended to accept `min` / `max` over the string classes. Enforcing them
+ *   from here would pre-empt a ruling that goes the other way.
+ * - `boolean` / `toggle` are no longer a collision at all, and this note no
+ *   longer refers one to the maintainer. #16685 was ruled A and #16750 added
+ *   both members to the `sum` / `avg` / `min` / `max` rows, on the authority of
+ *   maintainer ruling #11152 (booleans aggregate as NUMBERS on every backend,
+ *   pinned by `AGGREGATION_CASES`). The table ACCEPTS them — so there is
+ *   nothing here to refuse, and this gate never judged them either way: they
+ *   are outside the temporal class.
  *
- * Refusing those would break uses that work today, which is a product judgement
- * and not a dev's to take mid-flight. The temporal rows carry no such
- * collision, and were measured on both dialects before this gate was written:
- * SQLite answers a silent average YEAR, Postgres refuses at 42883, no shipped
- * dataset in this repo pairs them, and there is no reading on which the mean of
- * a set of instants is a duration. So the temporal rows are executed and the
- * remainder stays with #16099, whose full-table leg is blocked on those two
- * collisions being ruled.
+ * Enforcing the string rows would break uses that work today, and #16785 ruled
+ * that they be AMENDED rather than executed. The temporal rows carry no such
+ * counter-evidence, and were measured on both dialects before this gate was
+ * written: SQLite answers a silent average YEAR, Postgres refuses at 42883, no
+ * shipped dataset in this repo pairs them, and there is no reading on which the
+ * mean of a set of instants is a duration. So the temporal rows are executed
+ * here and the full-table leg stays with #16099 — now waiting on #16785's
+ * amendment landing, not on two unruled collisions.
  *
  * ## Tiering — "cannot answer, do not block", the same as every sibling probe
  *
