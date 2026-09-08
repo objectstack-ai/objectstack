@@ -503,6 +503,127 @@ const maskedComments = memoiseMask((source) => maskComments(source));
  */
 const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(source)));
 
+/**
+ * ── The `#` half of the same discipline, for the file kind the follow already
+ *    admits (#16132) ───────────────────────────────────────────────────────
+ *
+ * `maskedModuleBody` reads line comments, block comments and a shebang, because every
+ * caller it was written for is JavaScript. `PROGRAM_TEXT_TARGET` admits a THIRD
+ * kind, and a shell script's prose is none of those three: on a `.sh` source every
+ * path a `#` comment mentions came back as a watch hint, because the JS-shaped
+ * literal regex reads a backticked path in prose as a template literal and a
+ * double-quoted one as a string. Measured on `be92d46`, over the 27 tracked
+ * `.sh` files: 37 hints as spelled, 8 once `#` comments are masked, and 8 of the
+ * 16 files that spell any hint at all had a population that was 100% prose.
+ * `scripts/bump-objectui.sh` was the sharpest — 7 hints, every one of them
+ * inside a `#` comment or an `echo` line. Re-taken unchanged after merging
+ * `5e53d73d`; the self-test asserts the DIRECTION rather than these numbers,
+ * because a reading belongs to a named commit and this one moves whenever a
+ * shell script gains or loses a comment.
+ *
+ * That is the one direction this file refuses everywhere else, stated twice next
+ * door: `spawnedProgramTargets` takes a missing lead over a fabricated one, and
+ * `readProgramTargetsInSource` blanks comments so a docblock naming a gate is
+ * not a read of it. Hint extraction paid for neither, for this kind.
+ *
+ * ## Why this is a per-LINE recogniser and not a shell parser
+ *
+ * A `#` opens a comment only at the start of a WORD, and only outside quotes —
+ * so `$#`, `${#a}`, `a#b` and a `#` inside `'…'` or `"…"` are not comment
+ * starts, and a naive blank-from-`#`-to-end-of-line corrupts exactly the lines
+ * worth reading. Quote tracking is therefore real, and it is where the cost of
+ * being WRONG is unbounded: one unbalanced quote silently disables the mask for
+ * the whole REST of the file, which is the fabricating direction.
+ *
+ * A flat scanner cannot keep shell's quoting straight, and the measurement is
+ * not marginal. Command substitution restarts quoting — `"$(printf '%s' "$x")"`
+ * is balanced in shell and reads as three separate spans to a scanner that does
+ * not model `$( … )` — and a here-string `<<<` looks like a here-doc introducer
+ * to anything that matches `<<` first. A cross-line implementation of both was
+ * built and measured on this tree before this one: it left 1,467 comment lines
+ * unmasked in `scripts/pm/os-verify-lock.sh` alone and 8 in
+ * `scripts/release-spec-changes.sh`, where the two surviving hints were the
+ * prose ones this card is about.
+ *
+ * ⇒ quote state is LINE-SCOPED: it opens and dies on its own line, and nothing
+ * is carried across a newline. Every misreading is then bounded to the line it
+ * is on, and the residue lands in the OVER-masking direction — a multi-line
+ * quoted string or a here-doc body whose line begins with `#` is masked as if
+ * it were a comment. That is a missing lead, on text that is data rather than a
+ * path the script opens, and it is the direction this file errs in everywhere.
+ * ⛔ Do not "fix" it into carried state: that trades a bounded over-mask for the
+ * unbounded under-mask measured above.
+ *
+ * Same projection as `blank` next door — spans become spaces, newlines and byte
+ * offsets survive — so this composes onto `maskedModuleBody`'s output rather
+ * than replacing it. The order is measured too, and it is the one that cannot
+ * widen: masking `#` FIRST stops a `#` comment containing `@objectstack/*` from
+ * opening a phantom JS block comment, which UNCOVERS code below it and adds
+ * hints (2 on this tree — `scripts/downstream-smoke.sh` and
+ * `.claude/hooks/guard-tree-enum.sh`). Masking `#` LAST can only blank more of
+ * an already-masked body, so the shell hint set is a subset of today's by
+ * construction.
+ */
+const SHELL_WORD_START = /[\s;&|()<>]/;
+
+function shellCommentSpans(source) {
+  const n = source.length;
+  const comment = new Uint8Array(n);
+  let quote = '';
+  // The character before the cursor, as the WORD rule sees it. A newline reads
+  // as a word boundary, so a `#` in column 0 is a comment start.
+  let prev = '\n';
+  let i = 0;
+  while (i < n) {
+    const ch = source[i];
+    if (ch === '\n') {
+      quote = '';
+      prev = '\n';
+      i++;
+      continue;
+    }
+    if (quote) {
+      // A backslash escapes inside `"…"` and is literal inside `'…'`.
+      if (quote === '"' && ch === '\\' && i + 1 < n && source[i + 1] !== '\n') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = '';
+      i++;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < n && source[i + 1] !== '\n') {
+      prev = 'x';
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      prev = 'x';
+      i++;
+      continue;
+    }
+    if (ch === '#' && SHELL_WORD_START.test(prev)) {
+      while (i < n && source[i] !== '\n') comment[i++] = 1;
+      continue;
+    }
+    prev = ch;
+    i++;
+  }
+  return comment;
+}
+
+/**
+ * The source with its `#` COMMENT spans blanked — the shell counterpart of
+ * `maskComments`, and the same projection: spaces in, newlines and offsets kept.
+ */
+export function maskShellComments(source) {
+  return blank(String(source), shellCommentSpans(String(source)));
+}
+
+/** `maskShellComments(maskedModuleBody(source))`, memoised — see the block above. */
+const maskedHashCommentBody = memoiseMask((source) => maskShellComments(maskedModuleBody(source)));
+
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
 // This module is importable and is NOT a discovered gate file — `check:pm-dispatch-gates`
@@ -4678,7 +4799,18 @@ function exclusionDeclSpans(moduleBody) {
  * have to remember to do it.
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
-  const moduleBody = maskedModuleBody(scriptSource);
+  // The `#` mask is KIND-scoped, so it is reached through the path rather than
+  // sniffed out of the bytes. A caller with no `scriptPath` therefore keeps the
+  // JS-only mask over a shell source, and that direction is the one this
+  // parameter fails in the OTHER way from everything else in this function: a
+  // forgotten path is a missing lead for the resolve below, and a FABRICATED
+  // one here. Both live callers pass it (`discoverFamilies`, twice); the
+  // pathless overload is the self-test's and `declaredInheritedPopulation`'s
+  // own fallback, and a shell module that declared an inherited population
+  // would be held to the path-aware set that `discoverFamilies` computes.
+  const moduleBody = hashCommentProgram(scriptPath)
+    ? maskedHashCommentBody(scriptSource)
+    : maskedModuleBody(scriptSource);
   const exclusions = exclusionDeclSpans(moduleBody);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
@@ -7371,6 +7503,27 @@ const SOURCE_READ_CALL = /\b(?:fs\.)?(?:readFileSync|copyFileSync)\s*\(/g;
 
 /** Program text, as opposed to data a gate parses — see the docblock above. */
 export const PROGRAM_TEXT_TARGET = /\.(?:[cm]?[jt]sx?|sh)$/;
+
+/**
+ * Program text this file's JS masker cannot read — derived from the other two
+ * kind tests rather than listed, so it cannot drift away from them (#16132).
+ *
+ * `PROGRAM_TEXT_TARGET` decides which kinds a population follow may reach;
+ * `SCANNED_SOURCE_EXTENSIONS` names the JS/TS half `maskedModuleBody` was
+ * written for. The remainder is the half whose comment syntax that masker does
+ * not know, and today it is exactly `.sh`. Spelling it as the DIFFERENCE means a
+ * kind added to the follow arrives already masked: the widening that admits it
+ * is the same edit that routes it here. A kind whose comments are not `#`
+ * would be over-masked by that default, which is a missing lead rather than a
+ * fabricated one — the direction the two scans next door both state.
+ */
+function hashCommentProgram(scriptPath) {
+  return (
+    typeof scriptPath === 'string'
+    && PROGRAM_TEXT_TARGET.test(scriptPath)
+    && !SCANNED_SOURCE_EXTENSIONS.test(scriptPath)
+  );
+}
 
 /**
  * The program files, of the tracked files a gate opens at an anchored path.
@@ -14833,6 +14986,171 @@ function selfTest() {
   t(
     'a caller that passes no script path still gets the stripped spelling',
     extractWatchHints("import { f } from './lib/dist-freshness';").includes('lib/dist-freshness'),
+  );
+
+  // ── `#` COMMENTS on a shell-kind source (#16132) ──────────────────────────
+  //
+  // The card's fixture table, which is the whole of the acceptance criterion:
+  // three sources that were indistinguishable and must not be, and a fourth row
+  // that is the CONTROL — the JS masking discipline already reached this file
+  // kind, and this change may not cost it. ⛔ A pin written against only the
+  // negative rows would pass on an instrument that returned nothing at all, and
+  // a pin written against only the positive one would pass on the broken
+  // instrument, which returned `1` for all three.
+  const shTarget = 'scripts/bump-objectui.selftest.sh';
+  const shProseTick = '# see `' + shTarget + '` for the self-test\n';
+  const shProseQuote = '# see "' + shTarget + '" for the self-test\n';
+  const shInvocation = "bash '" + shTarget + "'\n";
+  const shJsComment = '// see `' + shTarget + '`\n';
+  const shHints = (src, path = 'scripts/fixture.sh') => extractWatchHints(src, path, { tree: hintTree });
+  t(
+    'a path a shell `#` comment quotes in BACKTICKS is not a hint',
+    shHints(shProseTick).length === 0,
+    shHints(shProseTick),
+  );
+  t(
+    '…nor one it quotes in DOUBLE QUOTES — the two spellings reach the scan as a template and as a string, and one fix must cover both',
+    shHints(shProseQuote).length === 0,
+    shHints(shProseQuote),
+  );
+  t(
+    '…while a REAL invocation on the same file still yields its hint, so the mask removed prose rather than the population',
+    shHints(shInvocation).join() === shTarget,
+    shHints(shInvocation),
+  );
+  t(
+    'and the fourth row still reads 0 — the `//` mask this change composes onto is untouched on a shell source',
+    shHints(shJsComment).length === 0,
+    shHints(shJsComment),
+  );
+  // KIND-SCOPED, in both directions. The same bytes on a `.mjs` path must keep
+  // spelling their hint: `#` is not a comment in JavaScript, and a mask that
+  // fired there would be a widening rather than this card's narrowing.
+  t(
+    'the `#` mask does NOT reach a JS source — the same prose on a .mjs path still spells its hint',
+    shHints(shProseTick, 'scripts/check-x.mjs').join() === shTarget,
+    shHints(shProseTick, 'scripts/check-x.mjs'),
+  );
+  t(
+    'the kind predicate is the DIFFERENCE of the two that already exist, so a widened follow arrives already masked',
+    hashCommentProgram('scripts/x.sh')
+      && !hashCommentProgram('scripts/x.mjs')
+      && !hashCommentProgram('packages/spec/src/x.ts')
+      && !hashCommentProgram('apps/docs/x.tsx')
+      && !hashCommentProgram('docs/x.md')
+      && !hashCommentProgram(null),
+  );
+  // A `#` opens a comment only at the start of a WORD, and only outside quotes.
+  // Each of these is a line a blank-from-`#`-to-end-of-line pass would destroy,
+  // and each carries a real hint AFTER the `#` so the case cannot pass by
+  // returning nothing.
+  t(
+    'a `#` that is not at a word start opens no comment — $#, ${#…} and a bare a#b all keep the hint beside them',
+    shHints('[ "$#" -gt 0 ] && cat "docs/a/b.md"\n').join() === 'docs/a/b.md'
+      && shHints('n=${#argv[@]} ; cat "docs/a/b.md"\n').join() === 'docs/a/b.md'
+      && shHints('git log --grep=fix#1 -- "docs/a/b.md"\n').join() === 'docs/a/b.md',
+  );
+  t(
+    'a `#` inside single or double quotes opens no comment either',
+    shHints("grep '#' \"docs/a/b.md\"\n").join() === 'docs/a/b.md'
+      && shHints('grep "#" "docs/a/b.md"\n').join() === 'docs/a/b.md',
+  );
+  t(
+    'a TRAILING `#` comment is masked without taking the code before it',
+    shHints('cat "docs/a/b.md"   # and see `docs/gone.md`\n').join() === 'docs/a/b.md',
+    shHints('cat "docs/a/b.md"   # and see `docs/gone.md`\n'),
+  );
+  // The two shapes that make a CROSS-LINE quote scanner desync on real shell,
+  // and the reason quote state is line-scoped instead. Both were measured on
+  // this tree against a here-doc-aware implementation before this one: a
+  // here-string read as a here-doc introducer, and a command substitution whose
+  // inner `"…"` closes the outer one. Either desync silently disables the mask
+  // for the rest of the file, which is the FABRICATING direction.
+  t(
+    'a `<<<` here-string does not disable the mask for what follows it',
+    shHints('awk \'{ print $2 }\' <<< "$rest"\n# see `docs/gone.md`\n').length === 0,
+    shHints('awk \'{ print $2 }\' <<< "$rest"\n# see `docs/gone.md`\n'),
+  );
+  t(
+    '…nor does a command substitution carrying its own quotes',
+    shHints('v="$(printf \'%s\' "$input" | head -1)"\n# see `docs/gone.md`\n').length === 0,
+    shHints('v="$(printf \'%s\' "$input" | head -1)"\n# see `docs/gone.md`\n'),
+  );
+  // The residue that line-scoping BUYS those two with, pinned so nobody
+  // "repairs" it back into carried state: a `#` beginning a line inside a
+  // multi-line quoted string or a here-doc BODY is masked as if it were a
+  // comment. That text is data rather than a path the script opens, so the cost
+  // is a missing lead — the direction this file errs in everywhere.
+  t(
+    '⭐ the deliberate over-mask: a `#` line inside a here-doc body is blanked, and that is the cheap direction, not a defect',
+    shHints('cat > /tmp/n <<\'EOF\'\n# see `docs/gone.md`\nEOF\n').length === 0,
+  );
+  // The projection, asserted as `blank`'s contract next door states it: spans
+  // become spaces, so every byte offset and every line number survives and a
+  // caller can index this output against the unmasked source.
+  const shProjectionSrc = 'cat "docs/a/b.md" # x\n# y\nbash \'scripts/z.sh\'\n';
+  const shProjected = maskShellComments(shProjectionSrc);
+  t(
+    'maskShellComments only ever BLANKS — same length, same newlines, and every surviving character is the source\'s own',
+    shProjected.length === shProjectionSrc.length
+      && shProjected.split('\n').length === shProjectionSrc.split('\n').length
+      && [...shProjected].every((c, k) => c === ' ' || c === shProjectionSrc[k])
+      && shProjected !== shProjectionSrc,
+  );
+  // ── LIVE, on this tree: the census the card was filed on ──────────────────
+  //
+  // Appending `.mjs` to a shell path turns the kind predicate off while leaving
+  // the writer's DIRECTORY — the only other thing `scriptPath` decides here —
+  // byte for byte the same, so it is the control for what this mask removed.
+  // ⛔ Written as a DIRECTION and a floor rather than as a count: a reading
+  // belongs to a named commit, and this one moves whenever a shell script gains
+  // or loses a comment.
+  const liveShellFiles = trackedFiles().filter((f) => f.endsWith('.sh'));
+  let shellGrew = 0;
+  let shellShrank = 0;
+  let shellBefore = 0;
+  let shellAfter = 0;
+  for (const f of liveShellFiles) {
+    const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
+    const masked = extractWatchHints(src, f, { tree: hintTree });
+    const unmasked = extractWatchHints(src, `${f}.mjs`, { tree: hintTree });
+    shellBefore += unmasked.length;
+    shellAfter += masked.length;
+    if (masked.some((h) => !unmasked.includes(h))) shellGrew++;
+    else if (masked.length < unmasked.length) shellShrank++;
+  }
+  t(
+    `⭐ LIVE: over ${liveShellFiles.length} tracked .sh file(s) the mask never ADDS a hint — ${shellBefore} spelled without it, ${shellAfter} with`,
+    liveShellFiles.length > 0 && shellGrew === 0 && shellAfter < shellBefore,
+    JSON.stringify({ files: liveShellFiles.length, shellBefore, shellAfter, shellGrew, shellShrank }),
+  );
+  t(
+    '…non-vacuously: at least one live file really loses a hint, so the sweep is not passing over an instrument that changed nothing',
+    shellShrank >= 1,
+    JSON.stringify({ shellShrank }),
+  );
+  // The card's sharpest specimen, both ends. DEPARTURE alone would stay green
+  // on a mask that emptied the file, so the ARRIVAL half names a live shell
+  // script whose hint is spelled in CODE and must survive.
+  const liveBumpSrc = readFileSync(nodePath.join(ROOT, 'scripts/bump-objectui.sh'), 'utf8');
+  t(
+    'LIVE: the file the card measured no longer offers the path its `#` comments merely NAME',
+    !extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh', { tree: hintTree }).includes(
+      'docs/releases-maintenance.md',
+    ),
+  );
+  t(
+    '…non-vacuously: that path IS spelled in the file, inside a `#` comment, and the unmasked control still reads it',
+    extractWatchHints(liveBumpSrc, 'scripts/bump-objectui.sh.mjs', { tree: hintTree }).includes(
+      'docs/releases-maintenance.md',
+    ),
+  );
+  const liveShardSelfTest = 'scripts/ci/select-shard-packages.selftest.sh';
+  t(
+    '⭐ LIVE ARRIVAL: a shell script whose hint is spelled in CODE still spells it, so the mask removed prose and not the population',
+    extractWatchHints(readFileSync(nodePath.join(ROOT, liveShardSelfTest), 'utf8'), liveShardSelfTest, {
+      tree: hintTree,
+    }).includes('scripts/ci/select-shard-packages.sh'),
   );
   // One resolver, not two. `firstPartyImportTargets` answers the same question
   // for the import follow; if they could disagree, one of them is the copy

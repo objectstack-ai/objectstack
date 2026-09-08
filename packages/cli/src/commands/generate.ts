@@ -20,6 +20,7 @@ import type { FieldType } from '@objectstack/spec/data';
 import { isTenancyDisabled, isUniqueDeclared } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
+import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
 
 // ─── Metadata Type Templates ────────────────────────────────────────
 
@@ -699,12 +700,87 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
     console.log(`  ${chalk.dim('File:')}  ${chalk.white(path.join(dir, fileName))}`);
     console.log('');
 
+    // Both emissions are rendered ONCE, here, and every branch below reuses
+    // them: the scaffold file, and the barrel re-export line. They are the two
+    // files one name reaches (#16541), and rendering them at the single point
+    // where the name has finished being derived is what lets one refusal cover
+    // all 14 emission sites across all 7 generators instead of 14 patches.
+    const content = generator.generate(name);
+    const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
+
+    // ⛔ REFUSE rather than rewrite (#16541).
+    //
+    // This command ran no name validation at all, so a name that is legal as a
+    // NAME but not as an IDENTIFIER was interpolated straight into a binding
+    // position and written out under `exit 0` — `const foo.bar:
+    // Data.ServiceObject = {`, plus a matching barrel line: two files that are
+    // not TypeScript, from a command that reported success.
+    //
+    // The criterion is PARSEABILITY, not a charset. `findEmissionParseFailures`
+    // asks the compiler about the bytes above and about nothing else, which is
+    // why it also covers what a rule about identifier characters would miss —
+    // a reserved word is illegal as a `const` binding and legal as an
+    // `export { default as … }` alias, and `${toCamelCase(name)}Views` parses
+    // for a name that bare `${toCamelCase(name)}` refuses.
+    //
+    // Which names this command should ACCEPT — and whether it should normalise
+    // the ones it does, the way `os create` derives its identifier since
+    // #15892 — is an OPEN decision. Sanitising here would answer it by quietly
+    // widening tolerance, and a legal-looking identifier derived from a name
+    // that should have been refused is the worse of the two failures. So
+    // nothing is rewritten, acceptance is unchanged for every name that already
+    // produced parseable output, and the refusal is loud.
+    //
+    // Placed AHEAD of the dry-run branch on purpose: a preview that prints
+    // un-parseable TypeScript and exits 0 is the same defect in preview form.
+    const parseFailures = await findEmissionParseFailures([
+      { label: path.join(dir, fileName), source: content },
+      { label: path.join(dir, 'index.ts'), source: exportLine },
+    ]);
+    if (parseFailures.length > 0) {
+      printError('Refusing to generate — the TypeScript this would write does not parse');
+      console.log('');
+      console.log(`  ${chalk.dim('Name:')}       ${chalk.white(name)}`);
+      console.log(`  ${chalk.dim('Identifier:')} ${chalk.white(toCamelCase(name))}`);
+      console.log('');
+      for (const failure of parseFailures) {
+        console.log(`  ${chalk.white(failure.label)}`);
+        for (const diagnostic of failure.diagnostics) {
+          console.log(chalk.dim(`    ${diagnostic}`));
+        }
+      }
+      console.log('');
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g\` derives a TypeScript identifier from the name you give it, and`,
+      ));
+      console.log(chalk.dim(
+        '  this one is not something the compiler can parse — so what is listed above',
+      ));
+      console.log(chalk.dim(
+        '  would be written broken. Nothing was written.',
+      ));
+      console.log('');
+      console.log(chalk.dim(
+        '  It refuses instead of rewriting your name into a legal-looking identifier,',
+      ));
+      console.log(chalk.dim(
+        '  which would decide in silence which names this command accepts. Pick a name',
+      ));
+      console.log(chalk.dim(
+        `  that survives as an identifier — \`${CLI_ALIAS} g ${type} order_line\` and`,
+      ));
+      console.log(chalk.dim(
+        `  \`${CLI_ALIAS} g ${type} order-line\` both work, and both fold to \`orderLine\`.`,
+      ));
+      console.log('');
+      process.exit(1);
+    }
+
     if (flags.dryRun) {
       printInfo('Dry run — no files written');
       console.log('');
       console.log(chalk.dim('  Content:'));
       console.log(chalk.dim('  ' + '-'.repeat(38)));
-      const content = generator.generate(name);
       for (const line of content.split('\n')) {
         console.log(chalk.dim(`  ${line}`));
       }
@@ -725,8 +801,9 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         fs.mkdirSync(fullDir, { recursive: true });
       }
 
-      // Write file
-      const content = generator.generate(name);
+      // Write file — the same `content` the parse check above accepted, ⛔ not
+      // a re-render: a second call to `generator.generate` would make the
+      // bytes that were checked and the bytes that land two different things.
       fs.writeFileSync(filePath, content);
       printSuccess(`Created ${path.join(dir, fileName)}`);
 
@@ -734,7 +811,6 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
       const indexPath = path.join(process.cwd(), dir, 'index.ts');
       if (fs.existsSync(indexPath)) {
         const indexContent = fs.readFileSync(indexPath, 'utf-8');
-        const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`;
 
         if (!indexContent.includes(toCamelCase(name))) {
           fs.appendFileSync(indexPath, exportLine + '\n');
@@ -742,8 +818,7 @@ async function runMetadataGeneration(type: string, name: string, flags: { dir?: 
         }
       } else {
         // Create barrel index
-        const exportLine = `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';\n`;
-        fs.writeFileSync(indexPath, exportLine);
+        fs.writeFileSync(indexPath, exportLine + '\n');
         printSuccess(`Created ${dir}/index.ts`);
       }
 

@@ -41,6 +41,11 @@
     "email",
     "smtp"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/plugin-email"
+  },
   "files": [
     "dist",
     "README.md",

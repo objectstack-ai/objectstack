@@ -461,6 +461,12 @@ Even inside your own worktree, operate defensively:
    The issue number is what makes in-flight work *discoverable* — `git ls-remote --heads
    origin | grep issue-<n>` is a one-command pre-check, and the Duplicate Fix Guard
    workflow warns on fix PRs whose branch names no declared issue.
+
+   ⛔ **Off `main` is literal — a stacked series, each PR branched off the one below, is NOT a supported form.** No
+   tooling represents it: squash landing destroys the ancestry link, so every descendant rewinds behind what landed and
+   pays a rebuild lap per landing; and a breaking changeset's ADR-0087 disposition is base-relative, so a stacked card's
+   two bases demand contradictory markers. A multi-card change uses a **trunk branch**: correct the trunk's disposition
+   to `registered` before it merges, and pay the rebase laps. ⛔ No gate or merge-policy change is made for it.
 3. **Never `git push --force` / `--force-with-lease`, and never push `main`.** A
    force-push can clobber a parallel agent's work; `main` is shared — land all via PR.
 4. **Verify the current branch before every commit/push**
@@ -499,8 +505,8 @@ Even inside your own worktree, operate defensively:
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
-   auto-merge, often on a package your PR never touched (the queue runs the full suite; the
-   PR ran affected-only) — diagnose against `merge-queue-triage.yml`'s comment, recognise a
+   auto-merge, often on a package your PR never touched (it runs the merge group's affected
+   set, not just yours) — diagnose against `merge-queue-triage.yml`'s comment, recognise a
    known-flaky signature, then re-arm once, never reflexively; **collateral eviction is
    silent** (triage comments only on `failure`, so an entry cancelled because something
    *ahead* failed gets nothing) — neither on `main` nor in the queue means dropped, re-arm;
@@ -1037,16 +1043,9 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    schema is `.strict()`. The changeset is one of fourteen surfaces a retirement touches — follow the
    `spec-property-retirement` skill (`.claude/skills/`) rather than reconstructing the kit, and note the two routes
    imply **opposite** liveness-ledger dispositions.
-   **A breaking changeset must also state its ADR-0087 disposition, in writing.** Add exactly one marker to the
-   changeset body — `pnpm check:adr-0087-registration` enforces it, and the CI step is *Require an ADR-0087
-   disposition on a declared-breaking changeset*:
-   ```
-   <!-- adr-0087: registered SOME-MIGRATION-ID -->
-   <!-- adr-0087: not-required (unpublished) why -->
-   <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->
-   <!-- adr-0087: not-required (no-migration-prescription) why -->
-   ```
-   The gate prints the argument when it fails — that output is the authority.
+   **A breaking changeset must also state its ADR-0087 disposition, in writing** — exactly one marker in the
+   changeset body, enforced by `pnpm check:adr-0087-registration` (CI step *Require an ADR-0087 disposition on a
+   declared-breaking changeset*). ⛔ The categories are NOT copied here — the gate prints the full set when it fails.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it

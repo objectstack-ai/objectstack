@@ -146,11 +146,12 @@ export function isConsumerInstallable(type: string | undefined): boolean {
  *    loader should stamp it onto `err.code` is the boot path's seam (#16049),
  *    not this one.
  *
- * Spelled the ADR-0112 way and deliberately NOT wire vocabulary: it is raised
- * at authoring / `kernel.use()`, before any HTTP boundary exists —
- * `door: 'none'` / `boot-refusal` in
- * `packages/runtime/src/dispatcher-error-vocabulary.ts`, beside
- * `PLUGIN_CONTRACT_VIOLATION`, the envelope it rides.
+ * Spelled the ADR-0112 way and registered in `ERROR_CODE_LEDGER` under
+ * `@objectstack/spec` (#16449, under the #16404 ruling: a code that ships in
+ * `dist` is the published face, door or no door). Not wire vocabulary in the
+ * door sense: it is raised at authoring / `kernel.use()`, before any HTTP
+ * boundary exists, and rides `PLUGIN_CONTRACT_VIOLATION`'s envelope — the
+ * ledger row records that reading.
  */
 export const PLUGIN_UI_REQUIRED_KEY_MISSING = 'PLUGIN_UI_REQUIRED_KEY_MISSING';
 

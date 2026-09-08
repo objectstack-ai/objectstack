@@ -38,6 +38,7 @@ import {
   PluginSchema,
   type PluginDefinition,
 } from './plugin.zod';
+import { ERROR_CODE_LEDGER, ErrorCode } from '../api/error-code-ledger.zod';
 
 /** A `ui` plugin carrying both required keys — the calibration fixture. */
 const UI_COMPLETE: PluginDefinition = {
@@ -136,5 +137,15 @@ describe('C — SCOPE: only `type: \'ui\'` owes the two keys', () => {
     expect(CORE_PLUGIN_TYPES).toContain('ui');
     // 'standard' plus the seven `CORE_PLUGIN_TYPES`, minus 'ui'.
     expect(NON_UI).toHaveLength(CORE_PLUGIN_TYPES.length);
+  });
+});
+
+describe('D — the code is a member of the closed ADR-0112 vocabulary (#16449)', () => {
+  it('PLUGIN_UI_REQUIRED_KEY_MISSING parses against ErrorCode and is registered under @objectstack/spec', () => {
+    // The #16404 ruling: a code that ships in `dist` is the published face,
+    // door or no door. This one rides a zod issue and a boot refusal's
+    // message, never `error.code` at a door — registered all the same.
+    expect(ErrorCode.safeParse(PLUGIN_UI_REQUIRED_KEY_MISSING).success).toBe(true);
+    expect(ERROR_CODE_LEDGER['@objectstack/spec']).toContain(PLUGIN_UI_REQUIRED_KEY_MISSING);
   });
 });
