@@ -130,3 +130,20 @@ describe('initObjects / registerObjectMetadata accept `indexes` as a fresh objec
     expect(recordedIndexes(driver, T)).toEqual([]);
   });
 });
+
+/**
+ * The other half of the accept set. A variable-bound argument bypasses the
+ * excess-property check and is judged by ordinary assignability, so `indexes`
+ * must be an array — the two `@ts-expect-error`s ARE the assertion here: if
+ * either line stops erroring, `tsc` fails it as TS2578. Compile-time only,
+ * deliberately never called.
+ */
+export async function pinsTheNarrowingAxis(driver: SqlDriver): Promise<void> {
+  const asRecord = { ...bareObject('os16570_narrow'), indexes: { uniq_v: { fields: ['v'] } } };
+  // @ts-expect-error TS2322 — a record is not `any[]`, and never synced an index at run time.
+  await driver.initObjects([asRecord]);
+
+  const asNull = { ...bareObject('os16570_narrow'), indexes: null };
+  // @ts-expect-error TS2322 — `null` is not `any[]`, and never synced an index at run time.
+  await driver.initObjects([asNull]);
+}
