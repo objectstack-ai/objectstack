@@ -10,15 +10,27 @@
  * ## The defect
  *
  * `created_at` is an engine-injected audit column: it is not in
- * `datetimeFields`, and `SqlDriver#formatOutput` repairs it (both the
- * builtin-audit-column repair and the `datetimeFields` fold) only inside its
- * `if (this.isSqlite)` arm (`sql-driver.ts`, `formatOutput`). Postgres and
- * MySQL therefore hand this column out of the record read door as a JS
- * `Date`, while the SQLite family hands out canonical ISO-Z text — pinned
- * live in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
- * So on the production default driver, `listCommits` handed every
- * in-process consumer a `Date` in a field the type says is a `string`.
+ * `datetimeFields`, and when this landed `SqlDriver#formatOutput` repaired it
+ * (both the builtin-audit-column repair and the `datetimeFields` fold) only
+ * inside its `if (this.isSqlite)` arm (`sql-driver.ts`, `formatOutput`).
+ * Postgres and MySQL therefore handed this column out of the record read door
+ * as a JS `Date`, while the SQLite family handed out canonical ISO-Z text. So
+ * on the production default driver, `listCommits` handed every in-process
+ * consumer a `Date` in a field the type says is a `string`.
+ *
+ * #13973 ([ADR-0053 D-F1]) has since lifted BOTH passes out of that gate — they
+ * run on EVERY dialect now, so the record read door presents the canonical
+ * text — and the pin that recorded the asymmetry records that contract instead
+ * (`packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B1, inverted on purpose).
+ *
+ * ⚠️ That does not make the cases below historical. `withPostgresCalendarDayAsText`
+ * is untouched by that ruling ([ADR-0053 D-F2]) — the CLIENT still materialises
+ * `timestamptz` / `DATETIME(3)` as a `Date`, and what moved is where the driver
+ * folds it — and the `Date` domain at this mapper did not close: `driver-sql`
+ * hands an INVALID `Date` through unchanged ([ADR-0053 D-F3]) and non-SQL
+ * drivers materialise their own. What these cases own is the mapper's behaviour
+ * per INPUT SHAPE, which outlives the dialect fact.
  *
  * ## Why the fixture drives a hand-made `Date`
  *
