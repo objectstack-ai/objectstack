@@ -362,6 +362,21 @@ function mountSandbox(dir: string): void {
 }
 
 /**
+ * Copy the committed never-published ledger (#16431) into a fixture tree.
+ *
+ * `build-schemas.ts` resolves it from its own `__dirname/..`, so any tree that
+ * copies `scripts/` without it fails the #16431 gate on a MISSING ledger,
+ * before reaching whatever that fixture is about — which is how all four
+ * sandbox builders in this file came to need one line each. Copied rather than
+ * symlinked so a fixture may mutate it without writing to the real file; `src/`
+ * is the fixture's own, so the population a run observes is the repo's and the
+ * copied ledger is green without any seeding.
+ */
+function mountUnemittedLedger(dir: string): void {
+  fs.cpSync(path.join(PKG, UNEMITTED_BASELINE_FILE), path.join(dir, UNEMITTED_BASELINE_FILE));
+}
+
+/**
  * Build a sandbox — a temp tree that COPIES `scripts/` (so `__dirname` lands
  * there) and symlinks the read-only inputs — mount it, and seed it to the state
  * every block starts from: canonical ratchets, a real git repo, and an
@@ -381,12 +396,7 @@ function createSandbox(prefix: string): string {
   for (const entry of ['src', 'node_modules', 'package.json']) {
     fs.symlinkSync(path.join(PKG, entry), path.join(dir, entry));
   }
-  // The never-published ledger (#16431) is COPIED, not symlinked, for the same
-  // reason `scripts/` is: the block below mutates it per fixture, and a symlink
-  // would make that a write to the real committed file. `src/` is symlinked, so
-  // the population the sandbox observes is the repo's own — which is what makes
-  // the copied ledger green here without any fixture seeding it.
-  fs.cpSync(path.join(PKG, UNEMITTED_BASELINE_FILE), path.join(dir, UNEMITTED_BASELINE_FILE));
+  mountUnemittedLedger(dir);
   mountSandbox(dir);
   // The authorable-surface ratchet runs after the manifest one; give it the
   // committed snapshot so a check that gets that far judges the same contract.
@@ -2689,6 +2699,7 @@ describe('build-schemas.ts — check (b) matches the exact retired key, not its 
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
+    mountUnemittedLedger(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
@@ -2987,6 +2998,7 @@ describe('build-schemas.ts — a deleted manifest key must prove itself (#4725)'
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
+    mountUnemittedLedger(box);
     boxScript = path.join(box, 'scripts', 'build-schemas.ts');
     boxManifestDir = path.join(box, SCHEMA_MANIFEST_DIR_NAME);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
@@ -3352,6 +3364,7 @@ describe('build-schemas.ts — check (c) dates a tombstone by its exact key (#58
     for (const entry of ['node_modules', 'package.json']) {
       fs.symlinkSync(path.join(PKG, entry), path.join(box, entry));
     }
+    mountUnemittedLedger(box);
     writeManifestShards(path.join(box, SCHEMA_MANIFEST_DIR_NAME), pristine);
     boxSurfaceDir = path.join(box, AUTHORABLE_SURFACE_DIR_NAME);
     writeSurfaceShards(boxSurfaceDir, pristineSurface);
