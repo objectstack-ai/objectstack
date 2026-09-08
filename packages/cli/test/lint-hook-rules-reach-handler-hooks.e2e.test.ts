@@ -177,6 +177,28 @@ export default {
 };
 `;
 
+/**
+ * THE THIRD LIMB (#16544 re-review) — a nameless `functions` ARRAY entry.
+ * `stack.zod.ts` requires `name: z.string()` on the array form, and
+ * `normalizeStackInput` never touches `functions`, so `[{ handler: fn }]`
+ * failed the `functions` union at the parse on the un-lowered stack (exit 1)
+ * while `lowerBody` names it `anon_fn` before `os build`'s parse. The same
+ * pass now names it here too, so `os validate` accepts it. The `functions`
+ * MAP forms parse either way (not a limb); `hooks[*].handler` accepts a
+ * function un-lowered (not a limb).
+ */
+const CONFIG_FUNCTIONS_NAMELESS = `
+export default {
+  manifest: { id: 'com.example.reach_functions_nameless', name: 'reach_functions_nameless', version: '1.0.0', type: 'app' },
+  objects: [${OBJECT}],
+  functions: [{
+    handler: async (ctx: any) => {
+      return { ok: true, id: ctx.input.id };
+    },
+  }],
+};
+`;
+
 const dirs: Record<string, string> = {};
 
 function project(key: string, source: string): string {
@@ -191,6 +213,7 @@ beforeAll(() => {
   project('body', CONFIG_BODY);
   project('handlerOk', CONFIG_HANDLER_OK);
   project('actionTarget', CONFIG_ACTION_TARGET);
+  project('functionsNameless', CONFIG_FUNCTIONS_NAMELESS);
 });
 
 afterAll(() => {
@@ -292,4 +315,13 @@ describe('#16544 — the WIDENING limb: an inline action `target` callable is no
     const run = await runCli(['build', 'objectstack.config.ts', '--json'], dirs.actionTarget);
     expect(run.code, label(run)).toBe(0);
   }, 90_000);
+
+  it('INTAKE — a nameless `functions` array entry is accepted too (the pass names it `anon_fn`; exit 0, valid)', async () => {
+    // Red-first on the same BASE/HEAD pair: on BASE the `functions` union
+    // refuses the entry (no `name`) and the run exits 1; on HEAD it parses.
+    // `os build` accepted it on both sides, as for the action leg above.
+    const run = await runCli(['validate', 'objectstack.config.ts', '--json'], dirs.functionsNameless);
+    expect(run.code, label(run)).toBe(0);
+    expect(JSON.parse(run.stdout).valid, label(run)).toBe(true);
+  }, 60_000);
 });

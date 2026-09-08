@@ -234,17 +234,21 @@ export default class Validate extends Command {
       //
       //     NOT A PURE NARROWING. The same pass also lowers an inline action
       //     `target` callable (`actions[*]`, `objects[*].actions[*]`) to a ref
-      //     string plus `body`. `ActionSchema.target` is `z.string()`, and
-      //     `normalizeStackInput` never touches function values, so before
-      //     this step the un-lowered parse REFUSED such a config
-      //     (`invalid_type` at `actions.0.target`, exit 1) while `os build`
-      //     accepted it all along. It is accepted here now — an accepted-set
-      //     relaxation on this command, measured through the real CLI on
-      //     both sides and pinned in
-      //     `test/lint-hook-rules-reach-handler-hooks.e2e.test.ts`; parity
-      //     with the build is the intent, and it is declared rather than
-      //     assumed because a sibling's acceptance is evidence of intent, not
-      //     a declaration on this command's face.
+      //     string plus `body`, and names a nameless `functions` ARRAY entry
+      //     (`[{ handler: fn }]`) `anon_fn`. `ActionSchema.target` is
+      //     `z.string()`, the array entry requires `name`, and
+      //     `normalizeStackInput` touches neither, so before this step the
+      //     un-lowered parse REFUSED both configs (`invalid_type` at
+      //     `actions.0.target`; `invalid_union` at `functions`; exit 1) while
+      //     `os build` accepted them all along. Both are accepted here now —
+      //     accepted-set relaxations on this command, each measured through
+      //     the real CLI on both sides and pinned in
+      //     `test/lint-hook-rules-reach-handler-hooks.e2e.test.ts`. Not
+      //     limbs: `hooks[*].handler` accepts a function un-lowered, and the
+      //     `functions` MAP forms parse either way. Parity with the build is
+      //     the intent, and it is declared rather than assumed because a
+      //     sibling's acceptance is evidence of intent, not a declaration on
+      //     this command's face.
       //
       //     Nothing is emitted, so `lowering.functions` is unused here, and
       //     the extraction refusals in `bodyExtractionWarnings` are NOT
