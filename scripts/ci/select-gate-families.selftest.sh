@@ -8,7 +8,7 @@
 # nearly always does) but WHICH families it ran and skipped, for WHICH reason,
 # which `::warning::` lines it printed and which it must not, and what landed
 # in `gate-families.txt` / `$GITHUB_OUTPUT` / `$GITHUB_STEP_SUMMARY`. The
-# card's four minimum cases are here by name -- a `scripts/pm/` change, a
+# card's four minimum cases are here by name -- a scripts/pm/ change, a
 # docs-only group, a workflow change, an unknown path -- and the fail-open
 # branches around them: empty diff, unresolvable base, structural change,
 # unspellable path, an event that is not scoped.
@@ -399,7 +399,7 @@ expect_rc 0
 expect_warnings '' ''
 expect_verdicts query_options_erasure slot_lookup comment_mask_corpus
 expect_reason query_options_erasure '(M, workspace)'
-expect_reason comment_mask_corpus 'packages/a/src/index.ts'
+expect_reason comment_mask_corpus packages/a/src/index.ts
 
 S=$(scenario M:apps/site/src/page.tsx)
 run_case 'merge_group: an apps TSX edit is outside the ratchets (packages/** only) but inside the corpus' "$REPO" merge_group '' "$C0"
@@ -410,7 +410,7 @@ S=$(scenario M:packages/a/package.json)
 run_case 'merge_group: a package manifest runs the PM self-test only' "$REPO" merge_group '' "$C0"
 expect_rc 0
 expect_verdicts pm_dispatch_gates
-expect_reason pm_dispatch_gates 'packages/a/package.json'
+expect_reason pm_dispatch_gates packages/a/package.json
 
 S=$(scenario M:packages/a/scripts/build.mjs)
 run_case 'merge_group: a package-local script is a gate source (PM) and a masked source (corpus)' "$REPO" merge_group '' "$C0"

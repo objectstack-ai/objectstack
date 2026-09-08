@@ -11,9 +11,9 @@
 #   bash scripts/ci/select-gate-families.sh --families   # the family ids, one per line
 #   bash scripts/ci/select-gate-families.selftest.sh      # every branch, offline
 #
-# Environment in, three things out: `$RUNNER_TEMP/gate-families.txt` (one
-# line per family: `<id> <run|skip> <reason>`), `$RUNNER_TEMP/gate-changed-
-# files.txt` (the `<status> <path>` list the decision was taken over), and --
+# Environment in, three things out: $RUNNER_TEMP/gate-families.txt (one
+# line per family: `<id> <run|skip> <reason>`), $RUNNER_TEMP/gate-changed-
+# files.txt (the `<status> <path>` list the decision was taken over), and --
 # when the runner provides them -- one `<id>=run|skip` line per family
 # appended to `$GITHUB_OUTPUT` and a table appended to `$GITHUB_STEP_SUMMARY`.
 # Exit 0 on every decided outcome; exit 2 on a usage error.
@@ -53,13 +53,13 @@
 #
 #   pm_dispatch_gates      `pnpm check:pm-dispatch-gates`. Its self-test
 #                          discovers every workflow file, resolves every
-#                          `check:*` script through the root and package
+#                          check:* script through the root and package
 #                          `package.json`s, reads each gate's source for its
-#                          watch hints (so ALL of `scripts/**` and every
-#                          `packages/*/scripts/**`), reads `.claude/**`,
-#                          `skills/**` (the frame-sync COPIES table),
+#                          watch hints (so ALL of scripts/** and every
+#                          packages/*/scripts/**), reads .claude/**,
+#                          skills/** (the frame-sync COPIES table),
 #                          `AGENTS.md`, `CLAUDE.md`, `tsconfig.json`,
-#                          `.gitignore`, and sweeps `git ls-files` for hint
+#                          .gitignore, and sweeps `git ls-files` for hint
 #                          reachability and test-file residue. Because the
 #                          sweep reads the tracked NAME set, an ADDED file
 #                          anywhere runs it too; only modifications inside
@@ -67,13 +67,13 @@
 #                          workspace source that is neither a manifest nor a
 #                          script) skip it.
 #   query_options_erasure  `pnpm check:query-options-erasure`. Lints
-#                          `packages/**/*.{ts,tsx,mts,cts}` under
+#                          packages/**/*.{ts,tsx,mts,cts} under
 #                          `eslint.config.mjs`, reads its baseline
-#                          (`scripts/query-options-erasure-baseline.json`,
+#                          (scripts/query-options-erasure-baseline.json,
 #                          at HEAD and at the merge base), and imports a few
-#                          top-level `scripts/*.mjs` helpers.
+#                          top-level scripts/*.mjs helpers.
 #   slot_lookup            `pnpm check:slot-lookup`. Same shape and the same
-#                          population, with `scripts/slot-lookup-baseline.json`.
+#                          population, with scripts/slot-lookup-baseline.json.
 #   verify_lock            `bash scripts/pm/os-verify-lock.sh --self-test`.
 #                          Reads itself and a private temp dir; nothing else
 #                          in the tree.
@@ -82,8 +82,8 @@
 #                          in the tree outside build directories.
 #
 # Root configuration (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`,
-# `turbo.json`, `tsconfig.json`, `eslint.config.mjs`, `.gitignore`,
-# `.gitattributes`, `.npmrc`, `.nvmrc`) runs every family: a parser or
+# `turbo.json`, `tsconfig.json`, `eslint.config.mjs`, .gitignore,
+# .gitattributes, .npmrc, .nvmrc) runs every family: a parser or
 # dependency bump moves all of them. ESLint itself is not scoped (card
 # ruling 2), nor is any step whose reads this file cannot name.
 #
@@ -292,7 +292,7 @@ is_masked_source() {
 }
 
 # family_reads <id> <status> <path> <class>  -- exit 0 when the family must
-# run for this change. The `*)` arm of every `case` is "run": nothing here
+# run for this change. The *) arm of every `case` is "run": nothing here
 # skips by omission.
 family_reads() {
   local id=$1 status=$2 path=$3 class=$4
