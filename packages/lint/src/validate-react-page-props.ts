@@ -1180,7 +1180,8 @@ export function validateReactPageProps(stack: AnyRec): ReactPropFinding[] {
                 severity: 'error',
                 rule: REACT_PROP_RETIRED,
                 where, path,
-                message: `<${tag}> prop "${u}" is retired — the contract's only spelling is "${ret.replacedBy}" (#14791).`,
+                // (#14791 — the id stays here, out of the string authors read.)
+                message: `<${tag}> prop "${u}" is retired — the contract's only spelling is "${ret.replacedBy}".`,
                 hint: ret.note,
               });
               continue;
