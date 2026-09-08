@@ -3417,25 +3417,71 @@ export class ObjectStackClient {
     },
 
     /**
-     * Look up the calling user's membership row in the ACTIVE organisation.
+     * Look up the calling user's membership row in the GIVEN organisation.
      * Useful for permission checks on the client without having to scan the
      * full member list.
      *
-     * better-auth: GET /organization/get-active-member?organizationId=…
+     * Two requests, because no single better-auth route answers this question:
      *
-     * ⚠️ The server reads only the session's `activeOrganizationId` and
-     * ignores the `organizationId` query this method sends (measured: a query
-     * naming another organization answered the active one's row). Call
-     * `setActive` first if the organisation you mean is not the active one;
-     * with no active organisation the route is a thrown 400
-     * `NO_ACTIVE_ORGANIZATION`.
+     *   1. `GET /get-session` — who is calling. The body is the bare
+     *      `{ user, session }` envelope for a signed-in caller and the literal
+     *      `null` for an anonymous one (measured).
+     *   2. `GET /organization/list-members?organizationId=…&filterField=userId`
+     *      `&filterValue=<the caller>&limit=1` — the row, unwrapped from the
+     *      one-entry page.
+     *
+     * ⚠️ It is deliberately NOT `GET /organization/get-active-member`, which
+     * this method used to call. That handler reads only the session's
+     * `activeOrganizationId` and never looks at `ctx.query`, so it answered the
+     * ACTIVE organisation's row whatever id the caller named — the
+     * wrong-but-plausible answer, silently. `list-members` reads
+     * `ctx.query.organizationId` and its rows carry the identical shape
+     * ({@link OrganizationMemberWithUserWire}), so only the addressing moved.
+     * Measured against better-auth 1.7.2 over a real `AuthManager` + `SqlDriver`.
+     *
+     * What an existing caller sees change, all of it measured on the same drive:
+     *
+     *   - naming a NON-active organisation now answers THAT organisation's row
+     *     instead of the active one's — the defect this method carried;
+     *   - a caller who is not a member of `organizationId` is refused
+     *     `403 YOU_ARE_NOT_A_MEMBER_OF_THIS_ORGANIZATION` (it was
+     *     `400 MEMBER_NOT_FOUND`, and about the ACTIVE organisation at that);
+     *   - a caller with no active organisation gets their row rather than
+     *     `400 NO_ACTIVE_ORGANIZATION` — `setActive` is no longer a
+     *     precondition, which is the point of naming the organisation;
+     *   - an anonymous caller still gets `401 UNAUTHORIZED`, thrown from the
+     *     `list-members` request by the same session middleware that guarded
+     *     `get-active-member`.
      */
     getActiveMember: async (organizationId: string): Promise<OrganizationMemberWithUserWire> => {
       const route = this.getRoute('auth');
+      // Step 1 — the caller's own user id. Typed to the shape the route really
+      // serves rather than to `SessionResponse`, which declares the REST
+      // `{ success, data }` envelope this better-auth route does not use.
+      const sessionRes = await this.fetch(`${this.baseUrl}${route}/get-session`, {
+        headers: { Origin: this.baseUrl },
+      });
+      const session = (await sessionRes.json()) as { user?: { id?: string } } | null;
+      // Anonymous → `null`, and the request below is then refused 401 by the
+      // session middleware before the filter is ever read. The refusal stays
+      // the SERVER's; nothing is invented here to stand in for it.
+      const userId = session?.user?.id ?? '';
       const res = await this.fetch(
-        `${this.baseUrl}${route}/organization/get-active-member?organizationId=${encodeURIComponent(organizationId)}`,
+        `${this.baseUrl}${route}/organization/list-members`
+          + `?organizationId=${encodeURIComponent(organizationId)}`
+          + `&filterField=userId&filterValue=${encodeURIComponent(userId)}&limit=1`,
       );
-      return res.json();
+      const page = (await res.json()) as OrganizationMembersPage;
+      const [member] = page.members;
+      if (!member) {
+        // Unreachable through the route's own gate — `list-members` refuses a
+        // non-member 403 before it filters, so a 200 with no row means the
+        // membership vanished between the two requests. Loud beats a cast.
+        throw new Error(
+          `[ObjectStack] organizations.getActiveMember: no membership row for the calling user in organization "${organizationId}"`,
+        );
+      }
+      return member;
     },
 
     /**
