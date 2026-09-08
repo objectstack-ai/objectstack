@@ -16,10 +16,10 @@
  * The control plane (cloud) stores this blob opaquely. The per-file
  * `integrity` map is computed here at build time and self-checked by the
  * `os plugin publish` preflight; re-verification at install/load-time
- * unpack is not implemented in this repo and is owned by the future
- * runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud control
- * plane (#11331). This module owns the two contracts the runtime and
- * cloud must agree on byte-for-byte:
+ * unpack is not implemented in this repo and is owned by the
+ * future runtime loader (ADR-0025 §3.5 steps 4–7), not by the cloud
+ * control plane (#11331). This module owns the two contracts the
+ * runtime and cloud must agree on byte-for-byte:
  *
  *   1. The integrity digest STRING FORMAT — Subresource-Integrity style
  *      `sha256-<base64>` (matches ADR-0025 §3.2's example). See
