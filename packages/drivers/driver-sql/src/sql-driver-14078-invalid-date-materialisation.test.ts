@@ -48,11 +48,16 @@
  * ## The column, and why the write door is bypassed
  *
  * `updated_at` — the same builtin audit column `#13567` measures one file over,
- * for the same reason: it is a BUILTIN, so it is not in `datetimeFields`, no
- * declared-field coercion reaches it, and `formatOutput`'s audit repair
- * (`repairNaiveUtcAuditTimestamp`) sits inside `if (this.isSqlite)`. On the two
- * live dialects the read door therefore hands back whatever the client library
- * produced, unmodified — which is precisely what is being measured.
+ * for the same reason: it is a BUILTIN, so it is not in `datetimeFields` and no
+ * declared-field coercion reaches it. When this file was written,
+ * `formatOutput`'s audit repair sat inside `if (this.isSqlite)`, so on the two
+ * live dialects the read door handed back whatever the client library produced,
+ * unmodified. Since #13973 (ADR-0053 D-F1) that door folds a valid `Date` to
+ * the canonical ISO-Z text on every dialect — §B1's control now reads back as
+ * text — and the Invalid `Date` is the ONE shape the fold hands through
+ * unchanged (D-F3): it has no canonical text, and the fold is total in the
+ * sense this card ruled (it never throws). §B2/§B3 therefore still measure
+ * exactly what the client library produced for it, through the same door.
  *
  * The value is written with **raw knex**, not through `create`/`update`. That
  * is deliberate and is stated rather than hidden: the ObjectQL write door
@@ -63,11 +68,12 @@
  *
  * ## Pinned as OBSERVED, not as desired
  *
- * These assertions describe what the drivers do today. They are not a claim
- * that it is correct, and they take no side on the shared spelling. A client
- * upgrade that changed a materialisation would redden this file — which is the
- * point: the decision, whichever way it goes, is being made against a reading
- * that must stay true.
+ * The Invalid-`Date` assertions describe what the drivers do today. They are
+ * not a claim that it is correct, and they take no side on the shared spelling.
+ * A client upgrade that changed a materialisation would redden this file —
+ * which is the point: the decision, whichever way it goes, is being made
+ * against a reading that must stay true. (Ruled since: option B, 2026-09-02 —
+ * every copy of the shared spelling carries a total `Date` arm.)
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -389,15 +395,23 @@ function measure(cell: DialectCell): void {
       return;
     }
 
-    it('§B1 the control value materialises as a REAL instant', () => {
+    it('§B1 the control value materialises as a REAL instant — and leaves the read door as canonical text', () => {
       const label = cell.id === 'pg' ? 'year 0001' : 'year 1000';
       const probe = probes.get(label)!;
       expect(probe.stored, `${label} was refused: ${probe.refusal}`).toBe(true);
-      expect(probe.readBack instanceof Date, `${label}: got ${typeof probe.readBack}`).toBe(true);
-      const value = probe.readBack as Date;
-      expect(Number.isNaN(value.getTime()), `${label}: ${String(value)}`).toBe(false);
-      // The control's whole job: the shared spelling renders this one fine, so
-      // anything §B2 finds is about the value, not about the door.
+      // [#13973] ADR-0053 D-F1: a valid instant is folded to the canonical
+      // text at the driver's read boundary, so the control no longer reaches
+      // any consumer's `Date` arm at all — the string arm returns it first.
+      expect(
+        probe.readBack instanceof Date,
+        `${label}: the read door handed out a JS Date (${String(probe.readBack)})`,
+      ).toBe(false);
+      expect(typeof probe.readBack, `${label}: got ${typeof probe.readBack}`).toBe('string');
+      expect(probe.readBack, `${label}: shape`).toMatch(/^-?\d{4,6}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      const value = new Date(probe.readBack as string);
+      expect(Number.isNaN(value.getTime()), `${label}: ${String(probe.readBack)}`).toBe(false);
+      // The control's whole job: this instant is one the fold CAN canonicalise,
+      // so anything §B2/§B3 finds is about the value, not about the door.
       expect(renderThroughSharedSpelling(value).threw).toBe(false);
     });
 

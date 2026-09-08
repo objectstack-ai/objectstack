@@ -1,7 +1,8 @@
 {
   "file": "packages/drivers/driver-sql/src/sql-driver.ts",
   "adrs": [
+    "ADR-0053",
     "ADR-0120"
   ],
-  "invariant": "The bare-composite → NULL-safe tightening migrates through the ceremony (ADR-0120 D4): a `recreate_index` gated by the duplicate pre-flight probe — clean data grades it `safe` (dev autoMigrate may apply), duplicates BLOCK it with a row report and the old index stays in place; apply re-probes, so even --allow-destructive cannot drop a constraint whose replacement is not creatable. Storage stays NULL — GLOBAL_TENANT is an index-key fold, never written to the organization column."
+  "invariant": "ADR-0053 D-F1/D-F2/D-F3: `formatOutput`'s audit-column and `Field.datetime` folds and `presentReadValue`'s `datetime` arm run on EVERY dialect — a read door presents `created_at`/`updated_at` and every declared `datetime` as the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` text and never the client library's `Date`; the fold lives at the driver's read boundary, never at the pg/mysql2 type parser, and an Invalid `Date` passes through unchanged. Re-gating either fold on `isSqlite` reverts a maintainer ruling (#13973). ADR-0120 D4: the bare-composite → NULL-safe tightening migrates through the ceremony — a `recreate_index` gated by the duplicate pre-flight probe: clean data grades it `safe` (dev autoMigrate may apply), duplicates BLOCK it with a row report and the old index stays in place; apply re-probes, so even --allow-destructive cannot drop a constraint whose replacement is not creatable. Storage stays NULL — GLOBAL_TENANT is an index-key fold, never written to the organization column."
 }

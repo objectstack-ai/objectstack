@@ -124,7 +124,16 @@ const MOUNTS = {
   // conclusion from the other direction — "the wildcard was wider than the two
   // routes it served". Two independent reads landing on the same defect is the
   // argument for enumerating the shape rather than finding it by eye each time.
-  "packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`": { yields: true },
+  //
+  // #16025 renamed the PATTERN, not the handler: the mount is now derived from
+  // the auth service's own `basePath` (`authMount`) instead of the adapter's
+  // `prefix`, because the two defaults did not compose and auth was never
+  // reached on the documented embed. `yields` stays, and stays VERIFIED rather
+  // than asserted — the handler takes `next` and hands it to `yieldUnowned`,
+  // which awaits it, and `callsContinuation` counts that hand-off. Neither of
+  // the other two states would be true here: the mount does not own its
+  // namespace (`exempt`) and it is not terminal (`ratchet`).
+  "packages/adapters/hono/src/index.ts:all `${authMount}/*`": { yields: true },
 
   'packages/plugins/plugin-hono-server/src/adapter.ts:use *': { yields: true },
   'packages/plugins/plugin-hono-server/src/hono-plugin.ts:use *': { yields: true },
