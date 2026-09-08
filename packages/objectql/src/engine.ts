@@ -9702,7 +9702,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Fires the same `beforeFind`/`afterFind` hooks as `find` (#3195).
    */
-  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<any> {
+  async findOne(objectName: string, query?: EngineQueryOptions, options?: EngineReadOptions): Promise<Record<string, unknown> | null> {
     objectName = this.resolveObjectName(objectName);
     // Same alias fold as find() (#4346). Without it, `findOne({ filter })`
     // matched the first row of the WHOLE table rather than the predicate.
@@ -10868,7 +10868,7 @@ export class ObjectQL implements IObjectQLEngine {
    * `catch` also sees the `afterUpdate` dispatch and the roll-up recompute, and
    * a violation raised by a nested driver call in there is not this object's.
    */
-  async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any> {
+  async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<Record<string, unknown> | number | null> {
      object = this.resolveObjectName(object);
      this.logger.debug('Update operation starting', { object });
      this.assertWriteAllowed(object, 'update');
@@ -13086,7 +13086,7 @@ export class ObjectQL implements IObjectQLEngine {
     }
   }
 
-  async delete(object: string, options?: EngineDeleteOptions): Promise<any> {
+  async delete(object: string, options?: EngineDeleteOptions): Promise<boolean | number> {
     object = this.resolveObjectName(object);
     this.logger.debug('Delete operation starting', { object });
     this.assertWriteAllowed(object, 'delete');

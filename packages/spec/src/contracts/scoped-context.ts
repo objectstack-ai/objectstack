@@ -145,7 +145,7 @@ export interface IScopedObjectRepository {
      * nothing to do with what was asked, which no `if (!row)` can catch. When
      * any row genuinely will do, that is `find({ limit: 1 })`, which says so.
      */
-    findOne(query?: Record<string, unknown>): Promise<any>;
+    findOne(query?: Record<string, unknown>): Promise<Record<string, unknown> | null>;
 
     /** Count the records the query selects. */
     count(query?: Record<string, unknown>): Promise<number>;
@@ -161,7 +161,7 @@ export interface IScopedObjectRepository {
      * key out of the payload. The bulk form is `update(data, { where, multi: true })`;
      * there is no `updateMany`.
      */
-    update(data: any, options?: Record<string, unknown>): Promise<any>;
+    update(data: any, options?: Record<string, unknown>): Promise<Record<string, unknown> | number | null>;
 
     /** Update a single record by id — the id travels as the first argument. */
     updateById(id: string | number, data: any): Promise<any>;
