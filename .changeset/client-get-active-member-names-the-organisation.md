@@ -1,5 +1,5 @@
 ---
-"@objectstack/client": patch
+"@objectstack/client": minor
 ---
 
 fix(client): `organizations.getActiveMember(organizationId)` answers the organisation the caller NAMES, not whichever one the session has active (#16568)
@@ -24,5 +24,7 @@ Everything here is measured against a real `AuthManager` (better-auth 1.7.2, org
 - the method now makes two HTTP requests where it made one.
 
 Callers that relied on passing an arbitrary id to read the ACTIVE organisation's row should pass the active organisation's id (`auth.me()` carries `session.activeOrganizationId`).
+
+Graded `minor` rather than `patch`: the method's published behaviour moves for existing callers, which is the same clause-② judgement this PR declares, and the maintainer's ruling of 2026-09-04 (decision batch #35) holds that a change to a published package's public surface takes at least `minor` — a commit type may raise a bump, never lower it below what the act requires.
 
 The auth route ledger's `GET /api/v1/auth/organization/get-active-member` row is rebooked from `sdk` to `server-only` in the same change: `sdk` means "expressed by the SDK", and no SDK method builds that URL any more. Ledger-internal, nothing published moves with it.
