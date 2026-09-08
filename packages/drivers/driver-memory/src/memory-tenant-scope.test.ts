@@ -30,14 +30,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { DriverQuery } from '@objectstack/spec/contracts';
 import { InMemoryDriver } from './memory-driver.js';
 import { tenantScopePredicate } from './memory-tenant-scope.js';
+
+/** The shape the fixtures below declare — no wider than they need. */
+interface SeedSchema {
+  name: string;
+  fields: Record<string, { type: string }>;
+  tenancy?: { enabled?: boolean; tenantField?: string };
+}
 
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
 
 /** The card's case exactly: a tenant column, and NO `tenancy` block at all. */
-const EMPLOYER_SCHEMA = {
+const EMPLOYER_SCHEMA: SeedSchema = {
   name: 'ats_employer',
   fields: {
     id: { type: 'string' },
@@ -48,7 +56,7 @@ const EMPLOYER_SCHEMA = {
 };
 
 /** ADR-0066's platform-global posture — the objects that AGREED across drivers. */
-const LICENSE_SCHEMA = {
+const LICENSE_SCHEMA: SeedSchema = {
   name: 'sys_license',
   fields: {
     id: { type: 'string' },
@@ -58,13 +66,13 @@ const LICENSE_SCHEMA = {
 };
 
 /** No tenant column at all: nothing to scope by, on any driver. */
-const NOTE_SCHEMA = {
+const NOTE_SCHEMA: SeedSchema = {
   name: 'note',
   fields: { id: { type: 'string' }, body: { type: 'string' } },
 };
 
 /** A wall drawn by a column that deliberately is not the platform's. */
-const WORKSPACE_ITEM_SCHEMA = {
+const WORKSPACE_ITEM_SCHEMA: SeedSchema = {
   name: 'workspace_item',
   fields: {
     id: { type: 'string' },
@@ -82,10 +90,10 @@ const WORKSPACE_ITEM_SCHEMA = {
  * without the global carve-out answers `[a1, a2]`; a broken scope answers `[]`.
  * All four are distinguishable, which is the point.
  */
-async function seed(driver: InMemoryDriver, schema: Record<string, unknown> = EMPLOYER_SCHEMA) {
-  const object = schema.name as string;
+async function seed(driver: InMemoryDriver, schema: SeedSchema = EMPLOYER_SCHEMA) {
+  const object = schema.name;
   await driver.syncSchema(object, schema);
-  const tenantField = (schema as any).tenancy?.tenantField ?? 'organization_id';
+  const tenantField = schema.tenancy?.tenantField ?? 'organization_id';
   await driver.bulkCreate(object, [
     { id: 'a1', name: 'A one', [tenantField]: ORG_A },
     { id: 'a2', name: 'A two', [tenantField]: ORG_A },
@@ -244,7 +252,7 @@ describe('#16589 — the in-memory driver honours DriverOptions.tenantId', () =>
       // AST arm — what objectql's engine sends.
       const ast = await driver.aggregate(
         object,
-        { aggregations: [{ function: 'count', field: 'id', alias: 'n' }] } as any,
+        { aggregations: [{ function: 'count', field: 'id', alias: 'n' }] } satisfies DriverQuery,
         { tenantId: ORG_A },
       );
       expect(ast[0]?.n).toBe(3);

@@ -85,15 +85,18 @@ export class MemoryMultiTenantUnsupportedError extends Error {
 
   constructor(detected: string, remedy: string) {
     super(
-      `[driver-memory] Refusing to start: this driver has NO row-level tenant isolation.\n` +
+      // ⛔ No tracker id in this text: it is a RUNTIME string an operator reads,
+      // and `#NNNN` resolves to nothing for them (`pnpm check:doc-authoring`).
+      // The anchor for this driver's tenancy work is `Tracking:` below.
+      `[driver-memory] Refusing to start: this driver has only HALF of row-level tenant isolation.\n` +
         `\n` +
         `  Detected: ${detected}\n` +
         `\n` +
-        `  InMemoryDriver scopes reads, updates and deletes by \`DriverOptions.tenantId\`\n` +
-        `  (#16589), but it does NOT stamp a tenant column on writes: a record created\n` +
-        `  without an explicit organization lands with none, and a record with no\n` +
-        `  organization is visible to EVERY tenant. Rather than run half-isolated, the\n` +
-        `  driver fails at startup.\n` +
+        `  InMemoryDriver scopes reads, updates and deletes by \`DriverOptions.tenantId\`,\n` +
+        `  but it does NOT stamp a tenant column on writes: a record created without an\n` +
+        `  explicit organization lands with none, and a record with no organization is\n` +
+        `  visible to EVERY tenant. Rather than run half-isolated, the driver fails at\n` +
+        `  startup.\n` +
         `\n` +
         `  Fix one of:\n` +
         `    • Use @objectstack/driver-sql (PostgreSQL / MySQL / SQLite) for multi-tenant\n` +
