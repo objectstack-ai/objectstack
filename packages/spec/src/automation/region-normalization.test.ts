@@ -279,4 +279,113 @@ describe('#4347 — collectFlowGraphs', () => {
     expect(graphs.length).toBeGreaterThan(1);
     expect(graphs.length).toBeLessThan(64);
   });
+
+  /**
+   * #16752 — what the walk HANDS OUT matches its declared
+   * `readonly FlowNodeParsed[]`.
+   *
+   * The list in question is one `collectFlowGraphs` picks up ITSELF, out of a
+   * container's open `z.record` config, and casts after an `Array.isArray` that
+   * proves the LIST and never its MEMBERS — the sentence #15552 / #15636 /
+   * #15742 / #15793 removed from four lint readers. No caller ever holds this
+   * array, so no coercion at a call site can reach it; the guard belongs here.
+   *
+   * #16134 already stopped the walk DEREFERENCING a non-record member (a
+   * `TypeError` thrown here escapes `FlowSchema.safeParse` rather than becoming
+   * an issue). It did not stop the walk HANDING IT OUT: `nodes` was pushed
+   * verbatim, so every graph over a junk-bearing list carried the junk — at
+   * every depth, not only at the `MAX_REGION_DEPTH` ceiling the filing found.
+   *
+   * ⛔ The repair is a drop, never a looser signature: widening the declared
+   * type to tolerate malformed members is the direction #15793 refused on the
+   * anti-AI-error axis. As with the four repairs above, a dropped member
+   * renumbers the ones behind it in `graph.nodes` — a difference in the index,
+   * never in whether a node was judged; `graph.path`, which anchors a Zod issue
+   * where the author wrote it, is pinned below to stay indexed over the RAW
+   * list.
+   */
+  describe('#16752 — a non-record member never reaches a returned graph', () => {
+    /**
+     * The five shapes a raw node list holds that are not a node. `null` is the
+     * one an author writes by accident (an empty YAML list item deserialises to
+     * it); `an array` is the one a bare `typeof x === 'object'` test admits, so
+     * it pins that the drop is a record test and not an object test.
+     */
+    const NON_NODES: readonly (readonly [string, unknown])[] = [
+      ['null', null],
+      ['undefined', undefined],
+      ['a string', 'x'],
+      ['a number', 42],
+      ['an array', []],
+    ];
+
+    const isRecord = (v: unknown): boolean => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+    /**
+     * `depth` nested loop bodies, the innermost holding `junk` beside two real
+     * nodes. Hand-built rather than parsed on purpose: a region its own schema
+     * refuses is left RAW by `parseFlowNodeRegions`, and raw is the state this
+     * walk has to survive.
+     */
+    const nestedJunk = (depth: number, junk: unknown) => {
+      let region: Record<string, unknown> = {
+        nodes: [junk, { ...gate, id: 'gate_in' }, { ...write, id: 'write_in' }],
+        edges: [],
+      };
+      for (let i = depth; i > 0; i--) {
+        region = { nodes: [loopWith(region, `lp${i}`)], edges: [] };
+      }
+      return { nodes: region.nodes as never, edges: [] };
+    };
+
+    describe.each(NON_NODES)('with %s in the innermost body', (_label, junk) => {
+      // 0 is the flow's own list, 1 the shape the card reproduced, and 32 the
+      // depth ceiling — where `visit` pushes a graph and returns without ever
+      // walking its members, so the junk was handed out with nothing having
+      // looked at it.
+      it.each([0, 1, 32])('hands out only records at nesting %i', (depth) => {
+        const graphs = collectFlowGraphs(nestedJunk(depth, junk));
+        expect(graphs.flatMap(g => g.nodes).filter(n => !isRecord(n))).toEqual([]);
+      });
+
+      it('still hands out the real nodes standing beside it', () => {
+        // Anti-vacuity: the drop takes what cannot be read, not the list. A
+        // guard that emptied every graph would pass the assertion above.
+        const graphs = collectFlowGraphs(nestedJunk(1, junk));
+        expect(graphs[graphs.length - 1]!.nodes.map(n => n.id)).toEqual(['gate_in', 'write_in']);
+      });
+
+      it('lets `FlowSchema.safeParse` return an envelope rather than throw (#16134)', () => {
+        // This walk runs inside the parse, so the repair has to stay a drop and
+        // a skip; a throw here escapes `safeParse` instead of becoming an issue.
+        const result = FlowSchema.safeParse({
+          name: 'repro', label: 'Repro', type: 'schedule',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            loopWith({ nodes: [junk], edges: [] }),
+          ],
+          edges: [],
+        });
+        expect(typeof result.success).toBe('boolean');
+      });
+    });
+
+    it('leaves `path` indexed over the RAW list, so a finding stays where the author wrote it', () => {
+      // The container is at authored index 1 whether or not a non-record
+      // precedes it: dropping a member must not renumber its siblings in the
+      // key path a Zod issue is anchored on (#16134).
+      const graphs = collectFlowGraphs({
+        nodes: [null, loopWith(gatedRegion())] as never,
+        edges: [],
+      });
+      expect(graphs.map(g => g.path)).toEqual([[], ['nodes', 1, 'config', 'body']]);
+    });
+
+    it('hands back the very same array when there is nothing to drop', () => {
+      // Copy-on-write, as `parseFlowNodeRegions` is: a well-formed flow pays
+      // nothing for the guard.
+      const nodes = [{ ...gate }, { ...write }];
+      expect(collectFlowGraphs({ nodes: nodes as never, edges: [] })[0]!.nodes).toBe(nodes);
+    });
+  });
 });
