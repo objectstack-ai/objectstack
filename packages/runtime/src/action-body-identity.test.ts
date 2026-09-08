@@ -59,7 +59,13 @@ function makeSharingEngine(extra: Record<string, unknown> = {}) {
         },
         async find(object: string, options?: any) {
             gate('find', object, options?.context);
-            return [];
+            // [#16370] The by-id pre-load has to be ANSWERED: an action door now
+            // refuses a row-scoped invocation whose caller-scope subject load did
+            // not deliver the row, so a rig that answered every read with `[]`
+            // would collect a 404 before the handler this file is about is ever
+            // built. Every other read still reads empty — the WRITES above are
+            // this file's subject, and they are untouched.
+            return options?.where?.id ? [{ id: options.where.id }] : [];
         },
         async count(object: string, options?: any) {
             gate('count', object, options?.context);

@@ -3,7 +3,7 @@
 /**
  * DIRECT-MOUNT ROUTES ARE ENUMERABLE — and only when they are mounted (#5822).
  *
- * The nine routes `package-routes.ts` and `external-datasource-routes.ts` mount
+ * The six routes `package-routes.ts` and `external-datasource-routes.ts` mount
  * straight on the host `IHttpServer` used to be invisible to the server that
  * owns the surface: `RestServer.getRoutes()` reported `RouteManager`'s table
  * alone, so `GET {apiPath}/openapi.json` — which #5588 / PR #5821 made a
@@ -19,11 +19,11 @@
  *   mounted     ⇒ enumerable, and documented
  *   not mounted ⇒ absent from both
  *
- * The second direction has a real trigger: three of the four package routes are
- * gated on the `package` service, so a deployment without it serves none of
- * them — and must not document them. The federation registrar is NOT gated (it
- * mounts always and answers 503 per request), so "mounted" is unconditional
- * there and the document says so.
+ * The second direction had a real trigger when it was written: three of the
+ * then-four package routes were gated on the `package` service, so a
+ * deployment without it served none of them — and must not document them.
+ * The federation registrar is NOT gated (it mounts always and answers 503 per
+ * request), so "mounted" is unconditional there and the document says so.
  *
  * [#7563] `POST /packages/publish` joined the unconditional cohort, and for a
  * reason the second direction is about rather than an exception to it: leaving
@@ -32,9 +32,17 @@
  * `id = "publish"` and the router answered 405 built from THAT route's method
  * set. "Not mounted ⇒ absent from the document" is honest only while "not
  * mounted" also means "not answered"; where it cannot, the route mounts and
- * 404s for itself. The three gated routes have dispatcher twins at their own
- * patterns and so keep the original treatment — that split is pinned in
- * `package-publish-mount.test.ts`.
+ * 404s for itself.
+ *
+ * [#14503] The three gated routes are GONE from the registrar — they
+ * duplicated the dispatcher's `/packages` domain at byte-identical patterns
+ * and the ruling made that domain the single implementation — so today no
+ * registrar takes the gated branch at all. The second direction is kept as
+ * the contract (a registrar that skips a route must not document it) and is
+ * pinned from the other side: the three former patterns are documented by
+ * NEITHER boot, with or without a `package` service, because this package no
+ * longer mounts them. `package-publish-mount.test.ts` pins the same fact at
+ * the registrar.
  *
  * Both are driven through the REAL composition: `mountAndRecordDirectRoutes`
  * for the server-level facts, and `createRestApiPlugin().start()` for the
@@ -110,13 +118,22 @@ function createCtx(services: Record<string, unknown>) {
   };
 }
 
-/** The ledger's own list of the nine, split by registrar. */
+/** The ledger's own list of the six, split by registrar. */
 const LEDGER_DIRECT_MOUNT = REST_ROUTE_LEDGER.filter((e) => e.source === 'direct-mount').map((e) => e.route);
 const ALL_PACKAGE_ROUTES = LEDGER_DIRECT_MOUNT.filter((r) => r.includes('/packages'));
 /** [#7563] Mounted on every boot — no dispatcher twin to fall back to. */
 const PUBLISH_ROUTE = 'POST /api/v1/packages/publish';
-/** The `package`-service-gated three, each shadowing a dispatcher twin. */
-const PACKAGE_ROUTES = ALL_PACKAGE_ROUTES.filter((r) => r !== PUBLISH_ROUTE);
+/**
+ * [#14503] The three patterns this registrar used to mount behind the
+ * `package`-service gate. They are the dispatcher `/packages` domain's alone
+ * now (`packages/runtime/src/route-ledger.ts` carries their rows), so the
+ * REST ledger must not list them and no REST boot may document them.
+ */
+const FORMER_PACKAGE_TWINS = [
+  'GET /api/v1/packages',
+  'GET /api/v1/packages/:id',
+  'DELETE /api/v1/packages/:id',
+];
 const FEDERATION_ROUTES = LEDGER_DIRECT_MOUNT.filter((r) => r.includes('/external'));
 
 /** `VERB /path` for every route the server reports as mounted. */
@@ -207,7 +224,7 @@ describe('#5822 — a registrar describes exactly what it mounted', () => {
 // ---------------------------------------------------------------------------
 
 describe('#5822 — mounted direct-mount routes are enumerable and documented', () => {
-  it('getRoutes() reports all nine, marked as direct-mount', () => {
+  it('getRoutes() reports all six, marked as direct-mount', () => {
     const { rest } = bootWith({ package: packageServiceStub() });
     const keys = mountedKeys(rest);
     for (const route of LEDGER_DIRECT_MOUNT) {
@@ -220,7 +237,7 @@ describe('#5822 — mounted direct-mount routes are enumerable and documented', 
     expect(rest.getRoutes().some((r) => r.source === 'route-manager')).toBe(true);
   });
 
-  it('the openapi built-in section carries all nine, ledger row by ledger row', async () => {
+  it('the openapi built-in section carries all six, ledger row by ledger row', async () => {
     const { server } = bootWith({ package: packageServiceStub() });
     const body = await serveOpenApi(server);
     for (const route of LEDGER_DIRECT_MOUNT) {
@@ -228,15 +245,15 @@ describe('#5822 — mounted direct-mount routes are enumerable and documented', 
     }
     // The registration's summary and tags travel with them, exactly as they do
     // for a RouteManager route.
-    const list = body.paths['/api/v1/packages'].get;
-    expect(list.summary).toBe('List packages (registry + published)');
-    expect(list.tags).toEqual(['packages']);
+    const publish = body.paths['/api/v1/packages/publish'].post;
+    expect(publish.summary).toBe('Publish a package to the marketplace registry');
+    expect(publish.tags).toEqual(['packages']);
     expect(body.paths['/api/v1/datasources/{name}/external/tables'].get.parameters.map((p: any) => p.name))
       .toEqual(['name']);
   });
 
   it('still publishes nothing the server does not mount', async () => {
-    // #5588's set relation, re-proven with the nine added: growing the document
+    // #5588's set relation, re-proven with the six added: growing the document
     // must not loosen the rule that produced it.
     const { rest, server } = bootWith({ package: packageServiceStub() });
     const body = await serveOpenApi(server);
@@ -264,12 +281,17 @@ describe('#5822 — mounted direct-mount routes are enumerable and documented', 
       projectResolution: 'auto',
     });
 
-    expect(mountedKeys(rest)).toContain('GET /api/v1/environments/:environmentId/packages');
+    expect(mountedKeys(rest)).toContain('POST /api/v1/environments/:environmentId/packages/publish');
+    // [#14503] The scoped mirror carries publish and nothing else: the three
+    // former twins are not mounted on the scoped base either.
+    expect(mountedKeys(rest)).not.toContain('GET /api/v1/environments/:environmentId/packages');
+    expect(mountedKeys(rest)).not.toContain('GET /api/v1/environments/:environmentId/packages/:id');
+    expect(mountedKeys(rest)).not.toContain('DELETE /api/v1/environments/:environmentId/packages/:id');
 
     const unscoped = await serveOpenApi(server, '/api/v1');
     const scoped = await serveOpenApi(server, '/api/v1/environments/:environmentId');
-    expect(unscoped.paths['/api/v1/environments/{environmentId}/packages']).toBeUndefined();
-    expect(scoped.paths['/api/v1/environments/{environmentId}/packages'].get).toBeDefined();
+    expect(unscoped.paths['/api/v1/environments/{environmentId}/packages/publish']).toBeUndefined();
+    expect(scoped.paths['/api/v1/environments/{environmentId}/packages/publish'].post).toBeDefined();
   });
 });
 
@@ -278,30 +300,36 @@ describe('#5822 — mounted direct-mount routes are enumerable and documented', 
 // ---------------------------------------------------------------------------
 
 describe('#5822 — an unmounted registrar is reported by nothing', () => {
-  it('the publish row this file splits out is a row the ledger really has', () => {
-    // Without this, renaming the route in the ledger would quietly move it into
-    // PACKAGE_ROUTES and make the gated-cohort cases below assert the opposite
-    // of what they are named after.
-    expect(ALL_PACKAGE_ROUTES).toContain(PUBLISH_ROUTE);
-    expect(PACKAGE_ROUTES).toHaveLength(ALL_PACKAGE_ROUTES.length - 1);
+  it('the publish row is the ONLY package row the ledger has (#14503)', () => {
+    // The ledger must not carry the three former twins either: a row nobody
+    // mounts is exactly the phantom this file exists to refuse, and the
+    // conformance guard would flag it — this pins the shape from this side.
+    expect(ALL_PACKAGE_ROUTES).toEqual([PUBLISH_ROUTE]);
+    for (const route of FORMER_PACKAGE_TWINS) expect(LEDGER_DIRECT_MOUNT).not.toContain(route);
   });
 
-  it('a boot without the `package` service enumerates and documents no service-backed packages route', async () => {
-    const { rest, server } = bootWith({});
-    const keys = mountedKeys(rest);
-    for (const route of PACKAGE_ROUTES) {
-      expect(keys, `${route} is not mounted on this boot and must not be enumerable`).not.toContain(route);
-    }
-    // Not merely absent from the table: absent from the wire too — the gate
-    // itself is unchanged, this pins that the record follows it.
-    const mountedPaths = server.get.mock.calls.map((args: unknown[]) => args[0]);
-    expect(mountedPaths).not.toContain('/api/v1/packages');
+  for (const [label, services] of [
+    ['without', {}],
+    ['WITH', { package: packageServiceStub() }],
+  ] as const) {
+    it(`a boot ${label} the \`package\` service neither enumerates nor documents the three former package twins (#14503)`, async () => {
+      const { rest, server } = bootWith(services);
+      const keys = mountedKeys(rest);
+      for (const route of FORMER_PACKAGE_TWINS) {
+        expect(keys, `${route} is the dispatcher's alone and must not be enumerable here`).not.toContain(route);
+      }
+      // Not merely absent from the table: absent from the wire too.
+      const mountedGets = server.get.mock.calls.map((args: unknown[]) => args[0]);
+      expect(mountedGets).not.toContain('/api/v1/packages');
+      expect(mountedGets).not.toContain('/api/v1/packages/:id');
+      expect(server.delete.mock.calls.map((args: unknown[]) => args[0])).not.toContain('/api/v1/packages/:id');
 
-    const body = await serveOpenApi(server);
-    for (const route of PACKAGE_ROUTES) {
-      expect(documented(body, route), `${route} is not mounted but is documented`).toBe(false);
-    }
-  });
+      const body = await serveOpenApi(server);
+      for (const route of FORMER_PACKAGE_TWINS) {
+        expect(documented(body, route), `${route} is not mounted but is documented`).toBe(false);
+      }
+    });
+  }
 
   it('…but publish IS mounted, enumerable and documented on that same boot (#7563)', async () => {
     // The counterpart the header explains: this route has no dispatcher twin,
@@ -343,7 +371,7 @@ describe('#5822 — the REST plugin records what it mounts', () => {
     return { server, ctx };
   }
 
-  it('publishes the nine when the package service is there', async () => {
+  it('publishes the six when the package service is there', async () => {
     const { server } = await bootPlugin({ package: packageServiceStub() });
     const body = await serveOpenApi(server);
     for (const route of LEDGER_DIRECT_MOUNT) {
@@ -356,6 +384,6 @@ describe('#5822 — the REST plugin records what it mounts', () => {
     const body = await serveOpenApi(server);
     for (const route of FEDERATION_ROUTES) expect(documented(body, route)).toBe(true);
     expect(documented(body, PUBLISH_ROUTE), `${PUBLISH_ROUTE} mounts unconditionally (#7563)`).toBe(true);
-    for (const route of PACKAGE_ROUTES) expect(documented(body, route)).toBe(false);
+    for (const route of FORMER_PACKAGE_TWINS) expect(documented(body, route)).toBe(false);
   });
 });

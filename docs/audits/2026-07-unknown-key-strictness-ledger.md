@@ -971,11 +971,34 @@ collapse is now load-bearing on this file.** `groupBy` is a union, so the
 `unrecognized_keys` its strict arm raises never reaches `error.issues` — zod
 reports one `invalid_union` whose own message is the bare string *"Invalid
 input"* (#5014, the same flattening that hid `dashboard`'s `compareTo`
-prescription). What carries the named surface and the rename to the author is
+prescription). The named surface and the rename reach the author through
 `packages/lint/src/zod-issue-format.ts`'s arm unpacking, which #5020 had already
-built; **a strict object arm inside a union is only as loud as its consumer's
-unpacking**, and that is a general fact about this campaign's remaining union
-sites, not a chart detail. **(b) The product question this row carried is
+built; **a strict object arm inside a union is exactly as loud as its consumer's
+unpacking**. ⚠️ **CORRECTED, and this one is NOT a WRITTEN AT THE TIME
+case — it is the `chart.zod.ts` row's clause restated a few hundred lines up, and
+it takes the same treatment.** Two things are struck: the cleft that made
+`packages/lint`'s unpacking the *what* that carries the rename, and the trailing
+claim that this was *"a general fact about this campaign's remaining union sites,
+not a chart detail"*. Both were already false on the day #5583 wrote them
+(2026-08-08 — `e0f300ba5`, the same commit that wrote the `chart` row's clause):
+all three flatteners this campaign filed had closed first, **#4971**
+(`formatZodError`) and **#5014** (the wire mapper) on 2026-08-05 and **#5341**
+(the CLI) on 2026-08-04. Spec's OWN renderer unpacks, with no `packages/lint` in
+the path: `formatZodIssue` descends `invalid_union` and ranks the branches
+through `selectUnionBranches` (`packages/spec/src/shared/union-branch-policy.ts`
+— one policy, both spec-side walks, since **#8318**); `zodIssuesToFields` emits
+the same prescription as a second `unknown_field` entry. Re-measured through this
+paragraph's own door: `ChartAggregateSchema.safeParse({ field: 'amount',
+function: 'sum', groupBy: { field: 'stage', dateGranularty: 'month' } })`
+rendered by `formatZodError` prints `✗ groupBy: Invalid input` and, indented
+beneath it, *"Unrecognized key(s) on this chart groupBy: `dateGranularty`. Did
+you mean `dateGranularty` → `dateGranularity`?"* — the surface, the offending key
+and the rename all arrive, and the union's cost is the one wrapper line above
+them. The bolded sentence stays true as a statement about the MECHANISM;
+⛔ it is not a live constraint on this campaign's remaining union sites, and
+reading it as one cost a full dispatch cycle (**#14722**, filed on the
+`chart` row's reasoning and closed unfixed once
+the behaviour was measured). **(b) The product question this row carried is
 ANSWERED and it did NOT move the schema.** `groupBy` stays REQUIRED: measured on
 2026-08-08, the example corpus authors exactly one `<ObjectChart aggregate={…}>`
 and it carries `groupBy`, while the ungrouped single-value need is served by a

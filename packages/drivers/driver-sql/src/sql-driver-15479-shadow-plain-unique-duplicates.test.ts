@@ -125,13 +125,17 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
     ): Promise<{ logs: string[]; err: unknown }> => {
       driver = new SqlDriver(cell.config());
       const logs = spy();
-      await driver.initObjects([{ ...meta, indexes: [] }] as any);
+      // #16711: the `as any` that used to be on both of these calls was a
+      // workaround for `initObjects` not declaring `indexes`. The signature
+      // declares it now, so the cast is gone and these two calls are checked
+      // like any other.
+      await driver.initObjects([{ ...meta, indexes: [] }]);
       const knex = (driver as any).knex;
       await knex(meta.name).insert([
         { id: 'a', ...row },
         { id: 'b', ...row },
       ]);
-      const err: unknown = await driver.initObjects([meta] as any).then(
+      const err: unknown = await driver.initObjects([meta]).then(
         () => null,
         (e) => e,
       );
@@ -228,7 +232,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow plain unique over duplicates (#15479
     it('still creates and enforces the plain shadow unique over clean data', async () => {
       driver = new SqlDriver(cell.config());
       spy();
-      await driver.initObjects([plainUniqueOn('os15479_clean')] as any);
+      await driver.initObjects([plainUniqueOn('os15479_clean')]);
 
       const { cols, idx } = await catalog('os15479_clean');
       const shadow = cols.find((c: any) => isHashShadowColumn(c.COLUMN_NAME));
