@@ -295,6 +295,7 @@
     "REACT_BLOCKS": "src/ui/react-blocks.ts#REACT_BLOCKS (const)",
     "REACT_OVERLAY_SHADOWS": "src/ui/react-blocks.ts#REACT_OVERLAY_SHADOWS (const)",
     "REACT_RECORD_BLOCK_ALTERNATIVES": "src/ui/react-blocks.ts#REACT_RECORD_BLOCK_ALTERNATIVES (const)",
+    "REACT_RETIRED_OVERLAY_PROPS": "src/ui/react-blocks.ts#REACT_RETIRED_OVERLAY_PROPS (const)",
     "RECORD_CONTEXT_BLOCK_TAGS": "src/ui/react-blocks.ts#RECORD_CONTEXT_BLOCK_TAGS (const)",
     "RECORD_CONTEXT_TYPE_PREFIX": "src/ui/react-blocks.ts#RECORD_CONTEXT_TYPE_PREFIX (const)",
     "RESERVED_COMPONENT_TYPE_NAMESPACES": "src/ui/component-type-vocabulary.ts#RESERVED_COMPONENT_TYPE_NAMESPACES (const)",

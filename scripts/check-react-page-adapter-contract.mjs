@@ -1000,7 +1000,7 @@ export function selfTest() {
     'a tagged fence is selected on a real adapter.find',
   );
   assert(
-    !isReactPageSample({ lang: 'jsx', body: `<ListView objectName="showcase_account" />` }),
+    !isReactPageSample({ lang: 'jsx', body: `<ListView data={{ provider: 'object', object: 'showcase_account' }} />` }),
     'a plain block fence is NOT selected — admitting every jsx fence is the fabrication direction',
   );
   assert(

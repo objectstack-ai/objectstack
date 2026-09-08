@@ -33,10 +33,18 @@ const ENVELOPE = { dialect: 'cel', source: CONDITION };
 
 const gate = { id: 'gate', type: 'decision', label: 'Gate' };
 const write = { id: 'write', type: 'create_record', label: 'Write' };
-/** A well-formed region whose single edge carries a BARE STRING condition. */
-const gatedRegion = () => ({
-  nodes: [structuredClone(gate), structuredClone(write)],
-  edges: [{ id: 'b1', source: 'gate', target: 'write', type: 'conditional', condition: CONDITION }],
+/**
+ * A well-formed region whose single edge carries a BARE STRING condition.
+ *
+ * `suffix` keeps two regions of one flow apart: a flow has ONE node-id space
+ * across its top-level `nodes[]` and every region (#16134), so sibling
+ * branches, `try` + `catch`, and a container nested in a container may not
+ * repeat `gate` / `write` / `loop`. These fixtures pin normalization, not id
+ * reuse, so they carry distinct ids rather than pin the collision.
+ */
+const gatedRegion = (suffix = '') => ({
+  nodes: [{ ...gate, id: `gate${suffix}` }, { ...write, id: `write${suffix}` }],
+  edges: [{ id: `b1${suffix}`, source: `gate${suffix}`, target: `write${suffix}`, type: 'conditional', condition: CONDITION }],
 });
 
 const flowWith = (containerNode: Record<string, unknown>) => FlowSchema.parse({
@@ -53,8 +61,8 @@ const flowWith = (containerNode: Record<string, unknown>) => FlowSchema.parse({
   ],
 });
 
-const loopWith = (body: unknown) => ({
-  id: 'loop', type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}', iteratorVariable: 'row', body },
+const loopWith = (body: unknown, id = 'loop') => ({
+  id, type: LOOP_NODE_TYPE, label: 'Loop', config: { collection: '{rows}', iteratorVariable: 'row', body },
 });
 
 describe('#4415 — FlowSchema.parse canonicalizes regions with no second call', () => {
@@ -99,7 +107,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
   it('normalizes every parallel branch and keeps the branch `name`', () => {
     const flow = flowWith({
       id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
-      config: { branches: [{ name: 'left', ...gatedRegion() }, { name: 'right', ...gatedRegion() }] },
+      config: { branches: [{ name: 'left', ...gatedRegion() }, { name: 'right', ...gatedRegion('_r') }] },
     });
 
     const branches = (flow.nodes[1]!.config as any).branches;
@@ -113,7 +121,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
   it('normalizes both try_catch regions', () => {
     const flow = flowWith({
       id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-      config: { try: gatedRegion(), catch: gatedRegion(), errorVariable: '$err' },
+      config: { try: gatedRegion(), catch: gatedRegion('_c'), errorVariable: '$err' },
     });
 
     const cfg = (flow.nodes[1]!.config as any);
@@ -127,7 +135,7 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
     const flow = flowWith(loopWith({
       nodes: [{
         id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-        config: { try: { nodes: [loopWith(gatedRegion())], edges: [] } },
+        config: { try: { nodes: [loopWith(gatedRegion(), 'inner')], edges: [] } },
       }],
       edges: [],
     }));
@@ -168,10 +176,25 @@ describe('#4415 — FlowSchema.parse canonicalizes regions with no second call',
       config: { collection: '{r}', iteratorVariable: 'r', body: selfRegion },
     });
 
-    expect(() => FlowSchema.parse({
-      name: 'cyclic', label: 'Cyclic', type: 'schedule',
-      nodes: selfRegion.nodes, edges: [],
-    })).not.toThrow();
+    // #16134 — a flow has one node-id space, and the self-reference makes `l`
+    // its own body node at every depth, so the parse now REFUSES it; the
+    // termination pin therefore reads "a bounded ZodError, never a RangeError":
+    // the walk reached the depth ceiling and stopped.
+    let caught: unknown;
+    try {
+      FlowSchema.parse({
+        name: 'cyclic', label: 'Cyclic', type: 'schedule',
+        nodes: selfRegion.nodes, edges: [],
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).not.toBeInstanceOf(RangeError);
+    const issues = (caught as { issues?: Array<{ code: string; message: string }> })?.issues;
+    expect(issues).toBeDefined();
+    expect(issues!.length).toBeGreaterThan(0);
+    expect(issues!.length).toBeLessThan(64);
+    expect(issues!.every(i => i.code === 'custom' && i.message.startsWith('Duplicate node id `l`'))).toBe(true);
   });
 
   it('is copy-on-write at the node level', () => {
@@ -207,12 +230,12 @@ describe('#4347 — collectFlowGraphs', () => {
   it('names each parallel branch and both try_catch regions', () => {
     expect(collectFlowGraphs(flowWith({
       id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
-      config: { branches: [gatedRegion(), gatedRegion()] },
+      config: { branches: [gatedRegion(), gatedRegion('_r')] },
     })).map(g => g.scope)).toEqual(['', "parallel 'par' branch 0", "parallel 'par' branch 1"]);
 
     expect(collectFlowGraphs(flowWith({
       id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
-      config: { try: gatedRegion(), catch: gatedRegion() },
+      config: { try: gatedRegion(), catch: gatedRegion('_c') },
     })).map(g => g.scope)).toEqual(['', "try_catch 'tc' try", "try_catch 'tc' catch"]);
   });
 
@@ -226,6 +249,25 @@ describe('#4347 — collectFlowGraphs', () => {
     }));
     expect(collectFlowGraphs(flow).map(g => g.scope))
       .toEqual(['', "loop 'loop' body", "loop 'loop' body → try_catch 'tc' catch"]);
+  });
+
+  it('carries each graph\'s key path beside its scope, so a finding can be anchored where the author wrote it (#16134)', () => {
+    const flow = flowWith(loopWith({
+      nodes: [{
+        id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
+        config: { catch: gatedRegion() },
+      }],
+      edges: [],
+    }));
+    expect(collectFlowGraphs(flow).map(g => g.path)).toEqual([
+      [],
+      ['nodes', 1, 'config', 'body'],
+      ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'catch'],
+    ]);
+    expect(collectFlowGraphs(flowWith({
+      id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
+      config: { branches: [gatedRegion(), gatedRegion('_r')] },
+    })).map(g => g.path)).toEqual([[], ['nodes', 1, 'config', 'branches', 0], ['nodes', 1, 'config', 'branches', 1]]);
   });
 
   it('terminates on a self-referential region instead of recursing forever', () => {
