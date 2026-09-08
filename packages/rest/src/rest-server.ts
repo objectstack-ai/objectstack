@@ -2061,7 +2061,7 @@ export class RestServer {
     }
 
     /**
-     * [#3939] Enforce the deployment's batch-size cap on a bulk write route.
+     * [#3939] Enforce the configured batch-size cap on a bulk write route.
      * Returns `true` when a response was sent (the caller must return).
      *
      * The cap was declared in three places in `batch.zod.ts` (`.max(200)` on
@@ -2076,10 +2076,34 @@ export class RestServer {
      * own result), which turns a 10k-id body into 10k sequential engine
      * round-trips inside one request instead of one statement.
      *
-     * The cap is deployment policy — `RestServerConfig.batch.maxBatchSize`
-     * (1..1000, default 200) — so it lives here and the schemas carry shape
-     * only. One place decides it, and it is the place that knows the
-     * deployment's configured value.
+     * The cap is `RestServerConfig.batch.maxBatchSize` (1..1000, default 200),
+     * so it lives here and the schemas carry shape only: one place decides it,
+     * and it is the place that holds the constructed config.
+     *
+     * Reachability: EMBEDDER-ONLY (#15543, #16801). ⛔ It is NOT deployment
+     * policy — this docblock said exactly that until #16801, and no shipped
+     * boot path makes it true. A `RestServerConfig` is the ARGUMENT a host
+     * passes when it constructs the server, and there is exactly ONE door:
+     * `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`),
+     * whose `start()` is the only non-test site that reaches
+     * `new RestServer(...)`. Neither shipped boot path opens it with a `batch`
+     * config — `os serve` (`packages/cli/src/commands/serve.ts`) forwards
+     * exactly two keys out of the stack config's `api:` block
+     * (`api.enableProjectScoping`, `api.projectResolution`), and the dev plugin
+     * (`packages/plugins/plugin-dev/src/dev-plugin.ts`) calls
+     * `createRestApiPlugin()` with no config at all. ⇒ A CLI-started
+     * deployment always gets the schema default of 200, and no flag, config
+     * file or CLI option moves it.
+     *
+     * This is the recorded posture, not a gap awaiting a fix, and it is written
+     * the same way on the spec side — the `BatchEndpointsConfigSchema` docblock
+     * and the WHO CAN WRITE THIS CONFIG header in
+     * `packages/spec/src/api/rest-server.zod.ts`, plus the per-key REACHABILITY
+     * row in `packages/spec/liveness/batch_endpoints.json`. Keep the two
+     * wordings together: threading a `batch` config through a boot path would
+     * be a NEW authorable key, which the spec-side siblings were denied for
+     * want of measured demand, so reversing that is its own decision and
+     * ⛔ not a docblock's to take.
      */
     private enforceBatchSize(res: any, count: number, max: number, object?: string): boolean {
         if (count <= max) return false;
