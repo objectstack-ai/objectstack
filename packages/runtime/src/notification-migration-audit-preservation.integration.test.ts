@@ -262,9 +262,14 @@ describe('[#16312] the sys_notification migration preserves the original audit t
         );
         const row = firstRow(rows);
         expect(instantOf(row.created_at)).toBe(Date.parse(NOTIFICATION_INSTANT));
+        // Rewritten, not skipped: the event shape landed and the legacy
+        // recipient is gone, so this row really did go through both writes.
         expect(row.topic).toBe('task.assigned');
         expect(row.recipient_id).toBeNull();
-        expect(runWindowStart).toBeGreaterThan(0);
+        // ⇒ and it still predates the run. This is the seat's re-grading input
+        // stated as an assertion: a bad run is recoverable because the source
+        // instant is still here to backfill FROM.
+        expect(instantOf(row.created_at)).toBeLessThan(runWindowStart);
     });
 });
 
