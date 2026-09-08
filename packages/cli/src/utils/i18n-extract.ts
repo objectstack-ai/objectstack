@@ -127,6 +127,7 @@ import {
   PAGE_COMPONENT_COPY_KEYS,
   FLOW_SCREEN_COPY_KEYS,
   FLOW_SCREEN_FIELD_COPY_KEYS,
+  globalFilterKey,
   walkAddressedPageComponents,
 } from '@objectstack/spec/system';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -1321,6 +1322,26 @@ export function collectExpectedEntries(
         pushEntry(out, ['dashboards', name, 'widgets', wid, 'description'], w.description, 'widget');
       }
     }
+    // Global-filter copy (#16772) — `dashboards.<name>.globalFilters.<key>`,
+    // the filter bar drawn above the widget titles. The KEY is imported from
+    // `@objectstack/spec` (`name`, else `field`) so the extractor offers the
+    // entry `translateDashboard` reads and never a neighbour of it; an option
+    // is keyed by its `value` spelled as a string, the resolver's own
+    // spelling. `optionsFrom` options are fetched rows and have no key.
+    const globalFilters: any[] = Array.isArray(dash.globalFilters) ? dash.globalFilters : [];
+    for (const filter of globalFilters) {
+      if (!filter || typeof filter !== 'object') continue;
+      const key = globalFilterKey(filter);
+      if (key === undefined) continue;
+      pushEntry(out, ['dashboards', name, 'globalFilters', key, 'label'], filter.label, 'dashboard');
+      const options: any[] = Array.isArray(filter.options) ? filter.options : [];
+      for (const option of options) {
+        if (!option || typeof option !== 'object') continue;
+        const { value } = option;
+        if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
+        pushEntry(out, ['dashboards', name, 'globalFilters', key, 'options', String(value)], option.label, 'dashboard');
+      }
+    }
   }
 
   // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
@@ -1337,12 +1358,13 @@ export function collectExpectedEntries(
     }
     // Header copy is authored inside the page's `page:header` component but
     // is addressed by page name — `translatePage` overlays it back onto every
-    // header in the page's regions.
-    const regions: any[] = Array.isArray(page.regions) ? page.regions : [];
-    for (const region of regions) {
-      const components: any[] = Array.isArray(region?.components) ? region.components : [];
-      for (const component of components) {
-        if (component?.type !== PAGE_HEADER_COMPONENT_TYPE) continue;
+    // ROOT-LEVEL header: a region's entry, or a `slots.<slot>` entry on a
+    // `kind: 'slotted'` page (#16772). Which components are root level is the
+    // shared walk's to say (`nested: false`), not a second loop's — the loop
+    // this replaced read `page.regions` by hand and would have offered
+    // nothing for the `slots.header` the resolver now translates.
+    walkAddressedPageComponents(page, (component, { nested }) => {
+      if (!nested && component?.type === PAGE_HEADER_COMPONENT_TYPE) {
         const props = component.properties ?? {};
         // `title` duplicating `label` is the common case and resolves via the
         // label fallback — only emit it when the two genuinely differ.
@@ -1351,7 +1373,8 @@ export function collectExpectedEntries(
         }
         pushEntry(out, ['pages', name, 'subtitle'], props.subtitle, 'page');
       }
-    }
+      return component;
+    });
 
     // Per-component copy, addressed by the component's own id (#6080). Without
     // this pass the face exists but nothing writes the skeleton, so a

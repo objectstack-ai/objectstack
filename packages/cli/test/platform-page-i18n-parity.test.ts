@@ -289,18 +289,24 @@ const walkParityPage = (): Record<string, any> => ({
               null,
             ],
             // NOT descended by `translatePage`: `body`/`footer` are a
-            // renderer-side back-compat fallback, and `items[].children` sits
-            // one level deeper than the slot the ruling names.
+            // renderer-side back-compat fallback, not an authorable
+            // composition spelling.
             body: [{ id: 'card_body_child', type: 'object-metric', properties: { title: 'Body child' } }],
             footer: [{ id: 'card_footer_child', type: 'object-metric', properties: { title: 'Footer child' } }],
-            items: [{ children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
+            // DESCENDED since #16772 — a `page:tabs` / `page:accordion`
+            // panel's `items[].children`, one level below the container.
+            items: [{ label: 'Panel', children: [{ id: 'tab_child', type: 'object-metric', properties: { title: 'Tab child' } }] }],
           },
         },
       ],
     },
   ],
-  // NOT walked by `translatePage` at all — it maps `regions` only.
-  slots: { aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } } },
+  // A ROOT since #16772 — a `kind: 'slotted'` page authors its components
+  // here (one component or an array per slot); walked after the regions.
+  slots: {
+    aside: { id: 'slot_child', type: 'object-metric', properties: { title: 'Slot child' } },
+    details: [{ id: 'slot_list_child', type: 'record:details', properties: { title: 'Slot list child' } }],
+  },
 });
 
 /** A container chain deeper than the resolver's descent cap. */
@@ -370,15 +376,44 @@ describe('i18n-extract ↔ translatePage walk parity (#13109)', () => {
     const page = walkParityPage();
     expect([...idsExtractorOffers(page)].sort()).toEqual([
       'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'slot_child', 'slot_list_child', 'tab_child',
     ]);
-    // `card_body_child`, `card_footer_child`, `tab_child` and `slot_child` are
-    // absent from BOTH sides — the shapes `translatePage` does not descend.
+    // `card_body_child` and `card_footer_child` are absent from BOTH sides —
+    // the shapes `translatePage` does not descend. `tab_child`, `slot_child`
+    // and `slot_list_child` are present on BOTH sides since #16772 widened
+    // the shared walk to `items[].children` and to the `slots.<slot>` roots.
     // `hdr` — the region-level `page:header` — is absent from BOTH sides since
     // the ruling. `nested_header` stays: a `page:header` inside a container is
     // reached by the id route only, so the id key is the only key it has.
     expect([...idsResolverApplies(page)].sort()).toEqual([
       'card', 'inner_flex', 'kpi_1', 'kpi_deep', 'kpi_label', 'nested_header', 'region_metric',
+      'slot_child', 'slot_list_child', 'tab_child',
     ]);
+  });
+
+  it('offers and reads the page-name header route for a `slots.header` page:header — a slotted page has a header too (#16772)', () => {
+    const page = {
+      name: 'slotted_header_page',
+      label: 'Contract',
+      kind: 'slotted',
+      regions: [],
+      slots: {
+        header: { id: 'hdr', type: 'page:header', properties: { title: 'Contract detail', subtitle: 'Lifecycle' } },
+      },
+    };
+    const offered = collectExpectedEntries({ pages: [page] } as any)
+      .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
+      .map((e) => e.path.slice(2).join('.'))
+      .sort();
+    // Page-name route offered; the id route NOT offered for a root-level
+    // header, exactly as for a region-level one.
+    expect(offered).toEqual(['label', 'subtitle', 'title']);
+
+    const bundle = {
+      en: { pages: { slotted_header_page: { title: 'T::title', subtitle: 'T::subtitle', components: { hdr: { title: 'ID-ROUTE' } } } } },
+    } as any;
+    const out = translatePage(page as any, bundle, { locale: 'en' });
+    expect(out.slots.header.properties).toEqual({ title: 'T::title', subtitle: 'T::subtitle' });
   });
 
   // ── The ruled invariant, pinned directly (decision batch #58, 2026-09-06) ──
@@ -756,22 +791,31 @@ describe('shipped platform record pages -- i18n ownership (#14817)', () => {
     expect(SHIPPED_LOCALES.length).toBeGreaterThan(1);
   });
 
-  it('records that the extractor reaches the page label and nothing under `slots`', () => {
-    // A BOUNDARY PIN, not an endorsement. It states the measured fact that the
-    // shared walk roots at `regions[].components[]` and these pages author
-    // `regions: []`, so the 45 inline sites under `slots.*` have no bundle
-    // face. If the walk is ever widened -- a maintainer decision open on
-    // #14749 -- this reds, and the person widening it is told, at the exact
-    // moment they can act on it, that these three pages gain a bundle surface
-    // that needs entries and a coverage home. That notice is the whole value:
-    // today the same change would land green over an unmeasured population.
+  it('records that the extractor now reaches under `slots` — and that every site it reaches there is an inline locale map with no seed', () => {
+    // A BOUNDARY PIN, not an endorsement — moved, not removed. Until #16772
+    // this pinned `offered: ['label']`: the shared walk rooted at
+    // `regions[].components[]`, these pages author `regions: []`, and the 45
+    // inline sites under `slots.*` had no bundle face. #16772 widened the
+    // walk to the `slots.<slot>` roots and to `items[].children`, so the
+    // notice the old pin promised has fired, and this is the answer to it:
+    // these pages' copy is authored as inline locale maps (the ruled route for
+    // page copy, judged complete by the next case), so what the extractor
+    // offers for them is a set of `inlineLocales` rows — authored-with-no-
+    // seed, never a string to translate. The bundle surface they gained
+    // therefore needs NO entries, and their coverage home stays this file.
+    // What this pin holds: the reach is real (more than the label alone), and
+    // it exposes no seeded string for a translator to be asked for.
     for (const page of RECORD_PAGES) {
-      const offered = collectExpectedEntries({ pages: [page] } as any)
-        .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name)
-        .map((e) => e.path.slice(2).join('.'))
-        .sort();
-      expect({ page: page.name, regions: page.regions, offered })
-        .toEqual({ page: page.name, regions: [], offered: ['label'] });
+      const entries = collectExpectedEntries({ pages: [page] } as any)
+        .filter((e) => e.path[0] === 'pages' && e.path[1] === page.name);
+      const offered = entries.map((e) => e.path.slice(2).join('.')).sort();
+      expect(page.regions).toEqual([]);
+      expect(offered).toContain('label');
+      expect(offered.filter((k) => k.startsWith('components.')).length).toBeGreaterThan(0);
+      const seeded = entries
+        .filter((e) => e.path[2] === 'components' && e.inline !== undefined)
+        .map((e) => e.path.slice(2).join('.'));
+      expect({ page: page.name, seededUnderSlots: seeded }).toEqual({ page: page.name, seededUnderSlots: [] });
     }
   });
 
