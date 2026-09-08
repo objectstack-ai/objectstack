@@ -28,6 +28,15 @@
  * 3. `enforcePerClientResources` stays ON and is asserted ON by behaviour:
  *    a client that is NOT linked to the resource must still be refused.
  *    Switching the check off to make (2) pass would turn that check red.
+ * 4. The wrong-resource control asks the SAME server, over the SAME client and
+ *    session, for a resource that was never registered, and requires
+ *    `invalid_target`. Without it a green suite cannot tell "we registered the
+ *    MCP resource" from "resource checking is off": seeding by wildcard, or a
+ *    build that stopped resolving `resource` at all, leaves 1-3 green. It is
+ *    written as a DIFFERENTIAL — accepted resource and refused resource in one
+ *    run, one variable apart — so it reddens from either side: remove the
+ *    registration and the accepted half fails; widen it and the refused half
+ *    does.
  */
 
 import { createRequire } from 'node:module';
@@ -56,6 +65,10 @@ const BASE_URL = 'https://acme.example.com';
 const AUTH_BASE_PATH = '/api/v1/auth';
 const ISSUER = `${BASE_URL}${AUTH_BASE_PATH}`;
 const MCP_RESOURCE = `${BASE_URL}/api/v1/mcp`;
+// Never registered as an `oauthResource` row, and never advertised by the RFC
+// 9728 document. The AS must refuse it for the same client that the MCP
+// resource is granted to.
+const UNREGISTERED_RESOURCE = `${BASE_URL}/api/v1/other`;
 const REDIRECT_URI = 'http://localhost:56789/callback';
 // RFC 7636 Appendix B verifier/challenge pair.
 const PKCE_VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
@@ -251,6 +264,27 @@ async function authorizeWithResource(
   return { status: res.status, location: res.headers.get('location') ?? '' };
 }
 
+/**
+ * Drives the consent POST the authorize redirect asks for and returns the
+ * authorization code. Fails loudly rather than returning an empty code, so a
+ * caller can never mistake "consent broke" for "the grant was refused".
+ */
+async function consentToCode(auth: any, azLocation: string, cookie: string): Promise<string> {
+  const consentRes = await auth.handler(
+    new Request(`${ISSUER}/oauth2/consent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, origin: BASE_URL },
+      body: JSON.stringify({ accept: true, oauth_query: azLocation.slice(azLocation.indexOf('?')) }),
+    }),
+  );
+  const consentBody: any = await consentRes.json().catch(() => null);
+  const target = consentBody?.redirect_uri ?? consentBody?.url;
+  expect(target, `consent did not produce a redirect: ${JSON.stringify(consentBody)}`).toBeTruthy();
+  const code = new URL(target).searchParams.get('code');
+  expect(code, `consent returned no authorization code: ${target}`).toBeTruthy();
+  return code!;
+}
+
 function decodeJwtPayload(token: string): any {
   const parts = token.split('.');
   expect(parts.length, 'access token must be a signed JWT').toBe(3);
@@ -340,18 +374,7 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
     const az = await authorizeWithResource(server.auth, reg.body.client_id, cookie, advertisedResource);
     expect(az.location).not.toContain('invalid_target');
 
-    const consentRes = await server.auth.handler(
-      new Request(`${ISSUER}/oauth2/consent`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', cookie, origin: BASE_URL },
-        body: JSON.stringify({ accept: true, oauth_query: az.location.slice(az.location.indexOf('?')) }),
-      }),
-    );
-    const consentBody: any = await consentRes.json().catch(() => null);
-    const target = consentBody?.redirect_uri ?? consentBody?.url;
-    expect(target, `consent did not produce a redirect: ${JSON.stringify(consentBody)}`).toBeTruthy();
-    const code = new URL(target).searchParams.get('code');
-    expect(code, `consent returned no authorization code: ${target}`).toBeTruthy();
+    const code = await consentToCode(server.auth, az.location, cookie);
 
     const tokenRes = await server.auth.handler(
       new Request(`${ISSUER}/oauth2/token`, {
@@ -359,7 +382,7 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           grant_type: 'authorization_code',
-          code: code!,
+          code,
           redirect_uri: REDIRECT_URI,
           client_id: reg.body.client_id,
           code_verifier: PKCE_VERIFIER,
@@ -413,5 +436,88 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
       'a client with no oauthClientResource row must NOT be able to request the MCP resource — '
         + 'if this passes, enforcePerClientResources has been switched off',
     ).toContain('invalid_target');
+  });
+
+  it('still refuses an UNREGISTERED resource at authorize — the fix registers ONE resource, it does not switch resource checking off', async () => {
+    // ⛔ No assertion here on `opts.resources`. Asserting the option we passed
+    // is the very shape this file exists to replace — it would stay green under
+    // a provider that ignored the option. Every reading below is taken from the
+    // running AS.
+    const opts = await captureProviderOptions();
+    const server = await bootRealAuthorizationServer(opts);
+    const reg = await registerDcrClient(server.auth);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+    const cookie = await signUp(server.auth);
+
+    // DIFFERENTIAL. Same server, same client, same session, same scopes — the
+    // ONLY difference between these two requests is the `resource` value, so
+    // the pair isolates exactly the thing under test. Asserting both halves in
+    // one run is what makes this control refutable from both sides: drop the
+    // registration and the granted half fails, widen the registration and the
+    // refused half does.
+    const granted = await authorizeWithResource(server.auth, reg.body.client_id, cookie, MCP_RESOURCE);
+    expect(granted.location, 'the registered MCP resource must still be granted').not.toContain('invalid_target');
+    expect(granted.location, 'the registered MCP resource must reach consent').toContain('/oauth/consent');
+
+    const refused = await authorizeWithResource(
+      server.auth,
+      reg.body.client_id,
+      cookie,
+      UNREGISTERED_RESOURCE,
+    );
+    expect(
+      refused.location,
+      `a resource that was never registered must still be refused, and this client was just `
+        + `granted ${MCP_RESOURCE} in the same run — if this passes, the AS is accepting `
+        + `resources it was never told about, which is "resource checking is off", not "the MCP `
+        + `resource is registered"`,
+    ).toContain('invalid_target');
+    expect(refused.location, 'the refusal must not leak into a consent hand-off').not.toContain('/oauth/consent');
+
+    // Read from the AS's own store, not from the options: exactly one resource
+    // was seeded and it is the MCP one. A wildcard or catch-all seed shows up
+    // here, and would have shown up one assertion earlier as a granted
+    // redirect for a resource nobody registered.
+    expect(
+      server.resourceRows().map((r: any) => r.identifier),
+      'the AS must hold exactly the one resource this fix registers',
+    ).toEqual([MCP_RESOURCE]);
+  });
+
+  it('refuses at /oauth2/token a resource that was not bound at authorize', async () => {
+    const opts = await captureProviderOptions();
+    const server = await bootRealAuthorizationServer(opts);
+    const reg = await registerDcrClient(server.auth);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(201);
+    const cookie = await signUp(server.auth);
+
+    // A complete, VALID grant for the MCP resource — so the only defect the
+    // exchange below can carry is the swapped `resource`.
+    const az = await authorizeWithResource(server.auth, reg.body.client_id, cookie, MCP_RESOURCE);
+    expect(az.location).not.toContain('invalid_target');
+    const code = await consentToCode(server.auth, az.location, cookie);
+
+    const tokenRes = await server.auth.handler(
+      new Request(`${ISSUER}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: REDIRECT_URI,
+          client_id: reg.body.client_id,
+          code_verifier: PKCE_VERIFIER,
+          resource: UNREGISTERED_RESOURCE,
+        }).toString(),
+      }),
+    );
+    const tokenBody: any = await tokenRes.json().catch(() => null);
+    expect(
+      tokenRes.status,
+      `redeeming a code bound to ${MCP_RESOURCE} against ${UNREGISTERED_RESOURCE} must fail: `
+        + JSON.stringify(tokenBody),
+    ).not.toBe(200);
+    expect(tokenBody?.error, JSON.stringify(tokenBody)).toBe('invalid_target');
+    expect(tokenBody?.access_token, 'no token may be minted for an unbound resource').toBeFalsy();
   });
 });

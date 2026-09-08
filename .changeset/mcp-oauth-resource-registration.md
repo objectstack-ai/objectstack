@@ -1,5 +1,5 @@
 ---
-"@objectstack/plugin-auth": patch
+"@objectstack/plugin-auth": minor
 ---
 
 MCP OAuth can complete again: the MCP resource is registered as an RFC 8707 resource and DCR-registered clients are linked to it, so `authorize?resource=<mcp url>` no longer answers `invalid_target`.
