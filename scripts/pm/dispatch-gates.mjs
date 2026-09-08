@@ -516,7 +516,10 @@ const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(so
  * `.sh` files: 37 hints as spelled, 8 once `#` comments are masked, and 8 of the
  * 16 files that spell any hint at all had a population that was 100% prose.
  * `scripts/bump-objectui.sh` was the sharpest — 7 hints, every one of them
- * inside a `#` comment or an `echo` line.
+ * inside a `#` comment or an `echo` line. Re-taken unchanged after merging
+ * `5e53d73d`; the self-test asserts the DIRECTION rather than these numbers,
+ * because a reading belongs to a named commit and this one moves whenever a
+ * shell script gains or loses a comment.
  *
  * That is the one direction this file refuses everywhere else, stated twice next
  * door: `spawnedProgramTargets` takes a missing lead over a fabricated one, and
