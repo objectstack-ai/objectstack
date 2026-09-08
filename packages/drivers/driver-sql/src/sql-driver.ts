@@ -9374,7 +9374,7 @@ export class SqlDriver implements IDataDriver {
    * drops shards past the `shards × unit` window.
    */
   async rotateShards(
-    objectDef: { name: string; fields?: Record<string, any>; lifecycle?: any },
+    objectDef: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
     this.assertSchemaMutable('rotateShards');
@@ -9391,7 +9391,7 @@ export class SqlDriver implements IDataDriver {
 
   protected async ensureRotation(
     tableName: string,
-    obj: { name: string; fields?: Record<string, any> },
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
     policy: { shards: number; unit: 'day' | 'week' | 'month' },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
@@ -9544,8 +9544,21 @@ export class SqlDriver implements IDataDriver {
   }
 
   /** Create/column-sync one physical shard table (mirrors the managed-table
-   * branch of {@link initObjects}, scoped to a shard). */
-  protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
+   * branch of {@link initObjects}, scoped to a shard).
+   *
+   * #16711: `indexes` and `tenancy` are DECLARED here, on {@link ensureRotation}
+   * and on {@link rotateShards}, because this leaf reads both off the object the
+   * public entry point was handed — a shard carries the base table's declared
+   * indexes (#11374) and must scope a `unique: 'organization'` index the same
+   * way on every shard (ADR-0120 D1). Declaring them only here would leave the
+   * two links above still narrowing the same value, so a caller spelling
+   * `indexes` in a fresh literal to `rotateShards` would still be refused by a
+   * type while the driver read the key regardless.
+   */
+  protected async ensureShardTable(
+    shardName: string,
+    obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
+  ): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
     // column — the create branch skips it explicitly, the column-sync branch
@@ -9559,7 +9572,7 @@ export class SqlDriver implements IDataDriver {
       table: shardName,
       fields: obj.fields ?? {},
       tenantField: this.resolveTenantField(shardName),
-      declaredIndexes: (obj as any).indexes,
+      declaredIndexes: obj.indexes,
     });
     if (!exists) {
       await this.knex.schema.createTable(shardName, (table) => {
@@ -9586,7 +9599,7 @@ export class SqlDriver implements IDataDriver {
     // Declared indexes per shard. Auto-derived names already embed the shard
     // name; explicit names get a shard prefix so they can't collide across
     // shards in the same database.
-    const declared = (obj as any).indexes;
+    const declared = obj.indexes;
     if (Array.isArray(declared) && declared.length > 0) {
       const colInfo = await this.knex(shardName).columnInfo();
       const perShard = declared.map((idx: any) => ({
@@ -9945,8 +9958,19 @@ export class SqlDriver implements IDataDriver {
   // happened to bind first — a green that held for a reason unrelated to
   // correctness. `src/sql-driver-16570-init-objects-indexes-param.test.ts`
   // pins the fresh-literal form so it cannot silently go back.
+  //
+  // `lifecycle` was the third instance, and the one that made #16711 file the
+  // CLASS rather than a fourth single-key card: the loop below reads
+  // `obj.lifecycle?.storage` to decide whether a table is time-sharded, while
+  // the sibling `rotateShards` on this same class had always declared the key.
+  // Dropping it does not fail — it leaves the ADR-0057 rotation policy unarmed,
+  // silently, exactly as dropping `indexes` leaves a declared UNIQUE unsynced.
+  // `scripts/check-object-def-param-keys.mjs` now holds the whole class,
+  // including the half no in-file gate could see: a SUBCLASS in another
+  // published package overriding one of these methods with a narrower literal
+  // (`TursoDriver.initObjects` shadowed #4311's `tenancy` fix for five weeks).
   async initObjects(
-    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>,
   ): Promise<void> {
     // In-memory registration FIRST, and deliberately ahead of the DDL gate
     // below: being refused permission to alter a schema is not a reason to stay
@@ -10004,7 +10028,7 @@ export class SqlDriver implements IDataDriver {
       // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
       // the Rotator owns its DDL (shard tables + a read view under the base
       // name); the plain create/alter path below would collide with the view.
-      const rotationPolicy = (obj as any).lifecycle?.storage;
+      const rotationPolicy = obj.lifecycle?.storage;
       if (rotationPolicy?.strategy === 'rotation' && this.supportsRotation) {
         this.tablesWithTimestamps.add(tableName);
         await this.ensureRotation(tableName, obj, rotationPolicy);
@@ -11220,7 +11244,7 @@ export class SqlDriver implements IDataDriver {
       for (const o of objects) {
         tables.set(StorageNameMapping.resolveTableName(o), {
           fields: o.fields ?? {},
-          indexes: (o as any).indexes,
+          indexes: o.indexes,
         });
       }
     } else {

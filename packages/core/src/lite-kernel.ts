@@ -5,6 +5,7 @@ import { createLogger, ObjectLogger } from './logger.js';
 import type { LoggerConfig } from '@objectstack/spec/system';
 import { ObjectKernelBase } from './kernel-base.js';
 import { registerPluginByName } from './plugin-registration.js';
+import { assertPluginContract } from './plugin-contract.js';
 
 /**
  * ObjectKernel - MiniKernel Architecture
@@ -34,6 +35,26 @@ export class LiteKernel extends ObjectKernelBase {
      * Register a plugin
      * @param plugin - Plugin instance
      *
+     * A plugin object the DECLARED plugin contract refuses is refused here,
+     * with `PLUGIN_CONTRACT_VIOLATION` — the same check, the same envelope,
+     * that `ObjectKernel.use()` runs through `PluginLoader` (`plugin-contract.ts`
+     * is the one statement both kernels call; #16721, maintainer ruling
+     * 2026-09-08, option A under #9864's precedent that the kernels converge).
+     *
+     * This method used to write the object straight into the registry, so the
+     * same plugin was accepted by this kernel and refused by `ObjectKernel` —
+     * and `AGENTS.md` names THIS kernel for tests, so a plugin could be green
+     * in vitest and refused at production boot. Measured before converging
+     * (#16721 step 1): of 813 `LiteKernel.use()` calls reachable in this
+     * repository's suites, 807 were accepted by the schema unchanged and the
+     * six refusals came from three test-local fixture objects, none of them
+     * product code.
+     *
+     * Ordering, and why it is pinned: state first (`validateIdle`), then the
+     * contract, then registration — a refused plugin never reaches the
+     * registry, so it can neither be booted nor supersede an earlier
+     * registration under its name.
+     *
      * Duplicate names OVERWRITE, with one `warn` naming both versions — the
      * declared contract in `plugin-registration.ts`, applied identically by
      * `ObjectKernel.use()` (#9864, maintainer ruling 2026-08-19).
@@ -47,6 +68,9 @@ export class LiteKernel extends ObjectKernelBase {
      */
     use(plugin: Plugin): this {
         this.validateIdle();
+
+        // Same check, same envelope, as `ObjectKernel.use()` (#16721).
+        assertPluginContract(plugin);
 
         registerPluginByName(this.plugins, plugin, this.logger);
 
