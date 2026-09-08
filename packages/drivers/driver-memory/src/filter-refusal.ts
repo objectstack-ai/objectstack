@@ -632,7 +632,7 @@ export function arrayComparandError(field: string, value: unknown, path: string,
       `query path deep-equalled the array and returned the row, while the reference matcher ` +
       `compared it by REFERENCE (== between two objects is a reference test) and returned none. ` +
       `@objectstack/spec's comparand door leaves this position to the driver, and driver-sql ` +
-      `refuses it too (#16810).`,
+      `refuses it too.`,
   );
 }
 
