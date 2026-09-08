@@ -204,10 +204,14 @@ describe('scaffold emission policy — one definition, four emissions', () => {
   it('emits the exported constant rather than a literal, for every policy range', () => {
     const ranges = declaredRanges();
     // ⚠️ `tsx` left this table with #16483: the retired `os create example`
-    // template was the only emission that declared it, so `SCAFFOLD_TSX_RANGE`
-    // now reaches no scaffold at all. Asserting it here anyway would compare an
-    // empty harvest against the constant and go red on a correct tree; a row is
-    // owed by a range some emission really declares, and by nothing else.
+    // template was the only emission that declared it. `SCAFFOLD_TSX_RANGE`
+    // has now been retired with it — every surviving emission runs its scripts
+    // through `objectstack`, `tsc` or `vitest`, none of which is invoked as
+    // `tsx`, so no emission declares that range. Asserting it here anyway
+    // would compare an empty harvest against a constant and go red on a
+    // correct tree; a row is owed by a range some emission really declares,
+    // and by nothing else — so this table grows a `tsx` row only after some
+    // emission declares one, never to keep a constant company.
     const expected: Array<[string, string]> = [
       ['typescript', SCAFFOLD_TYPESCRIPT_RANGE],
       ['vitest', SCAFFOLD_VITEST_RANGE],

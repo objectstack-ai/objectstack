@@ -317,9 +317,6 @@ export const SCAFFOLD_VITEST_RANGE = '^4.0.0';
 /** The `@types/node` range a scaffolded project declares. */
 export const SCAFFOLD_TYPES_NODE_RANGE = '^22.0.0';
 
-/** The `tsx` range a scaffolded project declares when its scripts need it. */
-export const SCAFFOLD_TSX_RANGE = '^4.21.0';
-
 /** The zod range a scaffolded project declares when it authors schemas. */
 export const SCAFFOLD_ZOD_RANGE = '^4.3.6';
 
