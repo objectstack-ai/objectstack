@@ -499,8 +499,8 @@ Even inside your own worktree, operate defensively:
 
    **Re-arm awareness** — none of these is a reason to avoid the queue; all are reasons to
    confirm a PR is still *in* it: a red queue build **ejects** your entry and drops
-   auto-merge, often on a package your PR never touched (the queue runs the full suite; the
-   PR ran affected-only) — diagnose against `merge-queue-triage.yml`'s comment, recognise a
+   auto-merge, often on a package your PR never touched (it runs the merge group's affected
+   set, not just yours) — diagnose against `merge-queue-triage.yml`'s comment, recognise a
    known-flaky signature, then re-arm once, never reflexively; **collateral eviction is
    silent** (triage comments only on `failure`, so an entry cancelled because something
    *ahead* failed gets nothing) — neither on `main` nor in the queue means dropped, re-arm;
