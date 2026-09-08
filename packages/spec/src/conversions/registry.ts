@@ -2049,8 +2049,13 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  * measured to exist, and an app that wants NOT NULL columns declares
  * `storage.notNull` deliberately. Existing columns are left exactly as they
  * are.
+ *
+ * ⚠️ Fact 2 is about the MECHANISM, not about this entry, and it outlived the
+ * entry: `retiredFromLoadPath` still holds nothing back at three runtime seams
+ * (#16864). Before setting that flag on a DEFAULT FLIP — as opposed to a
+ * lossless delete or a rename — read that card, because the flag does not mean
+ * what its name and every docblock around it say it means.
  */
-
 
 /**
  * The #3896 close-out sweep, part 2 (protocol 17): the remaining inert
