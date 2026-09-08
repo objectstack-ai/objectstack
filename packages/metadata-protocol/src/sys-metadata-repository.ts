@@ -90,14 +90,24 @@ import { isWritablePackage } from './package-writability.js';
  *
  * [#13997] `sys_metadata`'s `created_at` / `updated_at` are BUILTIN audit
  * columns; `sys_metadata_history`'s `recorded_at` is a declared
- * `Field.datetime`. On the live dialects BOTH arrive out of the record read
- * door as a JS `Date`: `SqlDriver#formatOutput` repairs the audit columns
- * (`repairNaiveUtcAuditTimestamp`) and folds the declared datetime columns
- * (`normalizeSqliteDatetimeOutput`) ONLY inside its `if (this.isSqlite)` arm,
- * and `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
- * deliberately untouched because "those are instants, a `Date` is the right
- * materialisation for them, and `Field.datetime` depends on it". Pinned in
- * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * `Field.datetime`. On the live dialects BOTH used to arrive out of the record
+ * read door as a JS `Date`: `SqlDriver#formatOutput` repaired the audit columns
+ * (`repairNaiveUtcAuditTimestamp`) and folded the declared datetime columns
+ * (`normalizeSqliteDatetimeOutput`) ONLY inside its `if (this.isSqlite)` arm.
+ * #13973 ([ADR-0053 D-F1]) lifted both passes out of that gate — they run on
+ * EVERY dialect now, so the read door presents the canonical ISO-Z text.
+ * Pinned in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`
+ * §B, which was inverted on purpose to record the new contract.
+ *
+ * ⚠️ `withPostgresCalendarDayAsText` still leaves `timestamptz` / `timestamp`
+ * deliberately untouched ([ADR-0053 D-F2]) — those are instants and a `Date`
+ * remains the right materialisation for them at the CLIENT layer. What changed
+ * is that the driver no longer lets that `Date` out of its read door. (⛔ The
+ * clause this comment used to quote alongside it — that `Field.datetime`
+ * "depends on" the `Date` materialisation — was checked against the tree by
+ * #13973 and did not hold; it is gone from the driver and must not be quoted
+ * back.)
  *
  * `MetadataItem.authoredAt` is declared `z.string()` ('ISO-8601 timestamp',
  * `packages/metadata-core/src/types.ts`) and `MetadataItem` is a `z.infer`, so
@@ -163,10 +173,14 @@ function canonicalIsoInstant(value: unknown): string | undefined {
  * [#14037] `rowToEvent` reaches `ts` through `(row.recorded_at as string) ??
  * …`, and `row` is `any`, so tsc sees a `string` assignment that never
  * happened. `recorded_at` is a declared `Field.datetime` on
- * `sys_metadata_history`, which the dialect asymmetry above does NOT protect:
- * the `datetimeFields` fold sits inside `formatOutput`'s `if (this.isSqlite)`
- * arm, so Postgres and MySQL hand the column out as a JS `Date`.
- * `MetadataEventSchema.ts` is `z.string()`
+ * `sys_metadata_history`, and the dialect asymmetry described above did not
+ * protect it: the `datetimeFields` fold sat inside `formatOutput`'s
+ * `if (this.isSqlite)` arm, so Postgres and MySQL handed the column out as a JS
+ * `Date`. #13973 ([ADR-0053 D-F1]) has since closed that asymmetry — the fold
+ * runs on every dialect — but the cast is still an assertion rather than a
+ * measurement, and the `Date` domain is not empty: an INVALID `Date` still
+ * leaves `driver-sql` unchanged ([ADR-0053 D-F3]) and non-SQL drivers
+ * materialise their own. `MetadataEventSchema.ts` is `z.string()`
  * (`packages/metadata-core/src/types.ts`), and the value's one in-repo reader
  * — `MetadataManager.applyRepoEvent`, which forwards it to
  * `MetadataWatchEvent.timestamp` — is declared `z.string().datetime()`.
@@ -1177,16 +1191,22 @@ export class SysMetadataRepository implements MetadataRepository {
       organizationId: row.organization_id ?? null,
       packageId: row.package_id ?? null,
       // [#14938] `updated_at` / `created_at` are the BUILTIN audit columns,
-      // so on Postgres and MySQL they arrive here as a JS `Date`: the audit
-      // repair and the declared-datetime fold both sit inside
-      // `SqlDriver#formatOutput`'s `if (this.isSqlite)` arm, and
-      // `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
-      // alone because those are instants. `rows` is cast `as any[]` above,
-      // so tsc never saw the `Date` land in a field this signature declares
-      // `string | null`. Canonicalised at the producer — the same adapter
-      // boundary `rowToItem` uses, never a tolerant `??` in the console or a
-      // reshape at the driver's read door (#13973's two standing
-      // prohibitions).
+      // and on Postgres and MySQL they used to arrive here as a JS `Date`:
+      // the audit repair and the declared-datetime fold both sat inside
+      // `SqlDriver#formatOutput`'s `if (this.isSqlite)` arm. #13973
+      // ([ADR-0053 D-F1]) lifted both out of that gate, so the read door now
+      // presents canonical ISO-Z text on every dialect;
+      // `withPostgresCalendarDayAsText` is untouched by that ruling and still
+      // leaves `timestamptz` / `timestamp` alone at the CLIENT parser
+      // ([ADR-0053 D-F2]). `rows` is cast `as any[]` above, so tsc never saw
+      // the `Date` land in a field this signature declares `string | null`,
+      // and the shape is still reachable: an INVALID `Date` leaves the driver
+      // unchanged ([ADR-0053 D-F3]) and non-SQL drivers materialise their own.
+      // Canonicalised at the producer — the same adapter boundary `rowToItem`
+      // uses, and ⛔ never a tolerant `??` in the console, which is the #13973
+      // prohibition that still stands. (Its second one — ⛔ no unilateral
+      // reshape at the driver's read door — was DISCHARGED by the B1 ruling,
+      // which made that reshape the central fix rather than a local one.)
       //
       // The terminal is chosen PER CALL SITE (#14078) and this one is
       // `null`, not `rowToItem`'s `?? new Date(...).toISOString()`: this

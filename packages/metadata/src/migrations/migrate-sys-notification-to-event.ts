@@ -51,6 +51,56 @@ const EVENT_OBJECT = 'sys_notification';
 const INBOX_OBJECT = 'sys_inbox_message';
 const RECEIPT_OBJECT = 'sys_notification_receipt';
 
+/**
+ * The write context the two L5 materializing inserts carry: this is a
+ * HISTORICAL IMPORT, so the row's `created_at` is the notification's own
+ * instant and not the moment this migration ran.
+ *
+ * ## Read the fossil before you move this
+ *
+ * `preserveAudit` is not a bypass of audit — it is the door audit left open
+ * for exactly this case, and it has a ruling behind it:
+ *
+ *  - **#3493** put it there. `sys_stamp_audit_insert` / `sys_stamp_audit_update`
+ *    (`@objectstack/objectql`'s `plugin.ts`) read `session.preserveAudit` and,
+ *    when it is set, keep a supplied `created_at` / `updated_at` / `updated_by`
+ *    instead of overwriting it with the write instant. Its own words: "a
+ *    'historical' import reinstates the ORIGINAL timeline". Opt-in and
+ *    server-set only — `ExecutionContext.preserveAudit` is documented as never
+ *    client-supplied, and REST import reaches it only through the
+ *    `treatAsHistorical` request flag (`packages/rest/src/import-runner.ts`).
+ *  - **#15964** (maintainer ruling 2026-09-06, decision batch #54, option A)
+ *    reaffirmed it while removing the accident this migration was living on.
+ *    `created_at` used to be `record.created_at ?? now` on EVERY insert —
+ *    client-preferred with no flag at all — which laundered a forged
+ *    `created_at` past the static-`readonly` strip on an ordinary
+ *    authenticated POST. The ruling made the ordinary branch stamp `now` and
+ *    kept the `preserveAudit` branch, deliberately: "Under `preserveAudit` the
+ *    preservation is DECLARED, so the same keep is the ruled historical-import
+ *    channel and stays — which is why the fix is this ternary and not a bare
+ *    `= now`."
+ *
+ * ⇒ the fossil says the channel exists FOR this; declaring it is the ruled
+ * remedy, and ⛔ restoring the create-side `??` is not (#16312).
+ *
+ * ## Why the strip does not eat these keys
+ *
+ * The 2026-08-08 ruling narrowed the CREATE-side `readonly` strip's exemption
+ * to `isSystem` alone, so a non-system create asking for `preserveAudit` is
+ * warned that the exemption is UPDATE-only. That does not bite here:
+ * `staticReadonlyInsertSubject` returns `null` for an object whose name starts
+ * with `sys_` or that carries `managedBy` — both target objects are `sys_` and
+ * `sys_notification_receipt` is `managedBy: 'engine-owned'` — so no create-side
+ * static strip runs on them at all and no warning is owed. Pinned, on a real
+ * engine, by `packages/runtime/src/notification-migration-audit-preservation.integration.test.ts`.
+ *
+ * ⛔ NOT carried on the `data.update` that rewrites the event row below. That
+ * write really is happening now, so `updated_at = now` is the true fact;
+ * `sys_stamp_audit_update` never touches `created_at`, which is why the source
+ * row keeps its own.
+ */
+const HISTORICAL_IMPORT = { context: { preserveAudit: true } };
+
 /** Legacy inbox columns cleared once a row is rewritten to the event shape. */
 const LEGACY_COLUMNS = [
     'recipient_id',
@@ -173,29 +223,37 @@ async function runNotificationEventMigration(
             const eventTopic = row.type != null && String(row.type).length > 0 ? String(row.type) : 'legacy';
 
             // L5 in-app materialization.
-            await data.insert(INBOX_OBJECT, {
-                user_id: recipientId,
-                notification_id: id,
-                topic: eventTopic,
-                title,
-                body_md: row.body ?? null,
-                severity: 'info',
-                action_url: row.url ?? null,
-                organization_id: orgId,
-                created_at: createdAt,
-            });
+            await data.insert(
+                INBOX_OBJECT,
+                {
+                    user_id: recipientId,
+                    notification_id: id,
+                    topic: eventTopic,
+                    title,
+                    body_md: row.body ?? null,
+                    severity: 'info',
+                    action_url: row.url ?? null,
+                    organization_id: orgId,
+                    created_at: createdAt,
+                },
+                HISTORICAL_IMPORT,
+            );
 
             // L5 receipt (read-state spine).
-            await data.insert(RECEIPT_OBJECT, {
-                notification_id: id,
-                delivery_id: null,
-                user_id: recipientId,
-                channel: 'inbox',
-                state: isRead ? 'read' : 'delivered',
-                at: isRead && row.read_at != null ? canonicalTimestampText(row.read_at) : createdAt,
-                organization_id: orgId,
-                created_at: createdAt,
-            });
+            await data.insert(
+                RECEIPT_OBJECT,
+                {
+                    notification_id: id,
+                    delivery_id: null,
+                    user_id: recipientId,
+                    channel: 'inbox',
+                    state: isRead ? 'read' : 'delivered',
+                    at: isRead && row.read_at != null ? canonicalTimestampText(row.read_at) : createdAt,
+                    organization_id: orgId,
+                    created_at: createdAt,
+                },
+                HISTORICAL_IMPORT,
+            );
 
             // Rewrite the row itself to the L2 event shape (engine handles JSON).
             await data.update(
