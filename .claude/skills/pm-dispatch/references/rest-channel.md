@@ -22,11 +22,9 @@
 - ⛔ 查重必须含 closed:卡刚关闭时最易被重开,开域查重漏掉刚关闭的同题卡即重复派发。
 - 开域查重是要申报的例外,不是默认;状态与标签列卡仍 `state=open`,那是状态读不是查重。
 - ✓ 卡与 PR 元数据 `GET .../issues/{n}` · `GET .../pulls/{n}`,assignees、labels、body 齐全。
-- MCP `list_issues` 永不返回 assignees,这条差别本身就是走 REST 的理由。
 - ✓ 整条评论线 `GET .../issues/{n}/comments?per_page=100`。
 - ✓ Timeline 事件 `GET .../issues/{n}/timeline`:cross-ref、`added_to_merge_queue`、ready_for_review。
 - ✓ PR diff `GET .../pulls/{n}` 带 Accept `application/vnd.github.diff`;文件清单 `.../pulls/{n}/files`。
-- 后者可瞬态 404 ⇒ PR 文件读取优先走 git。
 - ✓ 取某 ref 上的文件 `GET .../contents/{path}?ref=...`,raw accept。
 - ✓ 祖先与对比 `GET .../compare/{base}...{head}` —— 浅检出上本地祖先判据不可信时的正解。
 - ✓ 门禁与 workflow `GET .../commits/{sha}/check-runs` · `GET .../actions/runs`。
@@ -39,6 +37,8 @@
 - 加法写剥不掉并发席位刚挂的标签,比 MCP `issue_write` 的整组替换安全。
 - 门关席位无此端点 ⇒ 回退 = MCP 读现值、并集、整组写、读回;读回是它安全的全部理由。
 - ✓ 建卡带标签 `POST .../issues` · 改正文 `PATCH .../issues/{n}` · 认领 `POST .../issues/{n}/assignees`。
+- 请求体走文件(`-d @file`)或引号定界 heredoc(`<<'EOF'`),⛔ 永不内联双引号串。
+- 双引号内 shell 先展开反引号、`$(...)`、`$VAR`,请求尚未成形;只标题坏而正文完好即此形。
 - ✓ 请求复审 `POST .../pulls/{n}/requested_reviewers` · 开 PR `POST .../pulls` 带 `draft=true`。
 - GraphQL 池为 0 的同一分钟里开得出 draft PR ⇒ 交付不必等重置。
 - ✓ 把 `origin/main` 合进 PR head:`PUT .../pulls/{n}/update-branch`,PM 席位可用。

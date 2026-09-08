@@ -37,6 +37,11 @@
     "rag",
     "ragflow"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/knowledge-ragflow"
+  },
   "files": [
     "dist",
     "README.md",
