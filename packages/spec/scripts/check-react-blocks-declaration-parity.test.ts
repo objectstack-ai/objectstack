@@ -567,11 +567,17 @@ describe('check:react-declaration-parity — the prescription is probed, not ass
       // the wrong one is this card's defect class again: a confident false claim about
       // the tree, in the text consulted when deciding what to run.
       expect(text).toContain('gen-sdui-manifest-node.mjs');
-      // The wrong tool may appear ONLY as the correction naming it wrong — never as a
-      // command to run. Pinning the spelling's absence outright would be the weaker
-      // test AND would forbid the correction: in the absent branch the same spelling
-      // legitimately opens a command line, which is exactly what this discriminates.
-      expect(text).not.toMatch(/^\s*pnpm sdui:manifest/m);
+      // The wrong tool may appear ONLY inside the correction that names it wrong —
+      // nowhere else, command line or prose. The LOOKAHEAD is what enforces the whole of
+      // that sentence, and it was measured before it was written: the original defective
+      // claim ('`pnpm sdui:manifest` rewrites it when .objectui-sha moves') was itself
+      // MID-LINE, so a line-anchored form does not match it at all and would have left
+      // this comment promising more than the code delivers — the same over-claim, one
+      // layer up, in a card about exactly that. A flat `not.toContain` is not available
+      // either: it would forbid the correction itself. This assertion belongs to the
+      // present branch alone — the absent branch legitimately opens command lines with
+      // that spelling, so it must not be hoisted out of this leg.
+      expect(text).not.toMatch(/pnpm sdui:manifest(?!` does NOT rewrite)/);
       expect(text).toContain('`pnpm sdui:manifest` does NOT rewrite this file');
       // …and it says, in words, what the two devs got wrong.
       expect(text).toMatch(/NOT MEASURED/);
