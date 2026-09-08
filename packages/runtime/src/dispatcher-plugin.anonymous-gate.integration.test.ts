@@ -66,7 +66,12 @@ function servicesPlugin(): Plugin {
                 executeAction,
                 getSchema: (n: string) => (n === objectDef.name ? objectDef : undefined),
                 registry: { getObject: (n: string) => (n === objectDef.name ? objectDef : undefined), getItem: () => undefined },
-                find: async () => [],
+                // [#16370] Answer the by-id subject pre-load: the door refuses a
+                // row-scoped invocation whose caller-scope load did not deliver,
+                // and this file's subject is the AUTH gate on the mounted route —
+                // an unrelated 404 would hide exactly the 200 it has to prove.
+                find: async (_object: string, options?: any) =>
+                    (options?.where?.id ? [{ id: options.where.id }] : []),
                 insert: async () => ({}), update: async () => ({}), delete: async () => ({}),
             });
             ctx.registerService('automation', {

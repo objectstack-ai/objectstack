@@ -523,6 +523,24 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             "into a code this repo owns by accident: it is still the vendor's string on the vendor's " +
             'wire, and a vendor rename turns the pin red rather than silently minting a local code.',
     },
+    {
+        code: 'EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION',
+        file: 'packages/plugins/plugin-auth/src/list-user-invitations-verification.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            "better-auth 1.7.2's own organization-plugin vocabulary — verified in the then-installed " +
+            'vendor at `dist/plugins/organization/error-codes`, spelled there exactly as it is here — ' +
+            'and read at runtime off `plugin.$ERROR_CODES`; the local restatement is only the fallback ' +
+            'for a plugin object carrying no `$ERROR_CODES`, and ' +
+            "`list-user-invitations-verification.test.ts` pins it equal to the vendor's own entry so a " +
+            'vendor rename turns the pin red rather than silently minting a local code. Raised ' +
+            "`APIError.from('FORBIDDEN', verificationRequired)` inside the rebuilt " +
+            '`/organization/list-user-invitations` better-auth endpoint, so it leaves as the ' +
+            "vendor's own `Response` on the vendor's wire — the identical refusal the vendor handler " +
+            'raised unconditionally before the rebuild — and never as a throw this repo classifies.',
+    },
 
     {
         code: 'OS_METADATA_CONVERTED',
@@ -801,23 +819,27 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     // [#16049] The plugin-contract refusal `kernel.use()` now raises. Same
     // pre-HTTP class as the rows above; the ruling that created it is the
-    // 2026-09-06 ADR-0049 enforce-or-remove call on `PluginSchema`.
+    // 2026-09-06 ADR-0049 enforce-or-remove call on `PluginSchema`. Since
+    // #16721 the stamp site is the module BOTH kernels call.
     {
         code: 'PLUGIN_CONTRACT_VIOLATION',
-        file: 'packages/core/src/plugin-loader.ts',
+        file: 'packages/core/src/plugin-contract.ts',
         shape: 'assignconst',
         door: 'none',
         verdict: 'boot-refusal',
         why:
-            'Raised by `PluginLoader.validatePluginContract` when a plugin object does not satisfy the '
+            'Raised by `assertPluginContract` (`plugin-contract.ts`, the one statement `LiteKernel.use()` '
+            + 'calls directly and `PluginLoader.validatePluginContract` runs for `ObjectKernel.use()`) '
+            + 'when a plugin object does not satisfy the '
             + 'declared `PluginSchema` on any of the EIGHT keys that enforcement covers — `id`, `type`, '
             + '`staticPath`, `slug`, `default`, `description`, `author`, `homepage` — including an explicit '
             + '`null` on any of them, since all eight are `.optional()` and admit absence but not `null`. '
             + '`version` is excluded from the enforcement, and unknown keys are not refused at all (the '
             + 'schema carries no `.strict()`), so the narrowing stops at those eight. It is '
             + 'raised while the kernel is still registering plugins, before bootstrap and therefore before '
-            + 'any HTTP boundary exists: `ObjectKernel.use()` re-wraps it into a fresh `Error` that the host '
-            + 'rethrows and the process aborts on, so no door can answer with it and no door can demote it. '
+            + 'any HTTP boundary exists: `LiteKernel.use()` throws it as-is and `ObjectKernel.use()` re-wraps '
+            + 'it into a fresh `Error` that the host rethrows and the process aborts on, so no door can answer '
+            + 'with it and no door can demote it. '
             + 'Same class as the migration-journal runner refusals and the service-resolution discriminator '
             + 'above, ruled by the same reasoning those rows cite: a composition fact raised pre-HTTP is not wire '
             + 'vocabulary. The code is repeated at the head of the message because that re-wrap keeps only '

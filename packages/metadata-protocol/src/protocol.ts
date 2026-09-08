@@ -10891,7 +10891,18 @@ export class ObjectStackProtocolImplementation implements
         // goes over whole and the insert re-derives the field's `defaultValue`,
         // symmetric with createData. `overrides` are applied ABOVE this line, so
         // a readonly key smuggled through them is still judged by the strip.
-        const result = await this.engine.insert(request.object, data, ctxOpt as any);
+        //
+        // [#15703] And the verdict is REPORTED, the same listener `createData`
+        // wires: a clone is the one create shape that carries a read-only column
+        // without the caller typing it (the source's `approval_status` travels in
+        // the copy), so the 201 body says which keys the engine dropped instead of
+        // leaving the caller to diff `record` against the source. Maintainer
+        // ruling 2026-09-08 (option 1); `CloneDataResponseSchema` declares the
+        // member in the same change, because that schema is declared AS PRODUCED.
+        const dropped: DroppedFieldsEvent[] = [];
+        const opts: any = { onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
+        if (ctx !== undefined) opts.context = ctx;
+        const result = await this.engine.insert(request.object, data, opts);
         // [#7823] Same ingress strip as `createData` — a clone's 201 body is
         // the same generic-data-path surface. (The SOURCE row was read through
         // the engine's find path, which already omits internal fields, so the
@@ -10903,6 +10914,7 @@ export class ObjectStackProtocolImplementation implements
             id: result.id,
             sourceId: request.id,
             record: result,
+            ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
         };
     }
 

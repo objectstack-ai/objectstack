@@ -139,6 +139,17 @@
  * it is RULE 2's premise: a trailer left on a pushed commit really does reach
  * the default branch's permanent history.
  *
+ * What DISCHARGES a pushed-branch red is therefore the merge, and only a merge
+ * whose squash message is the PR BODY — then the trailer never reaches the
+ * default branch. Whether that happens by itself is the repository setting
+ * `squash_merge_commit_message`: at `COMMIT_MESSAGES` (the value behind the
+ * measurement above) it takes the lander replacing the assembled commit list
+ * with the PR body by hand at the merge button, which a queue merge never does;
+ * at `PR_BODY` every squash does it, queue included. The output states that
+ * CONDITION rather than the value the setting holds today, so it stays true
+ * whichever way the repository is configured when it is read — and discharging
+ * the red never rewrites history.
+ *
  * What that costs depends on the spelling, and the output says so rather than
  * flattening it: Part-of and Refs land as a reference and move no card, while a
  * CLOSING keyword lands on the surface GitHub's parser reads. The asymmetry is
@@ -350,7 +361,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Context reading: presence, not truthiness.': 4,
   'The wiring itself. A gate whose workflow step is deleted or whose': 6,
   'The predicate source this gate reuses must still be there to reuse.': 1,
-  'RULE 2 — every card-relation spelling in a commit message is a finding,': 19,
+  'RULE 2 — every card-relation spelling in a commit message is a finding,': 22,
   'The regression fixture: the squash that assembled a contradiction no': 4,
   'RULE 2 delegates to the sweep extractors at the commit-message reading.': 3,
   'The commit list input. An absent, broken or empty list can never read': 8,
@@ -443,6 +454,17 @@ const PREDICATE_SOURCE = 'scripts/pm/check-half-states.mjs';
 /** The wiring that gives this gate a PR to judge. */
 const WIRING_WORKFLOW = '.github/workflows/partof-closing-keyword-guard.yml';
 
+/**
+ * The file RELATION_CONTRACT quotes — a REAL input, read by the self-test.
+ *
+ * Quoted as a path literal on purpose, unlike the paths in the header. The
+ * derivation turns a quoted path in this file into a watch hint, and this one
+ * is a hint that tells the truth: editing the sentence at the other end of it
+ * breaks the citation pin below, so a card touching that file really does want
+ * this gate run. The header's last section is the authority on the distinction.
+ */
+const AGENT_RULES_SOURCE = '.claude/agents/os-dev.md';
+
 export const EXIT_CLEAN = 0;
 export const EXIT_CONTRADICTION = 1;
 export const EXIT_NOT_WIRED = 2;
@@ -458,17 +480,54 @@ export const COMMITS_FILE_ENV = 'PR_COMMITS_FILE';
  * copying it. Quoted verbatim, in its own language, because a translation of a
  * ruling is a rewrite of it.
  *
- * Named in prose rather than as a bare path literal on purpose: the
- * dispatch-gates derivation turns quoted path literals in this file into watch
- * hints, and a sentence with spaces in it cannot become one. The header's last
- * section is the authority on that.
+ * ⛔ Nothing inside the corner brackets may be written HERE. An earlier revision
+ * carried a second sentence in them — that the squash concatenates the commit
+ * messages and can assemble a contradiction out of individually honest parts —
+ * which was true on the facts and had never been in the rules file at all. That
+ * is the same failure as a translation, in the other direction: it attributes to
+ * the ruling a claim the ruling does not make, and it prints that attribution to
+ * the very population that reads the rules file. The squash fact is this gate's
+ * own, and this gate already states it in its own words twice — in the RULE 2
+ * header section and in the printed finding below — so it is not restated here
+ * a third time.
+ *
+ * The brackets are held to their source MECHANICALLY, not by care: the self-test
+ * reads AGENT_RULES_SOURCE and requires every sentence between them to appear in
+ * it verbatim. Comparing the printed finding with this constant cannot do that —
+ * both sides move together when the constant is edited, which is precisely how
+ * the added sentence survived a self-test that already claimed to check the
+ * citation.
+ *
+ * The path is named in prose here rather than as a literal because it is spelled
+ * once, as a literal, at AGENT_RULES_SOURCE; that declaration carries the
+ * watch-hint note.
  */
 const RELATION_CONTRACT =
   'The contract is written down in the agent rules at .claude/agents/os-dev.md — '
-  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。'
-  + 'squash 会把全部 commit message 连成一条落地,逐条诚实拼成的一条自相矛盾。」 '
+  + '「PR 正文与 commit message 分开解析:卡片关系只在正文声明一次,commit ⛔ 不带卡片 trailer。」 '
   + '(The PR body and the commit messages are parsed separately: the card relation is declared ONCE, '
   + 'in the body, and a commit carries no card trailer.)';
+
+/**
+ * Every sentence inside the corner brackets of a citation, in order.
+ *
+ * Split rather than compared whole so the pin stays honest if the quotation ever
+ * grows a second sentence legitimately: each is held to the source on its own,
+ * and a sentence added here without being added there is named individually.
+ *
+ * Returns an empty array when there are no brackets at all, which the self-test
+ * refuses explicitly — an extractor that silently found nothing would make the
+ * citation pin vacuously green, the phantom-check shape this file exists to
+ * refuse elsewhere.
+ */
+function citedSentences(text) {
+  const quoted = /「([^」]*)」/.exec(String(text ?? ''));
+  if (quoted === null) return [];
+  return quoted[1]
+    .split(/(?<=。)/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+}
 
 /**
  * The commit rows the wiring gathered, as JSON Lines — one object per line,
@@ -721,6 +780,13 @@ export function judge(ctx) {
         "  card, while a CLOSING keyword lands on the surface GitHub's parser reads. ⛔ Weigh that under the",
         '  landing rules that bind you — this gate found a real contradiction between your commits and your',
         '  body, and it does not decide whether the pull request merges.',
+        '',
+        '  What DISCHARGES it is the merge, and only a merge whose squash message is the PR BODY: then the',
+        '  trailer above never reaches the default branch. Whether that happens by itself is the repository',
+        '  setting `squash_merge_commit_message`. At `COMMIT_MESSAGES` (the state fact 2 measured) it takes',
+        '  the lander replacing the assembled commit list with the PR body BY HAND at the merge button — a',
+        '  queue merge edits nothing, so there the residue lands. At `PR_BODY` every squash does it, queue',
+        '  included. Until that merge the red stays on this branch; ⛔ discharging it never rewrites history.',
       );
     }
     return { exit: EXIT_CONTRADICTION, lines: [...lines, ...(unread.length ? ['', ...unread] : [])] };
@@ -942,6 +1008,22 @@ function selfTest() {
     named.includes(RELATION_CONTRACT),
     true,
   );
+  // The case above compares the printed finding with THIS FILE'S constant, so
+  // both sides move together whenever the constant is edited: a sentence that
+  // was never in the rules file passes it, and one did — see the constant's
+  // docblock. These three hold the quotation to its SOURCE instead. An absent
+  // rules file reds here rather than passing quietly: a citation check that
+  // cannot read the cited file has verified nothing.
+  const agentRulesPath = join(ROOT, AGENT_RULES_SOURCE);
+  const agentRules = existsSync(agentRulesPath) ? readFileSync(agentRulesPath, 'utf8') : '';
+  const citedFromRules = citedSentences(RELATION_CONTRACT);
+  t(`the cited rules file is readable (${AGENT_RULES_SOURCE})`, agentRules !== '', true);
+  t('the citation carries quoted sentences at all (never a vacuous zero)', citedFromRules.length > 0, true);
+  t(
+    'every sentence inside the corner brackets is verbatim in the cited rules file',
+    citedFromRules.filter((sentence) => !agentRules.includes(sentence)),
+    [],
+  );
   // The guidance text itself, pinned. This gate once told the author to push
   // reworded commits while also forbidding a rewrite — unsatisfiable on a
   // pushed branch, and a seat that read it instructed an amend and force-push.
@@ -977,6 +1059,31 @@ function selfTest() {
   t(
     'the guidance leaves the landing decision to the lander rather than ordering a merge',
     named.includes('does not decide whether the pull request merges'),
+    true,
+  );
+  // The discharge sentence. Saying that nothing clears the red on the branch is
+  // half of the pushed case; the other half is WHAT discharges it — the merge,
+  // and only a merge whose squash message is the PR body — and the setting that
+  // decides whether that is by hand or automatic. It is stated as a CONDITION on
+  // the setting's value, never as today's value, so these three hold whichever
+  // way the repository is configured when they run; and the sentence must sit
+  // beside the prohibition, never in place of it.
+  t(
+    'the already-pushed case says what DISCHARGES the red: a merge whose squash message is the PR body',
+    named.includes('What DISCHARGES it is the merge') && named.includes('squash message is the PR BODY'),
+    true,
+  );
+  t(
+    'and names the setting that decides by-hand versus automatic, with both of its values',
+    named.includes('`squash_merge_commit_message`') &&
+      named.includes('`COMMIT_MESSAGES`') &&
+      named.includes('`PR_BODY`') &&
+      named.includes('BY HAND'),
+    true,
+  );
+  t(
+    'and the discharge sentence sits BESIDE the prohibition, never in place of it',
+    named.includes('discharging it never rewrites history') && /⛔ Do NOT amend, rebase or force-push/.test(named),
     true,
   );
   t(

@@ -17,12 +17,22 @@
  * milliseconds dropped, the SERVER's timezone baked in, no `Z`, and not
  * `Date.parse`-safe for a client doing strict ISO parsing.
  *
- * Why all four, and why nothing upstream repaired them: `formatOutput`'s two
- * timestamp repairs — the `AUDIT_TIMESTAMP_COLUMNS` pass (`created_at`) and the
- * `normalizeSqliteDatetimeOutput` pass over `datetimeFields`
- * (`started_at` / `completed_at` / `reverted_at`, all declared `Field.datetime`
- * on `sys_import_job`) — both sit INSIDE `formatOutput`'s `if (this.isSqlite)`
- * arm. ⚠️ A declared `Field.datetime` is NOT protected on Postgres/MySQL.
+ * Why all four, and why nothing upstream repaired them AT THE TIME:
+ * `formatOutput`'s two timestamp repairs — the `AUDIT_TIMESTAMP_COLUMNS` pass
+ * (`created_at`) and the `normalizeSqliteDatetimeOutput` pass over
+ * `datetimeFields` (`started_at` / `completed_at` / `reverted_at`, all declared
+ * `Field.datetime` on `sys_import_job`) — both sat INSIDE `formatOutput`'s
+ * `if (this.isSqlite)` arm, so a declared `Field.datetime` was NOT protected on
+ * Postgres/MySQL. #13973 ([ADR-0053 D-F1]) has since lifted both passes out of
+ * that gate: they run on EVERY dialect, so `driver-sql` no longer hands this
+ * seam a valid `Date` on any dialect.
+ *
+ * ⚠️ That does not make these cases redundant, and the `Date` arm they pin is
+ * not dead code. `driver-mongodb` stamps `new Date()` and BSON round-trips it,
+ * and `driver-sql` still hands an INVALID `Date` through unchanged — the one
+ * shape with no canonical text to fold to ([ADR-0053 D-F3]), measured reachable
+ * on both live dialects. What these cases own is the mapper's behaviour per
+ * INPUT SHAPE, which is the property that outlives the dialect fact.
  *
  * ## Why the obvious pin would have proved nothing
  *
@@ -57,11 +67,14 @@
  *
  * ## What is deliberately NOT claimed here
  *
- * That `driver-sql` hands this seam a `Date` on Postgres. That is a fact about
- * `driver-sql`, measured beside the fix (`formatOutput`'s `isSqlite` bracketing)
- * and pinned in that package; `@objectstack/rest` must not grow a Postgres
- * dependency to restate it. What these tests own is the mapper's behaviour
- * GIVEN each input shape a driver can produce.
+ * Which shapes `driver-sql` hands this seam, on which dialect. That is a fact
+ * about `driver-sql` — today the canonical text on every dialect, with the
+ * Invalid `Date` passing through ([ADR-0053 D-F1]/[D-F3]) — measured and pinned
+ * in that package (`sql-driver-13973-canonical-iso-read-door.test.ts`);
+ * `@objectstack/rest` must not grow a Postgres dependency to restate it, and
+ * must not re-derive it either, which is why nothing here asserts it. What
+ * these tests own is the mapper's behaviour GIVEN each input shape a driver can
+ * produce.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';

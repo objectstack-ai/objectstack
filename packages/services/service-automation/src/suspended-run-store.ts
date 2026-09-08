@@ -662,6 +662,12 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       // rides in the JSON blob. Null (not 0) when the engine computed no
       // summary: "not measured" and "measured zero" are different answers, and
       // only one of them should trip an alarm.
+      //
+      // [#15606] Four counters, not five: `summary.failed` stays in the blob
+      // on purpose and has no column to write it to. ⛔ Do not add
+      // `failed_count: record.summary?.failed ?? null` here as a tidy-up — the
+      // verdict, and the one condition that re-opens it, are written above
+      // `selected_count` in `sys-automation-run.object.ts`. Read that first.
       selected_count: record.summary?.selected ?? null,
       acted_count: record.summary?.acted ?? null,
       skipped_count: record.summary?.skipped ?? null,

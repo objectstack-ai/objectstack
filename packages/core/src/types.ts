@@ -136,8 +136,9 @@ export type PluginType = 'standard' | (typeof CORE_PLUGIN_TYPES)[number];
  * exported alias are the same union. Absent means `'standard'` at the schema
  * (`.default('standard')`), and the loader never writes that default back
  * onto the object. A value outside the set no longer type-checks, and since
- * #16049 `kernel.use()` REFUSES it at boot — `PluginLoader.validatePluginContract`
- * runs `PluginSchema` over every plugin object and raises
+ * #16049 `kernel.use()` REFUSES it at boot — `assertPluginContract`
+ * (`plugin-contract.ts`, run by BOTH `ObjectKernel.use()` and `LiteKernel.use()`
+ * since #16721) runs `PluginSchema` over every plugin object and raises
  * `PLUGIN_CONTRACT_VIOLATION` naming the plugin and the first violated key.
  * `type: 'ui'` additionally owes `staticPath` and `slug` (#16334,
  * `PLUGIN_UI_REQUIRED_KEY_MISSING`), refused on the same path.

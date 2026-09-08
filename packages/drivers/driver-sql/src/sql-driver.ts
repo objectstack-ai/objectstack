@@ -20,7 +20,7 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // The DECLARED aggregate vocabulary (#5907). Read from the spec so this driver's
 // "the protocol has no such function" refusal cannot drift from what
 // `AggregationNodeSchema.function` actually admits.
-import { AggregationFunction } from '@objectstack/spec/data';
+import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
@@ -8569,6 +8569,12 @@ export class SqlDriver implements IDataDriver {
     // See {@link presentReadColumns}.
     const presentedOutput = new Map<string, ReadPresentationKind>();
 
+    // [#15546] Result columns whose NULL answer folds to the identity the
+    // platform declares for that aggregate over NOTHING (`emptyGroupValueFor`,
+    // spec `data/aggregation-policy.ts`), keyed like `presentedOutput` by the
+    // column name the caller will read. See {@link foldEmptyAggregateAnswers}.
+    const foldedOutput = new Map<string, number>();
+
     if (query.groupBy) {
       // groupBy items may be plain strings ('region') or structured objects
       // ({ field: 'closed_at', dateGranularity: 'quarter' }). For structured
@@ -8698,6 +8704,12 @@ export class SqlDriver implements IDataDriver {
           } else {
             builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [fieldExpr]));
           }
+          // [#15546] What this aggregate answers over NOTHING, read from the
+          // policy rather than restated: `sum` (and the two counts, which never
+          // arrive as NULL) fold to `0`; `avg`/`min`/`max` have no identity and
+          // their NULL passes through. See {@link foldEmptyAggregateAnswers}.
+          const identity = emptyGroupValueFor(funcName);
+          if (identity !== undefined) foldedOutput.set(agg.alias, identity);
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
           // the only ones whose result still needs the column's presentation.
@@ -8789,7 +8801,60 @@ export class SqlDriver implements IDataDriver {
       // {@link SqlDriver.aggregateBackendFault}.
       throw this.aggregateBackendFault(object, query, error);
     }
-    return this.presentReadColumns(rows, presentedOutput);
+    return this.presentReadColumns(this.foldEmptyAggregateAnswers(rows, foldedOutput), presentedOutput);
+  }
+
+  /**
+   * [#15546] Fold the NULL a SQL aggregate answers over an all-NULL aggregand
+   * to the identity the platform declares for that aggregate over NOTHING.
+   *
+   * SQL `SUM` skips NULLs, and once it has skipped every row of a group it
+   * answers NULL — on every dialect this driver targets. Measured 2026-09-07
+   * on better-sqlite3, live PostgreSQL 16.13 and live MySQL 8.0.46: `sum` over
+   * a group of three rows whose column is NULL in each of them is `null` on
+   * all three, for `number` and `currency` columns alike. The engine's
+   * in-memory aggregate tier (`objectql`'s `in-memory-aggregation.ts`) answers
+   * `0` for the same rows, as do `driver-memory` and `driver-mongodb`'s
+   * lowering, and `emptyGroupValueFor` (spec `data/aggregation-policy.ts`)
+   * rules that summing nothing is `0` — a measured fact, not missing data.
+   * Which face answered was decided by a driver capability bit the caller
+   * never sees (`engine.ts`'s `typeof drv.aggregate === 'function'` fork), so
+   * one grouped list view rendered a blank total on one deployment and `0` on
+   * another. Maintainer ruling 2026-09-07 on #15546 (option A): three rows
+   * whose aggregand is absent and zero rows are the SAME case for `sum` — the
+   * addend set is empty either way — and this face is the one that moves.
+   *
+   * The identity is READ from the policy rather than restated here, so the
+   * other half of the same rule holds by construction: an aggregate whose
+   * `emptyGroupValueFor` is `undefined` (`avg`/`min`/`max`) has no answer over
+   * nothing, is never registered, and its NULL reaches the caller untouched.
+   * `count`/`count_distinct` register too but never arrive as NULL — `COUNT`
+   * answers `0` on its own — so the entry is inert for them, deliberately
+   * rather than special-cased away.
+   *
+   * Presentation, not compilation. The statement is unchanged — no `COALESCE`
+   * — so the emitted-SQL pins and the per-dialect result-type parsing above
+   * are untouched, and the answer is the JS number `0` on every dialect, the
+   * same value the in-memory tier produces. Only `null` folds: an `undefined`
+   * would mean the column was never projected, a different defect that must
+   * stay visible. Rows are mutated in place, as {@link presentReadColumns}
+   * does. The unaliased branch of {@link SqlDriver.aggregate} is not tracked,
+   * for the reason `presentedOutput` gives: `alias` is required by
+   * `AggregationNodeSchema`, and that branch lands under a dialect-dependent
+   * column name.
+   *
+   * Pinned on every enrolled face by the `sum(amount)` cases of
+   * `AGGREGATION_CASES` (spec `data/aggregation-conformance.ts`).
+   */
+  protected foldEmptyAggregateAnswers(rows: any, identities: Map<string, number>): any {
+    if (identities.size === 0 || !Array.isArray(rows)) return rows;
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      for (const [column, identity] of identities) {
+        if (row[column] === null) row[column] = identity;
+      }
+    }
+    return rows;
   }
 
   /**
@@ -9074,7 +9139,63 @@ export class SqlDriver implements IDataDriver {
     if (query.limit !== undefined) builder.limit(query.limit);
     if (query.offset !== undefined) builder.offset(query.offset);
 
-    return await builder;
+    const rows = await builder;
+    if (!Array.isArray(rows)) return rows;
+
+    // [#16609] The last read door that returned STORAGE forms. It handed back
+    // `await builder` with no presentation at all, while `find()`/`findOne()`
+    // run every row through `formatOutput` and `aggregate()`/`distinct()` got
+    // `presentReadValue` under #3797/#3849 — so one driver answered one
+    // declared column two ways depending on which door you knocked on.
+    // Measured on `main` at `2e6a2ea4c9`, one row through the two doors:
+    //   find()   -> { ok: true, meta: { k: 1 } }
+    //   window   -> { ok: 1,    meta: '{"k":1}' }
+    // i.e. a declared `Field.boolean` answered `1` and a declared `Field.object`
+    // answered the stored JSON TEXT. `formatOutput` rather than
+    // `presentReadValue` is what runs here, and that choice is load-bearing:
+    // {@link ReadPresentationKind} has no `json` member, so the per-value
+    // helper the other two doors use cannot present `meta` at all. These are
+    // ROWS, which is exactly what `formatOutput` takes.
+    //
+    // ── The alias columns are carved out, and that is the whole design ──────
+    //
+    // A window alias is a COMPUTED value, not a declared field, so no declared
+    // field's presentation rule may touch it. The case that forces the rule to
+    // be explicit is an alias that COLLIDES with a declared field name, and SQL
+    // has already decided that one: `select *` plus `<window> as ok` projects
+    // two columns named `ok` and the row object keeps the LAST, so the computed
+    // value wins the key and the declared column's value is not in the row at
+    // all. Measured on `main` at `2e6a2ea4c9` with `alias: 'ok'` over a
+    // declared `Field.boolean ok`: rows came back `ok: 1` and `ok: 2` — the
+    // ROW_NUMBERs, not the booleans (`true`/`false`), which is how you can tell
+    // them apart. So the alias wins the key BEFORE this change and still wins
+    // it after; what this carve-out prevents is presenting that computed number
+    // as the declared type, which would have turned ROW_NUMBER 1 and 2 into
+    // `true` and `true` and destroyed the very value the caller asked for.
+    // Pinned by `sql-driver-window-function-output.test.ts`.
+    //
+    // Snapshot-and-restore rather than a "which keys would `formatOutput`
+    // touch?" pre-computation: that question can only be answered by re-reading
+    // the declared-field registries `formatOutput` reads, which would be a
+    // second, worse copy of it — and one that goes silently stale the next time
+    // `formatOutput` learns a new rule. Restoring a value the pass never
+    // touched is a no-op, so the cheap-looking version buys nothing.
+    const aliases = Array.isArray(query.windowFunctions)
+      ? query.windowFunctions.map((wf) => String(wf.alias))
+      : [];
+
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const computed: [string, any][] = [];
+      for (const alias of aliases) {
+        if (Object.prototype.hasOwnProperty.call(row, alias)) computed.push([alias, row[alias]]);
+      }
+      // Mutates in place and returns the same row, as `findRows()` relies on.
+      this.formatOutput(object, row);
+      for (const [alias, value] of computed) row[alias] = value;
+    }
+
+    return rows;
   }
 
   // ===================================
@@ -9253,7 +9374,7 @@ export class SqlDriver implements IDataDriver {
    * drops shards past the `shards × unit` window.
    */
   async rotateShards(
-    objectDef: { name: string; fields?: Record<string, any>; lifecycle?: any },
+    objectDef: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
     this.assertSchemaMutable('rotateShards');
@@ -9270,7 +9391,7 @@ export class SqlDriver implements IDataDriver {
 
   protected async ensureRotation(
     tableName: string,
-    obj: { name: string; fields?: Record<string, any> },
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
     policy: { shards: number; unit: 'day' | 'week' | 'month' },
     nowMs: number = Date.now(),
   ): Promise<{ object: string; current: string; shards: string[]; dropped: string[] }> {
@@ -9423,8 +9544,21 @@ export class SqlDriver implements IDataDriver {
   }
 
   /** Create/column-sync one physical shard table (mirrors the managed-table
-   * branch of {@link initObjects}, scoped to a shard). */
-  protected async ensureShardTable(shardName: string, obj: { fields?: Record<string, any>; tenancy?: any }): Promise<void> {
+   * branch of {@link initObjects}, scoped to a shard).
+   *
+   * #16711: `indexes` and `tenancy` are DECLARED here, on {@link ensureRotation}
+   * and on {@link rotateShards}, because this leaf reads both off the object the
+   * public entry point was handed — a shard carries the base table's declared
+   * indexes (#11374) and must scope a `unique: 'organization'` index the same
+   * way on every shard (ADR-0120 D1). Declaring them only here would leave the
+   * two links above still narrowing the same value, so a caller spelling
+   * `indexes` in a fresh literal to `rotateShards` would still be refused by a
+   * type while the driver read the key regardless.
+   */
+  protected async ensureShardTable(
+    shardName: string,
+    obj: { fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
+  ): Promise<void> {
     const builtinColumns = new Set(['id', 'created_at', 'updated_at']);
     // [#12015] Both branches below drop a declared field named after a builtin
     // column — the create branch skips it explicitly, the column-sync branch
@@ -9438,7 +9572,7 @@ export class SqlDriver implements IDataDriver {
       table: shardName,
       fields: obj.fields ?? {},
       tenantField: this.resolveTenantField(shardName),
-      declaredIndexes: (obj as any).indexes,
+      declaredIndexes: obj.indexes,
     });
     if (!exists) {
       await this.knex.schema.createTable(shardName, (table) => {
@@ -9465,7 +9599,7 @@ export class SqlDriver implements IDataDriver {
     // Declared indexes per shard. Auto-derived names already embed the shard
     // name; explicit names get a shard prefix so they can't collide across
     // shards in the same database.
-    const declared = (obj as any).indexes;
+    const declared = obj.indexes;
     if (Array.isArray(declared) && declared.length > 0) {
       const colInfo = await this.knex(shardName).columnInfo();
       const perShard = declared.map((idx: any) => ({
@@ -9670,7 +9804,7 @@ export class SqlDriver implements IDataDriver {
    *          which `initObjects` goes on to use for its DDL.
    */
   protected registerManagedObjectMetadata(
-    obj: { name: string; fields?: Record<string, any>; tenancy?: any },
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
   ): { tableName: string; tenantField: string | null } {
     const tableName = StorageNameMapping.resolveTableName(obj);
     // #2186: remember the authoritative metadata field set for this table so
@@ -9679,8 +9813,8 @@ export class SqlDriver implements IDataDriver {
     // Always overwrite — a metadata change that REMOVES `indexes` must clear
     // the previous entry, or drift detection keeps expecting an index nobody
     // declares any more (and never reports it as orphaned).
-    if (Array.isArray((obj as any).indexes)) {
-      this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+    if (Array.isArray(obj.indexes)) {
+      this.managedObjectIndexes.set(tableName, obj.indexes);
     } else {
       this.managedObjectIndexes.delete(tableName);
     }
@@ -9800,7 +9934,7 @@ export class SqlDriver implements IDataDriver {
    * Idempotent: pure metadata assignment, safe to re-drive on every reload.
    */
   registerObjectMetadata(
-    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
   ): void {
     for (const obj of objects) this.registerManagedObjectMetadata(obj);
   }
@@ -9811,7 +9945,33 @@ export class SqlDriver implements IDataDriver {
   // undeclared here until #4311 (`registerExternalObject` and
   // `computeAndRecordTenantField` both had it), so a caller spelling the key
   // correctly was rejected by the type while the driver read it regardless.
-  async initObjects(objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>): Promise<void> {
+  //
+  // `indexes` is the same story, one key over, and it went undeclared here for
+  // longer: `registerManagedObjectMetadata` fills `managedObjectIndexes` from
+  // it, and that map is what `syncDeclaredIndexes` renders every declared
+  // UNIQUE from — so the whole index-sync path was driven by a key this
+  // signature said did not exist, reached through an `as any`. The sibling
+  // `detectManagedDrift` on this class had always declared it, so the two
+  // halves disagreed about the shape of the same input. Nothing tripped over
+  // it because TypeScript's excess-property check fires on a FRESH object
+  // literal and not on one bound to a variable first, and every caller here
+  // happened to bind first — a green that held for a reason unrelated to
+  // correctness. `src/sql-driver-16570-init-objects-indexes-param.test.ts`
+  // pins the fresh-literal form so it cannot silently go back.
+  //
+  // `lifecycle` was the third instance, and the one that made #16711 file the
+  // CLASS rather than a fourth single-key card: the loop below reads
+  // `obj.lifecycle?.storage` to decide whether a table is time-sharded, while
+  // the sibling `rotateShards` on this same class had always declared the key.
+  // Dropping it does not fail — it leaves the ADR-0057 rotation policy unarmed,
+  // silently, exactly as dropping `indexes` leaves a declared UNIQUE unsynced.
+  // `scripts/check-object-def-param-keys.mjs` now holds the whole class,
+  // including the half no in-file gate could see: a SUBCLASS in another
+  // published package overriding one of these methods with a narrower literal
+  // (`TursoDriver.initObjects` shadowed #4311's `tenancy` fix for five weeks).
+  async initObjects(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[]; lifecycle?: any }>,
+  ): Promise<void> {
     // In-memory registration FIRST, and deliberately ahead of the DDL gate
     // below: being refused permission to alter a schema is not a reason to stay
     // ignorant of the objects we were just told about. On a datasource we are a
@@ -9868,7 +10028,7 @@ export class SqlDriver implements IDataDriver {
       // ADR-0057 P2: rotation-declared telemetry is physically time-sharded —
       // the Rotator owns its DDL (shard tables + a read view under the base
       // name); the plain create/alter path below would collide with the view.
-      const rotationPolicy = (obj as any).lifecycle?.storage;
+      const rotationPolicy = obj.lifecycle?.storage;
       if (rotationPolicy?.strategy === 'rotation' && this.supportsRotation) {
         this.tablesWithTimestamps.add(tableName);
         await this.ensureRotation(tableName, obj, rotationPolicy);
@@ -9909,7 +10069,7 @@ export class SqlDriver implements IDataDriver {
         table: tableName,
         fields: obj.fields ?? {},
         tenantField,
-        declaredIndexes: (obj as any).indexes,
+        declaredIndexes: obj.indexes,
       });
 
       if (!exists) {
@@ -9984,7 +10144,7 @@ export class SqlDriver implements IDataDriver {
       // referenced column physically exists — which is also why field-level
       // `unique` can no longer be emitted inline by `createColumn`: a composite
       // needs the tenant column to already be there.
-      const declaredIndexes = (obj as any).indexes;
+      const declaredIndexes = obj.indexes;
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
         isUniqueScopeDeclared(f?.unique),
       );
@@ -11084,7 +11244,7 @@ export class SqlDriver implements IDataDriver {
       for (const o of objects) {
         tables.set(StorageNameMapping.resolveTableName(o), {
           fields: o.fields ?? {},
-          indexes: (o as any).indexes,
+          indexes: o.indexes,
         });
       }
     } else {

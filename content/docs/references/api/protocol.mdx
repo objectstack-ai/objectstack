@@ -484,6 +484,17 @@ Canonical cross-paradigm action/node descriptor (ADR-0018)
 | **id** | `string` | ✅ | The ID of the newly created clone. |
 | **sourceId** | `string` | ✅ | The ID of the record the clone was copied from. |
 | **record** | `Record<string, any>` | ✅ | The created clone, including server-generated fields. Engine-owned values (injected system/audit columns, autonumbers, computed formula/summary fields) are re-derived by the insert path rather than copied from the source; caller-supplied `overrides` win over copied values. |
+| **droppedFields** | `{ object: string; fields: string[]; reason: Enum<'readonly' \| 'readonly_when' \| 'primary_key'> }[]` | optional | Write-observability: fields that were LEGALLY stripped before the clone was written — a non-system clone cannot seed a static `readonly` column, whether the value was COPIED from the source row or supplied through `overrides` (the strip runs inside `engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on `createData`), so those keys are dropped and the field re-derives its default. Present ONLY when ≥1 field was dropped; the clone still succeeded without them (status/success semantics unchanged). Carried in the 201 body only — this route relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. Optional — omit-when-empty keeps the shape backward-compatible for existing clients. |
+
+### Nested Shape: `CloneDataResponse.droppedFields[number]`
+
+A write-path strip event: caller-supplied fields legally dropped from the payload
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the write targeted (resolved object name) |
+| **fields** | `string[]` | ✅ | Caller-supplied field names the engine removed from the write payload |
+| **reason** | `Enum<'readonly' \| 'readonly_when' \| 'primary_key'>` | ✅ | Why the fields were dropped: static readonly, a TRUE readonlyWhen predicate, or the primary-key strip of a payload id the engine ruled is not an identifier |
 
 
 ---

@@ -19,9 +19,10 @@
  *    `resolveErrorResponse` at all.
  *
  * So one door of `/api/v1/packages` withheld a leaky 5xx and the other did
- * not, on the same deployment — and this registrar is the one production
- * serves for the routes both declare (first-match-wins, see the module note in
- * `package-routes.ts`).
+ * not, on the same deployment. (The read/delete twins this registrar carried
+ * then are gone since #14503 — the dispatcher domain is their single
+ * implementation — so every case below drives the one route left,
+ * `POST /packages/publish`, for which this registrar is the only door.)
  *
  * This is option **B** of the three the card recorded, and the only one ruled:
  * apply the rule this surface already follows, at the door that was missed.
@@ -35,15 +36,20 @@
  * ## Reachability was MEASURED, not assumed
  *
  * The card was filed `Unverified`: grep proved the *filter was absent*, which
- * is a different claim from the *leak being reachable*. Section 1 settles it by
+ * is a different claim from the *leak being reachable*. It was settled by
  * observation — a REAL `ObjectQL` engine, a REAL
  * `ObjectStackProtocolImplementation`, and a driver that fails every
- * `sys_metadata` access the way a missing table does, driven through the route
- * a client calls. The producer walked is `protocol.deletePackage`'s
- * `engine.find('sys_metadata', …)`, which sits OUTSIDE that method's per-item
- * `try`/`catch` and so propagates whole.
+ * `sys_metadata` access the way a missing table does, driven through the
+ * registrar's then-mounted `DELETE /api/v1/packages/:id`. The producer walked
+ * was `protocol.deletePackage`'s `engine.find('sys_metadata', …)`, which sits
+ * OUTSIDE that method's per-item `try`/`catch` and so propagates whole. That
+ * walk is no longer in this file: #14503 removed the delete route from this
+ * registrar, and the producer-side fact it had come to pin after #8136 (the
+ * protocol answers a declared 503 and quotes no driver text) is measured at
+ * the producer in `packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts`
+ * and at the surviving dispatcher door.
  *
- * Before this change that request answered, verbatim:
+ * Before the withhold landed that request answered, verbatim:
  *
  *     HTTP 500
  *     {"success":false,"error":{"code":"INTERNAL_ERROR",
@@ -51,12 +57,12 @@
  *
  * ## Reverse verification, direction predicted BEFORE running
  *
- * Deleting the two-line withhold in `sendThrownError` turns the section-1 and
- * section-2 leak cases RED — they assert the positive sanitized shape, so the
- * driver line reappears in the diff — and leaves every pass-through case
- * (section 3) and every 4xx case (section 4) GREEN, because the predicate is
- * what decides and neither of those trips it. That is the ordinary direction,
- * and it was confirmed by running it (quoted in the PR).
+ * Deleting the two-line withhold in `sendThrownError` turns the section-1
+ * leak cases RED — they assert the positive sanitized shape, so the driver
+ * line reappears in the diff — and leaves every pass-through case (section 2)
+ * and every 4xx case (section 3) GREEN, because the predicate is what decides
+ * and neither of those trips it. That is the ordinary direction, and it was
+ * confirmed by running it (quoted in the PR).
  *
  * ## What is deliberately NOT asserted
  *
@@ -71,8 +77,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ApiErrorSchema, BaseResponseSchema, envelopeViolations } from '@objectstack/spec/api';
 import type { RouteHandler } from '@objectstack/spec/contracts';
-import { ObjectQL } from '@objectstack/objectql';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { INTERNAL_ERROR_MESSAGE, looksLikeInternalErrorLeak } from '@objectstack/types';
 import { registerPackageRoutes } from './package-routes.js';
 
@@ -80,7 +84,6 @@ const PKGS = '/api/v1/packages';
 
 /** The driver line a missing `sys_metadata` produces on each dialect. */
 const SQLITE_NO_TABLE = 'SQLITE_ERROR: no such table: sys_metadata';
-const PG_NO_RELATION = 'relation "sys_metadata" does not exist';
 
 interface Captured {
   status: number;
@@ -156,221 +159,23 @@ function thrown(message: string, carried: Record<string, unknown>): Error {
 }
 
 // ---------------------------------------------------------------------------
-// 1. The real producer, end to end — the card's "Unverified" half
+// 1. Every catch site in this registrar, and the whole 5xx band
 // ---------------------------------------------------------------------------
 //
-// Nothing is hand-built here: the engine, the protocol and the driver text all
-// come from shipping code, and the route is the one a client calls.
+// Two seams reach this registrar's one catch site (#14503 removed the
+// read/delete routes and, with them, their `get` / `delete` / registry
+// producer seams): the `publish` producer, and the capability-gate resolver.
 //
-// `DELETE /api/v1/packages/:id` with no `?version=` routes to
-// `protocol.deletePackage` (`package-routes.ts`, the `!version && typeof
-// options.protocol?.deletePackage === 'function'` branch). That method's FIRST
-// database touch is `this.engine.find('sys_metadata', { where })`, outside any
-// `try` — its per-item `catch` only wraps the `deleteMetaItem` loop below it.
-// So a driver failure on the overlay read propagates whole, out of the
-// protocol, into this registrar's catch-all, and onto the wire.
-
-function failingDriver(dbError: string) {
-  const boom = () => { throw new Error(dbError); };
-  const driver: any = {
-    name: 'memory-broken', version: '0.0.0', supports: {},
-    async connect() {}, async disconnect() {}, async checkHealth() { return true; },
-    async execute() { return null; },
-    async find() { boom(); }, async findOne() { boom(); },
-    async create() { boom(); }, async update() { boom(); }, async delete() { boom(); },
-    async upsert() { boom(); }, async count() { boom(); },
-    async bulkCreate() { boom(); }, async bulkUpdate() { boom(); }, async bulkDelete() { boom(); },
-    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
-    async commit() {}, async rollback() {},
-  };
-  return driver;
-}
-
-async function bootRealProtocol(dbError: string): Promise<any> {
-  const engine = new ObjectQL();
-  engine.registerDriver(failingDriver(dbError), true);
-  await engine.init();
-  return new ObjectStackProtocolImplementation(engine as any);
-}
-
-/**
- * [#8136] **OPTION C LANDED, AND THIS SECTION IS ITS SIGNAL — INVERTED, NOT
- * REPAIRED.**
- *
- * What used to open this block was an anti-vacuity guard asserting that
- * `protocol.deletePackage` really does let the driver line out:
- *
- * ```ts
- * await expect(protocol.deletePackage({ … })).rejects.toThrow(SQLITE_NO_TABLE);
- * ```
- *
- * It was written to go RED the day the producer stopped disclosing — "option C,
- * the real cure" — so that a reader came back and re-read this section instead
- * of consuming a green suite as proof the door was covered. #8136 is that day.
- * Per the card's own instruction the pin is inverted rather than mended: making
- * it green again would mean re-teaching the protocol to leak.
- *
- * So the subject of this section has moved by one layer, deliberately:
- *
- *   before — "the producer emits a driver line and this DOOR withholds it"
- *   now    — "the producer emits no driver line at all, and the envelope it
- *             does emit is DECLARED rather than guessed from a bare `Error`"
- *
- * The end-to-end walk is kept exactly as it was, because it is still the only
- * thing here that proves the whole path: a real `ObjectQL`, a real
- * `ObjectStackProtocolImplementation`, a driver that fails every `sys_metadata`
- * access, driven through the route a client calls. What changed is what it
- * observes at the far end.
- *
- * ⚠️ This does NOT retire the door's withhold, and section 2 onward still pins
- * it in full. `sendThrownError` guards every producer that reaches this
- * registrar, not just `metadata-protocol`, and #8131's `service-package`
- * producer is a separate card still in flight. The belt stays; what changed is
- * that this particular producer no longer needs it.
- */
-describe('[#8136] a real sys_metadata failure, walked in process through this door', () => {
-  it('the producer no longer discloses: the driver line never leaves `deletePackage`', async () => {
-    // The inverted guard. This is the same call the old premise guard made,
-    // asserting the opposite fact — and it is still the anti-vacuity anchor for
-    // the section: if the protocol ever starts interpolating driver text again,
-    // this goes red at the source rather than the door silently covering for it.
-    const protocol = await bootRealProtocol(SQLITE_NO_TABLE);
-
-    // The POSITIVE shape first, so this guard cannot pass vacuously — a bare
-    // `rejects.not.toThrow(...)` is green for a rejection with ANY other
-    // message, including a different leak, and green-by-accident is the exact
-    // failure mode this section exists to prevent.
-    await expect(
-      protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }),
-    ).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
-
-    await expect(
-      protocol.deletePackage({ packageId: 'com.acme.crm', allTenants: true }),
-    ).rejects.not.toThrow(SQLITE_NO_TABLE);
-  }, 60_000);
-
-  it('the driver line does not appear anywhere in the client body', async () => {
-    const protocol = await bootRealProtocol(SQLITE_NO_TABLE);
-
-    const captured = await drive(
-      mount({ delete: async () => ({ success: true }) }, { protocol }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
-    );
-
-    const error = expectDeclaredEnvelope(captured);
-    // [#8136] The envelope is now the producer's own DECLARATION, not this
-    // door's guess. `metadata-protocol` answers an unreadable metadata store
-    // with 503 / `SERVICE_UNAVAILABLE` — the contract it already used for that
-    // exact condition — so the door forwards a declared refusal instead of
-    // falling to the undeclared-500 default and withholding its prose.
-    expect(captured.status).toBe(503);
-    expect(error.code).toBe('SERVICE_UNAVAILABLE');
-    // Still the POSITIVE shape, not "it changed": the authored sentence, which
-    // is safe to ship precisely because it quotes nothing.
-    expect(error.message).toContain('The metadata store could not be read');
-    expect(error.message).not.toBe(INTERNAL_ERROR_MESSAGE);
-
-    const wire = JSON.stringify(captured.body);
-    expect(wire).not.toContain('SQLITE_ERROR');
-    expect(wire).not.toContain('no such table');
-    expect(wire).not.toContain('sys_metadata');
-  }, 60_000);
-
-  /**
-   * [#8132 → #8136] Twice-inverted, and the trail is the point.
-   *
-   * #8086 added this as a deliberately-red-in-future pin: the shared predicate
-   * knew no Postgres `relation … does not exist`, so that dialect's line
-   * travelled through this door while SQLite's was withheld. #8132 / #8263
-   * closed that IN THE PREDICATE and the case flipped to "withheld too, by the
-   * shared predicate". #8136 now removes the disclosure at the producer, so
-   * there is nothing left for the predicate to decide about this path.
-   *
-   * ⚠️ The predicate assertion is KEPT, and deliberately still asserts `true` —
-   * it records that the interim belt is real and still standing for every other
-   * producer. What it no longer does is carry the weight of this path, and that
-   * is the structural difference option C bought: the body below is clean for a
-   * dialect the predicate has never met just as surely as for one it has.
-   * `packages/metadata-protocol/src/protocol.driver-text-disclosure.test.ts`
-   * measures that directly, across five dialects, three of which the predicate
-   * cannot see.
-   */
-  it('the Postgres phrasing of the same failure is withheld at the producer now', async () => {
-    // The interim belt still exists and still recognises this phrasing.
-    expect(looksLikeInternalErrorLeak(PG_NO_RELATION)).toBe(true);
-
-    const protocol = await bootRealProtocol(PG_NO_RELATION);
-    const captured = await drive(
-      mount({ delete: async () => ({ success: true }) }, { protocol }),
-      'DELETE',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.crm' } },
-    );
-
-    const error = expectDeclaredEnvelope(captured);
-    // One door, one envelope, regardless of the engine underneath — the
-    // property the flip was always about, now held one layer earlier.
-    expect(captured.status).toBe(503);
-    expect(error.code).toBe('SERVICE_UNAVAILABLE');
-    expect(error.message).toContain('The metadata store could not be read');
-
-    const wire = JSON.stringify(captured.body);
-    expect(wire).not.toContain('does not exist');
-    expect(wire).not.toContain('sys_metadata');
-  }, 60_000);
-});
-
-// ---------------------------------------------------------------------------
-// 2. Every catch site in this registrar, and the whole 5xx band
-// ---------------------------------------------------------------------------
-//
-// The live half above proves the door. These prove it is the DOOR and not one
-// route: all four handlers exit through the same `sendThrownError`, so each is
-// driven separately rather than assumed to share the fix.
-//
-// [#11063] `GET /packages` used to be different BY DESIGN — the sentence here
-// read: "both of its data sources sit in their own inner `try { … } catch {}`,
-// so nothing below reaches the outer catch". That is no longer true of the
-// DURABLE source: #11063 removed its inner catch, because absorbing a failed
-// durable read reported it as a 200 whose `total` claimed a complete count. A
-// throw from `packageService.list()` now reaches this same outer catch and this
-// same `sendThrownError`.
-//
-// This site is nevertheless left driving the GATE, deliberately: the resolver
-// throw reaches the outer catch on this route regardless of what either data
-// source does, so it exercises the CATCH SITE rather than one source —
-// `refusePackageRequest` calls `options.resolveExecutionContext(req)`, and a
-// resolver that throws SYNCHRONOUSLY throws before the
-// `.catch(() => undefined)` is attached. The list door's durable-read arm is
-// pinned separately in `package-list-durable-read-refusal.test.ts`.
-//
-// ⚠️ TEST-ONLY INJECTION POINT. This note used to end "so it keeps proving the
-// DOOR rather than one source", which reads as a claim about a PRODUCTION path.
-// It is not one: no production throw of any kind reaches this catch through
-// this seam. What the site proves is how the door answers a SYNCHRONOUS gate
-// throw — coverage of the catch site, never a claim about producers. ⛔ Do not
-// read it as evidence that a production resolver can deliver a throw here.
-//
-// The derivation is stated ONCE — in the `Seam census` block of
-// `package-door-declared-code.test.ts`, and the same conclusion is recorded in
-// `package-door-user-message.test.ts`'s reachability section. Stable anchors:
-// #12537, #12647. ⛔ It is deliberately NOT restated here. ⛔ The case is KEPT,
-// not deleted: `reached()` keeps it from going vacuous, and its 5xx-withhold
+// ⚠️ The resolver entry is a TEST-ONLY INJECTION POINT. No production throw of
+// any kind reaches this catch through that seam: `refusePackageRequest` calls
+// `options.resolveExecutionContext(req)`, and only a resolver that throws
+// SYNCHRONOUSLY throws before the `.catch(...)` is attached. What the site
+// proves is how the door answers a synchronous gate throw — coverage of the
+// catch site, never a claim about producers. The derivation is stated ONCE, in
+// the `Seam census` block of `package-door-declared-code.test.ts` (stable
+// anchors: #12537, #12647), and is deliberately NOT restated here. The case is
+// KEPT: `reached()` keeps it from going vacuous, and its 5xx-withhold
 // assertions still pin real door behaviour.
-//
-// ⚠️ [#11376] The sentence here used to add: "Still true of the REGISTRY
-// source: `protocol.getMetaItems` keeps its own inner catch, which #11063
-// deliberately did not touch". Neither registry read in this registrar has one
-// any more — the list door lost its catch in #11130, the detail door's in
-// #11376, where the swallow was answering a terminal `404 RESOURCE_NOT_FOUND`
-// for a read that could not happen. So EVERY data source in all four handlers
-// now reaches the outer catch and this same `sendThrownError`, and this site
-// keeps driving the GATE for the reason above rather than because the sources
-// cannot get here. The two registry arms are pinned in
-// `package-list-registry-read-refusal.test.ts` and
-// `package-id-registry-read-refusal.test.ts`.
 
 interface Site {
   name: string;
@@ -394,41 +199,16 @@ const SITES: Site[] = [
     },
   },
   {
-    name: 'GET /packages — the capability gate resolver throws',
+    name: 'POST /packages/publish — the capability gate resolver throws',
     run: async (error: unknown) => {
       const resolveExecutionContext = vi.fn(() => { throw error; });
       const captured = await drive(
-        mount({ list: async () => [] }, { resolveExecutionContext }),
-        'GET',
-        PKGS,
+        mount({ publish: async () => ({ success: true }) }, { resolveExecutionContext }),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
       );
       return { captured, reached: () => resolveExecutionContext.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'GET /packages/:id — packageService.get throws',
-    run: async (error: unknown) => {
-      const get = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ get }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => get.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'DELETE /packages/:id — packageService.delete throws',
-    run: async (error: unknown) => {
-      const del = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ delete: del }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => del.mock.calls.length === 1 };
     },
   },
 ];
@@ -502,7 +282,7 @@ describe('[#8086] a leaky 5xx is withheld at every catch site, across the band',
 });
 
 // ---------------------------------------------------------------------------
-// 3. The PREDICATE decides — not a blanket 5xx replacement
+// 2. The PREDICATE decides — not a blanket 5xx replacement
 // ---------------------------------------------------------------------------
 //
 // Without this section the whole file is satisfied by `if (status >= 500)
@@ -559,7 +339,7 @@ describe('[#8086] a 5xx that does NOT look like a leak passes through unchanged'
 });
 
 // ---------------------------------------------------------------------------
-// 4. The OVER-BLOCK guard: 4xx is untouched
+// 3. The OVER-BLOCK guard: 4xx is untouched
 // ---------------------------------------------------------------------------
 //
 // A 4xx refusal's message is caller-facing BY DESIGN — it is the self-correcting
@@ -635,7 +415,7 @@ describe('[#8086] a 4xx message is never withheld, even when it trips the predic
 });
 
 // ---------------------------------------------------------------------------
-// 5. #8016 must not regress
+// 4. #8016 must not regress
 // ---------------------------------------------------------------------------
 //
 // This change rewrote the expression #8016 landed, so its half is re-pinned at
@@ -644,12 +424,12 @@ describe('[#8086] a 4xx message is never withheld, even when it trips the predic
 
 describe('[#8086] the #8016 coded mapping still answers (non-regression)', () => {
   it('a coded 409 keeps its status, its code AND its message', async () => {
-    const { captured } = await SITES[3].run(
-      thrown('Uninstalling drops 3 tables', { status: 409, code: 'DESTRUCTIVE_CHANGE' }),
+    const { captured } = await SITES[0].run(
+      thrown('Publishing would drop 3 tables', { status: 409, code: 'DESTRUCTIVE_CHANGE' }),
     );
     expect(captured.status).toBe(409);
     expect(captured.body?.error?.code).toBe('DESTRUCTIVE_CHANGE');
-    expect(captured.body?.error?.message).toBe('Uninstalling drops 3 tables');
+    expect(captured.body?.error?.message).toBe('Publishing would drop 3 tables');
   });
 
   it('structured `details` survive the withhold on a leaky 5xx', async () => {
