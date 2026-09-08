@@ -22,6 +22,7 @@ import { parseAutonumberFormat, renderAutonumber, resolveAutonumberFormat, readA
 // `AggregationNodeSchema.function` actually admits.
 import { AggregationFunction, emptyGroupValueFor } from '@objectstack/spec/data';
 import { STRUCTURED_JSON_TYPES, FILE_REFERENCE_TYPES, MULTI_OPTION_TYPES, NUMERIC_VALUE_TYPES } from '@objectstack/spec/data';
+import { numericColumnFor } from '@objectstack/spec/data';
 // [#5659] The Filter Protocol's boolean identity reduction — `$and: []` is TRUE,
 // `$or: []` is FALSE, `{}` is a TRUE disjunct, `$not: {}` is FALSE. One
 // implementation for all four consumers, proven against the same
@@ -15934,8 +15935,12 @@ export class SqlDriver implements IDataDriver {
       // Virtual — `createColumn` returns without emitting anything.
       case 'formula':
         return null;
-      // The non-string primitives: INTEGER / REAL / BOOLEAN / DATE / DATETIME /
-      // TIME columns. None of them is sized from metadata and none is a varchar.
+      // The non-string primitives: INTEGER / REAL / NUMERIC / BOOLEAN / DATE /
+      // DATETIME / TIME columns. None of them is a varchar, so none is sized
+      // from `maxLength` — which is the only question this mirror answers.
+      // ⚠️ The numeric members ARE sized from metadata since #16318, by
+      // `numericColumnFor` off `scale`; that is a different key and a different
+      // mirror, and answering `null` here stays correct.
       case 'integer':
       case 'int':
       case 'float':
@@ -16413,21 +16418,57 @@ export class SqlDriver implements IDataDriver {
       case 'int':
         col = table.integer(name);
         break;
+      // `float` is a DRIVER-side alias, not a `FieldType` — no `Field.float`
+      // builder exists and `NUMERIC_VALUE_TYPES` does not carry it — so
+      // `numericColumnFor` has no opinion about it and it keeps the column it
+      // has always had. #16318 moved the seven real members below; this one is
+      // out of that class and out of its scope.
       case 'float':
-      case 'number':
-      case 'currency':
-      case 'percent':
+        col = table.float(name);
+        break;
+      // [#16318] `number`/`currency`/`percent`/`slider`/`progress`/`summary`/
+      // `rating` take the physical representation `packages/spec` states for
+      // them ({@link numericColumnFor}) — the same table both `os generate
+      // migration` formats read, so one declaration cannot produce three
+      // different columns. The spec module carries the measurements and the
+      // ruling; ⛔ do not restate its numbers here.
+      //
+      // What this arm still owes the reader is the SQLite half, because that is
+      // why these three were moved into a float arm in the first place:
+      //
       // `rating`/`slider`/`progress` are authored as numeric scalars (a star
       // count, a slider position, a percent-of-completion). Without an explicit
       // case they fell to `default → table.string`, giving the column TEXT
       // affinity so SQLite coerced the written number to a string ('4' not 4) —
       // a silent type-fidelity leak the value-loss tests didn't catch. REAL
       // affinity round-trips them as JS numbers (#field-zoo).
+      //
+      // That leak stays defeated, and MEASURED rather than argued: knex
+      // compiles `table.decimal(...)` and `table.float(...)` to the IDENTICAL
+      // `float` column on SQLite, so the SQLite DDL for every one of these
+      // types is byte-identical to what this arm emitted before. `table.integer`
+      // gives `rating` INTEGER affinity there, which stores `4` as an integer
+      // and still accepts `4.5` as a REAL — SQLite refuses no fractional value,
+      // so nothing this dialect accepts today stops being accepted.
+      case 'number':
+      case 'currency':
+      case 'percent':
       case 'rating':
       case 'slider':
       case 'progress':
-        col = table.float(name);
+      case 'summary': {
+        const numeric = numericColumnFor(field);
+        // ⛔ Not `?? table.float(name)`: a missing answer here would mean the
+        // spec table and this arm's case labels have parted, and a silent
+        // fallback is exactly the drift #16318 exists to close. The pin
+        // (`numeric-column-representation.test.ts`) holds the two equal, and
+        // `NUMERIC_VALUE_TYPES` is the single membership authority both read.
+        col =
+          numeric === undefined || numeric.kind === 'integer'
+            ? table.integer(name)
+            : table.decimal(name, numeric.precision, numeric.scale);
         break;
+      }
       // `toggle` is a boolean rendered as a switch. Same leak as above (TEXT
       // affinity stored '1'); a boolean column gives NUMERIC affinity and the
       // `booleanFields` read-coercion below converts the stored 1/0 back to a
@@ -16521,9 +16562,6 @@ export class SqlDriver implements IDataDriver {
         // `deleteBehavior` — which is what `content/docs/protocol/objectql/
         // types.mdx` has told authors since 2026-07-30.
         col = table.string(name);
-        break;
-      case 'summary':
-        col = table.float(name);
         break;
       case 'auto_number':
       case 'autonumber':

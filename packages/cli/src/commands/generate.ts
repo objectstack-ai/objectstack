@@ -17,7 +17,7 @@ import type { FieldType } from '@objectstack/spec/data';
 // `computeTenantField` — are spelled here in the driver's own terms ON TOP of
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
-import { isTenancyDisabled, isUniqueDeclared } from '@objectstack/spec/data';
+import { isTenancyDisabled, isUniqueDeclared, numericColumnFor } from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
@@ -1122,9 +1122,21 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   richtext: 'TEXT',
   html: 'TEXT',
   markdown: 'TEXT',
-  number: 'DECIMAL(18,2)',
-  currency: 'DECIMAL(18,2)',
-  percent: 'DECIMAL(5,2)',
+  // #16318 — the NUMERIC family's seven members are RESOLVED, never written
+  // here. `DECIMAL(18,2)` / `DECIMAL(5,2)` were this file's own numbers and the
+  // platform never agreed with any of them: measured on live PostgreSQL 16.13,
+  // one object through all three producers, `number` was `real` on the driver,
+  // `numeric(18,2)` from this map and `numeric(8,2)` from the typescript format
+  // below — a three-way split, and all three lossy in different directions.
+  // These entries exist so the `satisfies` totality below still holds; the
+  // ANSWER is {@link numericSqlType} over `packages/spec`'s own table, which the
+  // driver reads as well. A field declaring a `scale` gets a different column,
+  // which a table keyed on the TYPE cannot express — {@link fieldTypeToSql}
+  // asks the resolver again with the field in hand, exactly as it does for the
+  // character families' `maxLength`.
+  number: numericSqlType({ type: 'number' })!,
+  currency: numericSqlType({ type: 'currency' })!,
+  percent: numericSqlType({ type: 'percent' })!,
   boolean: 'BOOLEAN',
   date: 'DATE',
   // #15521 — TIMESTAMPTZ, not TIMESTAMP, for the same reason and with the same
@@ -1200,7 +1212,7 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // a design-token name) is a value the platform stores and a table generated
   // for the same object refuses.
   color: 'VARCHAR(255)',
-  rating: 'INTEGER',
+  rating: numericSqlType({ type: 'rating' })!,
   // #14828 — `vector` is in STRUCTURED_JSON_TYPES, hence in the driver's
   // `JSON_COLUMN_TYPES`. `VECTOR` was also not portable: it needs pgvector and
   // does not exist on MySQL or SQLite.
@@ -1224,11 +1236,16 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
   // `driver-sql`'s `JSON_COLUMN_TYPES`, which is seeded from this same class.
   checkboxes: 'JSONB',
   tags: 'JSONB',
-  // NUMERIC_VALUE_TYPES. `progress` takes `percent`'s narrower shape because it
-  // is the same 0-100 quantity; `slider` and `summary` are open-range.
-  slider: 'DECIMAL(18,2)',
-  progress: 'DECIMAL(5,2)',
-  summary: 'DECIMAL(18,2)',
+  // NUMERIC_VALUE_TYPES — #16318, resolved like the three above. `progress` used
+  // to take `percent`'s NARROWER shape here because it is the same 0-100
+  // quantity; it still shares `percent`'s answer, and the shared answer is now
+  // the wide one. Measured, and the reason the narrow one could not stay: a
+  // `percent` stores a 0-1 FRACTION unless the field declares `max > 1`, so the
+  // legitimate 33.333% the ruling names reaches the column as `0.33333` and
+  // `numeric(5,2)` rounded it to `0.33`.
+  slider: numericSqlType({ type: 'slider' })!,
+  progress: numericSqlType({ type: 'progress' })!,
+  summary: numericSqlType({ type: 'summary' })!,
   // REFERENCE_VALUE_TYPES: the stored value is the related record's id, so the
   // width belongs to the TARGET's id column, never to this field. #14828 read
   // that derivation off the driver and applied it: the target's `id` column is
@@ -1272,6 +1289,46 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
  * nothing else.
  */
 const STRING_FAMILY_TYPES: ReadonlySet<string> = new Set(['email', 'url', 'phone', 'password']);
+
+/**
+ * The NUMERIC family's column, in this format's SQL vocabulary (#16318).
+ *
+ * ⛔ Never a transcription. The precision, the scale and the per-type baseline
+ * all live in `packages/spec`'s {@link numericColumnFor}, which
+ * `SqlDriver.createColumn` reads too — that shared table IS the repair, and a
+ * literal `DECIMAL(18,2)` here would re-create the divergence one layer up.
+ * This function only spells the answer; it decides nothing.
+ *
+ * ⚠️ The declaration it reads is `scale`, NOT `maxLength` — a different key
+ * from the one the character families read, on a different arm of the driver.
+ */
+/**
+ * ADR-0113's physical NOT NULL, spelled as `SqlDriver.createColumn` spells it:
+ * `(field as { storage?: { notNull?: boolean } }).storage?.notNull`.
+ *
+ * ⛔ NOT `required`. The driver was deliberately taken off that key — its own
+ * comment records why: "`required` is the write-time contract enforced by the
+ * record validator at the engine seam, and binding the DDL to it made every
+ * post-deploy tightening a destructive migration". Both generators stayed on
+ * `required`, so the scaffolded table and the platform's own table disagreed
+ * about which columns may be null (#16294 cause 1).
+ *
+ * ⚠️ Sources authored before protocol 17 carry `storage.notNull` explicitly
+ * through the `field-required-notnull-explicit` conversion, so a pre-17 object's
+ * columns come out exactly as they always did — the same sentence the driver's
+ * arm makes, and the reason this is a convergence rather than a capability loss.
+ */
+function declaredNotNull(field: unknown): boolean {
+  return !!(field as { storage?: { notNull?: boolean } } | undefined)?.storage?.notNull;
+}
+
+function numericSqlType(field: { type?: string; scale?: unknown }): string | undefined {
+  const numeric = numericColumnFor(field);
+  if (numeric === undefined) return undefined;
+  return numeric.kind === 'integer'
+    ? 'INTEGER'
+    : `DECIMAL(${numeric.precision},${numeric.scale})`;
+}
 
 /**
  * The widest `varchar(n)` any dialect this platform speaks will declare —
@@ -1596,11 +1653,19 @@ function fieldTypeToSql(
   multiple?: boolean,
   maxLength?: unknown,
   keyed?: boolean,
+  scale?: unknown,
 ): string | null {
   if (multiple) return FIELD_TYPE_SQL_MAP.json;
   const base = Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
     ? FIELD_TYPE_SQL_MAP[fieldType]
     : 'TEXT';
+  // #16318 — the NUMERIC family is the THIRD family that depends on the field
+  // and not only on its type, and its declaration is `scale`. Asked before the
+  // character families below because the three sets are disjoint and this one
+  // needs no `keyed`. A member with no usable `scale` resolves to the very
+  // entry the map already holds, so this branch changes nothing for it.
+  const numeric = numericSqlType({ type: fieldType, scale });
+  if (numeric !== undefined) return numeric;
   // #16091 — TWO families depend on the FIELD and not only on its type, because
   // those are the two arms `createColumn` reads a declaration in. They read
   // DIFFERENT things and must not be collapsed into one.
@@ -1702,12 +1767,22 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
         !!fieldDef.multiple,
         fieldDef.maxLength,
         keyColumns.has(fieldName),
+        fieldDef.scale,
       );
       // #14828 — a VIRTUAL field materialises no column. `SqlDriver.createColumn`
       // returns without emitting one and `schema-drift.ts`'s `fieldHasColumn`
       // answers false for it, so a column here is one the runtime never writes.
       if (sqlType === null) continue;
-      const notNull = fieldDef.required ? ' NOT NULL' : '';
+      // [#16318 / ADR-0113] The physical NOT NULL comes from the EXPLICIT
+      // storage constraint, never from `required` — read off
+      // `SqlDriver.createColumn`'s own arm, whose comment states the reason:
+      // "`required` is the write-time contract enforced by the record validator
+      // at the engine seam, and binding the DDL to it made every post-deploy
+      // tightening a destructive migration". Both generators were still on the
+      // old answer, so a scaffolded table constrained columns the platform's own
+      // table leaves nullable. This unblocks #16294 cause 1; that card's other
+      // two causes are not addressed here.
+      const notNull = declaredNotNull(fieldDef) ? ' NOT NULL' : '';
       fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}`);
     }
 
@@ -1821,7 +1896,10 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
 
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
       const fType = String(fieldDef.type || 'text');
-      const required = fieldDef.required ? '.notNullable()' : '.nullable()';
+      // [#16318 / ADR-0113] `storage.notNull`, never `required` — the same
+      // move, for the same recorded reason, as the sql format above. See
+      // `generateMigrationSql`'s own comment; ⛔ do not restate it here.
+      const required = declaredNotNull(fieldDef) ? '.notNullable()' : '.nullable()';
 
       // #14829 - `multiple` before the type, exactly as `SqlDriver.createColumn`
       // does it: the driver short-circuits on the flag above its own per-type
@@ -1905,15 +1983,30 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
               : `table.string('${fieldName}', ${keyable})`;
           break;
         }
-        case 'number': case 'currency': case 'percent':
-        // #14657 — NUMERIC_VALUE_TYPES: `valueSchemaFor` gives all of these
-        // `z.number()`, and `driver-sql` gives them a float column.
-        case 'slider': case 'progress': case 'summary':
-          colMethod = `table.decimal('${fieldName}')`;
+        // #16318 — NUMERIC_VALUE_TYPES, resolved from `packages/spec`'s own
+        // physical-representation table, which `SqlDriver.createColumn` and the
+        // sql format above read too.
+        //
+        // ⚠️ `table.decimal(name)` with NO arguments — what this arm used to
+        // emit — is knex's `decimal(8, 2)`, not an unconstrained `numeric`.
+        // Measured on live PostgreSQL 16.13, that column REFUSED `1234567.89`
+        // with `numeric field overflow`: a money value the platform stores today
+        // could not be stored in a table this format generated for the same
+        // object. It also never matched the sql format's own `DECIMAL(18,2)`, so
+        // the two halves of one command disagreed with each other as well as
+        // with the driver.
+        case 'number': case 'currency': case 'percent': case 'rating':
+        case 'slider': case 'progress': case 'summary': {
+          const numeric = numericColumnFor(fieldDef as { type?: string; scale?: unknown });
+          // ⛔ Not a fallback spelling: an undefined answer would mean these
+          // case labels and `NUMERIC_VALUE_TYPES` have parted, and a silent
+          // default is the drift this card closes. The pin holds them equal.
+          colMethod =
+            numeric === undefined || numeric.kind === 'integer'
+              ? `table.integer('${fieldName}')`
+              : `table.decimal('${fieldName}', ${numeric.precision}, ${numeric.scale})`;
           break;
-        case 'rating':
-          colMethod = `table.integer('${fieldName}')`;
-          break;
+        }
         case 'boolean':
         // #14657 — BOOLEAN_VALUE_TYPES; `driver-sql` shares one arm for the pair.
         case 'toggle':
