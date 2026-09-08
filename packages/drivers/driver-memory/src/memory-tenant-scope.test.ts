@@ -210,6 +210,14 @@ describe('#16589 — the in-memory driver honours DriverOptions.tenantId', () =>
     it('widens to the whole membership set instead of ANDing the active org', async () => {
       const driver = makeDriver();
       const object = await seed(driver);
+      // ⚠️ A THIRD organization, outside the membership set, and it is
+      // load-bearing: with only A and B seeded their union IS the whole table,
+      // so this case answered the same rows whether the union widened the scope
+      // or no scope ran at all. Measured — under the two-leg ablation that
+      // disables the chokepoint it stayed GREEN, alone among the scoped cases.
+      // `org_c` is what makes "widened" and "disabled" different answers.
+      await driver.create(object, { id: 'c1', name: 'C one', organization_id: 'org_c' });
+
       const rows = await driver.find(object, {}, { tenantId: ORG_A, tenantIds: [ORG_A, ORG_B] });
       expect(ids(rows)).toEqual(['a1', 'a2', 'b1', 'g1']);
     });
