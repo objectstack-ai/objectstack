@@ -37,6 +37,7 @@ import fs from 'node:fs';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { AuthManager } from './auth-manager';
+import { buildJwtPluginSchema } from './auth-schema-config.js';
 
 // Same pattern as auth-manager.mcp-oauth.test.ts: better-auth is mocked so
 // AuthManager's own instance build stays cheap. The authorization server the
@@ -137,19 +138,34 @@ async function bootRealAuthorizationServer(opts: any) {
   for (const m of ['user', 'session', 'account', 'verification', 'jwks']) db[m] = [];
   for (const [model, def] of Object.entries(pluginSchema ?? {})) db[def.modelName ?? model] = [];
 
+  // ⛔ `jwt()` must be given the SAME schema the platform gives it. Two
+  // reasons, and the second is a trap: (1) the harness should carry the
+  // deployment's real table names; (2) better-auth 1.7.2's `jwt()` MUTATES its
+  // shared default schema object, so once anything in this process has built
+  // `jwt({ schema: buildJwtPluginSchema() })` — AuthManager does, above — a
+  // later bare `jwt()` silently comes back mapped to `sys_jwks` too, and the
+  // token endpoint 500s on a model this store never created.
+  const jwtPlugin = jwt({ schema: buildJwtPluginSchema() as any });
+  const jwksModel = (jwtPlugin as any).schema?.jwks?.modelName ?? 'jwks';
+  db[jwksModel] = db[jwksModel] ?? [];
+
   const auth = betterAuth({
     baseURL: BASE_URL,
     basePath: AUTH_BASE_PATH,
     secret: 'test-secret-at-least-32-chars-long',
     database: memoryAdapter(db),
     emailAndPassword: { enabled: true },
-    plugins: [jwt(), plugin as any],
+    plugins: [jwtPlugin, plugin as any],
   });
   // Forces plugin `init` — which is where the provider seeds `resources`.
   await auth.$context;
 
+  // The schema maps these onto ObjectStack's `sys_oauth_*` tables, so resolve
+  // the store keys through it rather than assuming better-auth's model names.
   const resourceModel = pluginSchema?.oauthResource?.modelName ?? 'oauthResource';
   const clientResourceModel = pluginSchema?.oauthClientResource?.modelName ?? 'oauthClientResource';
+  const accessTokenModel = pluginSchema?.oauthAccessToken?.modelName ?? 'oauthAccessToken';
+  const refreshTokenModel = pluginSchema?.oauthRefreshToken?.modelName ?? 'oauthRefreshToken';
 
   return {
     auth,
@@ -158,7 +174,15 @@ async function bootRealAuthorizationServer(opts: any) {
       resource: db[resourceModel]?.length ?? 0,
       clientResource: db[clientResourceModel]?.length ?? 0,
     }),
+    /** Keyed by the platform table names the bug report counted. */
+    tableCounts: () => ({
+      [resourceModel]: db[resourceModel]?.length ?? 0,
+      [clientResourceModel]: db[clientResourceModel]?.length ?? 0,
+      [accessTokenModel]: db[accessTokenModel]?.length ?? 0,
+      [refreshTokenModel]: db[refreshTokenModel]?.length ?? 0,
+    }),
     resourceRows: () => db[resourceModel] ?? [],
+    clientResourceRows: () => db[clientResourceModel] ?? [],
   };
 }
 
@@ -271,6 +295,13 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
     const opts = await captureProviderOptions();
     const server = await bootRealAuthorizationServer(opts);
 
+    expect(server.tableCounts()).toEqual({
+      sys_oauth_resource: 1,
+      sys_oauth_client_resource: 0,
+      sys_oauth_access_token: 0,
+      sys_oauth_refresh_token: 0,
+    });
+
     const reg = await registerDcrClient(server.auth);
     expect(reg.status, JSON.stringify(reg.body)).toBe(201);
     const cookie = await signUp(server.auth);
@@ -313,6 +344,19 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
     expect(aud, 'the minted token must be audienced to the MCP resource').toContain(MCP_RESOURCE);
     expect(payload.iss).toBe(ISSUER);
+
+    // The three tables the bug report counted, plus the refresh row. ⚠️
+    // `sys_oauth_access_token` legitimately stays 0: the jwt plugin is on, so
+    // the access token is a signed JWT and 1.7.2 only persists a row for the
+    // OPAQUE variant (`createOpaqueAccessToken`). The minted-token evidence is
+    // the JWT above; the persisted evidence of a completed grant is the
+    // refresh row, which `offline_access` earns.
+    expect(server.tableCounts()).toEqual({
+      sys_oauth_resource: 1,
+      sys_oauth_client_resource: 1,
+      sys_oauth_access_token: 0,
+      sys_oauth_refresh_token: 1,
+    });
   });
 
   it('keeps the per-client resource check ON — an unlinked client is still refused', async () => {
@@ -323,31 +367,16 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
     expect(opts.enforcePerClientResources, 'the per-client resource check must not be disabled').not.toBe(false);
 
     const server = await bootRealAuthorizationServer(opts);
+    const reg = await registerDcrClient(server.auth);
+    expect(reg.status, JSON.stringify(reg.body)).toBe(201);
     const cookie = await signUp(server.auth);
 
-    // A client created WITHOUT the registration defaults gets no link row.
-    const unlinkedClientId = 'unlinked-test-client';
-    server.db.oauthClient!.push({
-      id: 'unlinked-row-id',
-      clientId: unlinkedClientId,
-      clientSecret: null,
-      name: 'Unlinked client',
-      redirectURLs: [REDIRECT_URI],
-      type: 'public',
-      applicationType: 'native',
-      tokenEndpointAuthMethod: 'none',
-      grantTypes: ['authorization_code'],
-      responseTypes: ['code'],
-      scopes: ['openid', 'profile', 'email', 'offline_access', 'data:read'],
-      clientCredentialsScopes: [],
-      disabled: false,
-      skipConsent: false,
-      requirePkce: true,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    // Drop the link the DCR defaults created. Everything else about the client
+    // is untouched, so the ONLY difference from the passing flow above is the
+    // per-client authorisation this check is supposed to enforce.
+    server.clientResourceRows().length = 0;
 
-    const az = await authorizeWithResource(server.auth, unlinkedClientId, cookie);
+    const az = await authorizeWithResource(server.auth, reg.body.client_id, cookie);
     expect(
       az.location,
       'a client with no oauthClientResource row must NOT be able to request the MCP resource — '

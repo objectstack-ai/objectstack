@@ -3415,23 +3415,17 @@ export class AuthManager {
         loginPage: this.getConsolePageUrl('/login'),
         consentPage: this.getConsolePageUrl('/oauth/consent'),
         schema: buildOauthProviderPluginSchema(),
-        // better-auth's oauth-provider cannot see the well-known documents we
-        // mount ourselves at the issuer ROOT (RFC 8414 §3 requires them there,
-        // not under the auth basePath) — registerOidcDiscoveryRoutes serves
-        // /.well-known/oauth-authorization-server AND the path-insertion variant
-        // (`…/api/v1/auth`) the notice names. Its "Please ensure … exists"
-        // reminder is therefore a false positive on every stock example.
-        //
-        // #3420 root cause of the DOUBLE print: the notice fires in the
-        // oauth-provider plugin's `init(ctx)`, which better-auth runs once per
-        // `betterAuth()` construction — and the instance is built more than once
-        // at boot (an initial lazy build, then a rebuild once boot-time auth
-        // *settings* are applied — applyConfigPatch() nulls the cached instance
-        // so the next request rebuilds with the new policy). Gating the emitter
-        // here silences the one requirement we've already satisfied across every
-        // build path, independent of how many times auth is constructed, so an
-        // official dev boot stays warning-free.
-        silenceWarnings: { oauthAuthServerConfig: true },
+        // ⛔ No `silenceWarnings` here. It was added for the #3420 double
+        // print of oauth-provider's "Please ensure /.well-known/… exists"
+        // notice — a false positive, because registerOidcDiscoveryRoutes
+        // mounts those documents at the issuer ROOT where RFC 8414 §3 requires
+        // them. The pinned 1.7.2 emits no such notice: neither the option name
+        // nor the `oauthAuthServerConfig` key nor the notice text occurs
+        // anywhere in `@better-auth/oauth-provider` or `better-auth`, so the
+        // option silenced nothing and was the same dead-option shape as the
+        // `validAudiences` defect below. If a future bump reintroduces the
+        // notice, re-add the silencer with a fresh reading — do NOT restore it
+        // on the strength of this comment.
         // ── MCP OAuth track (#2698) ────────────────────────────────
         // Coarse tool-family scopes for the platform's own MCP endpoint,
         // advertised alongside the standard OIDC scopes. Names are
@@ -3439,10 +3433,36 @@ export class AuthManager {
         // tool layer cannot drift.
         scopes: ['openid', 'profile', 'email', 'offline_access', ...MCP_OAUTH_SCOPES],
         // MCP clients bind tokens to the resource via RFC 8707
-        // (`resource=<mcp url>`); the AS only mints audiences it knows.
-        // The auth base (better-auth's default audience) stays valid for
-        // plain OIDC SSO flows.
-        validAudiences: [this.getAuthIssuer(), this.getMcpResourceUrl()],
+        // (`resource=<mcp url>`). In @better-auth/oauth-provider 1.7.2 a
+        // requested `resource` is resolved from the `oauthResource` table
+        // (`sys_oauth_resource`) — a miss is refused at /oauth2/authorize with
+        // `invalid_target: requested resource <id> is not configured` — and
+        // `enforcePerClientResources` defaults to TRUE, so the client must
+        // additionally be linked in `oauthClientResource`
+        // (`sys_oauth_client_resource`). Both rows have to exist before the
+        // first Connect, so both are declared here:
+        //
+        //   • `resources` seeds the sys_oauth_resource row from the plugin's
+        //     own `init` (idempotent, `resourceSeedMode: "insertOnly"` by
+        //     default, so an admin's later CRUD edits are never reverted);
+        //   • `clientRegistrationDefaultResources` links every newly
+        //     registered client to it inside the DCR transaction — a client
+        //     that registers anonymously one second before the login cannot
+        //     be linked by an admin in between.
+        //
+        // ⛔ `enforcePerClientResources` is deliberately NOT passed: the
+        // per-client linkage check stays at its `true` default. The fix makes
+        // the link happen; it does not switch the check off. A client with no
+        // link row is still refused, and
+        // auth-manager.mcp-oauth-resource.test.ts asserts exactly that.
+        //
+        // ⛔ Do not reintroduce `validAudiences`: 1.7.2 reads no such option
+        // (0 occurrences in its dist), and audience validation now runs
+        // through the resource table instead. A field that is passed and read
+        // by nobody looks like configuration and enforces nothing — that is
+        // how this defect survived a version bump.
+        resources: [this.getMcpResourceUrl()],
+        clientRegistrationDefaultResources: [this.getMcpResourceUrl()],
         // RFC 7591 Dynamic Client Registration. `allowUnauthenticated…` is
         // required: MCP clients register BEFORE any user is logged in (the
         // whole point of the self-serve flow). Registration is rate-limited
