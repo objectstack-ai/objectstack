@@ -162,7 +162,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.reference": {
         label: "Referencia",
-        helpText: "Objeto de destino (para lookup/master_detail)"
+        helpText: "Nombre del objeto de destino. En un campo tree es opcional y, si se indica, debe ser este mismo objeto (un árbol es una jerarquía dentro de su propio objeto — para enlazar con otro objeto, usa un lookup)"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",

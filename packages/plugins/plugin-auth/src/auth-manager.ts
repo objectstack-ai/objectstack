@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
@@ -72,6 +73,9 @@ import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-
 import {
   applyPlatformAdminImpersonation,
 } from './admin-impersonate-endpoint.js';
+import {
+  applyDeclaredInvitationVerificationToListing,
+} from './list-user-invitations-verification.js';
 import {
   invitationRoleCapFailure,
   isPlainMemberInvitation,
@@ -2792,7 +2796,12 @@ export class AuthManager {
       // [#8289] Same map, same request lifetime — see the field's doc for why
       // the before-hook cannot read it back off `ctx`.
       this.orgRolesMap = customOrgRoles;
-      return organization({
+      // [#16569] Held as a named object rather than an inline literal: the
+      // rebuilt `/organization/list-user-invitations` endpoint below needs the
+      // VERY object the vendor plugin was constructed with — it is what the
+      // vendor's own `getOrgAdapter(ctx.context, options)` reads, and the
+      // declaration it honours lives on it.
+      const organizationOptions = {
         schema: buildOrganizationPluginSchema(),
         // Enable the team sub-feature so the framework's `sys_team` /
         // `sys_team_member` tables (already declared in platform-objects)
@@ -3168,7 +3177,46 @@ export class AuthManager {
             console.error(`[AuthManager] sendInvitationEmail failed (swallowed): ${err?.message ?? err}`);
           }
         },
-      });
+      } satisfies OrganizationOptions;
+      const organizationPlugin: any = organization(organizationOptions);
+
+      // [#16569] `GET /organization/list-user-invitations` — make the vendor's
+      // listing honour the `requireEmailVerificationOnInvitation: false`
+      // declared above, the way `accept-invitation`, `reject-invitation` and
+      // `get-invitation` already do. better-auth 1.7.2's `listUserInvitations`
+      // refuses every unverified session UNCONDITIONALLY (it never reads the
+      // option), so on exactly the no-mailer deployment the declaration exists
+      // for, an invitee could accept an invitation but never list it and the
+      // SDK's `organizations.invitations.listMine()` inbox was empty-by-403.
+      // Rebuilt IN PLACE on this plugin's own endpoints record — the same
+      // shape as `applyPlatformAdminImpersonation` above, for the same reasons
+      // (one owner for the path; every hook keyed on it still fires; the
+      // request contract is the vendor's own options object, never a copy).
+      // The listing itself stays the vendor's `getOrgAdapter(...)
+      // .listUserInvitations(sessionEmail)`: no second definition of which
+      // rows a session may see. `list-user-invitations-verification.ts`
+      // carries the full reading.
+      const listingRewired = await applyDeclaredInvitationVerificationToListing(
+        organizationPlugin,
+        organizationOptions,
+      );
+      if (!listingRewired) {
+        // The vendor renamed or dropped the endpoint. Say so loudly: the
+        // route then falls back to the vendor's own handler, which refuses
+        // every unverified session — an empty inbox, not an open door.
+        // `warn`, not `error` (AGENTS.md → Degradation log levels): the
+        // system is VISIBLY smaller — the inbox answers a 403 the caller sees
+        // — and nothing claims a persistence it did not perform.
+        console.warn(
+          '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
+          '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
+          'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +
+          'applied to the invitation inbox. Unverified users will be refused ' +
+          '(403 EMAIL_VERIFICATION_REQUIRED_FOR_INVITATION) until ' +
+          'list-user-invitations-verification.ts is updated for the new vendor shape.',
+        );
+      }
+      return organizationPlugin;
       });
     }
 
