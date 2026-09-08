@@ -182,7 +182,7 @@ function thrown(message: string, carried: Record<string, unknown>): Error {
 
 /**
  * One catch site, plus the seam that drives a throw INTO it and a witness that
- * the throw really travelled that way. Same four seams as
+ * the throw really travelled that way. Same two seams as
  * `package-door-declared-code.test.ts` and
  * `package-routes-coded-error-mapping.test.ts`, for the same reason: a case
  * that silently never reached the seam would otherwise "pass" on a body it got
@@ -208,41 +208,16 @@ const SITES: Site[] = [
     },
   },
   {
-    name: 'GET /packages — the capability gate resolver throws',
+    name: 'POST /packages/publish — the capability gate resolver throws',
     run: async (error: unknown) => {
       const resolveExecutionContext = vi.fn(() => { throw error; });
       const captured = await drive(
-        mount({ list: async () => [] }, { resolveExecutionContext }),
-        'GET',
-        PKGS,
+        mount({ publish: async () => ({ success: true }) }, { resolveExecutionContext }),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
       );
       return { captured, reached: () => resolveExecutionContext.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'GET /packages/:id — packageService.get throws',
-    run: async (error: unknown) => {
-      const get = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ get }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => get.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'DELETE /packages/:id — packageService.delete throws',
-    run: async (error: unknown) => {
-      const del = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ delete: del }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => del.mock.calls.length === 1 };
     },
   },
 ];

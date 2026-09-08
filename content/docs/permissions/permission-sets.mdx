@@ -293,7 +293,9 @@ is what makes package uninstall well-defined — and enforced: uninstalling a
 package (`DELETE /api/v1/packages/:id`) revokes its own sets, their
 position/user bindings, and its pending audience-binding suggestions in the
 same request (no ghost grants); the uninstall response reports the revocation
-under `cleanups`. Environment-authored sets and other packages' rows survive.
+under `data.persisted.cleanups` (the dispatcher's `/packages` domain answers
+the route, and it nests the protocol's uninstall report under `persisted`).
+Environment-authored sets and other packages' rows survive.
 
 ## One authoritative store — the record is a projection (ADR-0094)
 
