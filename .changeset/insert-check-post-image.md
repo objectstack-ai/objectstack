@@ -5,6 +5,8 @@
 
 fix(plugin-security)!: the insert-side RLS `check` is evaluated on the row that will be STORED — after `beforeInsert` — instead of on the caller's raw payload (#16608)
 
+<!-- adr-0087: not-required (no-migration-prescription) an enforcement-ORDER change: no authorable key, spelling or stored shape moves, so a stored `sys_metadata` row needs no conversion and an upgrader has nothing to hand-edit. What changes is which image the existing `check` predicate is evaluated against; the remedy for a newly-refused insert is to fix the policy or the data, not to migrate metadata. -->
+
 **BREAKING** — an accept-set narrowing on the write gate's refusal behaviour. An insert that is admitted today can be refused after this change.
 
 `check` validates the row a write produces — the PostgreSQL `WITH CHECK` analog. `update` reached that row by merging the caller's pre-image with the change set. `insert` could not: it has no pre-image, and the security middleware runs BEFORE the engine's operation, so its post-image was `opCtx.data` — the caller's payload as it arrived, ahead of `applyFieldDefaults` and ahead of every `beforeInsert` hook.

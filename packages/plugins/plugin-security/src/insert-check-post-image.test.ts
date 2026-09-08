@@ -76,6 +76,15 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+  assertEngineFindOnePredicate,
+  type EngineFindOneQueryInput,
+  type EngineUpdateDispatchData,
+  type EngineUpdateDispatchInput,
+  type EngineDeleteDispatchInput,
+} from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
@@ -480,10 +489,23 @@ describe('[#16608] fail-closed — an engine that does not run the installed che
       registerMiddleware: (mw: (opCtx: unknown, next: () => Promise<void>) => Promise<void>) => middlewares.push(mw),
       getSchema: (name: string) => OBJECTS.find((o) => o.name === name),
       async find() { return []; },
-      async findOne() { return null; },
+      // The write verbs route through the real engine's dispatch predicates —
+      // a double looser than `ObjectQL` turns a green suite into no suite
+      // (`check:engine-double-contract`, from #4434). This double refuses a
+      // call the engine refuses even though the leg below never makes one.
+      async findOne(object: string, query: EngineFindOneQueryInput) {
+        assertEngineFindOnePredicate(object, query);
+        return null;
+      },
       async insert(_object: string, data: Record<string, unknown>) { rows.push({ ...data }); return data; },
-      async update(_object: string, data: unknown) { return data; },
-      async delete() { return true; },
+      async update(_object: string, data: EngineUpdateDispatchData, options?: EngineUpdateDispatchInput | null) {
+        assertEngineUpdateDispatch(data, options);
+        return data;
+      },
+      async delete(_object: string, options?: EngineDeleteDispatchInput | null) {
+        assertEngineDeleteDispatch(options);
+        return true;
+      },
     };
     const services: Record<string, unknown> = {
       manifest: { register: vi.fn() },
