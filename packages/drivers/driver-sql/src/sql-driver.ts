@@ -9853,7 +9853,7 @@ export class SqlDriver implements IDataDriver {
         table: tableName,
         fields: obj.fields ?? {},
         tenantField,
-        declaredIndexes: (obj as any).indexes,
+        declaredIndexes: obj.indexes,
       });
 
       if (!exists) {
@@ -9928,7 +9928,7 @@ export class SqlDriver implements IDataDriver {
       // referenced column physically exists — which is also why field-level
       // `unique` can no longer be emitted inline by `createColumn`: a composite
       // needs the tenant column to already be there.
-      const declaredIndexes = (obj as any).indexes;
+      const declaredIndexes = obj.indexes;
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
         isUniqueScopeDeclared(f?.unique),
       );
