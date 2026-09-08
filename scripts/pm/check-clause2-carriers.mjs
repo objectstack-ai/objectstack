@@ -338,6 +338,8 @@ import {
   EXIT_PREREQUISITE_NOT_MET,
   PROXY_FLAG,
   SWEEP_REPO_SHAPE,
+  deliveryEvidence,
+  deliveryEvidenceNote,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
@@ -643,7 +645,16 @@ export function c1CarrierSplit(pair) {
   const onPr = gated(pair?.prLabels);
   if (onCard === null || onPr === null) return null; // unreadable — accounted as UNJUDGED, not clean.
   if (onCard === onPr) return null;
-  const draft = pair.draft ? ' (draft)' : '';
+  // The PAIRING's own evidence (#16706). This row's dangerous half tells a
+  // reader a live fail-open is in front of them, and the measured specimen that
+  // produced one was a pair derived from an accounting sentence — so the row
+  // states what the pairing rests on, in the same breath as the consequence.
+  // A pair from a caller that predates the field carries no `evidence` at all;
+  // it prints as it always did rather than claiming a reading nobody took.
+  const bits = [];
+  if (pair.draft) bits.push('draft');
+  if (pair?.evidence !== undefined) bits.push(deliveryEvidenceNote(pair.evidence));
+  const draft = bits.length > 0 ? ` (${bits.join(', ')})` : '';
   if (onCard && !onPr) {
     return (
       `\`${CONTRACT_REVIEW_LABEL}\` on card #${pair.card} while its delivering open PR ` +
@@ -1355,6 +1366,14 @@ export function pairUnjudged(pair) {
  * its card, and every branch name carries the fallback too — 7 of 7, both
  * channels. Pairing is a derivation here, not an assumption.
  *
+ * Each pair carries the EVIDENCE its derivation rests on (#16706), because the
+ * derivation is exactly where a false pair enters this file: a body whose prose
+ * said 「part of #N already landed」 about another card derived a pair that
+ * never existed, and C1 then reported its dangerous half against it in the same
+ * words a real split gets. The kind rides on the pair so the row can say what
+ * it was built from; ⛔ it is never a filter here — a pair is derived exactly
+ * when `prDeliversCard` says so, as before.
+ *
  * @param {object[]} openPrs
  * @param {number[]} cardNumbers — the open cards the sweep holds.
  */
@@ -1363,7 +1382,15 @@ export function derivePairs(openPrs, cardNumbers) {
   for (const pr of openPrs ?? []) {
     if (!pr || pr.merged_at) continue;
     for (const n of cardNumbers ?? []) {
-      if (prDeliversCard(pr, String(n))) pairs.push({ pr: pr.number, card: Number(n), draft: Boolean(pr.draft), prRow: pr });
+      if (prDeliversCard(pr, String(n))) {
+        pairs.push({
+          pr: pr.number,
+          card: Number(n),
+          draft: Boolean(pr.draft),
+          evidence: deliveryEvidence(pr, String(n)),
+          prRow: pr,
+        });
+      }
     }
   }
   return pairs;

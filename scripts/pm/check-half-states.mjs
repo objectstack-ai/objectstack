@@ -1527,6 +1527,49 @@ function partOfRe() {
 }
 
 /**
+ * The same relation, restricted to the DECLARATION POSITION — `Part of #N`
+ * alone on a line or at the start of one, after the markers a list item or a
+ * blockquote puts in front of it.
+ *
+ * ⚠️ This is a LABEL, never a filter. `partOfTargets` above is unchanged and
+ * every reader still sees exactly the set it saw before; this predicate only
+ * answers *where* a match sat, so a row can say what its belief rests on. The
+ * distinction it draws is POSITIONAL and mechanical — "at the declaration
+ * position" / "elsewhere on a line" — and deliberately not a judgement about
+ * whether the surrounding words are prose: a semantic "mid-sentence" test is
+ * the start of a second dialect, and the corpus below shows the position alone
+ * does not settle authorship either.
+ *
+ * ## Why the relation is NOT narrowed to this position (the measured reason)
+ *
+ * Narrowing `partOfRe` to the declaration position was the obvious remedy and
+ * it is REFUSED on a corpus reading, not on taste. Measured over the 299 merged
+ * PR bodies of `objectstack-ai/objectstack` reachable in three pages of 100
+ * (2026-09-08) and, on the commit surface, over the complete 512-commit window
+ * of this checkout:
+ *
+ *   surface   `Part of #N` at the declaration position / elsewhere
+ *   body                                            29 / 1
+ *   commit                                          34 / 0
+ *
+ * The single body-surface match elsewhere is a REAL declaration, not prose —
+ * PR #16543's opening line reads
+ *
+ *     Refs #15858 (item 1) · Part of #15858 (item 1 of the two the card names).
+ *
+ * where `Part of` is second on the line only because the author put the two
+ * declarations side by side. That body carries no closing keyword, so a
+ * narrowed extractor would empty its `partOf` set and drop `prDeliversCard`
+ * through to the branch-name fallback — the channel its own docblock reserves
+ * for bodies that declare NOTHING. One real declaration lost is the cost the
+ * ⛔ in `prDeliversCard`'s docblock names, so the relation stays wide and the
+ * position is reported instead.
+ */
+function partOfDeclarationRe() {
+  return /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?[*_]{0,3}Part of\s+#(\d+)\b/gim;
+}
+
+/**
  * Blank out markdown code — fenced blocks and inline spans — so the scan sees
  * only the text GitHub's own reference parser acts on.
  *
@@ -1618,6 +1661,17 @@ export function stripMarkdownCode(body, { inline = true } = {}) {
 export function partOfTargets(body, { markdown = true } = {}) {
   const text = markdown ? stripMarkdownCode(body) : String(body ?? '');
   return new Set([...text.matchAll(partOfRe())].map((m) => m[1]));
+}
+
+/**
+ * The subset of `partOfTargets` whose match sat at the DECLARATION POSITION.
+ * A strict subset by construction — same surface handling, same word, a
+ * stricter prefix — so a caller can only ever use it to grade a match that
+ * `partOfTargets` already returned, never to find one it did not.
+ */
+export function partOfDeclarationTargets(body, { markdown = true } = {}) {
+  const text = markdown ? stripMarkdownCode(body) : String(body ?? '');
+  return new Set([...text.matchAll(partOfDeclarationRe())].map((m) => m[1]));
 }
 
 /**
@@ -1752,17 +1806,110 @@ export function branchNameTarget(ref) {
  * derives — wants this wide one, because a half in flight is live work. ⛔ Do
  * not narrow it here to serve H8: that would make the live half invisible to
  * the rows that exist to see it.
+ *
+ * ## The boolean is DERIVED from `deliveryEvidence`, and stays byte-identical
+ *
+ * The verdict is now one `!== null` over `deliveryEvidence` below rather than a
+ * second copy of the same precedence. That is anti-drift, not a change: the
+ * evidence function reproduces this function's three steps in the same order,
+ * so every input answers exactly what it answered before, and the two can never
+ * be edited apart — the failure mode a sibling predicate invites. The ⛔ above
+ * still binds: the relation is not narrowed, only ATTRIBUTED.
  */
 export function prDeliversCard(pr, n) {
+  return deliveryEvidence(pr, n) !== null;
+}
+
+/**
+ * WHY this PR is believed to deliver card `n` — the evidence kind behind
+ * `prDeliversCard`'s boolean, or `null` when it does not deliver at all.
+ *
+ * ## The defect this exists for (#16706)
+ *
+ * `prDeliversCard` answers one bit, and five readers print rows from it — H8's
+ * open side, H31's carrier comparison, `claimDelivery`, the pairing
+ * `check-clause2-carriers` derives, and `prFullyDeliversCard`, which calls it
+ * first. A `true` sourced from a closing keyword and a `true` sourced from the
+ * two words `part of` landing in an accounting sentence printed IDENTICALLY, so
+ * a row manufactured by the second was indistinguishable from a real finding —
+ * measured two-sidedly on objectui PR #8354, whose "Serial constraints" section
+ * said 「part of #7918 already landed …」 about a *different* card with its own
+ * separate PR, and whose C1 row then told a reader that a live fail-open was in
+ * front of them. Deleting that one sentence flipped the reading back.
+ *
+ * This adds INFORMATION and narrows nothing — the distinction the card's own
+ * remedy 3 asks for. The relation `prDeliversCard` reports is untouched, which
+ * is what keeps it clear of the ⛔ in that function's docblock: that ⛔ governs
+ * *which declarations count*, and every declaration that counted still counts.
+ *
+ * ## The kinds, in the precedence `prDeliversCard` already used
+ *
+ *   `closing-keyword`  a closing keyword bound to `#N` — GitHub closes the card
+ *                      on merge, the strongest evidence there is
+ *   `part-of`          `Part of #N` at the declaration position
+ *   `part-of-inline`   `Part of #N` elsewhere on a line — a real declaration
+ *                      written beside another one, or the accounting sentence
+ *                      above. ⚠️ POSITION, not authorship: a reader owes this
+ *                      one a look, and the corpus at `partOfDeclarationRe`
+ *                      records why it is not simply rejected.
+ *   `branch-name`      no declaration in the body at all; the card comes from
+ *                      `claude/issue-<n>-<slug>`, the fallback whose cost is
+ *                      argued at `prDeliversCard`
+ *
+ * ⛔ The closing keyword is graded FIRST and the position never downgrades it:
+ * a body carrying `Fixes #N` delivers `#N` whatever else it says about it, so a
+ * stray inline `part of #N` beside a real keyword must not make the row read as
+ * unattributed.
+ */
+export function deliveryEvidence(pr, n) {
   const target = String(n);
   const body = pr?.body ?? '';
   const partOf = partOfTargets(body);
   const closing = closingKeywordTargets(body);
-  if (partOf.has(target) || closing.has(target)) return true;
+  if (closing.has(target)) return 'closing-keyword';
+  if (partOf.has(target)) {
+    return partOfDeclarationTargets(body).has(target) ? 'part-of' : 'part-of-inline';
+  }
   // The body spoke — about some OTHER card. A stale branch name does not
   // overrule it (the re-scope case above).
-  if (partOf.size > 0 || closing.size > 0) return false;
-  return branchNameTarget(pr?.head?.ref) === target;
+  if (partOf.size > 0 || closing.size > 0) return null;
+  return branchNameTarget(pr?.head?.ref) === target ? 'branch-name' : null;
+}
+
+/**
+ * The phrase a finding row prints beside a PR number, so the row states its own
+ * evidence instead of leaving every `true` looking alike.
+ *
+ * Kept short on purpose: these render INSIDE sentences that already carry a
+ * contract paragraph, and a row nobody finishes reading reports nothing. The
+ * two weak channels are the ones that get the ⚠️, because they are the two a
+ * reader must verify before acting.
+ */
+export function deliveryEvidenceNote(kind) {
+  switch (kind) {
+    case 'closing-keyword':
+      return 'via a closing keyword';
+    case 'part-of':
+      return 'via a `Part of` declaration';
+    case 'part-of-inline':
+      return '⚠️ via `Part of` NOT at the declaration position — verify it declares a delivery rather than mentioning the card in passing';
+    case 'branch-name':
+      return '⚠️ via the branch-name fallback, the body declaring nothing';
+    default:
+      return 'evidence unread';
+  }
+}
+
+/**
+ * `#8354 (draft, ⚠️ via …)` — one PR reference with its evidence, for the rows.
+ *
+ * One renderer, so the five readers cannot drift into five spellings of the
+ * same fact; the `draft` marker keeps the position it already had in every row
+ * that carried one.
+ */
+export function deliveryRef(pr, n) {
+  const draft = pr?.draft ? 'draft, ' : '';
+  return `#${pr?.number} (${draft}${deliveryEvidenceNote(deliveryEvidence(pr, n))})`;
 }
 
 /**
@@ -1845,8 +1992,15 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
     if (prFullyDeliversCard(pr, n)) delivering.push(pr);
   }
   if (delivering.length === 0) return null;
+  // Each row states the evidence its delivery reading rests on (#16706): a
+  // `true` from a closing keyword and a `true` from a `Part of` that sat
+  // mid-line printed identically, and this row prescribes a DESTRUCTIVE write.
   const list = delivering
-    .map((p) => `#${p.number} (merged ${String(p.merged_at).slice(0, 10)})`)
+    .map(
+      (p) =>
+        `#${p.number} (merged ${String(p.merged_at).slice(0, 10)}, ` +
+        `${deliveryEvidenceNote(deliveryEvidence(p, n))})`,
+    )
     .join(', ');
 
   const stillOpen = [];
@@ -1857,9 +2011,7 @@ export function h8MergedPrStillDispatched(issue, mergedPrs, openPrs) {
     if (prDeliversCard(pr, n)) stillOpen.push(pr);
   }
   if (stillOpen.length > 0) {
-    const openList = stillOpen
-      .map((p) => `#${p.number}${p.draft ? ' (draft)' : ''}`)
-      .join(', ');
+    const openList = stillOpen.map((p) => deliveryRef(p, n)).join(', ');
     const total = delivering.length + stillOpen.length;
     return (
       `delivered IN PART — ${delivering.length} of ${total} delivering PR(s) merged ` +
@@ -5007,7 +5159,10 @@ export function h31ContractReviewCarrierSplit(issue, openPrs) {
   const cardGated = labelNames(issue ?? {}).includes(CONTRACT_REVIEW_LABEL);
   const gatedPrs = delivering.filter((pr) => labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
   const barePrs = delivering.filter((pr) => !labelNames(pr).includes(CONTRACT_REVIEW_LABEL));
-  const list = (prs) => prs.map((p) => `#${p.number}${p.draft ? ' (draft)' : ''}`).join(', ');
+  // With its evidence (#16706) — this row names a PR as DELIVERING the card,
+  // and a reader clearing a gate off it needs to know whether that rests on a
+  // closing keyword or on a `Part of` that sat mid-line.
+  const list = (prs) => prs.map((p) => deliveryRef(p, n)).join(', ');
   const contract =
     'The gate is a DUAL carrier — 「两边都挂好」, hung in one stroke and cleared in one ' +
     'stroke, each carrier written read-modify-write with a READ-BACK ' +
@@ -5267,12 +5422,30 @@ export function h27NeedsClaimLivenessRead(issue, claim, nowMs = Date.now()) {
  * is a bounded recency window (`MERGED_WINDOW_DAYS`). That asymmetry is what
  * the finding sentence has to disclose, so it is preserved here rather than
  * collapsed into a boolean.
+ *
+ * ## `evidence` — the one reader with no row of its own (#16706)
+ *
+ * H27, this function's only consumer, fires only when BOTH counts are zero, so
+ * a delivery it counted never reaches a printed sentence: the count's whole
+ * effect is to SUPPRESS the row. That makes the suppression the thing worth
+ * attributing — a card held silent by a delivery whose evidence is an inline
+ * `Part of` is a card nobody is told about, on the strength of a match this
+ * card measured as unreliable. So the kinds ride along on the return shape,
+ * additively (both counts keep their spelling and their meaning), for a reader
+ * or a report that asks why a dispatch was judged live.
  */
 export function claimDelivery(n, openPrs, mergedPrs) {
   const target = String(n);
-  const open = (openPrs ?? []).filter((pr) => prDeliversCard(pr, target)).length;
-  const merged = (mergedPrs ?? []).filter((pr) => pr?.merged_at && prDeliversCard(pr, target)).length;
-  return { open, merged };
+  const openRows = (openPrs ?? []).filter((pr) => prDeliversCard(pr, target));
+  const mergedRows = (mergedPrs ?? []).filter((pr) => pr?.merged_at && prDeliversCard(pr, target));
+  return {
+    open: openRows.length,
+    merged: mergedRows.length,
+    evidence: [...openRows, ...mergedRows].map((pr) => ({
+      pr: pr?.number,
+      kind: deliveryEvidence(pr, target),
+    })),
+  };
 }
 
 /**
