@@ -4513,12 +4513,21 @@ export class RestServer {
                         // That move landed with NO edit in this block, which is
                         // exactly the property #6633 was built to provide.
                         //
-                        // A boot that mounted nothing (no `package` service ⇒
-                        // the registrar was never called) advertises nothing:
-                        // the protocol's service-presence `packages` entry is
+                        // A boot that mounted nothing advertises nothing: the
+                        // protocol's service-presence `packages` entry is
                         // deleted rather than left to promise a 404 — this
                         // server knows the mount fact, which is strictly better
-                        // knowledge than service presence.
+                        // knowledge than service presence. [#14503] The package
+                        // registrar's ONE route (`POST {base}/packages/publish`)
+                        // mounts on every boot since #7563, so `routes.packages`
+                        // is advertised on every boot at THIS server's base; the
+                        // family's reads and delete are served by the runtime
+                        // dispatcher's `/packages` domain, the single
+                        // implementation. (While the base was keyed on the
+                        // registrar's own `GET {base}/packages` copy — never
+                        // mounted on a stock boot, where the `package` service
+                        // registers after this plugin starts — a stock boot
+                        // advertised no `routes.packages` at all.)
                         const direct = this.getDirectMountRouteBases(
                             isScoped ? (req.params?.environmentId ?? ':environmentId') : undefined,
                         );
@@ -13430,11 +13439,20 @@ export class RestServer {
         let packagesScoped: string | undefined;
         let datasources: string | undefined;
         for (const { method, path } of this.directMountedRoutes) {
-            // The package registrar's list route (`GET {base}/packages`) IS the
-            // surface base — recorded verbatim, recognised, never rebuilt.
-            if (method === 'GET' && path.endsWith('/packages')) {
-                if (path.includes(SCOPED_SEGMENT)) packagesScoped = path;
-                else packagesUnscoped = path;
+            // [#14503] The package registrar mounts ONE route,
+            // `POST {base}/packages/publish`, under the family base; the base
+            // is that recorded path minus its `/publish` segment — recognised,
+            // never rebuilt. (It used to be keyed on the registrar's own
+            // `GET {base}/packages` copy of the list route, removed by #14503:
+            // the dispatcher's `/packages` domain is the family's single
+            // implementation, and REST's contribution to the family is publish.)
+            const publishAt = path.endsWith('/packages/publish') && method === 'POST'
+                ? path.length - '/publish'.length
+                : -1;
+            if (publishAt > 0) {
+                const base = path.slice(0, publishAt);
+                if (path.includes(SCOPED_SEGMENT)) packagesScoped = base;
+                else packagesUnscoped = base;
             }
             // Every federation route sits under
             // `{base}/datasources/:name/external/…`; the advertised base is

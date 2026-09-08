@@ -65,8 +65,10 @@
  *      to an empty-but-valid envelope, answered 403. "Unresolvable" and
  *      "unwired" are now two answers; section 3 drives both side by side.
  *  - **Is a fault ever served as ANONYMOUS ACCESS, or as a silent success? NO.**
- *    Every degraded class is REFUSED on every wire-reachable method of all
- *    four routes. The swallow fails CLOSED. (Section 6.)
+ *    Every degraded class is REFUSED on the route this registrar mounts
+ *    (`POST /packages/publish` — the read and delete routes this file also
+ *    drove before #14503 are the dispatcher domain's alone now). The swallow
+ *    fails CLOSED. (Section 6.)
  *  - **Does a fault ever reach the caller as the 5xx it is?** It did not, in
  *    any class — that zero was read against a WORKING instrument: section 1
  *    shows this same door answering **500 `INTERNAL_ERROR`** when the fault is
@@ -150,6 +152,15 @@ import { registerPackageRoutes } from './package-routes.js';
 import { RestServer } from './rest-server.js';
 
 const PKGS = '/api/v1/packages';
+/**
+ * [#14503] The instrument is `POST /packages/publish` — the one route the
+ * registrar mounts now; the read and delete routes this file used to drive
+ * beside it are the dispatcher domain's alone. Same resolver, same gate, same
+ * production wiring; `drive` supplies a valid publish body by default so a
+ * cleared gate reaches a 200 rather than a body-validation 400.
+ */
+const PUBLISH_PATH = `${PKGS}/publish`;
+const PUBLISH_BODY = { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} };
 
 // ---------------------------------------------------------------------------
 // Harness — the REAL supplier and the REAL registrar, wired the production way.
@@ -186,11 +197,11 @@ function serverWith(w: Wiring): RestServer {
 interface Captured { status: number; body: any }
 
 /**
- * Mount the four package routes against a real `RestServer`, with the resolver
+ * Mount the package route against a real `RestServer`, with the resolver
  * wired EXACTLY as `rest-api-plugin.ts` wires it:
  * `resolveExecutionContext: (req) => restServer.resolvePackageRouteExecutionContext(req)`.
  */
-function mount(rest: RestServer, list: () => Promise<unknown> = async () => []): Map<string, RouteHandler> {
+function mount(rest: RestServer, publish: () => Promise<unknown> = async () => ({ success: true })): Map<string, RouteHandler> {
   const routes = new Map<string, RouteHandler>();
   const server = {
     get: (p: string, h: RouteHandler) => { routes.set(`GET:${p}`, h); },
@@ -201,7 +212,7 @@ function mount(rest: RestServer, list: () => Promise<unknown> = async () => []):
   } as any;
   registerPackageRoutes(
     server,
-    () => ({ list, publish: async () => ({}), delete: async () => ({}) }) as any,
+    () => ({ publish }) as any,
     '/api/v1',
     { resolveExecutionContext: (req: any) => rest.resolvePackageRouteExecutionContext(req) } as any,
   );
@@ -224,7 +235,7 @@ async function drive(
     header() { return res; },
   };
   await handler(
-    { params: {}, query: {}, body: undefined, headers: {}, method, path, ...req } as any,
+    { params: {}, query: {}, body: path === PUBLISH_PATH ? PUBLISH_BODY : undefined, headers: {}, method, path, ...req } as any,
     res,
   );
   return captured;
@@ -272,22 +283,22 @@ const healthy = (): Wiring => ({ authServiceProvider: AUTH_OK, objectQLProvider:
 // ---------------------------------------------------------------------------
 
 describe('[#13255] controls — the instrument can produce 200, 401, 403 and 500', () => {
-  it('CONTROL 200: the full production stack, healthy end to end, serves the read', async () => {
-    const captured = await drive(mount(serverWith(healthy())), 'GET', PKGS);
+  it('CONTROL 200: the full production stack, healthy end to end, serves the publish', async () => {
+    const captured = await drive(mount(serverWith(healthy())), 'POST', PUBLISH_PATH);
     expect(captured.status).toBe(200);
     expect(captured.body?.success).toBe(true);
   });
 
   it('CONTROL 200: and the capabilities came from the SHIPPED aggregation, not a stub', async () => {
     const rest = serverWith(healthy());
-    const ctx = await rest.resolvePackageRouteExecutionContext({ params: {}, headers: {}, method: 'GET', path: PKGS });
+    const ctx = await rest.resolvePackageRouteExecutionContext({ params: {}, headers: {}, method: 'POST', path: PUBLISH_PATH });
     expect(ctx?.userId).toBe('u_admin');
     expect(ctx?.systemPermissions).toContain('manage_metadata');
     expect(ctx?.systemPermissions).toContain('studio.access');
   });
 
   it('CONTROL 401: a genuinely anonymous caller (no auth wired at all) is refused', async () => {
-    const captured = await drive(mount(serverWith({})), 'GET', PKGS);
+    const captured = await drive(mount(serverWith({})), 'POST', PUBLISH_PATH);
     expect(captured.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(captured.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
   });
@@ -295,8 +306,8 @@ describe('[#13255] controls — the instrument can produce 200, 401, 403 and 500
   it('CONTROL 403: an authenticated caller who genuinely holds nothing is refused on capability', async () => {
     const captured = await drive(
       mount(serverWith({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlEmpty() })),
-      'GET',
-      PKGS,
+      'POST',
+      PUBLISH_PATH,
     );
     expect(captured.status).toBe(403);
     expect(captured.body?.error?.code).toBe('FORBIDDEN');
@@ -304,7 +315,7 @@ describe('[#13255] controls — the instrument can produce 200, 401, 403 and 500
 
   it('⭐ CONTROL 500: THIS door does answer a 5xx — when the fault is raised by the package service', async () => {
     const routes = mount(serverWith(healthy()), async () => { throw new Error('driver exploded'); });
-    const captured = await drive(routes, 'GET', PKGS);
+    const captured = await drive(routes, 'POST', PUBLISH_PATH);
     expect(captured.status).toBe(500);
     expect(captured.body?.error?.code).toBe('INTERNAL_ERROR');
   });
@@ -443,7 +454,7 @@ describe('[#13255] reachability — each production fault class, driven, with it
   it.each(CLASSES)('$id — $what', async (klass) => {
     // ---- the fault -------------------------------------------------------
     const rest = serverWith(klass.faulted());
-    const req = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
+    const req = { params: {}, headers: {}, method: 'POST', path: PUBLISH_PATH, ...(klass.req ?? {}) };
     // [#13279] The loud cohort never produces a context to inspect — that IS
     // the repair. The resolution REJECTS with the branded outage error instead
     // of fabricating an envelope that reports a capability set nobody read.
@@ -457,7 +468,7 @@ describe('[#13255] reachability — each production fault class, driven, with it
       expect(isAuthzStoreUnavailableError((settled as any).e)).toBe(true);
       expect((settled as any).e.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
       // POSITIVE CONTROL, unchanged: the same wiring minus the fault is served.
-      const served = await drive(mount(serverWith(healthy())), 'GET', PKGS, klass.req ?? {});
+      const served = await drive(mount(serverWith(healthy())), 'POST', PUBLISH_PATH, klass.req ?? {});
       expect(served.status).toBe(200);
       return;
     }
@@ -476,7 +487,7 @@ describe('[#13255] reachability — each production fault class, driven, with it
     // ---- POSITIVE CONTROL: the same wiring, fault removed ----------------
     // A refusal above is caused by the injected fault, not by a harness that
     // could never have been served in the first place.
-    const control = await drive(mount(serverWith(healthy())), 'GET', PKGS, klass.req ?? {});
+    const control = await drive(mount(serverWith(healthy())), 'POST', PUBLISH_PATH, klass.req ?? {});
     expect(control.status).toBe(200);
     expect(control.body?.success).toBe(true);
   });
@@ -488,17 +499,9 @@ describe('[#13255] reachability — each production fault class, driven, with it
 // ---------------------------------------------------------------------------
 
 describe('[#13255] consequence — the door\'s answer for each fault class', () => {
-  it.each(CLASSES)('$id — read and write cohorts', async (klass) => {
+  it.each(CLASSES)('$id — the write cohort, on the one route left', async (klass) => {
     const routes = mount(serverWith(klass.faulted()));
     const extra = klass.req ?? {};
-
-    const read = await drive(routes, 'GET', PKGS, extra);
-    expect(read.status).toBe(klass.read.status);
-    expect(read.body?.error?.code).toBe(klass.read.code);
-
-    const del = await drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'com.acme.crm' } });
-    expect(del.status).toBe(klass.write.status);
-    expect(del.body?.error?.code).toBe(klass.write.code);
 
     const publish = await drive(routes, 'POST', `${PKGS}/publish`, {
       ...extra,
@@ -523,8 +526,6 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
       const routes = mount(serverWith(klass.faulted()));
       const extra = klass.req ?? {};
       const bucket = klass.ctx === 'loud' ? loud : quiet;
-      bucket.push((await drive(routes, 'GET', PKGS, extra)).status);
-      bucket.push((await drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'x' } })).status);
       bucket.push((await drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'x', version: '1.0.0' } } })).status);
     }
     // The ruled class: the outage is the answer, on EVERY route — not one door
@@ -556,10 +557,10 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     //                holds nothing" is TRUE. A supported shape; stays quiet.
     //  - FAILED    — the engine was wired and could not be resolved. "This
     //                caller holds nothing" is UNKNOWN, and was being asserted.
-    const unwired = await drive(mount(serverWith({ authServiceProvider: AUTH_OK })), 'GET', PKGS);
+    const unwired = await drive(mount(serverWith({ authServiceProvider: AUTH_OK })), 'POST', PUBLISH_PATH);
     const failed = await drive(
       mount(serverWith({ ...healthy(), objectQLProvider: async () => { throw new Error('datasource unavailable'); } })),
-      'GET', PKGS,
+      'POST', PUBLISH_PATH,
     );
 
     // The repair: the answers DIFFER. Before this card both were
@@ -578,13 +579,13 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     // the CAPABILITY refusal an authenticated caller gets, not a fault wearing
     // the same number: an unwired embedder still RESOLVES an identity.
     const ctx = await serverWith({ authServiceProvider: AUTH_OK })
-      .resolvePackageRouteExecutionContext({ params: {}, headers: {}, method: 'GET', path: PKGS });
+      .resolvePackageRouteExecutionContext({ params: {}, headers: {}, method: 'POST', path: PUBLISH_PATH });
     expect(ctx?.userId).toBe('u_admin');
     expect(ctx?.systemPermissions ?? []).toEqual([]);
 
     // ⭐ CONTROL that the harness can still produce the SERVED answer, so the
     // two refusals above are read as caused by their faults.
-    expect((await drive(mount(serverWith(healthy())), 'GET', PKGS)).status).toBe(200);
+    expect((await drive(mount(serverWith(healthy())), 'POST', PUBLISH_PATH)).status).toBe(200);
   });
 
   it('⭐ [#13476] a provider that RESOLVES `undefined` is "no engine", not a fault', async () => {
@@ -595,7 +596,7 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     // fails if `wiredEngineOrLoud` is ever "simplified" into treating any falsy
     // resolution as a failure.
     const captured = await drive(
-      mount(serverWith({ ...healthy(), objectQLProvider: async () => undefined })), 'GET', PKGS);
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => undefined })), 'POST', PUBLISH_PATH);
     expect(captured.status).toBe(FORBID.status);
     expect(captured.body?.error?.code).toBe(FORBID.code);
   });
@@ -607,12 +608,12 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     // path; it is the instrument that tells "evaluated and holds nothing"
     // apart from "never evaluated".
     const lost = CLASSES.find((c) => c.id === 'AUTH_SERVICE_DOWN')!;
-    const captured = await drive(mount(serverWith(lost.faulted())), 'GET', PKGS, { method: 'OPTIONS' });
+    const captured = await drive(mount(serverWith(lost.faulted())), 'POST', PUBLISH_PATH, { method: 'OPTIONS' });
     expect(captured.status).toBe(403);
     expect(captured.body?.error?.code).toBe('FORBIDDEN');
 
     // CONTROL: past the SAME clause, a healthy stack is served.
-    const control = await drive(mount(serverWith(healthy())), 'GET', PKGS, { method: 'OPTIONS' });
+    const control = await drive(mount(serverWith(healthy())), 'POST', PUBLISH_PATH, { method: 'OPTIONS' });
     expect(control.status).toBe(200);
   });
 });
@@ -630,7 +631,7 @@ describe('[#13255] the private resolver FULFILS on every production fault class'
 
   it.each(CLASSES)('$id — `resolveExecCtx` settles the way its cohort declares', async (klass) => {
     const rest = serverWith(klass.faulted());
-    const req: Record<string, any> = { params: {}, headers: {}, method: 'GET', path: PKGS, ...(klass.req ?? {}) };
+    const req: Record<string, any> = { params: {}, headers: {}, method: 'POST', path: PUBLISH_PATH, ...(klass.req ?? {}) };
     // The PRIVATE resolver, read BEFORE the wrapper's `.catch` can act — so
     // this reads the supplier, not the net over it.
     const inner = (rest as any).resolveExecCtx(req.params?.environmentId, req);
@@ -649,7 +650,7 @@ describe('[#13255] the private resolver FULFILS on every production fault class'
     // supplier rather than of the wrapper.
     const rest = serverWith(healthy());
     (rest as any).computeExecCtx = async () => { throw new Error('injected inner rejection'); };
-    const req = { params: {}, headers: {}, method: 'GET', path: PKGS };
+    const req = { params: {}, headers: {}, method: 'POST', path: PUBLISH_PATH };
     expect(await settle((rest as any).resolveExecCtx(undefined, req))).toBe('rejected');
     expect(await settle(rest.resolvePackageRouteExecutionContext({ ...req }))).toBe('fulfilled');
     expect(await rest.resolvePackageRouteExecutionContext({ ...req })).toBeUndefined();
@@ -665,9 +666,9 @@ describe('[#13255] a server-side fault is indistinguishable from the denial it i
   it('CONTEXT LOST: an auth-service outage answers exactly what a genuine anonymous caller answers', async () => {
     const faulted = await drive(
       mount(serverWith({ ...healthy(), authServiceProvider: async () => { throw new Error('auth service unavailable'); } })),
-      'GET', PKGS,
+      'POST', PUBLISH_PATH,
     );
-    const anonymous = await drive(mount(serverWith({})), 'GET', PKGS);
+    const anonymous = await drive(mount(serverWith({})), 'POST', PUBLISH_PATH);
     expect(faulted.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(JSON.stringify(faulted)).toBe(JSON.stringify(anonymous));
   });
@@ -686,23 +687,26 @@ describe('[#13255] a server-side fault is indistinguishable from the denial it i
     // verbatim 「第一批其余同意」: 权限库不可达时不再解析为「已认证零能力」,
     // 而是响亮拒绝(与真实能力拒绝的 403 可区分).
     const faulted = await drive(
-      mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS,
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'POST', PUBLISH_PATH,
     );
     const genuinelyEmpty = await drive(
-      mount(serverWith({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlEmpty() })), 'GET', PKGS,
+      mount(serverWith({ authServiceProvider: AUTH_OK, objectQLProvider: async () => qlEmpty() })), 'POST', PUBLISH_PATH,
     );
 
     // The outage is answered as an outage — and says so, in words that cannot
     // be read as a permission verdict.
     expect(faulted.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
     expect(faulted.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
-    expect(faulted.body?.error?.message).not.toContain('studio.access');
+    expect(faulted.body?.error?.message).not.toContain('manage_metadata');
 
     // ⚠️ The other half of the ruling, and the half a one-sided fix would
     // break: a GENUINE capability denial is untouched. Making outages loud is
     // only correct if real denials still read as denials.
     expect(genuinelyEmpty.status).toBe(403);
-    expect(genuinelyEmpty.body?.error?.message).toContain('studio.access');
+    // [#14503] The one route left is the write cohort's: its denial names
+    // `manage_metadata` (the read cohort's `studio.access` wording went with
+    // the read routes to the dispatcher domain).
+    expect(genuinelyEmpty.body?.error?.message).toContain('manage_metadata');
 
     // The disguise is gone, stated on the same comparison that pinned it.
     expect(JSON.stringify(faulted)).not.toBe(JSON.stringify(genuinelyEmpty));
@@ -710,18 +714,18 @@ describe('[#13255] a server-side fault is indistinguishable from the denial it i
 
   it('CONTROL: the same comparison SEPARATES two answers that differ', async () => {
     const [refused, served] = await Promise.all([
-      drive(mount(serverWith({})), 'GET', PKGS),
-      drive(mount(serverWith(healthy())), 'GET', PKGS),
+      drive(mount(serverWith({})), 'POST', PUBLISH_PATH),
+      drive(mount(serverWith(healthy())), 'POST', PUBLISH_PATH),
     ]);
     expect(JSON.stringify(refused)).not.toBe(JSON.stringify(served));
   });
 
   it('and the two DISGUISES are not each other — the door distinguishes lost-context from lost-grants', async () => {
     const lost = await drive(
-      mount(serverWith({ ...healthy(), authServiceProvider: async () => { throw new Error('down'); } })), 'GET', PKGS,
+      mount(serverWith({ ...healthy(), authServiceProvider: async () => { throw new Error('down'); } })), 'POST', PUBLISH_PATH,
     );
     const grants = await drive(
-      mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS,
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'POST', PUBLISH_PATH,
     );
     expect(lost.status).not.toBe(grants.status);
   });
@@ -739,9 +743,6 @@ describe('[#13255] no degraded class is ever served as anonymous ACCESS or as a 
       const routes = mount(serverWith(klass.faulted()));
       const extra = klass.req ?? {};
       for (const call of [
-        () => drive(routes, 'GET', PKGS, extra),
-        () => drive(routes, 'GET', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'com.acme.crm' } }),
-        () => drive(routes, 'DELETE', `${PKGS}/:id`, { ...extra, params: { ...(extra.params ?? {}), id: 'com.acme.crm' } }),
         () => drive(routes, 'POST', `${PKGS}/publish`, { ...extra, body: { manifest: { id: 'com.acme.crm', version: '1.0.0' } } }),
       ]) {
         const captured = await call();
@@ -786,9 +787,9 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
   /** The same seam, failed both ways; the door's answer to each. */
   const bothShapes = async (seam: 'settingsServiceProvider' | 'objectQLProvider' | 'authServiceProvider') => {
     const rejecting = await drive(
-      mount(serverWith({ ...healthy(), [seam]: async () => { throw new Error('seam unavailable'); } })), 'GET', PKGS);
+      mount(serverWith({ ...healthy(), [seam]: async () => { throw new Error('seam unavailable'); } })), 'POST', PUBLISH_PATH);
     const syncThrowing = await drive(
-      mount(serverWith({ ...healthy(), [seam]: (() => { throw new Error('seam unavailable'); }) as any })), 'GET', PKGS);
+      mount(serverWith({ ...healthy(), [seam]: (() => { throw new Error('seam unavailable'); }) as any })), 'POST', PUBLISH_PATH);
     return { rejecting, syncThrowing };
   };
 
@@ -869,7 +870,7 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
     // throw (`qlDown`), so the engine seam RESOLVES here and the error can only
     // have come from `tryFind`. The two raise sites are driven apart by the
     // section-3 pin, which fails the ENGINE instead of the reads.
-    const captured = await drive(mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS);
+    const captured = await drive(mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'POST', PUBLISH_PATH);
     expect(captured.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
     expect(captured.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
   });

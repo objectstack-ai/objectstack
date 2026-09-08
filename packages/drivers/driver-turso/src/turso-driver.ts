@@ -108,14 +108,19 @@ export interface TursoDriverConfig {
    * What it bounds, per arm (measured against `@libsql/client@0.17.4`):
    *
    * - **Remote mode over HTTP** (`libsql://`, `https://`, `http://`): every
-   *   request the client's HTTP transport makes. The driver hands
-   *   `@libsql/client` a `fetch` that aborts once the window elapses, so a
-   *   stalled endpoint fails the operation as `TIMEOUT` / 504 instead of
-   *   hanging it. A `wss://` / `ws://` URL rides the WebSocket transport, which
-   *   exposes no such seam in this client version — so the constructor REFUSES
-   *   a non-zero `timeout` beside one of those two schemes (`VALIDATION_ERROR`
-   *   / 400) rather than accept a window it cannot deliver: drop `timeout`, or
-   *   spell the url `libsql://` / `https://`, which IS bounded.
+   *   request the client's HTTP transport makes, when THIS driver creates the
+   *   client. The driver hands `@libsql/client` a `fetch` that aborts once the
+   *   window elapses, so a stalled endpoint fails the operation as `TIMEOUT` /
+   *   504 instead of hanging it. Two remote compositions cannot carry that
+   *   window, and the constructor REFUSES both (`VALIDATION_ERROR` / 400)
+   *   rather than accept a bound it cannot deliver:
+   *   - a `wss://` / `ws://` URL, which rides the WebSocket transport and
+   *     exposes no such seam in this client version — drop `timeout`, or spell
+   *     the url `libsql://` / `https://`, which IS bounded;
+   *   - a pre-configured {@link TursoDriverConfig.client}, which arrives with
+   *     its transport already built and no seam left to install the window on
+   *     — drop `client`, or drop `timeout` and build the bound into that client
+   *     when you create it.
    * - **Replica mode**: `sync()` — the one remote operation on this arm (reads
    *   and writes run against the local file). A sync still running when the
    *   window closes rejects with the same envelope; the native binding's own
@@ -144,6 +149,17 @@ export interface TursoDriverConfig {
    * caching, connection pooling, or testing.
    *
    * Only effective in remote and replica modes.
+   *
+   * **In REMOTE mode this key may not be combined with a non-zero
+   * {@link TursoDriverConfig.timeout}** — the constructor refuses the pair
+   * (`VALIDATION_ERROR` / 400). The window is the `fetch` this driver installs
+   * while CREATING the remote client, so a client it did not create cannot
+   * carry it; accepting the pair meant running every request unbounded while
+   * `timeout`'s contract promised otherwise. Build the bound into the client
+   * you hand in (`createClient({ fetch })`), or drop `client` and let the
+   * driver create the remote client. Replica mode is unaffected: `sync()` —
+   * the one remote operation on that arm — is bounded whatever client is in
+   * use, so the pair stays accepted there.
    */
   client?: Client;
 }
@@ -382,6 +398,68 @@ function refuseWebSocketTimeout(url: string, timeoutMs: number): never {
   throw err;
 }
 
+/**
+ * `timeout` beside a caller-supplied `client` in REMOTE mode — refused at
+ * construction.
+ *
+ * On the HTTP arm the window is not a driver-side wrapper around each call: it
+ * is installed once, as the `fetch` this driver hands `@libsql/client` when it
+ * BUILDS the client ({@link createRemoteClient} — the single site that spreads
+ * `{ fetch: fetchBoundedBy(timeoutMs) }`). A pre-configured `client` arrives
+ * with its transport already constructed, and `Config.fetch` is read at
+ * `createClient()` time and kept inside the hrana transport; there is no
+ * after-the-fact seam on a built client for the driver to reach (the same
+ * reading that ruled out option (b) on the filing card). So both remote sites
+ * that take the supplied client — `connect()` and the transport's lazy connect
+ * factory, which spell the choice identically as
+ * `this.tursoConfig.client ?? (await this.createRemoteClient())` — skip the one
+ * place the window is installed, and every request runs unbounded.
+ *
+ * ADR-0049 enforce-or-remove: `timeout`'s own docblock promised "every request
+ * the client's HTTP transport makes", and `client`'s said nothing about the key
+ * ceasing to apply, so this composition was a declared setting that changed
+ * nothing — accepted silently, which is the defect. Refusing it says so at the
+ * one constructor every loader calls and changes no wire behaviour.
+ *
+ * ⛔ NOT done here, deliberately: wrapping or re-creating the caller's client so
+ * the window rides after all. A client handed in for "custom caching,
+ * connection pooling, or testing" is the caller's object; replacing its
+ * transport because `timeout` is set would discard exactly the configuration
+ * they built it to carry, behind their back — the same reason a `wss://` url is
+ * not silently re-routed over HTTP.
+ *
+ * Scoped to REMOTE mode. On the replica arm a supplied `client` keeps the key
+ * live: `sync()` — the one remote operation that arm performs — is bounded by
+ * {@link boundedBy} around the awaited promise, whatever client is in use, so
+ * the key is not inert there and the pair is accepted. `timeout: 0` and unset
+ * are the documented "no bound", ask for nothing, and are not refused.
+ *
+ * Ordered AFTER {@link refuseWebSocketTimeout} on purpose: that refusal already
+ * takes every `wss://` / `ws://` url with a window — its own contract records
+ * that "a caller-supplied `client` is not consulted" — so this one fires only
+ * on compositions the constructor accepts today, and no configuration changes
+ * which message it gets.
+ *
+ * ⛔ No internal issue id in the message: it reaches an operator's boot log and
+ * Studio's datasource form. The ids live in the comments beside it.
+ */
+function refuseSuppliedClientTimeout(timeoutMs: number): never {
+  const err = new Error(
+    `\`TursoDriverConfig.timeout\` (${timeoutMs} ms) is set beside \`TursoDriverConfig.client\` in remote ` +
+      `mode, and on that pair it bounds nothing: the window is the \`fetch\` this driver hands ` +
+      `@libsql/client while CREATING the remote client, and a pre-configured client is already built — ` +
+      `its transport is not the driver's to replace (measured against @libsql/client 0.17.4), so the ` +
+      `window would be accepted and never delivered. Either drop \`client\` and let the driver create the ` +
+      `remote client, where every request IS bounded and a stalled endpoint fails as TIMEOUT / 504, or ` +
+      `keep \`client\` and omit \`timeout\`, building the bound into that client yourself when you call ` +
+      `\`createClient({ fetch })\`. Replica mode is unaffected: there \`sync()\` is bounded whatever ` +
+      `client is in use.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
+}
+
 // ── Turso Driver ─────────────────────────────────────────────────────────────
 
 /**
@@ -522,6 +600,16 @@ export class TursoDriver extends SqlDriver {
     const timeoutMs = timeoutWindow(config);
     if (mode === 'remote' && timeoutMs !== undefined && ridesWebSocketTransport(config.url)) {
       refuseWebSocketTimeout(config.url, timeoutMs);
+    }
+    // A window a pre-configured client cannot carry is refused here for the
+    // same reason and in the same place — see `refuseSuppliedClientTimeout`.
+    // The predicate mirrors the `??` at the two sites that consume the key
+    // (`connect()` and the transport's lazy connect factory) exactly: those
+    // take the supplied client for any non-nullish value, and fall through to
+    // `createRemoteClient()` — where the window IS installed — for `null` and
+    // `undefined` alike.
+    if (mode === 'remote' && timeoutMs !== undefined && config.client !== undefined && config.client !== null) {
+      refuseSuppliedClientTimeout(timeoutMs);
     }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);
@@ -686,6 +774,13 @@ export class TursoDriver extends SqlDriver {
    * `timeout` sat declared-but-unforwarded four lines from a forwarded
    * `concurrency` until the ADR-0049 ruling on it: see `fetchBoundedBy` for
    * why the window rides `Config.fetch` and not `Config.timeout`.
+   *
+   * Both sites can also SKIP this builder entirely — each spells the choice
+   * `this.tursoConfig.client ?? (await this.createRemoteClient())` — and when
+   * they do, the one place `timeout` is installed is not reached. That pair is
+   * refused at construction now (`refuseSuppliedClientTimeout`), which is what
+   * keeps "the window is applied here" true of the whole remote arm rather
+   * than only of the branch that calls this method.
    */
   private async createRemoteClient(): Promise<Client> {
     const { createClient } = await import('@libsql/client');
