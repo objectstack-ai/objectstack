@@ -40,6 +40,12 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+// The repository's OWN checksum function, so a hand-seeded at-rest row carries
+// the `checksum` column a real write would have left. Without it the
+// optimistic lock reads `hashSpec(body)` as the parent and `null` as the head
+// and refuses the follow-up save with `METADATA_CONFLICT` — a fixture defect
+// that would otherwise read as the subject refusing the write.
+import { hashSpec } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
 
 const PKG = 'app.sdbh';
@@ -173,6 +179,17 @@ function packagedApp(label: string) {
     };
 }
 
+
+/** One `sys_metadata` row exactly as a previous session would have left it. */
+function seedRow(stores: Map<string, Map<string, Record<string, unknown>>>, body: Record<string, unknown>) {
+    stores.set('sys_metadata', new Map([['r_seeded', {
+        id: 'r_seeded', type: 'app', name: 'pet_hospital',
+        organization_id: null, package_id: PKG, state: 'active', version: 1,
+        metadata: JSON.stringify(body),
+        checksum: hashSpec(body),
+    }]]));
+}
+
 async function storedBody(engine: ObjectQL, name = 'pet_hospital'): Promise<Record<string, unknown>> {
     const rows = await engine.find('sys_metadata', { where: { type: 'app', name } });
     expect(rows.length).toBe(1);
@@ -257,14 +274,10 @@ describe('#16702 door 2 — hydration restates the fact for EVERY type, not only
         const { driver, stores } = makeStubDriver();
         // A row written BEFORE door 1 existed — the population door 1 cannot
         // reach and door 2 makes harmless without rewriting it.
-        stores.set('sys_metadata', new Map([['r_legacy', {
-            id: 'r_legacy', type: 'app', name: 'pet_hospital',
-            organization_id: null, package_id: PKG, state: 'active', version: 1,
-            metadata: JSON.stringify({
-                name: 'pet_hospital', label: 'Pet Hospital',
-                _packageId: PKG, _packageVersion: '1.0.0', _provenance: 'package',
-            }),
-        }]]));
+        seedRow(stores, {
+            name: 'pet_hospital', label: 'Pet Hospital',
+            _packageId: PKG, _packageVersion: '1.0.0', _provenance: 'package',
+        });
 
         const { engine, protocol } = await boot(driver);
         expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0 });
@@ -284,11 +297,7 @@ describe('#16702 door 2 — hydration restates the fact for EVERY type, not only
         // package_id COLUMN before handing it to the shared hydrator, so door 1
         // alone cannot keep that body off the code-artifact test. Door 2 can.
         const { driver, stores } = makeStubDriver();
-        stores.set('sys_metadata', new Map([['r_legacy', {
-            id: 'r_legacy', type: 'app', name: 'pet_hospital',
-            organization_id: null, package_id: PKG, state: 'active', version: 1,
-            metadata: JSON.stringify({ name: 'pet_hospital', label: 'Pet Hospital' }),
-        }]]));
+        seedRow(stores, { name: 'pet_hospital', label: 'Pet Hospital' });
 
         const engine = new ObjectQL();
         engine.registry.logLevel = 'silent';
@@ -329,11 +338,7 @@ describe('#16702 criterion 3 — NEGATIVE CONTROL: real package protection survi
 
     it('…and still refused after a boot that hydrated a tenant overlay of the same name', async () => {
         const { driver, stores } = makeStubDriver();
-        stores.set('sys_metadata', new Map([['r_overlay', {
-            id: 'r_overlay', type: 'app', name: 'pet_hospital',
-            organization_id: null, package_id: PKG, state: 'active', version: 1,
-            metadata: JSON.stringify({ name: 'pet_hospital', label: 'Customized' }),
-        }]]));
+        seedRow(stores, { name: 'pet_hospital', label: 'Customized' });
         const { engine, protocol } = await boot(driver);
         engine.registry.registerItem('app', packagedApp('Packaged Pet Hospital'), 'name', PKG);
         expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0 });
@@ -350,12 +355,7 @@ describe('#16702 criterion 3 — NEGATIVE CONTROL: real package protection survi
 describe('#16702 criterion 5 — mergeArtifactProtection precedence is unchanged', () => {
     it('where a real artifact exists its envelope still beats the stored copy AND the restatement', async () => {
         const { driver, stores } = makeStubDriver();
-        stores.set('sys_metadata', new Map([['r_overlay', {
-            id: 'r_overlay', type: 'app', name: 'pet_hospital',
-            organization_id: null, package_id: PKG, state: 'active', version: 1,
-            // A stored copy that LIES in both directions: no lock, tenant-ish body.
-            metadata: JSON.stringify({ name: 'pet_hospital', label: 'Customized', _lock: 'none' }),
-        }]]));
+        seedRow(stores, { name: 'pet_hospital', label: 'Customized', _lock: 'none' });
         const { engine, protocol } = await boot(driver);
         engine.registry.registerItem('app', packagedApp('Packaged Pet Hospital'), 'name', PKG);
         expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0 });
@@ -374,11 +374,7 @@ describe('#16702 criterion 5 — mergeArtifactProtection precedence is unchanged
 
     it('with NO artifact present the restatement stands and nothing is invented', async () => {
         const { driver, stores } = makeStubDriver();
-        stores.set('sys_metadata', new Map([['r_overlay', {
-            id: 'r_overlay', type: 'app', name: 'pet_hospital',
-            organization_id: null, package_id: PKG, state: 'active', version: 1,
-            metadata: JSON.stringify({ name: 'pet_hospital', label: 'Customized', _lock: 'none' }),
-        }]]));
+        seedRow(stores, { name: 'pet_hospital', label: 'Customized', _lock: 'none' });
         const { engine, protocol } = await boot(driver);
         expect(await protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0 });
 
