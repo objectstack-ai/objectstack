@@ -78,22 +78,34 @@ afterEach(() => {
   }
 });
 
-/** The options AuthManager actually hands `oauthProvider()`. */
+/**
+ * The options AuthManager actually hands `oauthProvider()`, together with the
+ * RFC 9728 document the SAME manager advertises. Both come from one manager on
+ * purpose: the defect class here is a drift between the resource identifier a
+ * client is TOLD to request and the one the AS will accept, and only a reading
+ * that carries both can see it.
+ */
 async function captureProviderOptions(): Promise<any> {
+  return (await captureManagerSurface()).opts;
+}
+
+async function captureManagerSurface(): Promise<{ opts: any; discovery: any }> {
   process.env.OS_MCP_SERVER_ENABLED = 'true';
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  let discovery: any;
   try {
     const manager = new AuthManager({
       secret: 'test-secret-at-least-32-chars-long',
       baseUrl: BASE_URL,
     });
     await manager.getAuthInstance();
+    discovery = manager.getMcpProtectedResourceMetadata();
   } finally {
     warnSpy.mockRestore();
   }
   const opts = (oauthProvider as any).mock.calls.at(-1)?.[0];
   expect(opts, 'AuthManager must register the oauthProvider plugin').toBeDefined();
-  return opts;
+  return { opts, discovery };
 }
 
 /**
@@ -213,14 +225,19 @@ async function signUp(auth: any) {
       body: JSON.stringify({ email: 'dev@acme.example.com', password: 'password-12345', name: 'Dev' }),
     }),
   );
-  const cookie = (res.headers.get('set-cookie') ?? '')
+  const cookie = String(res.headers.get('set-cookie') ?? '')
     .split(',')
-    .map((c) => c.split(';')[0]!.trim())
+    .map((c: string) => c.split(';')[0]!.trim())
     .join('; ');
   return cookie;
 }
 
-async function authorizeWithResource(auth: any, clientId: string, cookie: string) {
+async function authorizeWithResource(
+  auth: any,
+  clientId: string,
+  cookie: string,
+  resource: string = MCP_RESOURCE,
+) {
   const url = new URL(`${ISSUER}/oauth2/authorize`);
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', REDIRECT_URI);
@@ -229,7 +246,7 @@ async function authorizeWithResource(auth: any, clientId: string, cookie: string
   url.searchParams.set('state', 'st');
   url.searchParams.set('code_challenge', PKCE_CHALLENGE);
   url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set('resource', MCP_RESOURCE);
+  url.searchParams.set('resource', resource);
   const res = await auth.handler(new Request(url.toString(), { method: 'GET', headers: { cookie } }));
   return { status: res.status, location: res.headers.get('location') ?? '' };
 }
@@ -292,7 +309,21 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
   });
 
   it('mints a token whose audience is the MCP resource (discovery → DCR → authorize → consent → token)', async () => {
-    const opts = await captureProviderOptions();
+    const { opts, discovery } = await captureManagerSurface();
+
+    // -- discovery leg (RFC 9728) ----------------------------------------
+    // The client learns the resource identifier HERE and asks for exactly this
+    // string below - it is never re-typed from a constant. That is the point:
+    // an AS that seeds one spelling while advertising another reproduces this
+    // very defect, and a flow that hard-codes the resource cannot see it.
+    expect(discovery?.resource, 'discovery must advertise the MCP resource').toBe(MCP_RESOURCE);
+    expect(discovery?.authorization_servers).toEqual([ISSUER]);
+    const advertisedResource: string = discovery.resource;
+    expect(
+      opts.resources,
+      'the AS must be seeded with the SAME identifier discovery advertises',
+    ).toContain(advertisedResource);
+
     const server = await bootRealAuthorizationServer(opts);
 
     expect(server.tableCounts()).toEqual({
@@ -306,7 +337,7 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
     expect(reg.status, JSON.stringify(reg.body)).toBe(201);
     const cookie = await signUp(server.auth);
 
-    const az = await authorizeWithResource(server.auth, reg.body.client_id, cookie);
+    const az = await authorizeWithResource(server.auth, reg.body.client_id, cookie, advertisedResource);
     expect(az.location).not.toContain('invalid_target');
 
     const consentRes = await server.auth.handler(
@@ -332,7 +363,7 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
           redirect_uri: REDIRECT_URI,
           client_id: reg.body.client_id,
           code_verifier: PKCE_VERIFIER,
-          resource: MCP_RESOURCE,
+          resource: advertisedResource,
         }).toString(),
       }),
     );
@@ -342,7 +373,7 @@ describe('MCP resource registration against the real provider (RFC 8707)', () =>
 
     const payload = decodeJwtPayload(tokenBody.access_token);
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-    expect(aud, 'the minted token must be audienced to the MCP resource').toContain(MCP_RESOURCE);
+    expect(aud, 'the minted token must be audienced to the MCP resource').toContain(advertisedResource);
     expect(payload.iss).toBe(ISSUER);
 
     // The three tables the bug report counted, plus the refresh row. ⚠️

@@ -11,4 +11,9 @@ On 17.3.0 no MCP client could ever obtain a token. `plugin-auth` configured `@be
 - **`enforcePerClientResources` is left at its `true` default.** The per-client linkage check stays on — the fix makes the link exist rather than switching the check off. A client with no link row is still refused with `invalid_target`, and a test asserts that.
 - **`validAudiences` is removed.** It was passed and read by nobody, which is precisely how the defect survived a version bump: it looked like configuration and enforced nothing.
 
+Two boot-path defects the resource seed uncovered are fixed in the same change, because seeding is the first thing this package ever wrote from a plugin `init`:
+
+- **`getAuthInstance()` now settles better-auth's plugin `init` hooks before it resolves.** `betterAuth()` returns synchronously and runs those hooks behind `auth.$context`, so a failure inside one had no catcher and escaped as an unhandled rejection — which Node terminates the process for by default. A boot failure now rejects the call that asked for the instance.
+- **The no-`dataEngine` development fallback builds its own in-memory adapter instead of letting better-auth build one.** better-auth 1.7.2 keys that store by the schema *key* while every read resolves by `modelName`, so on that path every model this package renames was unreachable — `user`/`sys_user` as much as `oauthResource`/`sys_oauth_resource` — answering `Model <name> not found`. Production never took this branch (it uses the ObjectQL adapter); development and tests did.
+
 No configuration change is required. Deployments that already ran 17.3.0 get the resource row on the next boot; MCP clients that failed to connect need to reconnect so a fresh registration picks up the link.

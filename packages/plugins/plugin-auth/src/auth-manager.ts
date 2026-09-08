@@ -1252,7 +1252,7 @@ export class AuthManager {
       basePath: this.configuredBasePath(),
 
       // Database adapter configuration
-      database: this.createDatabaseConfig(),
+      database: await this.createDatabaseConfig(),
 
       // Model/field mapping: camelCase (better-auth) → snake_case (ObjectStack)
       // These declarations tell better-auth the actual table/column names used
@@ -2413,7 +2413,27 @@ export class AuthManager {
       } : {}),
     };
 
-    return betterAuth(betterAuthConfig);
+    const auth = betterAuth(betterAuthConfig);
+
+    // ⛔ Do not return before better-auth's plugin `init` hooks have settled.
+    //
+    // `betterAuth()` returns synchronously and runs those hooks behind
+    // `auth.$context`, so anything a plugin does at init is a promise NOBODY
+    // holds. That was harmless while init did no I/O. It stopped being harmless
+    // when the oauth-provider began seeding the RFC 8707 `sys_oauth_resource`
+    // row from its own `init`: a failure there had no catcher and surfaced as
+    // an UNHANDLED REJECTION — which Node terminates the process for by default
+    // — and, in tests, as a boot write racing its engine's teardown and failing
+    // with "No driver available for object 'sys_oauth_resource'" long after the
+    // test that triggered it had passed.
+    //
+    // Awaiting it here makes the seed part of "the instance is ready": a boot
+    // failure now rejects THIS call, where callers can see and handle it,
+    // instead of escaping the stack. `$context` is absent when better-auth is
+    // mocked, and `await undefined` is a no-op, so this is safe on that path.
+    await (auth as { $context?: Promise<unknown> } | undefined)?.$context;
+
+    return auth;
   }
 
   /**
@@ -3737,7 +3757,7 @@ export class AuthManager {
    * silently.  We therefore wrap the ObjectQL adapter in a factory function
    * so it is correctly recognised as a `DBAdapterInstance`.
    */
-  private createDatabaseConfig(): any {
+  private async createDatabaseConfig(): Promise<any> {
     // Use ObjectQL adapter factory if dataEngine is provided
     if (this.config.dataEngine) {
       // createObjectQLAdapterFactory returns an AdapterFactory
@@ -3755,9 +3775,41 @@ export class AuthManager {
       'Please provide a dataEngine instance (e.g., ObjectQL) in AuthManagerOptions.'
     );
 
-    // Return a minimal in-memory configuration as fallback
-    // This allows the system to work in development/testing without a real database
-    return undefined; // better-auth will use its default in-memory adapter
+    // ⛔ NOT `undefined`, and ⛔ do not "simplify" it back to that.
+    //
+    // Handing better-auth no `database` makes it build its own in-memory store
+    // in `getBaseAdapter`, and that store is keyed by the schema KEY while
+    // every read resolves by `modelName`. Measured on better-auth 1.7.2:
+    //
+    //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
+    //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
+    //   the adapter then asks  -> 'sys_oauth_resource'             // resolved by modelName
+    //   => Error: Model sys_oauth_resource not found
+    //
+    // So on that path EVERY model this package renames is unreachable —
+    // `user`/`sys_user` included. It stayed invisible for as long as nothing
+    // touched a renamed model during boot; the RFC 8707 resource seed does,
+    // from the oauth-provider plugin's `init`, where the throw surfaces as an
+    // UNHANDLED REJECTION rather than a failed request.
+    //
+    // Keying the store by `modelName` is what the adapter actually reads, so
+    // this fixes the dev/test fallback instead of working around it. Production
+    // never reaches this branch — it returns the ObjectQL factory above.
+    //
+    // The import is dynamic on purpose (the rest of better-auth is loaded the
+    // same way here); `createAuthInstance` awaits this method, and better-auth
+    // then calls the returned factory SYNCHRONOUSLY, so the module has to be
+    // resolved before we hand it over, not inside it.
+    const [{ memoryAdapter }, { getAuthTables }] = await Promise.all([
+      import('better-auth/adapters/memory'),
+      import('@better-auth/core/db'),
+    ]);
+    return (options: any) => {
+      const tables = getAuthTables(options) as Record<string, { modelName?: string }>;
+      const db: Record<string, unknown[]> = {};
+      for (const [key, table] of Object.entries(tables)) db[table?.modelName ?? key] = [];
+      return memoryAdapter(db)(options);
+    };
   }
 
   /**
