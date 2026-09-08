@@ -2325,18 +2325,18 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
   // parse walk judges nesting 0..MAX_REGION_DEPTH (32). One level further the
   // region is left raw, `safeParse` succeeds, and the within-region duplicate is
   // `validateControlFlow`'s — `analyzeRegion`'s own line, its own shape.
-  const loopsNestedTo = (nesting: number, innermost: FlowNode[]): FlowNode => {
+  const loopsNestedTo = (nesting: number, innermost: FlowNode[], innermostEdges: FlowEdge[] = []): FlowNode => {
     // Outermost loop is `n` (the edges above point at it), inner ones `l1..`;
     // `l${k}` sits at nesting k and its body is nesting k + 1.
-    let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: innermost, edges: [] };
+    let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: innermost, edges: innermostEdges };
     for (let k = nesting - 1; k >= 1; k--) {
       body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: '{items}', body } }], edges: [] };
     }
     return { id: 'n', type: 'loop', label: 'Loop', config: { collection: '{items}', body } };
   };
-  const roundTripped = (nesting: number, innermost: FlowNode[]): Flow => JSON.parse(JSON.stringify(flowWith([
+  const roundTripped = (nesting: number, innermost: FlowNode[], innermostEdges: FlowEdge[] = []): Flow => JSON.parse(JSON.stringify(flowWith([
     { id: 'start', type: 'start', label: 'Start' },
-    loopsNestedTo(nesting, innermost),
+    loopsNestedTo(nesting, innermost, innermostEdges),
     { id: 'end', type: 'end', label: 'End' },
   ])));
 
@@ -2364,8 +2364,9 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
     expect((caught as Error).message).toContain("loop 'l32' body: duplicate node id 'dup'");
     expect((caught as Error).message).not.toContain('Duplicate node id');
 
-    // Control: the same nesting with unique ids is accepted end to end.
-    const unique = FlowSchema.safeParse(roundTripped(33, [step('u1'), step('u2')]));
+    // Control: the same nesting with unique ids — chained, so the region is
+    // single-entry / single-exit and only the ids differ — is accepted end to end.
+    const unique = FlowSchema.safeParse(roundTripped(33, [step('u1'), step('u2')], [{ id: 'ue', source: 'u1', target: 'u2' }]));
     expect(unique.success).toBe(true);
     if (!unique.success) return;
     expect(() => validateControlFlow(unique.data)).not.toThrow();
