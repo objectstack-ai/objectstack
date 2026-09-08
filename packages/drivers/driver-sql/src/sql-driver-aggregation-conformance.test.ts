@@ -179,6 +179,11 @@ const CONFORMANCE_OBJECT = {
     // Nullable, and it must stay that way — see `AggregationRow.stage`.
     stage: { type: 'text', name: 'stage' },
     score: { type: 'number', name: 'score' },
+    // [#15546] Nullable, and it must stay that way — see `AggregationRow.amount`:
+    // the `east` group is NULL in every row, which is the cell the ruled
+    // `sum` → `0` fold is pinned on. A `NOT NULL` column, or a `0` seeded in
+    // place of a null, turns that cell green for the wrong reason.
+    amount: { type: 'number', name: 'amount' },
     // [#11152] Declared `type: 'boolean'` on purpose — see `AggregationRow.flag`:
     // the ruled point of the boolean cases is that aggregation answers NUMBERS
     // (min=0/max=1) even where the declared type would present a row read as a
@@ -211,8 +216,14 @@ const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) => 
   // `groupByAlias ?? groupBy`. Reading `c.groupBy` unconditionally is the bug
   // this axis exists to catch: it is green on a face that ignores the alias.
   const groupKey = c.groupByAlias ?? c.groupBy;
+  // [#15546] A NULL answer is kept as `null`, never coerced: `Number(null)` is
+  // `0`, which is the ruled answer for the all-null `sum` cell — so the
+  // unconditional `Number(r.n)` this read as before made that cell green with
+  // the fold ABLATED (measured: 85/85 green against a driver answering
+  // `null`). The harness, not the driver, was holding the observable. The
+  // string-typed answers node-pg hands back (`"6"` for `COUNT`) still coerce.
   return rows
-    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: Number(r.n) }))
+    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n === null ? null : Number(r.n) }))
     .sort((x, y) => String(x.group).localeCompare(String(y.group)));
 };
 
@@ -247,13 +258,18 @@ describe(`[#6409] SqlDriver — aggregate vocabulary conformance (${cell.label})
     expect(rows.map((r: any) => String(r.id))).toEqual(['1', '2', '3', '4', '5', '6']);
     for (const r of rows as any[]) {
       const seeded = AGGREGATION_ROWS.find((s) => s.id === String(r.id))!;
-      expect([r.region, r.stage ?? null, Number(r.score)], r.id)
-        .toEqual([seeded.region, seeded.stage, seeded.score]);
+      expect([r.region, r.stage ?? null, Number(r.score), r.amount ?? null], r.id)
+        .toEqual([seeded.region, seeded.stage, seeded.score, seeded.amount]);
     }
     // The property the null cases hang off, asserted directly: an empty string
     // in place of a null would keep every `count_distinct` case green at the
     // wrong number.
     expect((rows as any[]).filter((r) => r.stage === null)).toHaveLength(2);
+    // [#15546] The property the all-null `sum` cell hangs off: four NULL
+    // amounts, both `east` rows among them. A `0` seeded in place of a null
+    // answers the ruled `0` without the fold ever running.
+    expect((rows as any[]).filter((r) => r.amount === null), 'null amounts').toHaveLength(4);
+    expect((rows as any[]).filter((r) => r.region === 'east' && r.amount === null), 'east all-null').toHaveLength(2);
     // [#11152] The property the boolean cases hang off: 3 true / 3 false. A
     // seed that folded the flags turns every boolean case into a test of the
     // wrong table. `Boolean(...)` because the ROW read is presentation-shaped
