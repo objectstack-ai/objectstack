@@ -107,13 +107,69 @@
  * masked before the statement is located, through the repo's one comment
  * scanner (`scripts/js-comment-mask.mjs`).
  *
+ * ## The SECOND way a declaration is invisible: the VALUE, not the spelling
+ *
+ * Everything above is about the SPELLING -- a declaration computed instead of
+ * written out. A declaration can be a perfect literal array and STILL
+ * contribute nothing, because `scripts/pm/dispatch-gates.mjs#extractWatchHints`
+ * admits a literal only when it STARTS with a word character, a dot or an `@`.
+ * A literal opening with a glob never reaches the resolve step, never becomes a
+ * hint, and places its gate on NO card:
+ *
+ *     ['scripts/**']          -> ["scripts/**"]
+ *     ['**\/package.json']    -> []            <- literal, and dropped anyway
+ *
+ * Four instruments passed that drop, because each asked its own question and
+ * none asked whether the literals were ADMISSIBLE: this gate saw a literal
+ * array, the gate's own self-test saw its own constant,
+ * `check:declared-population-live` was satisfied by nothing (a family
+ * declaring zero literals "declares nothing", a legitimate state), and it scored
+ * `undetermined` or `silent` for every card in the tree. A declaring-zero gate
+ * and a declared-but-eaten gate are the same colour on all of them.
+ *
+ * So the sweep asks the second question too, and it asks it OF THE EXTRACTOR
+ * rather than of a copy of its rule -- a second copy of an admission regex is
+ * a thing that drifts, and the drift would be silent in the same direction.
+ * Each declared literal is put through `extractWatchHints` on its own, and a
+ * literal that yields NO hint is the finding.
+ *
+ * ⛔ Admission is NOT widened to accept a leading glob, and this gate exists
+ * BECAUSE it is not: that refusal is measured (the admission comment inside
+ * `extractWatchHints` prices bare-top-level-word admission at +139084
+ * fabricated pairs, and records a re-measured refusal of the resolved-form
+ * widening), and relaxing it is a change to every gate in the farm rather than
+ * a repair to one declaration. The remedy this gate prints is therefore the
+ * enumerable root-prefixed spelling, never a request to change the rule.
+ *
+ * ⭐ What this buys is NOT cheaper enumeration -- the author of a file-kind
+ * population still has to name every root that holds the kind, and still has to
+ * pin that enumeration against the gate's own scan. It solves the other half:
+ * it does not solve the trouble of enumerating, it solves not knowing that you
+ * need to enumerate.
+ *
+ * ## Why ONE literal at a time, and never the module's whole extraction
+ *
+ * The tempting spelling is to extract the whole module and diff the declared
+ * literals against the result. Measured on this tree, that spelling is wrong in
+ * both directions. It FALSELY accuses: `scripts/pm/dispatch-gates.mjs` spells a
+ * rostered declaration inside its own self-test as a fixture string, which
+ * `extractWatchHints` blanks along with the rest of the self-test, so a
+ * perfectly admissible literal is absent from that module's extraction. And it
+ * would falsely accuse again on any declaration written module-relative, whose
+ * extracted hint is the RESOLVED path and not the literal as spelled. Probing
+ * one literal at a time asks exactly the question the finding is about -- does
+ * this literal produce a hint at all -- and neither residue reaches it.
+ *
  * ## What is asserted, and what is deliberately NOT
  *
  * Asserted: the right-hand side of the declaration is an ARRAY OF QUOTED STRING
- * LITERALS and nothing else. That is stronger than "each declared hint appears
- * quoted inside the statement", and it needs no runtime value, so this gate
- * never imports the files it judges -- a gate that imported 14 modules to read
- * one constant would run their module bodies to do it.
+ * LITERALS and nothing else, and every literal in it is one the hint extractor
+ * admits. The first is stronger than "each declared hint appears quoted inside
+ * the statement"; neither needs a runtime value, so this gate never imports the
+ * files it judges -- a gate that imported 14 modules to read one constant would
+ * run their module bodies to do it. The extractor itself IS imported, and that
+ * is the opposite case: it is the authority being consulted, not a subject
+ * being read, and it is a pure string function with no module-scope work.
  *
  * NOT asserted: that a declaration is CORRECT -- that it names the roots the
  * gate really walks, and only those. That claim is local to each gate and each
@@ -147,6 +203,7 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 import { maskComments } from './js-comment-mask.mjs';
+import { extractWatchHints } from './pm/dispatch-gates.mjs';
 
 // ── The self-test's own battery roster and floor (#13489) ──────────────────
 //
@@ -181,7 +238,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-name floor': 5,
   'discovery of an UNROSTERED spelling of the idiom': 5,
   'the empty population is refused, not passed': 1,
-  'the live tree': 14,
+  "literals the extractor's admission DROPS": 14,
+  'the live tree': 15,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -397,6 +455,57 @@ export function literalHints(rhs) {
 }
 
 /**
+ * The hints `extractWatchHints` builds from ONE declared literal, standing
+ * alone under `name`.
+ *
+ * The probe source is a declaration and not a bare string on purpose: the
+ * extractor's exclusion channel keys on the DECLARATION NAME, so a future
+ * rostered name that happened to read as an exclusion would drop its literals
+ * here and be reported LOUDLY rather than judged under a rule that does not
+ * apply to it.
+ *
+ * A literal carrying both quote characters cannot be delimited, and the
+ * extractor cannot read such a span out of the real source either -- so it
+ * yields nothing here, which is the same verdict for the same reason.
+ */
+function admittedHints(name, literal) {
+  const quote = literal.includes("'") ? (literal.includes('"') ? null : '"') : "'";
+  if (quote === null) return [];
+  return extractWatchHints(`const ${name} = [${quote}${literal}${quote}];\n`);
+}
+
+/**
+ * The declared literals that produce NO hint at all -- the value-side drop.
+ *
+ * Pure over the list, and split out of `auditSourceName` for the same reason
+ * `missingNames` is split out of `main`: the self-test drives it directly, and
+ * the shape it guards against is one a healthy live tree cannot exhibit.
+ */
+export function droppedByAdmission(name, hints) {
+  return hints.filter((h) => admittedHints(name, h).length === 0);
+}
+
+/**
+ * What a dropped literal's author is told: what happened, what to write
+ * instead, and why the rule that dropped it is not the thing being changed.
+ */
+function admissionRemedy(name, dropped) {
+  return `the ${name} declaration is a literal array, and ${dropped.length} of its literal(s) build NO `
+    + `hint at all: ${dropped.map((h) => JSON.stringify(h)).join(', ')}. The hint extractor admits a `
+    + 'literal only when it STARTS with a word character, a dot or an @, so one opening with a glob '
+    + 'never reaches the resolve step, never becomes a hint, and places this gate on NO card -- the '
+    + 'same silent drop this gate exists for, arrived at through the VALUE instead of the spelling. '
+    + 'Remedy: spell the population as one enumerable root-prefixed entry per root that holds the '
+    + 'kind, and pin that enumeration against the walk this gate really performs so it cannot go '
+    + 'stale quietly. Admission is deliberately NOT widened to accept a leading glob: see the '
+    + 'admission comment inside extractWatchHints, which prices bare-top-level-word admission at '
+    + '+139084 fabricated pairs and records a re-measured refusal of the resolved-form widening -- '
+    + 'relaxing it is a change to every gate in the farm, not a repair to one declaration. This '
+    + 'finding does not solve the trouble of enumerating; it solves not knowing that you need to '
+    + 'enumerate.';
+}
+
+/**
  * One file's verdict for ONE rostered name. `null` means the file does not
  * declare that name at all -- it mentions it in prose, or reads someone else's.
  */
@@ -425,6 +534,13 @@ export function auditSourceName(rel, source, name) {
   }
   if (hints.length === 0) {
     return { rel, name, ok: false, why: `the ${name} declaration is EMPTY -- it names no subtree at all` };
+  }
+  // The value-side question, asked only once the spelling-side one has passed:
+  // an empty or computed declaration has no literals to judge, and naming the
+  // same declaration under two remedies would leave its author choosing.
+  const dropped = droppedByAdmission(name, hints);
+  if (dropped.length > 0) {
+    return { rel, name, ok: false, why: admissionRemedy(name, dropped) };
   }
   return { rel, name, ok: true, hints };
 }
@@ -530,7 +646,8 @@ function main() {
   if (bad.length) {
     console.error(
       `✗ check-watch-hint-literal: ${bad.length} of ${rows.length} declaration(s) are not readable `
-      + 'as literals. Spell the hints inside the declaration statement.',
+      + 'by the hint extractor. Spell the hints inside the declaration statement, and spell each one '
+      + 'so the extractor admits it.',
     );
     return 1;
   }
@@ -538,10 +655,12 @@ function main() {
   const perName = DECL_NAMES
     .map((n) => `${n} ${rows.filter((r) => r.name === n).length}`)
     .join(', ');
+  const literals = rows.reduce((n, r) => n + r.hints.length, 0);
   console.log(
     `✓ check-watch-hint-literal: ${rows.length} declaration(s) across ${DECL_NAMES.length} rostered `
-    + `name(s) -- ${perName} -- every one an array of quoted literals inside its own statement, `
-    + 'every rostered name non-empty, and no unrostered spelling of the idiom in the tree.',
+    + `name(s) -- ${perName} -- every one an array of quoted literals inside its own statement, all `
+    + `${literals} of those literals admitted by the hint extractor, every rostered name non-empty, `
+    + 'and no unrostered spelling of the idiom in the tree.',
   );
   return 0;
 }
@@ -686,6 +805,60 @@ export function selfTest() {
   t('an empty file list produces no rows, which the floor above refuses',
     audit([]).rows.length === 0 && missingNames(audit([]).rows).length === DECL_NAMES.length);
 
+  // -- literals the extractor's admission DROPS ------------------------------
+  // ⭐ The value-side drop. Every case here declares a perfect literal array,
+  // so every one of them passes the spelling-side question above; what
+  // separates them is whether the hint extractor can make a hint out of what
+  // is inside it.
+  battery("literals the extractor's admission DROPS");
+  const KIND_ONE_LINER = "['**/package.json']";
+  t('a declaration whose only literal opens with a glob is rejected',
+    rejected(decl(KIND_ONE_LINER)));
+  t('...and it is rejected on the VALUE, not on the spelling -- the declaration IS a literal array',
+    literalHints(KIND_ONE_LINER) !== null && literalHints(KIND_ONE_LINER).length === 1);
+  const globWhy = verdict(decl(KIND_ONE_LINER))?.why ?? '';
+  t('the remedy names the literal that was dropped', globWhy.includes('**/package.json'));
+  t('the remedy states the admission rule that dropped it',
+    globWhy.includes('STARTS with a word character, a dot or an @'));
+  t('the remedy prescribes the enumerable root-prefixed spelling rather than only refusing',
+    globWhy.includes('enumerable root-prefixed entry per root that holds the kind'));
+  t('the remedy carries the measurement behind the refusal, so widening admission is not the obvious read',
+    globWhy.includes('+139084') && globWhy.includes('every gate in the farm'));
+  t('the remedy says what the finding is actually for',
+    globWhy.includes('it solves not knowing that you need to enumerate'));
+
+  // The negatives PR #16446 shipped: the same population, enumerated.
+  const ADMISSIBLE_KIND = [
+    'packages/**/package.json',
+    'apps/**/package.json',
+    'examples/**/package.json',
+    'package.json/**',
+  ];
+  t('the enumerated spelling of the same population is accepted',
+    accepted(decl(`[${ADMISSIBLE_KIND.map((h) => `'${h}'`).join(', ')}]`)),
+    ADMISSIBLE_KIND.join(' · '));
+  t('...and every one of those literals is admitted individually',
+    droppedByAdmission(DIR_NAME, ADMISSIBLE_KIND).length === 0);
+  t('one dropped literal among admissible ones still fails, and only it is named',
+    rejected(decl(`['scripts/**', '**/package.json']`))
+      && droppedByAdmission(DIR_NAME, ['scripts/**', '**/package.json']).join() === '**/package.json');
+
+  // ⭐ The false positive a whole-MODULE diff would produce, which is why the
+  // probe is per literal: `scripts/pm/dispatch-gates.mjs` spells a rostered
+  // declaration inside its own self-test, and the extractor blanks self-tests --
+  // so that literal is absent from that module's extraction while being
+  // perfectly admissible.
+  t('a literal is judged on its own admissibility, not on whether its module extraction carries it',
+    droppedByAdmission(DIR_NAME, ['packages/drivers/**']).length === 0);
+  t('...and a module-relative literal, whose extracted hint is the RESOLVED path, is not accused either',
+    droppedByAdmission(DIR_NAME, ['../../packages/spec/**']).length === 0);
+
+  // The two states that must keep their OWN remedy rather than acquiring this one.
+  t('an EMPTY declaration keeps the empty-population remedy, not the admission one',
+    (verdict(decl('[]'))?.why ?? '').includes('names no subtree at all'));
+  t('a COMPUTED declaration keeps the computed remedy, not the admission one',
+    (verdict(decl('[`${SCAN_ROOT}/**`]'))?.why ?? '').includes('is COMPUTED, not a literal array'));
+
   // -- the live tree ---------------------------------------------------------
   battery('the live tree');
   const { rows: live, strays } = audit(walk(REPO_ROOT));
@@ -694,6 +867,10 @@ export function selfTest() {
     `${live.length} declaration(s)`);
   t('every live declaration is a literal', live.every((r) => r.ok),
     live.filter((r) => !r.ok).map((r) => `${r.rel}:${r.name}`).join(' · '));
+  t('and every literal in every live declaration is one the hint extractor admits',
+    live.every((r) => !r.ok || droppedByAdmission(r.name, r.hints).length === 0),
+    live.flatMap((r) => (r.ok ? droppedByAdmission(r.name, r.hints)
+      .map((h) => `${r.rel}:${r.name}:${h}`) : [])).join(' · '));
   t('EVERY rostered name has a live declarer -- the floor is armed, not merely coded',
     missingNames(live).length === 0, `missing: ${missingNames(live).join(', ') || 'none'}`);
   for (const name of DECL_NAMES) {
@@ -737,7 +914,8 @@ export function selfTest() {
     + 'spellings rejected, the statement-scoped search proved against runtime and comment copies of '
     + `the literal beside it, all ${DECL_NAMES.length} rostered names judged for both spellings, the `
     + 'per-name floor proved against a population that is healthy on every name but one, unrostered '
-    + 'spellings of the idiom discovered, and the live repo-wide population judged.',
+    + 'spellings of the idiom discovered, the value-side drop proved on a literal array the extractor '
+    + 'admits nothing out of, and the live repo-wide population judged on both questions.',
   );
   selfTestReachedVerdict = true;
   return 0;

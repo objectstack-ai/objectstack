@@ -599,7 +599,42 @@ export const CEILINGS = new Map([
   // pairs, and re-wrap funding is refused per the 2026-08-17 rule in any case.
   // The same-PR correction of the footer-mechanism row is line-neutral and buys
   // nothing. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 395],
+  // Raised 395 → 402 by the SEVENTH readings increment, again under the STANDING
+  // one-file exception quoted above rather than a fresh decision card, and again
+  // recorded as a `ruledRaises` record citing it. Spent at ONE line per
+  // deduplicated reading, each written in this file's voice: the dispatch-gates
+  // self-test runs past the container's 600 s foreground cap, so a timeout is not
+  // a verdict (+1); a push that re-folds an armed PR can drop the arm with no
+  // field saying so (+1); `enable_pr_auto_merge` succeeds on a PR already reading
+  // `mergeable_state: clean`, against its own tool description (+1); a `merged_by`
+  // named in `list_pull_requests`'s `fields` comes back absent, so an absent field
+  // is not a value reading (+1); PR labels ARE readable after all — leg ④, the two
+  // PR-native MCP endpoints (+1); the write side's mirror asymmetry, where
+  // `issue_write update` takes a PR number that read leg ① refuses (+1); and the
+  // TITLE truncation — the same read-side discard reaches titles, where it cuts
+  // from the first tag-shaped span to the END rather than leaving a hole, so a
+  // title-derived population count is only a lower bound (+1) = +7 exactly.
+  //
+  // ⚠️ That last line is a NEW ROW, not a rewrite, and the distinction was a
+  // review finding rather than the author's first instinct. It was first written
+  // as an in-place replacement of the read-side row above it, which silently cost
+  // that row its SUBJECT: the original names WHAT is discarded (an angle-bracketed
+  // span inside inline backticks, discarded whole, unescaped, undecodable), and
+  // that is the load-bearing contrast with the entity-escaping row before it,
+  // which IS reversible. The replacement left 「丢弃」 with no antecedent anywhere
+  // in the file. The read-side row is therefore restored BYTE-IDENTICAL to
+  // `origin/main` (blob c242297575d3c04205e47d9628ff0545e5d63da4) and the title
+  // fact pays for its own line.
+  //
+  // ONE correction is paid in place and buys nothing: the PR-label block's
+  // opening row, which said three blind legs where leg ④ now answers.
+  // The single-label omission this increment's carrier card was opened for did
+  // NOT reproduce, so it lands NO line — the negative reading is on the card.
+  // Nothing else was paid in place: the fourth increment MEASURED zero
+  // line-neutral folds among this file's adjacent rule pairs, and re-wrap funding
+  // is refused per the 2026-08-17 rule in any case. Landed count, headroom 0,
+  // same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 402],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -1065,6 +1100,20 @@ export const CROSS_FILE_MOVES = new Map([
             + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
             + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
           date: '2026-09-07',
+          delta: 7,
+        },
+        {
+          // The SEVENTH increment, under the same STANDING exception — the same
+          // words, quoted again rather than cross-referenced, because a record
+          // that quotes no ruling is RED and each record stands alone. The +7 is
+          // accounted for line by line beside this entry's ceiling above.
+          ruling:
+            'the standing one-file exception for'
+            + ' `.claude/skills/pm-dispatch/references/platform-readings.md` — pm-dispatch'
+            + ' SKILL.md, verbatim and untranslated: 「唯一例外:`platform-readings.md`'
+            + ' 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。条件:席位验收评论'
+            + '逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排」',
+          date: '2026-09-08',
           delta: 7,
         },
       ],

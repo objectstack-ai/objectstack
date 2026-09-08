@@ -210,8 +210,11 @@ export interface ApprovalResumeSurface {
    * dead: the #15555 false-negative harm, one surface over) and ⛔ never
    * skipped (that hides the row). Absence of the discriminator is not
    * evidence of anything. Rejects when a store cannot be read; the inspection
-   * counts such a row `undetermined`, exactly as it does a thrown
-   * {@link hasSuspendedRun}.
+   * counts such a row `undetermined` — but ⛔ unlike a thrown
+   * {@link hasSuspendedRun} it does NOT drop the row, because this oracle is
+   * asked only WHICH shape a row already known to be stranded is (#16709).
+   * A host that resolves a malformed verdict is treated the same way, and
+   * costs no OTHER row its answer.
    */
   inspectConsumedSuspension?(runId: string): Promise<
     | { repairable: true }
@@ -495,13 +498,15 @@ function refineFailedRunState(verdict: ConsumedSuspensionVerdict): StrandedRunSt
  *    `NO_CONSUMED_SUSPENSION` covers all three and does not say which. The
  *    label is faithful to the verb: nothing re-arms it; the remedy is a new
  *    run, not a restore.
- *  - `failed` — the engine COULD NOT BE ASKED which of the three it is: the
- *    attached surface has no `inspectConsumedSuspension` (an engine build
- *    older than this plugin, or a test double). Today's undifferentiated
- *    label, kept on purpose as the fail-closed fallback (#15358 ruling, item
- *    1): absence of the discriminator is not evidence, so the row is reported
- *    and its repairability left unstated — ⛔ never `unrepairable`, ⛔ never
- *    dropped from the report.
+ *  - `failed` — the engine COULD NOT BE ASKED which of the three it is, or
+ *    was asked and could not answer. Three ways in: the attached surface has
+ *    no `inspectConsumedSuspension` (an engine build older than this plugin,
+ *    or a test double); the read THREW (a store outage); or the host resolved
+ *    a malformed verdict, violating its own declared surface (#16709). Today's
+ *    undifferentiated label, kept on purpose as the fail-closed fallback
+ *    (#15358 ruling, item 1): a failure to differentiate is not evidence, so
+ *    the row is reported and its repairability left unstated — ⛔ never
+ *    `unrepairable`, ⛔ never dropped from the report.
  *
  * ⚠️ This names the shapes for the REPORT only. It is not a run state: the
  * engine's own vocabulary is still `'completed' | 'paused' | 'failed'`
@@ -4394,7 +4399,10 @@ export class ApprovalService implements IApprovalService {
    * `'snapshot_dropped'` and `'unrepairable'` (see {@link StrandedRunState}).
    * A surface without that member leaves the row `'failed'` — reported,
    * undifferentiated — because absence of the discriminator is not evidence
-   * of anything; a thrown read counts `undetermined`, like the other two.
+   * of anything. So does a read that THREW or answered a malformed verdict
+   * (#16709): by the time this oracle is asked the row is already known to be
+   * stranded, so a failure to differentiate it is not a reason to drop it from
+   * a report — it is counted `undetermined` as telemetry AND reported.
    *
    * ⚠️ **What this can and cannot size.** It makes the condition *visible* in a
    * deployment; it is not itself a census, and it says nothing about this
@@ -4412,7 +4420,16 @@ export class ApprovalService implements IApprovalService {
   async inspectStrandedRequests(options?: { limit?: number }): Promise<{
     scanned: number;
     stranded: StrandedApprovalRequest[];
-    /** Rows skipped because the suspension store could not be read — NOT healthy, just unknown. */
+    /**
+     * Reads that could not be MADE — telemetry, ⛔ never a verdict and ⛔ never
+     * a "healthy" number. A thrown first or second oracle SKIPS its row
+     * (whether that row is stranded at all is then unknown, and a storage
+     * outage must not be published as a lost run); a thrown or malformed THIRD
+     * read leaves its row in `stranded` as the undifferentiated `'failed'` and
+     * is counted here as well — the row is known to be stranded, only its
+     * shape could not be told (#16709). So this counter and `stranded.length`
+     * overlap on purpose, and neither one alone sizes the scan's blind spot.
+     */
     undetermined: number;
   }> {
     const empty = { scanned: 0, stranded: [] as StrandedApprovalRequest[], undetermined: 0 };
@@ -4480,19 +4497,43 @@ export class ApprovalService implements IApprovalService {
       // the other two oracles. See `refineFailedRunState` and
       // `StrandedRunState` for the three answers and why none is folded.
       if (runState === 'failed' && typeof this.automation.inspectConsumedSuspension === 'function') {
-        let verdict: ConsumedSuspensionVerdict;
+        // ⚠️ [#16709 item 3] The REFINEMENT runs inside this `try`, with the
+        // read it refines. `refineFailedRunState` dereferences the verdict, so
+        // a host that violates the declared surface — resolving `undefined`
+        // where a verdict is declared — used to throw a `TypeError` out of
+        // `inspectStrandedRequests` itself, turning a PARTIAL answer into NO
+        // answer for every OTHER row in the scan. Enumerating the rows that
+        // cannot advance is this method's entire purpose, so a misbehaving
+        // implementation must cost at most the differentiation of its own row.
+        let refined: StrandedRunState | undefined;
+        let differentiated = true;
         try {
-          verdict = await this.automation.inspectConsumedSuspension(runId);
+          refined = refineFailedRunState(await this.automation.inspectConsumedSuspension(runId));
         } catch (err: any) {
+          // [#16709 item 2 — PM ruling, 2026-09-08] The row STAYS in the
+          // report, as the undifferentiated `'failed'`. This oracle is not
+          // asked WHETHER the row is stranded: the first two already answered
+          // that (no live pause, terminal `failed`). It is asked only WHICH of
+          // the three shapes it is — so a read that could not be made is the
+          // textbook "could not differentiate" case, which is exactly what
+          // `'failed'` is kept for (#15358 ruling, item 1).
+          //
+          // ⛔ Never dropped from the list. This is a REPORT of rows that
+          // cannot advance, and a row whose state we failed to determine is
+          // precisely the row an operator has to see; skipping it would make
+          // "nothing stranded" read TRUE while a row is in fact stuck, with
+          // the only trace a log line nobody is paging on. `undetermined`
+          // still counts it, as telemetry — never as a verdict.
+          differentiated = false;
           undetermined++;
           this.logger?.warn?.('[approvals] stranded-request scan could not read the consumed-suspension state', {
             request: raw?.id, run: runId, error: err?.message ?? String(err),
           });
-          continue;
         }
-        const refined = refineFailedRunState(verdict);
-        if (!refined) continue;   // re-armed between the two reads — alive after all
-        runState = refined;
+        if (differentiated) {
+          if (!refined) continue;   // re-armed between the two reads — alive after all
+          runState = refined;
+        }
       }
 
       // Neither suspended nor recoverable: the run this decision was supposed to

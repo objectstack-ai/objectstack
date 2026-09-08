@@ -461,6 +461,7 @@
     "listViewGroupKeyPredicate (function)",
     "normalizeFilterOperator (function)",
     "normalizeInlineAction (function)",
+    "objectNavTargetExclusivity (function)",
     "pageForm (const)",
     "partitionAssembledViewArtifacts (function)",
     "reactBlockTagFor (function)",

@@ -674,10 +674,11 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
-     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
-     * which both anchors moved by exactly one line (the icon block from
-     * `729-735`, the registration input from `788`), so NO anchor moved here;
+     * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 —
+     * `containers.tsx` is byte-identical to the one at `a472b0716` and, through
+     * it, to `00d3f09c5`, the last hop on which either anchor moved by exactly
+     * one line (the icon block from `729-735`, the registration input from
+     * `788`), so NO anchor moved here;
      * both were re-READ at the new pin with the cited text unchanged rather
      * than inferred from that identity): `containers.tsx:730-736`
      * renders
@@ -1733,10 +1734,11 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 —
-     * `containers.tsx` is byte-identical to the one at `00d3f09c5`, the hop on
-     * which both anchors moved by exactly one line (the icon block from
-     * `918-924`, the registration input from `965`), so NO anchor moved here;
+     * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 —
+     * `containers.tsx` is byte-identical to the one at `a472b0716` and, through
+     * it, to `00d3f09c5`, the last hop on which either anchor moved by exactly
+     * one line (the icon block from `918-924`, the registration input from
+     * `965`), so NO anchor moved here;
      * both were re-READ at the new pin with the cited text unchanged rather
      * than inferred from that identity): `containers.tsx:919-925`
      * renders
@@ -1940,9 +1942,10 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — both
+   * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 — both
    * files, `resolve-icon.ts` and `button.tsx`, are byte-identical to the ones
-   * at `00d3f09c5`, so no anchor MOVED; the re-READ still corrected two that
+   * at `a472b0716` and, through them, to `00d3f09c5`, so no anchor MOVED; an
+   * earlier re-READ corrected two that
    * had been wrong since they were written — the registration's input list and
    * its `defaultProps`, see the last paragraph of this block. The hop onto
    * `00d3f09c5` was the one that moved this record's SUBSTANCE rather than
@@ -2581,10 +2584,11 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `a472b0716`; re-derived at that pin 2026-09-04 — all
+   * (`.objectui-sha` = `53ded82bf`; re-derived at that pin 2026-09-08 — all
    * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
    * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
-   * byte-identical to the ones at `00d3f09c5` and at `67dadd602` before it, so
+   * byte-identical to the ones at `a472b0716`, at `00d3f09c5` and at
+   * `67dadd602` before it, so
    * NO anchor moved — the `object-metric` registration still begins at `:194`
    * and the icon input still lands on `:204`. Every anchor below was re-READ
    * at the new pin rather than inferred from that identity), and the chain
@@ -2645,7 +2649,8 @@ export type ObjectMetricProps = z.input<typeof ObjectMetricPropsSchema>;
  * (`KanbanRenderer`, index.tsx). `groupField` is the DESIGNER's spelling with
  * zero read points (#7973 class) — aliased to the `groupBy` the board reads.
  * `limit` (#16503) was measured later, at the pin this repo builds against
- * (`.objectui-sha` = `a472b0716`): `ObjectKanban.tsx:264`, the `$top` of the
+ * (`.objectui-sha` = `53ded82bf`; re-READ there 2026-09-08, file
+ * byte-identical to `a472b0716`, anchor unmoved): `ObjectKanban.tsx:264`, the `$top` of the
  * board's one query — its docblock below carries the four-face record.
  */
 export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
@@ -2669,7 +2674,9 @@ export const ObjectKanbanPropsSchema = lazySchema(() => strictObject({
    * Row cap (#16503 — the spec half of objectui#8172; decision batch #68,
    * 2026-09-07, option A: the contract declares the capability that already
    * ships, is documented and is in use). Measured at the objectui pin this
-   * repo builds against (`.objectui-sha` = `a472b0716`), four faces agreed
+   * repo builds against (`.objectui-sha` = `53ded82bf`; all four anchors
+   * re-READ at that pin 2026-09-08, every `plugin-kanban` file byte-identical
+   * to the one at `a472b0716` and none moved), four faces agreed
    * while this map refused the key by name: the board's one query is
    * `dataSource.find(objectName, { $filter: schema.filter, $top: schema.limit
    * ?? DEFAULT_KANBAN_LIMIT })` (`plugin-kanban/src/ObjectKanban.tsx:262-266`,

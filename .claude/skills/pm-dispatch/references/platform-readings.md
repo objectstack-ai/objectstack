@@ -12,6 +12,7 @@
 - 它分得开从未入队与入队后被踢;`pull_request.enqueued` webhook 推送式不可重读,只作旁证。
 - `auto_merge` 字段不只是空,是不稳定:同一 PR 一分钟内先 set 后 None,入队后又回落 off。
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
+- 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
 - 成功序列读间隔不读事件名:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被踢。
 - 真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
@@ -19,6 +20,7 @@
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
 - 队列落的是另一个提交:`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO。
 - 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
+- `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
 - `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
 - `dirty` 即队列入口否决(冲突对象是当前 main);draft PR 恒回 `draft`。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
@@ -49,6 +51,7 @@
 - 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
 - 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
 - ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
+- `enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述的优雅失败相反。
 - 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
 - 配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生 ⇒ 验效果,不验回应。
 - 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
@@ -201,12 +204,14 @@
 - `issue_write` 还清空每个未传字段(assignees 在内)⇒ 单字段更新必须把现值带齐重写。
 - 追加端点同样先过探针:403 会话没有真追加通道,只能整组替换。
 - 摘标签也没有加法端点:`finding` 定级这类只能整组写,carve-out 保留;写后照纪律回读。
-- PR 标签的三条读腿全盲、两条静默。
+- PR 标签走 issue 形通道的三条读腿全盲、两条静默,PR 原生端点见腿 ④。
 - 腿 ①:`issue_read get_labels` 传 PR 号回 Could not resolve to an Issue。
 - REST 的 PR 也是 issue 惯例在此方法不成立;响亮失败即路由信号,改走腿 ③。
 - 腿 ②:`pull_request_read get` 的 `labels` 时缺时滞,可整字段缺席;连盲都不稳定,更险。
 - 腿 ③:payload 档 —— issue 页的 `href` 锚点 grep(`/labels/NAME`)在 PR 页命中零。
 - PR 侧拼写是 `data-name="NAME"`,片链到 `issues?q=…label%3A…`。
+- 腿 ④:`list_pull_requests` 与 `search_pull_requests` 传 PR 号回完整 `labels`,是可用读腿。
+- 反向不对称:`issue_write update` 传 PR 号写 `labels` 与 `assignees` 生效,而读腿 ① 拒 PR 号。
 - ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
 - 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
 - ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
@@ -216,6 +221,7 @@
 - MCP `issue_read` 的 body 实体转义是纯读侧伪影,撇号与引号与尖括号成数字实体,comments 原样。
 - 存储体是明文,先解码实体再写回往返安全;腐蚀 body 的恰是把转义读数原样回写。
 - 读侧并非一律可逆:行内反引号里的尖括号片段被 MCP 读路径整个丢弃,非转义,无从解码。
+- 该丢弃亦及标题:自首个 tag 形跨度截到尾,是切不是洞 ⇒ 凭标题的总体计数只是下界。
 - 写侧剥除是真实存储损耗,⛔ 两类不并成一条,写后回读必做;实体归属与 `&amp;` 类未实测。
 - 评论里独立成行的标记同被读路径吃掉留空行 ⇒ 缺失不证写侧剥除,先读 payload 原体。
 - `Blocked-by:` 行归 BODY,是单通道反向索引:追加按解码后写回执行。
@@ -357,6 +363,7 @@
 - 落地探针除命名代码形外,还必须在落地前的 tip 上读出不同值,否则它分不开两棵树。
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
+- `check:pm-dispatch-gates` 逾容器 600 秒前台上限 ⇒ detach 加 `tail --pid` 前台等;超时不是读数。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
 
 ## 闭合关键词解析(PR 正文写侧)

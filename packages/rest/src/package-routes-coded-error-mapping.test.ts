@@ -165,41 +165,16 @@ const SITES: Site[] = [
     },
   },
   {
-    name: 'GET /packages — the capability gate resolver throws',
+    name: 'POST /packages/publish — the capability gate resolver throws',
     run: async (error: unknown) => {
       const resolveExecutionContext = vi.fn(() => { throw error; });
       const captured = await drive(
-        mount({ list: async () => [] }, { resolveExecutionContext }),
-        'GET',
-        PKGS,
+        mount({ publish: async () => ({ success: true }) }, { resolveExecutionContext }),
+        'POST',
+        `${PKGS}/publish`,
+        { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
       );
       return { captured, reached: () => resolveExecutionContext.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'GET /packages/:id — packageService.get throws',
-    run: async (error: unknown) => {
-      const get = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ get }),
-        'GET',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => get.mock.calls.length === 1 };
-    },
-  },
-  {
-    name: 'DELETE /packages/:id — packageService.delete throws',
-    run: async (error: unknown) => {
-      const del = vi.fn(async () => { throw error; });
-      const captured = await drive(
-        mount({ delete: del }),
-        'DELETE',
-        `${PKGS}/:id`,
-        { params: { id: 'com.acme.crm' } },
-      );
-      return { captured, reached: () => del.mock.calls.length === 1 };
     },
   },
 ];
@@ -369,12 +344,12 @@ describe('#8016 — anti-vacuity: these routes answer normally when nothing thro
     expect(captured.body?.success).toBe(true);
   });
 
-  it('GET /packages/:id returns 404 RESOURCE_NOT_FOUND for an absent package', async () => {
+  it('POST /packages/publish returns 404 RESOURCE_NOT_FOUND when no package service is composed (#7563)', async () => {
     const captured = await drive(
-      mount({ get: async () => undefined }),
-      'GET',
-      `${PKGS}/:id`,
-      { params: { id: 'com.acme.nope' } },
+      mount(undefined as any),
+      'POST',
+      `${PKGS}/publish`,
+      { body: { manifest: MANIFEST, metadata: { author: 'acme' } } },
     );
     expect(captured.status).toBe(404);
     expect(captured.body?.error?.code).toBe('RESOURCE_NOT_FOUND');

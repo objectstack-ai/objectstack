@@ -6,8 +6,16 @@ working in **any ObjectStack app** — this monorepo *and* third-party projects.
 projects add (or update) the bundle with:
 
 ```bash
-npx skills add objectstack-ai/objectstack/skills --all
+npx skills add objectstack-ai/objectstack/skills --skill '*' --agent claude-code -y
 ```
+
+Name your own runtime after `--agent` (`codex`, `cursor`, …) — the bundle is
+byte-identical whichever you name, and it lands **once**, in that agent's own
+directory (`.claude/skills/` for `claude-code`). Replacing
+`--skill '*' --agent claude-code -y` with `--all` is the multi-runtime opt-in:
+it installs for every runtime the CLI knows and writes the bundle to **three**
+destinations instead of one — a full real copy in **both** `.agents/` and
+`agent/`, plus `.claude/` symlinks pointing into `.agents/`.
 
 The `/skills` subpath matters: it is the published catalog boundary — pointing
 the skills CLI at the repo root would also pick up repo-internal skills.
