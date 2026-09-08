@@ -811,8 +811,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         verdict: 'boot-refusal',
         why:
             'Raised by `assertPluginContract` (`plugin-contract.ts`, the one statement `LiteKernel.use()` '
-            + 'calls directly and `PluginLoader.validatePluginContract` runs for `ObjectKernel.use()`, '
-            + '#16721) when a plugin object does not satisfy the '
+            + 'calls directly and `PluginLoader.validatePluginContract` runs for `ObjectKernel.use()`) '
+            + 'when a plugin object does not satisfy the '
             + 'declared `PluginSchema` on any of the EIGHT keys that enforcement covers — `id`, `type`, '
             + '`staticPath`, `slug`, `default`, `description`, `author`, `homepage` — including an explicit '
             + '`null` on any of them, since all eight are `.optional()` and admit absence but not `null`. '
