@@ -1,6 +1,7 @@
 ---
 "@objectstack/spec": minor
 "@objectstack/cli": patch
+"@objectstack/platform-objects": patch
 ---
 
 Two surfaces the console renders that no translation bundle could address — a `kind: 'slotted'` page's components and a dashboard's global-filter bar — are now addressable (#16772).
@@ -13,3 +14,5 @@ Two surfaces the console renders that no translation bundle could address — a 
 **`dashboards.<name>.globalFilters.<key>` is a new bundle group.** A dashboard's filter bar draws directly above the widget titles the bundle has always translated, and neither a filter's label nor its static option labels had a key. The group is keyed by the filter's `name` (`GlobalFilterSchema.name`, declared as defaulting to `field` — a filter that authors no `name` is keyed by its `field`) and carries `label` and an `options.<value>` map keyed by the option `value` spelled as a string. `translateDashboard` overlays it on the served document, which is what objectui's filter bar already reads; the exported `globalFilterKey()` is the one key derivation both the resolver and the extractor use. `optionsFrom` options are fetched rows and are deliberately not addressable.
 
 **`@objectstack/cli`:** `os i18n extract` offers `dashboards.<name>.globalFilters.<key>.label` / `.options.<value>` for every static filter, and `pages.<name>.title` / `.subtitle` for a `page:header` at any root (a slotted page's `slots.header` included) — the component keys under `slots` and tab panels follow from the shared walk with no extractor change.
+
+**`@objectstack/platform-objects`:** the shipped Setup bundles (`en`, `zh-CN`, `ja-JP`, `es-ES`) carry the new `dashboards.<name>.globalFilters.created_at.label` entry for the system-overview dashboard's date-range filter, which authors no `name` and is therefore keyed by its `field`.
