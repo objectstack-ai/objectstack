@@ -28,7 +28,14 @@ describe('Data Engine Contract', () => {
         findOne: async (_objectName, _query?) => null,
         insert: async (_objectName, data, _options?) => data,
         update: async (_objectName, data, _options?) => data,
-        delete: async (_objectName, _options?) => { return { deleted: 1 }; },
+        // [#16231] `delete` declares `Promise[boolean | number]` — whether the
+        // by-id row was there, or how many rows a predicate delete removed.
+        // This fake used to answer `{ deleted: 1 }`, a shape NO driver and NO
+        // engine has ever produced; `Promise[any]` admitted it, and a contract
+        // test modelling a shape the contract does not have is the drift the
+        // declaration exists to stop. Spelled with square brackets in this
+        // comment only where a generic would otherwise be typed out.
+        delete: async (_objectName, _options?) => 1,
         count: async (_objectName, _query?) => 0,
         aggregate: async (_objectName, _query) => [],
       };
@@ -53,7 +60,7 @@ describe('Data Engine Contract', () => {
           return data;
         },
         update: async (_obj, data) => data,
-        delete: async () => ({ deleted: 1 }),
+        delete: async () => 1,
         count: async () => store.length,
         aggregate: async () => [],
       };
@@ -92,7 +99,7 @@ describe('Data Engine Contract', () => {
         },
         insert: async (_obj, data) => data,
         update: async (_obj, data) => data,
-        delete: async () => ({}),
+        delete: async () => true,
         count: async (_obj, _query, options) => {
           seen.push({ method: 'count', isSystem: options?.context?.isSystem });
           return 0;
@@ -123,7 +130,7 @@ describe('Data Engine Contract', () => {
         findOne: async () => null,
         insert: async (_obj, data) => data,
         update: async (_obj, data) => data,
-        delete: async () => ({}),
+        delete: async () => true,
         count: async () => 0,
         aggregate: async () => [],
         vectorFind: async (_objectName, _vector, options?) => {
@@ -156,7 +163,7 @@ describe('Data Engine Contract', () => {
         findOne: async () => null,
         insert: async (_obj, data) => data,
         update: async (_obj, data) => data,
-        delete: async () => ({}),
+        delete: async () => true,
         count: async () => 0,
         aggregate: async () => [],
         execute: async (command, options?) => {

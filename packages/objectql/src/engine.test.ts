@@ -2398,7 +2398,8 @@ describe('ObjectQL Engine', () => {
                 expand: { assignee: { object: 'assignee' } },
             });
 
-            expect(result.assignee).toEqual({ id: 'u1', name: 'Alice' });
+            expect(result).not.toBeNull();
+            expect(result!.assignee).toEqual({ id: 'u1', name: 'Alice' });
         });
 
         it('should handle already-expanded objects (skip re-expansion)', async () => {
