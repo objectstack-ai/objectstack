@@ -25,10 +25,18 @@ What a consumer sees change:
 - `summary_json`'s `description` now names `failed` as the field to read
   lost-row counts from, states that the run-level totals live in the blob
   alongside the per-node breakdown, and repeats the `unmeasured`/`failed`
-  convention that an absent count means "not tracked", never zero. This string
-  ships in the published bundle and is what a Studio/admin surface renders for
-  the field, which is why this carries a changeset rather than
-  `skip-changeset`.
+  convention that an absent count means "not tracked", never zero. ⚠️ This is
+  why the change carries a changeset and NOT `skip-changeset`, and it was
+  MEASURED rather than assumed from "it's only prose": `SysAutomationRun` is
+  re-exported from `src/index.ts`, `package.json` publishes `files: ["dist"]`,
+  and after `pnpm --filter @objectstack/service-automation build` the new
+  description text is present in BOTH published entry points — one hit each in
+  `dist/index.js` and `dist/index.cjs`. `skip-changeset` is for a diff that
+  publishes nothing from any released package; this one changes bytes inside a
+  released package's shipped bundle, so it does not qualify. (`description` is
+  also what the authorable `help` / `helpText` keys alias onto in
+  `packages/spec/src/data/object.zod.ts` — documentation a consumer surface can
+  render, not an internal note.)
 - The comment above `selected_count` — the paragraph that explains why the
   four are columns, and therefore the paragraph a reader is in when they
   notice the fifth is not — now carries the verdict for `failed` and the one
