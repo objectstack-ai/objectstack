@@ -331,7 +331,11 @@ function toMcpWebRequest(_deps: DomainHandlerDeps, raw: any, parsedBody: any): R
  * contract cannot drift from it, where a second hand-written `getMetaItems(…)`
  * signature silently could.
  */
-type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
+// [#15238] Exported so the handle-typing pin beside this file can name it —
+// the same reason `domains/packages.ts` exports `PackagesDomainProtocol`. Not a
+// published-surface change: `packages/runtime`'s index does not re-export
+// `domains/`.
+export type McpMergedMetadataRead = Pick<MetadataProtocol, 'getMetaItems'>;
 
 /**
  * [#8726] Read this environment's `skill` rows through the merged listing.

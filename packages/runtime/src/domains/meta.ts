@@ -795,7 +795,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // very fan-out.
                 const objectMasker = await resolveObjectMasker(deps, _context);
 
-                if (scoped && typeof protocol.getMetaItem === 'function') {
+                // [#15238] `protocol &&` spelled out, matching the `!scoped` twin
+                // below. Behaviour-identical: `scoped` is derived from
+                // `protocol?.getProjectId` / `protocol?.environmentId`, so it can only
+                // be true when the handle is there. The `any` cast this branch used to
+                // resolve through is what let the two sibling guards drift apart in
+                // spelling — typing the handle is what surfaced it (TS18048).
+                if (scoped && protocol && typeof protocol.getMetaItem === 'function') {
                     try {
                         const organizationId = await deps.resolveActiveOrganizationId(_context);
                         const data = await protocol.getMetaItem({ type: 'object', name, organizationId });
