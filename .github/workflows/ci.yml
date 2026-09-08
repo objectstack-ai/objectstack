@@ -4,9 +4,33 @@ on:
   push:
     branches:
       - main
+  # ⭐ NO `branches:` filter here, deliberately (#16482). A `pull_request:`
+  # trigger filtered to `branches: [main]` does not run at all when the PR's
+  # base is a feature branch — and a workflow that does not run publishes NO
+  # check run, which is an ABSENCE, not a skip. Branch protection reads that as
+  # permanently pending, so every required context this file publishes reports
+  # nothing on such a PR. Measured on the #14478 stack: six card PRs showed
+  # 8-11 light checks and ZERO of the six required contexts; the first real
+  # signal arrived at the trunk PR, after every card was written, reviewed and
+  # merged. Correctness rested on local runs quoted into PR bodies — a
+  # discipline, not a gate.
+  #
+  # Runner cost of removing the filter, measured 2026-09-08 over the 30 days
+  # 2026-08-09 → 2026-09-08 (4000 PRs read, `sort=created&direction=desc` paged
+  # until the window closed): 6 of 4000 PRs had a base other than `main`
+  # (0.15%), all six the #14478/#15679 stack. At the window's measured 7008
+  # pull_request runs per workflow, 0.15% is ~10.5 extra runs per workflow per
+  # 30 days ≈ 2.5/week, or ~57 job-runs/week across both files at 23 job-runs
+  # per PR event. Even the pessimistic bound — one uncancelled run per one of
+  # those PRs' 115 commits — is 1.6% of current pull_request spend. Small, so
+  # the trigger is widened unconditionally rather than gated on a label or on
+  # "the base is an open PR's head" (#16482 records the arithmetic).
+  #
+  # ⛔ Do NOT mirror this widening onto the `push:` trigger above. `push:` is
+  # per-branch, not per-PR: unfiltering it would run this workflow on every
+  # push to every agent branch in the repo, which is a different and far larger
+  # population than the 6 PRs measured here.
   pull_request:
-    branches:
-      - main
   # Merge queue: the queue builds each PR as speculatively merged onto the
   # current main and only lands it if this workflow is green on that result —
   # the race-free version of the "pull main and re-verify before merging"
