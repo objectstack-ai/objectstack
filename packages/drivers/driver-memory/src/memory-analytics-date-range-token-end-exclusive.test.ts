@@ -138,12 +138,14 @@ const iso = (t: number) => new Date(t).toISOString();
  * asserted to be a local midnight by this function.
  */
 function localClock(instant: string, zone: string): string {
+    // ⛔ No `fractionalSecondDigits`: it is not in this package's `lib` view of
+    // `Intl.DateTimeFormatOptions`. The sub-second half is checked directly on
+    // the literal instead — see the fence below.
     return new Intl.DateTimeFormat('en-CA', {
         timeZone: zone,
         hourCycle: 'h23',
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
-        fractionalSecondDigits: 3,
     }).format(new Date(instant));
 }
 
@@ -253,10 +255,13 @@ describe("#16179 — 'today' stops BEFORE tomorrow's first instant", () => {
     it('every window literal is a local midnight in its own zone — checked against `Intl`, not against the code under test', () => {
         for (const c of CELLS) {
             for (const bound of c.window) {
+                // The clock half, from the tz database.
                 expect(
                     localClock(bound, c.zone),
                     `${label(c)}: ${bound} is not midnight in ${c.zone}`,
-                ).toMatch(/ 00:00:00\.000$/);
+                ).toMatch(/ 00:00:00$/);
+                // The sub-second half, read off the literal itself.
+                expect(bound, `${label(c)}: ${bound} carries a sub-second part`).toMatch(/\.000Z$/);
             }
         }
     });
