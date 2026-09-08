@@ -183,7 +183,6 @@ export class StorageServicePlugin implements Plugin {
 
   private readonly options: StorageServicePluginOptions;
   private storage: SwappableStorageService | null = null;
-  private store: StorageMetadataStore | null = null;
   private metrics: MetricsRegistry = new NoopMetricsRegistry();
   /**
    * What the CURRENTLY installed adapter points at (#4096). Set beside every
@@ -435,24 +434,16 @@ export class StorageServicePlugin implements Plugin {
         }
 
         if (httpServer && this.storage) {
-          this.store = new StorageMetadataStore(engine);
-
-          registerStorageRoutes(httpServer, this.storage, this.store, {
+          // [#15169] ONE composition, shared with the host door
+          // (`mountStorageRoutes`): the gates are bound in
+          // `composeStorageRoutes`, from the kernel, and nowhere else — so the
+          // plugin's own mount and a host's cannot drift apart.
+          composeStorageRoutes(httpServer, toGateRegistry(ctx), {
+            storage: this.storage,
+            engine,
             basePath: this.options.basePath ?? '/api/v1/storage',
             presignedTtl: this.options.presignedTtl,
             sessionTtl: this.options.sessionTtl,
-            resolveSession: buildAuthSessionResolver(ctx),
-            authorizeFileRead: buildFileReadAuthorizer(ctx, engine),
-            // "Is anything still holding this tombstone?" on the READ side
-            // (#10246) — the reap guard's own `findFileHolder`, handed over
-            // rather than re-derived. One definition of "still held", asked by
-            // the sweep before it reaps and by the download path before it
-            // refuses, so the two cannot answer differently. No engine (bare
-            // kernel) leaves it undefined and tombstones stay refused.
-            resolveFileHolder:
-              engine && typeof (engine as any).find === 'function'
-                ? (file: FileRecord) => findFileHolder(engine as any, file.id, file as any)
-                : undefined,
             logger: ctx.logger,
           });
 
@@ -762,10 +753,10 @@ function toWebHeaders(req: { headers?: unknown }): any | null {
 }
 
 /** A `getSession(headers)` bound to the kernel's `auth` service, or null. */
-function buildGetSession(ctx: PluginContext): ((headers: any) => Promise<any>) | null {
+function buildGetSession(registry: StorageGateRegistry): ((headers: any) => Promise<any>) | null {
   let authService: any;
   try {
-    authService = ctx.getService<any>('auth');
+    authService = registry.getService<any>('auth');
   } catch {
     return null;
   }
@@ -775,6 +766,163 @@ function buildGetSession(ctx: PluginContext): ((headers: any) => Promise<any>) |
     if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
     if (!api?.getSession) return undefined;
     return api.getSession({ headers });
+  };
+}
+
+/** The default wire prefix of the storage door. */
+const DEFAULT_STORAGE_BASE_PATH = '/api/v1/storage';
+
+/**
+ * [#15169] The slice of a kernel the storage door is composed FROM — the
+ * registry accessors its gates read, and nothing else.
+ *
+ * Structurally satisfied by every shape a caller holds today: an
+ * `ObjectKernel` (`getService` + `getServiceAsync`), a `LiteKernel`
+ * (`getService` only), and a `PluginContext` (`getService`, with the async
+ * registry one hop away through `getKernel()`). {@link toGateRegistry}
+ * normalises whichever arrives into the {@link StorageGateRegistry} the gate
+ * builders take, so the tenancy-posture read (#15352) runs identically for a
+ * host that hands over a kernel and for the plugin's own `kernel:ready` mount.
+ */
+export interface StorageRouteKernel {
+  /** Sync registry lookup; throws when the slot is absent. */
+  getService<T>(name: string): T;
+  /**
+   * Async registry lookup carrying the branded "never registered" rejection
+   * (`ObjectKernel`). Absent on hosts without one — a `LiteKernel` — and the
+   * posture read stays quiet there (family-wide behaviour, #15997).
+   */
+  getServiceAsync?<T>(name: string, scopeId?: string): Promise<T>;
+  /** A `PluginContext` reaches the async registry through its kernel. */
+  getKernel?(): { getServiceAsync?<T>(name: string, scopeId?: string): Promise<T> } | undefined;
+}
+
+/**
+ * What the gate builders READ — package-internal. A sync registry, plus the
+ * async one when the host has it. Never a `PluginContext` any more: the
+ * builders used to take one and read `getKernel?.()` themselves, which meant a
+ * host holding a bare kernel (no context at all) could not build the gates
+ * without impersonating a context. See {@link toGateRegistry}.
+ */
+export interface StorageGateRegistry {
+  getService<T>(name: string): T;
+  getServiceAsync?<T>(name: string, scopeId?: string): Promise<T>;
+}
+
+/**
+ * Normalise whatever registry-shaped thing the caller holds into the slice the
+ * gate builders read. The async accessor is taken from the value itself when
+ * it has one (a kernel), else from `getKernel()` (a plugin context on a real
+ * kernel), else left absent (a `LiteKernel`, or a test context with neither) —
+ * the exact three-way reading `resolveAdmissionTenancyPosture` used to perform
+ * inline, now performed once so both mount paths share it.
+ */
+export function toGateRegistry(kernel: StorageRouteKernel): StorageGateRegistry {
+  const registry: StorageGateRegistry = {
+    getService: <T>(name: string): T => kernel.getService<T>(name),
+  };
+  const asyncSource = typeof kernel.getServiceAsync === 'function' ? kernel : kernel.getKernel?.();
+  const getServiceAsync = asyncSource?.getServiceAsync;
+  if (asyncSource && typeof getServiceAsync === 'function') {
+    registry.getServiceAsync = <T>(name: string, scopeId?: string): Promise<T> =>
+      getServiceAsync.call(asyncSource, name, scopeId) as Promise<T>;
+  }
+  return registry;
+}
+
+/** The inputs {@link composeStorageRoutes} binds the door over. Package-internal. */
+export interface StorageRoutesComposition {
+  /** The `storage` service the routes serve bytes through. */
+  storage: IStorageService;
+  /** The data engine `sys_file` / `sys_upload_session` live in; `null` ⇒ in-memory metadata (bare kernel). */
+  engine: IDataEngine | null;
+  basePath?: string;
+  presignedTtl?: number;
+  sessionTtl?: number;
+  downloadTtl?: number;
+  logger?: { info(msg: string): void; warn(msg: string): void };
+}
+
+/**
+ * What a mount bound — booleans, never the gate functions themselves. A host
+ * reads it to say at boot what its storage door enforces (Route & surface
+ * ownership §3: absence must be loud), and a test pins it without being handed
+ * anything it could call around the door.
+ */
+export interface StorageRoutesMountReport {
+  /** The wire prefix the routes were registered under. */
+  basePath: string;
+  /** Upload routes require a session (the kernel's `auth` service was present). */
+  sessionResolver: boolean;
+  /**
+   * Parent-governed downloads consult the ADR-0104 D3 authorization gate (the
+   * kernel had BOTH an `auth` service and a data engine). `false` ⇒ downloads
+   * of gated files stay OPEN — the declared bare-kernel behaviour.
+   */
+  downloadAuthorizer: boolean;
+  /** Tombstoned rows are re-judged through the reap guard's `findFileHolder` (#10246). */
+  tombstoneHolderResolver: boolean;
+  /** Where `sys_file` metadata lives for this mount. */
+  metadataStore: 'engine' | 'memory';
+}
+
+/**
+ * [#15169] Compose the storage door: bind the three gates FROM the registry and
+ * register the routes over them. Package-internal; the two callers are the
+ * plugin's own `kernel:ready` mount and the public host door
+ * `mountStorageRoutes` (`mount-storage-routes.ts`).
+ *
+ * This is the ONE place `resolveSession` / `authorizeFileRead` /
+ * `resolveFileHolder` are wired, and the reason the three builders are not
+ * on the package's public surface: a host that needs storage routes on a
+ * kernel without an `http-server` service (cloud's per-environment tenant
+ * kernels) gets the composition, not its parts. It cannot substitute the
+ * download gate — `buildFileReadAuthorizer` IS the ADR-0104 D3 download
+ * authorization — because nothing on the public option types names it; it
+ * cannot omit it either, because it is bound here from the kernel the host
+ * hands over. A consumer re-implementing the authorizer in its own code is
+ * how a security decision acquires a second, divergent definition, and it
+ * was refused (#15169 option C).
+ *
+ * `resolveFileHolder` is bound to the reap guard's own `findFileHolder`
+ * (#10246): one definition of "still held", asked by the sweep before it
+ * reaps and by the download path before it refuses, so the two cannot answer
+ * differently. No engine (bare kernel) leaves it undefined and tombstones stay
+ * refused — the same reason the predicate itself stays unexported (see
+ * `index.ts`).
+ */
+export function composeStorageRoutes(
+  http: IHttpServer,
+  registry: StorageGateRegistry,
+  composition: StorageRoutesComposition,
+): StorageRoutesMountReport {
+  const basePath = composition.basePath ?? DEFAULT_STORAGE_BASE_PATH;
+  const engine = composition.engine;
+  const store = new StorageMetadataStore(engine);
+  const resolveSession = buildAuthSessionResolver(registry);
+  const authorizeFileRead = buildFileReadAuthorizer(registry, engine);
+  const resolveFileHolder =
+    engine && typeof (engine as any).find === 'function'
+      ? (file: FileRecord) => findFileHolder(engine as any, file.id, file as any)
+      : undefined;
+
+  registerStorageRoutes(http, composition.storage, store, {
+    basePath,
+    presignedTtl: composition.presignedTtl,
+    sessionTtl: composition.sessionTtl,
+    downloadTtl: composition.downloadTtl,
+    resolveSession,
+    authorizeFileRead,
+    resolveFileHolder,
+    logger: composition.logger,
+  });
+
+  return {
+    basePath,
+    sessionResolver: resolveSession !== undefined,
+    downloadAuthorizer: authorizeFileRead !== undefined,
+    tombstoneHolderResolver: resolveFileHolder !== undefined,
+    metadataStore: engine ? 'engine' : 'memory',
   };
 }
 
@@ -800,10 +948,10 @@ function buildGetSession(ctx: PluginContext): ((headers: any) => Promise<any>) |
  * organization therefore means no stamp — the pre-#12745 behaviour, reported
  * by the backfill rather than invented here.
  */
-function buildAuthSessionResolver(
-  ctx: PluginContext,
+export function buildAuthSessionResolver(
+  registry: StorageGateRegistry,
 ): ((req: { headers?: unknown }) => Promise<StorageUploadSession | null>) | undefined {
-  const getSession = buildGetSession(ctx);
+  const getSession = buildGetSession(registry);
   if (!getSession) return undefined;
   return async (req) => {
     try {
@@ -881,6 +1029,12 @@ function buildAuthSessionResolver(
  *
  * ## Why `getServiceAsync`, and why its ABSENCE stays quiet ON THIS DOOR
  *
+ * Since #15169 the accessor arrives already normalised: {@link toGateRegistry}
+ * takes `getServiceAsync` off a kernel directly, or off `getKernel()` for a
+ * plugin context, or leaves it absent — so this function reads one slice
+ * whichever mount path built it (the plugin's own, or a host's
+ * `mountStorageRoutes`). The three-way reading below is unchanged in effect.
+ *
  * ⚠️ The brand exists only on the ASYNC resolution path: `PluginContext.getService`
  * — the accessor every other lookup in this file uses — throws two UNBRANDED
  * plain `Error`s (`… not found` and `… is async - use await`), so a synchronous
@@ -917,14 +1071,11 @@ function buildAuthSessionResolver(
  * extraction is worth doing — once, as its own card, after they land.
  */
 async function resolveAdmissionTenancyPosture(
-  ctx: PluginContext,
+  registry: StorageGateRegistry,
 ): Promise<TenancyPosture | undefined> {
-  const kernel = ctx.getKernel?.() as
-    | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
-    | undefined;
-  if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
+  if (typeof registry.getServiceAsync !== 'function') return undefined;
   try {
-    return effectiveTenancyPosture(await kernel.getServiceAsync<TenancyPostureSource>('tenancy'));
+    return effectiveTenancyPosture(await registry.getServiceAsync<TenancyPostureSource>('tenancy'));
   } catch (err) {
     if (!isServiceNotRegisteredError(err)) {
       throw new AuthzStoreUnavailableError('tenancy', err);
@@ -949,11 +1100,11 @@ async function resolveAdmissionTenancyPosture(
  * more. A shared model would have had to union field references too, silently
  * widening access whenever one file id was copied into a more public record.
  */
-function buildFileReadAuthorizer(
-  ctx: PluginContext,
+export function buildFileReadAuthorizer(
+  registry: StorageGateRegistry,
   engine: IDataEngine | null,
 ): ((file: FileRecord, req: { headers?: unknown }) => Promise<FileReadVerdict>) | undefined {
-  const getSession = buildGetSession(ctx);
+  const getSession = buildGetSession(registry);
   if (!getSession || !engine || typeof (engine as any).find !== 'function') return undefined;
 
   return async (file, req) => {
@@ -967,7 +1118,7 @@ function buildFileReadAuthorizer(
       // why a quiet `catch` at this seam would be the defect rather than the
       // fix. Raised INSIDE this `try`, so an outage takes the #13279 relay in
       // the `catch` below rather than a new net.
-      const tenancyPosture = await resolveAdmissionTenancyPosture(ctx);
+      const tenancyPosture = await resolveAdmissionTenancyPosture(registry);
       const authz = await resolveAuthzContext({ ql: engine, headers, getSession, tenancyPosture });
       if (!authz.userId) return 'unauthenticated';
 
@@ -990,7 +1141,7 @@ function buildFileReadAuthorizer(
         const delegateName = (engine as any).getObject?.(ownerObject)?.fileAccessDelegate;
         if (typeof delegateName === 'string' && delegateName) {
           try {
-            const delegate = ctx.getService<IFileAccessDelegate>(delegateName);
+            const delegate = registry.getService<IFileAccessDelegate>(delegateName);
             if (!delegate || typeof delegate.authorizeFileRead !== 'function') return 'deny';
             return (await delegate.authorizeFileRead(ownerId, authz)) ? 'allow' : 'deny';
           } catch {
