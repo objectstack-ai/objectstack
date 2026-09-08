@@ -938,7 +938,8 @@ for (const [driverName, makeDriver] of DRIVERS) {
  * entirely — they are about the ENGINE's pass order, which is what the F1 fix
  * moved. They live here because this file is where that reorder is justified.
  */
-describe('[#16608 F1] what moving the strips ahead of the credential channel changes', () => {
+for (const [credDriverName, makeCredDriver] of DRIVERS) {
+describe(`[#16608 F1] ${credDriverName} — what moving the strips ahead of the credential channel changes`, () => {
   const OBJ = 'qa_ro_cred';
   // The same non-system caller the cells above use — granted create on this
   // object, and governed by NO `check`, so nothing here is the RLS gate's doing.
@@ -951,7 +952,7 @@ describe('[#16608 F1] what moving the strips ahead of the credential channel cha
     // value test then compared a REF against the caller's plaintext, read the
     // difference as "a hook rewrote this key", and KEPT it — the one input
     // where that test inverts. Pre-existing on 17.3.0, closed by the reorder.
-    const booted = await boot(DRIVERS[0]![1]);
+    const booted = await boot(makeCredDriver);
 
     const outcome = await attempt(() =>
       booted.engine.insert(
@@ -985,7 +986,7 @@ describe('[#16608 F1] what moving the strips ahead of the credential channel cha
     // `refuseEmptyPasswordFields` up too would let a field-level validation
     // verdict answer a write that RLS refuses, which is the wrong precedence
     // for a security gate.
-    const booted = await boot(DRIVERS[0]![1]);
+    const booted = await boot(makeCredDriver);
 
     const outcome = await attempt(() =>
       booted.engine.insert(OBJ, { id: 'cred_2', name: 'n', pw: '' }, { context: CALLER } as never),
@@ -997,3 +998,4 @@ describe('[#16608 F1] what moving the strips ahead of the credential channel cha
     expect(rows[0]!.pw, 'the empty credential is not stored — the ruling’s guarantee, unchanged').toBeNull();
   });
 });
+}
