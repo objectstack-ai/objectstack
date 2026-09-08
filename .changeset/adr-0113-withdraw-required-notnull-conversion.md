@@ -1,5 +1,6 @@
 ---
 "@objectstack/spec": patch
+"@objectstack/driver-sql": patch
 ---
 
 fix(spec): withdraw the `field-required-notnull-explicit` ADR-0087 conversion — `required: true` no longer stamps `storage.notNull: true` on anybody's fields (#16693)
@@ -18,3 +19,5 @@ ADR-0113 split the pre-17 `required` tri-binding on purpose: `required` is the *
 **No migration is owed to anyone** (maintainer ruling, 2026-09-08, decision batch #85, option A). Genuinely pre-ADR-0113 artifacts are not measured to exist, existing columns are left exactly as they are, and an app that wants NOT NULL columns declares `storage.notNull` deliberately — which is what the app that reported this had already done.
 
 The protocol-17 ledger entry and the generated upgrade guide now say this in the other direction too, and the falsified sentence in `sql-driver.ts` — "sources authored before protocol 17 carry `storage.notNull` explicitly via the `field-required-notnull-explicit` conversion, so their columns come out exactly as they always did" — is corrected where it stood.
+
+Two sentences in `@objectstack/driver-sql` that this withdrawal falsifies are corrected with it, and no drift behaviour changes. The `relax_not_null` finding — raised when a column is NOT NULL and the metadata declares no `storage` constraint — used to prescribe "(pre-protocol-17 sources: `os migrate meta` stamps it for every previously-required field)"; it now says the constraint has to be declared by its author, because nothing supplies it any more. The comment beside it, which closed with "`os migrate meta` ratifies it whenever the source is next migrated", says so too. The deliberate SILENCE for a `required: true` field whose column is already NOT NULL is unchanged — this corrects the sentences, never the finding.
