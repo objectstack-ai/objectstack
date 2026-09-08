@@ -937,9 +937,12 @@ export const FlowSchema = lazySchema(() => strictObject(
   // document order, depth first — and "already declared by" is the earlier
   // position in that walk, named as a top-level index (`nodes[1]`) or a region
   // path (`loop 'sweep' body → nodes[0]`). This is the one refusal an author
-  // meets: `analyzeRegion` (at `registerFlow()`) keeps a per-region uniqueness
-  // invariant for direct raw-region callers, but a flow that parses never
-  // reaches it with a collision, and a flow with one never parses.
+  // meets at every depth the walk reaches: `collectFlowGraphs` stops at
+  // `MAX_REGION_DEPTH` (the ceiling `parseFlowNodeRegions` shares), so a region
+  // nested beyond it is left raw and stays `validateControlFlow`'s — there
+  // `analyzeRegion`'s own `duplicate node id` line is the only refusal of a
+  // within-region duplicate (a cross-region collision past the ceiling is not
+  // judged), and it also guards `bpmn-mapping`'s raw-region caller. Kept.
   const firstNodeLocationById = new Map<string, string>();
   for (const graph of collectFlowGraphs(flow)) {
     graph.nodes.forEach((node, index) => {

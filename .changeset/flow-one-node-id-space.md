@@ -4,12 +4,13 @@
 
 feat(spec)!: `FlowSchema` refuses a region node whose id is already declared elsewhere in the flow — one node-id space across the top-level `nodes[]` and every region body (#16134)
 
-<!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-typed: `nodes[].id` keeps its name, its type and its describe at every depth, and every flow whose node ids are unique across the whole flow parses byte-identically. The only newly refused shape is a region node (`loop.config.body`, `try_catch.config.try` / `.catch`, `parallel.config.branches[]`, at any depth) carrying an id that a top-level node or a node in another region already declares — a collision, not a spelling — and its remedy is to rename one of the two (and re-point the edges that meant it), which is authoring intent no `objectstack migrate meta` rewrite can choose for the author. The census over this repository at `83863b2df` (AST scan of `packages/**` and `examples/**`: 972 outermost literal `nodes[]` arrays including tests, 66 excluding; 102 region arrays / 86 region nodes with a literal id, 15 / 11 excluding tests; a planted region-reuses-top-level-id control reads 1 at its planted line) found zero cross-region or region-vs-top-level collisions, so there is no in-repo file to name. -->
+<!-- adr-0087: not-required (no-migration-prescription) No authorable key is renamed, retired or re-typed: `nodes[].id` keeps its name, its type and its describe at every depth, and every flow whose node ids are unique across the whole flow parses byte-identically. The only newly refused shape is a region node (`loop.config.body`, `try_catch.config.try` / `.catch`, `parallel.config.branches[]`, at any depth the parse walks — nesting up to `MAX_REGION_DEPTH` = 32) carrying an id that a top-level node or a node in another region already declares — a collision, not a spelling — and its remedy is to rename one of the two (and re-point the edges that meant it), which is authoring intent no `objectstack migrate meta` rewrite can choose for the author. The census over this repository at `83863b2df` (AST scan of `packages/**` and `examples/**`: 972 outermost literal `nodes[]` arrays including tests, 66 excluding; 102 region arrays / 86 region nodes with a literal id, 15 / 11 excluding tests; a planted region-reuses-top-level-id control reads 1 at its planted line) found zero cross-region or region-vs-top-level collisions, so there is no in-repo file to name. -->
 
 **BREAKING** accept-set narrowing on `FlowSchema` — a flow has **one node-id
 space**. A node inside an ADR-0031 region body (`loop.config.body`,
 `try_catch.config.try` / `.catch`, each `parallel.config.branches[]`, nested to
-any depth) whose `id` is already declared by a top-level node, or by a node in
+any depth the parse walks — up to `MAX_REGION_DEPTH` = 32 levels) whose `id` is
+already declared by a top-level node, or by a node in
 any other region of the same flow, is now **refused at parse time** — by
 `FlowSchema.parse` / `safeParse`, `defineFlow`, and every door that validates a
 flow through the schema (`objectstack validate`, the runtime publish gate, a
@@ -30,9 +31,10 @@ checkpoint's `completedNodeIds` all key on the bare id, so such a collision was
 silently wrong wherever a flow is flattened.
 
 **What changes** (`packages/spec/src/automation/flow.zod.ts`): the existing
-`superRefine` pass over `nodes[]` now walks every graph in the flow via
+`superRefine` pass over `nodes[]` now walks every graph the parse reaches via
 `collectFlowGraphs` — the top-level graph first, then each region in document
-order, depth first — keeping one map of first declarations. A later occurrence
+order, depth first, down to `MAX_REGION_DEPTH` (32) — keeping one map of first
+declarations. A later occurrence
 raises the same single `custom` issue as before, anchored at the later node's
 own `id` (inside the region, e.g. `nodes.1.config.body.nodes.0.id`) and naming
 both locations — a top-level index (`nodes[1]`) or a region path
@@ -42,10 +44,13 @@ both locations — a top-level index (`nodes[1]`) or a region path
 ✗ nodes.1.config.body.nodes.0.id: Duplicate node id `start` — `loop 'n' body → nodes[0]` reuses the id already declared by `nodes[0]`; every node id in a flow must be unique. Rename one of them: …
 ```
 
-One refusal, one message shape: an author never sees two issues for one
-collision. `analyzeRegion` keeps its per-region uniqueness line as an invariant
-for direct raw-region callers (`bpmn-mapping`), but a flow that parses never
-reaches it with a collision, and a flow with one never parses.
+One refusal, one message shape, at every depth the parse walks: within
+`MAX_REGION_DEPTH` an author never sees two issues for one collision. A region
+nested beyond that ceiling is left raw by the parse and stays
+`validateControlFlow`'s, in its own line — there `analyzeRegion`'s
+`duplicate node id 'X'` is the only refusal of a within-region duplicate (a
+cross-region collision past the ceiling is not judged), and the same line
+guards `bpmn-mapping`'s raw-region caller, so it is kept on purpose.
 `collectFlowGraphs` gains a `path` field beside `scope` — the same location as
 a key path — so the issue can be anchored where the author wrote the node; it
 also now skips a non-object element in a region its own schema refused (such a

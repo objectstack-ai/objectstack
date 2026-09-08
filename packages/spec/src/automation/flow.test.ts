@@ -2156,7 +2156,9 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
   // 「同意」): top-level `nodes[]` and every region body (`loop` / `try_catch` /
   // `parallel`, at every depth) share ONE id space; a collision is refused at
   // parse, by the rule that already refused top-level duplicates, in its one
-  // message shape, naming both locations. "Declared by" is the earlier
+  // message shape, naming both locations — at every depth the walk reaches:
+  // `collectFlowGraphs` stops at `MAX_REGION_DEPTH` (32), and that seam is
+  // pinned last, so it moves deliberately. "Declared by" is the earlier
   // position in the `collectFlowGraphs` walk — the top-level graph first, then
   // each region in document order, depth first — so the top-level array is
   // always the first declaration and a region node is the one that moves.
@@ -2235,7 +2237,7 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
     );
   });
 
-  it('walks every depth — a try_catch catch-region node nested inside a loop body that reuses a top-level id is refused with the chained region path', () => {
+  it('walks nested depth — a try_catch catch-region node nested inside a loop body that reuses a top-level id is refused with the chained region path', () => {
     const result = FlowSchema.safeParse(flowWith([
       { id: 'start', type: 'start', label: 'Start' },
       loopOver([{
@@ -2317,6 +2319,56 @@ describe('FlowSchema — one node-id space across the top-level nodes[] and ever
     expect(caught).toBeInstanceOf(Error);
     expect(caught).not.toBeInstanceOf(TypeError);
     expect((caught as Error).message).toContain("loop 'n' body: invalid region");
+  });
+
+  // The seam, pinned so it moves deliberately (as #15713's boundary did): the
+  // parse walk judges nesting 0..MAX_REGION_DEPTH (32). One level further the
+  // region is left raw, `safeParse` succeeds, and the within-region duplicate is
+  // `validateControlFlow`'s — `analyzeRegion`'s own line, its own shape.
+  const loopsNestedTo = (nesting: number, innermost: FlowNode[]): FlowNode => {
+    // Outermost loop is `n` (the edges above point at it), inner ones `l1..`;
+    // `l${k}` sits at nesting k and its body is nesting k + 1.
+    let body: { nodes: FlowNode[]; edges: FlowEdge[] } = { nodes: innermost, edges: [] };
+    for (let k = nesting - 1; k >= 1; k--) {
+      body = { nodes: [{ id: `l${k}`, type: 'loop', label: `L${k}`, config: { collection: '{items}', body } }], edges: [] };
+    }
+    return { id: 'n', type: 'loop', label: 'Loop', config: { collection: '{items}', body } };
+  };
+  const roundTripped = (nesting: number, innermost: FlowNode[]): Flow => JSON.parse(JSON.stringify(flowWith([
+    { id: 'start', type: 'start', label: 'Start' },
+    loopsNestedTo(nesting, innermost),
+    { id: 'end', type: 'end', label: 'End' },
+  ])));
+
+  it('the seam at MAX_REGION_DEPTH: a within-region duplicate at nesting 32 is refused at parse; at nesting 33 the parse accepts and validateControlFlow refuses it in analyzeRegion\'s own line', () => {
+    const dup = [step('dup', 'Dup A'), step('dup', 'Dup B')];
+
+    const atCeiling = FlowSchema.safeParse(roundTripped(32, dup));
+    expect(atCeiling.success).toBe(false);
+    if (atCeiling.success) return;
+    expect(atCeiling.error.issues).toHaveLength(1);
+    expect(atCeiling.error.issues[0].message).toContain('Duplicate node id `dup`');
+    expect(atCeiling.error.issues[0].path.slice(-3)).toEqual(['nodes', 1, 'id']);
+
+    const pastCeiling = FlowSchema.safeParse(roundTripped(33, dup));
+    expect(pastCeiling.success).toBe(true);
+    if (!pastCeiling.success) return;
+    let caught: unknown;
+    try {
+      validateControlFlow(pastCeiling.data);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).not.toBeInstanceOf(TypeError);
+    expect((caught as Error).message).toContain("loop 'l32' body: duplicate node id 'dup'");
+    expect((caught as Error).message).not.toContain('Duplicate node id');
+
+    // Control: the same nesting with unique ids is accepted end to end.
+    const unique = FlowSchema.safeParse(roundTripped(33, [step('u1'), step('u2')]));
+    expect(unique.success).toBe(true);
+    if (!unique.success) return;
+    expect(() => validateControlFlow(unique.data)).not.toThrow();
   });
 
   it('accepts a flow whose ids are unique across the whole flow, keeping every region node in authored order', () => {

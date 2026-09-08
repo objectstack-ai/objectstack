@@ -407,10 +407,15 @@ export function analyzeRegion(region: { nodes: FlowNodeParsed[]; edges?: FlowEdg
   }
 
   // Unique ids — an invariant this analysis needs (the degree maps below key
-  // on id), not the author-facing rule. A flow has ONE node-id space, judged
-  // by `FlowSchema` at parse over every depth (#16134), so a parsed flow never
-  // arrives here carrying a collision and no author sees this line; it guards
-  // direct callers that hand in a raw region (`bpmn-mapping`).
+  // on id), and the author-facing rule's last line of defence. A flow has ONE
+  // node-id space, judged by `FlowSchema` at parse over every depth
+  // `collectFlowGraphs` walks — nesting up to `MAX_REGION_DEPTH` (#16134) — so
+  // within that ceiling a parsed flow never arrives here carrying a collision.
+  // Beyond it a region is left raw and reaches this line through
+  // `validateControlFlow`, where this is the ONLY refusal of a within-region
+  // duplicate: delete it and the degree maps would silently de-duplicate the
+  // collision instead. It also guards direct callers that hand in a raw region
+  // (`bpmn-mapping`).
   const ids = new Set<string>();
   for (const n of nodes) {
     if (ids.has(n.id)) errors.push(`duplicate node id '${n.id}'`);
