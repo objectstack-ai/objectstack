@@ -236,7 +236,10 @@ export class UpdateHookResultNotWriteShapeError extends Error {
       `'update()' declares 'Promise<Record<string, any> | number | null>' — the two answers its ` +
       `two dispatch paths give. A BY-ID write resolves the post-write record (or 'null' when the ` +
       `readback leaves the caller's row scope); a PREDICATE write resolves the affected-row COUNT ` +
-      `and names no row (#4639). A '${info.event}' handler may SHAPE what it is handed — mutate ` +
+      // The predicate write's affected-count contract is stated in this module's
+      // header; the tracker id stays OUT of the runtime string, which reaches
+      // authors, operators and generated surfaces that cannot resolve one.
+      `and names no row. A '${info.event}' handler may SHAPE what it is handed — mutate ` +
       `the record in place, drop keys, assign a different RECORD — but replacing it with a shape ` +
       `outside that union is refused, because the declaration is the contract. To REFUSE the ` +
       `write, throw from the handler. Branch on ` +
