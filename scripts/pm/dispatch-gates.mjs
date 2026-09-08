@@ -10986,12 +10986,22 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  *
  * ## What the total deliberately does NOT cover
  *
- * The pending-changeset families, the unreachable listing and the always-runs
- * tail are each outside it, each with its own count printed under its own
- * heading. That is the same disclosure `machineReadableOutput` makes on stderr,
- * and it is made here for the same reason: a new number that reads as "the
- * complete account of what CI runs" would reproduce this card's own defect one
- * layer up.
+ * Every block printed BELOW this line is outside it, each with its own count
+ * under its own heading. That disclosure is made for the same reason
+ * `machineReadableOutput` makes its own on stderr: a new number that reads as
+ * "the complete account of what CI runs" would reproduce this card's own defect
+ * one layer up.
+ *
+ * ⛔ This comment deliberately does NOT list those blocks. It used to, and the
+ * rendering listed them too — one claim, written out twice — and the two copies
+ * drifted: both named three of the five blocks the same run printed, omitting
+ * the artifact rosters and the declared WIDE population. A harvester who
+ * followed the enumeration and stopped never reached either, and CI caught the
+ * difference on a family printed in the WIDE block (#16398). The list now
+ * exists ONCE, as `outsideBlockNames` in `familyReconciliationLines`, built
+ * from the block counts on `recon` so a block that printed cannot be missing
+ * from it and a block that did not print cannot be named. Amend it there;
+ * there is no second copy here to keep in step.
  *
  * `staleRows` and the row/family gap are surfaced rather than smoothed. A
  * consumer counting PRINTED rows in the convention block and comparing them
@@ -10999,7 +11009,9 @@ export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows 
  * explanation — a STALE row prints and contributes no command, and one family
  * hit by two kinds prints twice. Both are stated in the rendering.
  */
-export function familyReconciliation({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
+export function familyReconciliation({
+  matchedRows = [], kindGroups = [], alwaysRunsRows = [], rosterRows = [], widePopulationRows = [],
+} = {}) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
@@ -11072,6 +11084,15 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [], always
     staleRows,
     ciOnlyConventionRows,
     notRunnableConventionRows,
+    // Two counts that are NOT terms of the total and never enter the closure
+    // assertion below — they are the SIZES of two blocks printed under this
+    // line, carried here for the same reason `ciOnly` and `notRunnable` are:
+    // the rendering has to name what sits outside the answer, and a count it
+    // reads from the arrays that RENDER those blocks cannot disagree with them
+    // (#16398). `familyReconciliationLines` is where they are used; its
+    // `outsideBlockNames` is the only place the list of outside blocks exists.
+    artifactRosters: rosterRows.length,
+    widePopulation: widePopulationRows.length,
   };
   if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
@@ -11123,13 +11144,42 @@ export function familyReconciliationLines(recon) {
         ' Named under their own heading above with the variable in the value position, carried on their row in --json,' +
         ' and omitted from --commands by design.'
       : null;
+  // ⭐ The enumeration of what sits OUTSIDE this total — built ONCE here and
+  // rendered by BOTH branches below, because it is one claim and two copies of
+  // it is exactly how it went wrong. It was prose, and the prose named three
+  // blocks while the same run printed five; the two it omitted, the artifact
+  // rosters and the declared WIDE population, are the ones nothing else in this
+  // rendering tells a seat to run. A harvester who follows this line and stops
+  // reached neither, and CI reddened on a family printed in the WIDE block
+  // (#16398).
+  //
+  // Assembled from the block COUNTS on `recon` rather than written out, so the
+  // list cannot disagree with what was printed: the counts are the lengths of
+  // the very arrays `artifactRosterLines` and `widePopulationLines` render. A
+  // count of 0 drops the name, because at zero rows both of those return
+  // nothing — pointing a reader "below" at a heading that is not there is the
+  // same defect facing the other way. Named in the order they are PRINTED, so
+  // a reader walking down the output meets them as promised.
+  const outsideBlockNames = [
+    ...(recon.artifactRosters > 0 ? [`the ${recon.artifactRosters} artifact-roster famil(ies)`] : []),
+    ...(recon.widePopulation > 0 ? [`the ${recon.widePopulation} declared WIDE-population famil(ies)`] : []),
+    'the pending-changeset families',
+    'the unreachable listing',
+    'the always-runs tail',
+  ];
+  const outsideBlocks = `${outsideBlockNames.slice(0, -1).join(', ')} and ${outsideBlockNames[outsideBlockNames.length - 1]}`;
+  // Both uses below are sentence-initial and every name opens with a lowercase
+  // article, so the leading letter is raised here rather than by keeping a
+  // second, capitalised copy of the list — which is the duplication this whole
+  // construction exists to remove.
+  const outsideBlocksCapitalised = `${outsideBlocks.charAt(0).toUpperCase()}${outsideBlocks.slice(1)}`;
   if (recon.total === 0) {
     return [
       'Reconciliation — 0 famil(ies): this card\'s whole runnable answer, and the derivation COMPLETED to reach it.',
       '  0 named by PATH (the matched block) + 0 named by change KIND (the convention block). An empty answer, not a missing one.',
       ...(ciOnlyLine ? [ciOnlyLine] : []),
       ...(notRunnableLine ? [notRunnableLine] : []),
-      '  ⇒ --commands prints nothing for these paths and exits 0. The always-runs tail below still applies and is NOT covered by this number.',
+      `  ⇒ --commands prints nothing for these paths and exits 0. ${outsideBlocksCapitalised} below still apply and are NOT covered by this number.`,
     ];
   }
   const lines = [
@@ -11189,7 +11239,7 @@ export function familyReconciliationLines(recon) {
   }
   lines.push(
     `  ⛔ ${recon.total} is what THIS CARD owes by path and kind — NOT a complete account of what CI runs on the PR.` +
-      ' The pending-changeset families, the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+      ` ${outsideBlocksCapitalised} below are each OUTSIDE it, each with its own count.`,
   );
   return lines;
 }
@@ -11920,7 +11970,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the block it counts) and the reconciliation line below. Recomputing it in
   // either place would be two readings of one derivation, which is the drift
   // this card is about.
-  const recon = familyReconciliation({ matchedRows, kindGroups, alwaysRunsRows });
+  // `rosters` and `widePopulationRows` are handed in as the SAME arrays the two
+  // blocks below the reconciliation are rendered from, never as recounts of
+  // them: the line has to name every block that sits outside this total, and a
+  // second count of those rows could name a set the output does not contain
+  // (#16398).
+  const recon = familyReconciliation({
+    matchedRows, kindGroups, alwaysRunsRows, rosterRows: rosters, widePopulationRows,
+  });
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
@@ -21546,7 +21603,49 @@ function selfTest() {
     // ⛔ The new number must not become a second "complete account of what CI
     // runs" — that would reproduce this card's own defect one layer up. Same
     // disclosure machineReadableOutput already makes on stderr.
-    t('and disclaims the three sections it deliberately excludes', rl.some((l) => l.includes('NOT a complete account of what CI runs') && l.includes('always-runs tail')));
+    //
+    // ⭐ Pinned NAME BY NAME, because the weaker shape is what failed. This case
+    // used to ask only for the substring `always-runs tail`, so the sentence
+    // could name three of the five blocks the same run printed and stay green
+    // here for the whole time a harvester following it was missing two of them
+    // (#16398). Every name below is its own assertion: dropping ONE reds.
+    const outsideRecon = familyReconciliation({
+      matchedRows: rRows,
+      kindGroups: rKinds,
+      rosterRows: [{ check: 'check:r1' }, { check: 'check:r2' }],
+      widePopulationRows: [{ check: 'check:w1' }],
+    });
+    const outsideLine = familyReconciliationLines(outsideRecon).find((l) => l.includes('NOT a complete account of what CI runs'));
+    t('the disclaimer of what sits outside the total is printed at all', Boolean(outsideLine));
+    for (const name of [
+      'the 2 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the pending-changeset families',
+      'the unreachable listing',
+      'the always-runs tail',
+    ]) {
+      t(`and it names "${name}" — every block printed below it, not a subset`, (outsideLine ?? '').includes(name));
+    }
+    // The two counts are the lengths of the arrays that RENDER those blocks, so
+    // the enumeration cannot name a block the run did not print: at zero rows
+    // artifactRosterLines and widePopulationLines both return nothing, and a
+    // name pointing "below" at an absent heading is this same defect reversed.
+    const noBlocksLine = familyReconciliationLines(r).find((l) => l.includes('NOT a complete account of what CI runs'));
+    t('and names NEITHER block on a run that printed neither', !(noBlocksLine ?? '').includes('artifact-roster') && !(noBlocksLine ?? '').includes('WIDE-population'));
+    t('...while still naming the three blocks that print unconditionally', ['the pending-changeset families', 'the unreachable listing', 'the always-runs tail'].every((n) => (noBlocksLine ?? '').includes(n)));
+    // The ZERO-total branch renders the SAME list from the SAME expression: a
+    // card with no runnable family of its own still owes every block below, and
+    // two branches spelling this claim separately is how it drifted before.
+    const zeroOutside = familyReconciliationLines(familyReconciliation({
+      matchedRows: [], kindGroups: [], rosterRows: [{ check: 'check:r1' }], widePopulationRows: [{ check: 'check:w1' }],
+    }));
+    t('the zero branch enumerates the same blocks rather than naming one of them', zeroOutside.some((l) => (
+      l.includes('the 1 artifact-roster famil(ies)')
+        && l.includes('the 1 declared WIDE-population famil(ies)')
+        && l.includes('the pending-changeset families')
+        && l.includes('the unreachable listing')
+        && l.includes('the always-runs tail')
+    )));
     // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
     // spelling warning already follows: on a card with no convention-only
     // family, a warning that one section is short is a claim this run measured
