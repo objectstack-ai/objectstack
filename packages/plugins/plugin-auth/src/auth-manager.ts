@@ -3204,7 +3204,10 @@ export class AuthManager {
         // The vendor renamed or dropped the endpoint. Say so loudly: the
         // route then falls back to the vendor's own handler, which refuses
         // every unverified session — an empty inbox, not an open door.
-        console.error(
+        // `warn`, not `error` (AGENTS.md → Degradation log levels): the
+        // system is VISIBLY smaller — the inbox answers a 403 the caller sees
+        // — and nothing claims a persistence it did not perform.
+        console.warn(
           '[AuthManager] better-auth\'s organization plugin no longer exposes a ' +
           '`listUserInvitations` endpoint at /organization/list-user-invitations, ' +
           'so the declared `requireEmailVerificationOnInvitation` could NOT be ' +

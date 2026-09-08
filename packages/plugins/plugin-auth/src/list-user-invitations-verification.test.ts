@@ -98,8 +98,10 @@ const createMemoryEngine = () => {
           (a, b) => (a[order.field] > b[order.field] ? 1 : -1) * (order.order === 'desc' ? -1 : 1),
         );
       }
-      if (q.offset) out = out.slice(q.offset);
-      if (q.limit) out = out.slice(0, q.limit);
+      if (typeof q.offset === 'number') out = out.slice(q.offset);
+      // By PRESENCE, not truthiness: `limit: 0` is a bound, not its absence
+      // (`check:objectql-double-limit`).
+      if (typeof q.limit === 'number') out = out.slice(0, q.limit);
       return out.map((r) => ({ ...r }));
     },
     async count(name: string, q: any = {}) {
