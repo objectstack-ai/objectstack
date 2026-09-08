@@ -1912,6 +1912,54 @@ export interface OperationContext {
    * a value that does not parse reads as absent, never as an organization.
    */
   tenantLayer0Verdict?: TenantLayer0Verdict;
+  /**
+   * [#16608] The INSERT post-image seam — where an enforcement layer gets to
+   * judge the row that will actually be stored.
+   *
+   * An `insert` has no pre-image, so a middleware's only image of the write is
+   * `opCtx.data`: the caller's payload as it arrived, before `applyFieldDefaults`
+   * and before the `beforeInsert` hooks. A value the app DERIVES server-side —
+   * an organization copied from a parent, a denormalised scoping field a caller
+   * is deliberately not allowed to choose — is not on that image, so a predicate
+   * over it judges a value that never lands and ignores the one that does.
+   * Measured on 17.3.0: the same identity, same object, same second, an insert
+   * carrying the stamped value was admitted and the identical insert leaving it
+   * to the hook was refused, while the stored row was identical either way — and
+   * an insert naming an IN-SCOPE value for a parent in ANOTHER organization was
+   * admitted with the parent's organization stored on it.
+   *
+   * So the enforcement layer installs its judgement here instead of running it
+   * against `opCtx.data`, and {@link ObjectQL.insert} calls it once the
+   * `beforeInsert` chain has produced the row — before the first producer with
+   * a side effect (the secret channel, the autonumber, the statement), so a
+   * refusal still costs nothing. `update` needs no seam: that path already
+   * merges its pre-image with the change set, which is the same proposition.
+   *
+   * ABSENT is the ordinary state — no enforcement layer is mounted, or the
+   * write is one it does not gate. The engine never invents one.
+   */
+  postHookWriteImageCheck?: PostHookWriteImageCheck;
+}
+
+/**
+ * [#16608] The judgement {@link OperationContext.postHookWriteImageCheck}
+ * carries, and the acknowledgement its installer reads back.
+ *
+ * `evaluate` receives the rows exactly as the `beforeInsert` chain left them —
+ * the images the driver is about to be handed — and REFUSES by throwing. It is
+ * called at most once per operation, and only for rows still live (a row the
+ * declared-field door culled from a partial batch is never judged: it will not
+ * be written).
+ *
+ * `honoured` is set by the engine immediately before `evaluate` runs. It exists
+ * so the installer can fail CLOSED on a seam that was never called: an
+ * enforcement layer that moved its gate here and finds the flag unset on the
+ * way out knows its check did not happen, and says so loudly rather than
+ * reading an unjudged write as an allowed one.
+ */
+export interface PostHookWriteImageCheck {
+  evaluate(rows: readonly Record<string, unknown>[]): void | Promise<void>;
+  honoured?: boolean;
 }
 
 /**
@@ -10299,6 +10347,42 @@ export class ObjectQL implements IObjectQLEngine {
         const postRefusal = postHookUndeclared.find((e) => e !== undefined);
         if (postRefusal) throw postRefusal;
       }
+
+      // ── [#16608] The INSERT POST-IMAGE seam ──────────────────────────────
+      //
+      // The enforcement layer's write `check` used to be evaluated in its
+      // middleware, against `opCtx.data` — the caller's payload as it arrived.
+      // For an `update` that is a merged pre-image, which is the row that will
+      // exist; for an `insert` it is the row the caller ASKED for, and the
+      // hooks above have since produced the row that will actually be stored.
+      // So the judgement is made HERE, on `rowHookContexts[i].input.data` —
+      // the same objects `rows` is built from below and the driver is handed.
+      //
+      // Placement obeys the rule #8682 wrote for the declared-field door and
+      // #13657 restated for its post-hook half: a refusal must cost nothing.
+      // This sits immediately after that door and BEFORE every producer —
+      // `resolveSystemInsertOrganization`, `encryptSecretFields` (which writes
+      // a `sys_secret` row), `applyAutonumbers` (which CONSUMES a sequence
+      // number), validation and the statement. Nothing between here and the
+      // driver adds a value the caller could have steered: the passes that run
+      // after are engine-owned strips and stamps.
+      //
+      // A culled row is skipped rather than judged: it will not be written, so
+      // refusing it would replace one verdict with another for a row that has
+      // already lost. `honoured` is set BEFORE `evaluate`, so a throwing check
+      // still reads as honoured — the flag answers "did the seam run", never
+      // "did the write pass".
+      const postHookWriteImageCheck = opCtx.postHookWriteImageCheck;
+      if (postHookWriteImageCheck) {
+        postHookWriteImageCheck.honoured = true;
+        const live: Record<string, unknown>[] = [];
+        for (let i = 0; i < rowHookContexts.length; i++) {
+          if (undeclaredPerRow[i] !== undefined) continue;
+          live.push(rowHookContexts[i]!.input.data as Record<string, unknown>);
+        }
+        await postHookWriteImageCheck.evaluate(live);
+      }
+
       // Thread the open transaction (if any) into the driver-facing
       // options so that knex's `.transacting(trx)` is honoured. Without
       // this, calls inside a `engine.transaction(...)` block would deadlock
