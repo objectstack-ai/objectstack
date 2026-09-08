@@ -6013,6 +6013,22 @@ export class SecurityPlugin implements Plugin {
       (context?.positions ?? []) as string[],
     ).filter((p) => policyDeclaresClause(p, 'check'));
     if (withCheck.length === 0) return null;
+    // [ADR-0105 D11 / #16607] Stage the app-resolved membership sets on THIS
+    // context before the `check` clause compiles — the same staging the read
+    // side performs before Layer 1 compiles (`computeLayeredRlsFilter`). A
+    // bare insert performs no read, so without this line the `check` twin of
+    // a `using` clause that reads a resolver key
+    // (`record.f in current_user.<key>`) compiled against a context in which
+    // the key had never been staged: unresolved variable → policy dropped →
+    // `RLS_DENY_FILTER` → every such insert refused. The two write shapes
+    // that DID pass did so by accident of an earlier read on the SAME context
+    // object (the by-id pre-image at 2.7, the controlled_by_parent master
+    // read) having staged it first; staging is memoized per context, so
+    // those shapes still resolve exactly once. This OBTAINS the context the
+    // check should always have had — it relaxes nothing: no resolver, a
+    // throwing resolver or an unresolved key still drop the policy and still
+    // fail closed, on this path as on the read path.
+    await this.stageRlsMembership(context);
     return this.rlsCompiler.compileFilter(withCheck, context, 'check');
   }
 
@@ -6043,6 +6059,14 @@ export class SecurityPlugin implements Plugin {
    * unset, which makes the policies referencing them drop out — narrowing
    * access, never widening it. Reserved kernel keys can never be overwritten,
    * so an app cannot redefine the org wall's own vocabulary.
+   *
+   * Two call sites, one per compile site, and both are load-bearing: the
+   * read side ({@link computeLayeredRlsFilter}, before Layer 1 compiles
+   * `using`) and the write side ({@link computeWriteCheckFilter}, before
+   * `check` compiles). A predicate must resolve the same variables whichever
+   * clause it sits in; with the write-side call missing, a `check` reading a
+   * resolver key resolved only when the request happened to read first
+   * (#16607).
    */
   private async stageRlsMembership(context: any): Promise<void> {
     if (!this.rlsMembershipResolver || !context || typeof context !== 'object') return;
