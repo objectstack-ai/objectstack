@@ -367,6 +367,10 @@ export type {
 } from './validate-dashboard-action-refs.js';
 
 export { validateFilterTokens, FILTER_TOKEN_UNKNOWN } from './validate-filter-tokens.js';
+export { validateFlowFilterTokens, FLOW_FILTER_TOKEN_UNKNOWN } from './validate-flow-filter-tokens.js';
+export type { FlowFilterTokenFinding } from './validate-flow-filter-tokens.js';
+export { classifyFlowTemplateToken, FLOW_TEMPLATE_DATE_FUNCTIONS, FLOW_TEMPLATE_VALUE_FUNCTIONS } from './flow-template-grammar.js';
+export type { FlowTemplateTokenVerdict } from './flow-template-grammar.js';
 export type { FilterTokenFinding, FilterTokenSeverity } from './validate-filter-tokens.js';
 export { validatePresetComparands, FILTER_PRESET_COMPARAND } from './validate-preset-comparands.js';
 export type { PresetComparandFinding, PresetComparandSeverity } from './validate-preset-comparands.js';

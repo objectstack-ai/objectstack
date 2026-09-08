@@ -856,7 +856,8 @@ export default class Compile extends Command {
           // the legacy .mjs bundle. A SEPARATE key on purpose, and the reason is
           // parity too — the opposite way round from `unknownKeyWarnings` just
           // above. `{origin,reason}` extraction records have NO counterpart in
-          // `os validate --json`: that command lowers no handlers, so there is
+          // `os validate --json`: that command lowers too since #16544 but
+          // EMITS nothing, so it surfaces no extraction record and there is
           // no cross-command list for these to join, and folding a shape only
           // ONE command can ever emit into the shared key would teach consumers
           // a shape the other command never ships. The undeclared-key findings

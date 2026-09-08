@@ -41,8 +41,20 @@ import {
   readHostDeclaration,
 } from './node.js';
 
-/** The cloud-private package at the heart of cloud#1013. */
-const ORGANIZATIONS = '@objectstack/organizations';
+/**
+ * The HOST-ONLY package the defect case below uses as its example: a name this
+ * file writes into the fixture host app and that exists nowhere else.
+ *
+ * ⚠️ It must stay a `@fixture/*` name (#16552). The pin below was written
+ * against `@objectstack/organizations`, a real cloud-private package at the
+ * time. #16215 brought that package into this workspace, pnpm's hoisted store
+ * started carrying it, and the assertion turned into a function of whether the
+ * runner had BUILT it — green on a shard that had not (which is every CI shard
+ * that runs this file), red on any full local build. A name the workspace owns
+ * cannot state "the framework cannot resolve it", and no workspace name is safe
+ * from becoming one; only a name the workspace can never contain is.
+ */
+const HOST_ONLY = '@fixture/host-only';
 /** A package that fails while it EVALUATES — not while it resolves. */
 const BROKEN = '@fixture/throws-on-load';
 /**
@@ -99,7 +111,7 @@ beforeAll(() => {
     JSON.stringify({
       name: 'host-app-fixture',
       type: 'module',
-      dependencies: { [ORGANIZATIONS]: '*' },
+      dependencies: { [HOST_ONLY]: '*' },
       // #4719 fixture amendment: the evaluation-crash case below imports this
       // package, and an undeclared name is no longer looked up in the host's
       // node_modules at all — so the crash it exists to prove would be masked by
@@ -111,9 +123,12 @@ beforeAll(() => {
     }),
     'utf8',
   );
+  // Modelled on the real enterprise plugin (cloud#1013): the SHAPE is what
+  // `serve` / `bootStack` construct, and the callers' cases below assert it. The
+  // package NAME is deliberately fixture-only, for the reason given at HOST_ONLY.
   writeFixturePackage(
     hostRoot,
-    ORGANIZATIONS,
+    HOST_ONLY,
     'export class OrganizationsPlugin { name = "com.objectstack.organizations"; }\n',
   );
   writeFixturePackage(hostRoot, BROKEN, 'throw new Error("fixture package exploded on import");\n');
@@ -163,14 +178,32 @@ describe('host-app package resolution (cloud#1013, #4700)', () => {
     //   node -e "require.resolve('@objectstack/organizations')" -> MODULE_NOT_FOUND
     // A bare `import()` in serve.ts / harness.ts resolved from exactly here,
     // which is why declaring the dependency in the app changed nothing.
-    expect(() => createHostRequire(PACKAGE_ROOT).resolve(ORGANIZATIONS)).toThrow(
-      /Cannot find module/,
+    //
+    // PREMISE, proved here instead of assumed (#16552). The sentence this case
+    // states needs an example that IS host-only, and the old one silently
+    // stopped being one. Both legs below are load-bearing:
+    //
+    //  1. the name resolves from the HOST APP — without this, a name that
+    //     exists nowhere at all satisfies leg 2 and the case pins nothing;
+    //  2. and from the framework package it is ABSENT — asserted on the bare
+    //     specifier, not on `/Cannot find module/` alone, because those are two
+    //     different verdicts. A package the framework CAN see, whose entry file
+    //     merely is not on disk, also throws MODULE_NOT_FOUND — naming
+    //     `<store>/<pkg>/dist/index.js`, not the specifier. That throw is what
+    //     held this pin green in CI while the property went unguarded: the
+    //     example package was reachable and simply unbuilt on that shard. Read
+    //     as a bare-specifier failure, the pin can no longer be satisfied by an
+    //     unbuilt workspace package, in either build state.
+    const fromHost = createHostRequire(hostRoot).resolve(HOST_ONLY);
+    expect(fromHost).toContain(hostRoot);
+    expect(() => createHostRequire(PACKAGE_ROOT).resolve(HOST_ONLY)).toThrow(
+      new RegExp(`Cannot find module '${HOST_ONLY}'`),
     );
   });
 
   it('resolves a package that exists ONLY in the host app', async () => {
     const importFromHost = createHostImporter(hostRoot);
-    const mod = await importFromHost(ORGANIZATIONS);
+    const mod = await importFromHost(HOST_ONLY);
     // The export `serve` and `bootStack` construct: `new mod.OrganizationsPlugin()`.
     expect(typeof mod.OrganizationsPlugin).toBe('function');
     expect(new mod.OrganizationsPlugin().name).toBe('com.objectstack.organizations');
@@ -548,7 +581,7 @@ describe('the undeclared fallback resolves from the CALLER (#10943)', () => {
     // The fix moves one branch. The declared path must still resolve from the
     // host app, and an undeclared-but-NODE_PATH-reachable package must still be
     // refused: a caller base is not a way back into the hoisted store.
-    const mod = await createHostImporter(hostRoot, { fallbackImport })(ORGANIZATIONS);
+    const mod = await createHostImporter(hostRoot, { fallbackImport })(HOST_ONLY);
     expect(new mod.OrganizationsPlugin().name).toBe('com.objectstack.organizations');
     const err = await createHostImporter(undeclaringRoot, { fallbackImport })(
       HOISTED_ONLY,
