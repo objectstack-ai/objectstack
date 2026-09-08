@@ -356,3 +356,112 @@ describe('#14192 — the accept side does not move, and `main` is declared', () 
     expect(issue.message).not.toContain('`capabilities`');
   });
 });
+
+describe('#16328 — the `permissions` union door names the surface and the rename, like every other door', () => {
+  // ## What #16328 reported, and what was actually wrong
+  //
+  // The card measured `{ services: ['object'], hoooks: ['x'] }` refused with a
+  // keyless `invalid_union` at `['permissions']` and attributed it to
+  // `formatZodError` flattening the union's nested refusal away — the same
+  // premise #14722 was filed on.
+  //
+  // Re-measured on `origin/main` `f89812e4d`: that premise is FALSE, and the
+  // strictness ledger's `state-machine.zod.ts` row already says so in as many
+  // words — the flattening was lifted at #4971 and consolidated into
+  // `selectUnionBranches` (`shared/union-branch-policy.ts`) at #8318.
+  // `formatZodIssue` descends `invalid_union`, drops the `z.array(z.string())`
+  // arm as kind-mismatch-only, and renders the object arm verbatim. The RAW
+  // issue list is keyless; what the author reads is not.
+  //
+  // The real defect was one level in: `PluginPermissionsSchema` was the one
+  // closed object of the three known union doors that never adopted
+  // `strictObject`. Born `.strict()` at #1487, it never passed through the
+  // #4001 campaign, so its nested line was zod's own `Unrecognized key:
+  // "hoooks"` — the key echoed, but no surface and no rename, while its two
+  // sibling doors (`ManifestSchema` through `devPlugins[]`, and
+  // `ActionRef` / `GuardRef`) carry all three.
+  //
+  // So this pins the CONTENT of the nested line, not the union's shape. The
+  // union is deliberately untouched: reshaping it costs either the accept set
+  // or the published JSON Schema, which is the standing finding recorded on
+  // the `devPlugins[]` guard above.
+  const near = () => ({ ...legal(), permissions: { services: ['object'], hoooks: ['x'] } });
+
+  it('the author reads the key, the surface and the rename — through `formatZodError`', () => {
+    const result = ManifestSchema.safeParse(near());
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const rendered = formatZodError(result.error);
+    expect(rendered).toContain('permissions');
+    expect(rendered, 'the offending key is named').toContain('hoooks');
+    expect(rendered, 'the surface is named').toContain('the `permissions` block of this package manifest');
+    expect(rendered, 'the rename is offered').toContain('Did you mean `hoooks` → `hooks`?');
+  });
+
+  it('the named refusal is the object arm\'s own issue, carried inside the union issue', () => {
+    // The raw shape, stated because it is the half the card measured: the
+    // top-level issue IS a keyless `invalid_union` and that is not the defect.
+    const result = ManifestSchema.safeParse(near());
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const union = result.error.issues.find((i) => i.code === 'invalid_union') as
+      | { path: (string | number)[]; errors: Array<Array<{ code: string; keys?: string[]; message?: string }>> }
+      | undefined;
+    expect(union).toBeDefined();
+    expect(union!.path).toEqual(['permissions']);
+    const nested = union!.errors.flat().find((i) => i.code === 'unrecognized_keys');
+    expect(nested, 'the named refusal is carried inside the union issue').toBeDefined();
+    expect(nested!.keys).toEqual(['hoooks']);
+    expect(nested!.message).toContain('Did you mean `hoooks` → `hooks`?');
+  });
+
+  it('the accept set does not move — both arms of the union still parse', () => {
+    // #16328's negative control, and the reason a "fix" here could be worse
+    // than the defect. `strictObject` is `z.object(shape, { error }).strict()`:
+    // the shape and the strictness are unchanged, and an error map is consulted
+    // only once an issue is already being raised.
+    expect(ManifestSchema.safeParse({ ...legal(), permissions: { services: ['object'] } }).success).toBe(true);
+    expect(ManifestSchema.safeParse({ ...legal(), permissions: ['read', 'write'] }).success).toBe(true);
+    expect(ManifestSchema.safeParse({ ...legal(), permissions: [] }).success).toBe(true);
+    expect(ManifestSchema.safeParse({
+      ...legal(),
+      permissions: { services: ['object'], hooks: ['record.beforeInsert'], network: ['api.acme.com'], fs: [] },
+    }).success).toBe(true);
+  });
+
+  it('every declared key is accepted alone — the candidate list cannot have drifted from the shape', () => {
+    for (const key of ['services', 'hooks', 'network', 'fs']) {
+      expect(
+        ManifestSchema.safeParse({ ...legal(), permissions: { [key]: ['x'] } }).success,
+        `${key} is declared and must parse`,
+      ).toBe(true);
+    }
+  });
+
+  it('a spelled-out abbreviation reaches `fs`, which edit distance never could', () => {
+    const result = ManifestSchema.safeParse({ ...legal(), permissions: { filesystem: ['/tmp'] } });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(formatZodError(result.error)).toContain('Did you mean `filesystem` → `fs`?');
+  });
+
+  it('the five doors that already named their key are untouched by this change', () => {
+    // The hard acceptance limb: this change adds an error map to ONE block, so
+    // no other door's message may move. Each of these is asserted in full
+    // elsewhere in this file; here they are re-read together as the regression
+    // baseline #16328 asked for.
+    const doors: Array<[string, Record<string, unknown>, string]> = [
+      ['manifest root', (() => { const { namespace: _n, ...r } = legal(); return { ...r, namesapce: 'probe' }; })(), 'Did you mean `namesapce` → `namespace`?'],
+      ['contributes', { ...legal(), contributes: { kind: [{ id: 'sys.bi.report' }] } }, 'Did you mean `kind` → `kinds`?'],
+      ['contributes.kinds entry', { ...legal(), contributes: { kinds: [{ id: 'sys.bi.report', descriptio: 'x' }] } }, 'Did you mean `descriptio` → `description`?'],
+      ['engines', { ...legal(), engines: { protocl: '^17' } }, 'Did you mean `protocl` → `protocol`?'],
+      ['engine (legacy)', { ...legal(), engine: { bogusKey: 'x' } }, 'Unrecognized key(s) on the legacy `engine` block'],
+    ];
+    for (const [name, input, expected] of doors) {
+      const result = ManifestSchema.safeParse(input);
+      expect(result.success, `${name} must refuse`).toBe(false);
+      if (result.success) continue;
+      expect(formatZodError(result.error), `${name} keeps its message`).toContain(expected);
+    }
+  });
+});
