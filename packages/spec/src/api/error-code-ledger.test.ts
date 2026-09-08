@@ -267,21 +267,59 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(() => ErrorCode.parse('')).toThrow();
   });
 
-  it('rejects retired registered-but-unemittable codes (the ledger header "Retiring a code" class)', () => {
-    // MONGODB_MULTI_TENANT_UNSUPPORTED (#3724 → retired #8035): a BOOT
-    // refusal — the CLI rethrows it pre-HTTP and aborts; the one
-    // request-reachable trigger is swallowed by a documented best-effort
-    // catch. No response envelope can carry it, so keeping the row promised
-    // clients a code no response delivers (precedent:
-    // OVERLAY_PERSISTENCE_FAILED / #5783). The throw site and its constant
-    // (`MULTI_TENANT_UNSUPPORTED_CODE` in `@objectstack/driver-mongodb`)
-    // deliberately live on — host boot matching is not wire vocabulary —
-    // which is exactly why the WIRE vocabulary must refuse the string.
-    expect(() => ErrorCode.parse('MONGODB_MULTI_TENANT_UNSUPPORTED')).toThrow();
-    expect(REGISTERED_ERROR_CODES).not.toContain('MONGODB_MULTI_TENANT_UNSUPPORTED');
-    // The row was the package's only registration, so the owner key came out
-    // with it — a future driver-mongodb WIRE code re-adds the entry
-    // deliberately, with an emit path, not by reverting #8035.
-    expect(Object.keys(ERROR_CODE_LEDGER)).not.toContain('@objectstack/driver-mongodb');
+  it('rejects a retired code with no producer left (the ledger header "Retiring a code" class)', () => {
+    // OVERLAY_PERSISTENCE_FAILED (#5264 deleted its only producer, #5783
+    // unregistered it): the FIRST ground of the header's "Retiring a code"
+    // section — and since #16404 the only ground left, because the second
+    // one ("host boot matching is not wire vocabulary", the ground #8035
+    // unregistered MONGODB_MULTI_TENANT_UNSUPPORTED on) is superseded by the
+    // "door or no door" rule. A code with no producer anywhere in
+    // `packages/**` source is a row promising a code no response can carry,
+    // and the wire vocabulary must refuse it.
+    expect(() => ErrorCode.parse('OVERLAY_PERSISTENCE_FAILED')).toThrow();
+    expect(REGISTERED_ERROR_CODES).not.toContain('OVERLAY_PERSISTENCE_FAILED');
+  });
+
+  it('accepts the #16649 batch — the fourteen remaining door:none codes, each under its stamping package (#16404)', () => {
+    // The rest of the #16404 class after #16449: every `boot-refusal` row
+    // `dispatcher-error-vocabulary.ts` still carried, each measured in its
+    // package's built `dist/index.js` and absent from the union before this
+    // batch. Registration widens the face only — none reaches an HTTP door on
+    // this tree, so no wire body changes; the rows ratcheted out with it.
+    const batch: Record<string, keyof typeof ERROR_CODE_LEDGER> = {
+      INVALID_ARTIFACT_PACKAGES: '@objectstack/core',
+      INVALID_ARTIFACT_PACKAGE_ENTRY: '@objectstack/core',
+      DUPLICATE_ARTIFACT_PACKAGE: '@objectstack/core',
+      NO_SUCH_RUN: '@objectstack/core',
+      PLAN_CHANGED: '@objectstack/core',
+      PREFLIGHT_FAILED: '@objectstack/core',
+      NOT_COMPENSABLE: '@objectstack/core',
+      SERVICE_NOT_REGISTERED: '@objectstack/core',
+      PLUGIN_CONTRACT_VIOLATION: '@objectstack/core',
+      MIXED_ARTIFACT_COLLECTION_SHAPE: '@objectstack/runtime',
+      DUPLICATE_ARTIFACT_OBJECT_NAME: '@objectstack/objectql',
+      MEMORY_MULTI_TENANT_UNSUPPORTED: '@objectstack/driver-memory',
+      MONGODB_MULTI_TENANT_UNSUPPORTED: '@objectstack/driver-mongodb',
+      WALLED_MEMBERSHIP_POLICY_UNDECLARED: '@objectstack/organizations',
+    };
+    expect(Object.keys(batch)).toHaveLength(14);
+    for (const [code, owner] of Object.entries(batch)) {
+      expect(ErrorCode.parse(code)).toBe(code);
+      expect(ERROR_CODE_LEDGER[owner], `${code} registered under ${owner}`).toContain(code);
+      // None re-spells a standard member — registered plainly, no waiver.
+      expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    }
+    // The reversal on the record: MONGODB_MULTI_TENANT_UNSUPPORTED was
+    // UNregistered by #8035 and its owner key came out with it (this suite
+    // pinned both absences); #16404 supersedes that ground, so the row and
+    // the key are back — pinned by presence now. `@objectstack/organizations`
+    // is a new owner key, the package's first registration.
+    expect(Object.keys(ERROR_CODE_LEDGER)).toContain('@objectstack/driver-mongodb');
+    expect(Object.keys(ERROR_CODE_LEDGER)).toContain('@objectstack/organizations');
+    // The control that lets this pin fail in the other direction: a code
+    // registered by nobody is still refused. `MULTI_TENANT_UNSUPPORTED` is the
+    // shared NAME of the two drivers' constants, never a code either stamps.
+    expect(() => ErrorCode.parse('MULTI_TENANT_UNSUPPORTED')).toThrow();
+    expect(REGISTERED_ERROR_CODES).not.toContain('MULTI_TENANT_UNSUPPORTED');
   });
 });
