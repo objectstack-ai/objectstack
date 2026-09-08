@@ -151,6 +151,44 @@ const HEALTHY_BOOT = [
 ].join('\n');
 
 /**
+ * A healthy REGISTRY-mode boot window.
+ *
+ * ⚠ Unlike `HEALTHY_BOOT` this one is RECONSTRUCTED, not verbatim, and the
+ * distinction is load-bearing so it is stated rather than glossed: it is the
+ * specimen's own boot window (job `101626009369`) with the four lines
+ * attributable to the defect removed — the `AuthPlugin failed to load` line,
+ * both kernel degraded-capability lines, and `SharingServicePlugin: could not
+ * enumerate organizations`, which only failed because the plugin that creates
+ * `sys_organization` never loaded. What is KEPT is the one boot warning that is
+ * normal for registry mode: the canary installs the LAST PUBLISHED release, so
+ * an artifact whose protocol floor predates the runtime's spec is expected, and
+ * the ADR-0087 forward conversion says so at WARN.
+ *
+ * ⭐ This fixture exists because the pack-mode one could not do this job, and
+ * that was MEASURED rather than foreseen: under a deliberately wrong
+ * `WARN|warn` predicate the firing control below stayed GREEN, because
+ * `HEALTHY_BOOT`'s only warn-shaped line carries the `⚠` glyph and never the
+ * word. A healthy boot that spells `WARN` in full is what makes "⛔ do not
+ * widen the severity set wholesale" a thing this file can actually catch.
+ */
+const HEALTHY_REGISTRY_BOOT = [
+  '',
+  '◆ Development Mode',
+  '  Loading objectstack.config.ts...',
+  '[LocalCryptoProvider] No OS_SECRET_KEY/OS_DEV_CRYPTO_KEY set — generated a new AES-256-GCM key and persisted it to /tmp/y/dev-crypto-key (mode 0600).',
+  '  ↪ secret fields: LocalCryptoProvider wired (dev) — set OS_SECRET_KEY and swap for KMS/Vault in production',
+  '',
+  '  ✓ Server is ready',
+  '',
+  '  Plugins: 31 loaded',
+  '',
+  '  ⚠ Boot diagnostics — 1 warning logged during startup:',
+  "    2026-09-07T04:51:11.594Z WARN [MetadataPlugin] artifact '/tmp/y/dist/objectstack.json' predates this runtime's spec (authored engines.protocol floor 17.0.0, runtime spec 17.3.0) — converted 1 site(s) forward via ADR-0087 conversion 'field-required-notnull-explicit'.",
+  '    run with --log-level debug to watch the boot stream live',
+  '',
+].join('\n');
+
+/**
  * Every benign `failed to load` in the tree, plus the two near-misses that make
  * the legs' boundaries real rather than asserted.
  *
@@ -233,6 +271,7 @@ function runHarness(): Record<string, string> {
     OTHER: write('other.log', OTHER_SITES),
     NONSENSE: write('nonsense.log', NONSENSE),
     DECORATED: write('decorated.log', DECORATED_BOOT),
+    REGISTRY: write('registry.log', HEALTHY_REGISTRY_BOOT),
   };
 
   const harness = path.join(dir, 'harness.sh');
@@ -274,6 +313,7 @@ function runHarness(): Record<string, string> {
       `echo "DECOR_UNSCRUBBED_NAMES_PLUGIN=$(grep -cE "$SMOKE_BOOT_FAILURE_PATTERN" ${JSON.stringify(fixtures.DECORATED)} )"`,
       // Vacuity guard: the healthy fixture really does carry warn-shaped lines.
       `echo "HEALTHY_WARN_LINES=$(grep -c '⚠' ${JSON.stringify(fixtures.HEALTHY)})"`,
+      `echo "REGISTRY_WARN_WORDS=$(grep -c 'WARN' ${JSON.stringify(fixtures.REGISTRY)})"`,
       'exit 0',
     ].join('\n'),
     { mode: 0o755 },
@@ -330,6 +370,18 @@ describe.skipIf(!RUNNABLE)('[#16793] publish-smoke.sh judges the BOOT before it 
     // …and the fixture is not vacuously clean — it carries the same `⚠` glyph
     // the specimen does.
     expect(Number(r.HEALTHY_WARN_LINES)).toBeGreaterThan(0);
+  });
+
+  it('FIRING CONTROL 2: a healthy REGISTRY boot passes even though it spells WARN', () => {
+    // The half `HEALTHY_BOOT` cannot test. Registry mode installs the last
+    // PUBLISHED release, so a protocol-floor conversion warning is normal there
+    // — and it arrives as a full `<ISO>Z WARN …` line. This is the assertion
+    // that turns "⛔ do not widen the severity set to WARN" from advice in a
+    // comment into something that reddens.
+    expect(r.REGISTRY_STATUS).toBe('1');
+    expect(r.REGISTRY_HITS).toBe('0');
+    // Vacuity guard: the fixture really does contain the literal word.
+    expect(Number(r.REGISTRY_WARN_WORDS)).toBeGreaterThan(0);
   });
 
   it('the benign `failed to load` family is NOT a boot failure', () => {
