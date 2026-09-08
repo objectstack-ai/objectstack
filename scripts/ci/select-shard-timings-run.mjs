@@ -14,11 +14,14 @@
 // numbers nobody measured. Three ways the newest run is the wrong one, all
 // measured on this repo rather than imagined:
 //
-//   1. CANCELLED RUNS. `cancel-in-progress` kills a push run on main the moment
-//      the next merge lands, and merges arrive faster than Test Core finishes:
-//      36 of the last 60 push runs were censored that way. Such a run leaves
-//      SOME artifacts, so "the artifacts exist" is not the test -- every one of
-//      the six Test Core jobs must have concluded `success`.
+//   1. CANCELLED RUNS. `cancel-in-progress` kills a run on main the moment the
+//      next run in its concurrency group starts, and merges arrive faster than
+//      Test Core finishes: 36 of the last 60 push runs were censored that way.
+//      Such a run leaves SOME artifacts, so "the artifacts exist" is not the
+//      test -- every one of the six Test Core jobs must have concluded
+//      `success`. The hourly run this now reads has its OWN concurrency group
+//      (#16467, `github.event_name` is in ci.yml's key), so a merge cannot
+//      censor it -- but a second hourly run can, which is why this test stays.
 //
 //   2. CACHE REPLAYS. A run whose six jobs all concluded `success` can still
 //      have replayed most of the workspace from the turbo cache: shards were
@@ -41,6 +44,29 @@
 // its reason, so the workflow log says WHY the newest four runs were passed over
 // rather than leaving a bare run id to be taken on faith.
 //
+// WHICH EVENT'S RUNS, AND WHY THAT IS THE LOAD-BEARING PART (#16467).
+//
+// This used to read `event=push&branch=main`, on the argument that a push run
+// was the FULL battery and therefore ground truth. Since #16467 it is not: a
+// push to `main` computes its package set with `--affected` against
+// `github.event.before`, so a push run measures the packages that merge
+// touched and NOTHING ELSE. Nothing in the eligibility test below would have
+// noticed. Six shard jobs still conclude `success`, six run-summary artifacts
+// are still uploaded, and every guard reads green -- over a measurement of a
+// slice of the workspace that nobody asked for.
+//
+// `coverageReport` is not the backstop for that either. It refuses a package
+// that HAD a weight and now has neither a measurement nor a cache-hit witness
+// -- and a package the affected set excluded is a cache HIT, witnessed
+// unchanged, carried at its old weight. So a diet of affected-only runs would
+// have produced a dataset that passes every check while its numbers age out
+// one package at a time, which is exactly the silent rot this lane exists to
+// end.
+//
+// So the event is named, and it is the HOURLY SCHEDULED RUN: `schedule` on
+// ci.yml, minute 0, the one event the selection script treats as FULL by
+// construction. `DEFAULT_RUN_EVENT` below is that name, spelled once.
+//
 // Usage:
 //   node scripts/ci/select-shard-timings-run.mjs --candidates [--limit <n>]
 //   node scripts/ci/select-shard-timings-run.mjs --check-coverage \
@@ -49,7 +75,10 @@
 //   node scripts/ci/select-shard-timings-run.mjs --self-test
 //
 // `--candidates` needs GITHUB_TOKEN and GITHUB_REPOSITORY in the environment and
-// prints a JSON array, newest first. `--check-coverage` judges MEASURED UNION
+// prints a JSON array, newest first. `--event <name>` overrides which event's
+// runs are examined; it exists so the default can be exercised against a
+// counter-example rather than trusted, and ⛔ is not a way to feed the dataset
+// from an affected-only run. `--check-coverage` judges MEASURED UNION
 // CARRIED against the workspace and exits non-zero when a package that HAD a
 // measured weight has neither -- it names workspace packages that were never
 // measured too, but those are a report rather than a refusal, because the
@@ -67,6 +96,11 @@ import { isEntrypoint } from '../invoked-as.mjs';
 export const SHARD_COUNT = 6;
 
 const API = 'https://api.github.com';
+
+// The event whose runs are a FULL measurement of the workspace. ⛔ Not `push`:
+// see "WHICH EVENT'S RUNS" above -- a push run is affected-only since #16467
+// and would pass every eligibility and coverage check while measuring a slice.
+export const DEFAULT_RUN_EVENT = 'schedule';
 
 // `Test Core (3/6)` -> 3. Anchored on both ends: a job merely CONTAINING that
 // text (a future "Test Core (3/6) rerun") is not this job, and reading it as one
@@ -258,11 +292,12 @@ export async function listCandidates({
   workflow = 'ci.yml',
   shardCount = SHARD_COUNT,
   limit = 12,
+  event = DEFAULT_RUN_EVENT,
   fetchImpl = fetch,
 } = {}) {
   const runs = await api(
     `/repos/${repo}/actions/workflows/${workflow}/runs` +
-      `?event=push&branch=main&status=completed&per_page=${limit}`,
+      `?event=${encodeURIComponent(event)}&branch=main&status=completed&per_page=${limit}`,
     { token, fetchImpl }
   );
   const examined = [];
@@ -298,15 +333,22 @@ export async function listCandidates({
 // lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
   'select-shard-timings-run self-test': 35,
+  // #16467. Its own battery rather than more cases in the one above, so that
+  // "the query stopped being tested" is a NAMED breach: the floor check below
+  // reports a battery that registered zero cases by name, and a battery folded
+  // into another only makes a number smaller.
+  'select-shard-timings-run candidate selection': 13,
 });
-const SELF_TEST_BATTERY_FLOOR = 1;
+const SELF_TEST_BATTERY_FLOOR = 2;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return` that
 // leaves the function early cannot report as a pass.
 const SELF_TEST_VERDICT = 'select-shard-timings-run self-test reached its verdict';
 
-function selfTest() {
+// Async because the candidate-selection battery drives `listCandidates`
+// against an injected `fetchImpl`; every caller awaits the verdict.
+async function selfTest() {
   const batterySeen = new Map();
   let openBattery = null;
   const battery = (name) => {
@@ -572,6 +614,135 @@ function selfTest() {
     if (!threw(() => workspaceNames({ packages: { items: [] } }))) throw new Error('workspace: an EMPTY package list was accepted');
   });
 
+  // -------------------------------------------------------------------------
+  battery('select-shard-timings-run candidate selection');
+  // -------------------------------------------------------------------------
+  // WHICH RUNS THE SELECTOR EVEN LOOKS AT (#16467). Everything above judges a
+  // run once it is in hand; this battery judges the QUERY, which is the half
+  // that decided the dataset was being fed by affected-only push runs.
+  //
+  // The fake API below serves BOTH a schedule-shaped and a push-shaped run,
+  // and both are fully eligible -- six successful shards, six live artifacts.
+  // That is the point: eligibility cannot tell them apart, so the only thing
+  // that can is the event named in the request. Each reading therefore comes
+  // with its two controls -- a leg that makes the fake serve the push run
+  // (proving the absence below is a reading and not a mute fixture) and a leg
+  // that asks for an event nobody publishes (proving the run list is keyed on
+  // the event rather than handed back regardless of it).
+  const SCHEDULE_RUN_ID = 900;
+  const PUSH_RUN_ID = 100;
+  const eligiblePayload = {
+    jobs: { jobs: jobs(allSix) },
+    artifacts: { artifacts: artifacts([1, 2, 3, 4, 5, 6]) },
+  };
+  const makeFakeApi = () => {
+    const requested = [];
+    const fetchImpl = async (url) => {
+      requested.push(String(url));
+      const { pathname, searchParams } = new URL(String(url));
+      const runsMatch = /\/actions\/workflows\/([^/]+)\/runs$/.exec(pathname);
+      if (runsMatch) {
+        const byEvent = { schedule: SCHEDULE_RUN_ID, push: PUSH_RUN_ID };
+        const id = byEvent[searchParams.get('event')];
+        const workflow_runs = id
+          ? [{ id, head_sha: `${id}`.padStart(40, 'f'), created_at: '2026-09-08T04:00:00Z', html_url: `https://example.invalid/${id}` }]
+          : [];
+        return { ok: true, status: 200, statusText: 'OK', json: async () => ({ workflow_runs }) };
+      }
+      const kind = /\/actions\/runs\/\d+\/(jobs|artifacts)$/.exec(pathname)?.[1];
+      if (kind) {
+        return { ok: true, status: 200, statusText: 'OK', json: async () => eligiblePayload[kind] };
+      }
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) };
+    };
+    return { fetchImpl, requested };
+  };
+  const call = async (options = {}) => {
+    const { fetchImpl, requested } = makeFakeApi();
+    const examined = await listCandidates({ repo: 'o/r', token: 't', fetchImpl, ...options });
+    return { examined, requested };
+  };
+
+  check(() => {
+    if (DEFAULT_RUN_EVENT !== 'schedule') {
+      throw new Error(`default event: expected 'schedule', got '${DEFAULT_RUN_EVENT}'`);
+    }
+  });
+  check(() => {
+    if (DEFAULT_RUN_EVENT === 'push') throw new Error('default event: the affected-only event is back as the default');
+  });
+
+  // THE READING: by default the selector asks for the hourly scheduled run and
+  // gets it, and never asks for a push run at all.
+  const defaultCall = await call();
+  check(() => {
+    const ids = defaultCall.examined.map((r) => r.run_id);
+    if (ids.length !== 1 || ids[0] !== SCHEDULE_RUN_ID) {
+      throw new Error(`default selection: expected only the schedule run, got [${ids.join(', ')}]`);
+    }
+  });
+  check(() => {
+    if (!defaultCall.examined[0]?.eligible) throw new Error('default selection: the schedule run was not judged eligible');
+  });
+  check(() => {
+    const listQuery = defaultCall.requested.find((u) => u.includes('/runs?'));
+    if (!listQuery?.includes('event=schedule')) throw new Error(`default selection: the run list was not asked for by event (${listQuery})`);
+  });
+  check(() => {
+    if (defaultCall.requested.some((u) => u.includes('event=push'))) {
+      throw new Error('default selection: a push run was requested');
+    }
+  });
+  check(() => {
+    if (defaultCall.examined.some((r) => r.run_id === PUSH_RUN_ID)) {
+      throw new Error('default selection: the push-shaped run was returned');
+    }
+  });
+  check(() => {
+    const listQuery = defaultCall.requested.find((u) => u.includes('/runs?'));
+    for (const fragment of ['branch=main', 'status=completed', 'per_page=']) {
+      if (!listQuery.includes(fragment)) throw new Error(`default selection: '${fragment}' left the query (${listQuery})`);
+    }
+  });
+
+  // FIRING CONTROL: the fake DOES serve a push run, and it is fully eligible.
+  // So the zero above is a reading about the query, and the push run's
+  // eligibility is not what excludes it -- nothing in `runIsEligible` can.
+  const pushCall = await call({ event: 'push' });
+  check(() => {
+    const ids = pushCall.examined.map((r) => r.run_id);
+    if (ids.length !== 1 || ids[0] !== PUSH_RUN_ID) {
+      throw new Error(`firing control: the fake did not serve the push run, so the default reading is mute (got [${ids.join(', ')}])`);
+    }
+  });
+  check(() => {
+    if (!pushCall.examined[0]?.eligible) {
+      throw new Error('firing control: the push run was rejected by eligibility, which would make the event guard look unnecessary');
+    }
+  });
+
+  // NONSENSE CONTROL: an event nobody publishes returns nothing, so the run
+  // list is genuinely keyed on the event rather than served regardless of it.
+  const nonsenseCall = await call({ event: 'no-such-event' });
+  check(() => {
+    if (nonsenseCall.examined.length !== 0) {
+      throw new Error(`nonsense control: an unpublished event returned ${nonsenseCall.examined.length} run(s)`);
+    }
+  });
+  check(() => {
+    const listQuery = nonsenseCall.requested.find((u) => u.includes('/runs?'));
+    if (!listQuery?.includes('event=no-such-event')) {
+      throw new Error(`nonsense control: the event was not forwarded into the query (${listQuery})`);
+    }
+  });
+
+  // The limit is the number of runs EXAMINED, so it has to reach the query.
+  const limited = await call({ limit: 3 });
+  check(() => {
+    const listQuery = limited.requested.find((u) => u.includes('/runs?'));
+    if (!listQuery?.includes('per_page=3')) throw new Error(`limit: not forwarded (${listQuery})`);
+  });
+
   // -- The floor: every declared battery ran, and ran its cases. Evaluated
   //    before the verdict, so the success line can only be printed by a run in
   //    which the set of batteries that registered EQUALS the set declared.
@@ -616,7 +787,7 @@ async function main() {
   const argv = process.argv.slice(2);
 
   if (argv.includes('--self-test')) {
-    if (selfTest() !== SELF_TEST_VERDICT) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
       console.error(
         '\nx select-shard-timings-run self-test: selfTest() returned without reaching its verdict,\n' +
           'so no success line was printed. Exiting 0 here would report a self-test that never\n' +
@@ -675,7 +846,15 @@ async function main() {
     if (!token || !repo) throw new Error('--candidates needs GITHUB_TOKEN and GITHUB_REPOSITORY in the environment');
     const limitAt = argv.indexOf('--limit');
     const limit = limitAt === -1 ? 12 : Number(argv[limitAt + 1]);
-    const examined = await listCandidates({ repo, token, limit });
+    const eventAt = argv.indexOf('--event');
+    const event = eventAt === -1 ? DEFAULT_RUN_EVENT : String(argv[eventAt + 1]);
+    const workflow = 'ci.yml';
+    console.error(
+      `select-shard-timings-run: examining the ${limit} most recent completed \`${event}\` runs of ` +
+        `${workflow} on main. The hourly \`schedule\` run is the FULL battery; a \`push\` run has been ` +
+        'affected-only since #16467 and is not a measurement of the workspace.'
+    );
+    const examined = await listCandidates({ repo, token, limit, event, workflow });
     for (const run of examined) {
       console.error(
         run.eligible
@@ -686,9 +865,10 @@ async function main() {
     const eligible = examined.filter((r) => r.eligible);
     if (eligible.length === 0) {
       console.error(
-        `select-shard-timings-run: NO ELIGIBLE RUN among the ${examined.length} most recent completed push ` +
-          'runs on main. Every one was censored, failed, or has lost its run-summary artifacts to the ' +
-          '1-day retention window. This is a refusal, not a no-op: nothing was regenerated.'
+        `select-shard-timings-run: NO ELIGIBLE RUN among the ${examined.length} most recent completed ` +
+          `\`${event}\` runs of ${workflow} on main. Every one was censored, failed, or has lost its ` +
+          'run-summary artifacts to the 1-day retention window. This is a refusal, not a no-op: nothing ' +
+          'was regenerated.'
       );
       process.exit(1);
     }
@@ -697,7 +877,7 @@ async function main() {
   }
 
   console.error(
-    'usage: select-shard-timings-run.mjs --candidates [--limit <n>]\n' +
+    'usage: select-shard-timings-run.mjs --candidates [--limit <n>] [--event <name>]\n' +
       '       select-shard-timings-run.mjs --check-coverage --committed <f> --refreshed <f> --workspace <f> [--exclude <pkg>]...\n' +
       '       select-shard-timings-run.mjs --self-test'
   );

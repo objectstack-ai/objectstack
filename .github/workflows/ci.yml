@@ -38,12 +38,55 @@ on:
   # branch-protection-required check MUST carry this trigger, or queue builds
   # wait forever on a check that never reports.
   merge_group:
+  # ── THE HOURLY FULL RUN (#16467) ─────────────────────────────────────────
+  # `push` above now computes the Test Core package set with `--affected`
+  # against `github.event.before`, so a merge no longer re-tests the whole
+  # workspace it just tested in the queue. Something still has to run the FULL
+  # battery on `main`, on a clock, or "main is green" stops being a statement
+  # about the workspace and becomes a statement about the last diff.
+  #
+  # This is that run. Minute 0 rather than an offset minute ON PURPOSE, and
+  # against the sibling convention in test-nightly-tiers.yml: the reading this
+  # feeds — `scripts/ci/select-shard-timings-run.mjs` — wants one complete run
+  # per hour far more than it wants a short queue wait, and a run that starts
+  # a few minutes late is still the hour's run. What it must NOT do is collide
+  # with the next hour's, which the concurrency group below decides.
+  #
+  # ⛔ This is a NEW TRIGGER KEY, not a widening of `push:`. The ⛔ above still
+  # binds: `push:` stays filtered to `main`.
+  schedule:
+    - cron: '0 * * * *'
+  # The same full battery, on demand: an operator who has just landed a fix for
+  # a red hourly run should not have to wait up to an hour to see it answered.
+  # Treated as `full` by the selection script for the same reason `schedule` is.
+  workflow_dispatch:
 
 # Superseded runs on the same PR/branch waste runners and delay feedback;
 # cancel them. Push runs to main group by commit ref as well, so an in-flight
 # main run is cancelled only by a newer main push.
+#
+# ⭐ `github.event_name` IS LOAD-BEARING IN THIS KEY, and it is the whole
+# reason the hourly run above can finish (#16467). On a `schedule` event
+# `github.event.pull_request.number` is empty and `github.ref` is
+# `refs/heads/main` — BYTE-IDENTICAL to what a push to `main` produces. Without
+# the event name in the key the hourly run and the next merge share one group,
+# `cancel-in-progress: true` applies, and the next merge kills the hourly run.
+# That is not a hypothetical: this card's own measurement is that 36 of the
+# last 60 push runs on `main` were already cancelled that way, at a merge
+# cadence that would censor most hours.
+#
+# ⛔ Do not "simplify" this back to two segments. `scripts/ci/scheduled-full-
+# run.mjs --check-concurrency` evaluates this expression against a push-shaped
+# and a schedule-shaped context and reds when the two groups are equal, so the
+# collision cannot come back silently.
+#
+# `cancel-in-progress` stays `true` for every event including `schedule`: two
+# hourly runs overlapping means one of them is over an hour old, and an hour-old
+# measurement of `main` is strictly the worse of the two. Test Core's wall clock
+# is well inside the cadence (~39 shard-minutes across six shards), so this is
+# the exceptional path, not the normal one.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -54,11 +97,13 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      # On merge_group, everything counts as changed: dorny/paths-filter has no
-      # merge_group support, and the queue build is the last validation before
-      # main — the one place a skipped job can never be the right answer. A
-      # skipped step's output is the empty string (falsy), so `|| 'true'`
-      # supplies the merge-group value without touching PR/push behavior.
+      # On merge_group — and on the `schedule` / `workflow_dispatch` full runs
+      # (#16467) — everything counts as changed: dorny/paths-filter resolves a
+      # diff only on `pull_request` and `push`, and each of these three events
+      # is a place a skipped job can never be the right answer (the queue build
+      # is the last validation before main; the hourly run IS the full battery).
+      # A skipped step's output is the empty string (falsy), so `|| 'true'`
+      # supplies their value without touching PR/push behavior.
       docs: ${{ steps.changes.outputs.docs || 'true' }}
       core: ${{ steps.changes.outputs.core || 'true' }}
       console: ${{ steps.changes.outputs.console || 'true' }}
@@ -100,9 +145,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # ⭐ SPELLED AS AN ALLOW-LIST, not as `!= 'merge_group'` (#16467). This
+      # action reads a diff, and the only two events that hand it one it can
+      # resolve unaided are `pull_request` (base vs head) and `push`
+      # (`event.before` vs `after`). `merge_group` was the first event with
+      # neither, and the exclusion was written as its name; `schedule` and
+      # `workflow_dispatch` are the second and third, and under the old
+      # spelling they would have RUN the action with no resolvable base.
+      #
+      # That failure direction is the dangerous one: every filter output would
+      # come back `false`, `|| 'true'` supplies nothing (the output exists and
+      # says `false`), and every downstream `!= 'false'` guard SKIPS — so the
+      # hourly full run would have been an entirely green, entirely empty run
+      # of nothing at all. An allow-list makes each new event fail toward
+      # THE FILTER CONTRACT's half 1 instead: the step is skipped, its outputs
+      # are the empty string, `|| 'true'` fills them in, and everything runs.
       - uses: dorny/paths-filter@v4
         id: changes
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         with:
           filters: |
             docs:
@@ -473,13 +533,21 @@ jobs:
       #                 on this shard" exit below, every shard still attests,
       #                 and Test Core is an honest green. It is NOT the #10057
       #                 case, which is pull_request-only (the script says why).
-      #   push          unchanged: the FULL list.
+      #   push          affected set against `github.event.before`, the commit
+      #                 `main` was on before this merge landed (#16467). A zero
+      #                 sha -- a first push, or a force-push that rewrote
+      #                 history -- falls back to the FULL list, loudly.
+      #   schedule      the FULL list: the hourly run IS the full battery, and
+      #   workflow_     the on-demand rerun of it. Neither carries a diff base,
+      #     dispatch    and neither should: they are the run that says whether
+      #                 the whole workspace is green on `main`.
       - name: Compute this shard's package set
         env:
           OS_SHARD_EVENT_NAME: ${{ github.event_name }}
           OS_SHARD_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
           OS_SHARD_PR_PINNED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           OS_SHARD_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          OS_SHARD_PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           bash scripts/ci/select-shard-packages.sh
           node scripts/partition-test-shards.mjs "$RUNNER_TEMP/turbo-ls.json" \
