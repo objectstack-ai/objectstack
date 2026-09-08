@@ -183,6 +183,69 @@
  * is the one predicate the reader and the UNJUDGED accounting share, so the set
  * that owes a stream and the set that gets one cannot drift apart.
  *
+ * ## One PR, two cards — the FOURTH reading of the declaration limb (#16304)
+ *
+ * The declaration limb is keyed on the CARD, and the judgement it reads is a
+ * property of the PR's CONTRACT INCREMENT. Those coincide for the one-card /
+ * one-PR case C2 was built on (#13910/#13476, #13914), and they come apart the
+ * moment one PR delivers two cards. Measured on PR #16243, which carried
+ * `Fixes #15542` and `Closes #15854` on two separate lines: `--pair 16243`
+ * derived BOTH pairs, the first read `Clause-②: yes` from #15542's claim
+ * comment, and the second exited 4 naming a remedy no legitimate act could
+ * supply. #15854's own maintainer ruling (`5557098503`) reads 「both halves are
+ * one `domain:spec` PR, and this card closes when that PR lands」, so it is
+ * never separately dispatched and never receives a claim comment; this file's
+ * own ⛔ forbids writing one on the claiming seat's behalf, and that card
+ * additionally carried `pm:retriage`, where a `Claim:` is a dispatch act the PM
+ * protocol forbids outright.
+ *
+ * ⚠️ The PAIRING was not wrong, and that is what narrows the question. GitHub
+ * itself closed #15854 one second after the merge, on the same relation
+ * `prDeliversCard` read. The predicate asks the RIGHT cards; it asked one of
+ * them in a PLACE that a legitimate workflow cannot fill without manufacturing
+ * the artifact the checker looks for. What was missing was never the judgement
+ * — it sat on #15542 twice before any code was written — but a SECOND
+ * machine-readable copy of it, on a card whose protocol gives it no carrier.
+ *
+ * ⭐ So the limb gets a FOURTH READING rather than a wider predicate: *a card
+ * delivered by a PR whose SIBLING card carries the declaration*. It prints a
+ * row of its own — naming the card, the delivering PR, the sibling that carries
+ * the declaration and the value read from that sibling's claim — and it does
+ * not exit 4.
+ *
+ * ⛔ What it is NOT, in three parts, because each is a direction this file has
+ * already refused somewhere else:
+ *
+ *   1. **It relaxes no spelling.** The sibling's declaration is read by the
+ *      SAME `cardDeclaration` over the SAME imported `CLAIM_COMMENT_MARKER`,
+ *      and only a `declared` state on that sibling's own claim comment counts.
+ *      Prose on the sibling is still prose, a near miss is still a near miss.
+ *      #12409's boundary is untouched: the gap was in WHICH CARRIER IS ASKED,
+ *      never in WHAT COUNTS AS AN ANSWER.
+ *   2. **It narrows `prDeliversCard` by not one card.** The pair is derived
+ *      exactly as before and still gets a row of its own; the delivery relation
+ *      is the sibling module's and is neither restated nor filtered here. (That
+ *      was direction 2 in the filing, and the landing measurement excluded it —
+ *      teaching the predicate to stop asking about a card a PR really delivers
+ *      removes the very population the enqueue gate exists to cover.)
+ *   3. **It cannot read a #13914-class absence as declared, by construction.**
+ *      The reading fires ONLY when the subject card has NO CLAIM COMMENT AT ALL
+ *      — the `absent` state, which is exactly the state a never-separately-
+ *      dispatched card is in — and ONLY when some OTHER card of the same
+ *      delivering PR declares. A card that WAS dispatched carries a claim
+ *      comment by protocol, so a dispatched card whose declaration line is
+ *      missing reads `missing`, not `absent`, and keeps its C2 row and its
+ *      exit 4. And #13914's own shape is one card and one PR: it has no sibling
+ *      to read, so it cannot reach this row at all. Both halves are pinned as
+ *      CONTROLS in the self-test, beside the #16243 specimen.
+ *
+ * ⚠️ What the row asserts is therefore a LOCATION, never a substitution: the
+ * declaration governing this PR's increment exists, in the fixed spelling, on
+ * the sibling it names — and a reader must still satisfy themselves that it
+ * covers THIS card's half of the increment. That is precisely why the reading
+ * PRINTS rather than going quiet, and why it is a fourth reading rather than a
+ * silent pass.
+ *
  * ## The three read paths — a seat's ACCESS must not decide whether ② is checkable
  *
  * Precondition ② is read by the seat that LANDS the pair, and the carrier
@@ -302,6 +365,14 @@
  *      pair at all, was not issued by the session that wrote the diff.
  *      ⚠️ 0 is not "the review passed"; the PASS reading is human and
  *      is precondition ① of the landing check, not this exit code.
+ *      ⭐ Since #16304 it also covers the FOURTH READING: a card carrying no
+ *      claim comment of its own, delivered by a PR whose sibling card carries
+ *      the declaration. The limb IS read — in the fixed spelling, from a
+ *      carrier the PR itself designates by delivering it — so the pair is
+ *      neither UNJUDGED nor adverse, and a row prints saying where the
+ *      declaration lives and what it reads. ⛔ That is not the
+ *      "0-with-a-message" the entry for 4 below bans: that ⛔ forbids
+ *      rendering an ADVERSE verdict as 0, and this reading is not one.
  *   2  also the answer when a C3 candidate's event stream or head commit could
  *      not be read, or when a `Clause-②: no` pair's changed-file listing could
  *      not be: an unread stream is not a never-hung gate and an unread diff is
@@ -314,6 +385,15 @@
  *      impossible to confuse with "the environment could not answer", so a
  *      seat reading `$?` cannot turn a refusal into a clearance. And ⛔ never
  *      0-with-a-message: silence is what this whole file exists against.
+ *      ⛔ And it is NOT the fourth reading (#16304). That reading is not a
+ *      verdict about the pair at all: the limb is legible, on the carrier the
+ *      PR designates. Giving it a NEW non-zero code would have been the same
+ *      refusal wearing a different number — `references/contract-review.md`
+ *      states the landing check's ② as 「0 = 双肢一致…4 = 任一不成立」, so any
+ *      non-zero re-blocks the legal workflow this reading exists to unblock,
+ *      while telling a seat nothing the ROW does not already say. The row says
+ *      which; the exit says only the class. That split is this table's rule,
+ *      not an exception carved for this case.
  *
  * ## The standing caller
  *
@@ -377,6 +457,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the card-level declaration: every state, none collapsed into another': 13,
   'C1, replaying the 2026-08-31 measured table': 12,
   'C2, the row this file exists for': 26,
+  '#16304: the fourth reading — one PR, two cards, and the controls that keep exit 4': 39,
   'C3, the direction a carrier comparison cannot see': 7,
   '#14155: the COMPLETED state, and the three it must stay distinct from': 18,
   'the event reader itself': 9,
@@ -392,7 +473,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+// Raised by exactly the one battery #16304 adds, so the roster's existing slack
+// is preserved rather than tightened or loosened as a side effect.
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -746,6 +829,114 @@ export function c2DeclarationUnreadable(pair) {
         `${notADecision} ${NEVER_WRITES}`
       );
   }
+}
+
+// ---------------------------------------------------------------------------
+// The FOURTH reading of the declaration limb — one PR, two cards (#16304)
+// ---------------------------------------------------------------------------
+
+/**
+ * The OTHER cards this same PR delivers, and what each one's OWN claim comment
+ * declares.
+ *
+ * ⛔ Read through `cardDeclaration` — the same function, the same imported
+ * `CLAIM_COMMENT_MARKER`, the same two spellings. Only a `declared` state on a
+ * sibling's own claim comment is a carrier here: `misplaced`, `malformed`,
+ * `missing`, `absent` and `unreadable` are all NOT declarations on the sibling
+ * either, exactly as they are not on the subject card. Nothing about what
+ * counts as an answer moves in this function; what moves is only which card is
+ * being asked.
+ *
+ * The siblings are drawn from the SAME derived pair set the caller is
+ * rendering, so a sibling is by construction a card `prDeliversCard` said this
+ * PR delivers — never a card named by a reader, and never a card from another
+ * PR. A caller that passes no set gets an empty list, which is the fail-closed
+ * direction: the subject card then reads exactly as it did before #16304.
+ *
+ * @param {{ pr?: number, card?: number }} pair
+ * @param {{ pr?: number, card?: number, cardComments?: object[]|null }[]|null} pairs
+ * @returns {{ card: number, value: 'yes'|'no', detail?: string }[]}
+ */
+export function siblingDeclarations(pair, pairs) {
+  const out = [];
+  if (!pair || !Array.isArray(pairs)) return out;
+  const seen = new Set();
+  for (const other of pairs) {
+    if (!other || other === pair) continue;
+    if (Number(other.pr) !== Number(pair.pr)) continue;
+    if (Number(other.card) === Number(pair.card)) continue;
+    if (seen.has(Number(other.card))) continue;
+    const d = cardDeclaration(other?.cardComments ?? null);
+    if (d.state !== 'declared') continue;
+    seen.add(Number(other.card));
+    out.push({ card: Number(other.card), value: d.value, detail: d.detail });
+  }
+  return out;
+}
+
+/**
+ * Is THIS pair in the fourth reading's shape?
+ *
+ * The ONE predicate the row, the row suppression and the sweep tally all read —
+ * the same discipline `needsGateHistory` and `needsWideningRead` follow, so the
+ * set that gets the fourth reading and the set that is kept out of the C2 count
+ * cannot drift apart.
+ *
+ * ⭐ `absent` and nothing else. That is the whole #13914 guard, and it is
+ * structural rather than argued: `absent` means NO comment on the thread begins
+ * a line `Claim:`, which is the state of a card that was never separately
+ * dispatched — and a card that WAS dispatched carries a claim comment by
+ * protocol, so a dispatched card whose declaration line is missing reads
+ * `missing` and keeps its C2 row and its exit 4. `malformed`, `misplaced` and
+ * `missing` all mean a seat DID read this card and owes it something a
+ * legitimate act can supply; none of them is covered here.
+ */
+export function readsSiblingDeclaration(pair, pairs) {
+  if (cardDeclaration(pair?.cardComments ?? null).state !== 'absent') return false;
+  return siblingDeclarations(pair, pairs).length > 0;
+}
+
+/**
+ * The fourth reading, as a printed row.
+ *
+ * ⚠️ It asserts a LOCATION, never a substitution. The declaration is not moved
+ * onto this card, no value is attributed to it, and the row says in as many
+ * words that a reader must still satisfy themselves the sibling's reading
+ * covers this card's half of the increment. Going quiet instead would be the
+ * one thing this whole file exists against — and it would also hide the case
+ * where two siblings declare DIFFERENTLY, which is a real state and is named
+ * here rather than resolved by fiat (the same call `RANKING_UNSETTLED` makes
+ * one row up: this file reports a disagreement, it does not rank one).
+ */
+export function c2SiblingDeclared(pair, pairs) {
+  if (!readsSiblingDeclaration(pair, pairs)) return null;
+  const siblings = siblingDeclarations(pair, pairs);
+  const head = `card #${pair.card} (delivering open PR #${pair.pr}${pair.draft ? ' (draft)' : ''})`;
+  const where = siblings
+    .map((s) => `card #${s.card} declares \`Clause-②: ${s.value}\`${s.detail ? ` (${JSON.stringify(s.detail)})` : ''}`)
+    .join('; ');
+  const disagree =
+    new Set(siblings.map((s) => s.value)).size > 1
+      ? '⚠️ Those siblings do NOT agree with each other, and this row does not pick between them: ' +
+        'one PR has one contract increment, so a reader owes an answer about which reading governs ' +
+        'it before the pair enqueues. '
+      : '';
+  return (
+    `${head} — the declaration limb has NO READING ON THIS CARD, and the CLAIM COMMENT is why: no ` +
+    "comment on its thread begins a line `Claim:`, so the carrier this limb reads does not exist. " +
+    '⭐ But this PR delivers more than one card, and the declaration governing its contract ' +
+    `increment IS readable, in the fixed spelling, on a SIBLING card the same PR delivers — ${where}. ` +
+    'That is the FOURTH reading of this limb (#16304) and it is neither of the two not-read ' +
+    'states: nothing is owed on this card. A card that closes when its sibling\'s PR lands is ' +
+    'never separately dispatched, so it never receives a claim comment, and the only act that ' +
+    'could put one there is the act this file forbids — ⛔ writing the declaration on the claiming ' +
+    `seat's behalf. ${disagree}⚠️ What a reader must still verify: that the sibling's reading ` +
+    'covers THIS card\'s half of the increment too. The declaration was made about the PR; this ' +
+    'row asserts only WHERE it lives and what it says, and ⛔ never moves it onto this card. ' +
+    '⛔ This reading needs a sibling that DECLARED: a PR delivering exactly one card, or one whose ' +
+    'other cards carry no claim comment with a `Clause-②:` line, still gets the C2 row and exit 4, ' +
+    `unchanged. ${NEVER_WRITES}`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1275,18 +1466,45 @@ export function wideningUnjudged(pair, repo) {
   );
 }
 
-/** Every row for one pair, in reporting order. */
-export function pairRows(pair) {
+/**
+ * Every FINDING row for one pair, in reporting order.
+ *
+ * `pairs` — the derived set this pair came from — is optional and defaults to
+ * none, which is the fail-closed direction: a caller that does not supply the
+ * delivery set gets exactly the rows this function returned before #16304,
+ * including the C2 row on a card whose sibling would have carried the
+ * declaration. ⛔ The fourth reading is never a FINDING and is never returned
+ * from here: it belongs to `pairNotes`, so a round report's "N clause-②
+ * finding(s)" can never count a pair that owes nothing.
+ */
+export function pairRows(pair, pairs = null) {
   const rows = [];
   const split = c1CarrierSplit(pair);
   if (split) rows.push({ code: 'C1', text: split });
-  const decl = c2DeclarationUnreadable(pair);
+  // The SAME predicate `pairNotes` reads, so a pair can never be both counted
+  // as a C2 finding and reported as the fourth reading — or as neither.
+  const decl = readsSiblingDeclaration(pair, pairs) ? null : c2DeclarationUnreadable(pair);
   if (decl) rows.push({ code: 'C2', text: decl });
   const ungated = c3DeclaredYesUngated(pair);
   if (ungated) rows.push({ code: 'C3', text: ungated });
   const selfReview = c4VerdictSelfReview(pair);
   if (selfReview) rows.push({ code: 'C4', text: selfReview });
   return rows;
+}
+
+/**
+ * Every NOTE for one pair — a reading that is not a finding.
+ *
+ * Kept apart from `pairRows` because the two feed different consumers: a
+ * finding raises the `--pair` exit and is counted in the sweep's finding
+ * total, a note does neither. Both read `readsSiblingDeclaration`, so the row
+ * a pair gets and the count it lands in are decided once.
+ */
+export function pairNotes(pair, pairs = null) {
+  const notes = [];
+  const sibling = c2SiblingDeclared(pair, pairs);
+  if (sibling) notes.push({ code: 'C2-SIBLING', text: sibling });
+  return notes;
 }
 
 /**
@@ -1305,15 +1523,25 @@ export function pairRows(pair) {
  * reading with its own row, and an unreadable thread is UNJUDGED rather than
  * either not-read state.
  *
- * @param {{ cardComments?: object[]|null }[]|null} pairs
- * @returns {{ absent: number, missing: number }}
+ * ⭐ Since #16304 the `absent` population is split once more, for the same
+ * reason it was split from `missing` in the first place: a card with no claim
+ * comment whose SIBLING carries the declaration owes NOTHING, and counting it
+ * beside the cards that owe a claim comment is again one number said about two
+ * different owings. It is counted under `sibling`, from the same predicate the
+ * rows read — the tally takes the whole pair set, so the sibling relation is
+ * computable here without a second reader.
+ *
+ * @param {{ pr?: number, card?: number, cardComments?: object[]|null }[]|null} pairs
+ * @returns {{ absent: number, missing: number, sibling: number }}
  */
 export function declarationLimbTally(pairs) {
-  const tally = { absent: 0, missing: 0 };
+  const tally = { absent: 0, missing: 0, sibling: 0 };
   for (const pair of pairs ?? []) {
     const { state } = cardDeclaration(pair?.cardComments ?? null);
-    if (state === 'absent') tally.absent += 1;
-    else if (state === 'missing') tally.missing += 1;
+    if (state === 'absent') {
+      if (readsSiblingDeclaration(pair, pairs)) tally.sibling += 1;
+      else tally.absent += 1;
+    } else if (state === 'missing') tally.missing += 1;
   }
   return tally;
 }
@@ -1868,25 +2096,31 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFile
 
 function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
   const rows = [];
+  const notes = [];
   const unjudged = [];
   for (const pair of pairs) {
-    for (const row of pairRows(pair)) rows.push({ pr: pair.pr, card: pair.card, ...row });
+    for (const row of pairRows(pair, pairs)) rows.push({ pr: pair.pr, card: pair.card, ...row });
+    for (const note of pairNotes(pair, pairs)) notes.push({ pr: pair.pr, card: pair.card, ...note });
     const gap = pairUnjudged(pair);
     if (gap) unjudged.push({ pr: pair.pr, card: pair.card, text: gap });
   }
   const declarationLimb = declarationLimbTally(pairs);
   if (json) {
-    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, unjudged }, null, 2));
+    console.log(JSON.stringify({ repo, openPrs: pulls.length, pairs: pairs.length, declarationLimb, rows, notes, unjudged }, null, 2));
   } else {
     console.log(
       `check-clause2-carriers: ${pairs.length} card/PR pair(s) derived from ${pulls.length} open ` +
-        `PR(s) in ${repo} — ${rows.length} clause-② finding(s), ${unjudged.length} pair(s) UNJUDGED. ` +
+        `PR(s) in ${repo} — ${rows.length} clause-② finding(s), ${notes.length} note(s), ` +
+        `${unjudged.length} pair(s) UNJUDGED. ` +
         `Declaration limb not read: ${declarationLimb.absent} with NO CLAIM COMMENT (a line ` +
         `beginning \`Claim:\` is the whole set) and ${declarationLimb.missing} with a claim ` +
         'comment but NO DECLARATION LINE — two readings, two remedies, ⛔ never one number. ' +
-        'Report-only: findings are patrol input, not a gate verdict.',
+        `Read from a SIBLING card the same PR delivers: ${declarationLimb.sibling} — the fourth ` +
+        'reading (#16304), which owes nothing and is deliberately counted apart from the two ' +
+        'above. Report-only: findings are patrol input, not a gate verdict.',
     );
     for (const row of rows) console.log(`- **${row.code}** #${row.pr} / #${row.card} — ${row.text}`);
+    for (const note of notes) console.log(`- **${note.code}** #${note.pr} / #${note.card} — ${note.text}`);
     for (const gap of unjudged) console.log(`- **UNJUDGED** ${gap.text}`);
     if (rows.length === 0 && unjudged.length === 0) {
       console.log('- (no findings, and every pair was fully read — a clean board, not a short read.)');
@@ -1895,13 +2129,19 @@ function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
   return unjudged.length > 0 ? EXIT_INCOMPLETE : EXIT_OK;
 }
 
-function renderPair(pair, repo) {
+function renderPair(pair, repo, pairs = null) {
   const gap = pairUnjudged(pair);
   if (gap) {
     console.error(`✗ check-clause2-carriers --pair: ${gap}`);
     return EXIT_INCOMPLETE;
   }
-  const rows = pairRows(pair);
+  const rows = pairRows(pair, pairs);
+  // ⭐ A NOTE, not a finding: it prints in both branches below and raises no
+  // exit code. ⛔ It is not silence — the reading is stated in full, on stderr
+  // beside the rows, because a seat that reads only `$?` must still be able to
+  // find out from the run WHY this pair answered 0 without a declaration of
+  // its own (#16304).
+  const notes = pairNotes(pair, pairs);
   const widening = pairWidening(pair, repo);
   const wideningRow = c5WideningTell(pair, repo);
   if (wideningRow) rows.push({ code: 'C5', text: wideningRow });
@@ -1911,9 +2151,13 @@ function renderPair(pair, repo) {
       console.error(`✗ check-clause2-carriers --pair: ${wideningGap}`);
       return EXIT_INCOMPLETE;
     }
+    for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
-        'readable in the fixed spelling and both carriers agree' +
+        (notes.length > 0
+          ? 'readable in the fixed spelling on a SIBLING card this same PR delivers rather than on ' +
+            'this card (the reading above names which, and what it says), and both carriers agree'
+          : 'readable in the fixed spelling and both carriers agree') +
         (widening.state === 'clean'
           ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
           : '.'),
@@ -1921,6 +2165,7 @@ function renderPair(pair, repo) {
     return EXIT_OK;
   }
   for (const row of rows) console.error(`✗ ${row.code} — ${row.text}`);
+  for (const note of notes) console.error(`ℹ️  ${note.code} — ${note.text}`);
   // The file:line list, one per line, so an author can paste it into an editor.
   for (const line of refusalLines(widening)) console.error(`    ${line}`);
   // An adverse row OUTRANKS a gap -- a tell that WAS read is a fact about this
@@ -2098,6 +2343,84 @@ export function selfTest() {
   t('a correctly declared card produces NO C2 row', c2DeclarationUnreadable(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
   t('an unreadable thread produces no C2 row — it is UNJUDGED instead, never clean', c2DeclarationUnreadable(pair({ cardComments: null })) === null);
   t('…and the unjudged accounting names the thread that could not be read', says(pairUnjudged(pair({ cardComments: null })), 'comment thread'));
+
+  // -- #16304: the fourth reading — one PR, two cards -------------------------
+  //
+  // ★ The measured specimen — PR #16243 carried `Fixes #15542` and `Closes
+  // #15854` on two separate lines, so `--pair 16243` derived two pairs and
+  // exited 4 on the second. #15542 was claimed and declared `Clause-②: yes`
+  // before any code was written; #15854 by its own maintainer ruling closes
+  // when that PR lands, is never separately dispatched, never receives a claim
+  // comment, and additionally carried `pm:retriage`, where a `Claim:` is a
+  // dispatch act the PM protocol forbids. GitHub closed it one second after
+  // the merge on the same relation, so the PAIR was right and the PLACE the
+  // declaration was demanded from was not.
+  //
+  // ⭐ Every case below that begins ⛔ CONTROL is the other half: the shapes
+  // that must keep the C2 row and exit 4, byte for byte, or this reading would
+  // be the #13914 absence read as a declaration.
+  battery('#16304: the fourth reading — one PR, two cards, and the controls that keep exit 4');
+  const sibPair = (o) => ({ pr: 16243, card: 15854, draft: false, prLabels: [], cardLabels: [], cardComments: [], ...o });
+  const RULING_ONLY = [{ body: 'Ruling: both halves are one `domain:spec` PR, and this card closes when that PR lands.', created_at: '2026-09-04T11:00:00Z' }];
+  const DECLARING_SIBLING = sibPair({ card: 15542, cardComments: [CLAIM('Clause-②: yes')] });
+  const SUBJECT = sibPair({ cardComments: RULING_ONLY });
+  const SET = [DECLARING_SIBLING, SUBJECT];
+
+  t('the sibling this same PR delivers is found, with the value from its own claim', JSON.stringify(siblingDeclarations(SUBJECT, SET).map((s) => [s.card, s.value])) === '[[15542,"yes"]]', JSON.stringify(siblingDeclarations(SUBJECT, SET)));
+  t('⛔ a card is never its own sibling', siblingDeclarations(DECLARING_SIBLING, SET).every((s) => s.card !== 15542));
+  t('⛔ a card delivered by a DIFFERENT PR is not a sibling', siblingDeclarations(SUBJECT, [{ ...DECLARING_SIBLING, pr: 99999 }, SUBJECT]).length === 0);
+  t('⛔ a sibling whose claim carries no declaration is not a carrier', siblingDeclarations(SUBJECT, [sibPair({ card: 15542, cardComments: [CLAIM('Domain: x')] }), SUBJECT]).length === 0);
+  t('⛔ a sibling whose declaration is PROSE is not a carrier — ⛔ the spelling is NOT relaxed here', siblingDeclarations(SUBJECT, [sibPair({ card: 15542, cardComments: [CLAIM('## Clause ②: **yes**')] }), SUBJECT]).length === 0);
+  t('⛔ a sibling whose value is MALFORMED is not a carrier', siblingDeclarations(SUBJECT, [sibPair({ card: 15542, cardComments: [CLAIM('Clause-②: Yes')] }), SUBJECT]).length === 0);
+  t('⛔ a sibling whose declaration is MISPLACED is not a carrier — the claim comment is the carrier there too', siblingDeclarations(SUBJECT, [sibPair({ card: 15542, cardComments: [CLAIM('Domain: x'), { body: 'Clause-②: yes', created_at: '2026-09-05T10:00:00Z' }] }), SUBJECT]).length === 0);
+  t('⛔ a sibling whose thread could not be READ is not a carrier (#4690)', siblingDeclarations(SUBJECT, [sibPair({ card: 15542, cardComments: null }), SUBJECT]).length === 0);
+
+  t('the reading fires on the measured #16243 shape', readsSiblingDeclaration(SUBJECT, SET) === true);
+  const dispatchedSubject = sibPair({ cardComments: [CLAIM('Domain: `domain:spec`')] });
+  t('⛔ CONTROL — a DISPATCHED card (claim comment, no line) reads MISSING, not absent, and is NOT covered: the #13914 guard', readsSiblingDeclaration(dispatchedSubject, [DECLARING_SIBLING, dispatchedSubject]) === false);
+  t('⛔ CONTROL — a MALFORMED line on the subject is not covered either — a seat DID read that card', readsSiblingDeclaration(sibPair({ cardComments: [CLAIM('Clause-②: Yes')] }), SET) === false);
+  t('⛔ CONTROL — nor a MISPLACED one: it has its own row and its own reachable remedy', readsSiblingDeclaration(sibPair({ cardComments: [CLAIM('Domain: x'), { body: 'Clause-②: no', created_at: '2026-09-05T10:00:00Z' }] }), SET) === false);
+  t('⛔ CONTROL — a PR delivering exactly ONE card has no sibling to read', readsSiblingDeclaration(SUBJECT, [SUBJECT]) === false);
+  t('⛔ CONTROL — a caller that passes no delivery set gets the pre-#16304 reading: fail-closed', readsSiblingDeclaration(SUBJECT, null) === false);
+
+  t('the C2 FINDING row is suppressed in the fourth reading\'s shape', pairRows(SUBJECT, SET).every((r) => r.code !== 'C2'), JSON.stringify(pairRows(SUBJECT, SET).map((r) => r.code)));
+  t('…and the reading is a NOTE instead, under a code of its own', pairNotes(SUBJECT, SET).map((n) => n.code).join() === 'C2-SIBLING');
+  t('⛔ CONTROL — with no declaring sibling the C2 row comes straight back', pairRows(SUBJECT, [SUBJECT]).some((r) => r.code === 'C2'));
+  t('⛔ CONTROL — …and it is BYTE-IDENTICAL to the row this file printed before #16304', pairRows(SUBJECT, [SUBJECT]).find((r) => r.code === 'C2')?.text === c2DeclarationUnreadable(SUBJECT));
+  t('⛔ CONTROL — …and that shape produces no note at all', pairNotes(SUBJECT, [SUBJECT]).length === 0);
+
+  const sibRow = c2SiblingDeclared(SUBJECT, SET);
+  t('the note names the card it is about', says(sibRow, 'card #15854'));
+  t('…and the delivering PR', says(sibRow, 'PR #16243'));
+  t('…and the sibling card that carries the declaration', says(sibRow, 'card #15542 declares'));
+  t('…and the VALUE read from that sibling\'s own claim', says(sibRow, '`Clause-②: yes`'));
+  t('…and quotes the line it read, so the reading is checkable without a second run', says(sibRow, '"Clause-②: yes"'));
+  t('…and says in as many words that nothing is owed on this card', says(sibRow, 'nothing is owed on this card'));
+  t('…and asserts a LOCATION, never a substitution', says(sibRow, 'never moves it onto this card'));
+  t('…and names what a reader must still verify for themselves', says(sibRow, 'must still verify'));
+  t('…and keeps the ⛔ against filling the line in on the claiming seat\'s behalf', says(sibRow, 'writing the declaration on the claiming'));
+  t('…and states, in the row itself, the control that keeps exit 4 reachable', says(sibRow, 'still gets the C2 row and exit 4'));
+  t('…and still writes no label', says(sibRow, '自查放行'));
+
+  const OTHER_SIBLING = sibPair({ card: 15999, cardComments: [CLAIM('Clause-②: no')] });
+  const bothRow = c2SiblingDeclared(SUBJECT, [DECLARING_SIBLING, OTHER_SIBLING, SUBJECT]);
+  t('two siblings that DISAGREE are both named — the row quotes neither away', says(bothRow, '#15542 declares `Clause-②: yes`') && says(bothRow, '#15999 declares `Clause-②: no`'));
+  t('…and the disagreement is STATED rather than resolved by fiat', says(bothRow, 'do NOT agree with each other'));
+  t('…while agreeing siblings say nothing about a disagreement', !says(sibRow, 'do NOT agree'));
+
+  t('the sweep counts the fourth reading APART from the two owings', JSON.stringify(declarationLimbTally(SET)) === JSON.stringify({ absent: 0, missing: 0, sibling: 1 }), JSON.stringify(declarationLimbTally(SET)));
+  t('⛔ CONTROL — the same card with no declaring sibling is still counted ABSENT, and still owes a claim comment', declarationLimbTally([SUBJECT]).absent === 1 && declarationLimbTally([SUBJECT]).sibling === 0);
+
+  const pr16243 = { number: 16243, draft: false, labels: [], body: 'Fixes #15542\nCloses #15854\n', head: { ref: 'claude/issue-15542-additive-key' } };
+  const derived16243 = derivePairs([pr16243], [15542, 15854]);
+  t('#16304 specimen: the two-card PR still derives BOTH pairs — ⛔ `prDeliversCard` is NOT narrowed', derived16243.length === 2, JSON.stringify(derived16243.map((p) => p.card)));
+  t('…and both are graded as the strong closing-keyword channel, as GitHub itself read them', derived16243.every((p) => p.evidence === 'closing-keyword'));
+  // ⛔ The #13914 shape itself — one card, one PR, no claim comment. It cannot
+  // reach this reading, because there is no second card to read from.
+  const solo13914 = derivePairs([{ number: 13910, draft: true, labels: [], body: 'Fixes #13476\n', head: { ref: 'claude/issue-13476-x' } }], [13476])
+    .map((p) => ({ ...p, prLabels: [], cardLabels: [], cardComments: [] }));
+  t('⛔ CONTROL — the #13914 shape keeps its C2 row: one card and one PR has no sibling to read', pairRows(solo13914[0], solo13914).some((r) => r.code === 'C2'));
+  t('⛔ CONTROL — …and no note is manufactured for it', pairNotes(solo13914[0], solo13914).length === 0);
 
   // -- C3, the direction a carrier comparison cannot see ----------------------
   battery('C3, the direction a carrier comparison cannot see');
@@ -2611,7 +2934,8 @@ export function selfTest() {
   console.log(
     `✓ check-clause2-carriers self-test: ${cases.length} cases pass (fixed-spelling reader, the ` +
       'declaration states with the two not-read readings kept apart — no claim comment, and a claim '
-      + 'comment with no line — the 2026-08-31 seven-pair replay, the four gate-binding states ' +
+      + 'comment with no line — the fourth reading for a card whose sibling carries the declaration '
+      + 'with the controls that keep exit 4 reachable, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'the three read paths with their offline reader, the argv contract with its usage and its '
       + 'refusal, the board provenance line, and the exit register).',
@@ -2929,7 +3253,11 @@ async function main(argv) {
       }
       let worst = EXIT_OK;
       for (const p of pairs) {
-        const code = renderPair(p, repo);
+        // The WHOLE derived set is passed, because the fourth reading is a fact
+        // about the PR's delivery set rather than about one pair — and it is
+        // the set `gather` derived, so a sibling is always a card
+        // `prDeliversCard` said this PR delivers.
+        const code = renderPair(p, repo, pairs);
         if (code !== EXIT_OK) worst = code === EXIT_INCOMPLETE && worst === EXIT_PAIR_ADVERSE ? worst : code;
       }
       return worst;
