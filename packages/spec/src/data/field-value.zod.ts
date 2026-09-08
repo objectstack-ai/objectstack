@@ -174,10 +174,19 @@ export function referenceTargetOf(def: unknown): string | undefined {
 }
 
 /**
- * Media/attachment types. Stored form TODAY is the legacy inline metadata
- * object (`{url, name?, size?, ...}`) or an opaque file-id/url string;
- * ADR-0104 D3 (file-as-reference) narrows this to a `sys_file` id. The stored
- * schema below deliberately admits both until D3 lands.
+ * Media/attachment types. The STORED value of every member is an opaque
+ * `sys_file` id ({@link FileReferenceIdValueSchema}); the inline metadata
+ * object (`{url, name?, size?, ...}`) is the `expanded` READ form
+ * ({@link FileValueSchema}), derived rather than stored. ADR-0104 D3 wave 2
+ * (file-as-reference) narrowed it, and the classifier below is where that
+ * landed: `valueSchemaFor` returns the id ALONE for `form === 'stored'` and
+ * the id-or-object union only for `'expanded'`. Both directions are pinned in
+ * `field-value.test.ts`.
+ *
+ * Legacy values already in storage — an inline blob, an external URL — are
+ * admitted by the RUNTIME, never by this schema: they surface as warn-first
+ * ADR-0104 value-shape warnings from `@objectstack/objectql`'s record
+ * validator until a deployment opts into strict enforcement.
  */
 export const FILE_REFERENCE_TYPES: ReadonlySet<string> = new Set([
   'image', 'file', 'avatar', 'video', 'audio',

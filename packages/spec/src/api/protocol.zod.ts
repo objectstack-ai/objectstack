@@ -2357,9 +2357,13 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied `readonly` fields the in-engine create-side ' +
     'strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch ' +
-    '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
-    'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +
-    'drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
+    '(one event per object/reason with the UNION of dropped field names) rather than per-row, ' +
+    'because this response is `{ object, records, count }` and has no per-row slot to hang a ' +
+    'drop set on — a union is the only view it can represent. So read a name here as "at least ' +
+    'one row dropped this field", NOT "every row dropped the same set": since ruling C (#14147) ' +
+    'the strip runs INSIDE `engine.insert` after the `beforeInsert` hooks and exempts keys a ' +
+    'hook itself wrote, tracked per row, so rows a hook stamped differently drop different ' +
+    'sets. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
     'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
     'backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` ' +
     'on each result instead — see BatchOperationResultSchema.)'

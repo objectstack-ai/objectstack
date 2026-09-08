@@ -37,8 +37,10 @@ import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './da
  * { "$eq": { "$field": "order.owner_id" } }
  *
  * @example
- * // completed_at <= due_date + duty.grace_days  (#14104)
- * { "$lte": { "$field": "due_date", "addDays": { "$field": "duty.grace_days" } } }
+ * // completed_at <= due_date + grace_days  (#14104 — a SAME-TABLE offset
+ * // column, the spelling both execution paths compile; "Execution support"
+ * // below states what a dotted path does instead)
+ * { "$lte": { "$field": "due_date", "addDays": { "$field": "grace_days" } } }
  *
  * ## Execution support (#5041 → #5222 → #14104)
  *
