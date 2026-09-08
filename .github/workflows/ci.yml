@@ -570,8 +570,49 @@ jobs:
             else
               PKG="${LEG%%=*}"
               SLICE="${LEG#*=}"
+              # ⛔ THE SLICE'S DEPENDENCY CLOSURE IS BUILT IN ITS OWN RUN, and the
+              # sharded run below is `--only` (#16395). Turbo folds a run-level
+              # passthrough -- the `-- "--shard=$SLICE"` this leg exists to pass --
+              # into the hash of EVERY task in the run, not only the task that
+              # receives it. Measured on turbo 2.10.10, `--filter=@objectstack/cli`,
+              # `turbo run test ... --dry=json` (60 tasks: 59 `build` + 1 `test`):
+              #   plain vs plain            60 identical,  0 changed   <- control
+              #   plain vs -- --shard=1/2    0 identical, 60 changed
+              #   --shard=1/2 vs 2/2         0 identical, 60 changed
+              # So this leg could hit NEITHER the main-seeded cache restored above
+              # NOR the builds the whole leg ran seconds earlier in this same job:
+              # it rebuilt the closure a second time on every run, and shards 5/6
+              # and 6/6 -- the two that carry a slice -- paid it twice per job.
+              # Live reading, shard 5/6 of run 34193080219 (a `packages/spec` PR,
+              # so the affected set reaches cli): the slice leg reported
+              # `Cached: 2 cached, 58 total` / `Time: 9m18.941s` while
+              # `@objectstack/cli:test` itself measured `Duration 187.49s`. That is
+              # the rebuild the #16395 measurement was paying for, on a job then
+              # standing against a 30-minute wall.
+              #
+              # `turbo run build --filter=$PKG` is that closure and nothing more:
+              # measured 59 build tasks, all 59 hash-IDENTICAL to the ones in the
+              # passthrough-free test plan (0 differing, 0 extra, 0 missing vs the
+              # test's own `^build` closure), so they REPLAY instead of executing.
+              # `--filter=...^$PKG` was measured too and schedules 12 packages this
+              # closure does not need.
+              #
+              # ⚠ `--only` is what keeps the poisoned hashes off the build graph,
+              # and it makes the run below load-bearing: it must stay immediately
+              # before the test run. A sliced package with no `build` script would
+              # schedule nothing here, and the failure is LOUD -- the test's imports
+              # resolve to a missing dist -- never a silent green.
+              #
+              # The build leg tees to its own log and is deliberately NOT added to
+              # LOGS: check-test-completeness reads `<pkg>:test:` prefixes, and a
+              # roster of `<pkg>:build:` lines is not its input.
+              BUILD_LOG="$RUNNER_TEMP/test-core-slice-build-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+              node scripts/run-with-stall-guard.mjs --log "$BUILD_LOG" --stall-minutes 10 \
+                --report-dir "$RUNNER_TEMP/stall-reports" -- \
+                pnpm turbo run build "--filter=$PKG" --concurrency=4 --log-order=stream \
+                || { STATUS=$?; break; }
               LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
-              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+              set -- pnpm turbo run test "--filter=$PKG" --only --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
             fi
             LOGS="$LOGS $LOG"
             node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
