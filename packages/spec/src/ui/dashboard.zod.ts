@@ -800,8 +800,21 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    */
   name: z.string().optional().describe('Stable filter name (variable key); defaults to field'),
 
-  /** Field name to filter on */
-  field: z.string().describe('Field name to filter on'),
+  /**
+   * Field name to filter on — at the authoring layer it resolves against the
+   * object behind each bound widget's dataset (`dataset.object`), not against
+   * that dataset's declared `dimensions`; enforced by the lint rule
+   * `dashboard-filter-field-unknown` (severity error).
+   *
+   * `dimensions` is a separate namespace, the one `widgets[].dimensions[]`
+   * selects from BY NAME (`widget-dimension-unknown`, also severity error).
+   * That separation is a statement about the AUTHORABLE SURFACE only — it is
+   * NOT a claim that an object field can never serve as a dimension: the
+   * analytics query API does accept an object's own field as an ad-hoc
+   * dimension without the dataset declaring it, and `widget-dimension-unknown`
+   * is what holds that line for authored dashboards.
+   */
+  field: z.string().describe('Field name to filter on — at the authoring layer it resolves against the object behind each bound widget\'s dataset (`dataset.object`), not against that dataset\'s declared `dimensions`; enforced by the lint rule `dashboard-filter-field-unknown` (severity error)'),
 
   /**
    * Source object for i18n label resolution (#7804): when set, this filter's
