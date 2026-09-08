@@ -197,6 +197,15 @@ describe('#16231 findOne — a value outside the declaration is refused', () => 
     // supported spellings — `null` for no record, a throw to refuse the read.
     expect(error.developerMessage).toContain("assign 'null'");
     expect(error.developerMessage).toContain('throw from the handler');
+    // ⚠️ …and it names BOTH sources, because the seam sees a driver's answer as
+    // well as a handler's. The user-facing sentence therefore states what is
+    // AT the seam and accuses nobody: a `driver.update` double resolving
+    // `undefined` is the measured case this wording exists for, and a sentence
+    // reading "your handler replaced it" would have sent four repairs in this
+    // repository to the wrong file.
+    expect(error.developerMessage).toContain('off its own contract');
+    expect(error.message).toContain("after the 'afterFind' dispatch");
+    expect(error.message).not.toContain('handler replaced');
   });
 
   it('`undefined` is refused — decided here, and it is NOT the same as `null`', async () => {

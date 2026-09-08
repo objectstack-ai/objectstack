@@ -173,7 +173,10 @@ export class FindOneHookResultNotRecordError extends Error {
     this.developerMessage =
       `'findOne()' declares 'Promise<Record<string, any> | null>' — the ONE record the query ` +
       `selects, or 'null' — and its callers branch on 'if (!row)' rather than on a container ` +
-      `check. A '${info.event}' handler may SHAPE that record: mutate it in place, drop keys, ` +
+      `check. TWO things can put another shape here: a '${info.event}' handler that assigned ` +
+      `one, or a driver whose 'findOne' answered off its own contract ` +
+      `('Promise<Record<string, unknown> | null>'). A '${info.event}' handler may SHAPE that ` +
+      `record: mutate it in place, drop keys, ` +
       `or assign a different RECORD built from it. Replacing it with something that is neither ` +
       `a record nor 'null' is refused. To answer no record, assign 'null'. To REFUSE the read, ` +
       `throw from the handler — that is the supported way for a '${info.event}' guard to say no. ` +
@@ -239,7 +242,10 @@ export class UpdateHookResultNotWriteShapeError extends Error {
       // The predicate write's affected-count contract is stated in this module's
       // header; the tracker id stays OUT of the runtime string, which reaches
       // authors, operators and generated surfaces that cannot resolve one.
-      `and names no row. A '${info.event}' handler may SHAPE what it is handed — mutate ` +
+      `and names no row. TWO things can put another shape here: a '${info.event}' handler that ` +
+      `assigned one, or a driver whose 'update' / 'updateMany' answered off its own contract ` +
+      `('Promise<Record<string, unknown> | null>' and 'Promise<number>'). A '${info.event}' ` +
+      `handler may SHAPE what it is handed — mutate ` +
       `the record in place, drop keys, assign a different RECORD — but replacing it with a shape ` +
       `outside that union is refused, because the declaration is the contract. To REFUSE the ` +
       `write, throw from the handler. Branch on ` +
@@ -297,8 +303,15 @@ export class DeleteHookResultNotWriteShapeError extends Error {
     this.developerMessage =
       `'delete()' declares 'Promise<boolean | number>' — the two answers its two dispatch paths ` +
       `give. A BY-ID delete resolves whether the row was there ('false' is a real answer, and ` +
-      `'@objectstack/metadata-protocol' turns it into a 404); a PREDICATE delete resolves the ` +
-      `affected-row COUNT ('0' is a real answer). An '${info.event}' handler that wants to ` +
+      // ⛔ The metadata protocol is named without its quoted package specifier
+      // on purpose: `core-boundary.ratchet.test.ts` walks `core.ts`'s closure
+      // and flags a QUOTED forbidden package name anywhere in a file's text,
+      // import or not (ADR-0076 D2), and this module is inside that closure.
+      `the metadata protocol layer turns it into a 404); a PREDICATE delete resolves the ` +
+      `affected-row COUNT ('0' is a real answer). TWO things can put another shape here: an ` +
+      `'${info.event}' handler that assigned one, or a driver whose 'delete' / 'deleteMany' ` +
+      `answered off its own contract ('Promise<boolean>' and 'Promise<number>'). An ` +
+      `'${info.event}' handler that wants to ` +
       `REFUSE a delete throws from the handler; a delete has no post-state to reshape, so ` +
       `replacing 'ctx.result' with a record or an envelope is refused. Branch on ` +
       `\`code === '${DELETE_HOOK_RESULT_NOT_WRITE_SHAPE_CODE}'\` (ADR-0112) to detect this.`;
@@ -311,6 +324,17 @@ export class DeleteHookResultNotWriteShapeError extends Error {
 
 /**
  * The user-facing sentence, one composer for all three refusals.
+ *
+ * ⚠️ It names the SEAM and never a culprit, and that is a correction to the
+ * shape `find()`'s refusal could afford. On `find()` the value at the seam
+ * comes from `driver.find`, which every driver answers with an array, so
+ * "your handler replaced it" was true whenever the check fired. These three
+ * verbs have exits that can answer off-contract themselves — a `driver.update`
+ * double resolving `undefined` is the measured case, found by this very guard
+ * on four doubles in this repository — so a sentence blaming the handler would
+ * misattribute the fault on the most likely path. It states what is there
+ * after the dispatch; {@link FindOneHookResultNotRecordError.developerMessage}
+ * and its siblings name BOTH sources for the reader who has to go fix one.
  *
  * ⛔ It must not begin with a SQL verb — `@objectstack/rest`'s importer runs row
  * errors through `sanitizeRowError`, whose SQL backstop replaces any message
@@ -336,7 +360,7 @@ function refusalSentence(
       ? observed
       : `${'aeiou'.includes(observed[0]) ? 'an' : 'a'} ${observed}`;
   return (
-    `Refusing the '${verb}' on '${object}': its '${event}' handler replaced 'ctx.result' with ` +
+    `Refusing the '${verb}' on '${object}': after the '${event}' dispatch 'ctx.result' is ` +
     `${what}, and '${verb}()' answers ${declared}. Shaping what it answers is supported; ` +
     `replacing it with another shape is not.`
   );
