@@ -1362,6 +1362,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "delete",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-composite-key-diagnostic.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-deferred-dropped.test.ts",
       "verb": "delete",
       "pinned": 1
