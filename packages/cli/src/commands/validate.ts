@@ -222,12 +222,29 @@ export default class Validate extends Command {
       //
       //     POSITION IS LOAD-BEARING: after the two pre-parse unknown-key
       //     lints above, which keep reading `normalized` exactly as before,
-      //     and before the parse, which now reads the lowered view — the order
-      //     `compile.ts` runs. `lowerCallables` returns a NEW top-level object
-      //     and never mutates its input, so `normalized` — the registry's
-      //     `normalized` tier below, `collectMetadataStats(config)`, the
-      //     structural advisories — is byte-for-byte what it was; only what
-      //     the parse and the registry's `parsed` tier see changes.
+      //     and before the parse, which now reads the lowered view. That is
+      //     `compile.ts`'s lower-BEFORE-parse order exactly; its key lints sit
+      //     AFTER its parse, so on both doors what protects the lints' input
+      //     is non-mutation, not ordering: `lowerCallables` returns a NEW
+      //     top-level object and never mutates its input, so `normalized` —
+      //     the registry's `normalized` tier below, `collectMetadataStats(
+      //     config)`, the structural advisories — is byte-for-byte what it
+      //     was; only what the parse and the registry's `parsed` tier see
+      //     changes.
+      //
+      //     NOT A PURE NARROWING. The same pass also lowers an inline action
+      //     `target` callable (`actions[*]`, `objects[*].actions[*]`) to a ref
+      //     string plus `body`. `ActionSchema.target` is `z.string()`, and
+      //     `normalizeStackInput` never touches function values, so before
+      //     this step the un-lowered parse REFUSED such a config
+      //     (`invalid_type` at `actions.0.target`, exit 1) while `os build`
+      //     accepted it all along. It is accepted here now — an accepted-set
+      //     relaxation on this command, measured through the real CLI on
+      //     both sides and pinned in
+      //     `test/lint-hook-rules-reach-handler-hooks.e2e.test.ts`; parity
+      //     with the build is the intent, and it is declared rather than
+      //     assumed because a sibling's acceptance is evidence of intent, not
+      //     a declaration on this command's face.
       //
       //     Nothing is emitted, so `lowering.functions` is unused here, and
       //     the extraction refusals in `bodyExtractionWarnings` are NOT

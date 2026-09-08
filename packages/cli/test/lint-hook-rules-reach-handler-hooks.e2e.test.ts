@@ -137,6 +137,46 @@ export default {
 };
 `;
 
+/**
+ * THE WIDENING LIMB (#16544 contract review) — the axis the hook legs above
+ * cannot see. `ActionSchema.target` is `z.string()`, and `normalizeStackInput`
+ * never touches function values, so a plain-object config with an inline
+ * action `target` callable hit `invalid_type` at the parse: `os validate`
+ * REFUSED it before #16544 (exit 1) while `os build`, which lowers before it
+ * parses, always accepted it. The same `lowerCallables` pass now rewrites the
+ * callable to a ref string plus `body` on this door too, so `os validate`
+ * ACCEPTS it — an accepted-set relaxation on a published command, declared in
+ * the changeset and pinned here beside the hook legs. Both slots
+ * `lowerActionCallable` handles (`actions[*]`, `objects[*].actions[*]`).
+ */
+const CONFIG_ACTION_TARGET = `
+export default {
+  manifest: { id: 'com.example.reach_action_target', name: 'reach_action_target', version: '1.0.0', type: 'app' },
+  objects: [{
+    name: 'crm_case',
+    label: 'Case',
+    sharingModel: 'private',
+    fields: {
+      title: { type: 'text', label: 'Title' },
+    },
+    actions: [{
+      name: 'ping_case',
+      label: 'Ping case',
+      target: async (ctx: any) => {
+        return { ok: true, id: ctx.input.id };
+      },
+    }],
+  }],
+  actions: [{
+    name: 'ping_global',
+    label: 'Ping',
+    target: async (ctx: any) => {
+      return { ok: true, id: ctx.input.id };
+    },
+  }],
+};
+`;
+
 const dirs: Record<string, string> = {};
 
 function project(key: string, source: string): string {
@@ -150,6 +190,7 @@ beforeAll(() => {
   project('handler', CONFIG_HANDLER);
   project('body', CONFIG_BODY);
   project('handlerOk', CONFIG_HANDLER_OK);
+  project('actionTarget', CONFIG_ACTION_TARGET);
 });
 
 afterAll(() => {
@@ -228,4 +269,27 @@ describe('#16544 — door: `os validate` (lowers since #16544; measured NOT lowe
     expect(run.code, label(run)).toBe(0);
     expect(rulesIn(run)).not.toContain(READONLY_RULE);
   }, 60_000);
+});
+
+describe('#16544 — the WIDENING limb: an inline action `target` callable is now ACCEPTED by `os validate`', () => {
+  // Measured red-first on the same BASE/HEAD pair as the hook legs: on BASE
+  // this leg fails with `invalid_type` at `actions.0.target` and
+  // `objects.0.actions.0.target` (expected string, received function) and
+  // exit 1; on HEAD the lowered stack parses and the run exits 0. The build
+  // leg beside it is the parity reading: `os build` accepted this config on
+  // both sides, which is the intent — and the reason this is a declared
+  // relaxation rather than a narrowing.
+  it('INTAKE — `os validate` accepts the inline action target (exit 0, valid, no invalid_type)', async () => {
+    const run = await runCli(['validate', 'objectstack.config.ts', '--json'], dirs.actionTarget);
+    expect(run.code, label(run)).toBe(0);
+    const json = JSON.parse(run.stdout);
+    expect(json.valid, label(run)).toBe(true);
+    const codes = (Array.isArray(json.errors) ? json.errors : []).map((e: { code?: unknown }) => e?.code);
+    expect(codes).not.toContain('invalid_type');
+  }, 60_000);
+
+  it('PARITY — `os build` accepts the same config (it lowered before its parse all along)', async () => {
+    const run = await runCli(['build', 'objectstack.config.ts', '--json'], dirs.actionTarget);
+    expect(run.code, label(run)).toBe(0);
+  }, 90_000);
 });
