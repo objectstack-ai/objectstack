@@ -613,6 +613,15 @@ describe('build-schemas.ts — an export that never published must be declared (
     someUnemitted = keys[0];
   });
 
+  // The manifest is seeded per test everywhere in this file rather than by
+  // `createSandbox`, so a block run in isolation (`-t`) starts with none at all
+  // — and every case here would then fail on a stale manifest instead of on the
+  // thing it is testing. Seed before, restore after: the ledger has to go back
+  // too, because the shared sandbox outlives this block.
+  beforeEach(() => {
+    seedManifest((s) => s);
+  });
+
   afterEach(() => {
     fs.writeFileSync(unemittedPath(), pristineUnemitted);
     seedManifest((s) => s);
