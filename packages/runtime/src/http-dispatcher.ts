@@ -282,6 +282,26 @@ type PrimaryDatasourceReading =
     | { readonly kind: 'unresolved'; readonly reason: string };
 
 /**
+ * [#16402] What {@link HttpDispatcher.classifyService} answers — the classified
+ * service lookup's three non-fault outcomes.
+ *
+ * ⛔ Module-local and deliberately NOT exported, for the same reason
+ * `PrimaryDatasourceReading` above is not: it is an internal reading, and
+ * `DomainHandlerDeps.resolveServiceOrLoud` — which IS part of an exported type —
+ * keeps answering the service or `undefined`, unchanged. Nothing published
+ * gains a member.
+ *
+ * A caller that named no scope and asked for a `SCOPED` registration is NOT
+ * here: that stays the unbranded rejection `packages/core` raises, so
+ * `Scope ID required for scoped service '<name>'` keeps reaching the one caller
+ * it is true about.
+ */
+type ClassifiedServiceLookup =
+    | { readonly outcome: 'resolved'; readonly value: any }
+    | { readonly outcome: 'never-registered' }
+    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
+
+/**
  * The HTTP dispatch engine — translates an inbound (method, path, body, ctx)
  * request into a kernel response. Used directly by the framework's HTTP adapters
  * (express / fastify / nextjs / nestjs / nuxt / sveltekit / hono) and plugin-msw,
@@ -2253,24 +2273,129 @@ export class HttpDispatcher {
      * probe, which is the same classification rather than a second collapse.
      */
     private async resolveServiceOrLoud(kernel: any, name: string, scopeId?: string): Promise<any> {
-        const classified = async (read: () => Promise<any>): Promise<{ found: boolean; value?: any }> => {
+        const classified = await this.classifyService(kernel, name, scopeId);
+        return classified.outcome === 'resolved' ? classified.value : undefined;
+    }
+
+    /**
+     * [#16402] The classified lookup itself — the three answers the chain above
+     * can reach without a fault, told apart instead of collapsed.
+     *
+     * ## The defect this replaces
+     *
+     * The chain used to re-resolve on the request's own kernel WITHOUT the
+     * scope id it had just been handed:
+     *
+     * ```ts
+     * const own = await classified(() => kernel.getServiceAsync(name)); // ⛔ no scopeId
+     * ```
+     *
+     * A `ServiceLifecycle.SCOPED` registration resolved without a scope id
+     * rejects `Scope ID required for scoped service '<name>'` from
+     * `PluginLoader.getService`, unbranded — so a scoped factory that answered
+     * `undefined` for THIS scope came back out of here as that rejection, and
+     * every door above it (`./domains/keys.ts`, `./domains/activation-gate.ts`
+     * and its automation-toggle caller, and the identity step in
+     * {@link resolveRequestScope}) rendered it `503 SERVICE_UNAVAILABLE`.
+     *
+     * ⭐ `packages/core` was telling the TRUTH there — the retry really did give
+     * no scope. The retry was the lie, and it is repaired here: the scope the
+     * caller handed in travels with EVERY leg, which is what the leg before it
+     * and the `resolveService` tail already did. ⛔ The core message is
+     * deliberately untouched: it is the correct diagnostic for a caller that
+     * genuinely omitted the scope, and that caller must keep receiving it.
+     *
+     * ## Three states, three answers
+     *
+     *  - `resolved` — an instance.
+     *  - `never-registered` — every registry in the chain answered the BRANDED
+     *    "nothing was ever registered under this name" (#13905), or the probe
+     *    tail found nothing. The supported no-service composition.
+     *  - `no-instance-in-scope` — a registry DID know the name and the read
+     *    made in this scope produced no instance. ⚠️ It claims exactly that and
+     *    no more: this lookup never reads a registration's lifecycle, so it
+     *    does not assert the registration is `SCOPED` — asserting that would be
+     *    a second copy of a classification the registry already owns, and a
+     *    second thing to drift.
+     *
+     * A caller that named NO scope is not one of these three: it leaves as the
+     * unbranded rejection it always did, so the `Scope ID required …` diagnostic
+     * survives for the caller it is actually about.
+     *
+     * ## Why `no-instance-in-scope` maps to a quiet `undefined` above
+     *
+     * The two misses are DIFFERENT FACTS with the SAME licence. #13906
+     * decision 1 option A governs the posture that could not be READ —
+     * 「A posture that could not be READ is not a posture that is ABSENT.」 — and
+     * a factory that returns `undefined` for a scope has ANSWERED, not failed:
+     * the read happened and it reported no service here. ADR-0093 D4/D5 makes a
+     * deployment with no tenancy service the same shape as `single`, and that
+     * reading is per-scope for a per-scope registration. Answering it as an
+     * outage would keep the manufactured 503 this card is about and merely fix
+     * its wording, locking a legitimately service-less environment out of
+     * `/keys`, the activation switch and its own identity step.
+     *
+     * `undefined` is also what absence already means everywhere in this file:
+     * `resolveService`'s whole chain tests `svc != null`, and
+     * `PluginLoader.getScopedService` hands a factory's `undefined` straight
+     * back. Reading that value as a fault would be this lookup overruling the
+     * registry.
+     *
+     * ⛔ The distinction stays HERE rather than on
+     * {@link DomainHandlerDeps.resolveServiceOrLoud}: that member is part of an
+     * EXPORTED type, and no door needs to act on the difference — both misses
+     * license the same answer. A caller that needs the fact asks this method.
+     */
+    private async classifyService(
+        kernel: any,
+        name: string,
+        scopeId?: string,
+    ): Promise<ClassifiedServiceLookup> {
+        /**
+         * One registry read, split three ways. A value is the answer; the
+         * BRANDED rejection is "nothing registered"; a registry that knew the
+         * name and produced nothing is the scope-relative miss. Every other
+         * rejection is a fault and stays loud.
+         */
+        const read = async (get: () => Promise<any>): Promise<ClassifiedServiceLookup> => {
+            let svc: any;
             try {
-                const svc = await read();
-                return svc != null ? { found: true, value: svc } : { found: false };
+                svc = await get();
             } catch (err) {
-                if (isServiceNotRegisteredError(err)) return { found: false };
+                if (isServiceNotRegisteredError(err)) return { outcome: 'never-registered' };
                 throw err;
             }
+            if (svc != null) return { outcome: 'resolved', value: svc };
+            return scopeId === undefined
+                ? { outcome: 'never-registered' }
+                : { outcome: 'no-instance-in-scope', scopeId };
         };
+
+        // The more specific miss wins: one registry not knowing the name does
+        // not unsay another registry's "known here, no instance in this scope".
+        let miss: ClassifiedServiceLookup = { outcome: 'never-registered' };
+        const remember = (answer: ClassifiedServiceLookup): void => {
+            if (answer.outcome === 'no-instance-in-scope') miss = answer;
+        };
+
         if (scopeId && typeof this.defaultKernel.getServiceAsync === 'function') {
-            const scoped = await classified(() => this.defaultKernel.getServiceAsync(name, scopeId));
-            if (scoped.found) return scoped.value;
+            const scoped = await read(() => this.defaultKernel.getServiceAsync(name, scopeId));
+            if (scoped.outcome === 'resolved') return scoped;
+            remember(scoped);
         }
         if (typeof kernel?.getServiceAsync === 'function') {
-            const own = await classified(() => kernel.getServiceAsync(name));
-            return own.found ? own.value : undefined;
+            // ⭐ [#16402] `scopeId` — the whole repair. Dropped here, this leg
+            // manufactured `Scope ID required …` for a scope that was supplied.
+            const own = await read(() => kernel.getServiceAsync(name, scopeId));
+            if (own.outcome === 'resolved') return own;
+            remember(own);
+            return miss;
         }
-        return this.resolveService(kernel, name, scopeId);
+        // A `KernelBase`-shaped host (e.g. `LiteKernel`) supports no service
+        // factories, so it has no scoped registrations and "not registered" is
+        // the only miss it can produce — the quiet probe, unchanged.
+        const probed = await this.resolveService(kernel, name, scopeId);
+        return probed != null ? { outcome: 'resolved', value: probed } : miss;
     }
 
     /**

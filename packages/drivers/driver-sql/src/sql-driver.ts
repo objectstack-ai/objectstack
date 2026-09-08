@@ -9735,7 +9735,7 @@ export class SqlDriver implements IDataDriver {
    *          which `initObjects` goes on to use for its DDL.
    */
   protected registerManagedObjectMetadata(
-    obj: { name: string; fields?: Record<string, any>; tenancy?: any },
+    obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] },
   ): { tableName: string; tenantField: string | null } {
     const tableName = StorageNameMapping.resolveTableName(obj);
     // #2186: remember the authoritative metadata field set for this table so
@@ -9744,8 +9744,8 @@ export class SqlDriver implements IDataDriver {
     // Always overwrite — a metadata change that REMOVES `indexes` must clear
     // the previous entry, or drift detection keeps expecting an index nobody
     // declares any more (and never reports it as orphaned).
-    if (Array.isArray((obj as any).indexes)) {
-      this.managedObjectIndexes.set(tableName, (obj as any).indexes);
+    if (Array.isArray(obj.indexes)) {
+      this.managedObjectIndexes.set(tableName, obj.indexes);
     } else {
       this.managedObjectIndexes.delete(tableName);
     }
@@ -9865,7 +9865,7 @@ export class SqlDriver implements IDataDriver {
    * Idempotent: pure metadata assignment, safe to re-drive on every reload.
    */
   registerObjectMetadata(
-    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
   ): void {
     for (const obj of objects) this.registerManagedObjectMetadata(obj);
   }
@@ -9876,7 +9876,22 @@ export class SqlDriver implements IDataDriver {
   // undeclared here until #4311 (`registerExternalObject` and
   // `computeAndRecordTenantField` both had it), so a caller spelling the key
   // correctly was rejected by the type while the driver read it regardless.
-  async initObjects(objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>): Promise<void> {
+  //
+  // `indexes` is the same story, one key over, and it went undeclared here for
+  // longer: `registerManagedObjectMetadata` fills `managedObjectIndexes` from
+  // it, and that map is what `syncDeclaredIndexes` renders every declared
+  // UNIQUE from — so the whole index-sync path was driven by a key this
+  // signature said did not exist, reached through an `as any`. The sibling
+  // `detectManagedDrift` on this class had always declared it, so the two
+  // halves disagreed about the shape of the same input. Nothing tripped over
+  // it because TypeScript's excess-property check fires on a FRESH object
+  // literal and not on one bound to a variable first, and every caller here
+  // happened to bind first — a green that held for a reason unrelated to
+  // correctness. `src/sql-driver-16570-init-objects-indexes-param.test.ts`
+  // pins the fresh-literal form so it cannot silently go back.
+  async initObjects(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
+  ): Promise<void> {
     // In-memory registration FIRST, and deliberately ahead of the DDL gate
     // below: being refused permission to alter a schema is not a reason to stay
     // ignorant of the objects we were just told about. On a datasource we are a
@@ -9974,7 +9989,7 @@ export class SqlDriver implements IDataDriver {
         table: tableName,
         fields: obj.fields ?? {},
         tenantField,
-        declaredIndexes: (obj as any).indexes,
+        declaredIndexes: obj.indexes,
       });
 
       if (!exists) {
@@ -10049,7 +10064,7 @@ export class SqlDriver implements IDataDriver {
       // referenced column physically exists — which is also why field-level
       // `unique` can no longer be emitted inline by `createColumn`: a composite
       // needs the tenant column to already be there.
-      const declaredIndexes = (obj as any).indexes;
+      const declaredIndexes = obj.indexes;
       const uniqueFields = Object.values<any>(obj.fields ?? {}).some((f) =>
         isUniqueScopeDeclared(f?.unique),
       );
