@@ -1317,10 +1317,10 @@ export class TursoDriver extends SqlDriver {
    * already succeeded, so the table exists with its `id` primary key whether or
    * not the best-effort coercion registration below does.
    */
-  private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any> }): void {
+  private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any>; tenancy?: any }): void {
     this.remoteManagedObjects.add(obj.name);
     try {
-      this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: (obj as any).tenancy });
+      this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: obj.tenancy });
     } catch {
       /* metadata registration is best-effort; never block schema sync on it */
     }
@@ -1544,9 +1544,26 @@ export class TursoDriver extends SqlDriver {
    * which uses `@libsql/client.batch()` against the Turso endpoint directly.
    *
    * In local / replica modes the existing Knex-based path remains in effect.
+   *
+   * ⛔ #16711 — this parameter type must declare every key `SqlDriver.initObjects`
+   * declares, and `scripts/check-object-def-param-keys.mjs` fails the build if it
+   * stops doing so. An `override` does NOT inherit the base's parameter type, so
+   * this literal is what every caller of `@objectstack/driver-turso` sees: while
+   * it read `{ name; fields? }`, #4311's `tenancy` fix sat on the base for five
+   * weeks and was invisible from outside `@objectstack/driver-sql`, and #16570's
+   * `indexes` fix would have escaped the same way. The escape is silent because
+   * TypeScript's excess-property check fires on a FRESH object literal only — and
+   * the remote arm below forwards the WHOLE object as `schema`, so the runtime
+   * carried both keys the whole time and only the type face refused them.
    */
   override async initObjects(
-    objects: Array<{ name: string; fields?: Record<string, any> }>,
+    objects: Array<{
+      name: string;
+      fields?: Record<string, any>;
+      tenancy?: any;
+      indexes?: any[];
+      lifecycle?: any;
+    }>,
   ): Promise<void> {
     if (this.isRemote) {
       if (objects.length === 0) return;
