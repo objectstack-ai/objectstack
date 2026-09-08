@@ -330,6 +330,31 @@ export const SysAutomationRun = ObjectSchema.create({
     // the failure mode is silent: a detector that fires during normal operation
     // gets muted, and a muted broken-sweep detector is the same silence #4347
     // produced — except it now looks monitored.
+    //
+    // [#15606] And `failed` deliberately does NOT get one — the asymmetry
+    // below is a decision, not an oversight, recorded here because this is the
+    // paragraph that provokes the question. The four counters exist because
+    // ONE filter expression needs them in ONE row: `selected_count > 0 AND
+    // acted_count = 0`, qualified by `unmeasured_count`. A WHERE clause cannot
+    // reach into a JSON blob for an operand, so every operand of that one
+    // expression has to be a column or the expression cannot be written at
+    // all. `failed` is not one of its operands. It would be its OWN predicate
+    // (`failed_count > 0`), nobody alerts on it today, and a caller that wants
+    // it has already fetched `summary_json` — where the fold
+    // `failed = Σ nodes[].failures` sits, and which says so in its own
+    // description (pinned by `sys-automation-run-failed-count-verdict.test.ts`,
+    // so this explanation cannot rot into a lie about the schema).
+    //
+    // Re-open condition, stated so it is not a matter of taste later: the
+    // FIRST real need to ALERT on "which runs lost rows this week" is the card
+    // that adds `failed_count`, mirroring `unmeasured_count` — null on rows
+    // written before the column existed, ⛔ never `0`, because "not tracked"
+    // and "nothing failed" are different answers and only one of them should
+    // stay quiet. One column on an ADR-0103 engine-owned object: a human-floor
+    // change, never a rider. Until such a need is named, "readable but not
+    // queryable" is the right trade for this one counter — which is the same
+    // sentence as the first paragraph above, reaching the opposite conclusion
+    // because the input differs: there, an alarm existed to serve.
     selected_count: Field.number({
       label: 'Records Selected',
       required: false,
@@ -361,7 +386,7 @@ export const SysAutomationRun = ObjectSchema.create({
     summary_json: Field.textarea({
       label: 'Run Summary',
       required: false,
-      description: 'JSON per-node breakdown (terminal status, runs, failures, selected/acted) plus which gates closed and how often. Folded from the FULL step log, so its counts stay exact even when `steps_json` is compacted.',
+      description: 'JSON per-node breakdown (terminal status, runs, failures, selected/acted) plus which gates closed and how often — AND the run-level totals, which is where `failed` lives: the count of node executions that failed (`failed = Σ nodes[].failures`, contained ones included, so a green run can carry a non-zero `failed`). READ LOST-ROW COUNTS FROM HERE — `failed` has no column of its own, deliberately (see the comment above `selected_count`), so "which runs lost rows?" is answered by parsing this blob, not by a WHERE clause. Absent `failed` = not tracked (an older run), which is not the same as zero. Folded from the FULL step log, so its counts stay exact even when `steps_json` is compacted — and the totals survive this blob\'s own compaction too, which drops only the per-node detail (`detailOmitted`).',
       group: 'Outcome',
     }),
 

@@ -16,6 +16,8 @@ import {
   renderSourceHashModule,
   parseSourceHashModule,
   narrowToCommittedSections,
+  translationModulePayload,
+  translationModuleSections,
 } from '../src/utils/i18n-extract.js';
 
 const stack = (help: string) => ({
@@ -142,5 +144,56 @@ describe('the provenance table is narrowed to the committed sections (#12559)', 
 
   it('commits nothing when no section is committed', () => {
     expect(narrowToCommittedSections(table, [])).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The committed-section list is DERIVED from the module payloads (#16242)
+// ---------------------------------------------------------------------------
+//
+// The command used to name the sections it commits with two literals —
+// `committed.push('objects')` and `committed.push('metadataForms')` — chosen by
+// which modules were emitted. The emitted-module half was already derived; the
+// NAME was hand-copied, so under `kind: 'stack'` the caller named one of the
+// several sections the module it was describing actually holds.
+//
+// ⚠️ These cases pin the mapping, and the mapping is NOT "the payload's own
+// top-level keys". For `'objects'` and `'metadataForms'` the payload is the
+// sub-tree ROOTED AT one section, so its keys are object and form names; only
+// `'stack'` selects a `TranslationData`-shaped subtree whose keys are sections.
+// Deriving from the keys in all three cases is the plausible wrong repair, and
+// the first case below is what catches it: it would commit `['account']` and
+// narrow every `objects.*` record away — on the one path this repository's
+// single `--source-hashes` config is on.
+
+describe('the sections a module commits are read off its payload (#16242)', () => {
+  const result = extractTranslations(
+    { objects: [{ name: 'account', label: 'Account', fields: { name: { label: 'Name' } } }] },
+    { defaultLocale: 'en', locales: ['zh-CN'], fill: 'default' },
+  );
+  const bundle = result.bundles['zh-CN'];
+
+  it('names the section a single-section module roots at, never its payload keys', () => {
+    expect(translationModuleSections(bundle, 'objects')).toEqual(['objects']);
+    expect(translationModuleSections(bundle, 'metadataForms')).toEqual(['metadataForms']);
+    // The falsifier, spelled out: the payload's own keys are the object's name.
+    expect(Object.keys(translationModulePayload(bundle, 'objects'))).toEqual(['account']);
+  });
+
+  it('names every group a stack module holds, so a new group needs no edit here', () => {
+    const sections = translationModuleSections(bundle, 'stack');
+    expect(sections).toContain('objects');
+    // The registry baseline is the one thing a stack module never holds.
+    expect(sections).not.toContain('metadataForms');
+    // Derived, not enumerated: a group the bundle grows appears by itself.
+    const grown = { ...bundle, apps: { kpi: { label: 'KPI Console' } } };
+    expect(translationModuleSections(grown, 'stack')).toContain('apps');
+  });
+
+  it('feeds narrowToCommittedSections a set that keeps the records it describes', () => {
+    const table = result.sourceHashes['zh-CN'];
+    const narrowed = narrowToCommittedSections(table, translationModuleSections(bundle, 'objects'));
+    expect(Object.keys(narrowed).length).toBeGreaterThan(0);
+    for (const path of Object.keys(narrowed)) expect(path.startsWith('objects.')).toBe(true);
   });
 });
