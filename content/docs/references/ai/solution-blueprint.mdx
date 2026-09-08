@@ -30,7 +30,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `BlueprintApp.nav[number]`
 
@@ -40,6 +40,7 @@ const result = BlueprintAppSchema.parse(data);
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
 | **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
+| **viewName** | `string` | optional | For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object's default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration. |
 
 
 ---
@@ -173,6 +174,7 @@ const result = BlueprintAppSchema.parse(data);
 | **target** | `string` | ✅ | Object or dashboard machine name to surface (snake_case) |
 | **label** | `string` | optional | Nav entry label (defaults to the target label/name) |
 | **icon** | `string` | optional | Lucide icon name for the nav entry |
+| **viewName** | `string` | optional | For type:"object" only — the `views[].name` this entry opens (e.g. "ticket_status_board"). Omit for the object's default list. SET it whenever this blueprint authors a kanban/calendar/gallery/gantt view the menu should reach: give the object ONE entry per view (a 「工单列表」 entry with no viewName plus a 「工单看板」 entry with viewName:"ticket_status_board"). Without it every entry on the same target opens the SAME default list, and a label/icon saying otherwise is decoration. |
 
 
 ---
@@ -323,7 +325,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string` | optional | App display label |
 | **icon** | `string` | optional | Lucide icon for the App Launcher |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label?: string; icon?: string; … }[]` | optional | Navigation entries; omit to auto-surface every created object and dashboard |
 
 ### Nested Shape: `SolutionBlueprint.seedData[number]`
 
@@ -386,7 +388,7 @@ const result = BlueprintAppSchema.parse(data);
 | **name** | `string` | ✅ | App machine name (snake_case) |
 | **label** | `string \| null` | ✅ | App display label, or null |
 | **icon** | `string \| null` | ✅ | Lucide icon for the App Launcher, or null |
-| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null }[] \| null` | ✅ | Navigation entries; null to auto-surface every created object and dashboard |
+| **nav** | `{ type: Enum<'object' \| 'dashboard'>; target: string; label: string \| null; icon: string \| null; … }[] \| null` | ✅ | Navigation entries; null to auto-surface every created object and dashboard |
 
 
 ---

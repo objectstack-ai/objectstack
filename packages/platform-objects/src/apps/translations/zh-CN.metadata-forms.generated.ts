@@ -162,7 +162,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "fields.reference": {
         label: "引用对象",
-        helpText: "目标对象（用于 lookup / master_detail）"
+        helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
       },
       "fields.lookupFilters": {
         label: "Lookup Filters",

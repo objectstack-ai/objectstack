@@ -2462,6 +2462,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/list-user-invitations-verification.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/member-role-canonical.test.ts",
       "verb": "update",
       "pinned": 1
