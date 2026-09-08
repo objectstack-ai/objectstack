@@ -21,9 +21,11 @@
 //     `batchData`'s `create` rows AND both arms of `upsert` that create;
 //   - every create face whose RESPONSE carries `droppedFields` surfaces the
 //     ENGINE's `onFieldsDropped` there, which is the channel the ingress used
-//     to FAKE with a before/after payload diff. `cloneData` is the one face
-//     that does not: `CloneDataResponseSchema` declares no such member (pinned
-//     in the firing-control block at the bottom).
+//     to FAKE with a before/after payload diff. Since #15703 that is every one
+//     of the six: `cloneData` was the face that did not — its contract
+//     (`CloneDataResponseSchema`, declared AS PRODUCED) had no such member —
+//     until the member and the listener landed together (maintainer ruling
+//     2026-09-08, option 1); the firing-control block at the bottom enumerates it.
 // The enforcement itself is pinned where it now runs, against a real engine:
 // `packages/objectql/src/engine-insert-static-readonly-strip.test.ts`. This
 // package does not depend on `@objectstack/objectql`, so a strip assertion here
@@ -131,9 +133,9 @@ describe('#14147 — the create ingress DELEGATES the readonly strip to engine.i
     expect(inserts[0].options.context).toEqual({ isSystem: true });
   });
 
-  it('cloneData forwards the copied row AND the caller overrides whole', async () => {
+  it('cloneData forwards the copied row AND the caller overrides whole — and reports the engine’s verdict on both', async () => {
     const { p, inserts } = makeProtocol();
-    await p.cloneData({
+    const res: any = await p.cloneData({
       object: 'approval_case',
       id: 'src-1',
       overrides: { source: 'forged' },
@@ -143,6 +145,15 @@ describe('#14147 — the create ingress DELEGATES the readonly strip to engine.i
     // through them is still the engine's to strip (#3043's carried-over case).
     expect(inserts[0].data.source).toBe('forged');
     expect(inserts[0].data.approval_status, 'the copied readonly column travels too').toBe('approved');
+    // [#15703] ...and the 201 body says what the engine dropped — the column
+    // the caller never typed (copied from the source) and the one it forged
+    // through `overrides`, in the engine's one event. Until #15703 the clone
+    // stripped and warned but reported nothing on the wire.
+    expect(res.droppedFields).toEqual([
+      { object: 'approval_case', fields: ['approval_status', 'source'], reason: 'readonly' },
+    ]);
+    expect(res.record).not.toHaveProperty('approval_status');
+    expect(res.record).not.toHaveProperty('source');
   });
 
   it('createManyData forwards every row whole and AGGREGATES the engine’s event', async () => {
@@ -223,13 +234,15 @@ describe('#14147 — the create ingress DELEGATES the readonly strip to engine.i
 
 describe('#14147 — engine listener wiring (the firing control for every assertion above)', () => {
   // The faces enumerated here are the ones whose RESPONSE carries
-  // `droppedFields`: `CreateDataResponse`, `CreateManyDataResponse`, and the
-  // per-row results of `insertManyData` / `batchData`. `cloneData` is
-  // deliberately NOT among them — its contract has no such member; the case
-  // after this one pins that exclusion so "every" stays true of what is listed.
+  // `droppedFields`: `CreateDataResponse`, `CloneDataResponse` (since #15703),
+  // `CreateManyDataResponse`, and the per-row results of `insertManyData` /
+  // `batchData`. That is every create face; the case after this one pins the
+  // clone by name so the enumeration cannot silently lose the face that was
+  // the exclusion until its contract gained the member.
   it('every create face whose response carries droppedFields passes an onFieldsDropped listener to the engine', async () => {
     const { p, inserts } = makeProtocol();
     await p.createData({ object: 'approval_case', data: { title: 'A' } });
+    await p.cloneData({ object: 'approval_case', id: 'src-1' } as any);
     await p.createManyData({ object: 'approval_case', records: [{ title: 'A' }] });
     await p.batchData({
       object: 'approval_case',
@@ -244,26 +257,28 @@ describe('#14147 — engine listener wiring (the firing control for every assert
       request: { operation: 'upsert', records: [{ id: 'new-1', data: { title: 'A' } }] },
     } as any);
     await p.insertManyData({ object: 'approval_case', records: [{ title: 'A' }] });
-    expect(inserts, 'createData · createManyData · batchData create · batchData upsert-create ×2 (no id / unknown id) · insertManyData')
-      .toHaveLength(6);
+    expect(inserts, 'createData · cloneData · createManyData · batchData create · batchData upsert-create ×2 (no id / unknown id) · insertManyData')
+      .toHaveLength(7);
     for (const call of inserts) {
       expect(typeof call.options?.onFieldsDropped, 'a face with no listener reports a silent drop').toBe('function');
     }
   });
 
-  it('cloneData is the one create face that passes NO listener — its response contract declares no droppedFields', async () => {
-    // `CloneDataResponseSchema` (#11924, declared AS PRODUCED) is exactly
-    // `{ object, id, sourceId, record }`; `search-clone-schema-conformance.test.ts`
-    // holds the producer to that key set and asserts `droppedFields` in
-    // particular is absent. So a listener here would have nowhere contracted
-    // to report to. The engine still strips a copied-over or overridden
-    // readonly column and still logs the `warn` line — the clone simply does
-    // not carry the event on the wire. Reporting it means a new response key,
-    // which is a spec change with its own card, not a delegation detail.
+  it('cloneData passes the listener too — the sixth face, now that its response contract declares droppedFields (#15703)', async () => {
+    // Until #15703 this case pinned the ABSENCE of the listener, with its
+    // reason: `CloneDataResponseSchema` (#11924, declared AS PRODUCED) was
+    // exactly `{ object, id, sourceId, record }`, so a listener had nowhere
+    // contracted to report to, and the engine's strip of a copied-over or
+    // overridden readonly column reached only the `warn` log. The maintainer
+    // ruling of 2026-09-08 (option 1) added the optional member and this
+    // listener in one change — the schema stays declared as produced — and
+    // `search-clone-schema-conformance.test.ts` now measures the produced
+    // member on the wire. This case pins the presence by name, so the
+    // enumeration above cannot drop the clone without a red here.
     const { p, inserts } = makeProtocol();
     await p.cloneData({ object: 'approval_case', id: 'src-1' } as any);
     expect(inserts).toHaveLength(1);
-    expect(inserts[0].options?.onFieldsDropped).toBeUndefined();
+    expect(typeof inserts[0].options?.onFieldsDropped, 'a clone with no listener reports a silent drop').toBe('function');
   });
 
   it('a create that drops NOTHING reports no droppedFields at all', async () => {
