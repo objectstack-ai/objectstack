@@ -45,7 +45,9 @@ import {
   admissionFixtureSecurity,
 } from './fixtures/analytics-admission-fixture.js';
 
-const ADMIN_ROWS = 3;
+const ADMIN_OPEN_ROWS = 3;
+/** Deliberately DIFFERENT from the open count, so the two objects' totals cannot be confused. */
+const ADMIN_WALLED_ROWS = 4;
 const MEMBER_ROWS = 2;
 
 /** The smallest dataset query there is — the exact shape the reported probe posted. */
@@ -90,12 +92,14 @@ async function bootFor(driver: (typeof DRIVERS)[number]): Promise<Boot> {
   // Author through HTTP as each principal so `created_by` carries the real
   // caller — the owner policy on `admission_open` is what makes the member's
   // admitted count a scoped number rather than the table total.
-  for (let i = 0; i < ADMIN_ROWS; i++) {
+  for (let i = 0; i < ADMIN_OPEN_ROWS; i++) {
     const r = await stack.apiAs(adminToken, 'POST', '/data/admission_open', {
       name: `admin-open-${i}`,
       region: i % 2 === 0 ? 'west' : 'east',
     });
     expect(r.status).toBeLessThan(300);
+  }
+  for (let i = 0; i < ADMIN_WALLED_ROWS; i++) {
     const w = await stack.apiAs(adminToken, 'POST', '/data/admission_walled', {
       name: `admin-walled-${i}`,
       region: 'west',
@@ -216,9 +220,15 @@ describe.each(DRIVERS)(
 
     it('an administrator is admitted on both objects, and gets the SAME numbers', async () => {
       const boot = boots.get(driver)!;
+      // The expected totals are the administrator's OWN rows on each object,
+      // not the table totals: the platform's ownership floor scopes this
+      // principal on these public fixture objects. That is `/data`'s answer, so
+      // it must be the analytics answer too — which is the whole assertion. The
+      // two objects carry deliberately different counts so a number arriving
+      // from the wrong table cannot pass.
       for (const [object, expected] of [
-        ['admission_open', ADMIN_ROWS + MEMBER_ROWS],
-        ['admission_walled', ADMIN_ROWS],
+        ['admission_open', ADMIN_OPEN_ROWS],
+        ['admission_walled', ADMIN_WALLED_ROWS],
       ] as const) {
         const rest = await restProbe(boot, boot.adminToken, object);
         const analytics = await analyticsProbe(boot, boot.adminToken, inlineCount(object), {
