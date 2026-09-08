@@ -24,24 +24,41 @@ import { retiredKey } from '../shared/retired-key';
  *
  * WHO CAN WRITE THIS CONFIG (#15543) — read this before planning a deployment
  * around any key below. A `RestServerConfig` is the ARGUMENT a host passes when
- * it constructs the server: never a stack collection member, never a stored
- * metadata row, never a file the CLI reads. Both doors are programmatic —
- * `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`) and
- * `createHonoServerPlugin({ restConfig })`
- * (`packages/plugins/plugin-hono-server/src/hono-plugin.ts`).
+ * it constructs the server: never a stack collection member and never a stored
+ * metadata row.
  *
- * No shipped boot path opens either door with a config of its own. `os serve`
- * (`packages/cli/src/commands/serve.ts`) constructs the plugin with a fixed
- * argument carrying exactly two CLI-derived keys — `api.enableProjectScoping`
- * and `api.projectResolution` — and the dev plugin
+ * There is exactly ONE door, and it is programmatic:
+ * `createRestApiPlugin({ api })` (`packages/rest/src/rest-api-plugin.ts`),
+ * whose `start()` is the only non-test site that reaches `new RestServer(...)`.
+ * ⚠️ `HonoServerPlugin` (`packages/plugins/plugin-hono-server`) declares a
+ * `restConfig?: RestServerConfig` option, but it is NOT a second door: its one
+ * reader takes `api.basePath` for the SPA fallback, and that plugin never
+ * constructs a REST server, so nothing below `api.basePath` reaches anything.
+ *
+ * No shipped boot path opens that door with a config of its own. `os serve`
+ * (`packages/cli/src/commands/serve.ts`) reads the stack config's own top-level
+ * `api:` block and forwards exactly two keys out of it —
+ * `api.enableProjectScoping` and `api.projectResolution` — into a fixed
+ * argument, through an `as any` cast; the dev plugin
  * (`packages/plugins/plugin-dev/src/dev-plugin.ts`) calls
- * `createRestApiPlugin()` with no config at all. So on a CLI-started deployment
- * every OTHER key here is EMBEDDER-ONLY: the whole of `crud`, `metadata` and
- * `batch`, and the rest of `api`. Its value is whatever the `.default()` below
- * says, and no flag, env var or config file moves it. That is the recorded
- * posture, not a gap awaiting a fix: the keys keep their runtime reads and
- * their embedder consumer, and the reachability answer ADR-0049 asks for is
- * written per key in the liveness ledger
+ * `createRestApiPlugin()` with no config at all. So the CLI does read a config
+ * file — it just forwards those two keys and nothing else.
+ *
+ * ⇒ On a CLI-started deployment every OTHER key here is EMBEDDER-ONLY: the
+ * whole of `crud`, `metadata` and `batch`, and the rest of `api`. Its value is
+ * whatever the `.default()` below says, and no flag, config file or CLI option
+ * moves it.
+ *
+ * ⚠️ ONE CARVE-OUT, and it is the security-relevant key: the REST server's
+ * `normalizeConfig` folds the environment into the effective value of
+ * `metadata.maskObjectFields` — `OS_ALLOW_UNMASKED_OBJECT_METADATA` turns the
+ * ADR-0106 D8 mask OFF for a deployment that cannot otherwise reach the key.
+ * That env var is the only thing outside an embedder's argument that changes
+ * any value here. See `maskObjectFields` below.
+ *
+ * This is the recorded posture, not a gap awaiting a fix: the keys keep their
+ * runtime reads and their embedder consumer, and the reachability answer
+ * ADR-0049 asks for is written per key in the liveness ledger
  * (`packages/spec/liveness/crud_endpoints.json`, `metadata_endpoints.json`,
  * `batch_endpoints.json`).
  */
@@ -322,12 +339,13 @@ export type CrudEndpointsConfigParsed = z.infer<typeof CrudEndpointsConfigSchema
  *
  * Reachability: EMBEDDER-ONLY (#15543). Every key below is parsed and read at
  * construction, and none of them is authorable from a CLI-started deployment —
- * `os serve` passes only the two `api.*` keys named in the file header and the
- * dev plugin passes nothing. `prefix`, `enableCache`, `maskObjectFields` and
- * the four `endpoints.*` switches are therefore whatever their defaults say
- * unless a host constructs the config itself. The one metadata-masking opt-out
- * a deployment CAN reach is the env var `OS_ALLOW_UNMASKED_OBJECT_METADATA`
- * (see `maskObjectFields`).
+ * `os serve` forwards only the two `api.*` keys named in the file header and the
+ * dev plugin passes nothing. `prefix`, `enableCache` and the four `endpoints.*`
+ * switches are therefore whatever their defaults say unless a host constructs
+ * the config itself. ⚠️ `maskObjectFields` is the one exception in this file:
+ * its AUTHORED value is embedder-only like the rest, but its EFFECTIVE value is
+ * also moved by the env var `OS_ALLOW_UNMASKED_OBJECT_METADATA`, which a
+ * deployment can reach and which turns the mask off (see `maskObjectFields`).
  * 
  * @example
  * {
@@ -379,19 +397,22 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
    *
    * `false` serves the full schema to every authenticated caller, as releases
    * before ADR-0106 did — but ⛔ only an EMBEDDER can write that `false`. This
-   * key is not reachable from a CLI-started deployment at all (see WHO CAN
+   * KEY is not reachable from a CLI-started deployment at all (see WHO CAN
    * WRITE THIS CONFIG in the file header), so under `os serve` and the dev
-   * plugin the mask is on and stays on. The change is **disclosure only**: the
-   * data plane masks values and refuses forbidden writes either way, and the
-   * console reads field affordances from `/auth/me/permissions`, so toggling it
-   * never changes UI correctness.
+   * plugin it is always `true`. The change is **disclosure only**: the data
+   * plane masks values and refuses forbidden writes either way, and the console
+   * reads field affordances from `/auth/me/permissions`, so toggling it never
+   * changes UI correctness.
    *
-   * The opt-out a DEPLOYMENT can actually reach is the env var
-   * `OS_ALLOW_UNMASKED_OBJECT_METADATA=1`, which also covers the runtime
-   * `/metadata` dispatcher (that path has no per-server REST config to read).
-   * Either opt-out disables the mask and neither is needed to keep it on — but
-   * of the two only the env var is reachable without embedding, so a deployment
-   * that must serve unmasked schemas sets the env var, not this key.
+   * ⚠️ The key being `true` is NOT the same as the mask being on. The REST
+   * server's `normalizeConfig` folds the environment into the effective value:
+   * `OS_ALLOW_UNMASKED_OBJECT_METADATA` turns the mask OFF whatever this key
+   * says, and it also covers the runtime `/metadata` dispatcher (that path has
+   * no per-server REST config to read). ⇒ Under `os serve` and the dev plugin
+   * the mask is on UNLESS that env var is set — it is the one opt-out a
+   * deployment can reach, and the one it must use, because this key is not
+   * reachable without embedding. Either opt-out disables the mask; neither is
+   * needed to keep it on.
    */
   maskObjectFields: z.boolean().default(true)
     .describe('[ADR-0106 D8] Mask served object schemas to the caller\'s readable fields'),
