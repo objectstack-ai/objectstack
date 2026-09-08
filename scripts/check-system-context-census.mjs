@@ -431,39 +431,39 @@ export const NON_READ_ANCHORS = [
     file: 'packages/objectql/src/engine.ts',
     symbol: 'buildDriverOptions',
     collapsesOntoRead: true,
-    why: 'row 23 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
+    why: 'row 24 -- the early return the tenant-audit read feeds, and where `bypassTenantAudit` is threaded to the driver',
     rowSeams: ['Tenant-audit warning silenced'],
   },
   {
     file: 'packages/objectql/src/engine.ts',
     symbol: 'insert',
     collapsesOntoRead: true,
-    why: 'row 21 -- the strict-drop refusal that never fires under elevation, and the strip-before-validation block the validation row cites',
+    why: 'row 22 -- the strict-drop refusal that never fires under elevation, and the strip-before-validation block the validation row cites',
     rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/objectql/src/readonly-strict-errors.ts',
     symbol: 'READONLY_CLASS_REASONS',
-    why: 'row 21 -- the reason set the silent refusal would have used',
+    why: 'row 22 -- the reason set the silent refusal would have used',
     rowSeams: ['Strict-drop refusal never fires'],
   },
   {
     file: 'packages/plugins/plugin-security/src/system-write-guard.ts',
     symbol: 'assertEngineOwnedWriteAllowed',
-    why: 'row 24 -- the bypass expressed through a helper rather than a direct read',
+    why: 'row 25 -- the bypass expressed through a helper rather than a direct read',
     rowSeams: ['append-only write guard bypassed'],
   },
   {
     file: 'packages/plugins/plugin-sharing/src/sharing-service.ts',
     symbol: 'revoke',
     collapsesOntoRead: true,
-    why: 'row 34 -- the CONFLICT guard `revoke()` deletes in front of, in the same function',
+    why: 'row 35 -- the CONFLICT guard `revoke()` deletes in front of, in the same function',
     rowSeams: ['`revoke()` deletes directly'],
   },
   {
     file: 'packages/services/service-automation/src/builtin/crud-nodes.ts',
     symbol: 'registerCrudNodes',
-    why: 'row 60 -- the call site of the compensating owner stamp',
+    why: 'row 61 -- the call site of the compensating owner stamp',
     rowSeams: ['Automation flow data nodes re-add the `owner_id` stamp'],
   },
   {
@@ -2573,14 +2573,15 @@ function selfTest() {
       t(
         '⭐ ABLATION: one row inserted above row 34 turns the gate RED, naming the falsified page ' +
           'references -- this is the exact edit #15687 made under a green gate',
-        falsifiedRefs.some((p) => p.includes('`Row 34`') && p.includes('is row 35')) &&
-          falsifiedRefs.some((p) => p.includes('`rows 1–62`')),
+        falsifiedRefs.some((p) => p.includes('`Row 35`') && p.includes('is row 36')) &&
+          falsifiedRefs.some((p) => p.includes('`rows 1–63`')),
         ablated.problems.join(' | ')
       );
       t(
-        '⭐ ABLATION: and the `why:` strings for rows 34 and 60 -- the other two references #15687 falsified',
-        falsifiedWhy.some((p) => p.includes('`row 34`') && p.includes('is row 35')) &&
-          falsifiedWhy.some((p) => p.includes('`row 60`') && p.includes('is row 61')),
+        '⭐ ABLATION: and the `why:` strings for the two `why:` references #15687 falsified ' +
+          '(the seams #15687 knew as rows 34 and 60; the page has since grown a row above them)',
+        falsifiedWhy.some((p) => p.includes('`row 35`') && p.includes('is row 36')) &&
+          falsifiedWhy.some((p) => p.includes('`row 61`') && p.includes('is row 62')),
         falsifiedWhy.join(' | ')
       );
       t(
