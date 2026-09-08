@@ -124,8 +124,13 @@
  * rot: `packages/drivers/driver-sql/src/sql-driver.ts#ensureShardTable`,
  * (`#initObjects`, `#registerObjectMetadata`, `#registerManagedObjectMetadata`,
  * `#detectManagedDrift`, `#rotateShards`, `#ensureRotation`) and
- * `packages/drivers/driver-turso/src/turso-driver.ts#initObjects`,
- * (`#registerRemoteFieldMetadata`).
+ * `packages/drivers/driver-turso/src/turso-driver.ts#TursoDriver` — whose
+ * `initObjects` override and `registerRemoteFieldMetadata` helper are the two
+ * members this gate reads there. ⚠️ Neither is spelled as a symbol anchor,
+ * because neither has a resolvable declaration site under the shared resolver's
+ * rule: `override async initObjects(` puts the name mid-line, which is the SAME
+ * wrapped-signature shape that made a single-line grep for it return a silence
+ * on this very file. Anchoring the class instead keeps the citation checked.
  */
 
 import { execFileSync } from 'node:child_process';
