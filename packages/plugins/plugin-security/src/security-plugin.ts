@@ -3310,7 +3310,10 @@ export class SecurityPlugin implements Plugin {
           `[Security] Access denied: the insert on '${opCtx.object}' was executed without the row-level CHECK ` +
           `being evaluated — the engine did not run OperationContext.postHookWriteImageCheck (#16608). ` +
           `The write is NOT vouched for by this gate.`;
-        ctx.logger.error(developerMessage, {
+        // Contract arg order (#5637): `error(message, error?: Error, meta?)` —
+        // the structured fields ride in the THIRD position. There is no `Error`
+        // to carry here: nothing threw, the seam simply never ran.
+        ctx.logger.error(developerMessage, undefined, {
           operation: opCtx.operation,
           object: opCtx.object,
           positions,
