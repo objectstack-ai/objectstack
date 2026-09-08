@@ -52,6 +52,20 @@
  * has since been registered fails — which is how #8846 landing ratchets this
  * list down instead of leaving stale rows promising work already done.
  *
+ * ## The spec face — `packages/spec/src/**` is a ledger member or a finding (#16449)
+ *
+ * The #16404 ruling (director seat, decision batch #62, 2026-09-07, option D)
+ * settled what "the published contract face" means for an error code: the
+ * ledger, door or no door — every code that ships in `dist` is registered
+ * there, because a thrown value's `code` is what a consumer pins. This gate is
+ * where that rule has teeth for the tree it was measured on: a stamp site under
+ * `packages/spec/src/` may be classified `foreign-vocabulary` (not an ADR-0112
+ * code at all) or `runtime-pinned` (a template whose pin parses every member
+ * against the closed union), and NOTHING ELSE — a `boot-refusal` or
+ * `pending-registration` row there is a `spec-face-unregistered` finding, and
+ * the only way out is the ledger row (which makes the site disappear from the
+ * scan, as any registration does). See `SPEC_SOURCE_FACE` below.
+ *
  * ## Why textual, not AST
  *
  * The same reasoning `check-error-code-casing` records: the failure mode is a
@@ -257,6 +271,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '[#14626] THE NESTED TEMPLATE, across all FOUR shared textual primitives.': 242,
   '[#13790] The INLINE literal EXPRESSION at an object-literal `code:`.': 40,
   '[#14742] THE REGEX LITERAL, across all FOUR shared textual primitives.': 39,
+  '[#16449] A packages/spec/src stamp site is a ledger member, never classified away.': 7,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -275,6 +290,23 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage',
 const LEDGER_ZOD = 'packages/spec/src/api/error-code-ledger.zod.ts';
 const ERRORS_ZOD = 'packages/spec/src/api/errors.zod.ts';
 const DECLARATION = 'packages/runtime/src/dispatcher-error-vocabulary.ts';
+
+/**
+ * [#16449] The SPEC FACE. `packages/spec/src/**` ships in `@objectstack/spec`'s
+ * `dist`, and the #16404 ruling (director seat, decision batch #62, 2026-09-07,
+ * option D) makes `ERROR_CODE_LEDGER` / `StandardErrorCode` the published
+ * contract face: every code that ships in `dist` is registered there, door or
+ * no door. So a stamp site under this prefix is a ledger member or it is a
+ * finding — the verdicts that classify a site AWAY from registration
+ * (`boot-refusal`, `pending-registration`, `sandbox-authored`) are refused
+ * there, as `spec-face-unregistered`. Two verdicts survive: `foreign-vocabulary`
+ * (a different vocabulary that merely spells itself `code` — a driver errno, a
+ * conversion outcome, a conformance fixture) and `runtime-pinned` (a template
+ * whose named pin parses every member against the closed union — the
+ * registration proof, done where a scan cannot). Pinned by `--self-test`.
+ */
+const SPEC_SOURCE_FACE = 'packages/spec/src/';
+const SPEC_FACE_VERDICTS = Object.freeze(new Set(['foreign-vocabulary', 'runtime-pinned']));
 
 // ---------------------------------------------------------------------------
 // The registered vocabulary — read from spec SOURCE, never from a build
@@ -2905,7 +2937,25 @@ export function reconcile({ sites, declared, registered, unresolved, declaredHel
   const siteKeys = new Set(sites.map(key));
 
   for (const site of sites) {
-    if (declaredByKey.has(key(site))) continue;
+    const row = declaredByKey.get(key(site));
+    if (row) {
+      // [#16449] A packages/spec/src site is a ledger member, a foreign
+      // vocabulary or a runtime-pinned template — no verdict may park it
+      // between (see SPEC_SOURCE_FACE).
+      if (site.file.startsWith(SPEC_SOURCE_FACE) && !SPEC_FACE_VERDICTS.has(row.verdict)) {
+        findings.push({
+          kind: 'spec-face-unregistered',
+          text:
+            `${site.file} stamps unregistered code '${site.code}' (${site.shape}) and ${DECLARATION} ` +
+            `classifies it '${row.verdict}' — a verdict refused under ${SPEC_SOURCE_FACE}.\n` +
+            `      That tree ships in @objectstack/spec's dist, and the #16404 ruling makes ERROR_CODE_LEDGER ` +
+            `the published face: every code shipped in dist is registered there, door or no door. Register ` +
+            `'${site.code}' in ${LEDGER_ZOD} (this row then ratchets out as stale), or — only if it is not an ` +
+            `ADR-0112 error code at all — classify it 'foreign-vocabulary' with the evidence.`,
+        });
+      }
+      continue;
+    }
     if (site.shape === 'objlittemplate') {
       findings.push({
         kind: 'unclassified-site',
@@ -5355,6 +5405,38 @@ function selfTest() {
     }
   }
 
+  // ── [#16449] The spec face: a packages/spec/src site is registered or foreign ──
+  battery('[#16449] A packages/spec/src stamp site is a ledger member, never classified away.');
+  {
+    const specSite = { code: 'SPEC_ONLY_ONE', file: 'packages/spec/src/x.zod.ts', shape: 'classfield', door: 'none' };
+    const otherSite = { ...specSite, file: 'packages/x/src/a.ts' };
+    const rowFor = (site, verdict, extra = {}) => ({ ...site, verdict, why: 'self-test', ...extra });
+    const specFace = (site, verdict, extra) =>
+      reconcile({ sites: [site], declared: [rowFor(site, verdict, extra)], registered: new Set(), unresolved: [] })
+        .filter((f) => f.kind === 'spec-face-unregistered');
+    ok(specFace(specSite, 'boot-refusal').length === 1,
+      "a 'boot-refusal' row for a packages/spec/src site is a spec-face finding");
+    ok(specFace(specSite, 'pending-registration').length === 1,
+      "a 'pending-registration' row for a packages/spec/src site is a spec-face finding");
+    ok(specFace(specSite, 'foreign-vocabulary').length === 0,
+      "a 'foreign-vocabulary' row for a packages/spec/src site is admitted");
+    ok(specFace(otherSite, 'boot-refusal').length === 0,
+      "the same 'boot-refusal' row OUTSIDE packages/spec/src is not a spec-face finding (control)");
+    const tpl = { code: 'SPEC_*_FAILED', file: 'packages/spec/src/x.ts', shape: 'objlittemplate', door: 'none' };
+    ok(specFace(tpl, 'runtime-pinned', { pin: 'scripts/check-dispatcher-error-vocabulary.mjs' }).length === 0,
+      "a 'runtime-pinned' template under packages/spec/src is admitted — its pin is the registration proof");
+    const [finding] = specFace(specSite, 'boot-refusal');
+    ok(Boolean(finding) && finding.text.includes('#16404') && finding.text.includes(LEDGER_ZOD),
+      'the spec-face finding names the ruling and the ledger file — the remedy, not only the verdict');
+    // Registration is the way out: a registered code derives no site at all.
+    const { sites: none } = deriveSites({
+      registered: new Set(['SPEC_ONLY_ONE']),
+      files: [{ rel: 'packages/spec/src/x.zod.ts', source: `class E extends Error { readonly code = 'SPEC_ONLY_ONE'; }` }],
+      readFile: () => '',
+    });
+    ok(none.length === 0, 'a registered code under packages/spec/src derives no site — the ledger row is the way out');
+  }
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -5461,10 +5543,14 @@ function main() {
   findings.push(...checkDoorTyping({ doorSource, files }));
 
   const pending = declared.filter((d) => d.verdict === 'pending-registration');
+  const specSites = sites.filter((s) => s.file.startsWith(SPEC_SOURCE_FACE));
   const bounds =
     `  scope: ${files.length} non-test source files under ${SCAN_ROOT}/; ` +
     `${registered.size} registered codes (${ledger.size} ledger + ${standard.size} standard); ` +
     `${sites.length} unregistered code-stamping site(s) found; ${declared.length} classified.\n` +
+    `  [#16449] the spec face: ${specSites.length} stamp site(s) under ${SPEC_SOURCE_FACE}, every one ` +
+    `'foreign-vocabulary' or 'runtime-pinned' — any other verdict there is a finding: that tree ships in ` +
+    `@objectstack/spec's dist, and the #16404 ruling makes the ledger the published face, door or no door.\n` +
     `  door typing (#9098): ${REST_DOOR_FILE} checked for the typed author-side responder, the ` +
     `absence of a second \`sendError\`, and decided refusals bypassing it.\n` +
     `  the sandbox limb (author-thrown codes from metadata-app action code) is outside this scan ` +

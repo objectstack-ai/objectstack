@@ -249,6 +249,7 @@
     "ReportSchedule (interface)",
     "ResolveDependenciesInput (interface)",
     "ResolveShareLinkResult (interface)",
+    "ResumeFailureReport (interface)",
     "ResumeSignal (interface)",
     "RlsMembershipContext (interface)",
     "RollbackInput (interface)",

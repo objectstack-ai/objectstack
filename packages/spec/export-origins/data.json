@@ -4,6 +4,7 @@
   "exports": {
     "ACCEPTED_FILTER_COMPARAND_TYPES": "src/data/filter-comparand-type.ts#ACCEPTED_FILTER_COMPARAND_TYPES (const)",
     "ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE": "src/data/filter-comparand-type.ts#ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE (const)",
+    "AGGREGATE_FIELD_TYPE_COMPATIBILITY": "src/data/aggregate-field-type-compatibility.ts#AGGREGATE_FIELD_TYPE_COMPATIBILITY (const)",
     "AGGREGATION_CASES": "src/data/aggregation-conformance.ts#AGGREGATION_CASES (const)",
     "AGGREGATION_ROWS": "src/data/aggregation-conformance.ts#AGGREGATION_ROWS (const)",
     "ALL_OPERATORS": "src/data/filter.zod.ts#ALL_OPERATORS (const)",
@@ -725,6 +726,7 @@
     "hookForm": "src/data/hook.form.ts#hookForm (const)",
     "injectedSystemColumnDefs": "src/data/injected-system-column-provenance.ts#injectedSystemColumnDefs (function)",
     "isAcceptedFilterComparand": "src/data/filter-comparand-type.ts#isAcceptedFilterComparand (function)",
+    "isAggregateCompatibleWithFieldType": "src/data/aggregate-field-type-compatibility.ts#isAggregateCompatibleWithFieldType (function)",
     "isAnalyticsDateRangeRefusalIssue": "src/data/analytics.zod.ts#isAnalyticsDateRangeRefusalIssue (function)",
     "isApiOperationAllowed": "src/data/api-derivation.ts#isApiOperationAllowed (function)",
     "isApiPrimitive": "src/data/api-derivation.ts#isApiPrimitive (function)",
