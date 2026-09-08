@@ -32,15 +32,44 @@ other read door no longer produces — so on the live dialects the divergence wa
 between this door and the driver's own declared read contract, not merely
 between dialects.
 
+**What moves, FROM → TO, per column class and per dialect.** Routing this door
+through `formatOutput` moves SEVEN classes, not only the boolean and JSON ones
+the defect was reported as. `unchanged` means the storage form on that dialect
+already WAS the presented form, so the row is byte-identical there — it is
+recorded rather than omitted, because the same code path now runs for it.
+
+| class | sqlite | postgres | mysql |
+|---|---|---|---|
+| `Field.boolean` | `1` / `0` → `true` / `false` | unchanged (native `boolean`) | `1` / `0` → `true` / `false` |
+| `Field.object` (JSON) | `'{"k":1}'` TEXT → `{ k: 1 }` | unchanged (native `jsonb`) | unchanged (mysql2 parses JSON) |
+| numeric fields | `'4'` → `4` (a numeric STRING off a legacy TEXT-affinity column) | unchanged | unchanged |
+| `Field.datetime` + `created_at` / `updated_at` | unchanged — already the canonical text since #3912; a legacy zone-naive row is repaired to it | `Date` → `'2026-01-10T09:00:00.123Z'` | `Date` → `'2026-01-10T09:00:00.123Z'` |
+| `Field.date` | unchanged (`toDateOnly` on text is identity) | unchanged (the driver pins the `date` OID parser to text) | `Date` → `'2026-01-10'` |
+| `Field.time` | unchanged | `'09:30:00.5'` → `'09:30:00.500'` | → canonical `HH:MM:SS[.fff]` |
+| `external.columnMap` | the row KEY renames: remote column key → local field key | same | same |
+
+The instant TO is the canonical `YYYY-MM-DDTHH:MM:SS.sssZ` TEXT **on every
+dialect**, never a JS `Date` — that is ADR-0053 D-F1 as #16619 landed it, and
+this door now runs the same presenter, so it answers the same shape the other
+read doors do.
+
+`external.columnMap` is the one class nobody named on the card, and it is a KEY
+move rather than a value move: on an external object with a `columnMap`, the row
+this door returns is now keyed by the LOCAL field names, as `find()` has always
+keyed it, instead of by the remote physical column names.
+
 **What to do.** Code that compensated for the storage forms stops being
 correct and should simply drop the compensation:
 
 - `if (row.ok === 1)` → `if (row.ok)`; the value is a real boolean now.
 - `JSON.parse(row.meta)` → `row.meta`; it is already the parsed value, and
   parsing an object throws.
+- `Number(row.amount)` → `row.amount`; a numeric column is a `number`.
 - A `Field.datetime` / `Field.date` / `Field.time` / `created_at` / `updated_at`
   read through this door is now the same presented value `find()` gives, so a
-  branch that re-normalised it can go.
+  branch that re-normalised it — or that called `Date` methods on it — can go.
+- A reader of an external object with a `columnMap` indexes the row by the LOCAL
+  field key, not the remote column key.
 
 **The alias columns are carved out**, which is the design question this door
 raised. A window alias is a computed value, not a declared field, so no declared
