@@ -135,11 +135,18 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
         expect(direct._provenance).toBe('package');
     });
 
-    it('registers the row unchanged when artifacts have not loaded yet (boot-order no-op)', async () => {
+    it('grafts NO artifact envelope when artifacts have not loaded yet (boot-order no-op)', async () => {
         // Empty registry at hydration time — the scoped lookup finds
         // nothing, exactly like the unscoped one did, and the row
         // registers without a grafted envelope. Artifact-after-hydration
         // boot orders are unaffected by the scoping.
+        //
+        // [#16702] What the row does carry is the SERVER's own sentence about
+        // it — `_provenance: 'org'`, the same one the `object` branch has
+        // always stated — because every row this hydrator sees came out of a
+        // `sys_metadata` write. That is a statement of authorship, not a graft
+        // from an artifact: `_lock` and `_packageId` stay absent, which is what
+        // this case is about.
         const registry = new SchemaRegistry({ multiTenant: false });
         registry.logLevel = 'silent';
         const rows = [
@@ -159,7 +166,8 @@ describe('loadMetaFromDb — ADR-0048 package-scoped protection graft at boot (#
         expect(direct.label).toBe('B Home (customized)');
         expect(direct._lock).toBeUndefined();
         expect(direct._packageId).toBeUndefined();
-        expect(direct._provenance).toBeUndefined();
+        // [#16702] NOT `undefined` — the hydrator states tenant authorship.
+        expect(direct._provenance).toBe('org');
     });
 
     it('keeps the legacy best-effort graft for package-less (global) rows', async () => {

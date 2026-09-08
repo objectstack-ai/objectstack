@@ -1460,7 +1460,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       identity: {
         label: "ID",
-        description: "権限セットはプロファイルに追加アクセス権を重ねる。プロファイルは各ユーザーに 1:1 で割り当てる基本セット。"
+        description: "権限セットは唯一の能力コンテナです。ユーザーは保持するすべてのセットの和集合を得るため、セットはアクセス権を追加することしかできません。ポジションがセットを人に配分します。"
       },
       system_permissions: {
         label: "システム権限",
