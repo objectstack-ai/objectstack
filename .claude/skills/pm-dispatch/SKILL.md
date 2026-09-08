@@ -672,7 +672,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 - 每轮向维护者打中文轮次报告(chat 通道):issue → 判决 → PR 链接 → 备注的表。
 - 报告加升级项、代裁清单(分诊)、awaiting a human merge 项、governed 合并审计清单。
-- 复审清单计条款②默认档施工的复审 FAIL 率,基线待测;实质高于达档施工 ⇒ 条款②回退。
+- 报告席记条款②默认档 FAIL 率入复审清单;超改制前达档史值 ⇒ 决策卡交维护者定回退。
 - 审计清单实跑 `node scripts/pm/check-governed-merges.mjs --since <上轮>`,⛔ 不凭记忆汇总。
 - 车道审计是早警;权威合并窗口与认定/回滚处置归总监席,见 `references/lanes/director.md`。
 - 报告含 `UNRECOGNISED` 行:对本轮门禁日志 grep `UNRECOGNISED` 逐行照录,`NOT APPLICABLE` 行也在内。
