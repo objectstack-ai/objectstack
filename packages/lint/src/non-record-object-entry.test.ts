@@ -399,7 +399,7 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  * "nothing throws" would have had to be deleted or weakened on the day it was
  * written, and would then never have caught the next one.
  *
- * Four rows have come out since it was written, each because the sweep went
+ * Six rows have come out since it was written, each because the sweep went
  * red demanding a throw that no longer happens — which is the both-directions
  * half earning its keep, since no removal started with anyone going looking:
  *
@@ -421,29 +421,34 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  *    `recordsOf` by #16751, with the COERCED array — never `flow.nodes` raw —
  *    handed on to `collectFlowGraphs`, so the crash is removed rather than
  *    relocated into `packages/spec`.
+ *  - `flows[].nodes[].config.body.nodes` / `lintFlowPatterns` +
+ *    `validateStackExpressions` — written down as ONE defect *inside*
+ *    `collectFlowGraphs`, on the reading that its region walk dereferences a
+ *    member of an inner list it had only `Array.isArray`-checked, and filed on
+ *    that basis. Re-pointing the readers above turned this row red demanding
+ *    two throws that no longer happen, and reading the frames off the reverted
+ *    tree showed the ATTRIBUTION was wrong: neither was in `packages/spec`.
+ *    `lintFlowPatterns` threw at its own `graph.nodes` reader, and
+ *    `validateStackExpressions` threw at `collectFlowVariableNames`' unguarded
+ *    `graph.nodes` walk — the two consumer sites #16751 re-pointed.
+ *    `collectFlowGraphs` FORWARDS a non-record member of a nested list into the
+ *    graph it yields rather than dereferencing it, so at this shape the crash
+ *    was always the consumer's. That is a statement about this shape and this
+ *    rule table only: it does not say the producer has no defect of its own
+ *    reachable some other way, and nothing here closes that question.
  *
- * ## The row it holds today, found by the arm that added it
+ * ## It holds no row today
  *
  * It went from empty to two the moment a flow's inner node list became
  * addressable, which is the point #15793 was filed to make: this class was
  * closed three times over collections while the same defect stood untouched one
- * addressing mode away. #16751 has since taken the consumer-side half back out;
- * what stands below is the producer-side one.
- *
- *  - `flows[].nodes[].config.body.nodes` / `validateStackExpressions` +
- *    `lintFlowPatterns` (#16752) — neither rule's own reader is at fault here:
- *    both throw from INSIDE `collectFlowGraphs`, whose region walk reads
- *    `node.config` off a member of an inner list it checked only with
- *    `Array.isArray`. No coercion at either call site reaches that list, which
- *    is why #15793 stopped and filed the fork instead of widening a
- *    `packages/spec` contract to tolerate malformed members.
+ * addressing mode away. Both rows came back out on the change that re-pointed
+ * the last of the flow-node-list readers, and the table is empty again. Empty
+ * is this ratchet's resting state, not its retirement: it stays exact in both
+ * directions, so a rule that starts throwing on any swept collection reds here
+ * because it is not listed.
  */
-const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
-  // 2026-09-08 — #16752. Both entries are ONE defect in `collectFlowGraphs`,
-  // surfacing through the two rules that call it. Removed together.
-  'flows[].nodes[].config.body.nodes · null': ['lintFlowPatterns', 'validateStackExpressions'],
-  'flows[].nodes[].config.body.nodes · undefined': ['lintFlowPatterns', 'validateStackExpressions'],
-};
+const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
  * Where a junk member still draws a finding no author's file justifies — the
