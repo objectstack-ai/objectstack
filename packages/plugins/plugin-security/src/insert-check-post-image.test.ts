@@ -185,6 +185,20 @@ const OBJECTS = [
       token: { name: 'token', type: 'secret' },
     },
   },
+  // The contract review's F1 reorder moves both strips ahead of the credential
+  // channel. These two columns are where that is OBSERVABLE rather than argued:
+  // an author-declared `readonly` on a credential field.
+  {
+    name: 'qa_ro_cred',
+    label: 'Readonly credential columns',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      name: { name: 'name', type: 'text' },
+      token: { name: 'token', type: 'secret', readonly: true },
+      pw: { name: 'pw', type: 'password', readonly: true },
+    },
+  },
   // The secret store the credential channel writes into, declared here so
   // `syncSchemas()` creates a real table for it and "no secret was minted" can
   // be READ rather than inferred.
@@ -222,6 +236,9 @@ const EMPLOYER_ADMIN: PermissionSet = PermissionSetSchema.parse({
     qa_ro_member_default: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_unevaluable_member: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_cost_member: { allowRead: true, allowCreate: true, allowEdit: true },
+    // No `rowLevelSecurity` policy for this one on purpose: its cells are about
+    // the ENGINE's pass order, not about the check gate.
+    qa_ro_cred: { allowRead: true, allowCreate: true, allowEdit: true },
   },
   rowLevelSecurity: [
     {
@@ -906,3 +923,77 @@ for (const [driverName, makeDriver] of DRIVERS) {
     });
   });
 }
+
+/**
+ * [contract review F1, the reorder's OWN consequences — measured, both legs]
+ *
+ * Moving the two strips ahead of the seam also moves them ahead of the
+ * credential loop (`refuseEmptyPasswordFields` + `encryptSecretFields`), which
+ * used to run first. That is not a detail to wave at: it changes what happens
+ * to a caller-supplied value on a `readonly` CREDENTIAL column, in two
+ * different directions, and both were measured on `cd09d3b99` (the reviewed
+ * head, `engine.ts` checked out over this tree) and on the fix.
+ *
+ * ⚠️ These cells run without a `check` policy and outside the RLS gate
+ * entirely — they are about the ENGINE's pass order, which is what the F1 fix
+ * moved. They live here because this file is where that reorder is justified.
+ */
+describe('[#16608 F1] what moving the strips ahead of the credential channel changes', () => {
+  const OBJ = 'qa_ro_cred';
+  // The same non-system caller the cells above use — granted create on this
+  // object, and governed by NO `check`, so nothing here is the RLS gate's doing.
+
+  it('a caller-forged `readonly` `secret` field is stripped, so nothing is stored and no secret is minted', async () => {
+    // MEASURED on the reviewed head cd09d3b99, same harness:
+    //   stored `token: "secret:sec_1"` · encrypt calls 1 · sys_secret rows 1
+    // The forgery REACHED THE STORE. `encryptSecretFields` ran first and
+    // replaced the row's value with a reference, so the strip's `Object.is`
+    // value test then compared a REF against the caller's plaintext, read the
+    // difference as "a hook rewrote this key", and KEPT it — the one input
+    // where that test inverts. Pre-existing on 17.3.0, closed by the reorder.
+    const booted = await boot(DRIVERS[0]![1]);
+
+    const outcome = await attempt(() =>
+      booted.engine.insert(
+        OBJ,
+        { id: 'cred_1', name: 'n', token: 'forged-plaintext' },
+        { context: CALLER } as never,
+      ),
+    );
+    expect(outcome.ok, `expected the insert to be admitted with the forgery dropped: ${outcome.message}`).toBe(true);
+
+    const rows = await booted.table(OBJ, ['id', 'token']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.token, 'a caller may not seed a `readonly` credential column').toBeNull();
+    expect(booted.crypto.encrypt, 'nothing was encrypted for a value the strip discards').toBe(0);
+    expect(await booted.table('sys_secret', ['id']), 'and no sys_secret row was minted').toEqual([]);
+  });
+
+  it('an empty string on a `readonly` `password` field is stripped rather than refused — and `""` still never reaches the store', async () => {
+    // ⚠️ THE ONE DIRECTION OF THE REORDER THAT IS NOT A NARROWING, recorded
+    // here so it is visible rather than discovered. MEASURED on the reviewed
+    // head cd09d3b99, same harness:
+    //   VALIDATION_ERROR — 'Empty string refused for password field
+    //   "qa_ro_cred.pw"' · nothing stored
+    // and on the fix: admitted, `pw` stored as NULL.
+    //
+    // What the 2026-08-13 ruling guarantees is that a masked credential column
+    // never holds `""` while every read reports "a password is set". That
+    // guarantee is INTACT — `""` is discarded on both orders; only which
+    // refusal a caller sees moved, on a payload the caller was never allowed to
+    // send. ⛔ The seam's 403 deliberately still precedes this: moving
+    // `refuseEmptyPasswordFields` up too would let a field-level validation
+    // verdict answer a write that RLS refuses, which is the wrong precedence
+    // for a security gate.
+    const booted = await boot(DRIVERS[0]![1]);
+
+    const outcome = await attempt(() =>
+      booted.engine.insert(OBJ, { id: 'cred_2', name: 'n', pw: '' }, { context: CALLER } as never),
+    );
+    expect(outcome.ok).toBe(true);
+
+    const rows = await booted.table(OBJ, ['id', 'pw']);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.pw, 'the empty credential is not stored — the ruling’s guarantee, unchanged').toBeNull();
+  });
+});
