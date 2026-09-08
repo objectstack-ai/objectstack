@@ -176,6 +176,76 @@ describe('Data Engine Contract', () => {
       expect(result.raw).toBe(true);
     });
   });
+  /**
+   * [#16231] The three narrowed verb declarations are PINNED, not only guarded.
+   *
+   * The maintainer ruling (option A, 2026-09-07, director seat summon #17,
+   * decision batch #2) has two halves: `findOne` / `update` / `delete` DECLARE
+   * what they answer, and each hook seam GUARDS `hookContext.result` against
+   * that declaration. The guard half is pinned by
+   * `packages/objectql/src/engine-verb-hook-result-shape.test.ts`. The
+   * DECLARATION half was pinned nowhere: reverting these three members to
+   * `Promise[any]` while leaving the guards in place reddened nothing in the
+   * repository. Every consumer repair the census produced (`if (!row)`,
+   * `typeof x === 'number' ? … : …`, `result!.assignee`) compiles identically
+   * against `any` — `any` admits every property read and is assignable in both
+   * directions — so those repairs are evidence that a narrowing once happened,
+   * never that it is still in force. A declared contract nothing can fail is
+   * ADR-0049's enforce-or-remove target; these three cases close that.
+   *
+   * ## The channel, and why it cannot be vitest
+   *
+   * These are COMPILE facts. vitest strips types through esbuild without ever
+   * resolving them, so all three cases run green over a reverted declaration.
+   * The check that actually reads them is `check:test-typecheck`
+   * (`tsconfig.test.json`, #5286) — the gate whose absence had made eighteen
+   * `@ts-expect-error` pins across this repo phantom checks.
+   *
+   * ## How a revert is caught
+   *
+   * The mechanism is the one the `#12248` block below already records: every
+   * directive here is RESOLVED by tsc today, so widening a member back to
+   * `Promise[any]` does not make a case fail an assertion — it makes the
+   * directive UNUSED, and an unused `@ts-expect-error` is itself an error
+   * (TS2578) in a file whose debt ledger is exact.
+   *
+   * ⛔ No new engine double. Each case reads the DECLARED member type through
+   * `IDataEngine[…]`, so nothing here can drift from the contract by being
+   * modelled beside it.
+   */
+  describe('the narrowed verb declarations are pinned, not just guarded (#16231)', () => {
+    type FindOneAnswer = Awaited<ReturnType<IDataEngine['findOne']>>;
+    type UpdateAnswer = Awaited<ReturnType<IDataEngine['update']>>;
+    type DeleteAnswer = Awaited<ReturnType<IDataEngine['delete']>>;
+
+    it('findOne: an un-null-checked property read does not compile', () => {
+      // The null limb is the entire point of the declaration — `findOne` reads
+      // the ONE record the query selects, or nothing — and TS18047 here is the
+      // dominant signature of this card's 92-error consumer census.
+      // @ts-expect-error - 'row' is possibly 'null'
+      const readsWithoutChecking = (row: FindOneAnswer): unknown => row.id;
+      expect(typeof readsWithoutChecking).toBe('function');
+    });
+
+    it('update: the answer cannot enter a record slot unnarrowed', () => {
+      // TWO dispatch exits: the by-id post-write record (or `null`), and the
+      // affected-row COUNT a predicate write resolves (#4639). A consumer that
+      // wants the record has to separate the count limb first, which is what
+      // `any` let every call site skip.
+      // @ts-expect-error - 'number | null' is not assignable to a record slot
+      const intoRecordSlot = (written: UpdateAnswer): Record<string, any> => written;
+      expect(typeof intoRecordSlot).toBe('function');
+    });
+
+    it('delete: the answer is not a row and has no field to read', () => {
+      // `boolean | number` — whether the by-id row was there, or how many rows
+      // a predicate delete removed. The `{ deleted: n }` envelope this card
+      // found in four test doubles is the shape an unread declaration admits.
+      // @ts-expect-error - property does not exist on 'boolean | number'
+      const readsARow = (removed: DeleteAnswer): unknown => removed.id;
+      expect(typeof readsARow).toBe('function');
+    });
+  });
 
   /**
    * [#5126] `WriteObservabilityOptions` is the IN-PROCESS write-options
