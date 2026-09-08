@@ -211,9 +211,10 @@ describe('REST /actions — flow dispatch (#3915)', () => {
         });
 
         const res = await dispatcher.handleActions('/crm_lead/convert_lead/lead_404', 'POST', {}, ctxFor());
+        const response: any = res.response;
 
-        expect(res.response.status).toBe(404);
-        expect(res.response.body.error.code).toBe('RECORD_NOT_FOUND');
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('RECORD_NOT_FOUND');
         // ⛔ The half that makes the status mean anything.
         expect(execute).not.toHaveBeenCalled();
     });
@@ -229,8 +230,9 @@ describe('REST /actions — flow dispatch (#3915)', () => {
         });
 
         const res = await dispatcher.handleActions('/crm_lead/convert_lead', 'POST', {}, ctxFor());
+        const response: any = res.response;
 
-        expect(res.response.status).toBe(200);
+        expect(response.status).toBe(200);
         expect(execute).toHaveBeenCalledTimes(1);
         expect((execute.mock.calls[0]?.[1] as any).params.recordId).toBeUndefined();
     });
