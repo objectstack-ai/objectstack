@@ -115,7 +115,11 @@ function makeStubDriver() {
         async checkHealth() { return true; },
         async execute() { return null; },
         async find(object: string, ast: any) {
-            return Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            const rows = Array.from(storeFor(object).values()).filter((r) => matchesWhere(r, ast?.where));
+            // The caller's bound, applied AFTER the filter and by PRESENCE — a
+            // `find` double that ignores `limit` answers a different query than
+            // the one it was handed (`pnpm check:objectql-double-limit`).
+            return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
         },
         async findOne(object: string, ast: any) {
             for (const r of storeFor(object).values()) if (matchesWhere(r, ast?.where)) return r;
