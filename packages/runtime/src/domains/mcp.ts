@@ -611,7 +611,20 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
             // Resolved per request on the SAME per-environment seam `getMeta`
             // uses — never captured once at boot, which would serve one
             // environment's overlay rows to every other one.
-            const protocol: any = await deps.resolveService(context, 'protocol', envId);
+            //
+            // [#15238] Typed at the RESOLVE, not just at the callee's
+            // parameter. `resolveService` answers `any` for `'protocol'` (the
+            // slot is deliberately unmapped in `ServiceSlotContracts`), and
+            // this file was half-typed: {@link McpMergedMetadataRead} was
+            // already declared for the merged-read seam below, while the handle
+            // feeding it was annotated `any` — so any verb, spelt any way,
+            // could be reached from this site. Naming the existing type here
+            // closes that half. ⛔ Still `| undefined` and still every member
+            // optional: `readMergedSkillRows` keeps its own
+            // `typeof protocol.getMetaItems !== 'function'` probe, because a
+            // host may occupy the slot with a partial object.
+            const protocol: McpMergedMetadataRead | undefined =
+                await deps.resolveService(context, 'protocol', envId);
             return await readMergedSkillRows(deps, protocol, getMeta);
         },
 
