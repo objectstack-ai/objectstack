@@ -154,6 +154,12 @@ export const esES: TranslationData = {
         widget_events_by_user: { title: 'Eventos por Usuario', description: 'Distribución de actividad entre usuarios' },
         widget_recent_events: { title: 'Volumen de Eventos por Acción', description: 'Volumen de eventos agrupado por acción (inicio de sesión, cierre de sesión, configuración, …)' },
       },
+      // The date-range bar above the widgets — addressable since
+      // `dashboards.<name>.globalFilters` (#16772), keyed by the filter's
+      // `field` because it authors no `name`.
+      globalFilters: {
+        created_at: { label: 'Rango de fechas' },
+      },
     },
   },
 

@@ -1175,12 +1175,14 @@ describe('translateDashboard — global filters (#16772)', () => {
   });
 
   it('translates the filter label and its static option labels, keyed by `name`', () => {
-    const out = translateDashboard(dashboard(), bundle, { locale: 'zh-CN' });
+    // The chain is the deployment's DECLARED one (#14882): `en` is consulted
+    // because the caller names it, never by default.
+    const out = translateDashboard(dashboard(), bundle, { locale: 'zh-CN', fallbackChain: ['en'] });
     expect(out.globalFilters![0].label).toBe('申请部门');
     expect(out.globalFilters![0].options).toEqual([
       { value: 'legal', label: '法务' },
       { value: 'sales', label: '销售' },
-      // Resolved key by key along the locale chain — `ops` comes from `en`.
+      // Resolved key by key along the declared chain — `ops` comes from `en`.
       { value: 'ops', label: 'Operations' },
       // No entry anywhere on the chain: authored label kept.
       { value: 'hr', label: 'HR' },
@@ -1211,7 +1213,7 @@ describe('translateDashboard — global filters (#16772)', () => {
     expect(out.globalFilters![2]).toBe(doc.globalFilters[2]);
     // The input is never mutated.
     expect(doc.globalFilters[0].label).toBe('Requesting Department');
-    expect(doc.globalFilters[0].options[0].label).toBe('Legal');
+    expect(doc.globalFilters[0].options?.[0]?.label).toBe('Legal');
   });
 
   it('CONTROL: leaves `globalFilters` off the copy when nothing resolved, and invents none on a dashboard without filters', () => {
@@ -2318,11 +2320,12 @@ describe('translatePage — slotted page roots and tab panels (#16772)', () => {
   };
 
   it('addresses a slotted page — the walk count is non-zero and every authored id is visited once', () => {
-    // Measured here, on this fixture: 9 components authored (1 header, 1
-    // path, 1 details, 1 tabs, 3 related lists in panels, 1 card, 1 nested
-    // related list); the `body` control is not a visit. The card's own
-    // number came from one app and one console build and is not restated.
-    expect(count(contractPage())).toBe(9);
+    // Measured here, on this fixture: 8 components authored (1 header, 1
+    // path, 1 details, 1 tabs, 2 related lists directly in panels, 1 card in
+    // a panel, 1 related list nested in that card); the `body` control is
+    // not a visit. The card's own number came from one app and one console
+    // build and is not restated.
+    expect(count(contractPage())).toBe(8);
     const ids: string[] = [];
     walkAddressedPageComponents(contractPage(), (c, { id, addressed }) => {
       if (addressed) ids.push(id as string);
