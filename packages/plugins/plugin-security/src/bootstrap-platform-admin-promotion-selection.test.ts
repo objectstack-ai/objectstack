@@ -60,6 +60,7 @@
  */
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
@@ -177,7 +178,12 @@ function withNaturalOrder(engine: ObjectQL, order: NaturalOrder): any {
       if (id !== undefined) insertionRank.set(rankKey(object, id), nextRank++);
       return result;
     },
+    // The shared engine-double contract (`check:engine-double-contract`): a
+    // facade whose update() is looser than ObjectQL.update is how a dead code
+    // path ships with its suite green. Asserted BEFORE delegating, so this
+    // wrapper can never be the loose link.
     async update(object: string, data: any, options: any) {
+      assertEngineUpdateDispatch(data, options);
       return (engine as any).update(object, data, options);
     },
   };
@@ -412,17 +418,28 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
         grants: () => tables.get('sys_user_permission_set')!,
         async find(object: string, q: any) {
           const where = q?.where ?? {};
-          return (tables.get(object) ?? []).filter((r) =>
-            Object.entries(where).every(([k, v]) => r[k] === v),
+          const matched = (tables.get(object) ?? []).filter((r) =>
+            Object.entries(where).every(([k, v]) => {
+              // Refuse loudly rather than reading a combinator as a field name:
+              // a matcher that silently answers `false` for `$or` is how a
+              // double reports a filtered-out row as absent.
+              if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+              return r[k] === v;
+            }),
           );
+          // The caller's bound, applied AFTER the filter and by PRESENCE.
+          return typeof q?.limit === 'number' ? matched.slice(0, q.limit) : matched;
         },
         async insert(object: string, data: any) {
           (tables.get(object) ?? []).push({ ...data });
           return { id: data.id };
         },
-        async update(object: string, data: any) {
-          const row = (tables.get(object) ?? []).find((r) => r.id === data.id);
+        async update(object: string, data: any, options?: any) {
+          const dispatch = assertEngineUpdateDispatch(data, options);
+          if (dispatch.kind !== 'by-id') return 0;
+          const row = (tables.get(object) ?? []).find((r) => r.id === dispatch.id);
           if (row) Object.assign(row, data);
+          return row ?? null;
         },
       };
     }
@@ -669,14 +686,28 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
       return {
         warns,
         async find(object: string, q: any) {
+          // The caller's bound, applied AFTER the filter and by PRESENCE.
+          const bound = (rows: any[]) =>
+            typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
           if (object === 'sys_permission_set') {
             const where = q?.where ?? {};
-            return permissionSets.filter((r) =>
-              Object.entries(where).every(([k, v]) => r[k] === v),
+            return bound(
+              permissionSets.filter((r) =>
+                Object.entries(where).every(([k, v]) => {
+                  // Refuse loudly rather than reading a combinator as a field
+                  // name — a matcher that answers `false` for `$or` reports a
+                  // row it never understood as absent.
+                  if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+                  return r[k] === v;
+                }),
+              ),
             );
           }
           if (object === 'sys_user') {
             const where = q?.where ?? {};
+            for (const k of Object.keys(where)) {
+              if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            }
             if (Object.keys(where).length > 0) return [];
             const offset = q?.offset ?? 0;
             const limit = q?.limit ?? 100;
@@ -697,8 +728,9 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
           if (object === 'sys_permission_set') permissionSets.push({ ...data });
           return { id: data.id };
         },
-        async update() {
-          /* noop */
+        async update(_object: string, data: any, options?: any) {
+          assertEngineUpdateDispatch(data, options);
+          return 0;
         },
       };
     }
