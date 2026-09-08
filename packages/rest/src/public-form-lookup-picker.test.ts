@@ -206,14 +206,19 @@ describe('#7467 a spec-valid stored form carrying a publicPicker reaches the loo
         //
         // [#16337] The KEYS are the canonical QueryAST ones (`where` / `fields`
         // / `orderBy`); until then the route spelled them `filters` / `select` /
-        // `sort`, wire aliases the normalizer folds onto exactly these. The
-        // VALUES are byte-identical across that rewrite, which is the point —
-        // and note what `where` carries: `ViewFilterRule` rows, the dialect
-        // `FormFieldPublicPickerSchema.filter` declares, NOT a
-        // `FilterCondition`. `findData` is stubbed in this suite, so it never
-        // meets the ingress's verdict on that value; the real normalizer
-        // refuses it (#16581) — ⛔ do not "repair" it by editing this
-        // expectation.
+        // `sort`, wire aliases the normalizer folds onto exactly these.
+        //
+        // [#16581] The VALUE on `where` is the part that moved. It used to be
+        // the `ViewFilterRule` rows verbatim — the dialect
+        // `FormFieldPublicPickerSchema.filter` declares — which the ingress
+        // refuses with `400 INVALID_FILTER`, so this endpoint answered 400 for
+        // every non-empty search. The route now LOWERS them to the
+        // `FilterArray` grammar the parser reads, and the declared conjunction
+        // is written down rather than left to the list form's implicit AND.
+        // ⚠️ `findData` is stubbed in this suite, so this remains a COMPOSITION
+        // pin and cannot say the value is served: that is measured against the
+        // real normalizer in `public-form-lookup-filter-lowering.test.ts`,
+        // whose §3 keeps the control that the parser itself was NOT loosened.
         expect(findData).toHaveBeenCalledTimes(1);
         const call = findData.mock.calls[0][0];
         expect(call.object).toBe('sys_user');
@@ -224,8 +229,9 @@ describe('#7467 a spec-valid stored form carrying a publicPicker reaches the loo
         // ascending. The route's `picker.sort ??` read is retired.
         expect(call.query.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
         expect(call.query.where).toEqual([
-            { field: 'is_active', operator: 'equals', value: true },
-            { field: 'name', operator: 'contains', value: 'ad' },
+            'and',
+            ['is_active', 'equals', true],
+            ['name', 'contains', 'ad'],
         ]);
         expect(call.context.anonymous).toBe(true);
     });

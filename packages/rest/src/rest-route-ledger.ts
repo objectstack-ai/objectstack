@@ -236,8 +236,17 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
     note: '[#6603] gated on `manage_metadata` (ADR-0066 D1), same mechanism as POST /meta/_migrate-stored — a session alone is no longer enough. The write-side answer to ADR-0106 D1: a masked read PUT back verbatim used to delete the fields the caller could not see. [#12702] the gate is the shared `metaWriteCapabilityVerdict`: `manage_org_presentation` is also admitted, ONLY for an `allowOrgOverride: true` type written org-scoped to the caller\'s own active organization' },
   { route: 'DELETE /api/v1/meta/:type/:name', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.deleteItem',
     note: 'REST-only: the dispatcher /meta branch has no DELETE handling — it falls into the read path. [#7019] gated on `manage_metadata` (ADR-0066 D1), same mechanism as the PUT twins — but NOT for the ADR-0106 reason: nothing is masked or round-tripped here, this discards a customization overlay outright, and `?dropStorage=true` takes the object table with it. [#12702] same shared verdict as the PUT door: an admitted `manage_org_presentation` reset threads the caller\'s own organization, so the only row it can discard is their own org\'s overlay' },
+  // The response schema POSTDATES this row: the row was written when the door
+  // had no declaration, and `HistoryMetaItemResponseSchema` was authored later
+  // by the card that declared the history protocol member. That is why this was
+  // the one row of the metadata family left unfilled while its `audit`,
+  // `rollback` and `diff` siblings were bound. The tracker anchors for both
+  // halves live in git history and in this comment's own PR, deliberately not
+  // in the `note` string below — that string reaches authors and operators
+  // through generated surfaces, where an issue id resolves to nothing.
   { route: 'GET /api/v1/meta/:type/:name/history', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getHistory',
-    note: 'REST-only: the dispatcher /meta branch swallows /history as a compound name and 404s' },
+    responseSchema: 'HistoryMetaItemResponseSchema',
+    note: 'REST-only: the dispatcher /meta branch swallows /history as a compound name and 404s. Payload answered BARE, so the named schema is the whole body — a describe-only transcription of `historyMetaItem`\'s declared return. Conformance: the history capture suite in spec `api/protocol.test.ts`, which parses a real two-event body (an update carrying every optional member, and the delete tombstone with `hash: null` and a `null` system actor) and pins the closed `op` vocabulary against the deliberately open `ref.type`' },
   { route: 'GET /api/v1/meta/:type/:name/audit', family: 'metadata', source: 'route-manager', disposition: 'sdk', client: 'meta.getAudit',
     responseSchema: 'AuditMetaItemResponseSchema',
     note: '[#12038] REST-only route; payload answered BARE, so the named schema is the whole body. The schema predates this row (#11678, exact field-for-field match of `auditMetaItem`\'s declared return); conformance: the #11678 capture suite in spec `api/protocol.test.ts`' },

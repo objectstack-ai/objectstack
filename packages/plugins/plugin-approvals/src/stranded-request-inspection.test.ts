@@ -97,14 +97,29 @@ function requestRow(over: Record<string, any> = {}): FakeRow {
   };
 }
 
-/** An automation surface with both oracles, each independently steerable. */
+/** What the #15358 third oracle answers, per run — see `ApprovalResumeSurface`. */
+type Verdict =
+  | { repairable: true }
+  | { repairable: false; reason: 'RUN_SUSPENDED' | 'SNAPSHOT_DROPPED' | 'NO_CONSUMED_SUSPENSION' };
+
+/**
+ * An automation surface with both oracles, each independently steerable — and,
+ * ONLY when `repairability` / `repairabilityThrows` is given, the #15358 third
+ * oracle (`inspectConsumedSuspension`). Its absence by default is deliberate:
+ * every test above the #15358 block drives a surface that cannot be asked,
+ * which is exactly the population the undifferentiated `'failed'` is kept for.
+ */
 function automation(opts: {
   suspended?: Record<string, boolean>;
   suspendedThrows?: boolean;
   history?: Record<string, { status?: string }>;
   historyThrows?: boolean;
+  repairability?: Record<string, Verdict>;
+  repairabilityThrows?: boolean;
 } = {}) {
-  return {
+  const inspectCalls: string[] = [];
+  const surface: any = {
+    inspectCalls,
     async resume() { return { success: true }; },
     async hasSuspendedRun(runId: string) {
       if (opts.suspendedThrows) throw new Error('suspended-run store unreadable');
@@ -114,7 +129,17 @@ function automation(opts: {
       if (opts.historyThrows) throw new Error('run history unreadable');
       return opts.history?.[runId] ?? null;
     },
-  } as any;
+  };
+  if (opts.repairability !== undefined || opts.repairabilityThrows) {
+    surface.inspectConsumedSuspension = async (runId: string): Promise<Verdict> => {
+      inspectCalls.push(runId);
+      if (opts.repairabilityThrows) throw new Error('run history unreadable for the consumed suspension');
+      const v = opts.repairability?.[runId];
+      if (!v) throw new Error(`test surface: no verdict scripted for ${runId}`);
+      return v;
+    };
+  }
+  return surface;
 }
 
 describe('stranded terminal request inspection (#4469)', () => {
@@ -403,5 +428,164 @@ describe('stranded inspection sees a run that FAILED mid-resume (#13909)', () =>
 
     expect(JSON.stringify(engine._tables)).toBe(before);
     expect(engine._tables['sys_approval_action'] ?? []).toHaveLength(0);
+  });
+});
+
+// ── #15358: the third oracle tells the `failed` rows apart ─────────────────
+//
+// `status === 'failed'` over-reports in one direction: a cascade-failed run
+// (an ancestor `failAncestors` failed while parked at its `subflow` node —
+// `failSuspendedRun` consumed its pause and journalled nothing, so nothing
+// re-arms it; #15222) has the same terminal row as the #13909 strand that
+// `restoreConsumedSuspension` repairs. The engine publishes the difference as
+// a dedicated read-only member (ruling B′, 2026-09-07), never on the object
+// `getRun` answers. This block pins the plugin's side of that contract on a
+// scripted surface; `stranded-run-repairability.test.ts` drives the real
+// engine through both shapes.
+
+describe('#15358 — the third oracle splits `failed` three ways, and its ABSENCE is fail-closed', () => {
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    svc = new ApprovalService({ engine: engine as any });
+    engine._tables['sys_approval_request'] = [requestRow()];
+  });
+
+  const failedRun = { history: { run_1: { status: 'failed' as const } } };
+
+  it('⭐ a surface WITHOUT the member reports the row `failed` — never `unrepairable`, never skipped', async () => {
+    // Absence of the discriminator is not evidence of anything. On a real
+    // engine it is absent from `getRun` for BOTH the repairable strand and the
+    // cascade-failed ancestor, so reading absence as "not a strand" would call
+    // the repairable row dead — #15555's false negative, one surface over.
+    const auto = automation(failedRun);
+    expect(typeof auto.inspectConsumedSuspension).toBe('undefined');
+    svc.attachAutomation(auto);
+    const out = await svc.inspectStrandedRequests();
+    expect(out.undetermined).toBe(0);
+    expect(out.stranded.map(s => s.runState)).toEqual(['failed']);
+  });
+
+  it('`repairable: true` → `repairable`', async () => {
+    svc.attachAutomation(automation({ ...failedRun, repairability: { run_1: { repairable: true } } }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded.map(s => s.runState)).toEqual(['repairable']);
+    expect(out.undetermined).toBe(0);
+  });
+
+  it('`SNAPSHOT_DROPPED` → `snapshot_dropped` — its own class, folded into neither neighbour', async () => {
+    svc.attachAutomation(automation({
+      ...failedRun, repairability: { run_1: { repairable: false, reason: 'SNAPSHOT_DROPPED' } },
+    }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded.map(s => s.runState)).toEqual(['snapshot_dropped']);
+  });
+
+  it('`NO_CONSUMED_SUSPENSION` → `unrepairable` — the cascade-failed / never-paused shape', async () => {
+    svc.attachAutomation(automation({
+      ...failedRun, repairability: { run_1: { repairable: false, reason: 'NO_CONSUMED_SUSPENSION' } },
+    }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded.map(s => s.runState)).toEqual(['unrepairable']);
+  });
+
+  it('`RUN_SUSPENDED` → not stranded: re-armed between the two reads, the run is alive', async () => {
+    svc.attachAutomation(automation({
+      ...failedRun, repairability: { run_1: { repairable: false, reason: 'RUN_SUSPENDED' } },
+    }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded).toEqual([]);
+    // Skipped as alive — NOT counted as unknown.
+    expect(out.undetermined).toBe(0);
+  });
+
+  it('a THROWN read is `undetermined`, exactly like the other two oracles — never a verdict', async () => {
+    svc.attachAutomation(automation({ ...failedRun, repairabilityThrows: true }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded).toEqual([]);
+    expect(out.undetermined).toBe(1);
+  });
+
+  it('an answer this build does not know stays `failed` — reported, undifferentiated', async () => {
+    // An engine ahead of this plugin. Fail-closed exactly as an absent member:
+    // a word this code cannot read condemns nothing.
+    svc.attachAutomation(automation({
+      ...failedRun,
+      repairability: { run_1: { repairable: false, reason: 'SOMETHING_NEWER' as any } },
+    }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded.map(s => s.runState)).toEqual(['failed']);
+    expect(out.undetermined).toBe(0);
+  });
+
+  it('is asked for `failed` rows ONLY — with the failed row as the positive control', async () => {
+    engine._tables['sys_approval_request'] = [
+      requestRow({ id: 'areq_missing', flow_run_id: 'run_missing' }),
+      requestRow({ id: 'areq_failed', flow_run_id: 'run_failed' }),
+      requestRow({ id: 'areq_done', flow_run_id: 'run_done' }),
+      requestRow({ id: 'areq_cancelled', flow_run_id: 'run_cancelled' }),
+      requestRow({ id: 'areq_parked', flow_run_id: 'run_parked' }),
+    ];
+    const auto = automation({
+      suspended: { run_parked: true },
+      history: {
+        run_failed: { status: 'failed' },
+        run_done: { status: 'completed' },
+        run_cancelled: { status: 'cancelled' },
+        run_parked: { status: 'failed' },
+      },
+      repairability: { run_failed: { repairable: false, reason: 'NO_CONSUMED_SUSPENSION' } },
+    });
+    svc.attachAutomation(auto);
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded.map(s => [s.requestId, s.runState])).toEqual([
+      ['areq_missing', 'missing'],
+      ['areq_failed', 'unrepairable'],
+    ]);
+    // Exactly one read, for exactly the failed-and-not-suspended row: a
+    // `missing` run has nothing to ask about, a finished or cancelled run is
+    // not reported at all, and a parked run never reaches the second oracle.
+    expect(auto.inspectCalls).toEqual(['run_failed']);
+  });
+
+  it('one mixed population, every label distinct — nothing folded', async () => {
+    engine._tables['sys_approval_request'] = [
+      requestRow({ id: 'areq_missing', flow_run_id: 'run_missing' }),
+      requestRow({ id: 'areq_repairable', flow_run_id: 'run_repairable' }),
+      requestRow({ id: 'areq_dropped', flow_run_id: 'run_dropped' }),
+      requestRow({ id: 'areq_cascade', flow_run_id: 'run_cascade' }),
+    ];
+    svc.attachAutomation(automation({
+      history: {
+        run_repairable: { status: 'failed' },
+        run_dropped: { status: 'failed' },
+        run_cascade: { status: 'failed' },
+      },
+      repairability: {
+        run_repairable: { repairable: true },
+        run_dropped: { repairable: false, reason: 'SNAPSHOT_DROPPED' },
+        run_cascade: { repairable: false, reason: 'NO_CONSUMED_SUSPENSION' },
+      },
+    }));
+    const out = await svc.inspectStrandedRequests();
+    expect(out.stranded.map(s => [s.requestId, s.runState])).toEqual([
+      ['areq_missing', 'missing'],
+      ['areq_repairable', 'repairable'],
+      ['areq_dropped', 'snapshot_dropped'],
+      ['areq_cascade', 'unrepairable'],
+    ]);
+    expect(out.undetermined).toBe(0);
+  });
+
+  it('still NEVER rewrites anything — the third oracle is a read like the other two', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approval_status: 'pending' }];
+    svc.attachAutomation(automation({
+      ...failedRun, repairability: { run_1: { repairable: false, reason: 'NO_CONSUMED_SUSPENSION' } },
+    }));
+    const before = JSON.stringify(engine._tables);
+    await svc.inspectStrandedRequests();
+    expect(JSON.stringify(engine._tables)).toBe(before);
   });
 });

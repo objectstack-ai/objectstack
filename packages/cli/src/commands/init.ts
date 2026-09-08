@@ -347,10 +347,11 @@ export const SCAFFOLD_TSCONFIG_COMPILER_OPTIONS = {
  *
  * `rootDir` and `include` are the only things the emitted shapes differ on:
  * `os create plugin` compiles `src/` alone, while `os init`'s three templates
- * and `os create example` also compile the `objectstack.config.ts` at the
- * project root. Measured before this renderer existed, four of the five
- * emitted `tsconfig.json` files were already byte-identical and the fifth
- * differed only in those two keys — so nothing here is a new decision.
+ * also compile the `objectstack.config.ts` at the project root. Measured before
+ * this renderer existed, four of the five emitted `tsconfig.json` files were
+ * already byte-identical and the fifth differed only in those two keys — so
+ * nothing here is a new decision. (Five because `os create example` was one of
+ * them; it was retired in #16483, and the measurement is left as it was taken.)
  */
 export function renderScaffoldTsconfig(
   options: { rootDir: string; include: string[] },
@@ -616,7 +617,7 @@ export default ${toCamelCase(namespace)}Item;
   },
 
   plugin: {
-    description: 'Reusable plugin with objects',
+    description: 'Metadata package: declarative objects another stack loads',
     get dependencies() {
       return {
         '@objectstack/spec': pkgVersion(),
@@ -881,7 +882,18 @@ export default class Init extends Command {
   };
 
   static override flags = {
-    template: Flags.string({ char: 't', description: 'Template: app, plugin, empty', default: 'app' }),
+    template: Flags.string({
+      char: 't',
+      // The word `plugin` names two different artifacts in this CLI and only one
+      // of them is a template here: `-t plugin` writes a METADATA PACKAGE
+      // (declarative objects, compiled), while `os create plugin` writes a
+      // KERNEL CODE plugin (TypeScript implementing `Plugin`). The flag
+      // spellings are published surface and unchanged (#16484); the nouns are
+      // what tell the two apart. See the chooser in
+      // content/docs/deployment/cli.mdx under `os init`.
+      description: 'Template: app, plugin (a metadata package), empty',
+      default: 'app',
+    }),
     install: Flags.boolean({ description: 'Install dependencies', default: true, allowNo: true }),
     'package-manager': Flags.string({
       char: 'p',

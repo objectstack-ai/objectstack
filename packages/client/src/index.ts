@@ -109,6 +109,12 @@ import {
   AuditMetaItemResponse,
   RollbackMetaItemResponse,
   DiffMetaItemResponse,
+  // [#13523] The change-log body of `GET /meta/:type/:name/history`, the one
+  // door of the family above whose declaration (#12005, PR #13521) landed
+  // AFTER the ruling's bindings were written — so both of its exits carried a
+  // pre-declaration spelling until now. Bound here on the same terms as its
+  // `AuditMetaItemResponse` twin: the PAYLOAD, envelope-free.
+  HistoryMetaItemResponse,
   PackagePublishResult,
   DiscardPackageDraftsResponse,
   ListPackageCommitsResponse,
@@ -1399,6 +1405,18 @@ export interface OrganizationTeamMemberRemovedReceipt {
     message: 'Team member removed successfully.';
 }
 
+/**
+ * The conventional CRUD data prefix — `CrudEndpointsConfigSchema.dataPrefix`
+ * in `packages/spec` declares `.default('/data')`, and REST mounts every data
+ * route under `${basePath}${crud.dataPrefix}`.
+ *
+ * This is the same kind of value as the `routeMap` conventions below: what the
+ * SDK falls back to when discovery has not told it otherwise, NOT a competing
+ * source of truth. `_dataPrefix()` prefers the advertised value in every case
+ * where it can read one.
+ */
+const DEFAULT_DATA_PREFIX = '/data';
+
 export class ObjectStackClient {
   private baseUrl: string;
   private token?: string;
@@ -1714,22 +1732,27 @@ export class ObjectStackClient {
      * Returns events recorded in `sys_metadata_history` for every
      * overlay put/delete, ordered by `event_seq` ascending. Non-overlay
      * metadata types return an empty list.
+     *
+     * [#13523] Returns {@link HistoryMetaItemResponse} — the published
+     * declaration (#12005), replacing the inline shape this method carried
+     * from before that schema existed. The route answers BARE, so the named
+     * type is the whole body, exactly as on the `getAudit` twin.
+     *
+     * ⚠️ The rebind is NOT field-for-field: the inline shape declared
+     * `actor: string` for a door that answers `null` on every
+     * system-initiated write (boot sync, migration, scheduled job — the
+     * producer's own `rowToEvent`), so a caller that read `actor` without a
+     * null check was type-checked against a promise the door never made. It
+     * also declared `op` as a plain `string` where the producer's vocabulary
+     * is closed, `ref.org` as optional where the producer always writes one,
+     * and omitted `ref.version` / `version` / `previousName` entirely. See
+     * the card for the field-by-field measurement.
      */
     getHistory: async (
         type: string,
         name: string,
         options?: { sinceSeq?: number; limit?: number },
-    ): Promise<{ events: Array<{
-        seq: number;
-        op: string;
-        ref: { org?: string; type: string; name: string };
-        hash: string | null;
-        parentHash: string | null;
-        actor: string;
-        message?: string;
-        ts: string;
-        source: string;
-    }> }> => {
+    ): Promise<HistoryMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const params = new URLSearchParams();
         if (options?.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
@@ -1737,7 +1760,7 @@ export class ObjectStackClient {
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
-        return this.unwrapResponse(res);
+        return this.unwrapResponse<HistoryMetaItemResponse>(res);
     },
     
     /**
@@ -3074,6 +3097,77 @@ export class ObjectStackClient {
   _isFilterAST(v: unknown): boolean { return this.isFilterAST(v); }
 
   /**
+   * @internal The CRUD data prefix this client's server actually mounts, read
+   * off the advertised routes (#14879).
+   *
+   * `crud.dataPrefix` moves the mounted CRUD paths and the advertised
+   * discovery document TOGETHER — REST builds every data route as
+   * `${basePath}${crud.dataPrefix}` and then advertises the same value as
+   * `routes.data = ${realBase}${crud.dataPrefix}`. The SDK is the third
+   * surface that has to describe those same paths, so it must read the value
+   * rather than restate it: a deployment on a non-default prefix mounts
+   * nothing at `/data`, and a client that assumes `/data` calls paths that do
+   * not exist.
+   *
+   * The advertised `routes.data` is `{realBase}{dataPrefix}` — ONE string
+   * carrying TWO unknowns, and no discovery key carries either half alone.
+   * The split is recovered in the order below, and where it cannot be
+   * recovered this DECLINES to the conventional `/data` rather than guess,
+   * exactly as `_apiBase()` declines rather than return a base of unknown
+   * shape:
+   *
+   *   1. If the advertised value already ends with the conventional `/data`,
+   *      that IS the prefix. Taking this first is what makes the change
+   *      incapable of regressing a deployment that works today: every rule
+   *      below can only run in the branch where the current code — which
+   *      knows the single literal `/data` — is ALREADY wrong.
+   *   2. Otherwise `routes.metadata` supplies the missing equation. It is
+   *      `{realBase}{metadata.prefix}` over the SAME `realBase` (both are
+   *      substituted from one `realBase` in the same discovery handler), so
+   *      the two advertised routes share exactly `realBase` plus whatever
+   *      their two prefixes happen to share. Cutting their common run back to
+   *      its last `/` therefore lands on the `realBase` boundary, and the
+   *      remainder of `routes.data` is the prefix. This is also correct when
+   *      the document was served from the environment-scoped mount, where
+   *      both routes carry the same `/environments/{id}` segment and it
+   *      simply becomes part of the shared run.
+   *
+   * A derived prefix of `/` or empty is not a prefix this understands, so it
+   * declines too, as does the case where the two routes share nothing but the
+   * leading `/` and therefore share no base at all. The one shape that survives all of it — a deployment that
+   * moved `dataPrefix` off `/data` AND whose `routes.metadata` is not
+   * substituted from the same base (i.e. `api.enableMetadata` is off) — is
+   * one the SDK cannot serve today either; it keeps today's answer.
+   */
+  _dataPrefix(): string {
+    const data = this.discoveryInfo?.routes?.data;
+    if (typeof data !== 'string' || !data) return DEFAULT_DATA_PREFIX;
+
+    // (1) The conventional prefix — today's entire rule, kept first.
+    if (data.endsWith(DEFAULT_DATA_PREFIX)) return DEFAULT_DATA_PREFIX;
+
+    // (2) `routes.metadata` as the second equation over the same `realBase`.
+    const meta = this.discoveryInfo?.routes?.metadata;
+    if (typeof meta !== 'string' || !meta || meta === data) return DEFAULT_DATA_PREFIX;
+
+    let shared = 0;
+    while (shared < data.length && shared < meta.length
+           && data.charCodeAt(shared) === meta.charCodeAt(shared)) shared++;
+
+    // `boundary === 0` means the two advertised routes have nothing in common
+    // but the leading `/` — so they do NOT share a `realBase`, and the whole of
+    // `routes.data` would be mistaken for the prefix. That happens when
+    // `routes.metadata` was never substituted from this deployment's base (its
+    // endpoints are off, so it still carries the conventional literal) while
+    // `routes.data` was. Decline: a wrong prefix is worse than today's.
+    const boundary = data.lastIndexOf('/', shared - 1);
+    if (boundary <= 0) return DEFAULT_DATA_PREFIX;
+
+    const derived = data.slice(boundary);
+    return derived.length > 1 ? derived : DEFAULT_DATA_PREFIX;
+  }
+
+  /**
    * @internal The unscoped API base this client's server actually serves,
    * derived from the advertised routes (#6714 face 3).
    *
@@ -3082,10 +3176,12 @@ export class ObjectStackClient {
    * / `environmentId` — no path), so the one derivable source is
    * `routes.data`: the REST discovery endpoint advertises it as
    * `{realBase}{dataPrefix}` with `dataPrefix` defaulting to `/data`. This
-   * derivation strips that conventional suffix; when the deployment customises
-   * `dataPrefix` away from `/data` the derivation declines and the caller
-   * falls back to the `/api/v1` convention — exactly today's behavior, so the
-   * change is strictly "follow the advertised base when it is derivable".
+   * derivation strips that advertised suffix — `_dataPrefix()` reads which
+   * suffix it is (#14879), so a deployment that moves `crud.dataPrefix` off
+   * the default no longer forces this derivation to decline. When the suffix
+   * is not derivable either, the caller falls back to the `/api/v1`
+   * convention — exactly today's behavior, so the change is strictly "follow
+   * the advertised base when it is derivable".
    *
    * When the discovery response was served from the environment-scoped mount
    * (`scoping.scoped`), `routes.data` is `{base}/environments/{id}/data`; the
@@ -3106,8 +3202,9 @@ export class ObjectStackClient {
    */
   _apiBase(): string {
     const data = this.discoveryInfo?.routes?.data;
-    if (typeof data === 'string' && data.endsWith('/data')) {
-      let base = data.slice(0, -'/data'.length);
+    const dataPrefix = this._dataPrefix();
+    if (typeof data === 'string' && data.endsWith(dataPrefix)) {
+      let base = data.slice(0, -dataPrefix.length);
       const scoping = this.discoveryInfo?.scoping;
       if (scoping?.scoped) {
         const advertised = typeof scoping.environmentId === 'string' && scoping.environmentId
@@ -6672,6 +6769,30 @@ export class ScopedEnvironmentClient {
   }
 
   /**
+   * URL for a route mounted under the deployment's CRUD data prefix (#14879).
+   *
+   * Every route reached through here is mounted by REST as
+   * `${dataPath}/...` with `dataPath = ${basePath}${crud.dataPrefix}`, so the
+   * prefix is deployment state, not a constant. The unscoped twin of each of
+   * these methods already reads it — it builds `${baseUrl}${getRoute('data')}`
+   * and `routes.data` IS `{realBase}{dataPrefix}`. This surface restated
+   * `/data` as a literal instead, so on a deployment that moved
+   * `crud.dataPrefix` the scoped half of one SDK called paths the server does
+   * not mount while the unscoped half of the same SDK called the right ones.
+   *
+   * The scoped form cannot consume `routes.data` verbatim the way the
+   * unscoped form does: the environment segment goes BETWEEN the API base and
+   * the prefix (`{base}/environments/{id}{dataPrefix}`), and the id is this
+   * client's, which need not be the one discovery resolved. So the two halves
+   * are taken separately — `_apiBase()` for the base, `_dataPrefix()` for the
+   * prefix — and both decline to today's conventions when the advertised
+   * document does not determine them.
+   */
+  private dataUrl(suffix: string): string {
+    return `${this.parent._baseUrl()}${this.scope()}${this.parent._dataPrefix()}${suffix}`;
+  }
+
+  /**
    * Metadata operations scoped to this project.
    */
   meta = {
@@ -6760,11 +6881,26 @@ export class ScopedEnvironmentClient {
       // Bare body, same as the unscoped twin — `_unwrap` is `unwrapResponse`.
       return this.parent._unwrap<DeleteMetaItemResponse>(res);
     },
+    /**
+     * The durable change-log for a metadata item, scoped to this
+     * environment. Reaches the SAME handler as the unscoped twin — one
+     * `registerForBase` replay against `/environments/:environmentId` — so
+     * the body is byte-identical and the declaration must be too.
+     *
+     * [#13523] Returns {@link HistoryMetaItemResponse}. This exit declared
+     * NOTHING before: no return annotation, and `_unwrap` called with no type
+     * argument, so `T` had no inference site and the published method
+     * answered `Promise<unknown>` — every caller forced to narrow by hand,
+     * against no contract. The unscoped twin meanwhile declared a DIFFERENT,
+     * inline shape. Binding one exit and not the other would have relocated
+     * that divergence rather than removed it (the #7019 direction), so both
+     * exits name this one type.
+     */
     getHistory: async (
       type: string,
       name: string,
       options?: { sinceSeq?: number; limit?: number },
-    ) => {
+    ): Promise<HistoryMetaItemResponse> => {
       const params = new URLSearchParams();
       if (options?.sinceSeq !== undefined) params.set('sinceSeq', String(options.sinceSeq));
       if (options?.limit !== undefined) params.set('limit', String(options.limit));
@@ -6772,7 +6908,7 @@ export class ScopedEnvironmentClient {
       const res = await this.parent._fetch(
         this.url(`/meta/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history${qs ? `?${qs}` : ''}`),
       );
-      return this.parent._unwrap(res);
+      return this.parent._unwrap<HistoryMetaItemResponse>(res);
     },
   };
 
@@ -6785,7 +6921,7 @@ export class ScopedEnvironmentClient {
    */
   data = {
     query: async <T = any>(object: string, query: Partial<QueryAST>): Promise<PaginatedResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/query`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/query`), {
         method: 'POST',
         body: JSON.stringify(query),
       });
@@ -6851,22 +6987,22 @@ export class ScopedEnvironmentClient {
       }
 
       const qs = queryParams.toString();
-      const res = await this.parent._fetch(this.url(`/data/${object}${qs ? `?${qs}` : ''}`));
+      const res = await this.parent._fetch(this.dataUrl(`/${object}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<PaginatedResult<T>>(res);
     },
     get: async <T = any>(object: string, id: string): Promise<GetDataResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/${id}`));
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/${id}`));
       return this.parent._unwrap<GetDataResult<T>>(res);
     },
     create: async <T = any>(object: string, data: Partial<T>): Promise<CreateDataResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}`), {
         method: 'POST',
         body: JSON.stringify(data),
       });
       return this.parent._unwrap<CreateDataResult<T>>(res);
     },
     createMany: async <T = any>(object: string, data: Partial<T>[]): Promise<T[]> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/createMany`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/createMany`), {
         method: 'POST',
         body: JSON.stringify(data),
       });
@@ -6881,7 +7017,7 @@ export class ScopedEnvironmentClient {
      * validates + previews without persisting.
      */
     import: async (object: string, request: ImportRequest): Promise<ImportResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/import`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/import`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
@@ -6893,18 +7029,18 @@ export class ScopedEnvironmentClient {
      * them in the background while callers poll progress / results / history.
      */
     createImportJob: async (object: string, request: CreateImportJobRequest): Promise<CreateImportJobResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/import/jobs`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/import/jobs`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
       return this.parent._unwrap<CreateImportJobResponse>(res);
     },
     getImportJobProgress: async (jobId: string): Promise<ImportJobProgress> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}`));
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}`));
       return this.parent._unwrap<ImportJobProgress>(res);
     },
     getImportJobResults: async (jobId: string): Promise<ImportJobResults> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}/results`));
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}/results`));
       return this.parent._unwrap<ImportJobResults>(res);
     },
     listImportJobs: async (query: Partial<ListImportJobsRequest> = {}): Promise<ImportJobSummary[]> => {
@@ -6914,31 +7050,31 @@ export class ScopedEnvironmentClient {
       if (query.limit != null) qs.set('limit', String(query.limit));
       if (query.offset != null) qs.set('offset', String(query.offset));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
-      const res = await this.parent._fetch(this.url(`/data/import/jobs${suffix}`));
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs${suffix}`));
       const body = await this.parent._unwrap<ListImportJobsResponse>(res);
       return body.jobs;
     },
     cancelImportJob: async (jobId: string): Promise<{ success: boolean }> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}/cancel`), {
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}/cancel`), {
         method: 'POST',
       });
       return this.parent._unwrap<{ success: boolean }>(res);
     },
     undoImportJob: async (jobId: string): Promise<UndoImportJobResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/import/jobs/${encodeURIComponent(jobId)}/undo`), {
+      const res = await this.parent._fetch(this.dataUrl(`/import/jobs/${encodeURIComponent(jobId)}/undo`), {
         method: 'POST',
       });
       return this.parent._unwrap<UndoImportJobResponse>(res);
     },
     update: async <T = any>(object: string, id: string, data: Partial<T>): Promise<UpdateDataResult<T>> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/${id}`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/${id}`), {
         method: 'PATCH',
         body: JSON.stringify(data),
       });
       return this.parent._unwrap<UpdateDataResult<T>>(res);
     },
     batch: async (object: string, request: BatchUpdateRequest): Promise<BatchUpdateResponse> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/batch`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/batch`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
@@ -6965,21 +7101,21 @@ export class ScopedEnvironmentClient {
       options?: BatchOptions,
     ): Promise<BatchUpdateResponse> => {
       const request: UpdateManyRequest = { records, options };
-      const res = await this.parent._fetch(this.url(`/data/${object}/updateMany`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/updateMany`), {
         method: 'POST',
         body: JSON.stringify(request),
       });
       return this.parent._unwrap<BatchUpdateResponse>(res);
     },
     delete: async (object: string, id: string): Promise<DeleteDataResult> => {
-      const res = await this.parent._fetch(this.url(`/data/${object}/${id}`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/${id}`), {
         method: 'DELETE',
       });
       return this.parent._unwrap<DeleteDataResult>(res);
     },
     deleteMany: async (object: string, ids: string[], options?: BatchOptions): Promise<BatchUpdateResponse> => {
       const request: DeleteManyRequest = { ids, options };
-      const res = await this.parent._fetch(this.url(`/data/${object}/deleteMany`), {
+      const res = await this.parent._fetch(this.dataUrl(`/${object}/deleteMany`), {
         method: 'POST',
         body: JSON.stringify(request),
       });

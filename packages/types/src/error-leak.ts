@@ -17,8 +17,10 @@
  * "Do not ship driver internals to clients" is a property of the HTTP
  * boundary, not of one router, so the predicate lives here — the package both
  * `@objectstack/rest` and `@objectstack/runtime` already depend on — and each
- * boundary applies it in its own envelope. One heuristic, one place to widen
- * when a new dialect's phrasing shows up.
+ * boundary applies it in its own envelope. One heuristic, one place — and
+ * since #16019 a FROZEN one: a phrasing it does not recognise is closed by the
+ * producer declaring its fault, never by a new row here (the ruling is
+ * recorded on {@link DIALECT_LEAK_PHRASINGS}).
  *
  * Deliberately a *heuristic over the message*, not a driver taxonomy: these
  * errors arrive as plain `Error`s from a half-dozen dialects with no shared
@@ -137,6 +139,23 @@ export const INTERNAL_ERROR_MESSAGE = 'Internal server error';
  * security prose (`[Security] Access denied: …`, pinned as a negative case), so
  * a guessed pattern here is the over-match direction, which suppresses
  * diagnostics an operator needs. Measure one, then add it.
+ *
+ * ⛔ **[#16019] This list no longer grows — it is the LAST-RESORT FALLBACK for
+ * an error that arrives with no declaration.** Maintainer ruling 2026-09-06
+ * (decision batch #57, option 3): a driver phrasing this list does not
+ * recognise is closed by the DRIVER declaring its own fault — `code` plus
+ * `status >= 500`, the shape {@link declaresServerFault} reads — never by a
+ * row added here. The standing example is SQLite's `no such function:`, the
+ * sibling of the `no such (?:table|column):` limb above and deliberately NOT
+ * added beside it: `SqlDriver.execute` (`driver-sql`, the raw-SQL path the
+ * analytics compilers run on) now raises a declared `DATABASE_ERROR`/500 with
+ * the dialect error under a non-enumerable `cause`, so every future dialect
+ * message on that path is covered without a change here. `error-leak.test.ts`
+ * pins the phrase as UNCOVERED by this list and withheld by the declaration;
+ * the doors pin that a declaration wins over the heuristic. A producer outside
+ * a driver that still throws a bare `Error` carrying dialect text is this
+ * list's residual, by design — the heuristic's `false` on it means uncovered,
+ * as the paragraph above already says, and the remedy is a declaration.
  *
  * ⚠️ Related but NOT reusable: `relation-sub-object.ts` owns the same Postgres
  * sentence for two other questions (which column? / is this a sub-object?), and

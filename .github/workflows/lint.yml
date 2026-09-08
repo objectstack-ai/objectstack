@@ -2647,6 +2647,24 @@ jobs:
       - name: Auth mount-vs-ledger guard
         run: pnpm check:auth-mount-ledger
 
+      # Vendor export contract (#16186). `@better-auth/core@1.7.3` deleted
+      # `createLocalAccountIssuer` in a PATCH; plugin-auth imports it statically
+      # through a caret range, so published 17.1.0-17.3.0 could not load at all
+      # on a fresh install -- while every job here stayed green, because
+      # pnpm-lock.yaml held 1.7.2. The lockfile protected the producer from the
+      # defect it was shipping. This gate asserts that a governed vendor's
+      # DECLARED range is exact, that the installed version IS that version, and
+      # that importing it really yields every symbol our shipped source takes
+      # from it -- so "what CI imported" and "what a consumer resolves" are the
+      # same string. Cheap and offline: it imports what `pnpm install` already
+      # put on disk. The network half (`--resolve`, which enumerates every
+      # registry version the range admits) runs in validate-deps.yml, which
+      # already installs from the registry. No `paths:` filter: a manifest edit,
+      # a lockfile refresh and a new vendor import can each move it. Runs its
+      # own --self-test first.
+      - name: Vendor export contract
+        run: pnpm check:vendor-export-contract
+
       # Optional-`error` sink contract (#9754, wired by #10608). A sink TYPE that
       # declares `error` as OPTIONAL must also declare `warn` as NON-optional, so
       # every value of that type has somewhere to put a durability report —
@@ -3655,13 +3673,16 @@ jobs:
       # whole population rather than a rule about moves: one of the three commits
       # involved moved nothing at all — it edited `repository.url` in the same
       # JSON object with the stale `directory` line as visible hunk context, and
-      # it shipped. Humans looked and missed it twice. ⛔ It judges only manifests
-      # that DECLARE the field; whether declaring is mandatory for a publishable
-      # package is an open policy question and a maintainer's to answer, so
-      # silence is counted and never a finding. Runs its own --self-test first:
-      # this population is `git ls-files` plus a field predicate, so a changed
-      # glob or a renamed field empties it silently and the production run would
-      # print exactly what a clean tree prints. Static read of tracked manifests;
+      # it shipped. Humans looked and missed it twice. Declaration is MANDATORY
+      # for a publishable (non-private) manifest — ruled, and the 14 that
+      # declared nothing were backfilled in the same change; a private manifest
+      # publishes nothing, so its silence is exempt while a wrong value in it is
+      # still judged. Runs its own --self-test first: this population is
+      # `git ls-files` plus TWO field predicates, so a changed glob, a renamed
+      # `repository.directory` or a `name`/`private` that stops reading as
+      # publishable each empty it silently and the production run would print
+      # exactly what a clean tree prints — hence pinned floors on all four counts
+      # and a control pair on each predicate. Static read of tracked manifests;
       # no build, no network, sub-second.
       - name: Manifest repository.directory guard
         run: pnpm check:manifest-repository-directory

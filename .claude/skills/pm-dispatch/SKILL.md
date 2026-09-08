@@ -337,6 +337,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 见新 tag 族发布 ⇒ 在 cloud 立 `.objectstack-sha` bump 单。
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
 - 分类动作每张三选一,外加一个修复通道。
+- ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
 - `pm:queue` 也收恢复不变量的 finding 与 test-only pin。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
@@ -552,7 +553,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - same-day churn 行:当天合并 ⇒ 先核对当前 main;在飞重叠每轮求交,相交即发四句警告。
 - 被在飞重叠完全覆盖就停下回报,⛔ 不硬造 diff。
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
-- 条件性标准条款命中判据才抄:多实现面 ⇒ 共享一致性覆盖。
 - 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
 - `mode:cloud` 只保留给 L/XL、必须活过 PM 会话的工作、浏览器/dogfood 验证。
