@@ -136,15 +136,42 @@
 //     built as one.
 //
 //  2. DERIVING "gated" FROM SOURCE SYNTAX IS UNSAFE — measured, not assumed.
-//     Scanning each of the 80 `this.routeManager.register(` call sites in
-//     `rest-server.ts` for `enforceAuth` reads 50 gated / 30 ungated, and 22 of
-//     those 30 are FALSE, in two structural shapes: `registerMetadataEndpoints`
+//     Scanning each of the 80 registration sites in `rest-server.ts` for
+//     `enforceAuth` — the SAME two spellings the `populationRule` below counts,
+//     72 direct `this.routeManager.register(` call sites plus 8
+//     `registerPerItemRoute(` calls — reads 51 gated / 29 ungated, and 22 of
+//     those 29 are FALSE, in two structural shapes: `registerMetadataEndpoints`
 //     installs a wrapping `guardedRouteManager` so its 19 inner routes are
 //     gated with no `enforceAuth` at the call site, and
 //     `registerSecurityExplainEndpoints` shares one `handler` const declared
-//     outside its 3 `register(` calls. A 73% false-ungated rate, concentrated
+//     outside its 3 `register(` calls. A 76% false-ungated rate, concentrated
 //     on the largest registrar, and hand-annotating the exceptions is the same
 //     rot this instrument already has.
+//
+//     ⚠️ RE-MEASURED 2026-09-08 against `0bb2318685`, because the 19 is a count
+//     inside the very registrar the per-item helper re-spelled, and because
+//     this paragraph attributed all 80 sites to the direct spelling alone
+//     while `:82` above already knew there were two — the authority on this
+//     population contradicting itself 57 lines apart.
+//
+//     WHAT DID NOT MOVE: 22 = 19 + 3. The same 19 routes, 11 still direct and
+//     8 now helper-routed, all through the same wrapping; the same 3 sharing
+//     one handler const; the population still 80. The re-spelling moved none
+//     of the five figures.
+//
+//     WHAT DID MOVE, and not here: 50 gated / 30 ungated became 51 / 29 when
+//     `registerUiEndpoints` — the one route in this file that resolved no
+//     identity, the same repair recorded as `enforceAuth` 61 -> 64 on the
+//     rest-server.ts row below — was guarded. That landed the day AFTER this
+//     paragraph was first written and hours BEFORE it was copied into
+//     `rest-route-ledger.ts`, `route-ledger.ts` and `authz-conformance.test.ts`,
+//     which is why four sites carried 50/30 in step. ⛔ Written down as a
+//     checked figure rather than left as one nobody dared touch: the two read
+//     identically on the page, and only this note tells them apart.
+//
+//     ⛔ The rejection stands whatever the numbers do, and the second spelling
+//     strengthens it: a naive scanner now has to know both spellings before it
+//     can read the file even this badly.
 //
 //  3. A LEDGER IS A DERIVED DATA FILE, ONE GUARDED STEP BEHIND THE SOURCE.
 //     Adding a route to a registrar in `rest-server.ts` does not touch
@@ -184,7 +211,7 @@
 // point, where a new route is already being read.
 //
 // ⛔ Two readings stay REJECTED and are recorded here so they are not
-// re-proposed: deriving "gated" from source syntax (73% false-ungated), and
+// re-proposed: deriving "gated" from source syntax (76% false-ungated), and
 // taking a ledger disposition as an authorization fact (blocker 1).
 
 import { readFileSync } from 'node:fs';
