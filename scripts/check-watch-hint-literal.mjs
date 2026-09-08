@@ -181,6 +181,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the per-name floor': 5,
   'discovery of an UNROSTERED spelling of the idiom': 5,
   'the empty population is refused, not passed': 1,
+  "literals the extractor's admission DROPS": 1,
   'the live tree': 14,
 });
 
@@ -685,6 +686,11 @@ export function selfTest() {
   battery('the empty population is refused, not passed');
   t('an empty file list produces no rows, which the floor above refuses',
     audit([]).rows.length === 0 && missingNames(audit([]).rows).length === DECL_NAMES.length);
+
+  // -- literals the extractor's admission DROPS ------------------------------
+  battery("literals the extractor's admission DROPS");
+  t('a declaration whose only literal opens with a glob is rejected',
+    rejected(decl("['**/package.json']")));
 
   // -- the live tree ---------------------------------------------------------
   battery('the live tree');
