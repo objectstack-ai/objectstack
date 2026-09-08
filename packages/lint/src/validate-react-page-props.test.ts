@@ -1569,7 +1569,7 @@ describe('an unparseable react source is reported, not scored clean (#10653)', (
       'const Page = (): JSX.Element => <ObjectForm objectName="a" />;\nexport default Page;',
       'const id = <T,>(x: T): T => x;\nfunction Page(){ return <ObjectForm objectName="a" />; }',
       'interface Props { a: number }\nexport default function Page(p: Props){ return <ObjectForm objectName="a" />; }',
-      'function Page(){ return <><ObjectForm data={{ provider: "object", object: "a" }} /><ListView data={{ provider: "object", object: "a" }} /></>; }',
+      'function Page(){ return <><ObjectForm objectName="a" /><ListView data={{ provider: "object", object: "a" }} /></>; }',
       'function Page(){ return <ObjectForm objectName="a" {...rest} />; }',
     ];
     for (const source of parseable) {
