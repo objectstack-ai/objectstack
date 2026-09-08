@@ -111,7 +111,7 @@ describe('timeout beside an UPPERCASE WebSocket url in forced remote mode — re
     expect(upper).not.toBeNull();
     expect(upper!.code).toBe(lower!.code);
     expect(upper!.status).toBe(lower!.status);
-    expect(upper!.message).toBe(lower!.message.replaceAll('`wss://`', '`WSS://`'));
+    expect(upper!.message).toBe(lower!.message.split('`wss://`').join('`WSS://`'));
   });
 
   it('createTursoDriver() is the same constructor, and refuses the same pair', () => {
