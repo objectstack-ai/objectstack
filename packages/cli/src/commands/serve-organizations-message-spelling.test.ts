@@ -66,6 +66,28 @@
  * via `test/serve-capability-vocabulary.test.ts` and the shared const's via
  * doctor's leg (ii).
  *
+ * ── The 2026-09-08 reword, and why it was made HERE rather than absorbed ──
+ *
+ * These pins previously expected the word "enterprise" in two operator-facing
+ * sentences: the install remedy ("add … (the enterprise multi-org runtime)")
+ * and the `isolated` posture hint. ADR-0132 moved the multi-org runtime into
+ * open core — `packages/plugins/organizations` is Apache-2.0 and carries no
+ * licence check — so both sentences told an open-source operator that a remedy
+ * they can in fact follow required a subscription.
+ *
+ * ⛔ The pins were NOT relaxed or deleted to accommodate the reword: they still
+ * compare the whole rendered line, whitespace included, against text built from
+ * `Serve.ORGANIZATIONS_RUNTIME_PKG`, and the #12151 CONTROL block below still
+ * proves they can say no. Only the expected PROSE moved, in the same diff as
+ * the prose itself, which is the shape this file is for — a wording change that
+ * does not redden a pin here would mean the pin had stopped reading.
+ *
+ * ⚠️ ONE NAME, TWO PACKAGES (ADR-0132 D3) is why the new wording names no
+ * edition at all: a commercial deployment resolves the same package name to a
+ * private licence-gated subclass, so any adjective this message picks is wrong
+ * for one of the two installs reading it. The roster keeps the edition fact,
+ * and `doctor-organizations-message-spelling.test.ts` leg (ii) still pins it.
+ *
  * ⚠️ This paragraph used to say the literal HAD to stay in `serve.ts`, because
  * `serve-cluster-host-resolution.test.ts` resolved the organizations `import()`
  * through that static and needed the literal in that file or the load dropped
@@ -152,7 +174,7 @@ describe('serve — the multi-org runtime name an operator READS comes from the 
   it('site 2 — the "add it to THIS APP" remedy names it, with the spacing intact', () => {
     // The other instruction an operator acts on: the app never declared it.
     expect(lines(remedyUndeclared())[0]).toBe(
-      `      • add ${PKG} (the enterprise multi-org runtime) to THIS APP`,
+      `      • add ${PKG} (the multi-org runtime) to THIS APP`,
     );
   });
 
@@ -164,7 +186,7 @@ describe('serve — the multi-org runtime name an operator READS comes from the 
     // package's own `exports` names no runtime entry Node can load — and it
     // fell into the else leg, rendering the UNDECLARED remedy verbatim:
     //
-    //       • add @objectstack/organizations (the enterprise multi-org runtime) to THIS APP
+    //       • add @objectstack/organizations (the multi-org runtime) to THIS APP
     //         — declare it in the app's package.json and install; the CLI resolves it from the
     //
     // i.e. "declare it and install it" to an operator who has already done
@@ -264,7 +286,7 @@ describe('serve — the posture description an operator reads names the declarat
     expect(verdict.ok, 'the gate accepted a value that is not a posture').toBe(false);
     if (verdict.ok) return;
     expect(lines(verdict.fatal)).toContain(
-      `      • set OS_TENANCY_POSTURE=isolated — organization wall + the enterprise ${PKG} runtime `
+      `      • set OS_TENANCY_POSTURE=isolated — organization wall + the ${PKG} runtime `
       + "(the legacy spelling 'multi' is accepted and normalizes to this)",
     );
   });
@@ -301,9 +323,9 @@ describe('#12151 CONTROL — these pins can say no', () => {
     // The exact regression the card names: interpolating into a template is
     // where a stray space or a lost backtick hides. If this instrument could
     // not tell the two apart, every assertion above would be decorative.
-    const expected = `      • add ${PKG} (the enterprise multi-org runtime) to THIS APP`;
-    expect(`      • add ${PKG}(the enterprise multi-org runtime) to THIS APP`).not.toBe(expected);
-    expect(`      • add ${PKG}  (the enterprise multi-org runtime) to THIS APP`).not.toBe(expected);
+    const expected = `      • add ${PKG} (the multi-org runtime) to THIS APP`;
+    expect(`      • add ${PKG}(the multi-org runtime) to THIS APP`).not.toBe(expected);
+    expect(`      • add ${PKG}  (the multi-org runtime) to THIS APP`).not.toBe(expected);
     expect(lines(remedyUndeclared())[0]).toBe(expected);
   });
 

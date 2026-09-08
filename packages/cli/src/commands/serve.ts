@@ -3677,16 +3677,23 @@ export default class Serve extends Command {
               }
             }
 
-            // Pair: OrganizationsPlugin (multi-org, ENTERPRISE) — must register
-            // BEFORE SecurityPlugin. The multi-org runtime (`organization_id`
+            // Pair: OrganizationsPlugin (multi-org) — must register BEFORE
+            // SecurityPlugin. The multi-org runtime (`organization_id`
             // auto-stamp, per-org seed replay, multi-org default-org bootstrap)
-            // lives in the closed-source `@objectstack/organizations` package
-            // (ADR-0105 D12; it registers the historical `org-scoping` service
-            // SecurityPlugin probes at start() to keep vs strip the wildcard
-            // `tenant_isolation` RLS — so registration order matters). Without
-            // it, deployments are single-org: the open member-management
+            // lives in the `@objectstack/organizations` package (ADR-0105 D12
+            // as amended by ADR-0132; it registers the historical `org-scoping`
+            // service SecurityPlugin probes at start() to keep vs strip the
+            // wildcard `tenant_isolation` RLS — so registration order matters).
+            // Without it, deployments are single-org: the open member-management
             // basics (plugin-auth's default-org bootstrap + better-auth
             // invitations) still work.
+            // ⚠️ ONE NAME, TWO PACKAGES (ADR-0132 D3): the framework publishes
+            // an Apache-2.0 package of that name (`packages/plugins/organizations`),
+            // and a commercial deployment resolves the same name to a private,
+            // licence-gated subclass of it through its own `workspace:*`
+            // declaration. `serve` does not choose between them and must not
+            // try — the host app's own manifest decides, which is exactly what
+            // the host-anchored importer below reads (#4719).
             // [ADR-0105 D1] Key off the resolved POSTURE, not the legacy boolean.
             // Both walled postures (`group` and `isolated`) need this package:
             // gating on `OS_MULTI_ORG_ENABLED` alone would let
@@ -4076,7 +4083,7 @@ export default class Serve extends Command {
       //
       // #4719 — this used to be a local re-implementation of that read. It was
       // right, and it was the ONLY place in the boot path that asked the question
-      // the right way: the enterprise organizations load two blocks up asked
+      // the right way: the organizations load two blocks up asked
       // "does it resolve", which a hoisted store answered yes to regardless. Both
       // now go through the one owner in `@objectstack/types/node`, so "declared"
       // cannot mean two different things in one file (Prime Directive #12).
@@ -5441,14 +5448,15 @@ export function formatOrganizationsInstallRemedy(
       '        the remedy is in the package, and the cause below is the authority on what it\n' +
       '        has to publish — or\n';
   }
-  return `      • add ${pkg} (the enterprise multi-org runtime) to THIS APP\n` +
+  return `      • add ${pkg} (the multi-org runtime) to THIS APP\n` +
     "        — declare it in the app's package.json and install; the CLI resolves it from the\n" +
     '          app, not from the framework it is linked out of. Being merely reachable\n' +
     '          through NODE_PATH / a hoisted workspace store is deliberately not enough\n' +
     '          (#4719) — that made this wall depend on how the process was launched.\n' +
-    '          NOTE: this runtime is closed-source and is NOT on the public npm registry —\n' +
-    '          it is distributed with an enterprise / cloud subscription. Without one this\n' +
-    '          bullet is not followable, and one of the two below is your path — or\n';
+    '          NOTE: this runtime is Apache-2.0 and published on the public npm registry\n' +
+    '          (ADR-0132), so this bullet is followable on any install — no subscription.\n' +
+    '          A commercial deployment resolves the same package name to its own private,\n' +
+    '          licence-gated build; the manifest that declares it decides which — or\n';
 }
 
 /**

@@ -6224,7 +6224,7 @@ export class AuthManager {
    * contraction over what #5233 shipped. The gate used to judge
    * `postureEnforcesWall(resolveTenancyPosture())`, the operator's request, which
    * came apart from `/auth/config` on exactly one deployment shape: ADR-0093 D5
-   * degradation (a wall was asked for, the enterprise `@objectstack/organizations`
+   * degradation (a wall was asked for, the `@objectstack/organizations`
    * runtime is absent, so nothing isolates anything). There the console hid the
    * "Create organization" action while the API happily minted organizations whose
    * boundary NO engine enforces — a declared-but-unenforced security property,

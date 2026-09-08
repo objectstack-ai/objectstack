@@ -215,7 +215,7 @@ export function resolvePlatformOwnerEmail(): string | undefined {
 /**
  * Escape hatch for the degraded-tenancy boot guard (ADR-0093 D5).
  *
- * When `OS_MULTI_ORG_ENABLED=true` but the enterprise `@objectstack/organizations`
+ * When `OS_MULTI_ORG_ENABLED=true` but the `@objectstack/organizations`
  * package cannot provide tenant isolation, the platform refuses to boot — a
  * deployment that asked for tenant isolation must not serve traffic pretending
  * to have it (ADR-0049 at the deployment layer). Setting this to a truthy value

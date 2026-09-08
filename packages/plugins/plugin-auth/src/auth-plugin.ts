@@ -1169,8 +1169,8 @@ export class AuthPlugin implements Plugin {
       // set — how a CONFIG-anchored admin comes into standing), and the
       // legacy `sys_user_permission_set` insert (how `single`-posture
       // first-user promotion lands standing, Choice 4A — retired with the
-      // legacy-grant removal leg). The enterprise organizations package's
-      // walled wiring should consume the same predicate.
+      // legacy-grant removal leg). The organizations package's walled
+      // wiring should consume the same predicate.
       try {
         const ql = ctx.getService<IObjectQLEngine>('objectql');
         if (ql && typeof ql.registerMiddleware === 'function') {
