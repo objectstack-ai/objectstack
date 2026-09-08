@@ -1719,6 +1719,21 @@ jobs:
       - name: No published source map embeds source text
         run: pnpm check:sourcemap-no-sources-content
 
+      # #15347. The ADR-0076 D2 boundary ratchet beside `core.ts` scans SOURCE
+      # TEXT for two hard-coded names, so it is neither transitive nor able to
+      # see a heavyweight arriving through any other specifier — which is
+      # exactly how #14680 arrived, three packages deep, invisible to every
+      # gate for the whole time it was live. This one loads the built lean
+      # entry in a fresh child per published condition and asserts the PACKAGE
+      # SET it evaluates: an exclusion claim, decidable and unit-carrying, with
+      # no size figure anywhere (#9803). Lives here for the same reason the two
+      # steps above do — it reads a real `dist/`, and with none it exits 3
+      # (PREREQUISITE NOT MET), never a silent green. Its header is the
+      # authority on detail, including why it is not a case in the vitest file
+      # it guards beside.
+      - name: The lean engine entry loads no forbidden or unlisted package
+        run: pnpm check:lean-entry-closure
+
       - name: Analyze bundle size
         run: pnpm --filter @objectstack/spec analyze
 

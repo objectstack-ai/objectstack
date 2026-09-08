@@ -156,6 +156,7 @@
     "check:published-readme-exports": "node scripts/check-published-readme-exports.mjs --self-test && node scripts/check-published-readme-exports.mjs",
     "check:published-readme-links": "node scripts/check-published-readme-links.mjs --self-test && node scripts/check-published-readme-links.mjs",
     "check:dual-build-cjs-loads": "node scripts/check-dual-build-cjs-loads.mjs --self-test && node scripts/check-dual-build-cjs-loads.mjs",
+    "check:lean-entry-closure": "node scripts/check-lean-entry-closure.mjs --self-test && node scripts/check-lean-entry-closure.mjs",
     "check:dts-closure": "node scripts/check-dts-closure.mjs --self-test && node scripts/check-dts-closure.mjs",
     "check:sourcemap-no-sources-content": "node scripts/check-sourcemap-no-sources-content.mjs --self-test && node scripts/check-sourcemap-no-sources-content.mjs",
     "check:type-check-coverage": "node scripts/check-type-check-coverage.mjs --self-test && node scripts/check-type-check-coverage.mjs",
