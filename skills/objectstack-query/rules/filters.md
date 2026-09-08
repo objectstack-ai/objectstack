@@ -227,23 +227,24 @@ ObjectQL read AND write paths (`find`/`findOne`/`count`/`aggregate`/`update`/
 strings and concrete ids. So use tokens in a hand-issued engine query too:
 computing "today" at module load freezes the date into the built artifact.
 
-A **flow node's** `config.filter` takes these tokens too. What happens when one
-of them drops a condition is a flow rule, not a query rule:
-**objectstack-automation** — a dropped condition *widens* the query, so
-`get_record` / `update_record` / `delete_record` fail the step instead of
-running it.
+A **flow node's** `config.filter` takes these tokens too. What a dropped
+condition does there is a flow rule, not a query rule
+(**objectstack-automation**): it *widens* the query, so `get_record` /
+`update_record` / `delete_record` fail the step instead of running it. A
+`{FUNC()}` neither dialect resolves is `flow-filter-token-unknown`: that node
+cannot run at all.
 
-**Unknown tokens are rejected, not ignored.** A value that is entirely `{...}`
-is a placeholder by construction: `objectstack build` fails it (rule
+**Unknown tokens are rejected, not ignored.** Outside a flow, a whole-`{...}`
+value is a placeholder by construction: `objectstack build` fails it (rule
 `filter-token-unknown`) and the resolver throws — because an unresolved token
 reaches SQL as a **literal**, matches nothing, and renders a widget showing 0,
 indistinguishable from "there is no data". Near-misses, not tokens:
 `{current_user}` (the RLS expression root), `{this_quarter_start}`, `{user_id}`
 (a real `titleFormat` interpolation) and `{organization_id}` (the column name);
 the error names the correction. A value that merely *contains* braces is left
-untouched — `'user-{current_user_id}'` is a literal. Check a spelling while
-authoring with `isDateMacroToken(tok)` / `isContextToken(tok)` from
-`@objectstack/spec/data`, passing the token WITHOUT braces.
+untouched — `'user-{current_user_id}'` is a literal. Check a spelling with
+`isDateMacroToken(tok)` / `isContextToken(tok)` from `@objectstack/spec/data`,
+WITHOUT braces.
 
 **`*_end` is a calendar DAY.** `{current_year_end}` is `2026-12-31`, so on a
 `datetime` column `<= {current_year_end}` stops at midnight on the 31st. Use

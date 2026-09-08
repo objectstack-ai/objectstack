@@ -128,6 +128,15 @@ interface CachedSubscription {
      * when the row itself carries no organization (a `single`-posture install):
      * the delivery then lands NULL, which is honest for a subscription that
      * belongs to no organization. Threaded, never fabricated (#11303's rule).
+     *
+     * [#13566] ALSO the subscription half of the organization MATCH — compared
+     * against the organization the producer stamps on the event
+     * (`DataEvent.organizationId`, #14970; `BulkDataEvent.organizationId`,
+     * #15225 / #15813) before anything is enqueued. See
+     * {@link AutoEnqueuer.admitsOrganization} for the matrix; the short form
+     * is that a subscription with no organization ownership does not receive
+     * an organization-walled event, and a subscription with one receives only
+     * its own organization's.
      */
     organizationId?: string;
     /**
@@ -176,11 +185,17 @@ export interface AutoEnqueuerOptions {
  * The handler:
  *   1. Looks up matching subscriptions in an in-memory `Map<object, sub[]>`
  *      — O(1) per event, no DB hit on the write path.
- *   2. Calls `outbox.enqueue()` fire-and-forget for each match. The
+ *   2. [#13566] Compares each candidate's own organization with the one the
+ *      producer stamped on the event — one equality per candidate, no
+ *      lookup (see {@link admitsOrganization}). On a walled deployment this
+ *      is what keeps organization A's record events out of organization B's
+ *      webhook endpoints.
+ *   3. Calls `outbox.enqueue()` fire-and-forget for each match. The
  *      enqueue itself is a single INSERT, which runs *after* the user's
  *      request has already returned.
  *
- * Net cost on the write path: one synchronous Map lookup (~microseconds).
+ * Net cost on the write path: one synchronous Map lookup (~microseconds)
+ * plus one string comparison per candidate subscription.
  *
  * ## Cache freshness
  * The cache is rebuilt:
@@ -244,6 +259,17 @@ export class AutoEnqueuer {
      * refresh, forever.
      */
     private readonly droppedForSecret = new Set<string>();
+    /**
+     * [#13566] Webhook ids whose FIRST organization-dimension refusal has been
+     * said out loud (see {@link admitsOrganization}). Same say-once shape as
+     * {@link droppedForSecret}, for the same reason: a subscription that
+     * cannot receive a class of events must be reported once, with the
+     * remedy, and not once per event forever — an org-less `'*'` subscription
+     * on a walled deployment would otherwise warn on every write of every
+     * organization. Pruned on refresh to the rows still live, so a row that
+     * is deleted and re-created reports again.
+     */
+    private readonly organizationRefusalReported = new Set<string>();
 
     constructor(
         private readonly engine: IDataEngine,
@@ -395,10 +421,14 @@ export class AutoEnqueuer {
         // deactivated. Otherwise the set grows for the life of the process, and
         // a webhook turned off while broken and later turned back on still
         // broken would have its first report suppressed as a repeat.
-        if (this.droppedForSecret.size > 0) {
+        if (this.droppedForSecret.size > 0 || this.organizationRefusalReported.size > 0) {
             const live = new Set(rows.map((r) => String(r?.id)));
             for (const id of this.droppedForSecret) {
                 if (!live.has(id)) this.droppedForSecret.delete(id);
+            }
+            // [#13566] Same pruning for the organization-refusal ledger.
+            for (const id of this.organizationRefusalReported) {
+                if (!live.has(id)) this.organizationRefusalReported.delete(id);
             }
         }
 
@@ -856,6 +886,21 @@ export class AutoEnqueuer {
             return;
         }
 
+        // [#13566] The organization term rides beside `recordId` on the same
+        // payload (`DataEvent.organizationId`, stamped by the engine from the
+        // RECORD's own tenant column, #14970). Read once per event here,
+        // compared per candidate subscription below — never resolved.
+        const organization = readEventOrganizationId(payload as Record<string, unknown>);
+        if (!organization) {
+            this.logger?.warn?.(
+                '[webhook-auto-enqueuer] dropping off-contract data event: `organizationId` is present but ' +
+                    'not a non-empty string (DataEventSchema refuses that at the publish site) — fix the ' +
+                    'producer; never coerced and never read as "no organization"',
+                { type: event.type, object: event.object },
+            );
+            return;
+        }
+
         // Deterministic eventId — same input on any node → same id.
         // Includes timestamp so two distinct updates to the same record
         // don't accidentally dedup.
@@ -863,6 +908,11 @@ export class AutoEnqueuer {
 
         for (const sub of subs) {
             if (!sub.triggers.has(trigger)) continue;
+            // [#13566] The organization dimension of the match. Decided BEFORE
+            // the parked branch below on purpose: a parked subscription records
+            // the payload on a dead `sys_http_delivery` row (#8069), and another
+            // organization's record must not land there either.
+            if (!this.admitsOrganization(sub, organization.organizationId, event)) continue;
 
             // Fire-and-forget — never await on the hot path. Map the webhook
             // delivery onto the generic HTTP-outbox shape (ADR-0018 M3):
@@ -969,8 +1019,28 @@ export class AutoEnqueuer {
         }
         const eventId = `${event.object}:${event.type}:${eventUuid}`;
 
+        // [#13566] `BulkDataEvent.organizationId` — the ONE organization the
+        // tenant wall named for the whole batch, or absent when the producer
+        // could not assert one (#15225 / #15813). Same reader as the
+        // per-record path; the two paths diverge only in what ABSENT means,
+        // which {@link admitsOrganization} spells out — on this path absent
+        // is a routine, expected value, and it is handled fail-closed.
+        const organization = readEventOrganizationId(payload as Record<string, unknown>);
+        if (!organization) {
+            this.logger?.warn?.(
+                '[webhook-auto-enqueuer] dropping off-contract bulk data event: `organizationId` is present ' +
+                    'but not a non-empty string (BulkDataEventSchema refuses that at the publish site) — fix ' +
+                    'the producer; never coerced and never read as "not asserted"',
+                { type: event.type, object: event.object },
+            );
+            return;
+        }
+
         for (const sub of subs) {
             if (!sub.triggers.has(trigger)) continue;
+            // [#13566] See the per-record path — decided before the parked
+            // branch for the same reason.
+            if (!this.admitsOrganization(sub, organization.organizationId, event)) continue;
 
             void this.enqueue({
                 source: 'webhook',
@@ -998,6 +1068,117 @@ export class AutoEnqueuer {
                 },
             }).catch((err) => this.reportWriteFailure(sub, eventId, err, 'bulk enqueue'));
         }
+    }
+
+    /**
+     * [#13566] The organization dimension of the match — ONE comparison
+     * between the subscription's own organization (cached off its
+     * `sys_webhook` row, #13546) and the organization the producer stamped on
+     * the event (#14970 per record; #15225 / #15813 per batch). ⛔ No lookup:
+     * the enqueuer exists to keep this path O(1), and both halves are already
+     * in hand — the filter is a comparison, never a resolution.
+     *
+     * The cells, and why each falls where it does:
+     *
+     *  | subscription | event  | verdict                                        |
+     *  |--------------|--------|------------------------------------------------|
+     *  | org A        | org A  | deliver                                        |
+     *  | org A        | org B  | not a match — the routine outcome of the new   |
+     *  |              |        | term, silent like an object-name mismatch      |
+     *  | org A        | absent | REFUSE (fail-closed), said once per sub        |
+     *  | none         | org A  | REFUSE, said once per sub — the ruling's case  |
+     *  | none         | absent | deliver — no wall on either side               |
+     *
+     * **`none` × `org A` — the ruling.** A `sys_webhook` row with no
+     * organization on a walled deployment (a package-declared row bootstrapped
+     * under `isSystem`, a row authored before the column was provisioned)
+     * would otherwise receive EVERY organization's records at its URL, signed
+     * with its secret — the leak this card is. Maintainer's ruling
+     * (2026-09-07), verbatim: *a subscription with no organisation ownership
+     * does not fan out — loud refusal, never a silent cross-organisation
+     * delivery.* ADR-0131 D1 is why there is no third reading — NULL is not a
+     * state, so "no organization" is never "every organization".
+     *
+     * **`org A` × `absent` — fail-closed, on BOTH paths.** The two event
+     * families spell absence with the same key and mean different things by
+     * it (`packages/spec/src/api/events.zod.ts`, both members' docs). On a
+     * `DataEvent` it is "this record belongs to no organization" — an
+     * environment-wide row, an object outside the wall, or (the per-record
+     * producer's own docblock, `eventOrganizationId` in
+     * `packages/objectql/src/engine.ts`) no row in hand at the publish site,
+     * published absent rather than substituting the caller's organization.
+     * On a `BulkDataEvent` it is "the producer did not assert one
+     * organization for this batch" — a system or cross-membership predicate
+     * write — and the contract says outright that a tenant-scoped consumer
+     * must not deliver it inside an organization wall. Neither reading names
+     * organization A, so a subscription that belongs to A delivers on
+     * neither. ⛔ Absent is never "no tenancy concern": delivering on it
+     * would turn each of those cases into a cross-organization delivery. The
+     * cost is an environment-wide record not reaching an organization's
+     * webhook — accepted, and said once so the subscription is not dead while
+     * looking armed.
+     *
+     * **`none` × `absent` — deliver.** A `single`-posture deployment stamps
+     * nothing on either side (`postureStampsOrganization` is false there), so
+     * this cell is every event on every non-walled install; on a walled one
+     * it is an environment-wide subscription taking an environment-wide
+     * event. No organization is named anywhere, so there is no wall to cross.
+     *
+     * Both refusals are said ONCE per subscription (the #8022 say-once rule,
+     * ledger {@link organizationRefusalReported}): the first refused event is
+     * a `warn` naming the consequence and the remedy, later ones are
+     * debug-level. Without that a refused subscription reads active:true in
+     * Setup with nothing ever arriving — the "dead while looking armed" shape
+     * ADR-0078 refuses.
+     */
+    private admitsOrganization(
+        sub: CachedSubscription,
+        eventOrganizationId: string | undefined,
+        event: RealtimeEventPayload,
+    ): boolean {
+        // org A × org A, and none × absent.
+        if (sub.organizationId === eventOrganizationId) return true;
+        // org A × org B — another organization's subscription is simply not a
+        // candidate for this event. Not logged: it is the match term working,
+        // once per event per foreign subscription.
+        if (sub.organizationId !== undefined && eventOrganizationId !== undefined) return false;
+
+        // Exactly one side names an organization — refuse, and say so once.
+        const orgless = sub.organizationId === undefined;
+        const meta = {
+            id: sub.id,
+            webhook: sub.name,
+            type: event.type,
+            object: event.object,
+            subscriptionOrganizationId: sub.organizationId,
+            eventNamesOrganization: eventOrganizationId !== undefined,
+        };
+        if (this.organizationRefusalReported.has(sub.id)) {
+            this.logger?.debug?.(
+                `[webhook-auto-enqueuer] webhook '${sub.name}' still refused on the organization ` +
+                    'dimension',
+                meta,
+            );
+            return false;
+        }
+        this.organizationRefusalReported.add(sub.id);
+        const message = orgless
+            ? `[webhook-auto-enqueuer] webhook '${sub.name}' belongs to NO organization, but this ` +
+              `${event.type} event on '${event.object}' is organization-walled (the producer stamped ` +
+              'organizationId) — refusing to fan out: a subscription with no organization ' +
+              "ownership does not receive an organization's records. It will receive NO " +
+              'organization-walled event while reading active:true in Setup; author the webhook ' +
+              'inside the organization that should receive these events. Said once per subscription.'
+            : `[webhook-auto-enqueuer] webhook '${sub.name}' belongs to organization ` +
+              `'${sub.organizationId}', but this ${event.type} event on '${event.object}' names no ` +
+              'organization — refusing to deliver it inside an organization wall: on the ' +
+              'per-record path an absent organizationId is an environment-wide row or an object outside ' +
+              'the wall; on the bulk path it is a batch the producer could not attribute to one ' +
+              'organization (a system or cross-membership predicate write). A tenant-scoped ' +
+              "subscription receives only events attributable to its own organization. Said once per " +
+              'subscription.';
+        this.logger?.warn?.(message, meta);
+        return false;
     }
 
     private handleSelfHealEvent(event: RealtimeEventPayload): void {
@@ -1035,6 +1216,34 @@ function mapActionToTrigger(
 }
 
 /** [#4639] `data.records.{action}` → its opt-in bulk trigger. */
+/**
+ * [#13566] The event's organization term, read off the payload the way the
+ * spec publishes it — `DataEvent.organizationId` / `BulkDataEvent.organizationId`
+ * (`@objectstack/spec/api`), `z.string().min(1).optional()` on both.
+ *
+ * Three answers, kept apart on purpose:
+ *  - `{ organizationId: '<id>' }` — present: the producer named the
+ *    organization (the RECORD's on the per-record path; the ONE organization
+ *    the tenant wall named for the batch on the bulk path);
+ *  - `{ organizationId: undefined }` — absent: the key is not on the payload
+ *    (or carries `undefined`, which is what the schema's `.optional()` admits
+ *    and what any JSON hop turns into no key at all) — the schema's one
+ *    spelling for "no organization named";
+ *  - `undefined` — OFF-CONTRACT: the key is present but is not a non-empty
+ *    string (`''`, `null`, a number). The schema refuses every one of those
+ *    at the publish site, so its arrival here means a producer that did not
+ *    validate; the caller drops the whole event loudly, exactly like a
+ *    missing `recordId` (#4626) — ⛔ never coerced, never read as absent.
+ */
+function readEventOrganizationId(
+    payload: Record<string, unknown>,
+): { organizationId: string | undefined } | undefined {
+    const value = payload.organizationId;
+    if (value === undefined) return { organizationId: undefined };
+    if (typeof value !== 'string' || value === '') return undefined;
+    return { organizationId: value };
+}
+
 function mapBulkActionToTrigger(action: string): 'bulk_update' | 'bulk_delete' | null {
     switch (action) {
         case 'updated':

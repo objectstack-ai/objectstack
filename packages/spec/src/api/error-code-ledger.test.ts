@@ -231,6 +231,35 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(standardSynonymOf('FLOW_INPUT_SCHEMA_INVALID')).toBeUndefined();
   });
 
+  it('accepts the #16449 batch — every code that ships in dist, door or no door (#16404)', () => {
+    // The #16404 ruling (director seat, decision batch #62, 2026-09-07, option
+    // D): the published face is this ledger, so a code that ships in `dist` is
+    // registered whether or not an HTTP door can answer with it. The nine
+    // measured unregistered on #16449's tree, each under the package that
+    // stamps it: the cross-package ownership refusal, the seven `defineStack`
+    // refusals and `PluginSchema`'s `ui` required-key issue code.
+    const batch: Record<string, keyof typeof ERROR_CODE_LEDGER> = {
+      OBJECT_OWNERSHIP_CONFLICT: '@objectstack/objectql',
+      PLUGIN_UI_REQUIRED_KEY_MISSING: '@objectstack/spec',
+      STACK_CAPABILITY_UNKNOWN: '@objectstack/spec',
+      STACK_CROSS_REFERENCE_INVALID: '@objectstack/spec',
+      STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED: '@objectstack/spec',
+      STACK_NAMESPACE_PREFIX_INVALID: '@objectstack/spec',
+      STACK_SCHEMA_INVALID: '@objectstack/spec',
+      STACK_SINGLE_APP_VIOLATION: '@objectstack/spec',
+      STACK_TRIGGER_CAPABILITY_REQUIRED: '@objectstack/spec',
+    };
+    for (const [code, owner] of Object.entries(batch)) {
+      expect(ErrorCode.parse(code)).toBe(code);
+      expect(ERROR_CODE_LEDGER[owner], `${code} registered under ${owner}`).toContain(code);
+      // Domain-prefixed, none re-spells a standard member — registered plainly, no waiver.
+      expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    }
+    // The card's ninth, `NAMESPACE_CONFLICT`, was already a row (#14748) — the
+    // one doored code of the batch, whose wire already carries it.
+    expect(ERROR_CODE_LEDGER['@objectstack/objectql']).toContain('NAMESPACE_CONFLICT');
+  });
+
   it('rejects unregistered, lowercase, and numeric codes', () => {
     expect(() => ErrorCode.parse('TOTALLY_MADE_UP_CODE')).toThrow();
     expect(() => ErrorCode.parse('validation_error')).toThrow(); // pre-ADR-0112 dialect

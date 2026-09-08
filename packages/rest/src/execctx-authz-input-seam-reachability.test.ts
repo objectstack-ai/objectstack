@@ -300,21 +300,28 @@ function mount(rest: RestServer): Map<string, RouteHandler> {
     delete: (p: string, h: RouteHandler) => { routes.set(`DELETE:${p}`, h); },
     patch: () => {}, use: () => {}, listen: async () => {}, close: async () => {},
   } as any;
+  // [#14503] The instrument is `POST /packages/publish` — the one route the
+  // registrar mounts now (the read routes it used to drive here are the
+  // dispatcher domain's alone). Same resolver, same gate, same seam; the write
+  // cohort (`manage_metadata`) is what the fixture's permission set grants.
   registerPackageRoutes(
     server,
-    () => ({ list: async () => [], publish: async () => ({}), delete: async () => ({}) }) as any,
+    () => ({ publish: async () => ({ success: true }) }) as any,
     '/api/v1',
     { resolveExecutionContext: (req: any) => rest.resolvePackageRouteExecutionContext(req) } as any,
   );
   return routes;
 }
 
+const PUBLISH_PATH = `${PKGS}/publish`;
+const PUBLISH_BODY = { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} };
+
 async function drive(
   routes: Map<string, RouteHandler>,
   headers: Record<string, string>,
 ): Promise<Captured> {
-  const handler = routes.get(`GET:${PKGS}`);
-  if (!handler) throw new Error(`no handler for GET ${PKGS}`);
+  const handler = routes.get(`POST:${PUBLISH_PATH}`);
+  if (!handler) throw new Error(`no handler for POST ${PUBLISH_PATH}`);
   const captured: Captured = { status: 0, body: undefined };
   const res: any = {
     json(data: any) { captured.body = data; },
@@ -322,7 +329,7 @@ async function drive(
     status(code: number) { captured.status = code; return res; },
     header() { return res; },
   };
-  await handler({ params: {}, query: {}, body: undefined, headers, method: 'GET', path: PKGS } as any, res);
+  await handler({ params: {}, query: {}, body: PUBLISH_BODY, headers, method: 'POST', path: PUBLISH_PATH } as any, res);
   return captured;
 }
 
@@ -756,8 +763,8 @@ describe('[#15256] §3b — every computeExecCtx branch derives the posture', ()
     headers: Record<string, string>,
     params: Record<string, string>,
   ): Promise<Captured> {
-    const handler = routes.get(`GET:${PKGS}`);
-    if (!handler) throw new Error(`no handler for GET ${PKGS}`);
+    const handler = routes.get(`POST:${PUBLISH_PATH}`);
+    if (!handler) throw new Error(`no handler for POST ${PUBLISH_PATH}`);
     const captured: Captured = { status: 0, body: undefined };
     const res: any = {
       json(data: any) { captured.body = data; },
@@ -765,7 +772,7 @@ describe('[#15256] §3b — every computeExecCtx branch derives the posture', ()
       status(code: number) { captured.status = code; return res; },
       header() { return res; },
     };
-    await handler({ params, query: {}, body: undefined, headers, method: 'GET', path: PKGS } as any, res);
+    await handler({ params, query: {}, body: PUBLISH_BODY, headers, method: 'POST', path: PUBLISH_PATH } as any, res);
     return captured;
   }
 

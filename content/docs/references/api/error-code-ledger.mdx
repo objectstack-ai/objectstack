@@ -94,6 +94,39 @@ is registered here — and if it merely re-spells a standard member, that
 registration is a recorded waiver, never drift. A code registered NOWHERE
 (a tenant app's own spelling) still reaches the wire, in `declaredCode`.
 
+## Door or no door — every code that ships in `dist` is registered (#16404)
+
+Ruled by the director seat (decision batch #62, 2026-09-07, option D;
+maintainer 「同意」): **the published contract face for error codes is THIS
+ledger together with `StandardErrorCode`.** Any `code` that ships in a
+package's `dist` is registered here whether or not an HTTP door can ever
+answer with it — a thrown value's `code` is what a consumer's
+`catch (e) { switch (e.code) }` pins, and once shipped it cannot be renamed
+without breaking that consumer. Registering a code widens this face and is
+therefore a Clause-② change (`needs:contract-review`), door or no door; a
+code present in `dist` and absent here is a protocol gap, not a tier
+question.
+
+ONE shape, no second list: a `door: 'none'` code is a row like any other —
+the string under the package that stamps it, and a comment that states its
+`status` and the reachability reading ("no HTTP door on this tree; the
+thrown value is the boundary"). The dispatcher vocabulary's `boot-refusal`
+verdict (`packages/runtime/src/dispatcher-error-vocabulary.ts`) records
+that same reachability for the codes NOT yet registered, and a row here
+ratchets its vocabulary row out exactly as a `pending-registration`
+registration does. What registration changes for such a code is the face,
+not the wire: nothing demotes today, and if a door ever does answer with
+it, `error.code` carries the specific code instead of the status-derived
+member plus `declaredCode`. The `declaredCode` demotion (#9106) stays for
+genuinely unknown / third-party spellings only.
+
+`packages/spec/src/**` is held to this mechanically:
+`check:dispatcher-error-vocabulary` refuses to classify a stamp site under
+that tree as anything but `foreign-vocabulary` (a different vocabulary that
+merely spells itself `code`) or `runtime-pinned` — a `boot-refusal` or
+`pending-registration` row for a spec site is a finding
+(`spec-face-unregistered`), and the only way out is the row here.
+
 A code emitted by several packages is listed once per emitting package —
 the union dedupes; the per-package rows are provenance, not identity.
 
@@ -126,6 +159,12 @@ aborts, and the one request-reachable trigger sits inside a documented
 best-effort catch that logs and continues. Its throw site and constant
 (`MULTI_TENANT_UNSUPPORTED_CODE`, `@objectstack/driver-mongodb`) live on:
 host boot matching is not wire vocabulary.
+⚠️ That SECOND ground is superseded by #16404 ("Door or no door" above): a
+boot refusal that ships in `dist` is owed a row, so the codes left out or
+retired on the "not wire vocabulary" reasoning — the remaining
+`boot-refusal` rows of `dispatcher-error-vocabulary.ts` — are registrations
+owed under the ruling, not re-argued per card. What still retires a row is
+the FIRST ground only: no producer left anywhere in `packages/**` source.
 Before deleting a row, check that no producer remains repo-wide AND
 that no consumer — including `objectui` and `cloud` — reads the literal;
 tests that merely CONSTRUCT the code are not producers, and a test pinned to
@@ -209,6 +248,7 @@ const result = ErrorCode.parse(data);
 * `ACTION_DISABLED`
 * `ALREADY_REVERTED`
 * `AMBIGUOUS_MATCH`
+* `ANALYTICS_DATE_RANGE_UNRECOGNIZED`
 * `ANALYTICS_QUERY_FAILED`
 * `APPROVAL_ACTIONS_FAILED`
 * `APPROVAL_APPROVE_FAILED`
@@ -360,6 +400,7 @@ const result = ErrorCode.parse(data);
 * `OBJECT_API_DISABLED`
 * `OBJECT_API_METHOD_NOT_ALLOWED`
 * `OBJECT_OVERLAY_PACKAGE_MISMATCH`
+* `OBJECT_OWNERSHIP_CONFLICT`
 * `OBJECT_PACKAGE_DISABLED`
 * `OPENAPI_UNAVAILABLE`
 * `OS_PROTOCOL_INCOMPATIBLE`
@@ -377,6 +418,7 @@ const result = ErrorCode.parse(data);
 * `PLUGIN_INSTALL_FAILED`
 * `PLUGIN_MANIFEST_INVALID`
 * `PLUGIN_REGISTER_FAILED`
+* `PLUGIN_UI_REQUIRED_KEY_MISSING`
 * `PROJECT_MEMBERSHIP_REQUIRED`
 * `PROJECT_NOT_FOUND`
 * `PROJECT_PROVISIONING`
@@ -431,6 +473,13 @@ const result = ErrorCode.parse(data);
 * `SQL_DIALECT_EMISSION_UNSUPPORTED`
 * `SSO_REGISTER_FAILED`
 * `SSO_REGISTER_FORBIDDEN`
+* `STACK_CAPABILITY_UNKNOWN`
+* `STACK_CROSS_REFERENCE_INVALID`
+* `STACK_HIERARCHY_SCOPE_CAPABILITY_REQUIRED`
+* `STACK_NAMESPACE_PREFIX_INVALID`
+* `STACK_SCHEMA_INVALID`
+* `STACK_SINGLE_APP_VIOLATION`
+* `STACK_TRIGGER_CAPABILITY_REQUIRED`
 * `STORED_TYPE_NOT_CANONICAL`
 * `STORE_UNAVAILABLE`
 * `SUGGESTION_CONFIRM_FAILED`

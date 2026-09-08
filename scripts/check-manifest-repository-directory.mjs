@@ -2,8 +2,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-manifest-repository-directory (#15991) -- a manifest that DECLARES
- * `repository.directory` must declare its own directory.
+ * check-manifest-repository-directory (#15991) -- a PUBLISHABLE manifest
+ * declares `repository.directory`, and every manifest that declares it declares
+ * its own directory.
  *
  *   node scripts/check-manifest-repository-directory.mjs              # the gate
  *   node scripts/check-manifest-repository-directory.mjs --list       # every manifest and its verdict
@@ -56,7 +57,16 @@
  * the manifest FILE KIND under every root that holds one, so a card that
  * TOUCHES a manifest at all is told to run it, whatever the edit was.
  *
- * ## What it checks, per manifest that declares the field
+ * ## What it checks
+ *
+ *   DECLARED     a PUBLISHABLE manifest declares the field AT ALL. Ruled
+ *                mandatory -- see the section below. A PRIVATE manifest that
+ *                declares nothing is `exempt`: it has no npm page for a link to
+ *                be missing from, so silence there is not a defect.
+ *
+ * and then, per manifest that declares the field, whatever its privacy -- a
+ * value that names the wrong directory is wrong in a private manifest too, and
+ * a private package is one `private` deletion away from publishing it:
  *
  *   WELL-FORMED  the value is a repo-root-relative POSIX directory path: no
  *                absolute path, no backslash separator, no `..` segment, no
@@ -83,39 +93,58 @@
  * because they tell an author two different things: STALE means the path is
  * gone, MISPLACED means the link points a consumer at somebody else's package.
  *
- * ## ⛔ What this gate deliberately does NOT decide
+ * ## The ruling: declaration is MANDATORY for a publishable manifest
  *
- * Whether declaring `repository.directory` is MANDATORY for a publishable
- * package is an open policy question (#15991), and it is a maintainer's to
- * answer -- 14 publishable packages declare nothing at all, and every one of
- * those npm pages currently has NO source link rather than a broken one.
- * Mandatory turns that into a 14-manifest backfill; silence-allowed leaves them
- * permanently unlinked. This gate implements the second half ONLY: a
- * consistency check over whoever opts in. A manifest that declares nothing is
- * `undeclared`, is counted, is listed by `--list`, and is NOT a finding.
+ * This gate shipped judging only manifests that DECLARED the field, and left
+ * the other half open: 14 publishable packages declared nothing at all, and
+ * every one of those npm pages had NO source link rather than a broken one.
+ * That half was a policy call and it has been made -- a publishable
+ * (non-private) workspace manifest DECLARES `repository.directory` naming its
+ * own directory. The 14 were backfilled in the same change that added this
+ * invariant.
  *
- * ⛔ Do not "extend" this gate to red on silence without that ruling. The
- * change is one line and the decision is not one line.
+ * The alternative -- silence allowed, a pure consistency check over whoever
+ * opts in -- was refused for a reason worth keeping written down here, because
+ * it is the reason a future author will want to re-open: it leaves "remember to
+ * write this line" to memory. That is the hand-copied-line-with-no-gate shape
+ * this repo has already been bitten by, on a defect a reviewer cannot see in a
+ * diff -- and it gives the next new package no signal at all, which is how the
+ * 14 got there. A gate that only checks opt-ins cannot ever shrink the set of
+ * packages with no source link; it can only keep the opted-in ones honest.
+ *
+ * ⛔ Silence is therefore a FINDING for a publishable manifest, and ⛔ it is not
+ * repaired by deleting a declaration to get out of the judged set -- deleting
+ * one moves a manifest from `ok` to a finding, not out of the population.
+ * PRIVATE manifests stay unjudged for silence and are counted apart.
  *
  * ## The anti-vacuity design, which is the whole risk of this population
  *
- * The population is `git ls-files` plus a `repository.directory` predicate, so
- * it empties SILENTLY in two independent ways: the manifest glob stops matching
- * (0 manifests, 0 findings, a clean green over nothing) or the field is renamed
- * upstream (81 manifests, 0 declarers, the same clean green). Neither shows up
- * as an error, and a gate that can only ever say "all clear" says it loudest
- * when it has read nothing. Three instruments, all of which must fire before
- * any verdict is printed:
+ * The population is `git ls-files` plus two field predicates, so it empties
+ * SILENTLY in three independent ways: the manifest glob stops matching (0
+ * manifests, 0 findings, a clean green over nothing); `repository.directory` is
+ * renamed upstream (82 manifests, 0 declarers, the same clean green); or
+ * `name`/`private` changes shape so nothing reads as publishable (82 manifests,
+ * 0 subjects for the DECLARED invariant, the same clean green again). None of
+ * the three shows up as an error, and a gate that can only ever say "all clear"
+ * says it loudest when it has read nothing. Three instruments, all of which
+ * must fire before any verdict is printed:
  *
- *   1. CONTROL PROBES, BOTH DIRECTIONS. The same `isTrackedDirectory` predicate
- *      the invariants use is driven against a directory the run KNOWS is there
- *      (derived from the population itself -- the directory of a manifest this
- *      run just read) and against one assembled at runtime that cannot be (that
- *      directory's own root plus a nonsense segment). EXISTS and MISSING must BOTH
- *      come back correct. One direction alone is worthless: a predicate stuck
- *      on `true` passes the EXISTS probe and silences every finding; a
- *      predicate stuck on `false` passes the MISSING probe and reddens the
- *      whole tree.
+ *   1. CONTROL PROBES, BOTH DIRECTIONS, ON BOTH PREDICATES. Two predicates
+ *      decide this gate's verdicts and each gets its own pair, because a green
+ *      pair on one says nothing about the other.
+ *      `isTrackedDirectory` (RESOLVES) is driven against a directory the run
+ *      KNOWS is there -- derived from the population itself, the directory of a
+ *      manifest this run just read -- and against one assembled at runtime that
+ *      cannot be (that directory's own root plus a nonsense segment).
+ *      `isPublishable` (DECLARED) is driven against two manifest objects
+ *      assembled here, one named and non-private, one `private: true`.
+ *      All four must come back correct. One direction alone is worthless in
+ *      either pair: a directory predicate stuck on `true` passes EXISTS and
+ *      silences every finding, one stuck on `false` passes MISSING and reddens
+ *      the whole tree; a publishability predicate stuck on `false` passes
+ *      PRIVATE and owes the DECLARED invariant to nobody, one stuck on `true`
+ *      passes PUBLISHABLE and asks private manifests for a promise they never
+ *      make.
  *   2. PINNED COUNTS. `MEASURED` records the census on a named commit and
  *      `floorProblem` refuses a run that falls below the derived floors. The
  *      counts are the ones a reader can reproduce, and a refusal names the
@@ -162,25 +191,32 @@ import { isEntrypoint } from './invoked-as.mjs';
 // The counts are a FLOOR, not an equality -- adding cases is ordinary work and
 // must not red. A battery BELOW its floor means cases stopped running.
 //
+// Each floor is set AT the number of cases the battery registers today, so the
+// slack between "what runs" and "what is floored" is zero. Two of these had
+// drifted below their batteries (5 against 6 cases, 9 against 12) and were
+// re-derived rather than left: a floor with slack in it is a floor that lets
+// exactly that many cases stop running before it notices.
+//
 // The machinery lives HERE, at module scope, rather than inside the self-test:
 // the assertion sink is a concise arrow in the self-test's body, so there is no
 // in-body helper to thread a per-run ledger through, and the self-test runs
 // once per process.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the population declaration itself': 5,
+  'the population declaration itself': 6,
   'the value normaliser': 12,
   'the tracked-directory index': 7,
-  'the judgement, per manifest': 9,
+  'the publishability predicate, both directions': 10,
+  'the judgement, per manifest': 13,
   'the measured defect shapes, replayed': 5,
-  'the control probes, both directions': 8,
-  'the vacuity floors, each driven to zero': 11,
-  'provenance: the record must stay reproducible, and visibly so': 5,
-  'the live tree: the shipped record against the real population': 6,
+  'the control probes, both directions': 11,
+  'the vacuity floors, each driven to zero': 14,
+  'provenance: the record must stay reproducible, and visibly so': 6,
+  'the live tree: the shipped record against the real population': 12,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 9;
+const SELF_TEST_BATTERY_FLOOR = 10;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -270,10 +306,17 @@ const EXIT_PREREQ = 3;
  * retries it: `**\/package.json` is judged correctly by `hintCovers` and is
  * never SEEN, because `extractWatchHints` admits a literal only if it starts
  * with a word character, a dot or an `@`. A leading glob is dropped at
- * admission, so that declaration extracts to zero hints -- the exact silent
- * drop `check:watch-hint-literal` exists for, arrived at through the value
- * rather than through the spelling. Measured while writing this gate: the
- * one-line form extracted `[]`; the four below extract all four.
+ * admission, so that declaration extracts to zero hints -- the exact drop
+ * `check:watch-hint-literal` exists for, arrived at through the value rather
+ * than through the spelling. Measured while writing this gate: the one-line
+ * form extracted `[]`; the four below extract all four.
+ *
+ * ⚠️ That drop was SILENT when this gate was written, and is not any more:
+ * `check:watch-hint-literal` now puts every declared literal through the
+ * extractor and reds on one that yields no hint, naming this remedy. So the
+ * one-line form is refused loudly rather than dropped quietly -- retry it and
+ * a gate tells you to enumerate, which is the only part of the cost this
+ * enumeration ever paid twice.
  *
  * ⛔ NOT the workspace-root spelling `check-published-files.mjs` uses
  * (`packages/*`, `apps/*`, …). That declaration is honest THERE -- it walks
@@ -333,31 +376,62 @@ export function hintCoversPath(hint, path) {
  * Immutable, so the record stays reproducible forever as `main` moves away from
  * it. ⛔ Never repoint it without re-running every count. Reproduce with:
  *
- *   git checkout <ref> && node scripts/check-manifest-repository-directory.mjs --list
+ *   node scripts/check-manifest-repository-directory.mjs --list
+ *
+ * `ref` is the commit that BACKFILLED the 14, on the branch that made
+ * declaration mandatory -- not a commit that was on `main` beforehand, because
+ * this census is a property of the post-backfill tree and no earlier tree had
+ * it. Every commit from `ref` to that branch's tip carries the same manifest
+ * population, so `--list` at the tip -- and on `main` from the day it landed --
+ * prints these numbers; the provenance line on every green run reports the live
+ * delta against them, so drift is visible without anyone checking a commit out.
  *
  * `manifests` is every tracked `package.json`; `declaring` is those that
- * declare `repository.directory`; `trackedDirectories` is the size of the
- * directory index the RESOLVES invariant is answered from.
+ * declare `repository.directory`; `publishable` is those the DECLARED
+ * invariant is owed by (a `name`, and not `private`); `undeclaredPublishable`
+ * is how many of those owe it and have not paid -- ZERO, and it is pinned at
+ * zero on purpose: the backfill IS the record, so a reader who finds this
+ * number edited upward is looking at a regression somebody wrote down rather
+ * than fixed. `trackedDirectories` is the size of the directory index the
+ * RESOLVES invariant is answered from.
  */
 const MEASURED = Object.freeze({
-  ref: '3e7ef9c238',
-  manifests: 81,
-  declaring: 57,
-  trackedDirectories: 527,
+  ref: '9e31bda5fa',
+  manifests: 82,
+  declaring: 72,
+  publishable: 70,
+  undeclaredPublishable: 0,
+  trackedDirectories: 530,
 });
 
-// The floors, each `MEASURED` minus this gate's declared headroom (~11%). They
-// are inequalities rather than equalities on purpose: this population moves in
-// both directions for good reasons -- a package is deleted, a private fixture
-// arrives, a manifest drops a declaration -- and an equality would red on every
-// legitimate move. What no legitimate move does is take a count to (nearly)
-// zero, which is the only thing a floor decides.
+// The floors, each `MEASURED` minus this gate's declared headroom, which is 12%
+// rounded down (`Math.floor(measured * 0.88)`). They are inequalities rather
+// than equalities on purpose: this population moves in both directions for good
+// reasons -- a package is deleted, a private fixture arrives, a manifest drops a
+// declaration -- and an equality would red on every legitimate move. What no
+// legitimate move does is take a count to (nearly) zero, which is the only
+// thing a floor decides.
+//
+// ⛔ Written as literals rather than derived from `MEASURED` at runtime: a floor
+// computed from the record moves the moment somebody edits the record, which is
+// the one edit a floor exists to survive.
 const MIN_MANIFESTS = 72;
-const MIN_DECLARING = 50;
-const MIN_TRACKED_DIRECTORIES = 460;
+const MIN_DECLARING = 63;
+const MIN_PUBLISHABLE = 61;
+const MIN_TRACKED_DIRECTORIES = 466;
 
-// Both control probes must fire, in both directions, before any verdict.
-const REQUIRED_CONTROLS = 2;
+// ⛔ There is deliberately NO floor on the private count. The private set is
+// only ever used to EXCLUDE, so a shrinking one makes this gate judge MORE and
+// is not a vacuity risk; a floor there would red the day three examples are
+// deleted and would protect nothing. The direction that CAN empty silently is
+// `publishable`, and that is floored above.
+
+// Every control probe must fire, in both directions on both predicates, before
+// any verdict. Two predicates decide this gate's verdicts and each gets its own
+// pair: `isTrackedDirectory` answers RESOLVES, `isPublishable` answers DECLARED.
+const REQUIRED_DIRECTORY_CONTROLS = 2;
+const REQUIRED_PUBLISHABILITY_CONTROLS = 2;
+const REQUIRED_CONTROLS = REQUIRED_DIRECTORY_CONTROLS + REQUIRED_PUBLISHABILITY_CONTROLS;
 
 /**
  * The leaf segment of the MISSING control probe's target, assembled at runtime
@@ -503,18 +577,61 @@ export function declaredDirectory(manifest) {
 }
 
 /**
+ * Does this manifest publish? Pure.
+ *
+ * The predicate the DECLARED invariant is owed by, and deliberately the SAME
+ * spelling `scripts/check-published-files.mjs` uses for the same question --
+ * `!manifest.name || manifest.private === true` means it publishes nothing.
+ * Two gates reading one population must not disagree about who is in it, so
+ * this is a copy of that predicate's meaning rather than an improvement on it.
+ *
+ * ⚠️ `private: true` is compared as a BOOLEAN. npm itself reads the field for
+ * truthiness, so a manifest spelling it `"true"` is private to npm and
+ * publishable here, and would be asked for a declaration it does not need. That
+ * divergence is accepted knowingly: it is a manifest to fix, it fails LOUDLY
+ * (an extra finding, never a silenced one), and matching the repo's one other
+ * publish-population reader is worth more than matching npm's coercion.
+ *
+ * @param {unknown} manifest
+ * @returns {boolean}
+ */
+export function isPublishable(manifest) {
+  if (manifest === null || typeof manifest !== 'object') return false;
+  const { name, private: isPrivate } = /** @type {{name?: unknown, private?: unknown}} */ (manifest);
+  if (typeof name !== 'string' || name === '') return false;
+  return isPrivate !== true;
+}
+
+/**
  * Judge ONE manifest. Pure -- the tracked-directory question arrives as a
  * predicate, so the self-test drives every verdict with no tree at all.
  *
- * @param {{path: string, ownDirectory: string, declared: unknown}} entry
+ * ⚠️ Only an EXPLICIT `publishable: false` exempts a silent manifest. A caller
+ * that forgets the field gets the finding, not the exemption: an omitted flag
+ * must fail towards NOISE, because the other default is a gate that stops
+ * judging and says nothing about it -- the exact silence this whole file is
+ * written against.
+ *
+ * @param {{path: string, ownDirectory: string, declared: unknown, publishable?: boolean}} entry
  * @param {(dir: string) => boolean} isTrackedDirectory
- * @returns {{verdict: 'undeclared'|'ok'|'malformed'|'stale'|'misplaced', finding: string | null}}
+ * @returns {{verdict: 'undeclared'|'exempt'|'ok'|'malformed'|'stale'|'misplaced', finding: string | null}}
  */
 export function judgeManifest(entry, isTrackedDirectory) {
-  const { path, ownDirectory, declared } = entry;
-  if (declared === undefined) return { verdict: 'undeclared', finding: null };
+  const { path, ownDirectory, declared, publishable } = entry;
+  const ownDir = ownDirectory === '' ? '(the repository root)' : ownDirectory;
+  if (declared === undefined) {
+    if (publishable === false) return { verdict: 'exempt', finding: null };
+    return {
+      verdict: 'undeclared',
+      finding: `${path}: this package publishes to npm and declares NO repository.directory. `
+        + 'npm renders that field as the package page\'s "source" deep link, so without it the page '
+        + `carries no link to this code at all. Declare it inside \`repository\`, naming this manifest's `
+        + `own directory: '${ownDir}'. Copy the block a sibling package already carries — the field is `
+        + 'concatenated onto `repository.url`, so `directory` without that url resolves to nothing.',
+    };
+  }
 
-  const own = ownDirectory === '' ? '(the repository root)' : ownDirectory;
+  const own = ownDir;
   const { value, problem } = normaliseDeclared(declared);
   if (problem !== null) {
     return {
@@ -593,10 +710,64 @@ export function controlProbes(manifestPaths, isTrackedDirectory) {
 }
 
 /**
+ * The control probes for the OTHER predicate -- the one the DECLARED invariant
+ * is decided by.
+ *
+ * Assembled subjects rather than subjects derived from the population, and the
+ * asymmetry with the directory probes above is deliberate. The directory probe
+ * needs the tree because "is this directory tracked" is a question ABOUT the
+ * tree; publishability is a question about a manifest OBJECT, so two objects
+ * built here answer it with no tree at all and can never go stale against one.
+ *
+ * ⛔ Both directions or neither, and the two directions fail differently. A
+ * predicate stuck on `false` says nothing publishes, so the DECLARED invariant
+ * is owed by nobody and every silent manifest passes -- the SILENT failure, and
+ * the whole reason this pair exists. A predicate stuck on `true` judges the
+ * private manifests too and reddens the tree -- loud, but it should still be
+ * named as a broken predicate rather than as ten defects.
+ *
+ * ⚠️ What this pair CANNOT catch is the field being renamed upstream, because
+ * its subjects are built to the spelling this gate already believes in. That
+ * direction empties `publishable` towards zero across the real population and
+ * is caught by `MIN_PUBLISHABLE`, not here. Probe and floor are two
+ * instruments, and neither substitutes for the other.
+ *
+ * @param {(manifest: unknown) => boolean} isPublishableFn
+ * @returns {{fired: number, problems: string[]}}
+ */
+export function publishabilityProbes(isPublishableFn) {
+  const problems = [];
+  let fired = 0;
+
+  if (isPublishableFn({ name: '@probe/publishes', version: '0.0.0' })) {
+    fired += 1;
+  } else {
+    problems.push(
+      'the PUBLISHABLE control probe FAILED: a named, non-private manifest assembled by this gate is '
+        + 'reported as publishing nothing. A predicate that answers no to everything leaves the DECLARED '
+        + 'invariant owed by NOBODY, so every manifest that declares nothing passes and this gate goes '
+        + 'quiet over the exact population it was made mandatory for.',
+    );
+  }
+
+  if (!isPublishableFn({ name: '@probe/does-not-publish', version: '0.0.0', private: true })) {
+    fired += 1;
+  } else {
+    problems.push(
+      'the PRIVATE control probe FAILED: a manifest assembled by this gate with `private: true` is '
+        + 'reported as publishing. Every private manifest would then be asked for a published promise it '
+        + 'never makes, and the findings below would be about the predicate, not about the tree.',
+    );
+  }
+
+  return { fired, problems };
+}
+
+/**
  * The first floor a run falls below, as a refusal message -- or `null` when
  * every count clears. Pure, so the self-test drives every floor with no tree.
  *
- * @param {{manifests?: number, declaring?: number, trackedDirectories?: number, controls?: number}} counts
+ * @param {{manifests?: number, declaring?: number, publishable?: number, trackedDirectories?: number, controls?: number}} counts
  * @returns {string | null}
  */
 export function floorProblem(counts) {
@@ -605,10 +776,12 @@ export function floorProblem(counts) {
       'This is the whole population. The manifest filter matched (almost) nothing, so every invariant below it was satisfied over an empty set and this gate printed what a clean tree prints.'],
     [counts?.declaring ?? 0, MIN_DECLARING, MEASURED.declaring, 'manifest(s) declaring repository.directory',
       'Manifests were found but none of them declares the field this gate reads. That is what a renamed field looks like from in here: a full population, an empty subject, and a green line.'],
+    [counts?.publishable ?? 0, MIN_PUBLISHABLE, MEASURED.publishable, 'publishable manifest(s)',
+      'This is the population the DECLARED invariant is owed by. Manifests were found and none of them reads as publishing, so nothing was required to declare anything and every silence passed. That is what a renamed `private`/`name` key looks like from in here — and unlike the loud direction, it produces no findings at all.'],
     [counts?.trackedDirectories ?? 0, MIN_TRACKED_DIRECTORIES, MEASURED.trackedDirectories, 'tracked directory(ies) indexed',
       'This is the index the RESOLVES invariant is answered from. A collapsed index cannot tell a live directory from a deleted one.'],
     [counts?.controls ?? 0, REQUIRED_CONTROLS, REQUIRED_CONTROLS, 'control probe(s) fired',
-      'The probes are what prove the tracked-directory predicate still answers in BOTH directions. Unfired, nothing establishes that this run could have produced a finding at all.'],
+      'The probes are what prove BOTH of this gate\'s predicates still answer in BOTH directions — `isTrackedDirectory` for RESOLVES, `isPublishable` for DECLARED. A missing probe means one of the four went unexercised, and nothing then establishes that this run could have produced a finding at all.'],
   ];
   for (const [got, min, measured, what, why] of rows) {
     if (got >= min) continue;
@@ -633,15 +806,15 @@ export function floorProblem(counts) {
  *
  * Pure, so the self-test drives it with no tree.
  *
- * @param {{manifests?: number, declaring?: number, trackedDirectories?: number}} counts
+ * @param {{manifests?: number, declaring?: number, publishable?: number, trackedDirectories?: number}} counts
  * @returns {string}
  */
 export function provenanceLine(counts) {
-  const got = [counts?.manifests ?? 0, counts?.declaring ?? 0, counts?.trackedDirectories ?? 0];
-  const rec = [MEASURED.manifests, MEASURED.declaring, MEASURED.trackedDirectories];
-  const floors = [MIN_MANIFESTS, MIN_DECLARING, MIN_TRACKED_DIRECTORIES];
+  const got = [counts?.manifests ?? 0, counts?.declaring ?? 0, counts?.publishable ?? 0, counts?.trackedDirectories ?? 0];
+  const rec = [MEASURED.manifests, MEASURED.declaring, MEASURED.publishable, MEASURED.trackedDirectories];
+  const floors = [MIN_MANIFESTS, MIN_DECLARING, MIN_PUBLISHABLE, MIN_TRACKED_DIRECTORIES];
   const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
-  return `  provenance — manifests/declaring/trackedDirectories: this run ${got.join('/')}`
+  return `  provenance — manifests/declaring/publishable/trackedDirectories: this run ${got.join('/')}`
     + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED.ref}`
     + ` (${delta.join('/')} vs the record).\n`
     + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good reasons,'
@@ -669,6 +842,7 @@ export function scan(paths, readManifest) {
   const isTrackedDirectory = (dir) => dirs.has(dir);
 
   const controls = controlProbes(manifestPaths, isTrackedDirectory);
+  const publishability = publishabilityProbes(isPublishable);
   const rows = [];
   const findings = [];
 
@@ -682,22 +856,29 @@ export function scan(paths, readManifest) {
         `${path}: this manifest could not be read (${error instanceof Error ? error.message : String(error)}). `
           + 'It is in the population and it was NOT judged — a manifest this gate cannot read is never scored clean.',
       );
-      rows.push({ path, ownDirectory, verdict: 'unreadable', declared: undefined });
+      rows.push({ path, ownDirectory, verdict: 'unreadable', declared: undefined, publishable: null });
       continue;
     }
     const declared = declaredDirectory(manifest);
-    const { verdict, finding } = judgeManifest({ path, ownDirectory, declared }, isTrackedDirectory);
+    const publishable = isPublishable(manifest);
+    const { verdict, finding } = judgeManifest({ path, ownDirectory, declared, publishable }, isTrackedDirectory);
     if (finding) findings.push(finding);
-    rows.push({ path, ownDirectory, verdict, declared });
+    rows.push({ path, ownDirectory, verdict, declared, publishable });
   }
 
   const counts = {
     manifests: manifestPaths.length,
     declaring: rows.filter((r) => r.declared !== undefined).length,
+    // ⛔ Counted off the PREDICATE, never off `manifests - private`: a row this
+    // gate could not read is neither, and folding it into either count would
+    // let an unreadable manifest inflate a floor it was never measured by.
+    publishable: rows.filter((r) => r.publishable === true).length,
+    privateManifests: rows.filter((r) => r.publishable === false).length,
+    undeclaredPublishable: rows.filter((r) => r.verdict === 'undeclared').length,
     trackedDirectories: dirs.size,
-    controls: controls.fired,
+    controls: controls.fired + publishability.fired,
   };
-  return { rows, findings, counts, controls };
+  return { rows, findings, counts, controls, publishability };
 }
 
 // ---------------------------------------------------------------------------
@@ -719,49 +900,56 @@ function main(argv) {
     return EXIT_PREREQ;
   }
 
-  const { rows, findings, counts, controls } = scan(paths, readManifestFrom(root));
+  const { rows, findings, counts, controls, publishability } = scan(paths, readManifestFrom(root));
 
   if (argv.includes('--list')) {
     for (const r of rows) {
-      console.log(`${r.verdict.padEnd(11)} ${r.ownDirectory === '' ? '(repo root)' : r.ownDirectory} `
+      console.log(`${r.verdict.padEnd(11)} ${(r.publishable === true ? 'publishable' : r.publishable === false ? 'private' : '?').padEnd(12)}`
+        + `${r.ownDirectory === '' ? '(repo root)' : r.ownDirectory} `
         + `${r.declared === undefined ? '' : `→ ${JSON.stringify(r.declared)}`}`);
     }
     console.log(`\n${counts.manifests} tracked manifest(s); ${counts.declaring} declare repository.directory; `
+      + `${counts.publishable} publishable and ${counts.privateManifests} private; `
+      + `${counts.undeclaredPublishable} publishable manifest(s) declare none; `
       + `${counts.trackedDirectories} tracked director(ies) indexed.`);
     return EXIT_OK;
   }
 
   // ⛔ Before any verdict: a run whose controls did not fire, or that read
   // (almost) nothing, must refuse rather than report the clean tree.
-  for (const p of controls.problems) console.error(`check:manifest-repository-directory REFUSES — ${p}`);
+  const probeProblems = [...controls.problems, ...publishability.problems];
+  for (const p of probeProblems) console.error(`check:manifest-repository-directory REFUSES — ${p}`);
   const floor = floorProblem(counts);
-  if (controls.problems.length || floor !== null) {
+  if (probeProblems.length || floor !== null) {
     if (floor !== null) console.error(`check:manifest-repository-directory REFUSES — ${floor}`);
     return EXIT_REFUSE;
   }
 
   if (findings.length) {
     console.error(`✗ check:manifest-repository-directory — ${findings.length} finding(s) across `
-      + `${counts.declaring} declaring manifest(s):`);
+      + `${counts.publishable} publishable and ${counts.declaring} declaring manifest(s):`);
     for (const f of findings) console.error(`  ✗ ${f}`);
     console.error('');
     console.error('`repository.directory` is a published promise: npm concatenates it onto the repository');
     console.error('URL and renders the result as the package page\'s "source" link. A value naming a directory');
-    console.error('this repo does not have publishes a 404 to every consumer who follows it, and nothing in');
-    console.error('this repo\'s own tests, build or typecheck can see it — the field is read by npm and by');
-    console.error('nobody here. Correct the value to the manifest\'s own directory.');
+    console.error('this repo does not have publishes a 404 to every consumer who follows it; no value at all');
+    console.error('publishes a page with no link to the code. Nothing in this repo\'s own tests, build or');
+    console.error('typecheck can see either — the field is read by npm and by nobody here.');
     console.error('');
-    console.error('⛔ Not repaired by deleting the declaration: whether a publishable package MUST declare');
-    console.error('this field is an open policy question (#15991) and is a maintainer\'s to answer. This gate');
-    console.error('judges only manifests that declare it; it says nothing about the ones that do not.');
+    console.error('⛔ A missing declaration is NOT repaired by leaving it missing, and an incorrect one is NOT');
+    console.error('repaired by deleting it: a publishable (non-private) workspace manifest declares');
+    console.error('repository.directory naming its own directory. That is ruled, and deleting a declaration');
+    console.error('moves a manifest from `ok` to a finding rather than out of the population. Private');
+    console.error('manifests publish nothing and are not asked.');
     return EXIT_FINDINGS;
   }
 
   console.log(
-    `✓ check:manifest-repository-directory — ${counts.declaring} of ${counts.manifests} tracked manifest(s) `
-      + `declare repository.directory, and every one of them names its own directory; `
-      + `${counts.manifests - counts.declaring} declare none (not judged: policy question #15991); `
-      + `${counts.controls} control probe(s) fired, EXISTS on '${controls.present}' and MISSING on '${controls.absent}'.`,
+    `✓ check:manifest-repository-directory — every one of ${counts.publishable} publishable manifest(s) `
+      + `declares repository.directory, and all ${counts.declaring} declarations across ${counts.manifests} `
+      + `tracked manifest(s) name their own directory; ${counts.privateManifests} private manifest(s) publish `
+      + `nothing and are not asked; ${counts.controls} control probe(s) fired — EXISTS on '${controls.present}', `
+      + `MISSING on '${controls.absent}', PUBLISHABLE and PRIVATE on assembled subjects.`,
   );
   console.log(provenanceLine(counts));
   return EXIT_OK;
@@ -837,18 +1025,58 @@ export function selfTest() {
   t('⛔ the manifest filter does not take a file that merely ENDS in the name',
     manifestsIn(['packages/x/not-package.json', 'packages/x/package.json']).join(',') === 'packages/x/package.json');
 
+  // ── the publishability predicate, both directions ─────────────────────────
+  // The predicate the DECLARED invariant is owed by. Its silent direction is
+  // "nothing publishes", which owes the invariant to nobody and passes every
+  // silent manifest, so both directions are driven here and again as live
+  // probes below.
+  battery('the publishability predicate, both directions');
+  t('a named, non-private manifest publishes', isPublishable({ name: '@objectstack/x' }) === true);
+  t('`private: true` does not publish', isPublishable({ name: '@objectstack/x', private: true }) === false);
+  t('`private: false` publishes — the key is read, not merely present',
+    isPublishable({ name: '@objectstack/x', private: false }) === true);
+  t('a manifest with no name publishes nothing, whatever else it says',
+    isPublishable({ version: '1.0.0' }) === false && isPublishable({ name: '', version: '1.0.0' }) === false);
+  t('a non-object is not publishable rather than a crash',
+    isPublishable(null) === false && isPublishable(undefined) === false && isPublishable('x') === false);
+  t('⚠️ `private` is compared as a BOOLEAN — a string "true" reads as publishable, and fails LOUDLY',
+    isPublishable({ name: '@objectstack/x', private: 'true' }) === true);
+  t('… which is the same spelling check-published-files.mjs uses to pick its own population',
+    readFileSync(join(REPO_ROOT, 'scripts/check-published-files.mjs'), 'utf8').includes('private === true'));
+  t('both probes fire against the honest predicate',
+    publishabilityProbes(isPublishable).fired === REQUIRED_PUBLISHABILITY_CONTROLS
+      && publishabilityProbes(isPublishable).problems.length === 0);
+  t('⛔ a predicate stuck on FALSE fails the PUBLISHABLE probe — the direction that silences everything',
+    publishabilityProbes(() => false).fired === 1
+      && publishabilityProbes(() => false).problems.some((m) => /PUBLISHABLE control probe FAILED/.test(m)));
+  t('a predicate stuck on TRUE fails the PRIVATE probe',
+    publishabilityProbes(() => true).fired === 1
+      && publishabilityProbes(() => true).problems.some((m) => /PRIVATE control probe FAILED/.test(m)));
+
   // ── the judgement, per manifest ───────────────────────────────────────────
   battery('the judgement, per manifest');
   const tracked = (set) => (dir) => set.has(dir);
   const live = tracked(new Set(['', 'packages', 'packages/spec', 'packages/plugins', 'packages/plugins/plugin-trigger-schedule']));
-  const judge = (path, declared) => judgeManifest({ path, ownDirectory: path.slice(0, path.lastIndexOf('/')), declared }, live);
+  const judge = (path, declared, publishable = true) =>
+    judgeManifest({ path, ownDirectory: path.slice(0, path.lastIndexOf('/')), declared, publishable }, live);
   t('a manifest that declares its own directory is ok',
     judge('packages/spec/package.json', 'packages/spec').verdict === 'ok');
-  t('a manifest that declares nothing is `undeclared`, and is NOT a finding',
+  t('⭐ RULED — a PUBLISHABLE manifest that declares nothing is a FINDING, not a skip',
     judge('packages/spec/package.json', undefined).verdict === 'undeclared'
-      && judge('packages/spec/package.json', undefined).finding === null);
-  t('⛔ the policy half stays undecided — silence never produces a finding',
-    judgeManifest({ path: 'packages/x/package.json', ownDirectory: 'packages/x', declared: undefined }, live).finding === null);
+      && judge('packages/spec/package.json', undefined).finding !== null);
+  t('… and the finding tells the author to declare it, naming the manifest\'s own directory',
+    /declares NO repository.directory/.test(judge('packages/spec/package.json', undefined).finding)
+      && judge('packages/spec/package.json', undefined).finding.includes("'packages/spec'"));
+  t('… and says the field needs the url it is concatenated onto, so nobody adds a lone `directory`',
+    /repository\.url/.test(judge('packages/spec/package.json', undefined).finding));
+  t('a PRIVATE manifest that declares nothing is `exempt` — it has no npm page to link from',
+    judge('packages/qa/x/package.json', undefined, false).verdict === 'exempt'
+      && judge('packages/qa/x/package.json', undefined, false).finding === null);
+  t('⛔ an OMITTED publishability flag fails towards the finding, never towards the exemption',
+    judgeManifest({ path: 'packages/x/package.json', ownDirectory: 'packages/x', declared: undefined }, live).verdict === 'undeclared');
+  t('a PRIVATE manifest that declares a WRONG directory is still judged — privacy exempts silence, not error',
+    judge('packages/spec/package.json', 'packages/plugins', false).verdict === 'misplaced'
+      && judge('packages/spec/package.json', 'packages/plugins', false).finding !== null);
   t('a `repository` STRING shorthand declares no directory', declaredDirectory({ repository: 'github:o/r' }) === undefined);
   t('a `repository` object with a directory declares it',
     declaredDirectory({ repository: { url: 'x', directory: 'packages/spec' } }) === 'packages/spec');
@@ -884,7 +1112,18 @@ export function selfTest() {
   // ── the control probes, both directions ───────────────────────────────────
   battery('the control probes, both directions');
   const honest = controlProbes(['packages/spec/package.json'], tracked(new Set(['', 'packages', 'packages/spec'])));
-  t('both probes fire against an honest predicate', honest.fired === REQUIRED_CONTROLS && honest.problems.length === 0);
+  t('both directory probes fire against an honest predicate',
+    honest.fired === REQUIRED_DIRECTORY_CONTROLS && honest.problems.length === 0);
+  t('the two predicates are floored TOGETHER — neither pair alone clears the control floor',
+    REQUIRED_CONTROLS === REQUIRED_DIRECTORY_CONTROLS + REQUIRED_PUBLISHABILITY_CONTROLS
+      && floorProblem({ manifests: MEASURED.manifests, declaring: MEASURED.declaring, publishable: MEASURED.publishable,
+        trackedDirectories: MEASURED.trackedDirectories, controls: REQUIRED_DIRECTORY_CONTROLS }) !== null);
+  t('⛔ a run where only the PUBLISHABILITY pair fired is refused too',
+    floorProblem({ manifests: MEASURED.manifests, declaring: MEASURED.declaring, publishable: MEASURED.publishable,
+      trackedDirectories: MEASURED.trackedDirectories, controls: REQUIRED_PUBLISHABILITY_CONTROLS }) !== null);
+  t('the two pairs interrogate DIFFERENT predicates — one honest pair cannot vouch for the other',
+    controlProbes(['packages/spec/package.json'], tracked(new Set(['', 'packages', 'packages/spec']))).fired === REQUIRED_DIRECTORY_CONTROLS
+      && publishabilityProbes(() => false).fired < REQUIRED_PUBLISHABILITY_CONTROLS);
   t('the EXISTS probe is derived from the population, not written down', honest.present === 'packages/spec');
   t('a predicate stuck on TRUE fails the MISSING probe',
     controlProbes(['packages/spec/package.json'], () => true).fired === 1);
@@ -893,18 +1132,22 @@ export function selfTest() {
     controlProbes(['packages/spec/package.json'], () => false).fired === 1);
   t('… and says which direction failed', /EXISTS control probe FAILED/.test(controlProbes(['packages/spec/package.json'], () => false).problems[0]));
   t('⛔ a predicate stuck on TRUE also silences every finding — the probe is the only witness',
-    judgeManifest(copyShape, () => true).verdict === 'misplaced'
-      && judgeManifest({ ...copyShape, declared: 'packages/plugins/plugin-trigger-gone' }, () => true).verdict === 'misplaced');
+    judgeManifest({ ...copyShape, publishable: true }, () => true).verdict === 'misplaced'
+      && judgeManifest({ ...copyShape, publishable: true, declared: 'packages/plugins/plugin-trigger-gone' }, () => true).verdict === 'misplaced');
   t('a population with no directoried manifest leaves the EXISTS probe unfired and SAYS so',
     controlProbes(['package.json'], () => true).fired === 0
       && controlProbes(['package.json'], () => true).problems.some((p) => /no subject/.test(p)));
 
   // ── the vacuity floors, each driven to zero ───────────────────────────────
   battery('the vacuity floors, each driven to zero');
-  const full = { manifests: MEASURED.manifests, declaring: MEASURED.declaring, trackedDirectories: MEASURED.trackedDirectories, controls: REQUIRED_CONTROLS };
+  const full = { manifests: MEASURED.manifests, declaring: MEASURED.declaring, publishable: MEASURED.publishable, trackedDirectories: MEASURED.trackedDirectories, controls: REQUIRED_CONTROLS };
   t('FLOOR — the values in the record clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
   t('FLOOR — a dead manifest filter refuses (every invariant satisfied over nothing)', floorProblem({ ...full, manifests: 0 }) !== null);
   t('FLOOR — a renamed field refuses (a full population, an empty subject)', floorProblem({ ...full, declaring: 0 }) !== null);
+  t('⭐ FLOOR — an empty PUBLISHABLE population refuses (the DECLARED invariant owed by nobody)',
+    floorProblem({ ...full, publishable: 0 }) !== null);
+  t('… and the refusal names that direction as the one producing NO findings at all',
+    /no findings at all/.test(floorProblem({ ...full, publishable: 0 })));
   t('FLOOR — a collapsed directory index refuses', floorProblem({ ...full, trackedDirectories: 0 }) !== null);
   t('FLOOR — unfired controls refuse', floorProblem({ ...full, controls: 0 }) !== null);
   t('FLOOR — ONE fired control is not enough', floorProblem({ ...full, controls: 1 }) !== null);
@@ -917,19 +1160,24 @@ export function selfTest() {
     /Find what stopped being read/.test(floorProblem({ ...full, manifests: 0 })));
   t('FLOOR — every floor sits at or below the value it was measured from',
     MIN_MANIFESTS <= MEASURED.manifests && MIN_DECLARING <= MEASURED.declaring
-      && MIN_TRACKED_DIRECTORIES <= MEASURED.trackedDirectories);
+      && MIN_PUBLISHABLE <= MEASURED.publishable && MIN_TRACKED_DIRECTORIES <= MEASURED.trackedDirectories);
+  t('FLOOR — and every floor is strictly positive, so no floor can be cleared by reading nothing',
+    [MIN_MANIFESTS, MIN_DECLARING, MIN_PUBLISHABLE, MIN_TRACKED_DIRECTORIES, REQUIRED_CONTROLS].every((n) => n > 0));
 
   // ── provenance ────────────────────────────────────────────────────────────
   battery('provenance: the record must stay reproducible, and visibly so');
   const provExact = provenanceLine(full);
   const provDrifted = provenanceLine({ ...full, manifests: MEASURED.manifests + 3 });
-  t('PROVENANCE — an exact run reports no delta', provExact.includes('(=/=/= vs the record)'), provExact);
+  t('PROVENANCE — an exact run reports no delta', provExact.includes('(=/=/=/= vs the record)'), provExact);
   t('PROVENANCE — a drifted run reports the signed delta', provDrifted.includes('+3'), provDrifted);
   t('PROVENANCE — the record\'s commit is quoted', provExact.includes(MEASURED.ref));
   t('PROVENANCE — the PASS path actually prints it (a line nothing calls is a record nothing reconciles)',
     selfSource.includes(`console.log(${'provenanceLine'}(counts))`));
   t('PROVENANCE — the delta is marked as information, never as a verdict',
     /not a verdict/.test(provDrifted) && !/✗|REFUSES/.test(provDrifted), provDrifted);
+  t('⭐ PIN — the record\'s undeclared-publishable count is ZERO, and the backfill is what that records',
+    MEASURED.undeclaredPublishable === 0 && MEASURED.declaring >= MEASURED.publishable,
+    JSON.stringify(MEASURED));
 
   // ── the live tree ─────────────────────────────────────────────────────────
   // The shipped record against the REAL population — the half a fixture listing
@@ -958,12 +1206,23 @@ export function selfTest() {
       && !liveHints.some((h) => hintCoversPath(h, 'apps/docs/next.config.mjs')));
   t('every declared hint reaches at least one live manifest — no dead declaration',
     liveHints.every((h) => liveManifests.some((p) => hintCoversPath(h, p))));
-  t('both control probes fire on the LIVE tree',
-    controlProbes(liveManifests, (d) => liveDirs.has(d)).fired === REQUIRED_CONTROLS);
+  t('both DIRECTORY control probes fire on the LIVE tree',
+    controlProbes(liveManifests, (d) => liveDirs.has(d)).fired === REQUIRED_DIRECTORY_CONTROLS);
   const liveProbes = controlProbes(liveManifests, (d) => liveDirs.has(d));
   t('the MISSING probe target really is absent from the live tree, and sits under a root the live tree HAS',
     !liveDirs.has(liveProbes.absent)
       && liveDirs.has(liveProbes.absent.slice(0, liveProbes.absent.indexOf('/'))));
+  // The publishable population, read off the real manifests. This is the half a
+  // fixture cannot give: the predicate above is exercised against assembled
+  // objects, and only this reads it against what the tree actually says.
+  const liveScan = scan(livePaths ?? [], (rel) => JSON.parse(readFileSync(join(REPO_ROOT, rel), 'utf8')));
+  t('the live publishable population clears its floor — the DECLARED invariant is owed by someone',
+    liveScan.counts.publishable >= MIN_PUBLISHABLE, String(liveScan.counts.publishable));
+  t('the live tree really does hold BOTH kinds — a run where every manifest reads the same way proves nothing',
+    liveScan.counts.publishable > 0 && liveScan.counts.privateManifests > 0,
+    `${liveScan.counts.publishable}/${liveScan.counts.privateManifests}`);
+  t('all four control probes fire on the LIVE run',
+    liveScan.counts.controls === REQUIRED_CONTROLS, String(liveScan.counts.controls));
 
   // The floor runs BEFORE the verdict below, so a success line can only be
   // printed by a run in which every declared battery registered its cases.
@@ -976,9 +1235,10 @@ export function selfTest() {
     return 1;
   }
   console.log(`✓ check-manifest-repository-directory self-test: ${cases.length} cases pass (the three measured defect `
-    + 'shapes replayed as verdicts, both control probes driven in both directions with the stuck-predicate cases that '
-    + 'motivate them, every vacuity floor driven to zero against its green control, the record reproducible and printed '
-    + 'on the pass path, and the declared population reconciled against the live tree).');
+    + 'shapes replayed as verdicts, both predicates\' control probes driven in both directions with the stuck-predicate '
+    + 'cases that motivate them, every vacuity floor driven to zero against its green control — the publishable '
+    + 'population among them — the ruled DECLARED invariant asserted in both its finding and its private exemption, the '
+    + 'record reproducible and printed on the pass path, and the declared population reconciled against the live tree).');
 
   selfTestReachedVerdict = true;
   return EXIT_OK;

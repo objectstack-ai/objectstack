@@ -12,6 +12,7 @@
 - 它分得开从未入队与入队后被踢;`pull_request.enqueued` webhook 推送式不可重读,只作旁证。
 - `auto_merge` 字段不只是空,是不稳定:同一 PR 一分钟内先 set 后 None,入队后又回落 off。
 - ⛔ 永不据它判没挂上而重挂 —— 重挂踢队重排。
+- 推送重折已挂 auto-merge 的 PR 可静默掉挂,无字段说明 ⇒ 重折后重发,再按队列 ref 探。
 - 成功序列读间隔不读事件名:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被踢。
 - 真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 不在 `origin/main` 上是二义读数:在队列里等 / 没入队,两者处置相反。
@@ -19,6 +20,7 @@
 - `origin/main` 按内容读(grep 本 PR 的产物),⛔ 不按 head sha 祖先性、不按 `merged` 布尔。
 - 队列落的是另一个提交:`git merge-base --is-ancestor <pr-head> origin/main` 对已完全合入的 PR 答 NO。
 - 同 PR 的 `list_pull_requests` 会回 `merged: false` 与 `merged_at` 并存 ⇒ 只读布尔即读成没合。
+- `list_pull_requests` 的 `fields` 请求 `merged_by` 不返回该字段 ⇒ 字段缺席不是值读数。
 - `mergeable_state` 惰性计算,`unknown` 不是读数 —— 挂 unknown 等于挂在可能脏的头上。
 - `dirty` 即队列入口否决(冲突对象是当前 main);draft PR 恒回 `draft`。
 - 判头脏走零配额本地试合并:fetch PR ref 后 `git merge-tree --write-tree origin/main <ref>`。
@@ -49,6 +51,7 @@
 - 设方法的 GraphQL mutation 不服务 agent 会话 ⇒ 席位既设不了也纠不了。
 - 它在本仓无实效:`main` 的合并队列规则带 `merge_method: SQUASH`,合并由队列执行。
 - ⇒ 落地方法读分支规则,⛔ 永不读 auto-merge 请求;树上每 PR 一个 squash 提交。
+- `enable_pr_auto_merge` 对已 `mergeable_state: clean` 的 PR 照样成功,与工具描述的优雅失败相反。
 - 回显两向不可靠,空回显不等于未挂上 ⇒ ⛔ 不拿它当任何方向的证据、不为它空转。
 - 配额枯竭时 `enable_pr_auto_merge` 回成功而挂载根本没发生 ⇒ 验效果,不验回应。
 - 回读 `auto_merge` 非空本接口给不了:`pull_request_read` 与 `fields` 枚举都无该成员。
@@ -109,6 +112,7 @@
 - 读数:`POST /actions/runs/{id}/rerun-failed-jobs` REST 回 403 而 MCP 回 201。
 - job 日志只有 MCP 取得回,REST 侧转 blob 存储 `http=000`;同分钟 MCP 限流而 REST core 满 15000。
 - ⇒ MCP 限流先探 REST 再定退避,⛔ 不据一侧限流把整个平台的写都停掉。
+- MCP 的读限流与写限流彼此独立,两向各有实测 ⇒ 一侧被拒 ⛔ 不推另一侧也不可用。
 - REST 档以本班 repo-scoped 探针绿为前提;403 会话改按降级梯读。
 - 容器 curl 的 REST 通道 = App installation token,core 15,000/时,与 GraphQL 池独立计。
 - GraphQL 池 5000/时,只留给没有 REST 对应物的几件。
@@ -167,6 +171,7 @@
 - ⛔ 空查重结果不是读数,除非本会话内一个已知必中的控制词答了命中。
 - ⛔ 不是可疑时才验:归零下空结果与真无重复逐字节同形,读作搜过了没有。
 - 后果是重复卡照开、空车道照停;控制词回 0 ⇒ 本会话 search 已坏,立刻换通道,⛔ 不重试。
+- 控制词命中只证通道活着:同一文档换个词即回零,故障按词形不按文档,零仍不是读数。
 - 换道:探针绿走 REST 列表端点 `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`。
 - 它走 core 桶且 `labels` 是真 AND;⛔ 完整性自证靠 `&page=N` 加总数核对。
 - 翻页在偏移 ~9,900 硬拒:422 Pagination with the page parameter is not supported for large datasets。
@@ -192,25 +197,33 @@
 - 组织侧授权变更后仓库访问逐步传播,同一端点数分钟内 403 转 200。
 - 该 403 体解析成净零 ⇒ 空车道先对 `open_issues_count` 反查再信,零命中纪律覆盖 list 读。
 - 满页首页零命中是截断不是缺席:`GET /branches?per_page=100` 回满 100 行无目标 ⇒ 翻完再判。
+- 裸数组无总数的 listing 自报不了截断,它的零不是读数;MCP 侧有 `totalCount` 可自报。
+- 存在性问题改单点读:`GET /repos/{o}/{r}/branches/BRANCH` 200/404,或 `git ls-remote --heads`。
 - `issue_write` 的 `labels` 是整组替换不是追加:同一动作内重读现值合并再写。
 - 隔轮旧读数是无效快照,按其回写静默剥别的标签;真追加走 REST `POST /issues/{n}/labels`。
+- `issue_write` 还清空每个未传字段(assignees 在内)⇒ 单字段更新必须把现值带齐重写。
 - 追加端点同样先过探针:403 会话没有真追加通道,只能整组替换。
 - 摘标签也没有加法端点:`finding` 定级这类只能整组写,carve-out 保留;写后照纪律回读。
-- PR 标签的三条读腿全盲、两条静默。
+- PR 标签走 issue 形通道的三条读腿全盲、两条静默,PR 原生端点见腿 ④。
 - 腿 ①:`issue_read get_labels` 传 PR 号回 Could not resolve to an Issue。
 - REST 的 PR 也是 issue 惯例在此方法不成立;响亮失败即路由信号,改走腿 ③。
 - 腿 ②:`pull_request_read get` 的 `labels` 时缺时滞,可整字段缺席;连盲都不稳定,更险。
 - 腿 ③:payload 档 —— issue 页的 `href` 锚点 grep(`/labels/NAME`)在 PR 页命中零。
 - PR 侧拼写是 `data-name="NAME"`,片链到 `issues?q=…label%3A…`。
+- 腿 ④:`list_pull_requests` 与 `search_pull_requests` 传 PR 号回完整 `labels`,是可用读腿。
+- 反向不对称:`issue_write update` 传 PR 号写 `labels` 与 `assignees` 生效,而读腿 ① 拒 PR 号。
 - ⇒ ⛔ 读成功而标签空或缺席不读作没有标签:按 `data-name=` 确认,否则整集作 UNKNOWN。
 - 可达时优先加法端点;⛔ 单读与单次即时读回都不决断。
 - ⇒ union-write 欠一次延迟确认;必需标签(如 `skip-changeset`)其后每次触碰重核。
 - `list_issues` 永不返回 assignees:`fields` 枚举无此成员,不传也没有。
 - 已认领卡与空闲卡响应逐字节相同,清单只是候选名单 ⇒ 认领前必须过完整 `issue_read`。
+- 可指派性是仓+账号属性且会话中可变:`GET /repos/{o}/{r}/assignees/USER` 204/404,指派后回读。
 - MCP `issue_read` 的 body 实体转义是纯读侧伪影,撇号与引号与尖括号成数字实体,comments 原样。
 - 存储体是明文,先解码实体再写回往返安全;腐蚀 body 的恰是把转义读数原样回写。
 - 读侧并非一律可逆:行内反引号里的尖括号片段被 MCP 读路径整个丢弃,非转义,无从解码。
+- 该丢弃亦及标题:自首个 tag 形跨度截到尾,是切不是洞 ⇒ 凭标题的总体计数只是下界。
 - 写侧剥除是真实存储损耗,⛔ 两类不并成一条,写后回读必做;实体归属与 `&amp;` 类未实测。
+- 评论里独立成行的标记同被读路径吃掉留空行 ⇒ 缺失不证写侧剥除,先读 payload 原体。
 - `Blocked-by:` 行归 BODY,是单通道反向索引:追加按解码后写回执行。
 - 历史上寄放在评论里的行按同程序增量回填,⛔ 不搞批量突击。
 - 解锁扫描只 grep body,⛔ 不加常设评论读;扫描走 `list_issues` 加 `issue_read` 直读。
@@ -294,7 +307,7 @@
 - MCP `update_pull_request` 包装器删掉 PR 正文的页脚块。
 - 裸 REST `PATCH /pulls` 追加一个裸页脚并保留既有 session-URL 页脚,差恰 58 字节。
 - 同一 MCP 包装器上有反例:把已带页脚的正文整体重送,两条页脚均逐字节存活。
-- 提出的机理是工具只为无页脚的正文合成页脚 —— ⛔ 未实测,⛔ 不把观察压成定律。
+- 送无页脚正文经 MCP 编辑回读仍无页脚(两次实测)⇒ 它不为无页脚正文合成页脚。
 - 第四形:裸 REST `POST /pulls` 建 PR 时,在已带 session-URL 页脚的正文后再追加一条同形页脚。
 - 该追加带前置横线、恰 90 字节,送出体是存储体的严格前缀。
 - ⇒ 追加形态随通道与动作(建 / 改)变,⛔ 不由任一条推其余;写后必回读。
@@ -339,8 +352,8 @@
 - 判 required 集为空要读 ruleset 的 required 集本身,或看队列合并是否真在等检查。
 - ⛔ 别处写下的计数值一律先复测再用。
 - MCP `issue_write create` 落库丢掉正文尾部的署名页脚块,正文其余部分完好。
-- 同一路径吃掉标题里的尖括号跨度 ⇒ 标题占位写裸词(NAME / :id),⛔ 不写尖括号形。
 - 建卡改走 REST `POST /issues` 页脚存活;回读后 `PATCH /issues/{n}` 重送正文逐字节存下。
+- 内联双引号 JSON 建卡:标题反引号标识符被 shell 以 root 展开,正文完好 —— 内容被执行。
 - CI job 的失败 step 不必与 job 名一致 ⇒ ⛔ 不由 job 名推原因,先读 step 名再下结论。
 - Actions 日志保留把老 job 截到 post-job cleanup ⇒ 归档只剩清理输出时原因不可断言。
 - 无 `packageManager` 的目录里 corepack 运行时解析 registry `latest` ⇒ 同 SHA 前绿后红是 tag 移了。
@@ -350,6 +363,7 @@
 - 落地探针除命名代码形外,还必须在落地前的 tip 上读出不同值,否则它分不开两棵树。
 - `check-governed-merges` 浅克隆上拒答而非少报,并报未审计仓数;补救 `git fetch --shallow-since=`。
 - 前台 `sleep` 被 harness 拒 ⇒ 等待写成带 until 条件的前台阻塞等待,⛔ 不写 sleep 轮询循环。
+- `check:pm-dispatch-gates` 逾容器 600 秒前台上限 ⇒ detach 加 `tail --pid` 前台等;超时不是读数。
 - 分支删除被拒有第二形态:代理回 403,与既有 send-pack 断连同处置 ⇒ 不可删,⛔ 不重试。
 
 ## 闭合关键词解析(PR 正文写侧)

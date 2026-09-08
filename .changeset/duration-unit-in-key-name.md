@@ -2,7 +2,7 @@
 "@objectstack/spec": minor
 ---
 
-feat(spec)!: a duration-shaped `z.number()` key carries its unit in the key name — `hook.timeout` / `job.timeout` / `DriverOptions.timeout` → `timeoutMs`, `MetadataManagerConfig.cache.ttl` → `ttlSeconds`, `cache.databaseLoader.ttl` → `ttlMs`, tenant `idleTimeout` / `sessionTimeout` → `*Seconds`; new gate `check:duration-unit-keys` (#14478, #14519)
+feat(spec)!: a duration-shaped `z.number()` key carries its unit in the key name — `hook.timeout` / `job.timeout` / `DriverOptions.timeout` → `timeoutMs`, `MetadataManagerConfig.cache.databaseLoader.ttl` → `ttlMs` (the outer `cache.ttl` leaves outright under #15624 — nothing read it), tenant `idleTimeout` / `sessionTimeout` → `*Seconds`; new gate `check:duration-unit-keys` (#14478, #14519)
 
 <!-- adr-0087: registered hook-timeout-to-timeout-ms, job-timeout-to-timeout-ms, metadata-manager-config-cache-ttl-unit-in-key, driver-options-timeout-to-timeout-ms, tenant-timeouts-unit-in-key -->
 
@@ -38,7 +38,7 @@ comment and published a bare `300` / `3600` to the reference page (#14519).
 | `HookSchema` (`hooks[]`) | `timeout` | `timeoutMs` | unchanged (ms) |
 | `JobSchema` (`jobs[]`) | `timeout` | `timeoutMs` | unchanged (ms) |
 | `DriverOptionsSchema` | `timeout` | `timeoutMs` | unchanged (ms) |
-| `MetadataManagerConfigSchema` | `cache.ttl` | `cache.ttlSeconds` | unchanged (s, default 3600) |
+| `MetadataManagerConfigSchema` | `cache.ttl` | *(deleted — its respelling `ttlSeconds` was retired before it shipped, #15624; the outer `cache` block was read by nothing, and the live TTL is `cache.databaseLoader.ttlMs`)* | — |
 | `MetadataManagerConfigSchema` | `cache.databaseLoader.ttl` | `cache.databaseLoader.ttlMs` | unchanged (ms, default 60000) |
 | `DatabaseLevelIsolationStrategySchema` | `connectionPool.idleTimeout` | `connectionPool.idleTimeoutSeconds` | unchanged (s, default 300) |
 | `TenantSecurityPolicySchema` | `accessControl.sessionTimeout` | `accessControl.sessionTimeoutSeconds` | unchanged (s, default 3600) |
@@ -52,10 +52,13 @@ new MetadataManager({ cache: { ttl: 3600, databaseLoader: { ttl: 60_000 } } });
 // after — rename the key; the number is unchanged
 defineHook({ name: 'audit_order', object: 'order', events: ['afterInsert'], handler: 'auditOrder', timeoutMs: 5000 });
 defineJob({ name: 'nightly_sweep', schedule: { type: 'cron', expression: '0 1 * * *' }, handler: 'sweep', timeoutMs: 300000 });
-new MetadataManager({ cache: { ttlSeconds: 3600, databaseLoader: { ttlMs: 60_000 } } });
+new MetadataManager({ cache: { databaseLoader: { ttlMs: 60_000 } } }); // the outer `ttl` is deleted, not renamed (#15624)
 ```
 
-**Migration.** Rename each key; no value changes. Authoring an old spelling
+**Migration.** Rename each key; no value changes — with one exception: the outer
+`MetadataManagerConfig.cache.ttl` is DELETED, not renamed (its respelling `ttlSeconds`
+was retired before it shipped, #15624; nothing ever read the outer `cache` block, and
+the nested `cache.databaseLoader.ttl → ttlMs` rename above is unchanged). Authoring an old spelling
 fails to compile (`tsc`: the input type is `never`) and fails to parse with a
 prescription naming the new key. For `hooks[]` / `jobs[]` the rename is a
 mechanical D2 conversion (`hook-timeout-to-timeout-ms`,

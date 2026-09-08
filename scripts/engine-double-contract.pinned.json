@@ -1887,6 +1887,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/plugin-governance-scoped-metadata.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-boot-hydration-scoped.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2797,6 +2802,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/rls-check-membership-staging.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/rls-check-membership-staging.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/rls-check-membership-staging.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/row-write-widener-composition.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3153,6 +3173,21 @@
     },
     {
       "file": "packages/rest/src/meta-published-overlay.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/public-form-lookup-filter-lowering.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3704,6 +3739,21 @@
     {
       "file": "packages/services/service-storage/src/metadata-store.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

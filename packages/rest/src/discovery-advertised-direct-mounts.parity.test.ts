@@ -78,16 +78,25 @@ function resolveRoute(table: Map<string, Handler>, method: string, url: string):
 }
 
 /** Drive one mounted handler the way an adapter would, capturing the body. */
-async function drive(entry: { handler: Handler; params: Record<string, string> }, query: Record<string, string> = {}) {
+async function drive(
+  entry: { handler: Handler; params: Record<string, string> },
+  query: Record<string, string> = {},
+  reqBody: unknown = {},
+) {
   let body: any;
   let statusCode = 200;
   const res: any = {
     status: (c: number) => { statusCode = c; return res; },
     json: (b: any) => { body = b; },
+    header: () => res,
+    send: () => {},
   };
-  await entry.handler({ params: entry.params, query, body: {} }, res);
+  await entry.handler({ params: entry.params, query, body: reqBody, headers: {} }, res);
   return { statusCode, body };
 }
+
+/** A manifest the publish route accepts — the one route the package registrar mounts (#14503). */
+const PUBLISH_BODY = { manifest: { id: 'com.acme.crm', version: '1.0.0' }, metadata: {} };
 
 /**
  * Boot the real composition. `withPackageService` gates the package registrar
@@ -107,7 +116,7 @@ function boot(opts: {
     registry: { getObject: (_n: string) => undefined, getRegisteredTypes: () => [] },
   };
   const services = new Map<string, any>(
-    opts.withPackageService === false ? [] : [['package', { list: async () => [] }]],
+    opts.withPackageService === false ? [] : [['package', { publish: async () => ({ success: true }) }]],
   );
   const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
   const config: any = {
@@ -122,7 +131,7 @@ function boot(opts: {
   rest.registerRoutes();
   const ctx = {
     getService: (name: string) => {
-      if (name === 'package' && opts.withPackageService !== false) return { list: async () => [] };
+      if (name === 'package' && opts.withPackageService !== false) return { publish: async () => ({ success: true }) };
       if (name === 'external-datasource') {
         return { listRemoteTables: async (_n: string, _o: any) => [{ name: 'customers' }] };
       }
@@ -139,8 +148,8 @@ function boot(opts: {
     // production wires its caller resolver here (via
     // `RestServer.resolvePackageRouteExecutionContext`). This parity test pins
     // mounted ⇒ advertised route PLACEMENT, not authz, so it stubs a capable
-    // caller — the advertised `GET /packages` URL then ANSWERS 200 the way an
-    // authorized caller reaches it in production, keeping this test's subject
+    // caller — the advertised base's `POST /packages/publish` then ANSWERS 200
+    // the way an authorized caller reaches it in production, keeping this test's subject
     // (does the advertised URL resolve and answer in the mounted table) intact.
     // The gate itself is pinned in `package-envelope.conformance.test.ts`.
     // [#9901] `manage_platform_settings` joins the set for the same reason:
@@ -186,11 +195,18 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     ).toBeDefined();
 
     // …and the advertised URLs answer through the SAME mounted table.
-    const pkg = resolveRoute(table, 'GET', discovery.routes.packages);
-    expect(pkg, 'advertised routes.packages must be a mounted GET route').toBeDefined();
-    const pkgAnswer = await drive(pkg!);
+    //
+    // [#14503] `routes.packages` is the FAMILY base. This registrar's one
+    // contribution to the family is `POST {base}/packages/publish`, so that is
+    // what must resolve under the advertised base; the list route the
+    // advertisement used to be keyed on is the dispatcher domain's alone now
+    // and is deliberately NOT mounted here.
+    const pkg = resolveRoute(table, 'POST', `${discovery.routes.packages}/publish`);
+    expect(pkg, 'advertised routes.packages must be the base of the mounted publish route').toBeDefined();
+    const pkgAnswer = await drive(pkg!, {}, PUBLISH_BODY);
     expect(pkgAnswer.statusCode).toBe(200);
     expect(pkgAnswer.body?.success).toBe(true);
+    expect(resolveRoute(table, 'GET', discovery.routes.packages), 'the list route is not this registrar\'s to mount (#14503)').toBeUndefined();
 
     const ext = resolveRoute(table, 'GET', `${discovery.routes.datasources}/pg_main/external/tables`);
     expect(ext, 'advertised routes.datasources must be the base of the mounted federation family').toBeDefined();
@@ -210,9 +226,9 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     expect(discovery.routes.packages).toBe('/backend/api/v9/packages');
     expect(discovery.routes.datasources).toBe('/backend/api/v9/datasources');
 
-    const pkg = resolveRoute(table, 'GET', discovery.routes.packages);
+    const pkg = resolveRoute(table, 'POST', `${discovery.routes.packages}/publish`);
     expect(pkg).toBeDefined();
-    expect((await drive(pkg!)).body?.success).toBe(true);
+    expect((await drive(pkg!, {}, PUBLISH_BODY)).body?.success).toBe(true);
 
     const ext = resolveRoute(table, 'GET', `${discovery.routes.datasources}/pg_main/external/tables`);
     expect(ext).toBeDefined();
@@ -220,7 +236,7 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
 
     // The convention paths are NOT mounted on this boot, so advertising them
     // would have been the lie the projection exists to prevent.
-    expect(resolveRoute(table, 'GET', '/api/v1/packages')).toBeUndefined();
+    expect(resolveRoute(table, 'POST', '/api/v1/packages/publish')).toBeUndefined();
     expect(resolveRoute(table, 'GET', '/api/v1/datasources/pg_main/external/tables')).toBeUndefined();
 
     // [#6714] The email surface is NOT a direct mount — it registers at the
@@ -232,15 +248,25 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     expect(resolveRoute(table, 'POST', '/api/v1/email/send')).toBeDefined();
   });
 
-  it('not mounted ⇒ not advertised: a boot without the package service advertises no routes.packages', async () => {
+  it('mounted ⇒ advertised on a boot WITHOUT the package service too: publish mounts unconditionally, so the family base is advertised (#7563 / #14503)', async () => {
     const { table } = boot({ versionedBase: '/api/v1', withPackageService: false });
     const discovery = await readDiscovery(table);
 
-    // The registrar was never called (same gate as production), so nothing is
-    // recorded and nothing is advertised — D12's other half, kept honest even
-    // though the PROTOCOL half would happily stay silent too (no `package`
-    // service in its registry either; the override is what guarantees it).
-    expect(Object.prototype.hasOwnProperty.call(discovery.routes, 'packages')).toBe(false);
+    // This case used to pin the opposite — "not mounted ⇒ not advertised" —
+    // on the premise that the registrar's own `GET /packages` copy was the
+    // family's surface and was gated on the service. Both halves of that
+    // premise are gone: the copy is removed (#14503, the dispatcher domain is
+    // the single implementation) and the registrar's one route mounts on
+    // every boot (#7563). What is advertised is what is mounted: the base
+    // under which publish sits, and publish answers its OWN 404 naming the
+    // surface rather than a sibling's 405 — the fact #7563 was filed for.
+    expect(discovery.routes.packages).toBe('/api/v1/packages');
+    const publish = resolveRoute(table, 'POST', '/api/v1/packages/publish');
+    expect(publish).toBeDefined();
+    const answer = await drive(publish!, {}, PUBLISH_BODY);
+    expect(answer.statusCode).toBe(404);
+    expect(answer.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+    expect(answer.body?.error?.message).toContain('marketplace publish surface');
     expect(resolveRoute(table, 'GET', '/api/v1/packages')).toBeUndefined();
 
     // The federation family mounts unconditionally (degrades per request), so
@@ -281,8 +307,9 @@ describe('[#6633] /discovery advertises the direct-mount surfaces where they are
     const discovery = await readDiscovery(table, '/api/v1/environments/:environmentId', { environmentId: 'env_alpha' });
     expect(discovery.routes.packages).toBe('/api/v1/environments/env_alpha/packages');
     // The scoped variant is genuinely mounted (`auto` mirrors the package
-    // routes under both bases) and the advertised URL resolves against it.
-    expect(resolveRoute(table, 'GET', '/api/v1/environments/env_alpha/packages')).toBeDefined();
+    // registrar under both bases) and the advertised base's publish resolves
+    // against it.
+    expect(resolveRoute(table, 'POST', '/api/v1/environments/env_alpha/packages/publish')).toBeDefined();
 
     // The federation family has no scoped variant — the unscoped mount is the
     // truth, and the scoped response says so rather than inventing one.

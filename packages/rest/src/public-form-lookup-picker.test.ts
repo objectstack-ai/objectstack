@@ -203,18 +203,35 @@ describe('#7467 a spec-valid stored form carrying a publicPicker reaches the loo
         // the declared object override, the declared cap, the declared filter
         // rows ahead of the visitor's search predicate, id + displayFields
         // projection, offset pinned to 0 (no anonymous pagination).
+        //
+        // [#16337] The KEYS are the canonical QueryAST ones (`where` / `fields`
+        // / `orderBy`); until then the route spelled them `filters` / `select` /
+        // `sort`, wire aliases the normalizer folds onto exactly these.
+        //
+        // [#16581] The VALUE on `where` is the part that moved. It used to be
+        // the `ViewFilterRule` rows verbatim — the dialect
+        // `FormFieldPublicPickerSchema.filter` declares — which the ingress
+        // refuses with `400 INVALID_FILTER`, so this endpoint answered 400 for
+        // every non-empty search. The route now LOWERS them to the
+        // `FilterArray` grammar the parser reads, and the declared conjunction
+        // is written down rather than left to the list form's implicit AND.
+        // ⚠️ `findData` is stubbed in this suite, so this remains a COMPOSITION
+        // pin and cannot say the value is served: that is measured against the
+        // real normalizer in `public-form-lookup-filter-lowering.test.ts`,
+        // whose §3 keeps the control that the parser itself was NOT loosened.
         expect(findData).toHaveBeenCalledTimes(1);
         const call = findData.mock.calls[0][0];
         expect(call.object).toBe('sys_user');
         expect(call.query.limit).toBe(10);
         expect(call.query.offset).toBe(0);
-        expect(call.query.select).toEqual(['id', 'name', 'email']);
+        expect(call.query.fields).toEqual(['id', 'name', 'email']);
         // [#7485] Ordering is fixed, not authorable: first display field,
         // ascending. The route's `picker.sort ??` read is retired.
-        expect(call.query.sort).toEqual([{ field: 'name', order: 'asc' }]);
-        expect(call.query.filters).toEqual([
-            { field: 'is_active', operator: 'equals', value: true },
-            { field: 'name', operator: 'contains', value: 'ad' },
+        expect(call.query.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
+        expect(call.query.where).toEqual([
+            'and',
+            ['is_active', 'equals', true],
+            ['name', 'contains', 'ad'],
         ]);
         expect(call.context.anonymous).toBe(true);
     });
@@ -299,7 +316,7 @@ describe('#7485 publicPicker.sort is retired — not declarable, and not read', 
         // The stored `{ field: 'email', order: 'desc' }` reaches `findData`
         // nowhere: the fixed default is the only ordering the route composes.
         expect(findData).toHaveBeenCalledTimes(1);
-        expect(findData.mock.calls[0][0].query.sort).toEqual([{ field: 'name', order: 'asc' }]);
+        expect(findData.mock.calls[0][0].query.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
     });
 
     it('…and the fixed sort tracks displayFields[0], including the no-displayFields default', async () => {
@@ -310,7 +327,7 @@ describe('#7485 publicPicker.sort is retired — not declarable, and not read', 
         const stored = await persistedBody(studioForm([{ field: 'owner', publicPicker: { object: 'sys_user' } }]));
         const { findData, lookup } = routesOver(stored, []);
         await lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, mockRes());
-        expect(findData.mock.calls[0][0].query.sort).toEqual([{ field: 'name', order: 'asc' }]);
+        expect(findData.mock.calls[0][0].query.orderBy).toEqual([{ field: 'name', order: 'asc' }]);
 
         const stored2 = await persistedBody(studioForm([{
             field: 'owner',
@@ -318,7 +335,7 @@ describe('#7485 publicPicker.sort is retired — not declarable, and not read', 
         }]));
         const second = routesOver(stored2, []);
         await second.lookup.handler({ params: { slug: 'contact', field: 'owner' }, query: {} } as any, mockRes());
-        expect(second.findData.mock.calls[0][0].query.sort).toEqual([{ field: 'email', order: 'asc' }]);
+        expect(second.findData.mock.calls[0][0].query.orderBy).toEqual([{ field: 'email', order: 'asc' }]);
     });
 });
 

@@ -167,9 +167,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 
+import { gitFreeEnv } from './git-env.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, scanSource } from './js-comment-mask.mjs';
 
@@ -522,7 +524,26 @@ const trackedCache = new Map();
 function trackedFiles(root) {
   const key = resolve(root);
   if (!trackedCache.has(key)) {
-    const out = execFileSync('git', ['ls-files'], { cwd: key, encoding: 'utf8', maxBuffer: 1 << 28 });
+    /* ⛔ THE ENVIRONMENT IS EXPLICIT, and passing none is what made this a
+     * measured incident rather than a hypothetical (#16624). Git exports
+     * `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` into every child it runs,
+     * and those OUTRANK `cwd`: a caller sweeping a SYNTHETIC root from inside a
+     * hook -- which is where `pre-commit` runs the gates built on this resolver
+     * -- would have this line answer with THE REAL REPOSITORY's file list while
+     * `key` names a temp directory. Silently: the sweep resolves against the
+     * wrong tree and reports findings, or none, about a corpus nobody swept.
+     *
+     * The sibling half of the same incident was a WRITE: an inheriting
+     * `git add -A` staged 8,190 paths as deleted in the real index and an
+     * inheriting `git init` wrote `core.bare = true` into the SHARED
+     * `.git/config`, breaking every worktree on the machine. This resolver only
+     * ever reads, so its exposure is the wrong answer rather than the damage --
+     * but the fix is one rule for both, and it lives in `scripts/git-env.mjs`.
+     *
+     * ⚠️ `gitFreeEnv()` is correct HERE because `ls-files` needs nothing from
+     * the ambient environment but the repository `cwd` names. ⛔ It must not be
+     * copied onto a git child that fetches or pushes -- see that module. */
+    const out = execFileSync('git', ['ls-files'], { cwd: key, encoding: 'utf8', maxBuffer: 1 << 28, env: gitFreeEnv() });
     trackedCache.set(key, new Set(out.split('\n').filter(Boolean)));
   }
   return trackedCache.get(key);
@@ -712,8 +733,9 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // not red. A battery BELOW its floor means cases stopped running; the remedy is
 // to find what stopped registering.
 // 63 → 67 when `declinedShape` gained a case per arm (#15809).
+// 67 → 69 when the sweep's git child gained an explicit environment (#16624).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 67,
+  'symbol-anchors self-test': 69,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -930,6 +952,58 @@ export function selfTest() {
     'a continuation is a CONTINUATION even when a path preceded it on the line');
   check(declinedShape({ path: 'a/b.ts' }) === 'directory-qualified', 'a path with a slash is directory-qualified');
   check(declinedShape({ path: 'b.ts' }) === 'bare-filename', 'a path with no slash is a bare filename — the shape no resolver can bind');
+
+  // 12. ⛔ THE ENVIRONMENT ISOLATION PIN (#16624), and it is the one case here
+  //     that spawns `git`. `sweepCorpus` resolves through `git ls-files`, and
+  //     for its whole life it passed NO ENVIRONMENT OF ITS OWN. From a plain
+  //     shell that is invisible; from inside a hook, git's exported `GIT_DIR`
+  //     outranks the `cwd` this resolver hands the child, and a sweep of a
+  //     SYNTHETIC root silently answers with the real repository's file list.
+  //
+  //     The provocation is the failure itself: a bogus `GIT_DIR` is injected,
+  //     a real two-file corpus is swept under it, and the sweep must come back
+  //     having resolved ITS OWN tree. Before the fix this threw -- `git
+  //     ls-files` cannot open a `GIT_DIR` that does not exist -- so the case
+  //     could not pass by accident.
+  //
+  //     ⚠️ Every `git` this case runs is itself spawned with a stripped
+  //     environment. A pin for this defect that reproduced the defect while
+  //     writing the real index would be the incident a second time.
+  const envPinDir = mkdtempSync(join(tmpdir(), 'symbol-anchors-envpin-'));
+  const priorGitDir = process.env.GIT_DIR;
+  let envPinSweep = null;
+  let envPinError = null;
+  try {
+    mkdirSync(join(envPinDir, 'docs'), { recursive: true });
+    mkdirSync(join(envPinDir, 'pkg'), { recursive: true });
+    writeFileSync(join(envPinDir, 'pkg', 'a.ts'), 'export function handler() { return 1; }\n');
+    writeFileSync(
+      join(envPinDir, 'docs', 'note.md'),
+      ['# note', '', 'the read lives at `pkg/a.ts#handler`.', ''].join('\n'),
+    );
+    execFileSync('git', ['init', '-q'], { cwd: envPinDir, env: gitFreeEnv() });
+    execFileSync('git', ['add', '-A'], { cwd: envPinDir, env: gitFreeEnv() });
+    process.env.GIT_DIR = join(tmpdir(), 'a-git-dir-that-does-not-exist');
+    try {
+      envPinSweep = sweepCorpus(defineCorpus({ id: 'envpin', label: 'env pin', docRoots: ['docs'] }), envPinDir);
+    } catch (err) {
+      envPinError = err;
+    }
+  } finally {
+    if (priorGitDir === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = priorGitDir;
+    rmSync(envPinDir, { recursive: true, force: true });
+  }
+  check(
+    envPinError === null,
+    '⛔ ENV LEAK: `sweepCorpus` must not inherit a hook\'s GIT_DIR — with one injected it threw: '
+      + String(envPinError && envPinError.message).slice(0, 200),
+  );
+  check(
+    envPinSweep !== null && envPinSweep.counts.symbol === 1 && envPinSweep.findings.filter((f) => !f.soft).length === 0,
+    '⛔ ENV LEAK: the sweep must resolve against ITS OWN tracked tree under an injected GIT_DIR — got '
+      + JSON.stringify(envPinSweep && { counts: envPinSweep.counts.symbol, findings: envPinSweep.findings.length }),
+  );
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //

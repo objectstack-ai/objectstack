@@ -177,6 +177,9 @@ describe('ObjectQLStrategy — timeDimensions[].dateRange (#3650)', () => {
     ]);
   });
 
+  // The title names the bare-string dialect that #16041 closed at the schema; the
+  // fixture now spells the same single-day window in the array form. Retiring
+  // this test, together with the strategy's degeneration, belongs to #16322.
   it('degenerates a bare-string dateRange to a single point, like NativeSQLStrategy', async () => {
     const seen: AggOpts[] = [];
     const result = await makeService(seen).query(
@@ -184,7 +187,7 @@ describe('ObjectQLStrategy — timeDimensions[].dateRange (#3650)', () => {
         cube: 'sales',
         dimensions: ['stage'],
         measures: ['revenue'],
-        timeDimensions: [{ dimension: 'close_date', dateRange: '2026-01-20' }],
+        timeDimensions: [{ dimension: 'close_date', dateRange: ['2026-01-20', '2026-01-20'] }],
       },
       ctx,
     );

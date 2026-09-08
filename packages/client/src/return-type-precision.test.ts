@@ -96,6 +96,7 @@ import type {
     AuditMetaItemResponse,
     RollbackMetaItemResponse,
     DiffMetaItemResponse,
+    HistoryMetaItemResponse,
     PackagePublishResult,
     DiscardPackageDraftsResponse,
     ListPackageCommitsResponse,
@@ -365,6 +366,12 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
     expectTypeOf(await client.meta.getAudit('view', 'account_list')).toEqualTypeOf<AuditMetaItemResponse>();
     expectTypeOf(await client.meta.rollbackItem('view', 'account_list', 3)).toEqualTypeOf<RollbackMetaItemResponse>();
     expectTypeOf(await client.meta.diffItem('view', 'account_list')).toEqualTypeOf<DiffMetaItemResponse>();
+    // [#13523] The ninth door of this family — declared after the ruling's
+    // bindings were written (#12005, PR #13521), so it kept a
+    // pre-declaration spelling on BOTH of its exits until now. See
+    // `returnTypePrecisionPins13523` below for the scoped exit and for the
+    // wrong-shape direction; the two are pinned TOGETHER on purpose.
+    expectTypeOf(await client.meta.getHistory('view', 'account_list')).toEqualTypeOf<HistoryMetaItemResponse>();
     // Ruling 1C: `getPublished` is bound to `unknown` BY RULING — an
     // arbitrary metadata item body, never a union frozen against the type
     // registry. `unknown` (not `any`) is the binding: callers must narrow.
@@ -407,6 +414,91 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
 
     void wrongCommits;
     void wrongDiagnostics;
+}
+
+/**
+ * [#13523] The history door — the #12038 family's ninth member, and the one
+ * whose declaration landed AFTER the ruling's bindings were written.
+ *
+ * ## Why this door needed its own block: it has TWO exits, and they disagreed
+ *
+ * `getHistory` exists twice in `./index.ts` — once on `ObjectStackClient` and
+ * once on `ScopedEnvironmentClient` — and the two are not independent doors.
+ * They are the SAME mount replayed against `/environments/:environmentId`
+ * (`registerForBase` in `rest-server.ts`), so they answer a byte-identical
+ * body. Their DECLARATIONS were nevertheless in two different pre-declaration
+ * states:
+ *
+ *   - the unscoped exit declared a hand-written inline shape;
+ *   - the scoped exit declared NOTHING — no return annotation, and `_unwrap`
+ *     called with no type argument, so `T` had no inference site and the
+ *     published method resolved to `Promise< unknown >`.
+ *
+ * Binding one and leaving the other would have RELOCATED that divergence
+ * rather than removed it, which is why the equality pin below is the first
+ * assertion in this block: it is red both when neither exit is bound and when
+ * only one is.
+ *
+ * ## The rebind is a NARROWING, not a rename
+ *
+ * The inline shape and `HistoryMetaItemResponse` are not field-for-field
+ * equivalent, so this is a real move of a published face. Every difference is
+ * pinned below, in the direction that is red before the change.
+ */
+export async function returnTypePrecisionPins13523(): Promise<void> {
+    // ── the two exits are ONE door ────────────────────────────────────────
+    // RED BEFORE in both of the ways it can be: the inline shape is not
+    // `unknown` (neither exit bound), and neither is equal to the published
+    // type (one exit bound). This is the assertion that refuses a half-fix.
+    type UnscopedHistory = Awaited<ReturnType<ObjectStackClient['meta']['getHistory']>>;
+    type ScopedHistory = Awaited<ReturnType<ScopedEnvironmentClient['meta']['getHistory']>>;
+    expectTypeOf<UnscopedHistory>().toEqualTypeOf<HistoryMetaItemResponse>();
+    expectTypeOf<ScopedHistory>().toEqualTypeOf<HistoryMetaItemResponse>();
+    expectTypeOf<UnscopedHistory>().toEqualTypeOf<ScopedHistory>();
+
+    // The scoped exit answered `unknown`, which has NO members — so this
+    // member read is red before the rebind (TS2339/TS18046) and is the
+    // simplest statement of what that exit's callers could not do.
+    void (await scoped.meta.getHistory('view', 'account_list')).events;
+
+    const event = (await client.meta.getHistory('view', 'account_list')).events[0];
+
+    // ── difference 1: `actor` is NULLABLE, and the inline shape said it was not ─
+    // The consequential one. `rowToEvent` writes `null` for every
+    // system-initiated write (boot sync, migration, scheduled job) and the
+    // schema declares it "never a sentinel string", so callers that resolve
+    // the actor against `sys_user` must be able to tell "nobody" from "a user
+    // id". The inline `actor: string` type-checked those callers against a
+    // promise the door has never made.
+    // RED BEFORE: the suppression is unused (TS2578) while `actor` is `string`.
+    // @ts-expect-error `actor` is `string | null` — a system-initiated event names no user
+    const actorIsNeverNull: string = event.actor;
+
+    // ── difference 2: `op` is a CLOSED vocabulary, not a plain string ──────
+    // RED BEFORE: with `op: string` this comparison overlaps and the
+    // suppression goes unused (TS2578).
+    // @ts-expect-error `save` is not in the ADR-0008 §2.4 change-log vocabulary
+    const opOutsideTheVocabulary = event.op === 'save';
+
+    // ── difference 3: `ref.org` is ALWAYS written, not optional ───────────
+    // The positive direction on purpose: red before as TS2322
+    // (`string | undefined` is not assignable to `string`), green after.
+    const org: string = event.ref.org;
+
+    // ── differences 4-6: three members the inline shape omitted entirely ──
+    // Red before as TS2339 — the inline shape declared no such properties, so
+    // no caller could reach the version lineage the rollback door pins
+    // against, nor the rename door's previous name.
+    const lineageVersion: number | undefined = event.version;
+    const previousName: string | undefined = event.previousName;
+    const refVersion: string | undefined = event.ref.version;
+
+    void actorIsNeverNull;
+    void opOutsideTheVocabulary;
+    void org;
+    void lineageVersion;
+    void previousName;
+    void refVersion;
 }
 
 /**
