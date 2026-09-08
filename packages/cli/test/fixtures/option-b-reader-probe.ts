@@ -186,7 +186,11 @@ function makeRecorder(rec: Recording) {
   let ctxRef: Bag | undefined;
   return {
     name: 'com.objectstack.probe.option-b-recorder',
-    type: 'service' as const,
+    // No `type`: `PluginSchema` defaults an absent `type` to `standard`, and
+    // `'service'` is not a member of the declared closed set — `ObjectKernel`
+    // refused this object already, and since #16721 `LiteKernel.use()` (the
+    // kernel `bootAndRecord` boots) runs the same contract. Nothing here reads
+    // `.type`; the recorder IS the subsystems, not a typed plugin.
     version: '1.0.0',
     init: async (ctx: Bag) => {
       ctxRef = ctx;
