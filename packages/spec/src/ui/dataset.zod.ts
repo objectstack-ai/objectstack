@@ -204,13 +204,21 @@ export const DatasetMeasureSchema = lazySchema(() => strictObject({
    * altogether.
    *
    * Measured at the pin this repo builds against (`.objectui-sha` =
-   * `a472b0716`; re-derived at that pin 2026-09-07) in objectui
+   * `53ded82bf`; re-derived at that pin 2026-09-08 — BOTH files in this chain
+   * changed over the hop off `a472b0716` (`dataset-format.ts` +23 lines,
+   * `date-display.ts` +108 under objectui#7443, "one home for the datetime
+   * display convention"), so every anchor below was re-READ there and three of
+   * the four MOVED; the substance is unchanged — the date-only arm still
+   * threads `format` as a STYLE and the datetime arm still takes none) in
+   * objectui
    * `packages/core/src/utils/dataset-format.ts`: `formatMeasure` routes a
-   * non-numeric value through `formatMeasureDate` (`:184-197`), whose
-   * date-only arm threads `format` into the STYLE parameter of `formatDate`
-   * (`utils/date-display.ts:104-137`, whose `relative` branch falls back to
-   * the absolute form beyond ±7 days at `:90`), while its datetime arm calls
-   * `formatDateTime(v, { locale })` with no style at all (`:194`). Teaching
+   * non-numeric value through `formatMeasureDate` (`:185-198`, was `:184-197`),
+   * whose date-only arm threads `format` into the STYLE parameter of
+   * `formatDate` (`utils/date-display.ts:131-164`, was `:104-137`, whose
+   * `relative` branch falls back to the absolute form beyond ±7 days at
+   * `:117`, was `:90`), while its datetime arm calls
+   * `formatDateTime(v, { locale })` with no style at all (`:195`, was `:194`).
+   * Teaching
    * the shared path a pattern grammar would change every list cell that reads
    * it, so the gap is DOCUMENTED here rather than closed (objectui#7178 ruled
    * A; the datetime half is objectui#7443).

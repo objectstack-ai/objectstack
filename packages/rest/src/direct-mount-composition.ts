@@ -22,24 +22,28 @@
  *
  *  - a route this boot mounted ⇒ it is enumerable through `getRoutes()` and
  *    appears in `GET {apiPath}/openapi.json`;
- *  - a route this boot skipped (a package route needing a `package` service
- *    that is not there) ⇒ nothing is recorded, nothing is documented, and the
- *    404 a caller would get from that deployment is what the document says too.
+ *  - a route this boot skipped ⇒ nothing is recorded, nothing is documented,
+ *    and the 404 a caller would get from that deployment is what the document
+ *    says too. (No registrar takes that branch today — both mount
+ *    unconditionally, see below — so it is the contract for the next one.)
  *
  * [#7563] That second bullet promised a 404 and, for `POST /packages/publish`,
  * did not get one: with no owner for the path, the dispatcher's
  * `/packages/:id` matched it (`id = "publish"`) and the router answered 405
  * with THAT route's `Allow` set. The publish route therefore mounts on every
- * boot and answers its own honest 404 — see `package-routes.ts` for why the
- * other three must not follow it.
+ * boot and answers its own honest 404. [#14503] The three package routes that
+ * used to sit behind the `package`-service gate beside it (`GET /packages`,
+ * `GET /packages/:id`, `DELETE /packages/:id`) are gone from the registrar
+ * altogether — `packages/runtime`'s `/packages` domain is their single
+ * implementation — so the package registrar carries no service gate at all
+ * now, and neither does this step.
  *
- * The service gate stays exactly where it was — around the package registrar's
- * routes — and the record follows it rather than restating it. What is
- * deliberately NOT recorded is any verdict about a service that a later phase
- * could still contradict: the federation routes mount unconditionally and
- * decide per request whether the `external-datasource` service is there (503 if
- * not), so this file records them as mounted and says nothing about federation
- * being available.
+ * What is deliberately NOT recorded is any verdict about a service that a
+ * later phase could still contradict: the federation routes mount
+ * unconditionally and decide per request whether the `external-datasource`
+ * service is there (503 if not), and the publish route resolves the `package`
+ * service per request (404 if none is composed), so this file records both as
+ * mounted and says nothing about either service being available.
  */
 
 import type { PluginContext } from '@objectstack/core';
@@ -58,8 +62,6 @@ export interface DirectMountComposition {
     ctx: PluginContext;
     /** The configured API base, e.g. `/api/v1`. */
     versionedBase: string;
-    /** The `protocol` slice the package routes read registry packages through. */
-    protocol?: PackageRoutesOptions['protocol'];
     /**
      * [#7033 / #7023] Resolves the caller's execution context for the direct-
      * mount gates — the `RestServer`'s own resolver, so the checks read the
@@ -86,7 +88,7 @@ export interface DirectMountComposition {
  * mounted on {@link DirectMountComposition.recorder}.
  */
 export function mountAndRecordDirectRoutes(composition: DirectMountComposition): void {
-    const { server, recorder, ctx, versionedBase, protocol, resolveExecutionContext } = composition;
+    const { server, recorder, ctx, versionedBase, resolveExecutionContext } = composition;
     const enableProjectScoping = composition.enableProjectScoping ?? false;
     const projectResolution = composition.projectResolution ?? 'auto';
 
@@ -99,12 +101,12 @@ export function mountAndRecordDirectRoutes(composition: DirectMountComposition):
     // plugins with no edge between them, so asking once here answered "no
     // package service" on precisely the deployments that have one.
     //
-    // `registerPackageRoutes` decides what that resolver's answer means per
-    // route: `POST /packages/publish` mounts either way (nobody else serves it,
-    // and an unowned path is answered by a `/packages/:id` sibling's 405
-    // instead of a 404 — #7563), the other three only when a service is there
-    // (they shadow live dispatcher twins). It reports back exactly what it
-    // mounted, so the record still follows the gate rather than restating it.
+    // `registerPackageRoutes` mounts `POST /packages/publish` either way
+    // (nobody else serves it, and an unowned path is answered by a
+    // `/packages/:id` sibling's 405 instead of a 404 — #7563) and, since
+    // #14503, nothing else: the three read/delete routes it used to gate on
+    // that resolver are served by the dispatcher's `/packages` domain alone.
+    // It reports back exactly what it mounted, so the record is the mount.
     const resolvePackageService = () => {
         try {
             return ctx.getService<PackageService>('package');
@@ -123,7 +125,7 @@ export function mountAndRecordDirectRoutes(composition: DirectMountComposition):
             : [versionedBase];
         for (const base of bases) {
             recorder.recordDirectMountedRoutes(
-                registerPackageRoutes(server, resolvePackageService, base, { protocol, resolveExecutionContext }),
+                registerPackageRoutes(server, resolvePackageService, base, { resolveExecutionContext }),
             );
         }
         ctx.logger.info('Package management routes registered');

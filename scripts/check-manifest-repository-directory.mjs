@@ -306,10 +306,17 @@ const EXIT_PREREQ = 3;
  * retries it: `**\/package.json` is judged correctly by `hintCovers` and is
  * never SEEN, because `extractWatchHints` admits a literal only if it starts
  * with a word character, a dot or an `@`. A leading glob is dropped at
- * admission, so that declaration extracts to zero hints -- the exact silent
- * drop `check:watch-hint-literal` exists for, arrived at through the value
- * rather than through the spelling. Measured while writing this gate: the
- * one-line form extracted `[]`; the four below extract all four.
+ * admission, so that declaration extracts to zero hints -- the exact drop
+ * `check:watch-hint-literal` exists for, arrived at through the value rather
+ * than through the spelling. Measured while writing this gate: the one-line
+ * form extracted `[]`; the four below extract all four.
+ *
+ * ⚠️ That drop was SILENT when this gate was written, and is not any more:
+ * `check:watch-hint-literal` now puts every declared literal through the
+ * extractor and reds on one that yields no hint, naming this remedy. So the
+ * one-line form is refused loudly rather than dropped quietly -- retry it and
+ * a gate tells you to enumerate, which is the only part of the cost this
+ * enumeration ever paid twice.
  *
  * ⛔ NOT the workspace-root spelling `check-published-files.mjs` uses
  * (`packages/*`, `apps/*`, …). That declaration is honest THERE -- it walks

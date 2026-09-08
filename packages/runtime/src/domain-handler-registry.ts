@@ -156,6 +156,15 @@ export interface DomainHandlerDeps {
      *  - branded "never registered" (`isServiceNotRegisteredError`, #13905) →
      *    `undefined`, quiet. The supported composition, whose behaviour is
      *    exactly what it was;
+     *  - [#16402] a registry that KNOWS the name and produces no instance for
+     *    the scope you passed → `undefined`, quiet as well. A factory that
+     *    answers `undefined` for a scope has ANSWERED, so this is an absent
+     *    fact and not an unread one — ADR-0093 D4/D5 reads a scope with no
+     *    service the same way it reads a deployment with none. ⚠️ It is a
+     *    DIFFERENT fact from the one above with the same licence, and the
+     *    lookup tells the two apart internally (`HttpDispatcher.classifyService`)
+     *    — it is collapsed HERE because no door needs to act on the difference,
+     *    ⛔ not because they are the same state;
      *  - every other rejection (a factory that threw, a scoped registration
      *    resolved without a scope id, a circular service dependency) →
      *    re-raised, for the gate to answer as an OUTAGE rather than as an
@@ -184,6 +193,15 @@ export interface DomainHandlerDeps {
      * fallback into a manufactured outage for every caller of that door. A
      * rejection out of this method should describe the SERVICE, never the call
      * site's own omission.
+     *
+     * ⭐ [#16402] That last sentence used to be false INSIDE the lookup itself:
+     * having taken your scope, it re-resolved on the request's own kernel
+     * WITHOUT it, so a scoped factory answering `undefined` for your scope came
+     * back as `Scope ID required for scoped service '<name>'` — a rejection
+     * describing an omission that never happened, at a call site that passed
+     * everything it was asked for. The scope now travels with every leg. ⛔ The
+     * `packages/core` wording is untouched, and a caller that really passes no
+     * scope still receives it, which is the one caller it is true about.
      *
      * Untyped by slot on purpose, exactly like `resolveService`'s second
      * overload: its callers address `tenancy`, which has no written

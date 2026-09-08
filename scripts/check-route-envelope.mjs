@@ -254,6 +254,18 @@ const MODULES = {
   // (`runtime/src/domains/share-links.ts`) had always returned.
   'packages/plugins/plugin-sharing/src/share-link-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#15169] The host door. `mountStorageRoutes` composes `/api/v1/storage/*`
+  // onto an HTTP surface the HOST owns, for a hosted kernel that registers no
+  // `http-server` service. It matches the `*-routes.ts` convention and so is
+  // discovered, but it answers nothing itself: it binds the three package-internal
+  // seams and hands the surface to `registerStorageRoutes`, so every body on that
+  // prefix is still written by `storage-routes.ts` above, through the shared pair.
+  // Zero is therefore structural rather than measured-and-hoped: a write site
+  // appearing here would mean the door started building bodies of its own, which is
+  // exactly the review this number exists to force. Declared in the same PR that
+  // created the module so the gap never exists.
+  'packages/services/service-storage/src/mount-storage-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // ── Exempt ──────────────────────────────────────────────────────────────
 
   // A dev-only SSE endpoint (`GET|POST /api/v1/dev/metadata-events`) that closes

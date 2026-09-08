@@ -14,12 +14,21 @@
 // The COMPILE-TIME half — a non-member literal or a `string`-typed value no
 // longer type-checks against the PUBLISHED `Plugin.type` — lives in
 // `packages/rest/src/plugin-type-closed-set.pin.test.ts`, deliberately NOT
-// here: `@objectstack/core` has no `typecheck` script (type-check DEBT ledger
-// entry), so a `@ts-expect-error` in this package is a phantom pin no tsc
-// program a `typecheck` script runs would ever evaluate —
-// `check:type-check-coverage` refuses exactly that. The rest package's
-// `tsconfig.test.json` program is compiled by its `typecheck` script and reads
-// core's BUILT `.d.ts`, so the pin over there guards the published contract.
+// here. The rest package's `tsconfig.test.json` program is compiled by its
+// `typecheck` script and resolves `@objectstack/core` to core's BUILT
+// `dist/index.d.ts`, so the pin over there guards the contract consumers
+// actually resolve.
+//
+// ⚠️ This used to read as though the split were forced — that
+// `@objectstack/core` "has no `typecheck` script (type-check DEBT ledger
+// entry)", making a `@ts-expect-error` here a phantom pin
+// `check:type-check-coverage` refuses. False on this tree: #14613 split a
+// `tsconfig.test.json` out of the build config, `package.json`'s `typecheck`
+// NAMES it (via `check:test-typecheck --project`), and this package holds no
+// DEBT entry. A directive here WOULD be evaluated — against `./types.ts`,
+// this package's own SOURCE. The published `.d.ts` is what those pins are
+// about and only the rest program reads it, which is a reason that outlives
+// any package's script list.
 
 import { describe, it, expect } from 'vitest';
 import { CORE_PLUGIN_TYPES, PluginSchema } from '@objectstack/spec/kernel';

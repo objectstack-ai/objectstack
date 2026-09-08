@@ -48,6 +48,29 @@
  * regeneration, and three independent things enforce it — the pending marker,
  * the `pre-commit` hook, and the `check:*` gates that already run on every PR.
  *
+ * ## Git environment isolation (#16753)
+ *
+ * Git runs this file AS the `merge=os-regen` driver, so `GIT_DIR` /
+ * `GIT_WORK_TREE` / `GIT_INDEX_FILE` are exported into it BY CONSTRUCTION — not
+ * by coincidence — and they outrank `cwd` in every `git` child it spawns. Each
+ * spawn site below is therefore classified, against the boundary
+ * `scripts/git-env.mjs` carries:
+ *
+ *   - a child whose subject is a repository its OWN `cwd` and arguments name —
+ *     the throwaway repos the self-test builds, and the reads against this
+ *     checkout — is spawned with `env: gitFreeEnv()`. Unqualified, that is every
+ *     site here except the three below.
+ *   - a child whose subject is THE MERGE GIT IS CURRENTLY PERFORMING keeps the
+ *     ambient environment, because those variables ARE the question it asks:
+ *     `gitDir()` on the driver path, `isProbeInvocation()`, and the
+ *     `git merge-file` the mixed limb runs. Each carries a ⛔ note at its site,
+ *     and stripping any of them is a behaviour change in the dangerous
+ *     direction, not an isolation.
+ *   - a NETWORK child would keep the ambient environment too (`GIT_CONFIG_*`
+ *     and `GIT_SSL_CAINFO` carry its transport). This file spawns none:
+ *     measured with a control on #16753, zero `fetch` / `clone` / `push` /
+ *     `ls-remote` sites here, non-zero elsewhere under `scripts/`.
+ *
  * ## Usage
  *
  *   node scripts/git-merge-regen.mjs %O %A %B %P   # invoked by git, never by hand
@@ -74,6 +97,7 @@ import {
   ownerRunCommand,
 } from './regen-artifacts.mjs';
 import { blankAnchorLineNumbers } from './doc-line-anchors.mjs';
+import { gitFreeEnv } from './git-env.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
 
 /**
@@ -156,11 +180,19 @@ const MIXED_COMPARATORS = Object.freeze({
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-function gitDir(cwd = process.cwd()) {
+function gitDir(cwd = process.cwd(), env = process.env) {
   // In a linked worktree this resolves to `.git/worktrees/<name>`, which is what
   // we want: the marker is per-worktree, so parallel agents never see each
   // other's pending regenerations.
-  return execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd, encoding: 'utf8' }).trim();
+  //
+  // ⛔ `env` DEFAULTS TO THE AMBIENT ONE, and never to `gitFreeEnv()` (#16753).
+  // On the driver path git has already told this process which repository it is
+  // merging, so the exported `GIT_DIR` IS the answer being asked for; deriving
+  // it from `cwd` instead would write the marker for whatever repository `cwd`
+  // happens to sit in. The THROWAWAY-repo callers pass `gitFreeEnv()`
+  // explicitly, because for them the opposite holds: their `cwd` is a temp
+  // directory and an inherited `GIT_DIR` answers with the real clone's.
+  return execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd, encoding: 'utf8', env }).trim();
 }
 
 /**
@@ -215,6 +247,12 @@ function gitDir(cwd = process.cwd()) {
  */
 function isProbeInvocation(cwd = process.cwd()) {
   try {
+    // ⛔ AMBIENT ENVIRONMENT ON PURPOSE — never `gitFreeEnv()` here (#16753).
+    // The signal is the index git is holding RIGHT NOW, and the table above
+    // names the variable that moves it: `GIT_INDEX_FILE`. Strip it and this
+    // reads `.git/index` while the merge holds a different one, finds no
+    // `.lock`, and answers "probe" for a REAL merge — the asymmetric direction
+    // documented above, the one that drops the deferral's own record.
     const index = resolve(
       cwd,
       execFileSync('git', ['rev-parse', '--git-path', 'index'], { cwd, encoding: 'utf8' }).trim(),
@@ -316,6 +354,11 @@ function deferralIsLossless(entry, ancestorFile, oursFile, theirsFile) {
  */
 function textMergeInPlace(ancestorFile, oursFile, theirsFile) {
   try {
+    // ⛔ AMBIENT ENVIRONMENT ON PURPOSE, and NOT a throwaway-repo spawn (#16753):
+    // the three arguments are the absolute temp paths git handed the driver, and
+    // `merge-file` reads no index and no work tree. It runs only on the driver
+    // path, inside the merge git is already performing, so it keeps that merge's
+    // own configuration — which `gitFreeEnv()` would take from a child of it.
     execFileSync('git', ['merge-file', '-L', 'ours', '-L', 'base', '-L', 'theirs', oursFile, ancestorFile, theirsFile], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -412,7 +455,7 @@ function drive(argv) {
 // ── Why the CALLEE NAME is the battery ──
 //
 // This file has no `selfTest()` entry function and no named section banners:
-// the `--self-test` dispatch at the bottom invokes FOURTEEN named callees, each
+// the `--self-test` dispatch at the bottom invokes FIFTEEN named callees, each
 // printing its own line and returning a boolean. So the roster's unit is the
 // CALLEE, and its label is the one the SOURCE ALREADY CARRIES — the function's
 // own name. Nothing is invented and nothing is judged per comment, and a set
@@ -427,10 +470,10 @@ function drive(argv) {
 // (PR #15271, `check-sdui-manifest`) makes a table row a battery. It does so
 // for a file whose SELF-TEST *is* the table: one literal table, one driving
 // loop over it, and a sink that writes only when a row fails. Here the table is
-// a local of ONE callee among fourteen, its rows are evaluated eagerly into
+// a local of ONE callee among fifteen, its rows are evaluated eagerly into
 // booleans before anything loops, and the callee already reduces them to a
 // single printed verdict of its own. Flooring those rows would floor one
-// callee's internals while the other twelve stayed at callee granularity — a
+// callee's internals while the other thirteen stayed at callee granularity — a
 // roster whose unit changes per entry. The rule: the battery is the unit the
 // DISPATCH names.
 //
@@ -455,6 +498,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   endToEnd: 1,
   endToEndMixed: 1,
   probeLeavesNoMarker: 1,
+  ambientGitEnvIsolation: 1,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -463,7 +507,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // key in the literal above, so the roster falls below this number; the
 // roster ↔ dispatch cross-check in the floor block is the other half, and it
 // names WHICH callee was listed twice.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key a registration is filed under when a callee registers no name at all.
 // It is not a declared battery, so it reds by the same set difference rather
@@ -473,7 +517,7 @@ const UNATTRIBUTED_BATTERY = '(no callee named)';
 // The battery ledger, read by `batteryFloorFailures()` from the dispatch block
 // at the very bottom of this file. It is MODULE-level rather than local to a
 // self-test body because this file HAS no self-test body: the registrations
-// happen inside fourteen separate callees and the floor is read at the dispatch's
+// happen inside fifteen separate callees and the floor is read at the dispatch's
 // verdict site, so the ledger has to outlive every one of those frames.
 //
 // ⚠️ Named for the roster's role, deliberately NOT with a self-test spelling:
@@ -485,7 +529,7 @@ const batterySeen = new Map();
 /**
  * Record that a self-test callee RAN.
  *
- * Called as the FIRST statement of each of the fourteen callees the `--self-test`
+ * Called as the FIRST statement of each of the fifteen callees the `--self-test`
  * dispatch invokes — above any early return, so a callee that bails out early
  * still reports that it ran, and the floor is never met by a frame that
  * returned before doing anything.
@@ -498,7 +542,7 @@ function registerCase(name) {
 /**
  * The floor: every declared callee RAN (#13489).
  *
- * Evaluated at the dispatch's verdict site — after all fourteen callees have had
+ * Evaluated at the dispatch's verdict site — after all fifteen callees have had
  * their chance and immediately before the success line — and reached only from
  * the `--self-test` branch, so a production merge-driver run never reads the
  * ledger at all.
@@ -1030,6 +1074,7 @@ function reconcileUntrackedDispositions() {
     const tracked = execFileSync('git', ['ls-files', '--', spec], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
+      env: gitFreeEnv(),
     }).trim();
     if (tracked) wrong.push(`${e.path} — declared untracked, but git tracks ${tracked.split('\n').length} file(s)`);
   }
@@ -1062,12 +1107,14 @@ function reconcileAttributeSemantics() {
   const tracked = execFileSync('git', ['ls-files', '-z'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
+    env: gitFreeEnv(),
     maxBuffer: 64 * 1024 * 1024,
   }).split('\u0000').filter(Boolean);
 
   const attrs = execFileSync('git', ['check-attr', '-z', 'merge', '--stdin'], {
     cwd: REPO_ROOT,
     encoding: 'utf8',
+    env: gitFreeEnv(),
     input: tracked.map((t) => t + '\u0000').join(''),
     maxBuffer: 64 * 1024 * 1024,
   }).split('\u0000');
@@ -1159,6 +1206,7 @@ function hookIsExecutable() {
     const mode = execFileSync('git', ['ls-files', '-s', '.githooks/pre-commit'], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
+      env: gitFreeEnv(),
     }).trim().split(/\s+/)[0];
     if (mode !== '100755') {
       return fail(`.githooks/pre-commit is mode ${mode || '<untracked>'} in the index, not 100755.\n`
@@ -1199,6 +1247,7 @@ function registeredDriverResolves() {
     actual = execFileSync('git', ['config', '--get', key], {
       cwd: REPO_ROOT,
       encoding: 'utf8',
+      env: gitFreeEnv(),
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -1261,9 +1310,19 @@ function expandDriverScript(value) {
   if (!expr) return { skip: `not a \`node <script>\` command: "${value}"` };
   try {
     return {
+      /* ⚠️ AN INDIRECT `git` SPAWN, and the one a `'git'` text probe does not
+       * find (#16753): the registered value expands `$(git rev-parse
+       * --show-toplevel)`, so the shell runs a `git` child of its own. Its
+       * subject is THIS clone -- the whole point of this check is to read the
+       * live registration HERE -- so it takes `gitFreeEnv()` like the other
+       * reads against this checkout. Without it, an inherited GIT_WORK_TREE
+       * expands to whatever repository the ambient environment names and the
+       * check reports this clone's driver as missing. Measured that way while
+       * this card's isolation battery was being written. */
       path: execFileSync('sh', ['-c', `printf '%s' ${expr}`], {
         cwd: REPO_ROOT,
         encoding: 'utf8',
+        env: gitFreeEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
       }).trim(),
     };
@@ -1293,7 +1352,7 @@ function realpath(p) {
 function endToEnd() {
   registerCase('endToEnd');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-selftest-'));
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     git('init', '-q', '--initial-branch=main', '.');
     git('config', 'user.email', 'selftest@objectstack.ai');
@@ -1327,7 +1386,7 @@ function endToEnd() {
     if (/^<{7}|^={7}$|^>{7}/m.test(merged)) return fail(`self-test: conflict markers survived in ${target}`);
     if (git('status', '--porcelain').match(/^(UU|AA)/m)) return fail('self-test: path left conflicted after merge');
 
-    const marker = join(gitDir(dir), PENDING_MARKER);
+    const marker = join(gitDir(dir, gitFreeEnv()), PENDING_MARKER);
     if (!existsSync(marker)) return fail(`self-test: no pending marker written at ${marker}`);
     if (!readFileSync(marker, 'utf8').includes(target)) return fail(`self-test: ${target} absent from the pending marker`);
 
@@ -1414,7 +1473,7 @@ function endToEndMixed() {
 
   const run = (theirs, label) => {
     const dir = mkdtempSync(join(tmpdir(), 'os-regen-mixed-'));
-    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     try {
       git('init', '-q', '--initial-branch=main', '.');
       git('config', 'user.email', 'selftest@objectstack.ai');
@@ -1491,7 +1550,7 @@ function endToEndMixed() {
 function probeLeavesNoMarker() {
   registerCase('probeLeavesNoMarker');
   const dir = mkdtempSync(join(tmpdir(), 'os-regen-probe-'));
-  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', env: gitFreeEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     git('init', '-q', '--initial-branch=main', '.');
     git('config', 'user.email', 'selftest@objectstack.ai');
@@ -1515,13 +1574,13 @@ function probeLeavesNoMarker() {
     writeFileSync(join(dir, target), '["base","ours"]\n');
     git('commit', '-qam', 'ours');
 
-    const marker = join(gitDir(dir), PENDING_MARKER);
+    const marker = join(gitDir(dir, gitFreeEnv()), PENDING_MARKER);
 
     // ── Leg 1: the probe ──
     // `spawnSync`, not `execFileSync`: the driver's notice goes to stderr, and it
     // is wanted on the SUCCESS path (merge-tree exits 0 when the driver resolves),
     // where `execFileSync` discards it.
-    const probe = spawnSync('git', ['merge-tree', '--write-tree', 'main', 'incoming'], { cwd: dir, encoding: 'utf8' });
+    const probe = spawnSync('git', ['merge-tree', '--write-tree', 'main', 'incoming'], { cwd: dir, encoding: 'utf8', env: gitFreeEnv() });
     if (!`${probe.stderr ?? ''}`.includes('not text-merged — it is generated')) {
       return fail(
         'self-test: the merge-tree probe never reached the driver, so "no marker" proves nothing.\n'
@@ -1556,9 +1615,146 @@ function probeLeavesNoMarker() {
   }
 }
 
+/* The recursion fuse for `ambientGitEnvIsolation` below. The probe re-enters
+ * this file's own `--self-test`, and the inner run must not re-enter it again.
+ *
+ * ⛔ Deliberately NOT a `GIT_`-prefixed name: `gitFreeEnv()` strips every one of
+ * those, so a `GIT_`-spelled fuse would be blown open by the very call this
+ * battery exists to verify — and the probe would recurse until the box ran out.
+ */
+const AMBIENT_ISOLATION_FUSE = 'OS_REGEN_AMBIENT_ISOLATION_INNER';
+
+/**
+ * ⭐ The throwaway repositories this file builds must be isolated from the
+ * AMBIENT one (#16753 — Tier A of #16644; the incident is #16624).
+ *
+ * Git runs this file AS the `merge=os-regen` driver, so `GIT_DIR` /
+ * `GIT_WORK_TREE` / `GIT_INDEX_FILE` are exported into it BY CONSTRUCTION, and
+ * they outrank `cwd` in every `git` child it spawns. A `git init` / `git config`
+ * / `git add` aimed at a temp directory therefore lands on the REAL repository.
+ * Measured, on this box: 8,190 paths staged as deleted in the shared index and
+ * `core.bare = true` written into the `.git/config` every linked worktree reads,
+ * from a self-test that printed `ok` throughout.
+ *
+ * ⛔ THE STAND-IN IS DISPOSABLE AND MUST STAY THAT WAY. Pointing these variables
+ * at the checkout this file lives in would not TEST the incident, it would BE
+ * the incident — for every agent sharing the clone. A throwaway repository
+ * demonstrates the property just as well: what is under test is that an ambient
+ * `GIT_DIR` outranks `cwd`, and any real repository shows that.
+ *
+ * The probe re-enters the WHOLE `--self-test` rather than one helper, because
+ * the property is a property of every spawn site at once, and a per-site
+ * assertion is exactly the thing a new spawn site can be added without.
+ *
+ * ⚠️ MEASURED, and the reason the fingerprint is not the index alone: with all
+ * three variables set, git resolves the work tree to the stand-in, so `git add
+ * -A` re-adds the stand-in's OWN files and the index comes back unchanged —
+ * `scripts/git-env.mjs` records the same asymmetry. What moves under all three
+ * is the CONFIG (`git config user.email …` in a throwaway repo writes the
+ * stand-in's config) and, once the fixture commits, its refs and HEAD. So the
+ * fingerprint is config + index + refs + HEAD, and a leak has to move none of
+ * them.
+ */
+function ambientGitEnvIsolation() {
+  registerCase('ambientGitEnvIsolation');
+  if (process.env[AMBIENT_ISOLATION_FUSE]) {
+    console.log('✓ ambient-git-env isolation: inner run — the outer run is the probe');
+    return true;
+  }
+
+  const standIn = mkdtempSync(join(tmpdir(), 'os-regen-standin-'));
+  const elsewhere = mkdtempSync(join(tmpdir(), 'os-regen-elsewhere-'));
+  try {
+    const standInGit = (...args) => execFileSync('git', args, {
+      cwd: standIn,
+      encoding: 'utf8',
+      env: gitFreeEnv(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    standInGit('init', '-q', '--initial-branch=main', '.');
+    standInGit('config', 'user.email', 'stand-in@objectstack.invalid');
+    standInGit('config', 'user.name', 'os-regen stand-in');
+    writeFileSync(join(standIn, 'tracked.txt'), 'the file the stand-in tracks\n');
+    standInGit('add', '-A');
+    standInGit('commit', '-qm', 'the commit the stand-in would lose');
+    const standInGitDir = standInGit('rev-parse', '--absolute-git-dir').trim();
+
+    const leaky = {
+      ...process.env,
+      GIT_DIR: standInGitDir,
+      GIT_WORK_TREE: standIn,
+      GIT_INDEX_FILE: join(standInGitDir, 'index'),
+      [AMBIENT_ISOLATION_FUSE]: '1',
+    };
+
+    /* ── The firing control, and it is the case that matters ──
+     * "The stand-in is untouched" is also what an environment that never
+     * reached the child produces. So before any verdict is read out of the
+     * fingerprint, a plain `git` child spawned in an UNRELATED directory has to
+     * answer with the stand-in's git dir — i.e. the leak is live, here, now. */
+    const seen = realpath(execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      cwd: elsewhere,
+      encoding: 'utf8',
+      env: leaky,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim());
+    if (seen !== realpath(standInGitDir)) {
+      return fail(
+        'self-test: the leaked git environment never reached the child, so "the stand-in is\n'
+          + '  untouched" would prove nothing about isolation.\n'
+          + `  a git child run in ${elsewhere} answered ${seen}, expected ${realpath(standInGitDir)}`,
+      );
+    }
+
+    const fingerprint = () => JSON.stringify({
+      config: readFileSync(join(standInGitDir, 'config'), 'utf8'),
+      index: standInGit('ls-files'),
+      refs: standInGit('for-each-ref', '--format=%(refname) %(objectname)'),
+      head: readFileSync(join(standInGitDir, 'HEAD'), 'utf8'),
+    }, null, 1);
+
+    const before = fingerprint();
+    const inner = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--self-test'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      env: leaky,
+    });
+    const after = fingerprint();
+
+    if (after !== before) {
+      return fail(
+        'self-test: ⛔ a `--self-test` run under an ambient GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE\n'
+          + '  WROTE THE REPOSITORY THOSE VARIABLES NAME. On the shared checkout that is #16624:\n'
+          + '  8,190 paths staged as deleted and core.bare=true in the config every worktree reads.\n'
+          + '  Every throwaway-repo `git` child owes `gitFreeEnv()` from scripts/git-env.mjs.\n'
+          + `  stand-in BEFORE: ${before}\n`
+          + `  stand-in AFTER:  ${after}`,
+      );
+    }
+    if (inner.status !== 0) {
+      return fail(
+        `self-test: the inner --self-test exited ${inner.status} under a leaked git environment.\n`
+          + '  The stand-in is byte-identical, so this is not the leak — it is the run itself failing.\n'
+          + `  ${`${inner.stdout ?? ''}${inner.stderr ?? ''}`.trim().split('\n').slice(-14).join('\n  ')}`,
+      );
+    }
+
+    console.log(
+      '✓ ambient-git-env isolation: a full --self-test under a leaked GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE'
+        + ' left the disposable stand-in repository byte-identical (config, index, refs, HEAD)',
+    );
+    return true;
+  } catch (err) {
+    return fail(`self-test: ${err?.stderr?.toString() || err?.message || err}`);
+  } finally {
+    rmSync(standIn, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+}
+
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
-  // The fourteen callees as a literal LIST rather than fourteen bare calls, so the
+  // The fifteen callees as a literal LIST rather than fifteen bare calls, so the
   // names this block invokes are data the floor below can cross-check the
   // roster against, in both directions. The names are read off the function
   // declarations themselves (`fn.name`), so a renamed callee moves this list
@@ -1578,6 +1774,7 @@ if (process.argv.includes('--self-test')) {
     endToEnd,
     endToEndMixed,
     probeLeavesNoMarker,
+    ambientGitEnvIsolation,
   ];
   const results = callees.map((run) => run());
 
