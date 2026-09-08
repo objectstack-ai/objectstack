@@ -406,8 +406,24 @@ describe('#16702 criterion 4 — the `object` branch is correct today and STAYS 
         const s1 = await boot(driver);
         await s1.protocol.saveMetaItem({
             type: 'object', name: 'pet_visit', packageId: PKG,
-            item: { ...objectBody('Pet Visit'), _packageId: PKG, _provenance: 'package' },
+            item: {
+                ...objectBody('Pet Visit'),
+                _packageId: PKG, _packageVersion: '1.0.0', _provenance: 'package',
+            },
         });
+
+        // Door 1's strip runs BEFORE `saveMetaItem`'s type branch, so its scope
+        // is type-AGNOSTIC: an `object` body loses the same three keys at rest.
+        // Pinned here rather than implied — the `_provenance: 'org'` read below
+        // comes from door 2's restatement and would stay green on its own even
+        // if the strip had skipped `object`.
+        const seededRows = await s1.engine.find('sys_metadata', { where: { type: 'object', name: 'pet_visit' } });
+        const seededObject = JSON.parse(String((seededRows[0] as any).metadata));
+        expect(seededObject).not.toHaveProperty('_packageId');
+        expect(seededObject).not.toHaveProperty('_packageVersion');
+        expect(seededObject).not.toHaveProperty('_provenance');
+        // …and nothing else was taken with them.
+        expect(seededObject).toMatchObject({ name: 'pet_visit', label: 'Pet Visit' });
 
         const s2 = await boot(driver);
         expect(await s2.protocol.loadMetaFromDb()).toMatchObject({ loaded: 1, errors: 0 });
