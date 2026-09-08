@@ -769,8 +769,11 @@ function assert(cond, msg) { if (!cond) { console.error(`❌ symbol-anchors --se
 // to find what stopped registering.
 // 63 → 67 when `declinedShape` gained a case per arm (#15809).
 // 67 → 69 when the sweep's git child gained an explicit environment (#16624).
+// 69 → 93 when the member-modifier spellings gained a case EACH, every one of
+//         them paired with its own negative control, after `override` was found
+//         missing from the hand-enumerated accept set (#16821).
 const SELF_TEST_BATTERIES = Object.freeze({
-  'symbol-anchors self-test': 69,
+  'symbol-anchors self-test': 93,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
