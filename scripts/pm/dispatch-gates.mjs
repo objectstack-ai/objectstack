@@ -503,6 +503,124 @@ const maskedComments = memoiseMask((source) => maskComments(source));
  */
 const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(source)));
 
+/**
+ * ── The `#` half of the same discipline, for the file kind the follow already
+ *    admits (#16132) ───────────────────────────────────────────────────────
+ *
+ * `maskedModuleBody` reads line comments, block comments and a shebang, because every
+ * caller it was written for is JavaScript. `PROGRAM_TEXT_TARGET` admits a THIRD
+ * kind, and a shell script's prose is none of those three: on a `.sh` source every
+ * path a `#` comment mentions came back as a watch hint, because the JS-shaped
+ * literal regex reads a backticked path in prose as a template literal and a
+ * double-quoted one as a string. Measured on `be92d46`, over the 27 tracked
+ * `.sh` files: 37 hints as spelled, 8 once `#` comments are masked, and 8 of the
+ * 16 files that spell any hint at all had a population that was 100% prose.
+ * `scripts/bump-objectui.sh` was the sharpest — 7 hints, every one of them
+ * inside a `#` comment or an `echo` line.
+ *
+ * That is the one direction this file refuses everywhere else, stated twice next
+ * door: `spawnedProgramTargets` takes a missing lead over a fabricated one, and
+ * `readProgramTargetsInSource` blanks comments so a docblock naming a gate is
+ * not a read of it. Hint extraction paid for neither, for this kind.
+ *
+ * ## Why this is a per-LINE recogniser and not a shell parser
+ *
+ * A `#` opens a comment only at the start of a WORD, and only outside quotes —
+ * so `$#`, `${#a}`, `a#b` and a `#` inside `'…'` or `"…"` are not comment
+ * starts, and a naive blank-from-`#`-to-end-of-line corrupts exactly the lines
+ * worth reading. Quote tracking is therefore real, and it is where the cost of
+ * being WRONG is unbounded: one unbalanced quote silently disables the mask for
+ * the whole REST of the file, which is the fabricating direction.
+ *
+ * A flat scanner cannot keep shell's quoting straight, and the measurement is
+ * not marginal. Command substitution restarts quoting — `"$(printf '%s' "$x")"`
+ * is balanced in shell and reads as three separate spans to a scanner that does
+ * not model `$( … )` — and a here-string `<<<` looks like a here-doc introducer
+ * to anything that matches `<<` first. A cross-line implementation of both was
+ * built and measured on this tree before this one: it left 1,467 comment lines
+ * unmasked in `scripts/pm/os-verify-lock.sh` alone and 8 in
+ * `scripts/release-spec-changes.sh`, where the two surviving hints were the
+ * prose ones this card is about.
+ *
+ * ⇒ quote state is LINE-SCOPED: it opens and dies on its own line, and nothing
+ * is carried across a newline. Every misreading is then bounded to the line it
+ * is on, and the residue lands in the OVER-masking direction — a multi-line
+ * quoted string or a here-doc body whose line begins with `#` is masked as if
+ * it were a comment. That is a missing lead, on text that is data rather than a
+ * path the script opens, and it is the direction this file errs in everywhere.
+ * ⛔ Do not "fix" it into carried state: that trades a bounded over-mask for the
+ * unbounded under-mask measured above.
+ *
+ * Same projection as `blank` next door — spans become spaces, newlines and byte
+ * offsets survive — so this composes onto `maskedModuleBody`'s output rather
+ * than replacing it. The order is measured too, and it is the one that cannot
+ * widen: masking `#` FIRST stops a `#` comment containing `@objectstack/*` from
+ * opening a phantom JS block comment, which UNCOVERS code below it and adds
+ * hints (2 on this tree — `scripts/downstream-smoke.sh` and
+ * `.claude/hooks/guard-tree-enum.sh`). Masking `#` LAST can only blank more of
+ * an already-masked body, so the shell hint set is a subset of today's by
+ * construction.
+ */
+const SHELL_WORD_START = /[\s;&|()<>]/;
+
+function shellCommentSpans(source) {
+  const n = source.length;
+  const comment = new Uint8Array(n);
+  let quote = '';
+  // The character before the cursor, as the WORD rule sees it. A newline reads
+  // as a word boundary, so a `#` in column 0 is a comment start.
+  let prev = '\n';
+  let i = 0;
+  while (i < n) {
+    const ch = source[i];
+    if (ch === '\n') {
+      quote = '';
+      prev = '\n';
+      i++;
+      continue;
+    }
+    if (quote) {
+      // A backslash escapes inside `"…"` and is literal inside `'…'`.
+      if (quote === '"' && ch === '\\' && i + 1 < n && source[i + 1] !== '\n') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) quote = '';
+      i++;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < n && source[i + 1] !== '\n') {
+      prev = 'x';
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      prev = 'x';
+      i++;
+      continue;
+    }
+    if (ch === '#' && SHELL_WORD_START.test(prev)) {
+      while (i < n && source[i] !== '\n') comment[i++] = 1;
+      continue;
+    }
+    prev = ch;
+    i++;
+  }
+  return comment;
+}
+
+/**
+ * The source with its `#` COMMENT spans blanked — the shell counterpart of
+ * `maskComments`, and the same projection: spaces in, newlines and offsets kept.
+ */
+export function maskShellComments(source) {
+  return blank(String(source), shellCommentSpans(String(source)));
+}
+
+/** `maskShellComments(maskedModuleBody(source))`, memoised — see the block above. */
+const maskedHashCommentBody = memoiseMask((source) => maskShellComments(maskedModuleBody(source)));
+
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
 // This module is importable and is NOT a discovered gate file — `check:pm-dispatch-gates`
@@ -4678,7 +4796,18 @@ function exclusionDeclSpans(moduleBody) {
  * have to remember to do it.
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
-  const moduleBody = maskedModuleBody(scriptSource);
+  // The `#` mask is KIND-scoped, so it is reached through the path rather than
+  // sniffed out of the bytes. A caller with no `scriptPath` therefore keeps the
+  // JS-only mask over a shell source, and that direction is the one this
+  // parameter fails in the OTHER way from everything else in this function: a
+  // forgotten path is a missing lead for the resolve below, and a FABRICATED
+  // one here. Both live callers pass it (`discoverFamilies`, twice); the
+  // pathless overload is the self-test's and `declaredInheritedPopulation`'s
+  // own fallback, and a shell module that declared an inherited population
+  // would be held to the path-aware set that `discoverFamilies` computes.
+  const moduleBody = hashCommentProgram(scriptPath)
+    ? maskedHashCommentBody(scriptSource)
+    : maskedModuleBody(scriptSource);
   const exclusions = exclusionDeclSpans(moduleBody);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
@@ -7371,6 +7500,27 @@ const SOURCE_READ_CALL = /\b(?:fs\.)?(?:readFileSync|copyFileSync)\s*\(/g;
 
 /** Program text, as opposed to data a gate parses — see the docblock above. */
 export const PROGRAM_TEXT_TARGET = /\.(?:[cm]?[jt]sx?|sh)$/;
+
+/**
+ * Program text this file's JS masker cannot read — derived from the other two
+ * kind tests rather than listed, so it cannot drift away from them (#16132).
+ *
+ * `PROGRAM_TEXT_TARGET` decides which kinds a population follow may reach;
+ * `SCANNED_SOURCE_EXTENSIONS` names the JS/TS half `maskedModuleBody` was
+ * written for. The remainder is the half whose comment syntax that masker does
+ * not know, and today it is exactly `.sh`. Spelling it as the DIFFERENCE means a
+ * kind added to the follow arrives already masked: the widening that admits it
+ * is the same edit that routes it here. A kind whose comments are not `#`
+ * would be over-masked by that default, which is a missing lead rather than a
+ * fabricated one — the direction the two scans next door both state.
+ */
+function hashCommentProgram(scriptPath) {
+  return (
+    typeof scriptPath === 'string'
+    && PROGRAM_TEXT_TARGET.test(scriptPath)
+    && !SCANNED_SOURCE_EXTENSIONS.test(scriptPath)
+  );
+}
 
 /**
  * The program files, of the tracked files a gate opens at an anchored path.
