@@ -15554,7 +15554,10 @@ async function selfTest() {
   t('H8 open: …and the merged half too', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('#10004'), true);
   t('H8 open: …and counts them, N of M', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('1 of 2'), true);
   // A draft open half is the specimen's own shape — never filtered out.
-  t('H8 open: …and marks the open half as a draft', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('(draft)'), true);
+  // The parenthetical carries the delivery EVIDENCE beside the draft marker
+  // since #16706, so the marker is pinned with its trailing comma rather than
+  // its old closing paren — still "is this row marked a draft", one spelling on.
+  t('H8 open: …and marks the open half as a draft', halvesRow([openHalf(10226, 'Part of #9834', true)]).includes('(draft,'), true);
   t('H8 open: a NON-draft open half counts identically', typeof halves([openHalf(10226, 'Part of #9834', false)]), 'string');
 
   // …and the row it replaces is unchanged whenever every deliverer HAS merged —
@@ -15596,6 +15599,102 @@ async function selfTest() {
     halvesRow([{ number: 10226, body: 'Part of #9834', merged_at: '2026-08-20T00:00:00Z' }]).includes('Drop `pm:dispatched`'),
     true,
   );
+
+  // -- #16706: every delivery row states the EVIDENCE it rests on -----------
+  //
+  // ★ Specimen — objectui PR #8354, whose body opened `Fixes #7760` and whose
+  // "Serial constraints" section carried the accounting sentence below about a
+  // DIFFERENT card (#7918, which had its own separate PR). `partOfTargets`
+  // matched the token sequence, so five readers were told #8354 delivered
+  // #7918, and `check-clause2-carriers` emitted a C1 row whose text tells the
+  // reader a live fail-open is in front of them.
+  //
+  // ⚖️ Two-sided, and BOTH sides are the reading: one side alone cannot tell
+  // "fixed" from "changed to never report". The relation is deliberately
+  // UNCHANGED — the prose match still reports a delivery — so what the two
+  // sides pin here is the EVIDENCE the row now prints, plus the control that
+  // deleting the sentence still removes the pair entirely.
+  const PROSE_8354 =
+    'Note that **part of #7918** already landed as `4f9f1ee` (PR #8226, memoising two of ' +
+    'the lazy getters); this PR does not touch the getters.';
+  const body8354 = `Fixes #7760\n\n## Serial constraints\n\n- ${PROSE_8354}\n`;
+  const clean8354 = 'Fixes #7760\n\n## Serial constraints\n\n';
+  const pr8354 = (body) => ({ number: 8354, body, draft: true, merged_at: null, head: { ref: 'claude/issue-7760-lazy-mirror-input-type-args' } });
+
+  t('#16706 specimen: the prose sentence still reports a delivery — the relation is NOT narrowed', prDeliversCard(pr8354(body8354), '7918'), true);
+  t('#16706 specimen: …and the row can now say the match was not at the declaration position', deliveryEvidence(pr8354(body8354), '7918'), 'part-of-inline');
+  // CONTROL — same body, that ONE sentence deleted, nothing else changed.
+  t('#16706 control: deleting the sentence removes the pair entirely', prDeliversCard(pr8354(clean8354), '7918'), false);
+  t('#16706 control: …and there is no evidence to report either', deliveryEvidence(pr8354(clean8354), '7918'), null);
+  // NEGATIVE — the real relation on the same body, in the same run, unmoved.
+  t('#16706 negative: `Fixes #7760` still parses on the specimen body', prDeliversCard(pr8354(body8354), '7760'), true);
+  t('#16706 negative: …and is graded as the strongest evidence there is', deliveryEvidence(pr8354(body8354), '7760'), 'closing-keyword');
+  t('#16706 negative: …in the control body too', deliveryEvidence(pr8354(clean8354), '7760'), 'closing-keyword');
+  // NEGATIVE — a real line-leading declaration keeps delivering, and is graded
+  // as the declaration it is.
+  t('#16706 negative: a line-leading `Part of #7918` still delivers', prDeliversCard({ number: 1, body: 'Part of #7918' }, '7918'), true);
+  t('#16706 negative: …and is graded `part-of`, not the inline kind', deliveryEvidence({ number: 1, body: 'Part of #7918' }, '7918'), 'part-of');
+  t('#16706 negative: a list-item declaration is the declaration position too', deliveryEvidence({ number: 1, body: '- Part of #7918' }, '7918'), 'part-of');
+  t('#16706 negative: …and a blockquoted one', deliveryEvidence({ number: 1, body: '> Part of #7918' }, '7918'), 'part-of');
+  t('#16706 negative: …and a bold-wrapped one', deliveryEvidence({ number: 1, body: '**Part of #7918**' }, '7918'), 'part-of');
+  // ⛔ A closing keyword is graded FIRST: a stray inline `part of #N` beside a
+  // real `Fixes #N` must not make the row read as unattributed.
+  t('#16706: a closing keyword outranks an inline `Part of` for the SAME card', deliveryEvidence({ number: 1, body: 'Fixes #7918\n\nsee part of #7918 above' }, '7918'), 'closing-keyword');
+  // The branch-name fallback is named as the weak channel it is.
+  t('#16706: the branch-name fallback is graded as such', deliveryEvidence({ number: 1, body: 'no declaration here', head: { ref: 'claude/issue-9834-x' } }, '9834'), 'branch-name');
+  t('#16706: a body that spoke about ANOTHER card still overrules the branch name', deliveryEvidence({ number: 1, body: 'Part of #9999', head: { ref: 'claude/issue-9834-x' } }, '9834'), null);
+
+  // ⭐ The anti-drift invariant: the boolean IS the evidence being non-null, so
+  // the two can never be edited apart. Driven over every fixture above.
+  for (const [label, row, card] of [
+    ['specimen prose', pr8354(body8354), '7918'],
+    ['specimen control', pr8354(clean8354), '7918'],
+    ['specimen closing keyword', pr8354(body8354), '7760'],
+    ['line-leading declaration', { number: 1, body: 'Part of #7918' }, '7918'],
+    ['branch fallback', { number: 1, body: '', head: { ref: 'claude/issue-9834-x' } }, '9834'],
+    ['re-scoped branch', { number: 1, body: 'Part of #9999', head: { ref: 'claude/issue-9834-x' } }, '9834'],
+  ]) {
+    t(`#16706 invariant (${label}): prDeliversCard === (deliveryEvidence !== null)`, prDeliversCard(row, card), deliveryEvidence(row, card) !== null);
+  }
+
+  // -- #16706: the kind reaches each of the FIVE readers' printed rows -------
+  // The docblock on `prDeliversCard` enumerates them; every one gets a reading.
+
+  // READER 1 — H8's OPEN side.
+  const openInline = { number: 8354, body: body8354, draft: true, merged_at: null };
+  const h8Inline = String(h8MergedPrStillDispatched(dispatched(7918), [mergedPr(1, 'Part of #7918')], [openInline]) ?? '');
+  t('#16706 reader H8-open: an inline-sourced open half says so in the row', h8Inline.includes('#8354 (draft, ⚠️ via `Part of` NOT at the declaration position'), true);
+  // READER 2 — H8's MERGED side, through `prFullyDeliversCard`.
+  const h8Merged = String(h8MergedPrStillDispatched(dispatched(7918), [mergedPr(8354, body8354)], []) ?? '');
+  t('#16706 reader prFullyDeliversCard: the merged side still fires on the inline match', h8Merged.includes('#8354'), true);
+  t('#16706 reader prFullyDeliversCard: …and the merged row states the evidence beside the date', h8Merged.includes('⚠️ via `Part of` NOT at the declaration position'), true);
+  t('#16706 reader prFullyDeliversCard: …while a closing keyword prints the strong phrase', String(h8MergedPrStillDispatched(dispatched(7760), [mergedPr(8354, body8354)], []) ?? '').includes('via a closing keyword'), true);
+  // READER 3 — H31's carrier comparison.
+  const h31Card = { ...issue([]), number: 7918, state: 'open' };
+  const h31Pr = { number: 8354, body: body8354, draft: true, merged_at: null, labels: [{ name: CONTRACT_REVIEW_LABEL }] };
+  const h31Row = String(h31ContractReviewCarrierSplit(h31Card, [h31Pr]) ?? '');
+  t('#16706 reader H31: the split row still fires', h31Row.length > 0, true);
+  t('#16706 reader H31: …and names the evidence the pairing rests on', h31Row.includes('#8354 (draft, ⚠️ via `Part of` NOT at the declaration position'), true);
+  // READER 4 — `claimDelivery`. Its only consumer (H27) fires on ZERO delivery,
+  // so the count's whole effect is to SUPPRESS a row; the kinds ride on the
+  // return shape, which is the only surface it has.
+  const cd = claimDelivery(7918, [openInline], []);
+  t('#16706 reader claimDelivery: the count is unchanged', cd.open, 1);
+  t('#16706 reader claimDelivery: …and the suppression is attributable', cd.evidence[0].kind, 'part-of-inline');
+  t('#16706 reader claimDelivery: …naming the PR it came from', cd.evidence[0].pr, 8354);
+  t('#16706 reader claimDelivery: a merged delivery is attributed too', claimDelivery(7760, [], [mergedPr(8354, body8354)]).evidence[0].kind, 'closing-keyword');
+  // READER 5 is `derivePairs`/C1, which lives in `check-clause2-carriers.mjs`
+  // and is pinned in that file's own self-test.
+
+  // -- #16706: the `Refs` axis — the reading the ruling asked for -----------
+  // The hole is OPEN on this axis too: `refsRe` is documented as "same
+  // strictness as `partOfRe`" and shares its shape, so an ordinary sentence
+  // reaches `refsTargets` exactly as the accounting sentence reached
+  // `partOfTargets`. It is reported rather than narrowed — same corpus
+  // discipline, and narrowing one of the two would break the symmetry their
+  // docblocks assert.
+  t('#16706 Refs axis: a prose `refs #N` is matched, exactly as `part of #N` is', refsTargets('The cleanup that refs #9999 already landed upstream.').has('9999'), true);
+  t('#16706 Refs axis: …and the protocol declaration still reads its item', refsTargets('Refs #9999 (item 2)').get('9999'), 'item 2');
 
   // -- H22: a CLOSED card still carrying a `pm:*` state label (#10688) -------
   const closedCard = (labels, state_reason = 'completed') => ({
@@ -18447,7 +18546,7 @@ async function selfTest() {
   const bare = gatePr(11844, ['documentation', 'size/l', 'tests']);
   const gated = gatePr(11844, ['documentation', 'size/l', CONTRACT_REVIEW_LABEL]);
   t('H31: gated card + a bare delivering PR -> finding', typeof h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL, 'pm:dispatched']), [bare]), 'string');
-  t('H31: …and it names the PR that is missing the carrier', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), '#11844 (draft)'), true);
+  t('H31: …and it names the PR that is missing the carrier', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), '#11844 (draft,'), true);
   t('H31: …and names both failure routes (hang never reached / PASS stopped half way)', says(h31ContractReviewCarrierSplit(gateCard([CONTRACT_REVIEW_LABEL]), [bare]), 'already passed'), true);
   t('H31: bare card + a gated delivering PR -> finding', typeof h31ContractReviewCarrierSplit(gateCard(['pm:dispatched']), [gated]), 'string');
   t('H31: …and calls that the more dangerous half', says(h31ContractReviewCarrierSplit(gateCard([]), [gated]), 'more dangerous half'), true);
@@ -18487,7 +18586,7 @@ async function selfTest() {
     labels: ['documentation', 'size/l', 'dependencies', 'tests', 'tooling'].map((name) => ({ name })),
   };
   t('H31 live: #11427 gated while its delivering PR #11844 is not -> finding', typeof h31ContractReviewCarrierSplit(live11427, [live11844]), 'string');
-  t('H31 live: …and the row names the PR', says(h31ContractReviewCarrierSplit(live11427, [live11844]), '#11844 (draft)'), true);
+  t('H31 live: …and the row names the PR', says(h31ContractReviewCarrierSplit(live11427, [live11844]), '#11844 (draft,'), true);
   // …and #10025, the other live carrier: gated, `pm:blocked`, no open PR at
   // all — the shape this row deliberately does NOT report.
   t('H31 live: #10025 (gated, no PR carrier yet) -> clean', h31ContractReviewCarrierSplit({ ...gateCard(['domain:services', 'pm:blocked', CONTRACT_REVIEW_LABEL]), number: 10025 }, [live11844]), null);

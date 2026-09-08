@@ -2301,6 +2301,40 @@ export function selfTest() {
   t('a PR body naming another card does NOT pair on a stale branch name', derivePairs([prRow(13910, 9999, 'claude/issue-13476-x')], [13476]).length === 0);
   t('a branch name is the fallback when the body says nothing', derivePairs([{ number: 1, labels: [], body: 'no refs here', head: { ref: 'claude/issue-13476-x' } }], [13476]).length === 1);
 
+  // -- #16706: the pair carries the EVIDENCE it was derived from -------------
+  //
+  // ★ The measured specimen — objectui PR #8354, whose "Serial constraints"
+  // section said 「part of #7918 already landed …」 about a DIFFERENT card with
+  // its own separate PR. The pair below is the one this file derived from that
+  // sentence, and the C1 row it emitted told the reader a live fail-open was in
+  // front of them. The relation is unchanged, so the pair is still derived —
+  // what changed is that the row now says what it was built from.
+  const PROSE_8354 =
+    'Note that **part of #7918** already landed as `4f9f1ee` (PR #8226, memoising two of ' +
+    'the lazy getters); this PR does not touch the getters.';
+  const body8354 = `Fixes #7760\n\n## Serial constraints\n\n- ${PROSE_8354}\n`;
+  const pr8354 = { number: 8354, draft: true, labels: [], body: body8354, head: { ref: 'claude/issue-7760-lazy-mirror-input-type-args' } };
+
+  const inlinePair = derivePairs([pr8354], [7918]);
+  t('#16706: the prose sentence still derives the pair — the relation is NOT narrowed here', inlinePair.length === 1);
+  t('#16706: …and the pair records that the match was not at the declaration position', inlinePair[0]?.evidence === 'part-of-inline');
+  const keywordPair = derivePairs([pr8354], [7760]);
+  t('#16706: the real `Fixes` relation on the same body is graded as the strong channel', keywordPair[0]?.evidence === 'closing-keyword');
+  // CONTROL — the same body with that ONE sentence deleted derives nothing.
+  t('#16706 control: deleting the sentence removes the pair entirely', derivePairs([{ ...pr8354, body: 'Fixes #7760\n\n## Serial constraints\n\n' }], [7918]).length === 0);
+
+  // …and the C1 row PRINTS it — the row the card was filed about.
+  const c1Inline = c1CarrierSplit({ ...inlinePair[0], prLabels: [CONTRACT_REVIEW_LABEL], cardLabels: [], cardComments: [CLAIM('Clause-②: yes')] });
+  t('#16706: the C1 dangerous half still fires on the derived pair', typeof c1Inline === 'string');
+  t('#16706: …and now names the evidence beside the PR', String(c1Inline).includes('#8354 (draft, ⚠️ via `Part of` NOT at the declaration position'));
+  t('#16706: …while the consequence paragraph it always carried is untouched', String(c1Inline).includes('an ungated card is a card that was never'));
+  // A strong-channel pair prints the strong phrase, so the two are DISTINGUISHABLE
+  // in the row — which is the whole point of the card.
+  const c1Keyword = c1CarrierSplit({ ...keywordPair[0], prLabels: [CONTRACT_REVIEW_LABEL], cardLabels: [], cardComments: [CLAIM('Clause-②: yes')] });
+  t('#16706: a keyword-sourced row reads differently from an inline-sourced one', String(c1Keyword).includes('via a closing keyword') && !String(c1Keyword).includes('NOT at the declaration position'));
+  // ⛔ A pair from a caller that predates the field claims no reading at all.
+  t('#16706: a pair with no evidence field prints exactly as it always did', String(c1CarrierSplit({ pr: 13910, card: 13476, draft: true, prLabels: [CONTRACT_REVIEW_LABEL], cardLabels: [], cardComments: [] })).includes('#13910 (draft)'));
+
   // -- the three read paths ---------------------------------------------------
   //
   // The offline reader is exercised against the SAME predicates the live path
