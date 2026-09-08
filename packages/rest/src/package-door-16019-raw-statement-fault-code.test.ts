@@ -1,18 +1,31 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#16019] `POST /api/v1/packages/publish` and `DELETE /api/v1/packages/:id`
- * — the wire `code` a raw-exec driver fault answers moved, and this file pins
- * the flip at the door.
+ * [#16019] `POST /api/v1/packages/publish` — the wire `code` a raw-exec driver
+ * fault answers moved, and this file pins the flip at the door.
+ *
+ * ## Scope, narrowed by #14503
+ *
+ * This file arrived pinning BOTH published REST package doors. `DELETE
+ * /api/v1/packages/:id` is no longer one of them: #14503 ruled the dispatcher's
+ * `/packages` domain the single implementation of the package read and delete
+ * routes, so `registerPackageRoutes` mounts `POST /packages/publish` and
+ * nothing else and never calls `PackageService.delete`. The two `DELETE` cases
+ * are removed rather than re-pointed — the surviving door
+ * (`packages/runtime/src/domains/packages.ts`) uninstalls through
+ * `protocol.deletePackage` and the registry, never through
+ * `PackageService.delete`, so no delete-door subject for THIS producer is left
+ * in this package to pin. The producer-side half is untouched and still pinned
+ * where the catch lives: `service-package`'s `delete-driver-fault.test.ts`
+ * (`[#16019]` block).
  *
  * ## The flip
  *
- * `PackageService.publish` / `delete` (`service-package/src/index.ts`) wrap
+ * `PackageService.publish` (`service-package/src/index.ts`) wraps
  * `objectql.execute(...)` in a catch whose branch ② re-throws any error that
  * `declaresHttpAnswer` — a numeric `status` or `statusCode` — and whose branch
  * ③ swallows everything else as a driver fault, returning `{ success: false }`
- * for the door's `sendError` to answer `500 PACKAGE_PUBLISH_FAILED` /
- * `500 PACKAGE_DELETE_FAILED`.
+ * for the door's `sendError` to answer `500 PACKAGE_PUBLISH_FAILED`.
  *
  * Before #16019 a raw-exec driver fault carried no `status` (knex's error
  * object: `code: 'SQLITE_ERROR'`, message `STATEMENT - DIAGNOSTIC`) → branch
@@ -22,11 +35,11 @@
  * → `500 DATABASE_ERROR`, the composed sentence as the message (it trips no
  * phrasing heuristic, so it is not replaced by `INTERNAL_ERROR_MESSAGE`; it
  * carries no dialect word to withhold). Same status band, no disclosure
- * either way; the ledgered `code` on two published doors moves.
+ * either way; the ledgered `code` on the published door moves.
  *
  * The catch's own half — that the declared fault propagates UNCHANGED and the
  * undeclared ancestor still takes branch ③ — is pinned where the catch lives,
- * in `service-package`'s `publish-driver-fault.test.ts` /
+ * in `service-package`'s `publish-driver-fault.test.ts` and
  * `delete-driver-fault.test.ts` (`[#16019]` blocks, identity-asserted). This
  * file takes the re-thrown object from there and pins what the DOOR answers,
  * with a `PackageService` double that throws it — the shape every
@@ -133,11 +146,7 @@ async function publishWith(svc: Record<string, unknown>): Promise<Captured> {
   });
 }
 
-async function deleteWith(svc: Record<string, unknown>): Promise<Captured> {
-  return drive(mount(svc), 'DELETE', `${PKGS}/:id`, { params: { id: 'com.acme.crm' } });
-}
-
-describe('[#16019] a raw-exec driver fault under sys_packages answers the producer\'s code on both package doors', () => {
+describe('[#16019] a raw-exec driver fault under sys_packages answers the producer\'s code on the publish door', () => {
   // The control that makes the assertions below about the DECLARATION and not
   // about the heuristic: the composed sentence trips nothing.
   it('the composed sentence is not a phrase the door\'s withhold heuristic knows', () => {
@@ -166,28 +175,6 @@ describe('[#16019] a raw-exec driver fault under sys_packages answers the produc
     expect(captured.status).toBe(500);
     const error = expectDeclaredEnvelope(captured);
     expect(error.code).toBe('PACKAGE_PUBLISH_FAILED');
-  });
-
-  it('DELETE /packages/:id — AFTER #16019: the re-thrown declared fault → 500 DATABASE_ERROR, composed sentence, no dialect word', async () => {
-    const del = vi.fn(async () => { throw rawStatementFault(); });
-    const captured = await deleteWith({ delete: del });
-
-    expect(del).toHaveBeenCalledTimes(1);
-    expect(captured.status).toBe(500);
-    const error = expectDeclaredEnvelope(captured);
-    expect(error.code).toBe('DATABASE_ERROR');
-    expect(error.code).not.toBe('PACKAGE_DELETE_FAILED');
-    expect(error.message).toBe(COMPOSED);
-    expect(JSON.stringify(captured.body)).not.toMatch(/sys_packages|no such table|insert into/i);
-  });
-
-  it('DELETE /packages/:id — BEFORE #16019: the swallowed driver fault → 500 PACKAGE_DELETE_FAILED (the control)', async () => {
-    const del = vi.fn(async () => ({ success: false }));
-    const captured = await deleteWith({ delete: del });
-
-    expect(captured.status).toBe(500);
-    const error = expectDeclaredEnvelope(captured);
-    expect(error.code).toBe('PACKAGE_DELETE_FAILED');
   });
 
   it('the withhold is untouched: a DECLARED fault whose message DOES carry dialect text is still replaced at this door', async () => {
