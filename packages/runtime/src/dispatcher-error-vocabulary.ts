@@ -537,7 +537,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             "`list-user-invitations-verification.test.ts` pins it equal to the vendor's own entry so a " +
             'vendor rename turns the pin red rather than silently minting a local code. Raised ' +
             "`APIError.from('FORBIDDEN', verificationRequired)` inside the rebuilt " +
-            '`/organization/list-user-invitations` better-auth endpoint (#16569), so it leaves as the ' +
+            '`/organization/list-user-invitations` better-auth endpoint, so it leaves as the ' +
             "vendor's own `Response` on the vendor's wire — the identical refusal the vendor handler " +
             'raised unconditionally before the rebuild — and never as a throw this repo classifies.',
     },
