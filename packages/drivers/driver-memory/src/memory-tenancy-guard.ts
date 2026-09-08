@@ -3,22 +3,33 @@
 /**
  * In-Memory Driver — multi-tenancy boot guard (#6915, mirroring #3724).
  *
- * This driver implements **no row-level tenant isolation**: it never reads
- * `DriverOptions.tenantId`, so reads carry no tenant predicate and writes are
- * never stamped with a tenant column. The SQL family's `resolveTenantField()` +
- * `applyTenantScope()` layer does not exist here at all — which is why
- * `scripts/check-tenant-chokepoint.mjs` scans `driver-sql` /
- * `driver-sqlite-wasm` / `driver-turso` and not this package: a driver that
- * REFUSES multi-tenant has no read-side chokepoint for that gate to re-derive.
+ * This driver implements **half** of row-level tenant isolation, and the guard
+ * below exists because of the missing half. Since #16589 it DOES read
+ * `DriverOptions.tenantId` / `tenantIds`: `memory-tenant-scope.ts` is the read
+ * side, and every door that takes a `DriverOptions` routes through it. What is
+ * still absent is the WRITE side — nothing stamps a tenant column on insert the
+ * way `SqlDriver.injectTenantOnInsert` does, so a row created without an
+ * explicit organization lands org-less and is then global to every caller.
+ * Running walled on that is worse than refusing, which is what this guard does.
+ *
+ * The SQL family's `getBuilder()` + `applyTenantScope()` layer still does not
+ * exist here — this driver filters an array rather than building a query — so
+ * `scripts/check-tenant-chokepoint.mjs` continues to scan `driver-sql` /
+ * `driver-sqlite-wasm` / `driver-turso` and not this package: its criterion is
+ * the knex builder, which has nothing to key on here. The in-memory doors are
+ * held by `memory-tenant-scope.test.ts` instead.
  * `distinct(object, field, query?)` does not even accept a `DriverOptions`, so a
- * caller has nowhere to pass a tenant even deliberately.
+ * caller has nowhere to pass a tenant even deliberately — it is the one read
+ * door the scope above cannot reach, named here rather than left to be found.
  *
  * The platform above the driver assumes tenant isolation is a *platform*
  * guarantee (object metadata's `tenancy` block, `applySystemFields` injecting
  * `organization_id`, the engine threading `tenantId` into every driver call).
  * Booting this driver into a multi-tenant deployment therefore produces
- * **silent** cross-tenant reads, updates and deletes — the exact
- * "declared ≠ enforced" shape Prime Directive #10 forbids.
+ * **silently unstamped writes** — rows that belong to no organization and are
+ * consequently readable by all of them — the exact "declared ≠ enforced" shape
+ * Prime Directive #10 forbids. Until #16589 the reads were silently
+ * cross-tenant as well.
  *
  * So the driver refuses to run there. It is positioned as a **dev / demo /
  * in-process** driver (#5704 moved the project's own test backends to sqlite
@@ -78,10 +89,11 @@ export class MemoryMultiTenantUnsupportedError extends Error {
         `\n` +
         `  Detected: ${detected}\n` +
         `\n` +
-        `  InMemoryDriver never reads \`DriverOptions.tenantId\` — reads carry no tenant\n` +
-        `  predicate and writes are not stamped with a tenant column, so queries would\n` +
-        `  read, update and delete OTHER tenants' records. Rather than run unisolated,\n` +
-        `  the driver fails at startup.\n` +
+        `  InMemoryDriver scopes reads, updates and deletes by \`DriverOptions.tenantId\`\n` +
+        `  (#16589), but it does NOT stamp a tenant column on writes: a record created\n` +
+        `  without an explicit organization lands with none, and a record with no\n` +
+        `  organization is visible to EVERY tenant. Rather than run half-isolated, the\n` +
+        `  driver fails at startup.\n` +
         `\n` +
         `  Fix one of:\n` +
         `    • Use @objectstack/driver-sql (PostgreSQL / MySQL / SQLite) for multi-tenant\n` +
@@ -102,13 +114,32 @@ export interface TenancyAwareSchema {
 }
 
 /**
- * Whether an object definition asks for row-level tenant isolation.
+ * Whether an object definition asks for row-level tenant isolation **loudly
+ * enough that this driver must refuse to allocate its table at all**.
  *
- * Only an **explicit** `tenancy.enabled === true` counts. An absent `tenancy`
- * block is not treated as a multi-tenant signal here: platform-wide tenant
- * scoping is driven by the deployment posture (checked separately by
- * {@link assertSingleTenantPosture}), and every object in a single-tenant
- * deployment omits the block.
+ * Only an **explicit** `tenancy.enabled === true` counts, because that is the
+ * declaration asking for the half this driver does not have: a tenant column
+ * stamped on every insert. Platform-wide posture is checked separately by
+ * {@link assertSingleTenantPosture}.
+ *
+ * ⚠️ This is deliberately NOT the engine's predicate, and that difference is
+ * where #16589 lived. `Engine.buildDriverOptions` scopes unless the object opts
+ * OUT (`tenantId !== undefined && !isTenancyDisabled(schema) && !isFederated`),
+ * so an object that OMITS the `tenancy` block — the common case — is scoped by
+ * the engine while this function answers `false` about it. That gap used to be
+ * silence: the driver discarded the `tenantId` and handed back every
+ * organization's rows. It is no longer silence — `memory-tenant-scope.ts`
+ * honours the scope on the read path — so what is left here is only the
+ * refusal, which is narrower than the scope on purpose.
+ *
+ * ⛔ The sentence this docstring used to carry — *"every object in a
+ * single-tenant deployment omits the block"* — was FALSE, and it was
+ * load-bearing, so it is recorded here rather than quietly deleted. `single`
+ * constrains the **wall**, not the number of organizations: a `single`-posture
+ * run was measured holding **13** `sys_organization` rows (twelve seeded by the
+ * app, one the platform mints for the admin), and rows carry whichever
+ * `organization_id` they were written with. The engine's scope is therefore
+ * meaningful under `single`, and discarding it changed results.
  */
 export function declaresTenantScope(schema: unknown): boolean {
   return (schema as TenancyAwareSchema | null | undefined)?.tenancy?.enabled === true;

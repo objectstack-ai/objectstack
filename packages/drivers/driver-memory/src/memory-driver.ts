@@ -49,6 +49,15 @@ import {
   uniqueConstraintsFromFields,
   type MemoryUniqueEnforcement,
 } from './memory-unique-constraint.js';
+// [#16589] Read-side tenant scoping — the half of this driver that used to
+// discard `DriverOptions.tenantId` in silence while the engine threaded it on
+// every call. Semantics read off `SqlDriver.applyTenantScope`; see the module
+// docblock for the measurement and for what this deliberately is NOT.
+import {
+  recordTenantField,
+  tenantScopePredicate,
+  type TenantRowPredicate,
+} from './memory-tenant-scope.js';
 
 /**
  * [#13524] The canonical rank of an authorable field operator — the tie-break
@@ -448,6 +457,20 @@ export class InMemoryDriver implements IDataDriver {
   private tablesCreatedHere: Set<string> = new Set();
   /** Tables that were already populated when this driver first synced them. */
   private tablesFoundExisting: Set<string> = new Set();
+  /**
+   * [#16589] The column each object is tenant-scoped by, learned in
+   * `syncSchema` — the in-memory twin of `SqlDriver.tenantFieldByTable`. An
+   * object never synced here has no entry and is therefore unscoped, which is
+   * the same answer `resolveTenantField` gives for a table it never registered.
+   */
+  private tenantFieldByObject: Map<string, string | null> = new Map();
+  /**
+   * [#16589 / #3249] The sticky explicit `tenancy.enabled: false` record, the
+   * twin of `SqlDriver.tenantOptOutByTable`: a later PARTIAL re-registration
+   * (`{ name, fields }`, no `tenancy`) must not let the implicit
+   * `organization_id` heuristic re-scope a platform-global table.
+   */
+  private tenantOptOutByObject: Set<string> = new Set();
 
   // ===================================
   // Lifecycle
@@ -565,7 +588,13 @@ export class InMemoryDriver implements IDataDriver {
     this.logger.debug('Find operation', { object, query });
     
     const table = this.getTable(object);
-    let results = [...table]; // Work on copy
+    // [#16589] 0. Tenant scope, ahead of the caller's own filter — the engine
+    // threads `tenantId` here on every read of a tenant-scoped object and this
+    // driver used to drop it, so a `single`-posture deployment holding many
+    // organizations (the posture constrains the WALL, not the number of orgs)
+    // read every organization's rows back.
+    const scope = this.tenantScope(object, options);
+    let results = scope ? table.filter(scope) : [...table]; // Work on copy
 
     // 1. Filter using Mingo
     if (query.where) {
@@ -702,10 +731,16 @@ export class InMemoryDriver implements IDataDriver {
    */
   async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.logger.debug('Update operation', { object, id });
-    
+
     const table = this.getTable(object);
-    const index = table.findIndex(r => r.id == id);
-    
+    // [#16589] An id-addressed update is scoped too — `driver-sql` applies the
+    // same predicate to its UPDATE builder, so a row belonging to another
+    // organization is simply not there. That lands on this method's OWN
+    // existing "not found" contract (strictMode throws, otherwise `null`);
+    // ⛔ no new refusal shape is invented for the cross-tenant case.
+    const scope = this.tenantScope(object, options);
+    const index = table.findIndex(r => r.id == id && (!scope || scope(r)));
+
     if (index === -1) {
       if (this.config.strictMode) {
         this.logger.warn('Record not found for update', { object, id });
@@ -738,10 +773,17 @@ export class InMemoryDriver implements IDataDriver {
     const table = this.getTable(object);
     let existingRecord: any = null;
 
+    // [#16589] The conflict lookup is a read: a row belonging to another
+    // organization is not a conflict for this caller, so the upsert lands as an
+    // INSERT rather than silently rewriting a row it was never allowed to see.
+    // Matches `driver-sql`, which scopes its own upsert door.
+    const scope = this.tenantScope(object, options);
+    const visible = scope ? table.filter(scope) : table;
+
     if (data.id) {
-        existingRecord = table.find(r => r.id === data.id);
+        existingRecord = visible.find(r => r.id === data.id);
     } else if (conflictKeys && conflictKeys.length > 0) {
-        existingRecord = table.find(r => conflictKeys.every(key => r[key] === data[key]));
+        existingRecord = visible.find(r => conflictKeys.every(key => r[key] === data[key]));
     }
 
     if (existingRecord) {
@@ -764,10 +806,13 @@ export class InMemoryDriver implements IDataDriver {
 
   async delete(object: string, id: string | number, options?: DriverOptions) {
     this.logger.debug('Delete operation', { object, id });
-    
+
     const table = this.getTable(object);
-    const index = table.findIndex(r => r.id == id);
-    
+    // [#16589] Scoped on the same reading as `update` above, and on the same
+    // "not found" contract.
+    const scope = this.tenantScope(object, options);
+    const index = table.findIndex(r => r.id == id && (!scope || scope(r)));
+
     if (index === -1) {
       if (this.config.strictMode) {
         throw new Error(`Record with ID ${id} not found in ${object}`);
@@ -783,7 +828,9 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions) {
-    let records = this.getTable(object);
+    // [#16589] Scoped like `find`, and for the same reason: a count is a read.
+    const scope = this.tenantScope(object, options);
+    let records = scope ? this.getTable(object).filter(scope) : this.getTable(object);
     if (query?.where) {
         const mongoQuery = this.convertToMongoQuery(query.where, object);
         if (mongoQuery && Object.keys(mongoQuery).length > 0) {
@@ -848,8 +895,14 @@ export class InMemoryDriver implements IDataDriver {
       this.logger.debug('UpdateMany operation', { object, query });
       
       const table = this.getTable(object);
-      let targetRecords = table;
-      
+      // [#16589] The PREDICATE of an updateMany is a read, and `driver-sql`
+      // routes it through `applyTenantScope` for exactly that reason: without
+      // it a caller scoped to one organization rewrites every organization's
+      // rows. `settled` below is still drawn from the WHOLE table, so rows this
+      // caller cannot see are untouched AND still contested for uniqueness.
+      const scope = this.tenantScope(object, options);
+      let targetRecords = scope ? table.filter(scope) : table;
+
       if (query && query.where) {
           const mongoQuery = this.convertToMongoQuery(query.where, object);
           if (mongoQuery && Object.keys(mongoQuery).length > 0) {
@@ -891,21 +944,28 @@ export class InMemoryDriver implements IDataDriver {
       
       const table = this.getTable(object);
       const initialLength = table.length;
-      
+      // [#16589] The predicate of a deleteMany is a read too — and this is the
+      // door where the old silence cost the most: a caller scoped to one
+      // organization asking to "delete all" emptied the table for EVERY
+      // organization. Scoped, the delete-all arm removes exactly the rows this
+      // caller can see and leaves the rest where they are.
+      const scope = this.tenantScope(object, options);
+      const visible = scope ? table.filter(scope) : table;
+
       if (query && query.where) {
           const mongoQuery = this.convertToMongoQuery(query.where, object);
           if (mongoQuery && Object.keys(mongoQuery).length > 0) {
             const mingoQuery = new Query(mongoQuery);
-            const matched = mingoQuery.find(table).all();
+            const matched = mingoQuery.find(visible).all();
             const matchedIds = new Set(matched.map((r: any) => r.id));
             this.db[object] = table.filter(r => !matchedIds.has(r.id));
           } else {
             // Empty query = delete all
-            this.db[object] = [];
+            this.db[object] = scope ? table.filter(r => !scope(r)) : [];
           }
       } else {
           // No where clause = delete all
-          this.db[object] = [];
+          this.db[object] = scope ? table.filter(r => !scope(r)) : [];
       }
       
       const count = initialLength - this.db[object].length;
@@ -963,7 +1023,14 @@ export class InMemoryDriver implements IDataDriver {
     // with a false `UNIQUE_VIOLATION`. Both lookups now read the same stored
     // value, so they cannot disagree — the property `updateMany` gets for free
     // by drawing its `targetIds` from table rows.
-    const resolvedIndexes = updates.map((u) => table.findIndex((r) => r.id == u.id));
+    // [#16589] Every id resolves through the tenant scope, so an id naming
+    // another organization's row resolves to -1 and takes this method's OWN
+    // missing-id arm (refuse the batch under `strictMode`, skip it otherwise) —
+    // the same landing `update` gives the single-row case.
+    const scope = this.tenantScope(object, options);
+    const resolvedIndexes = updates.map(
+      (u) => table.findIndex((r) => r.id == u.id && (!scope || scope(r))),
+    );
     const touchedIds = new Set(
       resolvedIndexes.filter((index) => index !== -1).map((index) => table[index].id),
     );
@@ -1043,9 +1110,11 @@ export class InMemoryDriver implements IDataDriver {
     // Resolve every id to a table index BEFORE removing any of them, so a
     // strict-mode refusal on a later id cannot leave an earlier one already
     // spliced out. A `Set` absorbs a duplicate id naming the same index twice.
+    // [#16589] Scoped like `bulkUpdate`, onto `delete`'s own missing-id arm.
+    const scope = this.tenantScope(object, options);
     const indices = new Set<number>();
     for (const id of ids) {
-      const index = table.findIndex((r) => r.id == id);
+      const index = table.findIndex((r) => r.id == id && (!scope || scope(r)));
       if (index === -1) {
         if (this.config.strictMode) {
           throw new Error(`Record with ID ${id} not found in ${object}`);
@@ -1188,6 +1257,12 @@ export class InMemoryDriver implements IDataDriver {
     // the pipeline arm is fed by `memory-analytics.ts` (`this.driver.aggregate(
     // tableName, pipeline)`), the AST arm by objectql's engine and
     // `@objectstack/verify`'s date-bucket parity probe.
+    // [#16589] One scope for both arms — an aggregate is a read, and the spec's
+    // own `DriverOptions.tenantIds` docblock names aggregates in the same
+    // breath as reads for any driver that implements native scoping. The
+    // pipeline arm's live producer (`memory-analytics.ts`) passes no options
+    // and is therefore unscoped exactly as before.
+    const scope = this.tenantScope(object, options);
     if (!Array.isArray(pipeline)) {
       const query = pipeline;
       this.logger.debug('Aggregate operation (QueryAST)', {
@@ -1195,7 +1270,8 @@ export class InMemoryDriver implements IDataDriver {
         groupBy: (query as any).groupBy,
         aggregations: (query as any).aggregations?.length ?? 0,
       });
-      let results = this.getTable(object).map((r) => ({ ...r }));
+      const scoped = scope ? this.getTable(object).filter(scope) : this.getTable(object);
+      let results = scoped.map((r) => ({ ...r }));
       if (query.where) {
         const mongoQuery = this.convertToMongoQuery(query.where, object);
         if (mongoQuery && Object.keys(mongoQuery).length > 0) {
@@ -1207,7 +1283,8 @@ export class InMemoryDriver implements IDataDriver {
 
     this.logger.debug('Aggregate operation', { object, stageCount: pipeline.length });
 
-    const records = this.getTable(object).map(r => ({ ...r }));
+    const source = scope ? this.getTable(object).filter(scope) : this.getTable(object);
+    const records = source.map(r => ({ ...r }));
     const aggregator = new Aggregator(pipeline);
     const results = aggregator.run(records);
 
@@ -1939,6 +2016,16 @@ export class InMemoryDriver implements IDataDriver {
       ...uniqueConstraintsFromFields(schema),
       ...uniqueConstraintsFromDeclaredIndexes(schema),
     ]);
+    // [#16589] Learn the tenant column in the same pass, from the same schema
+    // and through the same resolver the uniqueness key above already uses —
+    // `driver-sql` records it here too (`computeAndRecordTenantField`, called
+    // from `initObjects` / `registerObjectMetadata`). Deliberately NOT
+    // retroactive, for the reason stated one comment up: rows already in the
+    // table arrived from `initialData` or a persistence adapter, before any
+    // schema existed, and this driver does not rewrite them. They carry
+    // whatever organization they were written with — including none, which the
+    // scope reads as a global row.
+    this.tenantFieldByObject.set(object, recordTenantField(object, schema, this.tenantOptOutByObject));
     if (kinds.size > 0) {
       const table = this.db[object];
       for (let i = 0; i < table.length; i++) {
@@ -1956,6 +2043,12 @@ export class InMemoryDriver implements IDataDriver {
       // would be enforced over a table nobody declared — the inverse of the
       // gap this closes, and just as invisible.
       this.uniqueConstraints.delete(object);
+      // [#16589] Same reasoning for the tenant column and its sticky opt-out:
+      // a scope left behind would partition a table nobody declared, and a
+      // stale opt-out would silence the scope on the NEXT object to take this
+      // name.
+      this.tenantFieldByObject.delete(object);
+      this.tenantOptOutByObject.delete(object);
       this.logger.info('Dropped in-memory table', { object, recordCount });
     }
   }
@@ -2158,6 +2251,29 @@ export class InMemoryDriver implements IDataDriver {
       this.db[name] = [];
     }
     return this.db[name];
+  }
+
+  /**
+   * [#16589] The one place this driver turns `DriverOptions.tenantId` /
+   * `tenantIds` into a decision about rows — the in-memory counterpart of
+   * `SqlDriver.applyTenantScope`, and like it the single chokepoint every door
+   * routes through.
+   *
+   * Returns `null` for "nothing to scope", which every call that exists today
+   * gets: no `tenantId`, or an object with no tenant column. Each door keeps
+   * its original code on that arm, so an unscoped call is unchanged down to the
+   * array it allocates.
+   *
+   * ⚠️ `distinct()` is the one read door that cannot come here: its signature
+   * (`object, field, query?`) accepts no `DriverOptions` at all, so a caller has
+   * nowhere to pass a tenant even deliberately. `driver-sql`'s `distinct` DOES
+   * scope — that asymmetry is stated rather than left to be discovered, and it
+   * is not closed here because nothing in this repository calls
+   * `driver.distinct()`, so widening the signature would add a parameter no
+   * producer supplies (Prime Directive #10, from the other side).
+   */
+  private tenantScope(object: string, options?: DriverOptions): TenantRowPredicate | null {
+    return tenantScopePredicate(this.tenantFieldByObject.get(object) ?? null, options);
   }
 
   private generateId(objectName?: string) {

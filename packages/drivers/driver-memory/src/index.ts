@@ -47,6 +47,15 @@ export type {
   UniqueAwareSchema,
 } from './memory-unique-constraint.js';
 
+// [#16589] Read-side tenant scoping, exported for the same reason the
+// uniqueness helpers above are: a consumer verifying an isolation property on
+// this driver can assert the PREDICATE directly instead of inferring it from a
+// row count. ⚠️ Every isolation measurement taken on this driver BEFORE #16589
+// is void — it was taken against a driver that returned every organization's
+// rows to everyone — and has to be re-taken.
+export { recordTenantField, tenantScopePredicate } from './memory-tenant-scope.js';
+export type { TenantRowPredicate } from './memory-tenant-scope.js';
+
 export default {
   id: 'com.objectstack.driver.memory',
   version: '1.0.0',
