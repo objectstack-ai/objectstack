@@ -464,6 +464,70 @@ jobs:
           echo 'Items on this shard (a package name, or a package plus a k/n file-level slice):'
           cat "$RUNNER_TEMP/shard-packages.txt"
 
+      # ⛔ A FILE-LEVEL SLICE BUILDS ITS DEPENDENCY CLOSURE HERE, IN A RUN THAT
+      # CARRIES NO PASSTHROUGH, so that the sharded run in the next step can be
+      # `--only` (#16395).
+      #
+      # Turbo folds a run-level passthrough into the hash of EVERY task in the
+      # run, not only the task that receives it -- and `-- "--shard=k/n"` is the
+      # whole reason a slice gets its own invocation at all (the next step's
+      # comment says why it cannot ride the shared run). Measured on turbo
+      # 2.10.10, `--filter=@objectstack/cli`, `turbo run test ... --dry=json`
+      # (60 tasks: 59 `build` + 1 `test`):
+      #
+      #   plain vs plain             60 identical,  0 changed   <- control, fires
+      #   plain vs -- --shard=1/2     0 identical, 60 changed
+      #   --shard=1/2 vs 2/2          0 identical, 60 changed
+      #
+      # So the sliced leg could hit NEITHER the main-seeded Turbo cache restored
+      # above NOR the builds the shared leg ran seconds earlier in the SAME job:
+      # it re-executed the closure every run, and shards 5/6 and 6/6 -- the two
+      # that carry a slice -- paid that closure twice per job. Live reading,
+      # `Test Core (5/6)` of run 34193080219 (a `packages/spec` PR, so the
+      # affected set reaches cli): the slice leg reported
+      # `Cached: 2 cached, 58 total` / `Time: 9m18.941s` while
+      # `@objectstack/cli:test` itself measured `Duration 187.49s` -- six of those
+      # nine minutes were the duplicate rebuild, on a job that was then standing
+      # against a 30-minute wall (#16395's measurement).
+      #
+      # `turbo run build --filter=$PKG` is that closure and nothing more:
+      # measured 59 build tasks, all 59 hash-IDENTICAL to the ones in the
+      # passthrough-free test plan (0 differing, 0 extra, and 0 missing against
+      # the test's own `^build` closure), so they REPLAY rather than re-execute.
+      # `--filter=...^$PKG` was measured too and schedules 12 packages this
+      # closure does not need. Locally, back-to-back invocations of this exact
+      # command measured `57 cached, 57 total` / `Time: 153ms >>> FULL TURBO` on
+      # the second, against `5 cached, 57 total` / `3m45.918s` on the first.
+      #
+      # ⚠ THIS IS ITS OWN STEP, not a second guarded run inside the step below,
+      # because a guarded SITE is the triple (file, job, step) --
+      # `measure-stall-guard-headroom` REFUSES to report a verdict when two
+      # guarded runs share one, and refusing is right: the two would be judged
+      # against the worst reading of their union. `pnpm check:stall-guard-budget`
+      # and `pnpm check:stall-guard-headroom` both read this step, so it keeps
+      # its own `--stall-minutes` and its own headroom row.
+      #
+      # A shard with no slice runs zero iterations here; every shard still
+      # reaches the step, so its name is a stable site for those two gates.
+      - name: Build the sliced package's dependency closure
+        env:
+          NODE_OPTIONS: --report-on-signal --report-signal=SIGUSR2 --report-directory=${{ runner.temp }}/stall-reports
+        run: |
+          if [ ! -s "$RUNNER_TEMP/shard-packages.txt" ]; then
+            echo "No packages on this shard — nothing to build."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/stall-reports"
+          while read -r PKG SLICE; do
+            [ -n "$PKG" ] || continue
+            [ -n "$SLICE" ] || continue
+            echo "Slice $PKG=$SLICE — building its dependency closure with no passthrough."
+            LOG="$RUNNER_TEMP/test-core-slice-build-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
+            node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \
+              --report-dir "$RUNNER_TEMP/stall-reports" -- \
+              pnpm turbo run build "--filter=$PKG" --concurrency=4 --log-order=stream
+          done < "$RUNNER_TEMP/shard-packages.txt"
+
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
       # hosted runner; matching the core count bounds peak memory and the
       # job is CPU-bound anyway.
@@ -571,7 +635,15 @@ jobs:
               PKG="${LEG%%=*}"
               SLICE="${LEG#*=}"
               LOG="$RUNNER_TEMP/test-core-slice-$(printf '%s' "$PKG" | tr -c 'A-Za-z0-9' '-').log"
-              set -- pnpm turbo run test "--filter=$PKG" --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
+              # `--only` (#16395): the step above already built this slice's
+              # dependency closure in a passthrough-free run, so this run must
+              # schedule the ONE task the passthrough is for. Without it turbo
+              # re-hashes the whole `^build` closure under `--shard=k/n` and
+              # rebuilds it -- that comment carries the measurement. ⚠ The build
+              # step is load-bearing for this flag: a sliced package whose build
+              # never ran fails LOUDLY here (its imports resolve to a missing
+              # dist), never as a silent green.
+              set -- pnpm turbo run test "--filter=$PKG" --only --concurrency=4 --summarize --log-order=stream -- "--shard=$SLICE"
             fi
             LOGS="$LOGS $LOG"
             node scripts/run-with-stall-guard.mjs --log "$LOG" --stall-minutes 10 \

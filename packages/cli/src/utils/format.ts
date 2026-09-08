@@ -695,6 +695,41 @@ export interface ServerReadyOptions {
    */
   bootDiagnostics?: BootDiagnostics;
   /**
+   * The core services the KERNEL concluded were missing on this boot (#16630).
+   *
+   * This is `ObjectKernel.validateSystemRequirements()`'s OWN list — the very
+   * array behind its `System started with degraded capabilities. Missing core
+   * services: …` warning — carried here over the kernel's service registry and
+   * read by `readMissingCoreServices` in `./degraded-capabilities.ts`.
+   *
+   * ## Why the banner takes the list instead of working it out
+   *
+   * Until this field there was no data path at all between the two statements:
+   * `✓ Server is ready` is printed here, in `@objectstack/cli`; the degraded
+   * conclusion is reached in `@objectstack/core`. So the ready line could not
+   * report the failure — it never learned of it — and printed a green tick over
+   * a boot the kernel had just called degraded. Measured on objectui CI run
+   * `34056438855`, and again on this repo's own published-artifact canary (run
+   * `34084559243`), where the tick printed directly ABOVE four boot warnings
+   * saying the opposite.
+   *
+   * ⛔ Never re-derive it here. Which services count as `core` is
+   * `ServiceRequirementDef`'s judgement (`@objectstack/spec/system`), and a
+   * second implementation of it on this side would be free to disagree with the
+   * kernel's — replacing one wrong line with two contradictory ones.
+   *
+   * ## What it changes, and what it must not
+   *
+   * Non-empty ⇒ the ready line says what state the server is ready IN, and the
+   * unconditional `✓` is not printed. Absent or empty ⇒ the ready block is
+   * byte-for-byte what it has always been. That asymmetry is the design, not an
+   * optimisation: readiness itself is UNCHANGED (a machine deliberately booted
+   * without auth still boots, still prints ready, still exits 0), and an
+   * implementation that always appended a status line would have reported the
+   * degradation while rewriting every healthy boot's output as well.
+   */
+  missingCoreServices?: string[];
+  /**
    * Whether the MCP server surface (`/api/v1/mcp`) is on (#3167). Default-on
    * core capability, but nothing in the dev loop surfaces it — an AI client
    * (Claude Code, Cursor, …) can operate the running app the instant a
@@ -806,7 +841,20 @@ export function printServerReady(opts: ServerReadyOptions) {
   const base = opts.externalBaseOrigin;
   const link = (path: string) => (base === null ? path : base + path);
   console.error('');
-  console.error(chalk.bold.green('  ✓ Server is ready'));
+  // [#16630] The ready line carries the degradation the kernel already
+  // concluded. ⛔ Not a readiness gate: nothing about what boots, binds or
+  // exits changes here — the line only stops claiming an unqualified `✓` for a
+  // state the system has already recorded as degraded. On a healthy boot the
+  // `else` arm is the original statement, unchanged, so normal output does not
+  // move. See {@link ServerReadyOptions.missingCoreServices}.
+  const missingCore = opts.missingCoreServices ?? [];
+  if (missingCore.length > 0) {
+    console.error(
+      chalk.bold.yellow(`  ⚠ Server is ready — DEGRADED: missing core services: ${missingCore.join(', ')}`),
+    );
+  } else {
+    console.error(chalk.bold.green('  ✓ Server is ready'));
+  }
   console.error('');
   console.error(chalk.cyan('  ➜') + chalk.bold('  API:       ') + chalk.cyan(link('/')));
   if (opts.uiEnabled && opts.consolePath) {
