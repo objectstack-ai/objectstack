@@ -7,9 +7,13 @@
  * Token verification tests use REAL jose-signed JWTs against a locally
  * generated JWKS (mocked `getApi().getJwks`), so the crypto path — signature,
  * issuer, audience, expiry — is exercised for real, fail-closed on each axis.
- * The full discovery → DCR → PKCE browser flow is covered end-to-end against
- * a live dev server (see the PR's verification notes); better-auth's own
- * endpoint behavior is not re-tested here.
+ *
+ * ⚠️ The `oauthProvider plugin wiring` block below reads the options object
+ * this package passes to a MOCKED `oauthProvider`. That subject can only
+ * answer "did we pass X", never "does the provider honour X" — so ⛔ never
+ * assert protocol behaviour here. Anything whose truth depends on what the
+ * installed provider DOES belongs in auth-manager.mcp-oauth-resource.test.ts,
+ * which boots the real provider and drives the flow end to end.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -272,7 +276,7 @@ describe('verifyMcpAccessToken (local JWKS verification, fail-closed)', () => {
   });
 });
 
-describe('oauthProvider plugin wiring (DCR + scopes + audiences)', () => {
+describe('oauthProvider plugin wiring (DCR + scopes — options we pass, not behaviour)', () => {
   async function capturePluginOpts(env: Record<string, string>): Promise<any> {
     for (const [k, v] of Object.entries(env)) process.env[k] = v;
     (betterAuth as any).mockImplementation((config: any) => ({ handler: vi.fn(), api: {}, _cfg: config }));
@@ -297,19 +301,13 @@ describe('oauthProvider plugin wiring (DCR + scopes + audiences)', () => {
     expect(opts.allowUnauthenticatedClientRegistration).toBe(true);
     for (const scope of MCP_OAUTH_SCOPES) expect(opts.scopes).toContain(scope);
     expect(opts.scopes).toEqual(expect.arrayContaining(['openid', 'profile', 'email', 'offline_access']));
-    // RFC 8707: the MCP resource must be a valid audience or token minting fails.
-    expect(opts.validAudiences).toContain('https://acme.example.com/api/v1/mcp');
-    expect(opts.validAudiences).toContain('https://acme.example.com/api/v1/auth');
-  });
-
-  it('silences the false-positive oauthAuthServerConfig warning (#3420)', async () => {
-    // registerOidcDiscoveryRoutes mounts /.well-known/oauth-authorization-server
-    // (and the /api/v1/auth path-insertion variant) at the issuer ROOT ourselves,
-    // so better-auth's boot-time "Please ensure … exists" reminder is a false
-    // positive. It must be silenced via the documented option, or the stock
-    // showcase prints it (twice) on every `os dev`. Regression guard for the fix.
-    const opts = await capturePluginOpts({ OS_MCP_SERVER_ENABLED: 'true' });
-    expect(opts.silenceWarnings).toEqual({ oauthAuthServerConfig: true });
+    // ⛔ RFC 8707 audience binding is NOT asserted here. The subject available
+    // in this describe block is the options object we passed in, and the
+    // provider never consumes it — an assertion on it is green whether or not
+    // the installed version reads the option, which is exactly how a dead
+    // `validAudiences` survived a version bump. The refutable form lives in
+    // auth-manager.mcp-oauth-resource.test.ts, which boots the REAL provider
+    // and drives `authorize?resource=<mcp url>` to a minted token.
   });
 
   it('OS_OIDC_DCR_ENABLED=false forces DCR off even with MCP on', async () => {

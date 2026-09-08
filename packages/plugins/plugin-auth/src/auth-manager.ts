@@ -1256,7 +1256,7 @@ export class AuthManager {
       basePath: this.configuredBasePath(),
 
       // Database adapter configuration
-      database: this.createDatabaseConfig(),
+      database: await this.createDatabaseConfig(),
 
       // Model/field mapping: camelCase (better-auth) → snake_case (ObjectStack)
       // These declarations tell better-auth the actual table/column names used
@@ -2417,7 +2417,27 @@ export class AuthManager {
       } : {}),
     };
 
-    return betterAuth(betterAuthConfig);
+    const auth = betterAuth(betterAuthConfig);
+
+    // ⛔ Do not return before better-auth's plugin `init` hooks have settled.
+    //
+    // `betterAuth()` returns synchronously and runs those hooks behind
+    // `auth.$context`, so anything a plugin does at init is a promise NOBODY
+    // holds. That was harmless while init did no I/O. It stopped being harmless
+    // when the oauth-provider began seeding the RFC 8707 `sys_oauth_resource`
+    // row from its own `init`: a failure there had no catcher and surfaced as
+    // an UNHANDLED REJECTION — which Node terminates the process for by default
+    // — and, in tests, as a boot write racing its engine's teardown and failing
+    // with "No driver available for object 'sys_oauth_resource'" long after the
+    // test that triggered it had passed.
+    //
+    // Awaiting it here makes the seed part of "the instance is ready": a boot
+    // failure now rejects THIS call, where callers can see and handle it,
+    // instead of escaping the stack. `$context` is absent when better-auth is
+    // mocked, and `await undefined` is a no-op, so this is safe on that path.
+    await (auth as { $context?: Promise<unknown> } | undefined)?.$context;
+
+    return auth;
   }
 
   /**
@@ -3463,23 +3483,17 @@ export class AuthManager {
         loginPage: this.getConsolePageUrl('/login'),
         consentPage: this.getConsolePageUrl('/oauth/consent'),
         schema: buildOauthProviderPluginSchema(),
-        // better-auth's oauth-provider cannot see the well-known documents we
-        // mount ourselves at the issuer ROOT (RFC 8414 §3 requires them there,
-        // not under the auth basePath) — registerOidcDiscoveryRoutes serves
-        // /.well-known/oauth-authorization-server AND the path-insertion variant
-        // (`…/api/v1/auth`) the notice names. Its "Please ensure … exists"
-        // reminder is therefore a false positive on every stock example.
-        //
-        // #3420 root cause of the DOUBLE print: the notice fires in the
-        // oauth-provider plugin's `init(ctx)`, which better-auth runs once per
-        // `betterAuth()` construction — and the instance is built more than once
-        // at boot (an initial lazy build, then a rebuild once boot-time auth
-        // *settings* are applied — applyConfigPatch() nulls the cached instance
-        // so the next request rebuilds with the new policy). Gating the emitter
-        // here silences the one requirement we've already satisfied across every
-        // build path, independent of how many times auth is constructed, so an
-        // official dev boot stays warning-free.
-        silenceWarnings: { oauthAuthServerConfig: true },
+        // ⛔ No `silenceWarnings` here. It was added for the #3420 double
+        // print of oauth-provider's "Please ensure /.well-known/… exists"
+        // notice — a false positive, because registerOidcDiscoveryRoutes
+        // mounts those documents at the issuer ROOT where RFC 8414 §3 requires
+        // them. The pinned 1.7.2 emits no such notice: neither the option name
+        // nor the `oauthAuthServerConfig` key nor the notice text occurs
+        // anywhere in `@better-auth/oauth-provider` or `better-auth`, so the
+        // option silenced nothing and was the same dead-option shape as the
+        // `validAudiences` defect below. If a future bump reintroduces the
+        // notice, re-add the silencer with a fresh reading — do NOT restore it
+        // on the strength of this comment.
         // ── MCP OAuth track (#2698) ────────────────────────────────
         // Coarse tool-family scopes for the platform's own MCP endpoint,
         // advertised alongside the standard OIDC scopes. Names are
@@ -3487,10 +3501,36 @@ export class AuthManager {
         // tool layer cannot drift.
         scopes: ['openid', 'profile', 'email', 'offline_access', ...MCP_OAUTH_SCOPES],
         // MCP clients bind tokens to the resource via RFC 8707
-        // (`resource=<mcp url>`); the AS only mints audiences it knows.
-        // The auth base (better-auth's default audience) stays valid for
-        // plain OIDC SSO flows.
-        validAudiences: [this.getAuthIssuer(), this.getMcpResourceUrl()],
+        // (`resource=<mcp url>`). In @better-auth/oauth-provider 1.7.2 a
+        // requested `resource` is resolved from the `oauthResource` table
+        // (`sys_oauth_resource`) — a miss is refused at /oauth2/authorize with
+        // `invalid_target: requested resource <id> is not configured` — and
+        // `enforcePerClientResources` defaults to TRUE, so the client must
+        // additionally be linked in `oauthClientResource`
+        // (`sys_oauth_client_resource`). Both rows have to exist before the
+        // first Connect, so both are declared here:
+        //
+        //   • `resources` seeds the sys_oauth_resource row from the plugin's
+        //     own `init` (idempotent, `resourceSeedMode: "insertOnly"` by
+        //     default, so an admin's later CRUD edits are never reverted);
+        //   • `clientRegistrationDefaultResources` links every newly
+        //     registered client to it inside the DCR transaction — a client
+        //     that registers anonymously one second before the login cannot
+        //     be linked by an admin in between.
+        //
+        // ⛔ `enforcePerClientResources` is deliberately NOT passed: the
+        // per-client linkage check stays at its `true` default. The fix makes
+        // the link happen; it does not switch the check off. A client with no
+        // link row is still refused, and
+        // auth-manager.mcp-oauth-resource.test.ts asserts exactly that.
+        //
+        // ⛔ Do not reintroduce `validAudiences`: 1.7.2 reads no such option
+        // (0 occurrences in its dist), and audience validation now runs
+        // through the resource table instead. A field that is passed and read
+        // by nobody looks like configuration and enforces nothing — that is
+        // how this defect survived a version bump.
+        resources: [this.getMcpResourceUrl()],
+        clientRegistrationDefaultResources: [this.getMcpResourceUrl()],
         // RFC 7591 Dynamic Client Registration. `allowUnauthenticated…` is
         // required: MCP clients register BEFORE any user is logged in (the
         // whole point of the self-serve flow). Registration is rate-limited
@@ -3765,7 +3805,7 @@ export class AuthManager {
    * silently.  We therefore wrap the ObjectQL adapter in a factory function
    * so it is correctly recognised as a `DBAdapterInstance`.
    */
-  private createDatabaseConfig(): any {
+  private async createDatabaseConfig(): Promise<any> {
     // Use ObjectQL adapter factory if dataEngine is provided
     if (this.config.dataEngine) {
       // createObjectQLAdapterFactory returns an AdapterFactory
@@ -3783,9 +3823,41 @@ export class AuthManager {
       'Please provide a dataEngine instance (e.g., ObjectQL) in AuthManagerOptions.'
     );
 
-    // Return a minimal in-memory configuration as fallback
-    // This allows the system to work in development/testing without a real database
-    return undefined; // better-auth will use its default in-memory adapter
+    // ⛔ NOT `undefined`, and ⛔ do not "simplify" it back to that.
+    //
+    // Handing better-auth no `database` makes it build its own in-memory store
+    // in `getBaseAdapter`, and that store is keyed by the schema KEY while
+    // every read resolves by `modelName`. Measured on better-auth 1.7.2:
+    //
+    //   getAuthTables(options) -> { oauthResource: { modelName: 'sys_oauth_resource' }, … }
+    //   its memoryDB           -> { oauthResource: [] }            // keyed by KEY
+    //   the adapter then asks  -> 'sys_oauth_resource'             // resolved by modelName
+    //   => Error: Model sys_oauth_resource not found
+    //
+    // So on that path EVERY model this package renames is unreachable —
+    // `user`/`sys_user` included. It stayed invisible for as long as nothing
+    // touched a renamed model during boot; the RFC 8707 resource seed does,
+    // from the oauth-provider plugin's `init`, where the throw surfaces as an
+    // UNHANDLED REJECTION rather than a failed request.
+    //
+    // Keying the store by `modelName` is what the adapter actually reads, so
+    // this fixes the dev/test fallback instead of working around it. Production
+    // never reaches this branch — it returns the ObjectQL factory above.
+    //
+    // The import is dynamic on purpose (the rest of better-auth is loaded the
+    // same way here); `createAuthInstance` awaits this method, and better-auth
+    // then calls the returned factory SYNCHRONOUSLY, so the module has to be
+    // resolved before we hand it over, not inside it.
+    const [{ memoryAdapter }, { getAuthTables }] = await Promise.all([
+      import('better-auth/adapters/memory'),
+      import('@better-auth/core/db'),
+    ]);
+    return (options: any) => {
+      const tables = getAuthTables(options) as Record<string, { modelName?: string }>;
+      const db: Record<string, unknown[]> = {};
+      for (const [key, table] of Object.entries(tables)) db[table?.modelName ?? key] = [];
+      return memoryAdapter(db)(options);
+    };
   }
 
   /**
