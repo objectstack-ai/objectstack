@@ -79,7 +79,9 @@
  * ## Intake — which doors can reach `security-owd-alias` at all (#16109)
  *
  * `sharingModel` and `externalSharingModel` are CLOSED enums on `ObjectSchema`
- * (ADR-0090 D4 / D11): every value `OWD_ALIAS_FIX` names, and every
+ * (ADR-0090 D4 / D11): every value `OWD_ALIAS_FIX` names — both the D4
+ * aliases a shipped schema once accepted and the wrong-layer spellings it
+ * never did, two histories declared as two maps below — and every other
  * non-canonical string, is refused by the schema with `invalid_value`. So on
  * any door that PARSES before the registry runs, this rule's alias branches
  * are unreachable by construction — the object never arrives. Measured on
@@ -108,7 +110,8 @@
  * Read the two alias branches below accordingly: they are NOT a second
  * opinion on the enum, and they are dead on the parsed doors on purpose. They
  * exist so the UNPARSED doors — `os lint` first, the docs gate second — name
- * the canonical replacement instead of letting a retired spelling ride to
+ * the canonical replacement instead of letting a retired or wrong-layer
+ * spelling ride to
  * `os build`, where the enum's generic `invalid_value` is the only message. A
  * consumer crediting this rule id as live `error` coverage on a
  * `defineStack`-authored app is crediting the wrong gate: on that door the
@@ -152,13 +155,45 @@ export interface SecurityFinding {
 type AnyRec = Record<string, unknown>;
 
 const CANONICAL_OWD = ['private', 'public_read', 'public_read_write', 'controlled_by_parent'] as const;
-/** [ADR-0090 D4] Legacy alias → canonical fix-it mapping. */
-const OWD_ALIAS_FIX: Record<string, string> = {
+/**
+ * [ADR-0090 D4] The legacy `sharingModel` spellings a shipped schema once
+ * ACCEPTED, and the canonical value each becomes. D4 names exactly these
+ * THREE — "The legacy aliases `read`, `read_write`, `full` are **removed from
+ * the zod enum**" — and only these three have a retirement behind them: the
+ * `owd-legacy-read-aliases` ADR-0087 stored-row conversion for the two `read*`
+ * spellings, and the `13.owd-full-alias-removed` semantic entry for `full`.
+ */
+const OWD_RETIRED_ALIAS_FIX: Record<string, string> = {
   read: 'public_read',
   read_write: 'public_read_write',
   full: 'public_read_write',
+};
+
+/**
+ * Wrong-layer / misspelling fix-its: values NO shipped schema ever accepted
+ * *here*. They are NOT retired aliases, and nothing sits behind them to
+ * retire — no ADR-0087 conversion, no semantic-migration entry, and none is
+ * possible, because a conversion rewrites a spelling some shipped schema once
+ * took and the stored population for these is zero by construction (#16517
+ * read the enum's whole lifetime over complete history; `public` appears in no
+ * version of it).
+ *
+ * `public` is kept here rather than deleted because it catches a real
+ * authoring mistake. THREE neighbouring keys on the same `ObjectSchema` take
+ * `'public'` legally — `access.default` (`z.enum(['public', 'private'])`,
+ * ADR-0066) and `publicSharing.allowedAudiences`
+ * (`z.enum(['public', 'link_only', 'signed_in', 'email'])`) — and off-schema
+ * so does the sharing runtime's own internal vocabulary,
+ * `effectiveSharingModel(): 'private' | 'read' | 'public'`. `sharingModel` is
+ * the one neighbour that refuses it, and it fails CLOSED to `private` with no
+ * notice on the read path, so this fix-it is the author's only signal.
+ */
+const OWD_WRONG_LAYER_FIX: Record<string, string> = {
   public: 'public_read_write',
 };
+
+/** Every value this rule offers a fix-it for — both provenance groups. */
+const OWD_ALIAS_FIX: Record<string, string> = { ...OWD_RETIRED_ALIAS_FIX, ...OWD_WRONG_LAYER_FIX };
 /** D11 ordering for external ≤ internal (controlled_by_parent excluded). */
 const OWD_WIDTH: Record<string, number> = {
   private: 0,
@@ -180,6 +215,23 @@ const OWD_WIDTH: Record<string, number> = {
  */
 function owdOf(obj: AnyRec): unknown {
   return obj.sharingModel;
+}
+
+/**
+ * The provenance half of an alias finding's message.
+ *
+ * The two halves of `OWD_ALIAS_FIX` do not share a history, so one sentence
+ * cannot serve both: calling `public` "a retired alias (ADR-0090 D4)" asserts
+ * an acceptance that never happened, and sends the reader looking for the
+ * conversion and the semantic entry that would exist if it had. The fix-it is
+ * identical either way; only this clause differs.
+ */
+function owdAliasProvenance(value: string): string {
+  return OWD_RETIRED_ALIAS_FIX[value]
+    ? `is a retired alias (ADR-0090 D4)`
+    : `is not an OWD value and never was — ADR-0090 D4 retired 'read', 'read_write' and 'full', ` +
+        `not this one. '${value}' is legal on the neighbouring 'access.default' / ` +
+        `'publicSharing.allowedAudiences' keys, not on this one`;
 }
 
 /**
@@ -394,7 +446,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           where: `object "${objName}"`,
           path: `${objPath}.sharingModel`,
           message:
-            `sharingModel '${owd}' is a retired alias (ADR-0090 D4). The runtime fails CLOSED ` +
+            `sharingModel '${owd}' ${owdAliasProvenance(owd)}. The runtime fails CLOSED ` +
             `to 'private' on unknown values, so this object is NOT ${owd === 'read' ? 'readable' : 'writable'} org-wide.`,
           hint: `Replace with the canonical value: sharingModel: '${OWD_ALIAS_FIX[owd]}'.`,
         });
@@ -511,7 +563,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           rule: SECURITY_OWD_ALIAS,
           where: `object "${objName}"`,
           path: `${objPath}.externalSharingModel`,
-          message: `externalSharingModel '${external}' is a retired alias (ADR-0090 D4).`,
+          message: `externalSharingModel '${external}' ${owdAliasProvenance(external)}.`,
           hint: `Replace with the canonical value: externalSharingModel: '${OWD_ALIAS_FIX[external]}'.`,
         });
       } else if (
