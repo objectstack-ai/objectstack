@@ -17,12 +17,17 @@
  *   `os lint`      used to judge the un-lowered normalized stack; since #16095
  *                  `lintConfig` hands the registry's `parsed` tier the same
  *                  lowered view `os build` judges. This file's RED leg.
- *   `os validate`  parses the normalized stack WITHOUT lowering, so a
- *                  handler-authored hook carries no body there and the family
- *                  does not fire. Recorded below as a MEASUREMENT of that door,
- *                  not as a contract: an author who runs `os validate` alone is
- *                  not told. Closing it changes what `os validate` refuses and
- *                  is its own decision (see the card's report).
+ *   `os validate`  used to parse the normalized stack WITHOUT lowering, so a
+ *                  handler-authored hook carried no body there and the family
+ *                  did not fire — measured here under #16095 as a reading of
+ *                  that door, not a contract, because closing it changes what
+ *                  `os validate` refuses. #16544 closed it: `validate.ts` now
+ *                  runs the same `lowerCallables` pass between its pre-parse
+ *                  unknown-key lints and its parse, so this file's THIRD red
+ *                  leg. The control beside it fired before and fires after; a
+ *                  handler-authored hook the family has nothing to say about
+ *                  still passes, so the door refuses only what `os build`
+ *                  already refused.
  *
  * The fixture is the card's own: a readonly `is_escalated` written through
  * `ctx.api.object('crm_case').update(…)` from an `afterUpdate` hook — the write
@@ -111,6 +116,27 @@ export default {
 };
 `;
 
+/**
+ * NEGATIVE CONTROL for #16544: handler-authored like the intake, but the write
+ * lands on a declared, writable field — nothing in the family objects. This is
+ * the leg that proves the door now refuses only what `os build` already
+ * refused: a stack that validated green before #16544 validates green after.
+ */
+const CONFIG_HANDLER_OK = `
+export default {
+  manifest: { id: 'com.example.reach_handler_ok', name: 'reach_handler_ok', version: '1.0.0', type: 'app' },
+  objects: [${OBJECT}],
+  hooks: [{
+    name: 'retitle',
+    object: 'crm_case',
+    events: ['afterUpdate'],
+    handler: async (ctx: any) => {
+      await ctx.api.object('crm_case').update({ id: ctx.input.id, title: 'seen' });
+    },
+  }],
+};
+`;
+
 const dirs: Record<string, string> = {};
 
 function project(key: string, source: string): string {
@@ -123,6 +149,7 @@ function project(key: string, source: string): string {
 beforeAll(() => {
   project('handler', CONFIG_HANDLER);
   project('body', CONFIG_BODY);
+  project('handlerOk', CONFIG_HANDLER_OK);
 });
 
 afterAll(() => {
@@ -172,21 +199,33 @@ describe('#16095 — door: `os build` (the door that never had the gap)', () => 
   }, 90_000);
 });
 
-describe('#16095 — door: `os validate` (measured, NOT lowered)', () => {
-  // A reading of the door as it stands, so a change to it is a change someone
-  // chose: `os validate` parses the normalized stack without lowering, and the
-  // handler-authored hook carries no body there. If this leg starts failing
-  // because `os validate` began lowering, the intake row becomes the control
-  // row — update the ledger in the file header, do not delete the pin.
-  it('INTAKE — the handler-authored hook is NOT seen by the family here (exit 0, no finding)', async () => {
+describe('#16544 — door: `os validate` (lowers since #16544; measured NOT lowered under #16095)', () => {
+  // Under #16095 this leg pinned the door as it stood — exit 0, no finding —
+  // so that a change to it would be a change someone chose. #16544 chose it:
+  // `validate.ts` runs the same `lowerCallables` pass `os build` runs, between
+  // its pre-parse unknown-key lints and its parse, so the handler-authored hook
+  // carries a body here too. The intake row is now a RED row. The control
+  // beside it is unchanged — it fired before this change and fires after — so
+  // a red here is still a reading about the door, never about the rule.
+  it('INTAKE — the handler-authored hook IS refused here (error, exit 1) — the red-first leg of #16544', async () => {
     const run = await runCli(['validate', 'objectstack.config.ts', '--json'], dirs.handler);
-    expect(run.code, label(run)).toBe(0);
-    expect(rulesIn(run)).not.toContain(READONLY_RULE);
+    expect(run.code, label(run)).toBe(1);
+    expect(rulesIn(run)).toContain(READONLY_RULE);
   }, 60_000);
 
-  it('CONTROL — the explicit body IS refused here, so the silence above is the door, not the rule', async () => {
+  it('CONTROL — the explicit body is refused here, before and after, so the intake reading is about the door', async () => {
     const run = await runCli(['validate', 'objectstack.config.ts', '--json'], dirs.body);
     expect(run.code, label(run)).toBe(1);
     expect(rulesIn(run)).toContain(READONLY_RULE);
+  }, 60_000);
+
+  it('NEGATIVE CONTROL — a handler-authored hook the family has nothing to say about still passes (exit 0)', async () => {
+    // The lowered stack must PARSE (`handler: '<ref>'` beside the extracted
+    // `body`) and the family must stay silent on a legitimate write, or the
+    // door would have started refusing stacks `os build` ships. Read the exit
+    // and the absence of the rule together: a parse failure also exits 1.
+    const run = await runCli(['validate', 'objectstack.config.ts', '--json'], dirs.handlerOk);
+    expect(run.code, label(run)).toBe(0);
+    expect(rulesIn(run)).not.toContain(READONLY_RULE);
   }, 60_000);
 });
