@@ -111,8 +111,8 @@
  * opinion on the enum, and they are dead on the parsed doors on purpose. They
  * exist so the UNPARSED doors — `os lint` first, the docs gate second — name
  * the canonical replacement instead of letting a retired or wrong-layer
- * spelling ride to
- * `os build`, where the enum's generic `invalid_value` is the only message. A
+ * spelling ride to `os build`, where the enum's generic `invalid_value` is the
+ * only message. A
  * consumer crediting this rule id as live `error` coverage on a
  * `defineStack`-authored app is crediting the wrong gate: on that door the
  * credit belongs to the schema's closed enum.
