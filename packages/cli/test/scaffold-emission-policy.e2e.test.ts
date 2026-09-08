@@ -20,7 +20,7 @@
  *
  * The control for that reading sits in the same file as the defect:
  * `SCAFFOLD_PNPM_RANGE` and `renderPnpmWorkspaceYaml()` are IMPORTED by the
- * other scaffolder rather than restated, and across the same five emissions,
+ * other scaffolder rather than restated, and across the same emissions,
  * the same window and the same authors they did not drift at all.
  *
  * ## What is asserted, and why no expected value is written down here
@@ -356,8 +356,8 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
     if (sandbox) rmSync(sandbox, { recursive: true, force: true });
   });
 
-  /** The on-ramp's emission, beside the five the two CLI commands render. */
-  function allSixManifests(): Array<{ id: string; manifest: Record<string, unknown> }> {
+  /** Every emission the two CLI commands render, plus the on-ramp's. */
+  function allScaffolderManifests(): Array<{ id: string; manifest: Record<string, unknown> }> {
     return [...emittedManifests(), { id: 'npx create-objectstack', manifest: emitted! }];
   }
 
@@ -376,7 +376,7 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
 
   it('declares exactly one range per third-party dependency, across ALL THREE scaffolders', () => {
     const byName = new Map<string, Map<string, string[]>>();
-    for (const { id, manifest } of allSixManifests()) {
+    for (const { id, manifest } of allScaffolderManifests()) {
       for (const [name, range] of [
         ...thirdPartyOnly(manifest.dependencies as Record<string, unknown>),
         ...thirdPartyOnly(manifest.devDependencies as Record<string, unknown>),
@@ -403,7 +403,7 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
 
   it('emits the exported TypeScript and pnpm constants, not a restatement of them', () => {
     const typescriptRanges = new Set(
-      allSixManifests().map(
+      allScaffolderManifests().map(
         ({ manifest }) =>
           (manifest.devDependencies as Record<string, string> | undefined)?.typescript
           ?? (manifest.dependencies as Record<string, string> | undefined)?.typescript,
@@ -414,7 +414,7 @@ describe('the on-ramp emits the same policy — measured by DRIVING it', () => {
     ]);
 
     const pnpmRanges = new Set(
-      allSixManifests().map(({ manifest }) => (manifest.engines as Record<string, string> | undefined)?.pnpm),
+      allScaffolderManifests().map(({ manifest }) => (manifest.engines as Record<string, string> | undefined)?.pnpm),
     );
     expect([...pnpmRanges], 'every emission declares engines.pnpm, at one range').toEqual([
       SCAFFOLD_PNPM_RANGE,
