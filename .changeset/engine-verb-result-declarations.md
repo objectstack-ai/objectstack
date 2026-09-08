@@ -1,9 +1,9 @@
 ---
 "@objectstack/spec": minor
 "@objectstack/objectql": minor
-"@objectstack/metadata": patch
-"@objectstack/metadata-protocol": patch
-"@objectstack/plugin-auth": patch
+"@objectstack/metadata": minor
+"@objectstack/metadata-protocol": minor
+"@objectstack/plugin-auth": minor
 ---
 
 feat(engine)!: `findOne`, `update` and `delete` declare what they answer, and their hook seams are guarded (#16231)
