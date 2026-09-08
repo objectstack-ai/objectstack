@@ -21615,6 +21615,10 @@ function selfTest() {
       rosterRows: [{ check: 'check:r1' }, { check: 'check:r2' }],
       widePopulationRows: [{ check: 'check:w1' }],
     });
+    // The enumeration is read case-insensitively per NAME, because the leading
+    // name is raised to open the sentence; the exact rendered phrase is pinned
+    // once, below, where that capitalisation is part of the spelling.
+    const namesOutside = (line, names) => names.every((n) => (line ?? '').toLowerCase().includes(n.toLowerCase()));
     const outsideLine = familyReconciliationLines(outsideRecon).find((l) => l.includes('NOT a complete account of what CI runs'));
     t('the disclaimer of what sits outside the total is printed at all', Boolean(outsideLine));
     for (const name of [
@@ -21624,28 +21628,36 @@ function selfTest() {
       'the unreachable listing',
       'the always-runs tail',
     ]) {
-      t(`and it names "${name}" — every block printed below it, not a subset`, (outsideLine ?? '').includes(name));
+      t(`and it names "${name}" — every block printed below it, not a subset`, namesOutside(outsideLine, [name]));
     }
+    // The SPELLING of the whole enumeration, in print order, pinned for the
+    // reason the reconciliation line's own spelling is: a consumer may come to
+    // assert against it, and the order is the claim — a reader walking down the
+    // output meets the blocks in the order this line promised them.
+    t('and spells them in the order they are PRINTED below, as one phrase', (outsideLine ?? '').includes(
+      'The 2 artifact-roster famil(ies), the 1 declared WIDE-population famil(ies), the pending-changeset families,'
+        + ' the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+    ));
     // The two counts are the lengths of the arrays that RENDER those blocks, so
     // the enumeration cannot name a block the run did not print: at zero rows
     // artifactRosterLines and widePopulationLines both return nothing, and a
     // name pointing "below" at an absent heading is this same defect reversed.
     const noBlocksLine = familyReconciliationLines(r).find((l) => l.includes('NOT a complete account of what CI runs'));
-    t('and names NEITHER block on a run that printed neither', !(noBlocksLine ?? '').includes('artifact-roster') && !(noBlocksLine ?? '').includes('WIDE-population'));
-    t('...while still naming the three blocks that print unconditionally', ['the pending-changeset families', 'the unreachable listing', 'the always-runs tail'].every((n) => (noBlocksLine ?? '').includes(n)));
+    t('and names NEITHER block on a run that printed neither', !(noBlocksLine ?? '').toLowerCase().includes('artifact-roster') && !(noBlocksLine ?? '').toLowerCase().includes('wide-population'));
+    t('...while still naming the three blocks that print unconditionally', namesOutside(noBlocksLine, ['the pending-changeset families', 'the unreachable listing', 'the always-runs tail']));
     // The ZERO-total branch renders the SAME list from the SAME expression: a
     // card with no runnable family of its own still owes every block below, and
     // two branches spelling this claim separately is how it drifted before.
     const zeroOutside = familyReconciliationLines(familyReconciliation({
       matchedRows: [], kindGroups: [], rosterRows: [{ check: 'check:r1' }], widePopulationRows: [{ check: 'check:w1' }],
     }));
-    t('the zero branch enumerates the same blocks rather than naming one of them', zeroOutside.some((l) => (
-      l.includes('the 1 artifact-roster famil(ies)')
-        && l.includes('the 1 declared WIDE-population famil(ies)')
-        && l.includes('the pending-changeset families')
-        && l.includes('the unreachable listing')
-        && l.includes('the always-runs tail')
-    )));
+    t('the zero branch enumerates the same blocks rather than naming one of them', zeroOutside.some((l) => namesOutside(l, [
+      'the 1 artifact-roster famil(ies)',
+      'the 1 declared WIDE-population famil(ies)',
+      'the pending-changeset families',
+      'the unreachable listing',
+      'the always-runs tail',
+    ])));
     // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
     // spelling warning already follows: on a card with no convention-only
     // family, a warning that one section is short is a claim this run measured
