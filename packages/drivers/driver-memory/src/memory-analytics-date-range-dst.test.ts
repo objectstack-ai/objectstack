@@ -49,14 +49,43 @@
  * with the one-calendar answer. Without it a green run would be ambiguous
  * between "the fix works" and "these instants are not actually in a transition
  * window" — the second being the failure mode that hid this bug for so long.
+ *
+ * ## ⛔ The driver cells are RETIRED — #16041 closed the dialect, #16322 reinstates
+ *
+ * Every driver-facing cell below fed the relative dialect (`'last 3 days'`,
+ * `'last 7 days'`, `'last 1 week'`, `'last 2 weeks'`, `'last 1 month'`,
+ * `'last 3 months'`, `'last 1 year'`) through `AnalyticsQuerySchema.parse`.
+ * #16041 (maintainer ruling, decision batch #57) closed the string arm of
+ * `timeDimensions[].dateRange` to the `date-range-presets.ts` vocabulary, so
+ * that input is refused at the schema door and no longer reaches
+ * `parseDateRangeString` through any door production has. Re-spelling was
+ * MEASURED, not assumed: the parser matches `range.startsWith('last ')`, so
+ * every snake_case preset (`last_7_days`, `last_week`, …) takes the
+ * `[range, range]` fallback and matches EVERY row — not one of the 13 cells
+ * can be expressed in the closed vocabulary until #16322 aligns the parser.
+ * The cells are `it.todo` (retirement was chosen over routing the fixture
+ * around the schema door, which would have kept a live pin on the
+ * silent-widening fallback #16041 exists to abolish).
+ *
+ * ⚠️ COVERAGE LOST until #16322 reinstates it in preset form: the driver is
+ * no longer measured on the `last N …` ARITHMETIC leg across a DST
+ * transition — spring-forward and fall-back, all four legs (day / week /
+ * month / year), both hemispheres, the two non-whole-hour zones. (The
+ * `'today'` leg across the 23-hour spring-forward day stays covered by
+ * `memory-analytics-date-range-timezone.test.ts`.) What survives here is the
+ * CELL TABLE and its controls — every cell still flips, both directions, all
+ * four legs, the TZ=UTC indistinguishability fence — so the reinstatement
+ * starts from a verified table. Note for #16322: `last_7_days` /
+ * `last_30_days` / `last_90_days` are the rolling day-leg presets, while
+ * `last_week` / `last_month` / `last_quarter` / `last_year` are CALENDAR
+ * windows, not `n` units back, so the week / month / year cells need
+ * re-measured instants under the preset semantics. The retired harness
+ * (`probesSelected` over `MemoryAnalyticsService.query`) is in history at
+ * 5f4f1f6e22 / 1cf7392728.
  */
 
 import { describe, it, expect } from 'vitest';
 import { vi } from 'vitest';
-import { InMemoryDriver } from './memory-driver.js';
-import { MemoryAnalyticsService } from './memory-analytics.js';
-import { AnalyticsQuerySchema } from '@objectstack/spec/data';
-import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 const REAL_TZ = process.env.TZ;
 
@@ -105,49 +134,8 @@ function utcArithmeticStart(unit: Unit, num: number): string {
     return s.toISOString();
 }
 
-const CUBE: Cube = {
-    name: 'events',
-    title: 'Events',
-    sql: 'events',
-    measures: {
-        count: { name: 'count', label: 'Count', type: 'count', sql: 'id' },
-    },
-    dimensions: {
-        probe: { name: 'probe', label: 'Probe', type: 'string', sql: 'probe' },
-        createdAt: {
-            name: 'created_at',
-            label: 'Created At',
-            type: 'time',
-            sql: 'created_at',
-            granularities: ['day'],
-        },
-    },
-    public: true,
-};
-
-const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
-
-/** Ask `range` over rows planted at `instants`; answer which probes came back. */
-async function probesSelected(instants: string[], range: string): Promise<string[]> {
-    const driver = new InMemoryDriver({
-        initialData: {
-            events: instants.map((iso, i) => ({
-                id: i + 1,
-                probe: iso,
-                created_at: new Date(iso),
-            })),
-        },
-    });
-    await driver.connect();
-    const service = new MemoryAnalyticsService({ driver, cubes: [CUBE] });
-    const result = await service.query(asQuery({
-        cube: 'events',
-        measures: ['events.count'],
-        dimensions: ['events.probe'],
-        timeDimensions: [{ dimension: 'events.createdAt', dateRange: range }],
-    }));
-    return result.rows.map((row) => String(row['events.probe'])).sort();
-}
+// The driver harness (`CUBE`, `asQuery`, `probesSelected`) left with the
+// retired cells — see the header; #16322 brings it back with the preset form.
 
 interface Cell {
     zone: string;
@@ -186,48 +174,13 @@ const DST_CELLS: Cell[] = [
 
 const label = (c: Cell) => `${c.zone} @ ${c.instant} '${c.range}'`;
 
-/** Probe instants straddling BOTH candidate boundaries, computed in-zone. */
-function probesFor(c: Cell): string[] {
-    const truth = Date.parse(utcArithmeticStart(c.unit, c.num));
-    const mixed = Date.parse(localArithmeticStart(c.unit, c.num));
-    return [...new Set([
-        new Date(truth).toISOString(),
-        new Date(truth - 1).toISOString(),
-        new Date(mixed).toISOString(),
-        new Date(mixed - 1).toISOString(),
-        new Date(truth + 43_200_000).toISOString(), // comfortably inside, both ways
-    ])].sort();
-}
-
 describe('#15825 defect 2 — the `last N ...` legs resolve on one calendar, across DST transitions', () => {
     for (const c of DST_CELLS) {
-        it(`${c.kind}: ${label(c)}`, async () => {
-            const { truth, mixed, probes } = await at(c.zone, c.instant, async () => ({
-                truth: utcArithmeticStart(c.unit, c.num),
-                mixed: localArithmeticStart(c.unit, c.num),
-                probes: probesFor(c),
-            }));
-
-            // CONTROL FIRST — if these agree, the cell is not in a transition
-            // window and every assertion below would be vacuous. (It is the
-            // whole reason a TZ=UTC-only test is worthless here.)
-            expect(
-                mixed,
-                `${label(c)}: the local-arithmetic spelling must DISAGREE here, otherwise this cell pins nothing`,
-            ).not.toBe(truth);
-
-            const inZone = await at(c.zone, c.instant, () => probesSelected(probes, c.range));
-            const atUtc = await at('UTC', c.instant, () => probesSelected(probes, c.range));
-
-            // THE ORACLE: at TZ=UTC the two spellings coincide, so this run is
-            // the reference answer. The process timezone must not move it.
-            expect(inZone, `${label(c)}: the process timezone changed which rows were counted`).toEqual(atUtc);
-
-            // And the answer must actually be non-trivial — a window that
-            // selected everything or nothing would compare equal for free.
-            expect(inZone.length, `${label(c)}: probes must straddle the boundary`).toBeGreaterThan(0);
-            expect(inZone.length, `${label(c)}: probes must straddle the boundary`).toBeLessThan(probes.length);
-        });
+        // ⛔ RETIRED (#16041 → #16322): `c.range` is the relative dialect the
+        // closed vocabulary refuses at the schema door; no preset expresses it
+        // until #16322 aligns the parser (measured — see the header, which also
+        // states exactly what is uncovered until then).
+        it.todo(`${c.kind}: ${label(c)} — retired by #16041 (dialect closed at the schema), reinstate under #16322 in preset form`);
     }
 
     it('the day and week legs also match the offset-free definition — n x 24h before the UTC day', async () => {

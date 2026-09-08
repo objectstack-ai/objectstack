@@ -144,7 +144,7 @@ const result = CheckpointSchema.parse(data);
 | **iteration** | `integer` | optional | Zero-based iteration of the enclosing `loop`, carried through any nesting — a step inside a `parallel` branch that is itself inside a loop body carries the loop's iteration here and its branch index on `branch`. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop's iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`. |
 | **branch** | `integer` | optional | Zero-based index of the enclosing `parallel` branch. Present only on a step inside a parallel branch; absent everywhere else. When the parallel node is itself inside a loop body, the loop iteration is reported through `iteration`, never here. |
 | **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. For `parallel-branch` the branch index is reported through `branch`, and the enclosing loop iteration — when the parallel node sits inside a loop body — through `iteration`. |
-| **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean }` | optional | Records this step selected / acted on, as reported by the node executor |
+| **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean; failures?: integer }` | optional | Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
 
 ### Nested Shape: `ExecutionLog.summary`
@@ -155,7 +155,7 @@ const result = CheckpointSchema.parse(data);
 | **acted** | `integer` | ✅ | Total records written / effects dispatched by the run |
 | **skipped** | `integer` | ✅ | Total node executions a closed gate prevented |
 | **unmeasured** | `integer` | optional | Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero. |
-| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`. On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
+| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`, INCLUDING what a delegating node (`subflow` / `map`) rolled up from a child run that COMPLETED while containing failures: this total answers "what did this run cause", subflows included, so a parent whose child lost rows does not read `failed: 0`. A child that FAILED — whether or not it also contained failures before it failed — counts once, as the delegating step's own failure, and its own `failed` stays on its row (unlike `acted`, which carries a failed child's writes). On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
 | **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
 | **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
 | **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
@@ -201,7 +201,7 @@ const result = CheckpointSchema.parse(data);
 | **iteration** | `integer` | optional | Zero-based iteration of the enclosing `loop`, carried through any nesting — a step inside a `parallel` branch that is itself inside a loop body carries the loop's iteration here and its branch index on `branch`. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop's iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`. |
 | **branch** | `integer` | optional | Zero-based index of the enclosing `parallel` branch. Present only on a step inside a parallel branch; absent everywhere else. When the parallel node is itself inside a loop body, the loop iteration is reported through `iteration`, never here. |
 | **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. For `parallel-branch` the branch index is reported through `branch`, and the enclosing loop iteration — when the parallel node sits inside a loop body — through `iteration`. |
-| **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean }` | optional | Records this step selected / acted on, as reported by the node executor |
+| **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean; failures?: integer }` | optional | Records this step selected / acted on — and, for a step that delegated to a child run (`subflow`, a `map` item), the failures that child contained — as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
 
 ### Nested Shape: `ExecutionStepLog.error`
@@ -219,6 +219,7 @@ const result = CheckpointSchema.parse(data);
 | **selected** | `integer` | optional | Records this node READ or matched (a `get_record` query, a lookup) |
 | **acted** | `integer` | optional | Records this node WROTE (created / updated / deleted) or effects it dispatched (notifications delivered) |
 | **unmeasuredEffect** | `boolean` | optional | This execution may have caused an effect the platform cannot count (an external write through a connector). NOT interchangeable with `acted: 0` — it says the count is unknown, not that it is zero. |
+| **failures** | `integer` | optional | Node executions that failed inside a child run this execution delegated to and went on from — a `subflow` child or a `map` item whose run COMPLETED while containing failures: its `summary.failed`, rolled up so the parent answers "what did this run cause". Folds into this node's `failures` and so into the run-level `failed`. NOT this execution's own outcome: a step that failed is `status: 'failure'` and counts once through `nodes[].failures`, and a child that FAILED — whether or not it also contained failures before it failed — is exactly that step failure: its own `failed`, contained and fatal alike, stays on the child's run row and nothing rides up here (unlike `acted`, which does carry a failed child's writes). Absent = delegated nothing, or the child tracked no count, or the producer did not track it; never zero. |
 
 ### Nested Shape: `ExecutionStepLog.skippedBy`
 
@@ -240,6 +241,7 @@ const result = CheckpointSchema.parse(data);
 | **selected** | `integer` | optional | Records this node READ or matched (a `get_record` query, a lookup) |
 | **acted** | `integer` | optional | Records this node WROTE (created / updated / deleted) or effects it dispatched (notifications delivered) |
 | **unmeasuredEffect** | `boolean` | optional | This execution may have caused an effect the platform cannot count (an external write through a connector). NOT interchangeable with `acted: 0` — it says the count is unknown, not that it is zero. |
+| **failures** | `integer` | optional | Node executions that failed inside a child run this execution delegated to and went on from — a `subflow` child or a `map` item whose run COMPLETED while containing failures: its `summary.failed`, rolled up so the parent answers "what did this run cause". Folds into this node's `failures` and so into the run-level `failed`. NOT this execution's own outcome: a step that failed is `status: 'failure'` and counts once through `nodes[].failures`, and a child that FAILED — whether or not it also contained failures before it failed — is exactly that step failure: its own `failed`, contained and fatal alike, stays on the child's run row and nothing rides up here (unlike `acted`, which does carry a failed child's writes). Absent = delegated nothing, or the child tracked no count, or the producer did not track it; never zero. |
 
 
 ---
@@ -281,9 +283,9 @@ const result = CheckpointSchema.parse(data);
 | **nodeId** | `string` | ✅ | Node ID |
 | **nodeType** | `string` | ✅ | Node action type (e.g., "get_record", "decision") |
 | **nodeLabel** | `string` | optional | Human-readable node label |
-| **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped` |
+| **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped`. Judged on this node's OWN executions: a delegating node (`subflow` / `map`) whose child completed while containing failures reads `success` here with `failures > 0` |
 | **runs** | `integer` | ✅ | Times the node executed (loop iterations and parallel branches each count) |
-| **failures** | `integer` | ✅ | Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too; the run-level `failed` is the sum of this across `nodes` |
+| **failures** | `integer` | ✅ | Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too — plus what a delegating execution rolled up from a child run that COMPLETED (`metrics.failures`: the contained failures of a `subflow` child or a `map` item). On a delegating node this may therefore exceed `runs` and is no longer only this node's own failed executions; a child that FAILED adds only the step's own failure (unlike `acted`, which carries a failed child's writes too); the run-level `failed` is the sum of this across `nodes` |
 | **skipped** | `integer` | ✅ | Times a closed gate kept this node from running at all |
 | **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
 | **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |
@@ -302,7 +304,7 @@ const result = CheckpointSchema.parse(data);
 | **acted** | `integer` | ✅ | Total records written / effects dispatched by the run |
 | **skipped** | `integer` | ✅ | Total node executions a closed gate prevented |
 | **unmeasured** | `integer` | optional | Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero. |
-| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`. On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
+| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`, INCLUDING what a delegating node (`subflow` / `map`) rolled up from a child run that COMPLETED while containing failures: this total answers "what did this run cause", subflows included, so a parent whose child lost rows does not read `failed: 0`. A child that FAILED — whether or not it also contained failures before it failed — counts once, as the delegating step's own failure, and its own `failed` stays on its row (unlike `acted`, which carries a failed child's writes). On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
 | **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
 | **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
 | **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
@@ -314,9 +316,9 @@ const result = CheckpointSchema.parse(data);
 | **nodeId** | `string` | ✅ | Node ID |
 | **nodeType** | `string` | ✅ | Node action type (e.g., "get_record", "decision") |
 | **nodeLabel** | `string` | optional | Human-readable node label |
-| **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped` |
+| **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped`. Judged on this node's OWN executions: a delegating node (`subflow` / `map`) whose child completed while containing failures reads `success` here with `failures > 0` |
 | **runs** | `integer` | ✅ | Times the node executed (loop iterations and parallel branches each count) |
-| **failures** | `integer` | ✅ | Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too; the run-level `failed` is the sum of this across `nodes` |
+| **failures** | `integer` | ✅ | Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too — plus what a delegating execution rolled up from a child run that COMPLETED (`metrics.failures`: the contained failures of a `subflow` child or a `map` item). On a delegating node this may therefore exceed `runs` and is no longer only this node's own failed executions; a child that FAILED adds only the step's own failure (unlike `acted`, which carries a failed child's writes too); the run-level `failed` is the sum of this across `nodes` |
 | **skipped** | `integer` | ✅ | Times a closed gate kept this node from running at all |
 | **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
 | **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |

@@ -47,6 +47,19 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../../core/src/index.ts'),
       },
       {
+        // Test-only, and the reason it is a VALUE reach: the open-only wall
+        // acceptance (`open-only-wall-acceptance.test.ts`) constructs a real
+        // `RestServer` and drives its route handlers, so the whole REST
+        // admission chain — `resolveExecCtx` → `computeExecCtx` →
+        // `resolveAuthzContext` — is the subject under measurement. Resolved
+        // from `dist/` that suite would render its verdict about the last
+        // `pnpm build` of `@objectstack/rest`, which for an ACCEPTANCE is the
+        // silent-green direction: the wall would read as raised against a
+        // stale copy of the very code that raises it.
+        find: /^@objectstack\/rest$/,
+        replacement: path.resolve(__dirname, '../../rest/src/index.ts'),
+      },
+      {
         // Test-only: the moved fakes open their `update()` with
         // `assertEngineUpdateDispatch`, which is the PREDICATE those doubles are
         // pinned to (`pnpm check:engine-double-contract`). Resolved from `dist/`

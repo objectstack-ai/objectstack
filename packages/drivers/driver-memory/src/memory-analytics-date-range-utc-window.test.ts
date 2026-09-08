@@ -45,7 +45,7 @@ import { vi } from 'vitest';
 import { InMemoryDriver } from './memory-driver.js';
 import { MemoryAnalyticsService } from './memory-analytics.js';
 import { AnalyticsQuerySchema } from '@objectstack/spec/data';
-import type { AnalyticsQuery, Cube } from '@objectstack/spec/data';
+import type { AnalyticsDateRange, AnalyticsQuery, Cube } from '@objectstack/spec/data';
 
 const REAL_TZ = process.env.TZ;
 
@@ -101,7 +101,8 @@ const CUBE: Cube = {
 const asQuery = (input: AnalyticsQuery): AnalyticsQuery => AnalyticsQuerySchema.parse(input);
 
 /** Ask `range` over rows planted at `instants`; answer which probes came back. */
-async function probesSelected(instants: string[], range = 'today'): Promise<string[]> {
+// `range` is the CLOSED contract (#16041): a preset name or an explicit window.
+async function probesSelected(instants: string[], range: AnalyticsDateRange = 'today'): Promise<string[]> {
     const driver = new InMemoryDriver({
         initialData: {
             events: instants.map((iso, i) => ({
@@ -256,31 +257,23 @@ describe('#15825 defect 1 fences', () => {
         });
     });
 
-    it('the unrecognised-range fallback carries no calendar — same answer in every zone', async () => {
-        // This repair touched only the two legs that BUILD a window. The
-        // `return [range, range]` fallback is untouched, and this fence holds
-        // it that way: its answer must not depend on the process timezone.
-        //
-        // ⚠️ It is deliberately NOT asserted to be a sensible answer. Measured
-        // 2026-09-05: an unparseable `dateRange` reaches mingo as
-        // `{$gte: '<garbage>', $lte: '<garbage>'}` and, under BSON cross-type
-        // ordering, matches EVERY `Date`-typed row — so the time filter is
-        // silently dropped rather than refused. That is a different defect
-        // class from this card's (vocabulary, not calendar) and is filed
-        // separately; ⛔ it is not repaired here.
-        const probes = [
-            '2020-01-01T00:00:00.000Z',
-            '2026-09-05T06:00:00.000Z',
-            '2099-01-01T00:00:00.000Z',
-        ];
-        const answers: string[] = [];
-        for (const zone of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'Pacific/Chatham']) {
-            await at(zone, '2026-09-05T12:00:00Z', async () => {
-                answers.push(JSON.stringify(await probesSelected(probes, 'not a range at all')));
-            });
-        }
-        expect(new Set(answers).size, `the fallback answered differently per zone: ${answers.join(' | ')}`).toBe(1);
-    });
+    // ⛔ RETIRED (#16041 → #16322). This fence fed `dateRange: 'not a range at
+    // all'` through `AnalyticsQuerySchema.parse` to pin that the `[range, range]`
+    // fallback's answer did not depend on the process zone. #16041 (maintainer
+    // ruling, decision batch #57) closed the string arm to the
+    // `date-range-presets.ts` vocabulary, so an unrecognised string is refused
+    // at the schema door (`400 ANALYTICS_DATE_RANGE_UNRECOGNIZED`, pinned in
+    // `packages/spec/src/data/analytics-date-range-closed-vocabulary.test.ts`
+    // and `packages/runtime/src/analytics-daterange-refusal-envelope.test.ts`)
+    // and never reaches the parser through any door. Retired rather than routed
+    // around the door: that would have kept a live pin on the silent-widening
+    // fallback this card exists to abolish.
+    //
+    // COVERAGE LOST until #16322: nothing a caller can reach — the fallback's
+    // zone-independence was a property of an answer that matched EVERY row.
+    // #16322 deletes the fallback and owes the DRIVER-side refusal pin in its
+    // place (memory and SQL refusing identically, one conformance fixture).
+    it.todo('the unrecognised-range fallback carries no calendar — same answer in every zone — retired by #16041 (input refused at the schema); #16322 replaces it with the driver-side refusal pin');
 
     it('the process timezone is restored after every case', () => {
         expect(process.env.TZ).toBe(REAL_TZ);

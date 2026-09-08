@@ -293,6 +293,60 @@ const underObject = (key: string, valid?: AnyRec): SweptCollection => ({
   valid,
 });
 
+/**
+ * A judgeable flow node: the `start` node the flow readers resolve the
+ * record-change target against, so a control built from it is not merely empty.
+ */
+const VALID_NODE: AnyRec = { id: 'start', type: 'start', config: { objectName: 'crm_account' } };
+
+/**
+ * A flow's own node list — `stack.flows[].nodes` (#15793).
+ *
+ * ## Why this needed a THIRD addressing mode rather than one more row
+ *
+ * The two above address a collection by NAME: a top-level stack key, or one
+ * sub-collection key on an object. A flow's node list is neither. It is the
+ * `nodes` of a member of `stack.flows`, and #15793's whole diagnosis was that
+ * this sweep *could not express* it — which is why #15552, #15636 and #15742
+ * closed this defect class three times without ever reaching the two casts
+ * #15793 repaired. The blind spot was in the ADDRESSING, not in the rule table.
+ *
+ * The constructor is a three-line sibling of `underObject` because
+ * `SweptCollection.stack` was already an arbitrary builder; what was missing
+ * was only the will to write a second shape of one. That is worth saying
+ * plainly: the gap looked structural and was not.
+ */
+const underFlow = (key: string, valid?: AnyRec): SweptCollection => ({
+  label: `flows[].${key}`,
+  stack: (members) => ({ objects: [VALID_OBJECT], flows: [{ name: 'crm_flow', edges: [], [key]: members }] }),
+  valid,
+});
+
+/**
+ * A NESTED region's node list — `flows[].nodes[].config.body.nodes` (#15793).
+ *
+ * The graph-shaped half proper, and a different reachability question from
+ * `underFlow`. An ADR-0031 container keeps a whole sub-graph in its `config`,
+ * and `collectFlowGraphs` turns each into its own `FlowGraph` after checking
+ * only `Array.isArray` on the inner list — so a non-record member here is one
+ * the PRODUCER picked up, not one a caller passed in, and no coercion at the
+ * call site can reach it. Kept in the sweep with its throw recorded below
+ * rather than left unexpressed: an unaddressable shape is exactly what let this
+ * class survive three closures.
+ */
+const underNestedRegion = (valid?: AnyRec): SweptCollection => ({
+  label: 'flows[].nodes[].config.body.nodes',
+  stack: (members) => ({
+    objects: [VALID_OBJECT],
+    flows: [{
+      name: 'crm_flow',
+      edges: [],
+      nodes: [VALID_NODE, { id: 'lp', type: 'loop', config: { collection: 'x', body: { nodes: members, edges: [] } } }],
+    }],
+  }),
+  valid,
+});
+
 const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
   // Top-level, read through `recordsOf(stack.X)` by the re-pointed readers.
   topLevel('objects', VALID_OBJECT),
@@ -320,6 +374,11 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
   topLevel('mappings'),
   // Top-level, read by `validateSecurityPosture` through `recordsOf`.
   topLevel('positions'),
+  // A flow's inner graph — the shape no addressing mode could reach until
+  // #15793 added one. `underFlow` is the flow's own list; `underNestedRegion`
+  // is a container's sub-graph, which only the producer can hand out.
+  underFlow('nodes', VALID_NODE),
+  underNestedRegion(VALID_NODE),
   // Per-object sub-collections the same readers walk.
   underObject('fields', VALID_FIELD),
   underObject('actions'),
@@ -340,11 +399,9 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  * "nothing throws" would have had to be deleted or weakened on the day it was
  * written, and would then never have caught the next one.
  *
- * It is EMPTY today, and that is a measurement, not an aspiration: no rule in
- * the table throws on a non-record member of any collection swept here. Two
- * rows have come out since it was written, each because the sweep went red
- * demanding a throw that no longer happens — which is the both-directions half
- * earning its keep, since neither removal started with anyone going looking:
+ * Three rows have come out since it was written, each because the sweep went
+ * red demanding a throw that no longer happens — which is the both-directions
+ * half earning its keep, since no removal started with anyone going looking:
  *
  *  - `stack.datasets` — `indexDatasets` in `validate-chart-bindings.ts`,
  *    re-pointed by #15741.
@@ -354,8 +411,39 @@ const SWEPT_COLLECTIONS: readonly SweptCollection[] = [
  *    the list through `recordsOf` (#15742), which drops a non-record member of
  *    the array shape whole and in silence, exactly as the file's two sibling
  *    field readers already did.
+ *  - `flows[].nodes` / `validateStackExpressions` — the two casts #15793
+ *    repaired, and the reason the two graph-shaped arms below exist at all.
+ *
+ * ## The rows it holds today, both found by the arms that added them
+ *
+ * It went from empty to two the moment a flow's inner node list became
+ * addressable, which is the point #15793 was filed to make: this class was
+ * closed three times over collections while the same defect stood untouched one
+ * addressing mode away.
+ *
+ *  - `flows[].nodes` / `lintFlowPatterns` (#16751) — `lint-flow-patterns.ts`
+ *    holds the SAME two spellings #15793 removed from `validate-expressions.ts`
+ *    (`:1426` inline-casts `flow.nodes`, then `:1430` reads `.type` off each
+ *    member; `:456` and `:1522` double-cast `graph.nodes`). Shallowly
+ *    reachable — an ordinary flow with an empty YAML list item.
+ *  - `flows[].nodes[].config.body.nodes` / `validateStackExpressions` +
+ *    `lintFlowPatterns` (#16752) — neither rule's own reader is at fault here:
+ *    both throw from INSIDE `collectFlowGraphs`, whose region walk reads
+ *    `node.config` off a member of an inner list it checked only with
+ *    `Array.isArray`. No coercion at either call site reaches that list, which
+ *    is why #15793 stopped and filed the fork instead of widening a
+ *    `packages/spec` contract to tolerate malformed members.
  */
-const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {};
+const RESIDUAL_THROWS: Readonly<Record<string, readonly string[]>> = {
+  // 2026-09-08 — #16751. Removed when `lint-flow-patterns.ts` reads its node
+  // lists through `recordsOf`, as `validate-expressions.ts` now does.
+  'flows[].nodes · null': ['lintFlowPatterns'],
+  'flows[].nodes · undefined': ['lintFlowPatterns'],
+  // 2026-09-08 — #16752. Both entries are ONE defect in `collectFlowGraphs`,
+  // surfacing through the two rules that call it. Removed together.
+  'flows[].nodes[].config.body.nodes · null': ['lintFlowPatterns', 'validateStackExpressions'],
+  'flows[].nodes[].config.body.nodes · undefined': ['lintFlowPatterns', 'validateStackExpressions'],
+};
 
 /**
  * Where a junk member still draws a finding no author's file justifies — the

@@ -112,7 +112,10 @@ export interface TursoDriverConfig {
    *   `@libsql/client` a `fetch` that aborts once the window elapses, so a
    *   stalled endpoint fails the operation as `TIMEOUT` / 504 instead of
    *   hanging it. A `wss://` / `ws://` URL rides the WebSocket transport, which
-   *   exposes no such seam in this client version; the key does not bound it.
+   *   exposes no such seam in this client version — so the constructor REFUSES
+   *   a non-zero `timeout` beside one of those two schemes (`VALIDATION_ERROR`
+   *   / 400) rather than accept a window it cannot deliver: drop `timeout`, or
+   *   spell the url `libsql://` / `https://`, which IS bounded.
    * - **Replica mode**: `sync()` — the one remote operation on this arm (reads
    *   and writes run against the local file). A sync still running when the
    *   window closes rejects with the same envelope; the native binding's own
@@ -270,7 +273,9 @@ function remoteOperationTimedOut(what: string, timeoutMs: number): Error & { cod
  * different setting under the same name. `Config.fetch` is the one seam the
  * remote transport exposes: the hrana HTTP client routes EVERY request through
  * it (the protocol-version probe included), and the WebSocket transport takes
- * no such hook at all.
+ * no such hook at all — which is why a `wss://` / `ws://` url with a window is
+ * refused at construction ({@link refuseWebSocketTimeout}) instead of being
+ * handed a `fetch` that nothing reads.
  *
  * A signal already on the request is honoured alongside the window
  * (`AbortSignal.any`), so a caller's own abort keeps working; only an abort the
@@ -313,6 +318,68 @@ async function boundedBy<T>(operation: Promise<T>, timeoutMs: number, what: stri
 /** The configured window, or `undefined` for "no bound" — `0` and unset alike. */
 function timeoutWindow(config: TursoDriverConfig): number | undefined {
   return config.timeout && config.timeout > 0 ? config.timeout : undefined;
+}
+
+/**
+ * Whether a remote url rides `@libsql/client`'s WebSocket transport.
+ *
+ * The client routes on the literal scheme (`lib-esm/node.js`: `wss` / `ws` →
+ * its ws client, `https` / `http` → its HTTP client); `libsql://` is expanded
+ * by `@libsql/core` before that switch, and the entry this driver imports
+ * expands it to HTTPS. So these two spellings are the whole population that
+ * reaches the WebSocket arm from this driver.
+ */
+function ridesWebSocketTransport(url: string): boolean {
+  return url.startsWith('wss://') || url.startsWith('ws://');
+}
+
+/**
+ * `timeout` beside a `wss://` / `ws://` url — refused at construction.
+ *
+ * On those two schemes the window reaches nothing. `@libsql/client@0.17.4`'s
+ * WebSocket client (`lib-esm/ws.js` → `hrana.openWs(url, authToken)`) consults
+ * neither `Config.fetch` — the seam {@link fetchBoundedBy} rides — nor any
+ * timeout option of its own: over `@libsql/hrana-client@0.10.0`'s
+ * `lib-esm/ws/*.js` and `lib-esm/index.js` a `timeout` grep returns zero,
+ * while a `fetch` grep over `lib-esm/http/` finds the call sites — the control
+ * that makes the zero a reading. `Config.timeout` is not a seam either: it is
+ * the busy timeout for local `file:` lock contention, which "remote clients
+ * ignore".
+ *
+ * ADR-0049 enforce-or-remove: a declared setting that changes nothing is worse
+ * than absent, and "documented as not bounded" was still a `timeout: 30000`
+ * that an author reads as a bound. Accepting the pair silently was the defect;
+ * the refusal turns it into a loud one and changes no wire behaviour — routing
+ * a `wss://` url over HTTP because `timeout` is set would change the transport
+ * behind the author's back, and is deliberately NOT done here.
+ *
+ * Raised BEFORE `super()`, beside `detectMode`: ahead of the Knex base and of
+ * any `@libsql/client`, so it cannot be reached with a half-built driver, and
+ * a boot that would have run unbounded fails at the one constructor every
+ * loader calls (`buildTursoDriverConfig` → `new TursoDriver`).
+ *
+ * Scoped to REMOTE mode: on the replica arm a `wss://` url beside `syncUrl`
+ * still has `sync()` bounded, so the key is not inert there. `timeout: 0` is
+ * the documented "no bound", asks for nothing, and is not refused. A
+ * caller-supplied `client` is not consulted — its transport is not the driver's
+ * to know; the scheme of the `url` beside it is what decides here.
+ *
+ * ⛔ No internal issue id in the message: it reaches an operator's boot log and
+ * Studio's datasource form. The ids live in the comments beside it.
+ */
+function refuseWebSocketTimeout(url: string, timeoutMs: number): never {
+  const scheme = url.slice(0, url.indexOf('://') + '://'.length);
+  const err = new Error(
+    `\`TursoDriverConfig.timeout\` (${timeoutMs} ms) is set beside a \`${scheme}\` url, and on that ` +
+      `scheme it bounds nothing: a \`${scheme}\` url rides @libsql/client's WebSocket transport, which ` +
+      `takes no fetch and no timeout option (measured against @libsql/client 0.17.4), so the window would ` +
+      `be accepted and never delivered. Either omit \`timeout\` and run this remote unbounded, or keep it ` +
+      `and spell the url \`libsql://\` or \`https://\` — the client resolves \`libsql://\` to HTTPS — ` +
+      `where every request IS bounded and a stalled endpoint fails as TIMEOUT / 504.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.VALIDATION_ERROR;
+  err.status = 400;
+  throw err;
 }
 
 // ── Turso Driver ─────────────────────────────────────────────────────────────
@@ -449,6 +516,13 @@ export class TursoDriver extends SqlDriver {
 
   constructor(config: TursoDriverConfig) {
     const mode = TursoDriver.detectMode(config);
+    // A window the WebSocket arm cannot deliver is refused here, ahead of the
+    // Knex base and of any client — see `refuseWebSocketTimeout` for the
+    // reading and the ruling behind it.
+    const timeoutMs = timeoutWindow(config);
+    if (mode === 'remote' && timeoutMs !== undefined && ridesWebSocketTransport(config.url)) {
+      refuseWebSocketTimeout(config.url, timeoutMs);
+    }
     const knexConfig = TursoDriver.toKnexConfig(config, mode);
     super(knexConfig);
     this.tursoConfig = config;
@@ -1405,7 +1479,19 @@ export class TursoDriver extends SqlDriver {
   // ===================================
 
   override async execute(command: any, params?: any[], options?: DriverOptions): Promise<any> {
-    if (this.isRemote) return this.remoteTransport!.execute(command, params);
+    if (this.isRemote) {
+      // [#16019] The remote transport hands the libsql client's error back
+      // whole — `SQLITE_ERROR: no such function: translate`: no statement, no
+      // `status`, the bare shape the HTTP doors' phrasing heuristic never
+      // covered. Declared through the base class's raw-path terminal so both
+      // transports leave this driver with ONE envelope (`DATABASE_ERROR`/500,
+      // the dialect error under a non-enumerable `cause`).
+      try {
+        return await this.remoteTransport!.execute(command, params);
+      } catch (error) {
+        throw this.rawStatementFault(typeof command === 'string' ? command : String(command), error);
+      }
+    }
     return super.execute(command, params, options);
   }
 

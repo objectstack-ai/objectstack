@@ -787,6 +787,21 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'same answer: guard the block with `check:skill-docs`, leave the prose to text-merge.',
   },
   {
+    path: 'packages/create-objectstack/src/templates/*/package.json',
+    gen: 'gen:scaffold-emission-policy',
+    owner: ROOT_OWNER,
+    why:
+      'MIXED, and the generated part is TWO VALUES of it. `gen:scaffold-emission-policy` rewrites '
+      + "only `engines.pnpm` and `devDependencies.typescript` from the CLI's shared `SCAFFOLD_*` "
+      + 'constants; everything else in the file — the scripts block, the dependency LIST, and the '
+      + '`@objectstack/*` ranges a different pass (`scripts/sync-template-versions.mjs`) stamps at '
+      + 'version time — is authored or owned elsewhere. So "discard both sides and re-run the '
+      + 'generator" is not even defined here: the generator REFUSES a template that does not '
+      + 'already declare the keys it stamps, and it would reproduce none of the rest. Guarding the '
+      + 'two values with `check:scaffold-emission-policy` is the whole mechanism; a conflict in '
+      + 'this file is a human\'s, exactly as it was before those two values were generated.',
+  },
+  {
     path: 'packages/spec/json-schema/**',
     gen: 'gen:openapi',
     untracked: true,

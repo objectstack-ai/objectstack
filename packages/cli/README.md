@@ -56,7 +56,7 @@ os compile
 | Command | Description |
 |---------|-------------|
 | `os generate <type> <name>` | Generate metadata files (alias: `os g`) |
-| `os create <type> [name]` | Create a new package/plugin/example from template |
+| `os create <type> [name]` | Scaffold a standalone **kernel code** plugin project (the `Plugin` contract, built by `tsc`) from a built-in template |
 
 Available generate types: `object`, `view`, `action`, `flow`, `dashboard`, `app`, `skill`
 
@@ -177,7 +177,9 @@ Common variables: `OS_DATABASE_URL`, `OS_DATABASE_DRIVER`,
 
 ### `os init`
 
-- `-t, --template <template>` — Template: `app` (default), `plugin`, `empty`
+- `-t, --template <template>` — Template: `app` (default), `plugin` (a **metadata package** —
+  declarative objects another stack loads, *not* the kernel code plugin `os create plugin`
+  emits), `empty`
 - `--no-install` — Skip dependency installation
 
 ### `os compile`

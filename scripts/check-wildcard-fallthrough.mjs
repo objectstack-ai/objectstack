@@ -124,7 +124,16 @@ const MOUNTS = {
   // conclusion from the other direction — "the wildcard was wider than the two
   // routes it served". Two independent reads landing on the same defect is the
   // argument for enumerating the shape rather than finding it by eye each time.
-  "packages/adapters/hono/src/index.ts:all `${prefix}/auth/*`": { yields: true },
+  //
+  // #16025 renamed the PATTERN, not the handler: the mount is now derived from
+  // the auth service's own `basePath` (`authMount`) instead of the adapter's
+  // `prefix`, because the two defaults did not compose and auth was never
+  // reached on the documented embed. `yields` stays, and stays VERIFIED rather
+  // than asserted — the handler takes `next` and hands it to `yieldUnowned`,
+  // which awaits it, and `callsContinuation` counts that hand-off. Neither of
+  // the other two states would be true here: the mount does not own its
+  // namespace (`exempt`) and it is not terminal (`ratchet`).
+  "packages/adapters/hono/src/index.ts:all `${authMount}/*`": { yields: true },
 
   'packages/plugins/plugin-hono-server/src/adapter.ts:use *': { yields: true },
   'packages/plugins/plugin-hono-server/src/hono-plugin.ts:use *': { yields: true },
@@ -460,9 +469,11 @@ const SELF_TEST_VERDICT = 'check-wildcard-fallthrough self-test reached its verd
 //
 // "no assertion threw" used to be this self-test's ONLY success condition, so
 // "every case held" and "the cases never ran" printed the same line — and this
-// file's verdict spells a TRANSCRIBED count (`17 cases`), which is evidence, not
-// proof: nothing compared it, so a deleted block shrank the real count while the
-// literal stayed put. Closed the way PR #13487 validated on check-doc-authoring:
+// file's verdict once spelled a TRANSCRIBED count (a literal `17` against a real
+// 18), which is evidence, not proof: nothing compared it, so a deleted block
+// shrank the real count while the literal stayed put. The verdict now derives
+// its number from the ledger this roster floors (#15231). Closed the way PR
+// #13487 validated on check-doc-authoring:
 // what is pinned is the registered NAMES, not a number, and the floor requires
 // the OPENED set to equal the DECLARED set with each battery at or above its own
 // count.
@@ -625,13 +636,16 @@ function selfTest() {
     process.exit(1);
   }
 
-  // ⚠️ MEASURED at 18, not 17: this transcribed literal had already drifted one
-  // below the real count before this floor existed, which is precisely why a
-  // printed number is evidence and not proof. It is left as-is here so this
-  // change stays a pure no-op on output; the correction is filed separately, and
-  // the floor above is what makes the drift harmless — the count can no longer
-  // shrink in silence.
-  console.log('✓ self-test: 17 cases');
+  // The verdict DERIVES its number from `batterySeen` — the very ledger the floor
+  // above just evaluated — so the printed count and the floor can never disagree,
+  // and a block that stops running shrinks the number instead of leaving a
+  // transcribed literal standing (#15231). What it counts is assertions that
+  // actually RAN this run, not `assert(` call sites in the source: those are two
+  // different facts, and only the first one is measured here. Summing the whole
+  // ledger is exact because reaching this line means every battery that
+  // registered is a declared one — the set difference above reds otherwise.
+  const casesRun = [...batterySeen.values()].reduce((total, count) => total + count, 0);
+  console.log(`✓ self-test: ${casesRun} cases`);
 
   return SELF_TEST_VERDICT;
 }

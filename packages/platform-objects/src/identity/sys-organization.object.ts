@@ -17,6 +17,27 @@ export const SysOrganization = ObjectSchema.create({
   icon: 'building-2',
   isSystem: true,
   managedBy: 'better-auth',
+  // [#15873 — maintainer ruling 2026-09-07, option (a), verbatim 「同意」]
+  // Declares the generic EDIT affordance so `enable.apiMethods` below can
+  // keep `update`: a `managedBy` object runs through
+  // `reconcileManagedApiMethods` (objectql registry, ADR-0092 / ADR-0103 D3),
+  // which strips any write verb the resolved affordances do not grant and only
+  // warns. Without this line the declaration and the runtime disagree
+  // silently, one layer deeper than the method gate — the second silent gate
+  // #7727 measured on `sys_api_key`. `create` / `delete` stay bucket-default
+  // (off): organizations are created and destroyed through better-auth's own
+  // endpoints (the row actions below).
+  //
+  // Safe to open only because the enforcement it fronts already exists (ADR-0092
+  // D4's sequencing rule — the affordance never ships ahead of the guard): the
+  // D2 identity write guard clamps every user-context update on this table to
+  // the registered column whitelist, `MANAGED_EXTENSION_EDITABLE_FIELDS
+  // .sys_organization` in plugin-auth — the platform-owned extension columns
+  // (`require_mfa`, `parent_organization_id`, `sort_order`, `timezone`) and
+  // nothing else. Per D4's form-rendering constraint, every column outside that
+  // whitelist is marked `readonly` below, so the edit form cannot offer a write
+  // the server will refuse or strip.
+  userActions: { edit: true },
   // ADR-0010 §3.7 — managed by better-auth; tenants may not edit schema,
   // but may add overlay row-level config. Use `no-overlay` if you need to
   // forbid sys_metadata overlays entirely.
@@ -31,8 +52,12 @@ export const SysOrganization = ObjectSchema.create({
   titleFormat: '{name}',
   highlightFields: ['name', 'slug'],
 
-  // Custom actions — generic CRUD is suppressed (better-auth-managed),
-  // but admins still need to create new orgs from the Setup app.
+  // Custom actions — generic create / delete are suppressed (better-auth-
+  // managed), and better-auth's own columns (`name`, `slug`, `logo`) are
+  // edited ONLY through `update_organization` below. The generic `update` the
+  // data door admits since #15873 reaches the platform-owned extension columns
+  // alone (see `userActions` above and `enable.apiMethods` at the bottom);
+  // admins still need to create new orgs from the Setup app.
   actions: [
     {
       name: 'create_organization',
@@ -176,9 +201,22 @@ export const SysOrganization = ObjectSchema.create({
 
   fields: {
     // ── Identity ─────────────────────────────────────────────────
+    // ADR-0092 D4 — with the generic edit affordance open (#15873), every
+    // better-auth-owned column is `readonly` so the standard edit form renders
+    // it non-editable. This is UX only: the server boundary is plugin-auth's
+    // identity write guard (ADR-0092 D2), which strips these from a
+    // user-context update regardless — and a mixed payload that carries one
+    // beside a whitelisted column lands the whitelisted column and drops this
+    // one, so a form that offered it would report success on an edit that
+    // never happened. `name` / `slug` / `logo` change through better-auth's
+    // `organization/update` (the `update_organization` row action, whose
+    // params are declared on the action, not read off these flags). The
+    // engine's own static-`readonly` strip exempts system-context writers, so
+    // better-auth's adapter (which stamps `isSystem`) still writes them.
     name: Field.text({
       label: 'Name',
       required: true,
+      readonly: true,
       searchable: true,
       maxLength: 255,
       group: 'Identity',
@@ -187,6 +225,7 @@ export const SysOrganization = ObjectSchema.create({
     slug: Field.text({
       label: 'Slug',
       required: false,
+      readonly: true,
       searchable: true,
       maxLength: 255,
       description: 'URL-friendly identifier',
@@ -197,13 +236,17 @@ export const SysOrganization = ObjectSchema.create({
     logo: Field.url({
       label: 'Logo',
       required: false,
+      readonly: true,
       group: 'Branding',
     }),
 
     // ── Configuration ────────────────────────────────────────────
+    // better-auth's own `metadata` column (its organization schema declares
+    // it); not an extension field, so readonly under D4 like the three above.
     metadata: Field.textarea({
       label: 'Metadata',
       required: false,
+      readonly: true,
       description: 'JSON-serialized organization metadata',
       group: 'Configuration',
     }),
@@ -333,8 +376,22 @@ export const SysOrganization = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
-    // #1591 — reads only: writes are refused by the identity write guard
-    // (ADR-0092 D2) and owned by better-auth. HTTP answers 405 before the 403.
-    apiMethods: ['get', 'list'],
+    // #1591 closed the generic writes on this table — "refused by the identity
+    // write guard (ADR-0092 D2) and owned by better-auth; HTTP answers 405
+    // before the 403" — and that reasoning still holds for better-auth's own
+    // columns, which the D2 whitelist keeps refusing on this path. It never
+    // covered the platform-owned extension columns, which better-auth neither
+    // reads nor writes and which `MANAGED_EXTENSION_EDITABLE_FIELDS` had
+    // declared editable through the ordinary path while this gate 405'd every
+    // PATCH before the engine was reached (#15873). Ruled 2026-09-07, option
+    // (a): the data door admits `update`, and the D2 whitelist does the column
+    // gating — a user-context PATCH of `name` is now refused by the guard's own
+    // verdict (403 PERMISSION_DENIED) instead of the method gate's 405, and
+    // `create` / `delete` stay 405. `update` alone, no `bulk`: the ruling
+    // widened one verb, and the single-record-only choice is on the record in
+    // `SINGLE_RECORD_WRITE_ONLY` (`api-methods-batch-conformance.test.ts`,
+    // @objectstack/spec), whose stale-entry check fails if `bulk` is added
+    // here without retiring it.
+    apiMethods: ['get', 'list', 'update'],
   },
 });

@@ -154,6 +154,10 @@ function event(
     object: string,
     record: any,
     timestamp = '2026-05-24T00:00:00.000Z',
+    // [#13566] The RECORD's organization, the way the engine stamps it
+    // (#14970). Omitted = the spec's one spelling for "belongs to no
+    // organization"; the schema refuses the empty string.
+    extra: { organizationId?: string } = {},
 ): RealtimeEventPayload {
     const payload = DataEventSchema.parse({
         id: randomUUID(),
@@ -161,6 +165,7 @@ function event(
         object,
         recordId: String(record.id),
         ...(type === 'deleted' ? {} : { after: record }),
+        ...(extra.organizationId !== undefined ? { organizationId: extra.organizationId } : {}),
         timestamp,
     });
     return { type: payload.type, object, payload: { ...payload }, timestamp };
@@ -177,11 +182,16 @@ function bulkEvent(
     object: string,
     matched: number,
     timestamp = '2026-05-24T00:00:00.000Z',
+    // [#13566] The ONE organization the tenant wall named for the batch, the
+    // way the engine stamps it (#15225 / #15813). Omitted = "the producer did
+    // not assert one organization for the batch" — a routine value there.
+    extra: { organizationId?: string } = {},
 ): RealtimeEventPayload {
     const payload = BulkDataEventSchema.parse({
         id: randomUUID(),
         type: `data.records.${type}`,
         object,
+        ...(extra.organizationId !== undefined ? { organizationId: extra.organizationId } : {}),
         matched,
         timestamp,
     });
@@ -237,7 +247,10 @@ describe('AutoEnqueuer', () => {
         const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
-        await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+        // [#13566] The event names the subscription's own organization: an
+        // organization-owned subscription receives only its organization's
+        // events now, so the stamp is pinned on a delivery that still happens.
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }, undefined, { organizationId: 'org_pin_alpha' }));
         await flush();
 
         expect(calls).toHaveLength(1);
@@ -636,7 +649,9 @@ describe('AutoEnqueuer — bulk data events (#4639)', () => {
         const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0 });
         await ae.start();
 
-        await realtime.publish(bulkEvent('updated', 'contact', 3));
+        // [#13566] Same as the per-record pin: the batch is attributed to the
+        // subscription's own organization, so the delivery still happens.
+        await realtime.publish(bulkEvent('updated', 'contact', 3, undefined, { organizationId: 'org_pin_alpha' }));
         await flush();
 
         expect(calls).toHaveLength(1);
@@ -745,6 +760,342 @@ describe('AutoEnqueuer — bulk data events (#4639)', () => {
         await flush();
 
         expect(calls).toHaveLength(0);
+        await ae.stop();
+    });
+});
+
+/**
+ * #13566 — the organization dimension of the match.
+ *
+ * On a walled deployment (`OS_TENANCY_POSTURE=isolated|group`) every
+ * organization's `sys_webhook` rows sit in ONE cache keyed by object name, and
+ * the producers now stamp the event with the organization the record belongs
+ * to (#14970) or the one the tenant wall named for the batch (#15225 /
+ * #15813). Matching on object name alone delivered organization A's records
+ * to organization B's endpoint, signed with B's secret.
+ *
+ * ⭐ Every pin here asserts on WHICH SUBSCRIPTIONS THE ENQUEUER SELECTED —
+ * the `refId`s handed to the enqueue seam — never on delivery rows. #13565
+ * stamps each delivery with the SUBSCRIPTION's organization, so a leaked
+ * delivery reads as natively owned by the receiver while carrying the
+ * sender's payload: a test over `sys_http_delivery` rows passes on a live
+ * leak.
+ */
+describe('AutoEnqueuer — organization dimension (#13566)', () => {
+    const selected = (calls: EnqueueHttpInput[]) => calls.map((c) => c.refId).sort();
+
+    describe('per-record path (data.record.*)', () => {
+        it("fans out ONLY to the subscription of the organization the record belongs to", async () => {
+            // The leak pin. Two organizations, each with its own webhook on
+            // `contact`; before the fix both received both organizations'
+            // records.
+            const engine = new FakeEngine({
+                sys_webhook: [
+                    webhook({ id: 'wh-a', name: 'a', organization_id: 'org_a' }),
+                    webhook({ id: 'wh-b', name: 'b', organization_id: 'org_b' }),
+                ],
+            });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(event('created', 'contact', { id: 'c-a' }, undefined, { organizationId: 'org_a' }));
+            await flush();
+            expect(selected(calls)).toEqual(['wh-a']);
+
+            await realtime.publish(
+                event('updated', 'contact', { id: 'c-b' }, '2026-05-24T00:00:01.000Z', { organizationId: 'org_b' }),
+            );
+            await flush();
+            expect(selected(calls)).toEqual(['wh-a', 'wh-b']);
+            expect(calls.find((c) => c.refId === 'wh-b')!.organizationId).toBe('org_b');
+            expect((calls.find((c) => c.refId === 'wh-b')!.payload as any).recordId).toBe('c-b');
+            // A foreign organization's subscription is simply not a candidate
+            // — the match term working, not a refusal worth a warning.
+            expect(warn).not.toHaveBeenCalled();
+            await ae.stop();
+        });
+
+        it('an org-less subscription does NOT receive an organization-walled record event — loud, once', async () => {
+            // The ruling's case, verbatim: a subscription with no organisation
+            // ownership does not fan out — loud refusal, never a silent
+            // cross-organisation delivery.
+            const engine = new FakeEngine({ sys_webhook: [webhook()] });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const debug = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, {
+                refreshIntervalMs: 0,
+                logger: { warn, debug },
+            });
+            await ae.start();
+
+            await realtime.publish(event('created', 'contact', { id: 'c-1' }, undefined, { organizationId: 'org_a' }));
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining('belongs to NO organization'),
+                expect.objectContaining({ id: 'wh-1', type: 'data.record.created', object: 'contact' }),
+            );
+            expect(String(warn.mock.calls[0][0])).toContain('refusing to fan out');
+
+            // Said once per subscription: the next refused event, from another
+            // organization even, is debug-level.
+            await realtime.publish(
+                event('created', 'contact', { id: 'c-2' }, '2026-05-24T00:00:01.000Z', { organizationId: 'org_b' }),
+            );
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining('still refused'), expect.objectContaining({ id: 'wh-1' }));
+            await ae.stop();
+        });
+
+        it('an organization-owned subscription does NOT receive a record event that names no organization (fail-closed)', async () => {
+            // Absent on a DataEvent is "belongs to no organization" — an
+            // environment-wide row, an object outside the wall, or the producer
+            // publishing absent rather than substituting the caller's org when it
+            // had no row in hand. None of those names organization A.
+            const engine = new FakeEngine({ sys_webhook: [webhook({ organization_id: 'org_a' })] });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining('names no organization'),
+                expect.objectContaining({ id: 'wh-1', subscriptionOrganizationId: 'org_a', eventNamesOrganization: false }),
+            );
+
+            // …and its own organization's record still arrives (the positive
+            // control on the same subscription).
+            await realtime.publish(
+                event('created', 'contact', { id: 'c-2' }, '2026-05-24T00:00:01.000Z', { organizationId: 'org_a' }),
+            );
+            await flush();
+            expect(selected(calls)).toEqual(['wh-1']);
+            await ae.stop();
+        });
+
+        it('an org-less subscription still receives an org-less record event (the single-posture control)', async () => {
+            // A `single`-posture deployment stamps nothing on either side —
+            // every webhook on every non-walled install lives in this cell.
+            const engine = new FakeEngine({ sys_webhook: [webhook()] });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(event('created', 'contact', { id: 'c-1' }));
+            await flush();
+            expect(selected(calls)).toEqual(['wh-1']);
+            expect(calls[0].organizationId).toBeUndefined();
+            expect(warn).not.toHaveBeenCalled();
+            await ae.stop();
+        });
+
+        it("an any-object ('*') subscription goes through the same organization filter", async () => {
+            const engine = new FakeEngine({
+                sys_webhook: [
+                    webhook({ id: 'wh-star-orgless', name: 'star-orgless', object_name: '' }),
+                    webhook({ id: 'wh-star-a', name: 'star-a', object_name: '', organization_id: 'org_a' }),
+                    webhook({ id: 'wh-star-b', name: 'star-b', object_name: '', organization_id: 'org_b' }),
+                ],
+            });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(event('created', 'lead', { id: 'l-1' }, undefined, { organizationId: 'org_a' }));
+            await flush();
+            expect(selected(calls)).toEqual(['wh-star-a']);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ id: 'wh-star-orgless' }));
+            await ae.stop();
+        });
+
+        it('drops a record event whose organizationId is present but off-contract, delivering to nobody', async () => {
+            const engine = new FakeEngine({
+                sys_webhook: [webhook({ id: 'wh-orgless' }), webhook({ id: 'wh-a', organization_id: 'org_a' })],
+            });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            // The schema refuses '' at the publish site; a producer that did not
+            // validate is broken, and the event is dropped loudly — never
+            // coerced, never read as "no organization".
+            await realtime.publish({
+                type: 'data.record.created',
+                object: 'contact',
+                payload: { recordId: 'c-1', organizationId: '' },
+                timestamp: '2026-05-24T00:00:00.000Z',
+            });
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(String(warn.mock.calls[0][0])).toContain('off-contract');
+            expect(String(warn.mock.calls[0][0])).toContain('organizationId');
+            await ae.stop();
+        });
+    });
+
+    describe('bulk path (data.records.*)', () => {
+        it('fans out ONLY to the subscription of the organization the tenant wall named for the batch', async () => {
+            const engine = new FakeEngine({
+                sys_webhook: [
+                    webhook({ id: 'wh-a', name: 'a', triggers: 'bulk_update', organization_id: 'org_a' }),
+                    webhook({ id: 'wh-b', name: 'b', triggers: 'bulk_update', organization_id: 'org_b' }),
+                ],
+            });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(bulkEvent('updated', 'contact', 12, undefined, { organizationId: 'org_a' }));
+            await flush();
+            expect(selected(calls)).toEqual(['wh-a']);
+            expect((calls[0].payload as any).matched).toBe(12);
+            expect(warn).not.toHaveBeenCalled();
+            await ae.stop();
+        });
+
+        it('an organization-owned subscription does NOT receive a bulk event the producer could not attribute (absent = fail-closed)', async () => {
+            // On the bulk path absent is a ROUTINE value: the producer stamps
+            // the key only when the Layer 0 wall named exactly one organization
+            // (#15687). A system sweep or a cross-membership `group` write
+            // publishes it absent, and the contract says a tenant-scoped
+            // consumer must not deliver that inside an organization wall.
+            const engine = new FakeEngine({
+                sys_webhook: [webhook({ triggers: 'bulk_update,bulk_delete', organization_id: 'org_a' })],
+            });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(bulkEvent('updated', 'contact', 40));
+            await realtime.publish(bulkEvent('deleted', 'contact', 3));
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1); // said once, not once per event
+            expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining('names no organization'),
+                expect.objectContaining({ id: 'wh-1', type: 'data.records.updated', eventNamesOrganization: false }),
+            );
+
+            // Positive control on the same subscription: a batch the wall
+            // attributed to its organization is delivered.
+            await realtime.publish(bulkEvent('updated', 'contact', 5, undefined, { organizationId: 'org_a' }));
+            await flush();
+            expect(selected(calls)).toEqual(['wh-1']);
+            await ae.stop();
+        });
+
+        it('an org-less subscription receives an unattributed bulk event (the deployment-wide consumer the contract names)', async () => {
+            const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'bulk_update' })] });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(bulkEvent('updated', 'contact', 40));
+            await flush();
+            expect(selected(calls)).toEqual(['wh-1']);
+            expect(warn).not.toHaveBeenCalled();
+            await ae.stop();
+        });
+
+        it('an org-less subscription does NOT receive an organization-walled bulk event — loud, once', async () => {
+            const engine = new FakeEngine({ sys_webhook: [webhook({ triggers: 'bulk_update' })] });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish(bulkEvent('updated', 'contact', 40, undefined, { organizationId: 'org_a' }));
+            await realtime.publish(bulkEvent('updated', 'contact', 41, undefined, { organizationId: 'org_b' }));
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(warn).toHaveBeenCalledWith(
+                expect.stringContaining('belongs to NO organization'),
+                expect.objectContaining({ id: 'wh-1', type: 'data.records.updated' }),
+            );
+            await ae.stop();
+        });
+
+        it('drops a bulk event whose organizationId is present but off-contract, delivering to nobody', async () => {
+            const engine = new FakeEngine({
+                sys_webhook: [
+                    webhook({ id: 'wh-orgless', triggers: 'bulk_update' }),
+                    webhook({ id: 'wh-a', triggers: 'bulk_update', organization_id: 'org_a' }),
+                ],
+            });
+            const realtime = new FakeRealtime();
+            const { enqueue, calls } = makeRecorder();
+            const warn = vi.fn();
+            const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+            await ae.start();
+
+            await realtime.publish({
+                type: 'data.records.updated',
+                object: 'contact',
+                payload: { id: randomUUID(), type: 'data.records.updated', object: 'contact', matched: 4, organizationId: 42 },
+                timestamp: '2026-05-24T00:00:00.000Z',
+            });
+            await flush();
+            expect(selected(calls)).toEqual([]);
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(String(warn.mock.calls[0][0])).toContain('off-contract bulk data event');
+            expect(String(warn.mock.calls[0][0])).toContain('organizationId');
+            await ae.stop();
+        });
+    });
+
+    it('the say-once ledger forgets a row the refresh no longer sees, so a re-created row reports again', async () => {
+        const engine = new FakeEngine({ sys_webhook: [webhook()] });
+        const realtime = new FakeRealtime();
+        const { enqueue, calls } = makeRecorder();
+        const warn = vi.fn();
+        const ae = new AutoEnqueuer(engine, realtime, enqueue, { refreshIntervalMs: 0, logger: { warn } });
+        await ae.start();
+
+        await realtime.publish(event('created', 'contact', { id: 'c-1' }, undefined, { organizationId: 'org_a' }));
+        await flush();
+        expect(warn).toHaveBeenCalledTimes(1);
+
+        // Row deleted → refresh prunes the ledger; row re-created under the
+        // same id → its first refusal is loud again.
+        engine.rows.sys_webhook = [];
+        await ae.refresh();
+        engine.rows.sys_webhook = [webhook()];
+        await ae.refresh();
+        await realtime.publish(
+            event('created', 'contact', { id: 'c-2' }, '2026-05-24T00:00:01.000Z', { organizationId: 'org_a' }),
+        );
+        await flush();
+        expect(selected(calls)).toEqual([]);
+        expect(warn).toHaveBeenCalledTimes(2);
         await ae.stop();
     });
 });

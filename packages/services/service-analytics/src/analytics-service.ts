@@ -183,6 +183,21 @@ function isMissingColumnOfRelation(message: string): boolean {
  * (table/object/relation) — not column/syntax errors, which stay hard failures
  * so real query bugs still surface.
  *
+ * ⚠️ [#16019] Reached only by a BARE error. A fault an in-repo driver raises
+ * DECLARES itself — the typed read exits since #8931 (PR #9273), the raw-SQL
+ * path (`SqlDriver.execute`, which the native-SQL strategy runs on) since
+ * #16019 — and `queryDataset`'s catch re-throws a declared envelope before
+ * this question is asked (#5717 defence B). So a missing backing table raised
+ * by `driver-sql`, or by `driver-turso` embedded, does NOT degrade on either
+ * strategy: it answers `500 DATABASE_ERROR` at the door. `driver-turso`'s
+ * REMOTE transport is the exception and pre-dates this card: its typed exits
+ * are undeclared, and `RemoteTransport.aggregate` swallows a missing table
+ * into `[]` itself, so on the ObjectQL-aggregate strategy that deployment
+ * answers `200` with no rows by the transport's own swallow. What still
+ * degrades HERE is an undeclared producer — an embedder's own
+ * `executeRawSql`, a bare `Error` from a driver outside this repo, the
+ * framework's not-registered signals.
+ *
  * ⚠️ It is a heuristic over driver PHRASING, so it is the SECOND question the
  * degradation path asks, never the first: {@link hasDeclaredErrorEnvelope} runs
  * ahead of it (#5717), and only an error whose producer declared nothing is
@@ -1167,6 +1182,20 @@ export class AnalyticsService implements IAnalyticsService {
     // crash the widget with a 500. Datasets were the one read surface that
     // hard-failed on a missing source.
     //
+    // [#16019] That leniency now holds for a BARE error only. A fault an
+    // in-repo driver raises declares `code` + `status` — typed reads since
+    // #8931, the raw-SQL path the native-SQL strategy runs on since #16019 —
+    // and the `hasDeclaredErrorEnvelope` re-throw below (#5717 defence B)
+    // hands it to the door untouched, where it answers `500 DATABASE_ERROR`
+    // on both strategies — for `driver-sql`, and for `driver-turso` embedded;
+    // the remote transport's typed exits are undeclared and pre-date this card
+    // (`RemoteTransport.aggregate` swallows a missing table into `[]` on its
+    // own). The degrade is not re-judged here; the ruling that
+    // drivers declare (and that a declared envelope is never re-read by its
+    // wording) decides it. Producers that still reach the degrade: an
+    // embedder's own `executeRawSql`, an out-of-repo driver throwing bare, the
+    // framework's not-registered signals.
+    //
     // #5033 — that leniency is scoped to the dataset's OWN source. Once the raw-SQL
     // bridge routes by object (`plugin.ts`), a dataset that JOINS across datasources
     // fails on the base object's datasource with the JOINED table missing. Reporting
@@ -1187,7 +1216,8 @@ export class AnalyticsService implements IAnalyticsService {
       result = await new DatasetExecutor(this, orderLabels).execute(compiled, selection, context);
     } catch (err) {
       // The producer answered the classification question — the route's
-      // envelope reader serves it (4xx as itself, declared 5xx through the
+      // envelope reader serves it (4xx as itself; a declared 5xx relayed with
+      // the producer's own code by the door's ③a arm, #11718 — no longer the
       // `ANALYTICS_QUERY_FAILED` path). Nothing here may re-judge it by wording.
       if (hasDeclaredErrorEnvelope(err)) throw err;
       if (isMissingSourceError(err)) {

@@ -141,6 +141,7 @@
     "automation/ExecutionStepLog:startedAt",
     "automation/ExecutionStepLog:status",
     "automation/ExecutionStepMetrics:acted",
+    "automation/ExecutionStepMetrics:failures",
     "automation/ExecutionStepMetrics:selected",
     "automation/ExecutionStepMetrics:unmeasuredEffect",
     "automation/ExecutionStepSkipReason:edgeId",

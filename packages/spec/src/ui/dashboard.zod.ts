@@ -699,6 +699,63 @@ function isDateMacroPlaceholder(value: string): boolean {
 }
 
 /**
+ * [#4614] The `type: 'date'` ⇄ `defaultValue` vocabulary check attached to
+ * {@link GlobalFilterSchema} — a date filter's default is checked against the
+ * vocabulary that can actually resolve it.
+ *
+ * Why this filter type and not the built-in `dateRange`: `dateRange`'s
+ * `defaultRange` has always been an enum, so a typo there was already an
+ * author-time error. A `globalFilters` entry of `type: 'date'` was the
+ * asymmetric half — `defaultValue` is `string | number | boolean`, so a bare
+ * preset name is the ONLY spelling available, and nothing checked it. An
+ * unknown name then failed SILENTLY and late: the renderer cannot lift it to a
+ * range, falls through to "a bare string date means equality on that day", and
+ * emits `created_at = 'last_7_dayz'` — a condition no row matches, which the
+ * backend answers `200 OK` with a zero. Every tile reads 0 and the filter bar
+ * shows "All time", so the dashboard looks deliberately empty rather than
+ * misconfigured. That is the failure this moves to parse time.
+ *
+ * Exported (#16489, the spec half of objectui#7715) so a downstream mirror
+ * that spreads `GlobalFilterSchema.shape` — which carries the FIELDS by
+ * reference and drops every object-level check — can re-attach exactly this
+ * rule with `.superRefine(checkGlobalFilterDateDefaultValue)` instead of
+ * re-parsing through the spec schema or re-implementing it. One function per
+ * refinement, no bundle. `GlobalFilterSchema` attaches this same binding, so
+ * the export IS the check the schema runs — pinned in
+ * `object-refinement-check-exports.test.ts`.
+ */
+export function checkGlobalFilterDateDefaultValue(
+  filter: { type?: string; defaultValue?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (filter.type !== 'date' || filter.defaultValue === undefined) return;
+
+  const value = filter.defaultValue;
+  if (
+    typeof value === 'string' &&
+    ((DATE_RANGE_PRESETS as readonly string[]).includes(value) ||
+      isDateMacroPlaceholder(value) ||
+      ISO_DATE_RE.test(value))
+  ) {
+    return;
+  }
+
+  ctx.addIssue({
+    code: 'custom',
+    path: ['defaultValue'],
+    message:
+      `${JSON.stringify(value)} is not a value a \`type: 'date'\` filter can resolve. ` +
+      'Use one of three spellings: a preset name (' +
+      DATE_RANGE_PRESETS.join(', ') +
+      '); an ISO date such as `2026-01-15` or `2026-01-15T08:30:00Z`, meaning that ' +
+      'day exactly; or a date-macro token such as `{today}` or `{30_days_ago}` ' +
+      '(the full vocabulary is `DATE_MACRO_TOKENS` in `@objectstack/spec/data`). ' +
+      "`custom` is not among them — it is a `dateRange.defaultRange` sentinel that " +
+      'carries no bounds of its own.',
+  });
+}
+
+/**
  * Dynamic options binding for global filters.
  * Allows dropdown options to be fetched from an object at runtime.
  */
@@ -791,47 +848,11 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
 
   /** Widget IDs to apply this filter to (when scope is widget) */
   targetWidgets: z.array(z.string()).optional().describe('Widget IDs to apply this filter to'),
-}).superRefine((filter, ctx) => {
-  // #4614 — a date filter's `defaultValue` is checked against the vocabulary
-  // that can actually resolve it.
-  //
-  // Why this filter type and not the built-in `dateRange`: `dateRange`'s
-  // `defaultRange` has always been an enum, so a typo there was already an
-  // author-time error. A `globalFilters` entry of `type: 'date'` was the
-  // asymmetric half — `defaultValue` is `string | number | boolean`, so a bare
-  // preset name is the ONLY spelling available, and nothing checked it. An
-  // unknown name then failed SILENTLY and late: the renderer cannot lift it to a
-  // range, falls through to "a bare string date means equality on that day", and
-  // emits `created_at = 'last_7_dayz'` — a condition no row matches, which the
-  // backend answers `200 OK` with a zero. Every tile reads 0 and the filter bar
-  // shows "All time", so the dashboard looks deliberately empty rather than
-  // misconfigured. That is the failure this moves to parse time.
-  if (filter.type !== 'date' || filter.defaultValue === undefined) return;
-
-  const value = filter.defaultValue;
-  if (
-    typeof value === 'string' &&
-    ((DATE_RANGE_PRESETS as readonly string[]).includes(value) ||
-      isDateMacroPlaceholder(value) ||
-      ISO_DATE_RE.test(value))
-  ) {
-    return;
-  }
-
-  ctx.addIssue({
-    code: 'custom',
-    path: ['defaultValue'],
-    message:
-      `${JSON.stringify(value)} is not a value a \`type: 'date'\` filter can resolve. ` +
-      'Use one of three spellings: a preset name (' +
-      DATE_RANGE_PRESETS.join(', ') +
-      '); an ISO date such as `2026-01-15` or `2026-01-15T08:30:00Z`, meaning that ' +
-      'day exactly; or a date-macro token such as `{today}` or `{30_days_ago}` ' +
-      '(the full vocabulary is `DATE_MACRO_TOKENS` in `@objectstack/spec/data`). ' +
-      "`custom` is not among them — it is a `dateRange.defaultRange` sentinel that " +
-      'carries no bounds of its own.',
-  });
-}));
+})
+  // #4614 — the date `defaultValue` vocabulary check. Attached by identifier,
+  // not inlined: the export is the rule a `.shape` mirror re-attaches (#16489),
+  // and it must be this binding, not a copy.
+  .superRefine(checkGlobalFilterDateDefaultValue));
 
 /**
  * Dashboard Schema

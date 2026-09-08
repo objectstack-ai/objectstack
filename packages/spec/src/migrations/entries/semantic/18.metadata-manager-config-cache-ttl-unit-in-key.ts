@@ -5,8 +5,10 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'metadata-manager-config-cache-ttl-unit-in-key',
   surface: 'MetadataManagerConfig `cache.ttl` / `cache.databaseLoader.ttl` (kernel/metadata-loader.zod.ts)',
-  replacement: '`cache.ttlSeconds` (seconds, default 3600) and `cache.databaseLoader.ttlMs` '
-    + '(milliseconds, default 60000) — rename each key; the values are unchanged',
+  replacement: '`cache.databaseLoader.ttlMs` (milliseconds, default 60000) — rename the nested key; the '
+    + 'value is unchanged. The outer `cache.ttl` has NO replacement: its respelling `ttlSeconds` '
+    + 'was retired before it shipped (#15624, see `metadata-manager-config-inert-cache-keys-retired`) '
+    + '— delete the key; nothing ever read it',
   reason:
     'Maintainer ruling 2026-09-02 on #14478 (ruled B — no grandfathered baseline): the unit of a '
     + 'duration-shaped `z.number()` key lives in the key NAME or in a unit-carrying value, never '
@@ -22,11 +24,14 @@ export const entry: SemanticMigration = {
     + '`metadata-plugin-additional-types-retired` precedent). The one in-repo reader, '
     + '`DatabaseLoader` (`packages/metadata`), reads `cache.databaseLoader.ttlMs` at the same '
     + 'magnitude it read `ttl`; the outer `cache.ttl` had no runtime reader (measured on '
-    + 'ca46f8f12, and filed separately).',
+    + 'ca46f8f12, filed as #15624 and retired there under ADR-0049 before this rename shipped — '
+    + 'so this entry\'s outer half is a deletion, not a rename, and the `ttlSeconds` spelling '
+    + 'never reached a published release).',
   acceptanceCriteria:
     'Every `new MetadataManager({ cache: … })` / `MetadataManagerConfigSchema.parse(…)` site spells '
-    + '`cache.ttlSeconds` and `cache.databaseLoader.ttlMs`; authoring either old `ttl` fails to '
-    + 'compile (input type `never`) and fails to parse with the rename prescription naming the '
-    + 'suffixed key; a DatabaseLoader configured with `ttlMs: 60000` expires entries after 60 '
-    + 'seconds exactly as `ttl: 60000` did.',
+    + '`cache.databaseLoader.ttlMs` and no outer TTL at all; authoring either old `ttl` fails to '
+    + 'compile (input type `never`) and fails to parse with a prescription — the nested one naming '
+    + '`ttlMs`, the outer one prescribing deletion and naming `cache.databaseLoader.ttlMs`; a '
+    + 'DatabaseLoader configured with `ttlMs: 60000` expires entries after 60 seconds exactly as '
+    + '`ttl: 60000` did.',
 };

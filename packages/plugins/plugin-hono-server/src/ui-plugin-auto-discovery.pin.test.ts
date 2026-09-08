@@ -19,15 +19,42 @@
  * that probe, made permanent — the artifact in the tree that says the block is
  * live.
  *
- * WHAT MAKES IT END-TO-END. The fixture plugin is registered through the real
- * `ObjectKernel.use()` and the real `HonoServerPlugin.init()`/`start()` run
- * against the context the kernel hands its plugins. Nothing here stubs the
- * kernel, the plugin, or the branch under test.
+ * WHAT MAKES IT END-TO-END. The fixture plugin is registered through a real
+ * kernel's `use()` and the real `HonoServerPlugin.init()`/`start()` run against
+ * the context that kernel hands its plugins. Nothing here stubs the kernel, the
+ * plugin, or the branch under test.
+ *
+ * ⭐ WHICH KERNEL, AND WHY THAT IS NOW HALF THE FILE (#16599). This repository
+ * publishes TWO kernels and `@objectstack/core` exports both. They do not agree
+ * about this block's inputs, and the disagreement is the reason groups B, D and
+ * F exist in the shape they do:
+ *
+ *   - `ObjectKernel.use()` runs `PluginLoader.loadPlugin` ->
+ *     `validatePluginContract` -> `PluginSchema.safeParse` on every plugin
+ *     object (#16049, landed as #16363), and since #16334 that schema requires
+ *     `staticPath` AND `slug` for `type: 'ui'`. A `ui` plugin missing either is
+ *     a boot REFUSAL and never reaches `kernel.plugins` at all.
+ *   - `LiteKernel.use()` calls `registerPluginByName` directly and never
+ *     touches `PluginSchema`, `PluginLoader` or any part of that path — #16363
+ *     changed `PluginLoader` only, and `PluginLoader` is reached from
+ *     `ObjectKernel.use()` alone. The same object is stored verbatim, and
+ *     `ObjectKernelBase.createContext()` hands plugins a context whose
+ *     `getKernel()` returns that kernel, whose `plugins` map is exactly what
+ *     this block iterates.
+ *
+ * `AGENTS.md`'s Kernel table names `LiteKernel` for "Tests (vitest), serverless,
+ * edge (Workers)", so this is not a curiosity — it is the second supported way
+ * to run a UI plugin, and with zero in-repo `type: 'ui'` producers, externally
+ * authored plugins are the block's only real callers on EITHER kernel.
+ *
+ * ⇒ "Reachable" is therefore not a property of a branch here, it is a property
+ * of a branch PER KERNEL, and this file states both halves rather than one.
  *
  * WHAT EACH GROUP ACTUALLY OBSERVES — stated because the difference is the whole
- * point of this file. A, B and D observe ROUTE REGISTRATION: they replace
+ * point of this file. A, B, D and F observe ROUTE REGISTRATION: they replace
  * `rawApp.get` with a recorder, so no handler is ever installed and nothing is
- * served. That is enough to pin WHICH routes exist and, for D, that none does —
+ * served. That is enough to pin WHICH routes exist and, for D and F2, that none
+ * does —
  * and it is blind to everything downstream of the route string. E closes that:
  * it leaves `rawApp.get` alone, so the real handlers install on the real Hono
  * app, and drives `rawApp.request(...)` to pin what actually comes BACK. E is
@@ -47,13 +74,19 @@
  * would produce pin B's four route registrations whether or not the branch
  * works. Pin D is the calibration: the SAME fixture, the SAME on-disk static
  * root, one key different, must produce `[]`. Without D, B proves nothing.
+ *
+ * Group F carries its own copy of that discipline rather than borrowing D's,
+ * because it runs on a different kernel: F0 is the firing control showing the
+ * `LiteKernel` harness CAN mount, so F2's `[]` is caused by the
+ * `&& plugin.staticPath` conjunct and not by a harness that never mounts under
+ * that kernel. ⛔ A group that can only ever produce `[]` measures nothing.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ObjectKernel } from '@objectstack/core';
+import { LiteKernel, ObjectKernel } from '@objectstack/core';
 import { CORE_PLUGIN_TYPES } from '@objectstack/spec/kernel';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from './hono-plugin';
@@ -127,11 +160,21 @@ interface Observation {
  * `start()`, and report what the auto-discovery block did.
  */
 interface Booted {
-    kernel: ObjectKernel;
+    kernel: KernelUnderTest;
     honoPlugin: HonoServerPlugin;
     ctx: PluginContext;
     rawApp: RawApp;
 }
+
+/**
+ * Either published kernel. Both are exported from `@objectstack/core`, both give
+ * their plugins a context whose `getKernel()` returns the kernel itself, and both
+ * keep the loaded plugins in a `plugins` map — the three properties the block
+ * under test depends on. What they do NOT share is whether `use()` validates:
+ * see the header. Groups A, B, D and E run on `ObjectKernel`; group F runs on
+ * `LiteKernel`.
+ */
+type KernelUnderTest = ObjectKernel | LiteKernel;
 
 /** The subset of the raw Hono app these pins touch. */
 interface RawApp {
@@ -154,11 +197,44 @@ async function boot(fixture: UiPluginFixture): Promise<Booted> {
 
     await kernel.use(fixture as Plugin);
 
+    return attachHono(kernel);
+}
+
+/**
+ * The `LiteKernel` counterpart of {@link boot} — the kernel `AGENTS.md` names for
+ * tests, serverless and edge. `LiteKernel.use()` is synchronous and stores the
+ * object through `registerPluginByName` with no schema in the path, so a fixture
+ * that {@link boot} REFUSES arrives here intact and the block sees it.
+ *
+ * ⚠️ Not merely "less strict": nothing on this path calls `PluginSchema` at all,
+ * so #16334's `type: 'ui'` requirements and #16363's enforcement are both absent
+ * here — which is what makes group F a measurement of the branches rather than a
+ * second copy of group B.
+ *
+ * No `gracefulShutdown` option exists on this kernel and it registers no signal
+ * handlers of its own, so there is nothing to opt out of.
+ */
+async function bootLite(fixture: UiPluginFixture): Promise<Booted> {
+    const kernel = new LiteKernel({ logger: { level: 'silent' } });
+
+    kernel.use(fixture as Plugin);
+
+    return attachHono(kernel);
+}
+
+/**
+ * The half both kernels share: construct the real Hono plugin, take the very
+ * context object the kernel hands its plugins, and run the real `init()` —
+ * stopping short of `start()` so each pin can decide whether to watch
+ * registration or let it happen for real.
+ */
+async function attachHono(kernel: KernelUnderTest): Promise<Booted> {
     const honoPlugin = new HonoServerPlugin({ port: 0 });
 
     // The very object `bootstrap()` passes to every plugin: `initPluginWithTimeout`
     // calls `plugin.init(this.context)` with this context, and its `getKernel()`
     // returns this kernel — which is what the block under test reaches through.
+    // `LiteKernel` builds the same object, in `ObjectKernelBase.createContext()`.
     const ctx = (kernel as unknown as { context: PluginContext }).context;
 
     await honoPlugin.init(ctx);
@@ -179,8 +255,11 @@ async function boot(fixture: UiPluginFixture): Promise<Booted> {
  * ⚠️ Nothing is installed and nothing is served under this helper — that is the
  * point of pin E, which does not use it.
  */
-async function observe(fixture: UiPluginFixture): Promise<Observation> {
-    const { kernel, honoPlugin, ctx, rawApp } = await boot(fixture);
+async function observe(
+    fixture: UiPluginFixture,
+    bootOn: (f: UiPluginFixture) => Promise<Booted> = boot,
+): Promise<Observation> {
+    const { kernel, honoPlugin, ctx, rawApp } = await bootOn(fixture);
 
     const routes: string[] = [];
     const spy = vi.spyOn(rawApp, 'get').mockImplementation(((route: string) => {
@@ -247,14 +326,19 @@ describe('UI plugin auto-discovery (#16050)', () => {
             ]);
         });
 
-        it('a `ui` plugin declaring no `slug` is refused at kernel.use() before the block can derive one (#16334)', async () => {
+        it('a `ui` plugin declaring no `slug` is refused at ObjectKernel.use() before the block can derive one (#16334)', async () => {
             // `plugin.slug || plugin.name.split('/').pop()` — the block's documented
-            // `@org/console -> console` derivation — is UNREACHABLE through the
-            // kernel since #16334: `PluginSchema` requires `slug` for `type: 'ui'`
-            // and `kernel.use()` runs the schema (#16049), so the object never
-            // reaches `kernel.plugins`. Pinned as the refusal, with the spec's
-            // stable code surfacing inside the loader's envelope. The fallback
-            // expression itself is dead code now, awaiting its own card.
+            // `@org/console -> console` derivation — is unreachable ON THIS KERNEL
+            // since #16334: `PluginSchema` requires `slug` for `type: 'ui'` and
+            // `ObjectKernel.use()` runs the schema (#16049, landed as #16363), so
+            // the object never reaches `kernel.plugins`. Pinned as the refusal,
+            // with the spec's stable code surfacing inside the loader's envelope.
+            //
+            // ⛔ NOT dead code, and this comment used to say it was (#16599). The
+            // expression is LIVE AND LOAD-BEARING on `LiteKernel`, which never
+            // calls `PluginSchema` — pin F1 is the measurement, and ablating the
+            // `||` there moves the mounted route from `/console` to `/undefined`.
+            // ⇒ The two halves are one fact stated per kernel; read them together.
             const err = await refusal(boot(makeFixture({ name: '@os-fixture/console' })));
             expect(err.message).toContain('PLUGIN_CONTRACT_VIOLATION');
             expect(err.message).toContain("at 'slug'");
@@ -267,21 +351,35 @@ describe('UI plugin auto-discovery (#16050)', () => {
      *
      * `hono-plugin.ts` matches `plugin.type === 'ui' || plugin.type === 'ui-plugin'`,
      * and the second disjunct is the subject of #15638: `ui-plugin` is not a
-     * member of `CORE_PLUGIN_TYPES`, so `PluginSchema` refuses the value while
-     * the boot path — which never calls `PluginSchema` — accepts it and mounts.
-     * That arm is live, and #15638 decides what it should be. The ruling picks
-     * between two INCOMPATIBLE pins, so writing either one now would pin a guess:
+     * member of `CORE_PLUGIN_TYPES`, so `PluginSchema` refuses the value.
+     *
+     * ⚠️ WHICH KERNEL (#16599). This narration used to say "the boot path — which
+     * never calls `PluginSchema` — accepts it and mounts", naming no kernel. That
+     * is true of exactly one of the two, and both were measured:
+     *
+     *   - `ObjectKernel.use()` REFUSES it since #16363, with
+     *     `PLUGIN_CONTRACT_VIOLATION … at 'type'` naming the closed set.
+     *   - `LiteKernel.use()` still accepts it and the block still mounts `/slug`
+     *     and `/slug/*`, because #16363 changed `PluginLoader` and this kernel
+     *     never reaches `PluginLoader`.
+     *
+     * ⇒ #15638's arm is HALF dead — the same shape as the two arms #16599
+     * measured — and whoever lands it owes both halves rather than one. The
+     * ruling picks between two INCOMPATIBLE pins, so writing either one now would
+     * pin a guess:
      *
      *   - if #15638 rules REMOVE, C inverts: a `ui-plugin` fixture must mount
-     *     NOTHING, i.e. `routes` equal to `[]`, exactly like pin D;
+     *     NOTHING on `LiteKernel` too, i.e. `routes` equal to `[]`, exactly like
+     *     pin D;
      *   - if #15638 rules DECLARE/CONVERT (an ADR-0087 conversion entry), C
      *     becomes: a `ui-plugin` fixture is normalised to `ui`, mounts `/slug`
      *     and `/slug/*` exactly like pin B, and emits one deprecation warning.
      *
      * Whoever lands #15638 writes this case in that PR — the harness above takes
-     * it unchanged; only the fixture's `type` and the expectation differ. Until
-     * then the placeholder is the honest state: measured as live on #15638,
-     * unpinned here on purpose.
+     * it unchanged; only the fixture's `type`, the kernel it boots on
+     * (`bootLite`, per group F) and the expectation differ. Until then the
+     * placeholder is the honest state: measured as live on `LiteKernel` and
+     * refused on `ObjectKernel`, unpinned here on purpose.
      */
     it.todo('C — the legacy `ui-plugin` arm behaves as #15638 rules that it should');
 
@@ -311,12 +409,19 @@ describe('UI plugin auto-discovery (#16050)', () => {
             expect(routes).toEqual([]);
         });
 
-        it('a `ui` plugin declaring no `staticPath` is refused at kernel.use() before the block runs (#16334)', async () => {
+        it('a `ui` plugin declaring no `staticPath` is refused at ObjectKernel.use() before the block runs (#16334)', async () => {
             // The other conjunct of the same guard (`&& plugin.staticPath`) is
-            // likewise unreachable through the kernel: `staticPath` is required
-            // for `type: 'ui'` since #16334, so a `ui` plugin without assets is a
-            // boot refusal, not a silent non-mount. The `NON_UI_TYPES` cases
-            // above remain the proof that this harness CAN produce `[]`.
+            // likewise unreachable ON THIS KERNEL: `staticPath` is required for
+            // `type: 'ui'` since #16334, so a `ui` plugin without assets is a boot
+            // refusal here, not a silent non-mount. The `NON_UI_TYPES` cases above
+            // remain the proof that this harness CAN produce `[]`.
+            //
+            // ⛔ Again NOT dead, and this comment used to imply it (#16599): on
+            // `LiteKernel` the same object reaches the block and the conjunct is
+            // what skips it — pin F2. Deleting the conjunct there does not
+            // "remove dead code", it turns a clean boot into a `TypeError` naming
+            // `paths[1]`, thrown by `path.resolve(process.cwd(), mount.root)`
+            // further down `start()` once `undefined` is pushed as a mount root.
             const err = await refusal(boot(makeFixture({
                 name: '@os-fixture/console-no-assets',
                 staticPath: undefined,
@@ -406,6 +511,107 @@ describe('UI plugin auto-discovery (#16050)', () => {
             // file stays green.
             expect(res.status).toBe(200);
             expect(body).toBe(INDEX_HTML);
+        });
+    });
+
+    /**
+     * F — the SAME two inputs, on `LiteKernel`, where they are not refused.
+     *
+     * WHY THIS GROUP EXISTS (#16599). B and D pin that `ObjectKernel.use()`
+     * REFUSES a `ui` plugin missing `slug` or `staticPath`, and until this group
+     * existed the file went on to assert — in prose, with no case behind it —
+     * that the two branches those keys feed were therefore dead. ⛔ That is a
+     * claim about every entry point, argued from one. It was wrong.
+     *
+     * `LiteKernel.use()` never calls `PluginSchema` (see the header), so both
+     * inputs reach `kernel.plugins` intact and the block runs against them. Both
+     * are also ordinary type-legal `Plugin` values — nothing here needs a cast to
+     * construct them, so this is not a torture fixture, it is what an external
+     * `ui` plugin looks like when its author left an optional key out.
+     *
+     * ⭐ WHAT EACH CASE REPLACES. These three pins carry readings that were
+     * previously produced by ABLATING `hono-plugin.ts` in a throwaway probe —
+     * deleting the `||` moved F1's route to `/undefined`, and deleting the
+     * `&& plugin.staticPath` conjunct turned F2's clean boot into a `TypeError`.
+     * An ablation proves a branch load-bearing ONCE, in a session nobody can
+     * re-read. These cases are the same two readings, made permanent, so the next
+     * reader who concludes "dead code" is contradicted by a red test rather than
+     * by an argument.
+     *
+     * ⛔ F is NOT a claim about which kernel is right. Whether `LiteKernel` should
+     * validate at all is a contract question, carried on its own card and
+     * deliberately not pre-empted here. This group pins only what the tree does
+     * today.
+     */
+    describe('F — the same inputs on `LiteKernel`, which never calls `PluginSchema` (#16599)', () => {
+        it('F0 — the firing control: a fully declared `ui` plugin mounts on this kernel too', async () => {
+            const { routes } = await observe(
+                makeFixture({ name: '@os-fixture/console', slug: 'console-fixture' }),
+                bootLite,
+            );
+
+            // The calibration F2 depends on, and the reason F2's `[]` is a
+            // reading rather than a harness that never mounts under this kernel.
+            // Identical to pin B's expectation, which is the point: the block
+            // behaves the same on both kernels once the object gets through.
+            expect(routes).toEqual([
+                '/console-fixture',
+                '/console-fixture',
+                '/console-fixture/*',
+                '/console-fixture/*',
+            ]);
+        });
+
+        it('F1 — with no `slug`, the fallback derives one from the last path segment of the name', async () => {
+            const { stored, routes } = await observe(
+                makeFixture({ name: '@os-fixture/console' }),
+                bootLite,
+            );
+
+            // The object B could not get past `ObjectKernel.use()` is stored here
+            // verbatim, `slug` genuinely absent — so the fallback is reached with
+            // nothing to short-circuit on.
+            expect(stored).toBeDefined();
+            expect(stored?.slug).toBeUndefined();
+            expect(stored?.staticPath).toBe(STATIC_ROOT);
+
+            // `plugin.slug || plugin.name.split('/').pop()` — `@os-fixture/console`
+            // becomes `console`, exactly the `@org/console -> console` derivation
+            // the block documents. ⭐ THE NAME IS THE ASSERTION: `console` appears
+            // in no fixture field, only in the tail of `name`, so this expectation
+            // cannot be satisfied by anything except the fallback running. Drop the
+            // `||` and every route below reads `/undefined`.
+            expect(routes).toEqual([
+                '/console',
+                '/console',
+                '/console/*',
+                '/console/*',
+            ]);
+        });
+
+        it('F2 — with no `staticPath`, the guard skips the plugin and the boot stays clean', async () => {
+            const fixture = makeFixture({
+                name: '@os-fixture/console-no-assets',
+                slug: 'console-fixture',
+                staticPath: undefined,
+            });
+
+            // ⛔ The assertion is NOT merely `[]`. `start()` resolving is half of
+            // it: the `&& plugin.staticPath` conjunct is what keeps an assetless
+            // `ui` plugin from being pushed onto `mounts` with `root: undefined`,
+            // which `path.resolve(process.cwd(), mount.root)` further down
+            // `start()` rejects with a `TypeError` naming `paths[1]`. A guard that
+            // merely "avoided a pointless mount" would be dead weight; this one is
+            // the difference between a clean boot and a crashed one.
+            const observation = await observe(fixture, bootLite);
+
+            expect(observation.stored).toBeDefined();
+            expect(observation.stored?.staticPath).toBeUndefined();
+
+            // Same kernel, same harness, same fixture builder as F0 — `staticPath`
+            // is the only difference, so `[]` is caused by the conjunct and not by
+            // a harness that never mounts here.
+            expect(observation.routes).toEqual([]);
         });
     });
 });

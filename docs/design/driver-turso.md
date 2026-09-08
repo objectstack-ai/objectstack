@@ -528,7 +528,7 @@ carries the prescription. The live keys:
 | `syncUrl` | `string?` | — | Remote sync URL for embedded replica mode |
 | `sync.intervalSeconds` | `number` | `60` | Periodic sync interval (0 = manual only) |
 | `sync.onConnect` | `boolean` | `true` | Sync immediately on connect |
-| `timeoutMs` | `number?` | — | Operation timeout in milliseconds for remote operations (0 = no bound): remote mode over HTTP aborts each request at the window (`TIMEOUT` / 504); replica mode bounds `sync()`; WebSocket URLs are not bounded |
+| `timeoutMs` | `number?` | — | Operation timeout in milliseconds for remote operations (0 = no bound): remote mode over HTTP aborts each request at the window (`TIMEOUT` / 504); replica mode bounds `sync()`; a WebSocket url (`wss://` / `ws://`) beside a non-zero window is refused by the driver at construction (`VALIDATION_ERROR` / 400) — that transport takes no seam the window could ride |
 
 ---
 

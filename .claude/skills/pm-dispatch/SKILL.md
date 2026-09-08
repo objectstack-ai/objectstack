@@ -337,6 +337,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 见新 tag 族发布 ⇒ 在 cloud 立 `.objectstack-sha` bump 单。
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
 - 分类动作每张三选一,外加一个修复通道。
+- ⛔ 不挂 `needs:contract-review`:随 draft PR 或 `Clause-②: yes` 认领;裁定写方向、给六态之一。
 - `pm:queue` = 有具名落点或复现的具体缺陷,或范围明确的工具/门禁修复,无可问之事。
 - `pm:queue` 也收恢复不变量的 finding 与 test-only pin。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
@@ -541,6 +542,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 门禁清单取 `dispatch-gates.mjs --commands` 逐条跑,退出码先落盘,`--ran` 对账;⛔ 不抓人读输出。
 - 点名单是线索不是规格,dev 对实际改动重取补跑;行级断言转述前必须自己重验。
 - 派发令里关于代码的危害断言必须有读数(点名 call site / 路径 / 迁移)。
+- 搬自任何工件(含己文)本轮未亲测计数/零命中/文件面:重测或注「未验证」点名来源。
 - PM 测不了的危害 ⇒ 写成给 dev 的问题,⛔ 不写成栅栏;人工地板栅栏关于流程,免测量。
 - 派发令写明 dev ⛔ 不另留认领:PM 那条即身份;核对最新一条点名本分支,不符停手回报。
 - 已认领、别动 assignee 收窄到 assignee 字段本身;认领协议已满足是另一句话且可能是假的。
@@ -551,9 +553,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - same-day churn 行:当天合并 ⇒ 先核对当前 main;在飞重叠每轮求交,相交即发四句警告。
 - 被在飞重叠完全覆盖就停下回报,⛔ 不硬造 diff。
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
-- 条件性标准条款命中判据才抄:多实现面 ⇒ 共享一致性覆盖。
 - 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
-- 前提先行写明:issue 正文是线索不是规格。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
 - `mode:cloud` 只保留给 L/XL、必须活过 PM 会话的工作、浏览器/dogfood 验证。
 - build 重的 M 卡逐卡判断是否上云。
@@ -599,7 +599,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `Part of` 卡 MERGED 时点收口;changed files 范围与 changeset/`skip-changeset` 分流;测试证据。
 - 报告在草稿 PR 时点到达,CI 收敛读数只属于复核侧:gate `in_progress` 是诚实读数。
 - 绿色输出≠ 该绿证明了被测风险:拒收断言、全绿方向与时序、pin 翻转、边界后收益。
-- 证伪是好运行:`premise_still_valid: false` 是再分诊输入;dev 纠正 PM 当众认。
 - 删除与二进制:死代码删除亲核引用面;`+0/-0` 先疑 NUL;sweep 范围外产出成组列出。
 - 触 `skills/**` 的 PR 加问整包价值密度:从整包加载的客户 agent 座位读,⛔ 不从作者座位读。
 - 超派发预算或小功能大扩写 ⇒ REWORK,⛔ 不因已经写好了放行。
@@ -807,5 +806,6 @@ Domain: `domain:<x>`
 File surface: `<预期触碰的目录>` (stop on breach; explain in the report)
 Container & model: `<S 级机械卡 / M / L>`, `mode:subagent | mode:cloud`, `model: <档位,引当次 --tier 输出>`
 Clause-②: yes | no
+Thread-read: <id of the newest comment on the card at the moment this claim is written, or none>
 Serial constraints cleared: `<点名同文件/同包的前驱 PR 与在飞认领,及分诊点名的任意车道在飞兄弟卡中本卡 pin 断言其行为者;无则 none>`
 ```

@@ -11,11 +11,35 @@
  *   node scripts/pm/check-clause2-carriers.mjs --pair 13910 # ONE PR: a pre-arm predicate
  *   node scripts/pm/check-clause2-carriers.mjs --json       # the sweep, for round reports
  *   node scripts/pm/check-clause2-carriers.mjs --self-test  # offline, no network
+ *   node scripts/pm/check-clause2-carriers.mjs --help       # usage; no network
+ *
+ * ## Which board this answers about, and how a reader can tell (#16623)
+ *
+ * The board is a PARAMETER, resolved once per run by `resolveSweepRepo`
+ * (imported): `PM_SWEEP_REPO`, else `GITHUB_REPOSITORY`, else the default. It
+ * is not a property of this checkout -- this file reads no file in the tree at
+ * all, so an environment variable really does retarget it, and a sibling repo's
+ * seat runs `PM_SWEEP_REPO=<its repo> node scripts/pm/check-clause2-carriers.mjs
+ * --pair N` to get an answer about its own board.
+ *
+ * ⚠️ That was TRUE before this file said so, and saying so is the fix (#16623).
+ * The filing seat grepped THIS file for a repo flag, found nothing, and
+ * concluded the capability was absent -- while `resolveSweepRepo` sat in the
+ * import block eight lines from where it stopped reading. The resolver already
+ * returns `source` alongside `repo`; the run simply never printed it, so a
+ * DELIBERATE target and the DEFAULT fallback rendered identically. Every run
+ * now opens with a provenance line that names both.
  *
  *   # the SAME predicate with no private token and no network at all — the pair
  *   # pre-fetched into a document, named as a file or fed on stdin:
  *   node scripts/pm/check-clause2-carriers.mjs --pair 13910 --pair-json pair.json
  *   node scripts/pm/check-clause2-carriers.mjs --pair 13910 --pair-json -
+ *
+ * Since #16448 `--pair` also carries C5 — the WIDENING TELL row: a diff that
+ * adds a schema key, a closed-set member, a published export or a registry
+ * entry while its card declares `Clause-②: no`. The tells themselves live in
+ * `check-widening-tells.mjs` (imported, with its own self-test); this file
+ * supplies the declaration and the diff and joins them.
  *
  * ## The gate, and the three limbs it is supposed to stand on
  *
@@ -77,9 +101,22 @@
  * reading is "a HINT, never a verdict" because clause ② is judged from a card's
  * CONTENT. A second declaration of that surface here would be a hand copy of a
  * register — the exact drift `check:pm-governed-prose` exists to stop one
- * family over — and it would cost a changed-file listing per pair for a reading
- * that decides nothing this file reports. Every row below is derivable from the
- * declaration and the two carriers alone.
+ * family over. C1–C4 are all derivable from the declaration and the two
+ * carriers alone, and none of them costs a changed-file listing.
+ *
+ * ⭐ C5 (#16448) is the one row that reads a DIFF, and it is still not limb ①.
+ * Limb ① asks "does this card's file surface suggest the contract tier?" and
+ * answers with a hint; C5 asks "does this diff have the SHAPE of a widening,
+ * while its card declared `no`?" and answers about the pair. The tells, the
+ * surfaces and the refusal sentence all live in `check-widening-tells.mjs`,
+ * which IMPORTS `SUSPECT_TIER_GLOBS` rather than restating it — so the contract
+ * surface is still declared exactly once in this tree. The maintainer's
+ * condition on the directional clause-② ruling (#16349) was that the direction
+ * claim become checkable instead of trusted, and this row is that condition;
+ * `SUSPECT_TIER_GLOBS`'s own docblock had already promised the reading ("the
+ * PR's ACTUAL diff passes the clause-② enqueue gate before the card may
+ * enqueue — the diff is a fact; the card's semantics were a prediction") and
+ * pointed at a gate that, until #16448, was a human.
  *
  * **It relaxes no spelling.** `Clause-②: yes` / `Clause-②: no` are the only two
  * readings that count, and prose is not one of them. #12409 measured where the
@@ -193,6 +230,11 @@
  *             "events":   { "13476": the `/issues/N/events` rows }  — optional
  *             "commits":  { "HEAD-SHA": { commit: { committer: { date } } } }
  *                         — optional
+ *             "files":    { "13910": the `/pulls/N/files` rows }  — optional,
+ *                         keyed by PR NUMBER (not card), because that is what
+ *                         the endpoint is keyed by. Owed only by a pair whose
+ *                         card declares `Clause-②: no`; omitting it there
+ *                         reads `null` → C5 UNJUDGED, never a narrow diff.
  *           }
  *
  *         ⛔ A key the document does not carry reads `null`, which is UNJUDGED
@@ -211,10 +253,20 @@
  * the PR delivers (the card, its comment thread). A C3 candidate adds its two
  * carriers' event streams (one page each on this board) and — only once both
  * read cleared — one commit: ≤5 reads for a candidate pair, 2 for every other.
- * The sweep pays the listing once and the same per-pair cost for every pair it
- * derives. ⇒ a `--pair` run costs 3–6 requests, while a 29-PR sweep costs about
- * 60 — which is exactly GitHub's documented anonymous hourly budget, one more
- * reason the run prints the remaining count instead of assuming it.
+ * A pair whose card declares `Clause-②: no` adds ONE more — its changed-file
+ * listing, for C5 (#16448). The sweep pays the listing once and the same
+ * per-pair cost for every pair it derives. ⇒ a `--pair` run costs 3–7 requests,
+ * while a 29-PR sweep costs about 60 — which is exactly GitHub's documented
+ * anonymous hourly budget, one more reason the run prints the remaining count
+ * instead of assuming it.
+ *
+ * ⭐ That last read is `--pair` ONLY, and the asymmetry is deliberate. Paying it
+ * per sweep pair would push a routine sweep past the anonymous budget it
+ * already sits on, and a widening tell on somebody else's pair is a board fact
+ * rather than a verdict about the PR that happens to run CI next — the same
+ * call the sweep/`--pair` split already makes for every other row here. In a
+ * sweep `pair.files` is therefore `undefined`, which no row reads; `null` means
+ * a read that WAS owed came back short, and that is UNJUDGED.
  *
  * ## Exit codes — the refusal to read as clean, in one table
  *
@@ -223,7 +275,13 @@
  *      not a fact about whichever PR happens to run CI next, so failing a build
  *      over it would punish the wrong actor (`check-half-states.mjs`'s header
  *      argues this at length, and this file is the same family).
- *   1  bad usage — could not sweep at all.
+ *   1  bad usage — could not sweep at all. Since #16623 this also covers an
+ *      argument this file does not honour: it is refused BEFORE any read, so
+ *      the refusal is about the invocation and never about a board.
+ *      ⛔ Deliberately NOT 2, which `dispatch-gates.mjs` uses for the same
+ *      refusal — 2 here is a VERDICT (UNJUDGED), and a seat reading `$?` must
+ *      never be able to read a mistyped invocation as an incomplete sweep.
+ *      `--help` is not an error: it answers and exits 0, also before any read.
  *   2  swept, but INCOMPLETE: at least one pair whose card, labels or comments
  *      could not be read. An unread carrier is NOT a bare carrier and an unread
  *      thread is NOT an absent declaration (#4690): incomplete must never read
@@ -245,9 +303,14 @@
  *      ⚠️ 0 is not "the review passed"; the PASS reading is human and
  *      is precondition ① of the landing check, not this exit code.
  *   2  also the answer when a C3 candidate's event stream or head commit could
- *      not be read: an unread stream is not a never-hung gate, so it is UNJUDGED
- *      rather than either verdict.
- *   4  they do not. Deliberately NOT 3: a verdict about the PAIR must be
+ *      not be read, or when a `Clause-②: no` pair's changed-file listing could
+ *      not be: an unread stream is not a never-hung gate and an unread diff is
+ *      not a narrow one, so both are UNJUDGED rather than either verdict.
+ *   4  they do not — or, since #16448, the declaration reads `no` while the
+ *      diff carries a widening tell (row C5). One exit code with several
+ *      adverse reasons is the shape this table already had: the ROW says which,
+ *      and the exit says only "a verdict about this pair, adverse".
+ *      Deliberately NOT 3: a verdict about the PAIR must be
  *      impossible to confuse with "the environment could not answer", so a
  *      seat reading `$?` cannot turn a refusal into a clearance. And ⛔ never
  *      0-with-a-message: silence is what this whole file exists against.
@@ -271,8 +334,10 @@ import { isEntrypoint } from '../invoked-as.mjs';
 import {
   CLAIM_COMMENT_MARKER,
   CONTRACT_REVIEW_LABEL,
+  DEFAULT_SWEEP_REPO,
   EXIT_PREREQUISITE_NOT_MET,
   PROXY_FLAG,
+  SWEEP_REPO_SHAPE,
   governingClaim,
   isGateSemanticLabel,
   labelNames,
@@ -280,6 +345,15 @@ import {
   proxyRearmPlan,
   resolveSweepRepo,
 } from './check-half-states.mjs';
+import {
+  EXIT_INCOMPLETE as WT_EXIT_INCOMPLETE,
+  EXIT_OK as WT_EXIT_OK,
+  EXIT_REFUSED as WT_EXIT_REFUSED,
+  EXIT_USAGE as WT_EXIT_USAGE,
+  REFUSAL_SENTENCE,
+  refusalLines,
+  wideningRefusal,
+} from './check-widening-tells.mjs';
 
 // dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
 
@@ -309,12 +383,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the #13910 specimen, end to end': 2,
   'pairing, derived from the same relation H8/H31 read': 3,
   'the three read paths: ordered, offline-capable, and named in every refusal': 24,
-  'the exit register is distinct in every direction it must be': 3,
+  'C5: the direction claim checked against the diff (#16448)': 16,
+  'the exit register is distinct in every direction it must be': 6,
+  'the argv contract and the board provenance (#16623)': 42,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 13;
+const SELF_TEST_BATTERY_FLOOR = 14;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1106,6 +1182,88 @@ export function c4VerdictSelfReview(pair) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// C5 -- the direction claim, checked against the diff (#16448 / #16349)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this pair owe a changed-file listing?
+ *
+ * ⭐ ONLY a card that DECLARED `no`. The whole point of the #16349 ruling is
+ * that `no` is the reading which BUYS a lower tier, so `no` is the reading that
+ * must be checkable; a `yes` already routes to contract review and a tell on
+ * top of it decides nothing. Every other declaration state (`missing`,
+ * `absent`, `malformed`, `misplaced`, `unreadable`) is C2's row and not this
+ * one's: two readers of the same limb is the drift this file was written to
+ * avoid one family over.
+ *
+ * It is exported and used by BOTH the fetch and the UNJUDGED accounting, the
+ * way `needsGateHistory` is, so the set that owes a listing and the set that
+ * gets one cannot drift apart -- and a pair that owes nothing can never be
+ * reported as missing a read the reader was never going to make.
+ */
+export function needsWideningRead(pair) {
+  const d = cardDeclaration(pair?.cardComments ?? null);
+  return d.state === 'declared' && d.value === 'no';
+}
+
+/**
+ * The widening verdict for one pair -- the sibling gate, given this pair's
+ * declaration and diff.
+ *
+ * The tells, the surfaces and the refusal sentence all live in
+ * `check-widening-tells.mjs`; this function is the JOIN and nothing else, so
+ * the shape of a tell is stated once in the tree.
+ */
+export function pairWidening(pair, repo) {
+  if (!needsWideningRead(pair)) return { state: 'not-applicable', rows: [], gaps: [], text: null };
+  return wideningRefusal({ declaration: 'no', files: pair?.files ?? null, repo });
+}
+
+/**
+ * C5 -- a widening tell on a diff whose card declares `Clause-②: no`.
+ *
+ * The #16349 ruling made clause ② DIRECTIONAL on the maintainer's explicit
+ * condition that the direction claim become checkable instead of trusted. This
+ * row is that condition: `SUSPECT_TIER_GLOBS`'s own docblock already promised
+ * that "whichever tier is dispatched, the PR's ACTUAL diff passes the clause-②
+ * enqueue gate before the card may enqueue -- the diff is a fact; the card's
+ * semantics were a prediction", and until #16448 that gate was a human reading.
+ *
+ * ⚠️ A TELL, never a proof, in BOTH directions: a false positive costs the
+ * author one word in the claim comment, and a false negative is the cost the
+ * ruling accepted when it took the directional reading. So this row never
+ * asserts that the diff widens -- it asserts that the diff has the SHAPE of one
+ * that does, while the claim says it does not, and names the file:line so the
+ * author can answer with the file open.
+ */
+export function c5WideningTell(pair, repo) {
+  const v = pairWidening(pair, repo);
+  if (v.state !== 'refused') return null;
+  const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
+  return (
+    `${head} declares \`Clause-②: no\` while its diff carries ${v.rows.length} widening tell(s) -- ` +
+    `${REFUSAL_SENTENCE}. ${v.rows.map((r) => `${r.file}:${r.line} (${r.tell})`).join(', ')}. ` +
+    'Neither reading is overturned here: the declaration stands as written and the diff stands as ' +
+    `pushed, and they disagree. ${NEVER_WRITES}`
+  );
+}
+
+/**
+ * C5's own #4690 half -- a diff this file could not READ is not a narrow diff.
+ *
+ * Reached only for a pair that owes the listing, so a `yes` pair and a pair
+ * with no declaration can never be reported as missing a read nobody owed.
+ */
+export function wideningUnjudged(pair, repo) {
+  const v = pairWidening(pair, repo);
+  if (v.state !== 'unreadable' && v.state !== 'incomplete') return null;
+  return (
+    `pair PR #${pair?.pr} / card #${pair?.card} declares \`Clause-②: no\`, and its diff is UNJUDGED ` +
+    `for widening tells: ${v.text}`
+  );
+}
+
 /** Every row for one pair, in reporting order. */
 export function pairRows(pair) {
   const rows = [];
@@ -1482,7 +1640,39 @@ async function readHeadCommitDate(repo, sha) {
 }
 
 /**
- * The five reads `gather` performs, named once.
+ * The PAGE CAP on one PR's changed-file listing.
+ *
+ * Three pages is 300 files, past anything this board's PRs produce, and the
+ * files that matter here are a handful of contract sources. A PR that exceeds
+ * it is answered `null` -> UNJUDGED, never clean: a listing read short does not
+ * merely lose detail, it loses the very file whose added key is the tell.
+ */
+export const FILE_PAGE_CAP = 3;
+
+/**
+ * One PR's changed files, with their patches, paged to exhaustion -- or `null`.
+ *
+ * Owed by the widening-tell reading ALONE, and only for a pair whose card
+ * declares `Clause-②: no` (`needsWideningRead`, the same predicate the
+ * UNJUDGED accounting reads), so no pair can owe a request the live reader was
+ * never going to make.
+ *
+ * ⛔ Never a partial array, for the reason `readCarrierEvents` states one
+ * function over: a caller cannot tell a short read from a narrow diff.
+ */
+async function readPullFiles(repo, number) {
+  const out = [];
+  for (let page = 1; page <= FILE_PAGE_CAP; page++) {
+    const batch = await restOrNull(`/repos/${repo}/pulls/${number}/files?per_page=100&page=${page}`);
+    if (!Array.isArray(batch)) return null;
+    out.push(...batch);
+    if (batch.length < 100) return out;
+  }
+  return null; // cap hit: the tail is unread, so the diff is unread.
+}
+
+/**
+ * The six reads `gather` performs, named once.
  *
  * A reader implements every one of them and may answer with a value OR a
  * promise of one (`gather` awaits either), which is what lets the offline
@@ -1496,6 +1686,7 @@ export const READER_METHODS = Object.freeze([
   'readCardComments',
   'readCarrierEvents',
   'readHeadCommitDate',
+  'readPullFiles',
 ]);
 
 /** Paths (i) and (ii): the network, down the ladder `rest` implements. */
@@ -1507,6 +1698,7 @@ const NETWORK_READER = Object.freeze({
   readCardComments: (repo, n) => restOrNull(`/repos/${repo}/issues/${n}/comments?per_page=100`),
   readCarrierEvents: (repo, n) => readCarrierEvents(repo, n),
   readHeadCommitDate: (repo, sha) => readHeadCommitDate(repo, sha),
+  readPullFiles: (repo, n) => readPullFiles(repo, n),
 });
 
 /** A resource the document does not carry — `null`, i.e. UNJUDGED (#4690). */
@@ -1559,6 +1751,10 @@ export function pairJsonReader(doc, { source = 'the --pair-json document' } = {}
       const commit = fromDocument(doc.commits, sha);
       return serve(commit?.commit?.committer?.date ?? null);
     },
+    readPullFiles: (_repo, n) => {
+      const rows = fromDocument(doc.files, n);
+      return serve(Array.isArray(rows) ? rows : null);
+    },
   });
 }
 
@@ -1584,7 +1780,7 @@ export function pairJsonRepoConflict(docRepo, repo) {
  * sweep's cost at one PR listing plus two reads per pair, plus — for the C3
  * candidates ALONE — their two event streams and one head commit.
  */
-async function gather(repo, prFilter = null, reader = NETWORK_READER) {
+async function gather(repo, prFilter = null, reader = NETWORK_READER, { readFiles = false } = {}) {
   const pulls = (await reader.listOpenPulls(repo)).filter((pr) => (prFilter ? pr.number === prFilter : true));
   const pairs = [];
   for (const pr of pulls) {
@@ -1623,6 +1819,23 @@ async function gather(repo, prFilter = null, reader = NETWORK_READER) {
       pair.headCommittedAt = await reader.readHeadCommitDate(repo, pair.headSha);
     }
   }
+
+  // Third pass -- the changed-file listing, for the widening reading (#16448).
+  //
+  // ⭐ `--pair` ONLY, and only for the pairs that declared `no`. The report-only
+  // SWEEP deliberately does not pay for it: a 29-PR sweep already costs about
+  // GitHub's whole documented anonymous hourly budget, one row per pair here
+  // would push it past that, and a widening tell on somebody else's pair is a
+  // board fact rather than a verdict about the PR that happens to run next --
+  // the same call the sweep/`--pair` split already makes everywhere else in
+  // this file. `pair.files` is therefore `undefined` in a sweep, which no row
+  // reads, and `null` only when a read that WAS owed came back short.
+  if (readFiles) {
+    for (const pair of pairs) {
+      if (!needsWideningRead(pair)) continue;
+      pair.files = await reader.readPullFiles(repo, pair.pr);
+    }
+  }
   return { pulls, pairs };
 }
 
@@ -1655,21 +1868,38 @@ function renderSweep({ repo, pulls, pairs }, { json = false } = {}) {
   return unjudged.length > 0 ? EXIT_INCOMPLETE : EXIT_OK;
 }
 
-function renderPair(pair) {
+function renderPair(pair, repo) {
   const gap = pairUnjudged(pair);
   if (gap) {
     console.error(`✗ check-clause2-carriers --pair: ${gap}`);
     return EXIT_INCOMPLETE;
   }
   const rows = pairRows(pair);
+  const widening = pairWidening(pair, repo);
+  const wideningRow = c5WideningTell(pair, repo);
+  if (wideningRow) rows.push({ code: 'C5', text: wideningRow });
+  const wideningGap = wideningUnjudged(pair, repo);
   if (rows.length === 0) {
+    if (wideningGap) {
+      console.error(`✗ check-clause2-carriers --pair: ${wideningGap}`);
+      return EXIT_INCOMPLETE;
+    }
     console.log(
       `✓ check-clause2-carriers: PR #${pair.pr} / card #${pair.card} — the clause-② declaration is ` +
-        'readable in the fixed spelling and both carriers agree.',
+        'readable in the fixed spelling and both carriers agree' +
+        (widening.state === 'clean'
+          ? ', and its diff carries no widening tell. ⚠️ A tell is not a proof and its absence is not one either.'
+          : '.'),
     );
     return EXIT_OK;
   }
   for (const row of rows) console.error(`✗ ${row.code} — ${row.text}`);
+  // The file:line list, one per line, so an author can paste it into an editor.
+  for (const line of refusalLines(widening)) console.error(`    ${line}`);
+  // An adverse row OUTRANKS a gap -- a tell that WAS read is a fact about this
+  // pair whatever else could not be read -- but the gap is still printed, or a
+  // reader would take the rows below for the whole reading.
+  if (wideningGap) console.error(`⚠️  ${wideningGap}`);
   console.error(
     `check-clause2-carriers: PR #${pair.pr} / card #${pair.card} is NOT clause-② legible ` +
       `(exit ${EXIT_PAIR_ADVERSE}). ⛔ This is a verdict about this pair, not about the environment.`,
@@ -2151,11 +2381,121 @@ export function selfTest() {
   t('…and refuses to state a budget it did not see, rather than implying plenty', says(renderRateNote(null), 'UNKNOWN'));
 
   // -- the exit register is distinct in every direction it must be -----------
+  // -- C5: the direction claim, checked against the diff (#16448) -----------
+  //
+  // The tells themselves are the SIBLING's, with its own 120-case self-test;
+  // what is pinned here is the JOIN — which pairs owe a diff read, what a pair
+  // that owes none reports, and that a tell reaches the exit register.
+  battery('C5: the direction claim checked against the diff (#16448)');
+  const WIDENS = [{
+    filename: 'packages/spec/src/kernel/plugin.zod.ts',
+    status: 'modified',
+    patch: "@@ -95,0 +95,1 @@\n+  'workflow',",
+  }];
+  const NARROWS = [{
+    filename: 'packages/spec/src/kernel/plugin.zod.ts',
+    status: 'modified',
+    patch: "@@ -95,1 +95,0 @@\n-  'legacy',",
+  }];
+  const declaring = (value, files) => ({ pr: 13910, card: 13476, draft: false, cardLabels: [], prLabels: [], cardComments: [CLAIM(`Clause-②: ${value}`)], files });
+  t('only a card that DECLARED `no` owes a changed-file listing', needsWideningRead(declaring('no', null)) === true);
+  t('⛔ a `yes` owes none — it already routes to contract review', needsWideningRead(declaring('yes', null)) === false);
+  t('⛔ a card with a claim comment but NO declaration owes none — that is C2\'s row, not C5\'s', needsWideningRead({ cardComments: [CLAIM('Domain: `domain:engine`')] }) === false);
+  t('⛔ an UNREADABLE thread owes none — a second reader of the same limb is the drift this file avoids', needsWideningRead({ cardComments: null }) === false);
+  t('a widening tell on a `no` pair is a C5 row', typeof c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack') === 'string');
+  t('…naming the file:line', says(c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack'), 'packages/spec/src/kernel/plugin.zod.ts:95'));
+  t('…and carrying the card\'s own refusal sentence, unparaphrased', says(c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack'), REFUSAL_SENTENCE));
+  t('…and the never-writes boundary every other row carries', says(c5WideningTell(declaring('no', WIDENS), 'objectstack-ai/objectstack'), '自查放行'));
+  t('⛔ the SAME diff with `yes` is not a row — a tell never blocks the honest declaration', c5WideningTell(declaring('yes', WIDENS), 'objectstack-ai/objectstack') === null);
+  t('⛔ a removal-only diff with `no` is not a row — the ruling is directional', c5WideningTell(declaring('no', NARROWS), 'objectstack-ai/objectstack') === null);
+  t('a `no` pair whose listing could NOT be read is UNJUDGED, never clean', typeof wideningUnjudged(declaring('no', null), 'objectstack-ai/objectstack') === 'string');
+  t('…and it is not also a row — unread is not adverse', c5WideningTell(declaring('no', null), 'objectstack-ai/objectstack') === null);
+  t('⛔ a `yes` pair with no listing is NOT unjudged — it never owed one', wideningUnjudged(declaring('yes', null), 'objectstack-ai/objectstack') === null);
+  t('a sweep pair (files never fetched) that declared `no` reads as owing the listing', needsWideningRead({ cardComments: [CLAIM('Clause-②: no')] }) === true);
+  t('the reader roster carries the sixth read, so both readers must implement it', READER_METHODS.includes('readPullFiles'));
+  t('…and the offline document serves it from its own `files` bag', typeof pairJsonReader({ pulls: [], files: { 13910: [] } }).readPullFiles === 'function');
+
   battery('the exit register is distinct in every direction it must be');
   const codes = [EXIT_OK, EXIT_USAGE, EXIT_INCOMPLETE, EXIT_PREREQUISITE_NOT_MET, EXIT_PAIR_ADVERSE];
   t('every exit code is distinct — a verdict can never be read as an environment complaint', new Set(codes).size === codes.length, JSON.stringify(codes));
   t('the adverse-pair code is NOT the prerequisite code', EXIT_PAIR_ADVERSE !== EXIT_PREREQUISITE_NOT_MET);
   t('the prerequisite code is the sibling\'s, imported rather than re-picked', EXIT_PREREQUISITE_NOT_MET === 3);
+  // The widening gate is a second file with its own exits; a seat reading `$?`
+  // must read ONE table. The pin is written HERE, on the importing side, so the
+  // two modules stay acyclic.
+  t('the widening gate\'s REFUSED is this file\'s adverse-pair code', WT_EXIT_REFUSED === EXIT_PAIR_ADVERSE);
+  t('…its INCOMPLETE is this file\'s INCOMPLETE', WT_EXIT_INCOMPLETE === EXIT_INCOMPLETE);
+  t('…and its OK and USAGE agree too', WT_EXIT_OK === EXIT_OK && WT_EXIT_USAGE === EXIT_USAGE);
+
+  // -- the argv contract and the board provenance (#16623) -------------------
+  //
+  // The card that filed this was itself the failure it describes: its author
+  // grepped THIS file for a repo flag, found nothing, and concluded the
+  // capability was absent -- while `resolveSweepRepo` sat in the import block.
+  // So the cases below pin the two halves that would have answered them: the
+  // board says on what basis it is the board, and an argument this file does
+  // not honour is refused instead of silently changing nothing.
+  battery('the argv contract and the board provenance (#16623)');
+  const refusalText = (argv) => (argvRefusalLines(argv) ?? []).join('\n');
+  const usageText = usageLines().join('\n');
+  const THIS_BOARD = 'objectstack-ai/objectstack';
+  const OTHER_BOARD = 'objectstack-ai/objectui';
+
+  // -- (2) --help / -h answer, and answer BEFORE anything is read ------------
+  t('--help is recognised', wantsHelp(['--help']) === true);
+  t('…and the short spelling seats actually type', wantsHelp(['-h']) === true);
+  t('⛔ a bare run is NOT a help request — it is the sweep', wantsHelp([]) === false);
+  t('⛔ nor is any other honoured flag', wantsHelp(['--json']) === false && wantsHelp(['--pair', '13910']) === false);
+  t('⛔ and help is not refused as an unknown argument', argvRefusalLines(['--help']) === null && argvRefusalLines(['-h']) === null);
+  t('the usage text names every flag this file honours, rendered from the table', [...KNOWN_FLAGS.keys()].every((f) => usageText.includes(f)));
+  t('…and it names the env var that retargets the board — the fact the filing seat could not find', usageText.includes('PM_SWEEP_REPO'));
+  t('…and the runner variable beside it, so the precedence is legible', usageText.includes('GITHUB_REPOSITORY'));
+  t('…and the fallback board is the sibling\'s constant, imported rather than retyped', usageText.includes(DEFAULT_SWEEP_REPO));
+  t('help exits OK — a question answered is not an error', EXIT_OK === 0);
+
+  // -- (1) the board says on what basis it is the board ----------------------
+  t('the default fallback is named AS a fallback', says(boardProvenanceLine({ repo: THIS_BOARD, source: 'default' }), 'source: default'));
+  t('…and carries the action that changes it, which is the whole finding', says(boardProvenanceLine({ repo: THIS_BOARD, source: 'default' }), 'set PM_SWEEP_REPO to target another repo'));
+  t('an explicit target names PM_SWEEP_REPO as the source', says(boardProvenanceLine({ repo: OTHER_BOARD, source: 'PM_SWEEP_REPO' }), 'source: PM_SWEEP_REPO'));
+  t('…and a runner names GITHUB_REPOSITORY', says(boardProvenanceLine({ repo: OTHER_BOARD, source: 'GITHUB_REPOSITORY' }), 'source: GITHUB_REPOSITORY'));
+  t('the board itself is in the line in every case', says(boardProvenanceLine({ repo: OTHER_BOARD, source: 'PM_SWEEP_REPO' }), OTHER_BOARD));
+  t('⭐ a deliberate target and the fallback are DIFFERENT lines — the defect, in one assertion', boardProvenanceLine({ repo: THIS_BOARD, source: 'default' }) !== boardProvenanceLine({ repo: THIS_BOARD, source: 'PM_SWEEP_REPO' }));
+  // Driven through the real resolver, not a hand-built shape: the line and the
+  // resolution cannot drift apart, and `source` is proven to be what it renders.
+  t('the line is fed by resolveSweepRepo itself, so the two cannot disagree', says(boardProvenanceLine(resolveSweepRepo({ PM_SWEEP_REPO: OTHER_BOARD })), OTHER_BOARD) && says(boardProvenanceLine(resolveSweepRepo({ PM_SWEEP_REPO: OTHER_BOARD })), 'PM_SWEEP_REPO'));
+  t('…and a bare environment renders the default leg through that same resolver', says(boardProvenanceLine(resolveSweepRepo({})), 'source: default'));
+
+  // -- (3) an argument this file does not honour is REFUSED ------------------
+  t('an unknown flag is REFUSED rather than ignored', argvRefusalLines(['--this-flag-does-not-exist']) !== null);
+  t('…and the refusal NAMES it', says(refusalText(['--this-flag-does-not-exist']), '--this-flag-does-not-exist'));
+  t('…the filing card\'s own probe — an unknown flag with a value, beside a real one — names the unknown one', says(refusalText(['--issue', '7760', '--json']), '--issue'));
+  t('…and every refusal prints what IS honoured, so the next attempt can be right', [...KNOWN_FLAGS.keys()].every((f) => says(refusalText(['--nope']), f)));
+  t('…including the env precedence, which is where the filing seat\'s question actually lived', says(refusalText(['--nope']), 'PM_SWEEP_REPO'));
+  t('a joined value spelling is refused, showing the spelling this file takes', says(refusalText([`--pair=13910`]), '--pair 13910'));
+  t('a stray positional is refused too — this file reads none', says(refusalText(['16623']), '16623'));
+  t('…and is pointed at the flag a PR number belongs to', says(refusalText(['16623']), '--pair'));
+  t('⭐ but a repo-SHAPED positional is pointed at the mechanism that really retargets the board', says(refusalText([OTHER_BOARD]), `set PM_SWEEP_REPO='${OTHER_BOARD}'`));
+  t('…which is exactly what the filing seat reached for and could not find', says(refusalText(['--repo', OTHER_BOARD]), 'PM_SWEEP_REPO'));
+  t('⛔ two bad arguments are both named, never just the first', says(refusalText(['--a', '--b']), '--a') && says(refusalText(['--a', '--b']), '--b'));
+
+  // -- every honoured invocation still parses, unchanged ---------------------
+  t('a bare run is not refused', argvRefusalLines([]) === null);
+  t('--self-test still parses', argvRefusalLines(['--self-test']) === null);
+  t('--pair N still parses, and N is its VALUE rather than a stray positional', argvRefusalLines(['--pair', '13910']) === null);
+  t('--pair-json <path> still parses', argvRefusalLines(['--pair', '13910', '--pair-json', 'pair.json']) === null);
+  t('…and its stdin spelling is a value, not a flag', argvRefusalLines(['--pair', '13910', '--pair-json', '-']) === null);
+  t('--json still parses', argvRefusalLines(['--json']) === null);
+  t('every honoured flag together still parses', argvRefusalLines(['--pair', '13910', '--pair-json', '-', '--json']) === null);
+  t('⛔ a value-taking flag whose value is MISSING never eats the flag after it', argvRefusalLines(['--pair', '--json']) === null);
+
+  // -- the table is what the parse reads, so the two cannot drift ------------
+  t('a parse site looks its flag up in the table', flagIndex(['--pair', '1'], '--pair') === 0 && flagIndex([], '--json') === -1);
+  t('⛔ and a lookup for a flag NOT in the table throws rather than answering', (() => { try { flagIndex([], '--not-in-the-table'); return false; } catch { return true; } })());
+  t('the usage line is rendered from the table, values and all', usageText.includes('--pair-json path'));
+
+  // -- the refusal's exit, against the pinned register -----------------------
+  t('an argv refusal exits USAGE, never a verdict code', EXIT_USAGE !== EXIT_OK && EXIT_USAGE !== EXIT_INCOMPLETE && EXIT_USAGE !== EXIT_PAIR_ADVERSE && EXIT_USAGE !== EXIT_PREREQUISITE_NOT_MET);
+  t('⛔ and NOT dispatch-gates\' usage exit of 2, which is this file\'s UNJUDGED verdict', EXIT_USAGE === 1 && EXIT_INCOMPLETE === 2);
 
   // -- The floor: every declared battery RAN, and ran its cases (#13489) -----
   //
@@ -2212,7 +2552,8 @@ export function selfTest() {
       'declaration states with the two not-read readings kept apart — no claim comment, and a claim '
       + 'comment with no line — the 2026-08-31 seven-pair replay, the four gate-binding states ' +
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
-      'the three read paths with their offline reader, and the exit register).',
+      'the three read paths with their offline reader, the argv contract with its usage and its '
+      + 'refusal, the board provenance line, and the exit register).',
   );
 
   selfTestReachedVerdict = true;
@@ -2220,9 +2561,199 @@ export function selfTest() {
 }
 
 // ---------------------------------------------------------------------------
+// The argv contract, and the board's provenance (#16623)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every flag this file honours, what its value is spelled as, and what it does.
+ *
+ * ⭐ ONE table, and it is why the three things that used to disagree cannot:
+ * the parse looks every flag up through `flagIndex`, which THROWS on a flag
+ * that is not here; the refusal below decides what is an argument by asking it;
+ * and the usage text is rendered from it rather than typed beside it. A flag
+ * added to the parse without an entry here fails in this file's own self-test,
+ * instead of becoming a spelling the tool honours in one place and refuses in
+ * another.
+ *
+ * `value` is the value's spelling in the usage line, or `null` for a flag that
+ * takes none -- which is also how the refusal knows whether the NEXT argument
+ * belongs to this flag or is an argument of its own.
+ */
+export const KNOWN_FLAGS = new Map([
+  ['--help', { value: null, does: 'print this text and exit 0, without reading any board' }],
+  ['-h', { value: null, does: 'the same' }],
+  ['--self-test', { value: null, does: "run this file's own battery, offline -- no board is read" }],
+  ['--pair', { value: 'N', does: 'judge ONE open PR by number -- a predicate about that pair' }],
+  ['--pair-json', { value: 'path', does: 'read the pair from a document (`-` = stdin) instead of the network' }],
+  ['--json', { value: null, does: 'emit the sweep on stdout as JSON' }],
+]);
+
+/** How a flag and its value are spelled together, for the usage text. */
+function flagSpelling(flag, value) {
+  return value === null ? flag : `${flag} ${value}`;
+}
+
+/**
+ * The usage text -- rendered from the table above and from the resolver's own
+ * precedence, so neither can drift from what the tool actually does.
+ *
+ * ⭐ The env paragraph is the half #16623 is about. A seat reading only this
+ * script used to have no way to learn that the board is a parameter at all.
+ */
+export function usageLines() {
+  return [
+    'usage: node scripts/pm/check-clause2-carriers.mjs '
+      + [...KNOWN_FLAGS].map(([flag, { value }]) => `[${flagSpelling(flag, value)}]`).join(' '),
+    '',
+    ...[...KNOWN_FLAGS].map(([flag, { value, does }]) => `  ${flagSpelling(flag, value).padEnd(18)}  ${does}`),
+    '',
+    '  Which board is read is resolved PER RUN, not from this checkout -- this file reads no file in',
+    '  the tree at all. The precedence is `resolveSweepRepo`\'s, imported from check-half-states.mjs:',
+    '',
+    ...[
+      ['PM_SWEEP_REPO=owner/name', "an explicit target; a sibling repo's seat uses this"],
+      ['GITHUB_REPOSITORY', 'what Actions sets, i.e. the repo the workflow is installed in'],
+      [DEFAULT_SWEEP_REPO, 'the fallback, for a bare terminal'],
+    ].map(([source, why], i, all) => {
+      // Width derived from the entries, so the imported default cannot outgrow
+      // a hardcoded column and run into its own description.
+      const w = Math.max(...all.map(([s2]) => s2.length)) + 2;
+      return `    ${i + 1}. ${source.padEnd(w)}${why}`;
+    }),
+    '',
+    '  Every run prints which of the three answered, so a deliberate target and the fallback are',
+    '  never the same line. ⛔ A report about the wrong board reads exactly like a report about this one.',
+  ];
+}
+
+/** Did the caller ask for usage? Read through the table, like every other flag. */
+export function wantsHelp(argv) {
+  return flagIndex(argv, '--help') !== -1 || flagIndex(argv, '-h') !== -1;
+}
+
+/**
+ * Where `flag` sits in argv, or -1 -- the ONE lookup every parse site uses.
+ *
+ * The throw is the point. `argv.indexOf('--pair')` is correct and unguarded: it
+ * will as happily find a flag the refusal and the usage text have never heard
+ * of, which is exactly how a file grows a flag it honours and does not
+ * document. Routing every lookup through the table makes that unreachable
+ * rather than merely unlikely.
+ */
+export function flagIndex(argv, flag) {
+  if (!KNOWN_FLAGS.has(flag)) {
+    throw new Error(
+      `check-clause2-carriers: the parse asked for '${flag}', which is not in KNOWN_FLAGS. That table `
+        + 'is what the usage text and the unrecognised-argument refusal are derived from, so a flag '
+        + 'missing from it is one this file would honour in silence and refuse in the same run. Add it there.',
+    );
+  }
+  return argv.indexOf(flag);
+}
+
+/**
+ * Every argument this file does not honour -- or `null` when there is none.
+ *
+ * ## Why an unrecognised argument is a REFUSAL and not a warning
+ *
+ * Measured on the filing seat's container, where the board could be read:
+ * `--this-flag-does-not-exist` produced a full, well-formed report about this
+ * file's own board and exited 0 -- byte-identical to a bare run. So a typo and
+ * a deliberate invocation were the same command, and `--help` -- the one thing
+ * a seat types to find out what the flags ARE -- ran a network sweep instead of
+ * answering.
+ *
+ * That matters more here than on a dispatch-time tool. This is a LANDING
+ * pre-check with nothing behind it: its whole purpose is to show that a review
+ * gate was CLEARED rather than STRIPPED, and 「闸门被剥不是红灯是放行」 -- so a
+ * well-formed `0 pair(s) UNJUDGED` reads exactly like a clean board whether or
+ * not the caller's argument meant anything. ⭐ An impossible-to-fail reading is
+ * indistinguishable from a reading that passed.
+ *
+ * ⛔ A positional argument is refused on the same ground and not a softer one:
+ * this file reads NO positional argument at all, so `… 16623` is a number the
+ * tool never looked at, above a full-board report that exits 0.
+ */
+export function argvRefusalLines(argv) {
+  const unknownFlags = [];
+  const positionals = [];
+  const joined = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (KNOWN_FLAGS.has(arg)) {
+      if (KNOWN_FLAGS.get(arg).value === null) continue;
+      const next = argv[i + 1];
+      // Consume the value ONLY when one is really there. A missing or
+      // flag-shaped value is the flag's own site's refusal to report, with its
+      // own message; swallowing the next token here would hide that flag from
+      // this pass and name the wrong argument as the wrong one.
+      if (next !== undefined && (next === '-' || !next.startsWith('-'))) i++;
+      continue;
+    }
+    const eq = arg.indexOf('=');
+    if (eq > 0 && KNOWN_FLAGS.has(arg.slice(0, eq))) joined.push(arg);
+    else if (arg.startsWith('-')) unknownFlags.push(arg);
+    else positionals.push(arg);
+  }
+  const named = [...unknownFlags, ...joined, ...positionals];
+  if (named.length === 0) return null;
+
+  const lines = [
+    `check-clause2-carriers: REFUSING — ${named.map((a) => `'${a}'`).join(', ')} `
+      + `${named.length === 1 ? 'is not an argument' : 'are not arguments'} this file honours.`,
+  ];
+  for (const flag of joined) {
+    const at = flag.indexOf('=');
+    lines.push(
+      `  '${flag}' spells its value with '='. Every value here is the NEXT argument: `
+        + `'${flag.slice(0, at)} ${flag.slice(at + 1)}'.`,
+    );
+  }
+  for (const arg of positionals) {
+    // ⭐ A value shaped like a repo gets pointed at the mechanism that actually
+    // retargets the board, because that is the confusion this whole change is
+    // about: the filing seat reached for `--repo <owner>/<name>`, and the
+    // answer it needed was an environment variable it never saw named.
+    lines.push(
+      SWEEP_REPO_SHAPE.test(arg)
+        ? `  '${arg}' looks like a repo. The board is not an argument — set PM_SWEEP_REPO='${arg}' to target it.`
+        : `  '${arg}' is not a flag, and this file reads no positional argument at all — a PR number goes to '--pair'.`,
+    );
+  }
+  lines.push(
+    '  ⛔ Not a warning: an unrecognised argument used to change NOTHING — same report, same board, same exit —',
+    '  so a typo and a deliberate invocation were the same command. This is a landing pre-check with nothing',
+    '  behind it, and a well-formed report reads exactly like a clean one whatever you meant to ask for.',
+    '',
+    ...usageLines(),
+  );
+  return lines;
+}
+
+/**
+ * WHICH board this run reads, and ON WHAT BASIS -- the line #16623 exists for.
+ *
+ * `resolveSweepRepo` has always returned `source` beside `repo`; the run simply
+ * never printed it, so `PM_SWEEP_REPO=objectstack-ai/objectui` and a bare
+ * terminal falling back to the default rendered as the same sentence. The value
+ * was already computed. This renders it.
+ *
+ * ⚠️ It goes to STDERR in every mode, `--json` included, for the reason the read
+ * path report next door states: stdout is contractually the ANSWER, and a
+ * provenance line on stdout would travel into the round report that pastes it
+ * as though it were part of the finding.
+ */
+export function boardProvenanceLine({ repo, source }) {
+  const detail = source === 'default'
+    ? 'source: default — set PM_SWEEP_REPO to target another repo'
+    : `source: ${source}`;
+  return `check-clause2-carriers: every row below is read from ${repo} (${detail}).`;
+}
+
+// ---------------------------------------------------------------------------
 
 async function main(argv) {
-  if (argv.includes('--self-test')) {
+  if (flagIndex(argv, '--self-test') !== -1) {
     const selfTestCode = selfTest();
     if (!selfTestReachedVerdict) {
       console.error(
@@ -2233,6 +2764,20 @@ async function main(argv) {
       process.exit(1);
     }
     return selfTestCode;
+  }
+
+  // ⭐ Usage and argv BEFORE the board, and both before any read. A caller
+  // asking what the flags are must not be answered with a network sweep, and an
+  // unrecognised argument must be refused while the refusal can still be about
+  // the argument rather than about a board nobody asked for (#16623).
+  if (wantsHelp(argv)) {
+    for (const line of usageLines()) console.log(line);
+    return EXIT_OK;
+  }
+  const argvRefusal = argvRefusalLines(argv);
+  if (argvRefusal) {
+    for (const line of argvRefusal) console.error(line);
+    return EXIT_USAGE;
   }
 
   const repoRes = resolveSweepRepo(process.env);
@@ -2251,8 +2796,11 @@ async function main(argv) {
     return EXIT_USAGE;
   }
   const repo = repoRes.repo;
+  // Printed before the first request, so a run that dies in transport has still
+  // said which board it was about -- the state the filing seat was in.
+  console.error(boardProvenanceLine(repoRes));
 
-  const pairFlag = argv.indexOf('--pair');
+  const pairFlag = flagIndex(argv, '--pair');
   let only = null;
   if (pairFlag !== -1) {
     only = Number(argv[pairFlag + 1]);
@@ -2262,7 +2810,7 @@ async function main(argv) {
     }
   }
 
-  const pairJsonFlag = argv.indexOf('--pair-json');
+  const pairJsonFlag = flagIndex(argv, '--pair-json');
   let reader = NETWORK_READER;
   if (pairJsonFlag !== -1) {
     const named = argv[pairJsonFlag + 1];
@@ -2306,7 +2854,7 @@ async function main(argv) {
 
   let swept = 0;
   try {
-    const { pulls, pairs } = await gather(repo, only, reader);
+    const { pulls, pairs } = await gather(repo, only, reader, { readFiles: only !== null });
     swept = pairs.length;
     if (only !== null) {
       if (pairs.length === 0) {
@@ -2320,12 +2868,12 @@ async function main(argv) {
       }
       let worst = EXIT_OK;
       for (const p of pairs) {
-        const code = renderPair(p);
+        const code = renderPair(p, repo);
         if (code !== EXIT_OK) worst = code === EXIT_INCOMPLETE && worst === EXIT_PAIR_ADVERSE ? worst : code;
       }
       return worst;
     }
-    return renderSweep({ repo, pulls, pairs }, { json: argv.includes('--json') });
+    return renderSweep({ repo, pulls, pairs }, { json: flagIndex(argv, '--json') !== -1 });
   } catch (err) {
     return reportTransportFailure(err, { swept });
   } finally {
@@ -2338,7 +2886,7 @@ async function main(argv) {
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) {
+  if (flagIndex(process.argv.slice(2), '--self-test') !== -1) {
     const selfTestCode = selfTest();
     if (!selfTestReachedVerdict) {
       console.error(
@@ -2350,6 +2898,20 @@ if (isEntrypoint(import.meta.url)) {
     }
     process.exit(selfTestCode);
   } else {
+    // ⭐ Answered HERE, above the proxy re-exec, so neither usage nor a refused
+    // argument spawns a child process or opens a socket. `main` judges both
+    // again -- the same two functions -- so the guard cannot be lost by a
+    // caller that reaches `main` another way.
+    const cliArgv = process.argv.slice(2);
+    if (wantsHelp(cliArgv)) {
+      for (const line of usageLines()) console.log(line);
+      process.exit(EXIT_OK);
+    }
+    const cliRefusal = argvRefusalLines(cliArgv);
+    if (cliRefusal) {
+      for (const line of cliRefusal) console.error(line);
+      process.exit(EXIT_USAGE);
+    }
     const rearmed = rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);
     main(process.argv.slice(2)).then((code) => process.exit(code));

@@ -40,6 +40,11 @@
     "siliconflow",
     "ollama"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/embedder-openai"
+  },
   "files": [
     "dist",
     "README.md",
