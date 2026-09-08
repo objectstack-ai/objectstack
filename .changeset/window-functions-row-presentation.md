@@ -32,7 +32,7 @@ other read door no longer produces — so on the live dialects the divergence wa
 between this door and the driver's own declared read contract, not merely
 between dialects.
 
-**What moves, FROM → TO, per column class and per dialect.** Routing this door
+**What moves, per column class and per dialect (storage form → presented form).** Routing this door
 through `formatOutput` moves SEVEN classes, not only the boolean and JSON ones
 the defect was reported as. `unchanged` means the storage form on that dialect
 already WAS the presented form, so the row is byte-identical there — it is
