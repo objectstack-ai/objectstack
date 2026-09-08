@@ -13,7 +13,8 @@
  * The boolean rows are pinned twice: literally, and against the spec's own
  * conformance suite — every boolean case `AGGREGATION_CASES` requires a
  * backend to ANSWER (#11152) must be a pair this table accepts, so the two
- * tables in this package can never again contradict each other (#16685).
+ * tables in this package cannot contradict each other on the boolean axis
+ * (#16685) — the cross-pin reaches exactly as far as the `flag` cases.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -141,9 +142,7 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     // on six backends. A table refusing one of them would refuse a pair the
     // spec elsewhere REQUIRES an answer to (#16685).
     const booleanCases = AGGREGATION_CASES.filter((c) => c.field === 'flag');
-    expect(sorted(new Set(booleanCases.map((c) => c.function)))).toEqual(
-      sorted(['sum', 'avg', 'min', 'max', 'count', 'count_distinct']),
-    );
+    expect(sorted(new Set(booleanCases.map((c) => c.function)))).toEqual(sorted(AggregationFunction.options));
     for (const c of booleanCases) {
       expect(isAggregateCompatibleWithFieldType(c.function, 'boolean')).toBe(true);
       expect(isAggregateCompatibleWithFieldType(c.function, 'toggle')).toBe(true);
