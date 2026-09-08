@@ -336,8 +336,9 @@ function scriptSymbolClass(source, symbol) {
      *
      * ⚠️ The modifier alternation below is HAND-ENUMERATED, and it has been
      * demonstrated INCOMPLETE once (#16821): `override` was absent, so a
-     * symbol anchor naming any `override` member -- a dated reading: 69 of
-     * them under packages/ when this was measured -- returned
+     * symbol anchor naming any `override` member -- a dated reading: 276 of
+     * them under packages/ when this was measured, 207 of those the
+     * `static override` metadata on CLI command classes -- returned
      * `unresolved-symbol` for a declaration that was really there. The gate's
      * own remedy text ("name the real symbol, or drop to a file-level
      * anchor") then left an author only the WEAKER anchor, because the real
