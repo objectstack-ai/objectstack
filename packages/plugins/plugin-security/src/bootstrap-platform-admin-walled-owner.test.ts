@@ -21,9 +21,18 @@
  *    (pin #5 — loud migration, never a silent dual-track).
  *
  * Both directions stay pinned: walled writes NOTHING whatever the account
- * state, and `single` keeps first-user promotion byte-for-byte (Choice 4A —
- * the over-denial guard: retiring the walled write must not retire the
- * `single` one).
+ * state, and `single` still PROMOTES (Choice 4A — the over-denial guard:
+ * retiring the walled write must not retire the `single` one).
+ *
+ *  - **#16682: the `single` SELECTION is repaired.** That guard used to be
+ *    written as "byte-for-byte", and one case snapshotted the incumbent's
+ *    refusal to read `OS_PLATFORM_OWNER_EMAIL` on this branch. The incumbent
+ *    was the defect: an unordered, cap-50 `sys_user` read sorted client-side,
+ *    so who got the unscoped `admin_full_access` grant changed with the
+ *    storage driver, and a deployment that had DECLARED its owner could still
+ *    have somebody else promoted. The guard's subject survives — `single`
+ *    still writes a grant — but "byte-for-byte" does not, and the case that
+ *    claimed it is re-authored below with the ruling that replaced it.
  *
  * The outcomes here are bootstrap returns, not HTTP answers, so there is no
  * ADR-0112 envelope to assert; the machine-checkable surface is the exact
@@ -418,9 +427,37 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
     expect(ql.grants()[0]?.user_id).toBe('u_first');
   });
 
-  it('never consults the owner-email variable: a declared owner does NOT redirect the single-org promotion', async () => {
-    // Over-denial guard for the ruling's direction: setting the variable under
-    // `single` must not change who is promoted.
+  /**
+   * ⚠️ RE-AUTHORED by #16682. This case used to assert the opposite —
+   * "never consults the owner-email variable: a declared owner does NOT
+   * redirect the single-org promotion" — and it is worth being explicit about
+   * what changed and what did NOT, because the two are easy to confuse.
+   *
+   * What this case is FOR is unchanged: it is #11974's over-denial guard, and
+   * the invariant it guards is that retiring the WALLED write did not retire
+   * the `single` one. That invariant is `adminPromoted === true` with a grant
+   * row actually minted, and it is asserted below exactly as before.
+   *
+   * What changed is the incumbent it happened to snapshot alongside that
+   * invariant. `single` read `sys_user` with no `orderBy` and a cap of 50 and
+   * then sorted the returned array, so the promotion was decided by whichever
+   * rows the driver produced first — measured on 113 rows, memory promoted the
+   * intended owner and sqlite promoted a job-seeker persona — while
+   * `PLATFORM_OWNER_EMAIL_ENV`, imported into that same file, was consulted
+   * only on the walled branch. #16682's triage ruled both halves in, in one
+   * change, and ruled the split unacceptable:
+   *
+   *   > 只做 1(服务端排序 + 去掉 cap)让结果与驱动无关、可复现 —— 但它仍然可能
+   *   > 提升一个运营者没选的人(最老的可认证用户未必是 owner)。⇒ 修掉了不确定性,
+   *   > ⛔ 没修掉安全性。
+   *
+   * So a declared owner now DOES decide this promotion. `single` keeping
+   * first-user promotion (Choice 4A) is untouched: with no declaration, the
+   * age rule still answers — the case above this one pins that, and
+   * `bootstrap-platform-admin-promotion-selection.test.ts` pins the whole
+   * selection including every negative control.
+   */
+  it('a declared owner DOES redirect the single-org promotion (#16682), and `single` still promotes', async () => {
     process.env.OS_TENANCY_POSTURE = 'single';
     process.env.OS_PLATFORM_OWNER_EMAIL = 'second@corp.example';
     const ql = makeQl({
@@ -431,8 +468,13 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
       accounts: [account('u_first'), account('u_second')],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
+    // #11974's over-denial guard, unchanged: the `single` write still happens.
     expect(r.adminPromoted).toBe(true);
-    expect(ql.grants()[0]?.user_id).toBe('u_first');
+    expect(ql.grants()).toHaveLength(1);
+    // #16682: and it goes to the address the operator declared, not to
+    // whichever row the driver handed back first.
+    expect(ql.grants()[0]?.user_id).toBe('u_second');
+    expect(r.basis).toBe('declared-owner');
   });
 
   it('an UNVERIFIED first user is still promoted under `single` — the verified invariant was walled-only', async () => {

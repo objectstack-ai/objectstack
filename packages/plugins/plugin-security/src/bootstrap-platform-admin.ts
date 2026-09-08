@@ -70,8 +70,13 @@
 
 import { postureEnforcesWall, type PermissionSet } from '@objectstack/spec/security';
 import { SystemUserId } from '@objectstack/spec/system';
-import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/types';
 import {
+  isEmailVerifiedUserRow,
+  PLATFORM_OWNER_EMAIL_ENV,
+  resolveTenancyPosture,
+} from '@objectstack/types';
+import {
+  normalizePlatformAdminEmail,
   reportLegacyPlatformAdminGrant,
   resolvePlatformAdminEmails,
 } from '@objectstack/core';
@@ -119,9 +124,62 @@ interface BootstrapOptions {
 
 const SYSTEM_CTX = { isSystem: true };
 
-async function tryFind(ql: any, object: string, where: any, limit = 100): Promise<any[]> {
+/**
+ * [#16682] The `single`-posture candidate scan's page size and hard ceiling —
+ * what replaced the bare `50` at the promotion read.
+ *
+ * ## The cap's disposition
+ *
+ * The bare `50` is gone. What replaces it is a PAGE size and a scan CEILING,
+ * and the difference from the old constant is the `orderBy` that now travels
+ * with the read: an ORDERED page is the OLDEST rows, which is exactly the set
+ * the age ranking wants, so truncation can only bite when every one of the
+ * oldest `PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING` humans is non-authenticable.
+ * The old unordered `50` could drop the answer on a 51-row install.
+ *
+ * A ceiling is KEPT rather than dropped because this pass re-runs on every
+ * `sys_user` / `sys_account` insert until an admin exists
+ * (`shouldReplayBootstrapFor`), so an unbounded scan would be a per-sign-up
+ * full-table read on exactly the deployments that have not been promoted yet.
+ * What is NOT kept is the silence: reaching the ceiling WARNS, naming the
+ * number examined. "I only looked at N rows" was the whole defect.
+ *
+ * Exported so the guard reads the SAME numbers the selection does. A test that
+ * restates them is a test that goes quietly vacuous the day one is tuned.
+ */
+export const PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE = 200;
+export const PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING = 5000;
+
+/**
+ * One read, with the sort and the page WHERE THE DRIVER CAN SEE THEM.
+ *
+ * `orderBy` / `offset` are optional and are only put on the query when a
+ * caller passes them, so every pre-existing call site sends the same query it
+ * always did. They exist because an UNORDERED read with a `limit` does not
+ * return "the first N rows" — it returns whichever N rows that driver happened
+ * to produce first, and the two families disagree by construction. Measured on
+ * this repo's own drivers with 113 `sys_user` rows and `limit: 50`:
+ *
+ *   memory   window[0] = usr_zzz_owner   (insertion order)
+ *   sqlite   window[0] = usr_ats_c001    (id order) — usr_zzz_owner ABSENT
+ *
+ * A caller that then sorts the returned array is sorting a SAMPLE and
+ * reporting a global answer. Sorting in the query is the only way to make the
+ * cap select the rows the ranking actually wants.
+ */
+async function tryFind(
+  ql: any,
+  object: string,
+  where: any,
+  limit = 100,
+  orderBy?: { field: string; order: 'asc' | 'desc' }[],
+  offset?: number,
+): Promise<any[]> {
   try {
-    const rows = await ql.find(object, { where, limit }, { context: SYSTEM_CTX });
+    const query: Record<string, any> = { where, limit };
+    if (orderBy) query.orderBy = orderBy;
+    if (offset !== undefined) query.offset = offset;
+    const rows = await ql.find(object, query, { context: SYSTEM_CTX });
     return Array.isArray(rows) ? rows : [];
   } catch {
     return [];
@@ -273,6 +331,13 @@ export async function bootstrapPlatformAdmin(
   resynced?: number;
   /** [#2705] Existing rows left untouched by `resync` (admin/package-owned). */
   resyncSkipped?: number;
+  /**
+   * [#16682] WHY this target was chosen, when one was. `declared-owner` means
+   * `OS_PLATFORM_OWNER_EMAIL` named them; `oldest-authenticable` means nobody
+   * did and the age rule answered. The highest-privilege grant in the system
+   * should not be auditable only by reading which code path ran.
+   */
+  basis?: 'declared-owner' | 'oldest-authenticable';
 }> {
   const logger = options.logger;
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') {
@@ -553,28 +618,228 @@ export async function bootstrapPlatformAdmin(
   // user's only account past it — which reads as "cannot authenticate" and
   // silently SKIPS a legitimate target. The typical fresh boot answers on the
   // first query.
-  const oldestAuthenticable = async (ql2: any, users: any[]): Promise<any | undefined> => {
-    const byAge = [...users].sort(byCreatedAtAsc);
-    for (const user of byAge) {
-      if (user?.id === undefined || user?.id === null) continue;
-      const accounts = await tryFind(ql2, 'sys_account', { user_id: user.id }, 1);
-      if (accounts.length > 0) return user;
-    }
+  const canAuthenticate = async (user: any): Promise<boolean> => {
+    if (user?.id === undefined || user?.id === null) return false;
+    const accounts = await tryFind(ql, 'sys_account', { user_id: user.id }, 1);
+    return accounts.length > 0;
+  };
+  const firstAuthenticable = async (users: any[]): Promise<any | undefined> => {
+    for (const user of users) if (await canAuthenticate(user)) return user;
     return undefined;
   };
 
+  /**
+   * Mint the grant and RECORD it. One call site for both legs, so the write,
+   * the log and the seed-ownership handoff cannot drift apart per basis.
+   *
+   * [#16682] The old line was `first user promoted to platform admin: <email>`
+   * and nothing else. It is the only record of the highest-privilege grant
+   * this system ever makes, and it did not say WHY that row won or HOW MANY
+   * rows it was chosen from — so a promotion decided by a truncated,
+   * driver-ordered 50-row sample and one decided by an operator's declaration
+   * produced BYTE-IDENTICAL evidence. The prefix is unchanged (existing
+   * consumers match on it); the basis and the candidate pool are appended, and
+   * repeated in `meta` so a structured sink gets them as fields.
+   */
+  const promote = async (
+    chosen: any,
+    audit: { basis: 'declared-owner' | 'oldest-authenticable'; pool: string; candidatePoolSize: number },
+  ) => {
+    const inserted = await tryInsert(ql, 'sys_user_permission_set', {
+      id: genId('ups'),
+      user_id: chosen.id,
+      permission_set_id: adminPsId,
+      organization_id: null,
+      granted_by: null,
+    });
+    if (!inserted) {
+      logger?.warn?.(`[security] failed to grant admin_full_access to first user ${chosen.email ?? chosen.id}`);
+      return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed', ...resyncCounts };
+    }
+    logger?.info?.(
+      `[security] first user promoted to platform admin: ${chosen.email ?? chosen.id} `
+        + `— basis: ${audit.basis}; candidate pool: ${audit.pool}`,
+      { basis: audit.basis, candidatePoolSize: audit.candidatePoolSize, userId: String(chosen.id) },
+    );
+
+    // Hand seeded business records (owner_id NULL / usr_system) to the freshly
+    // promoted admin so owner-keyed UX works out of the box. Best-effort and
+    // idempotent — failures here must not undo the promotion above.
+    let ownershipClaimed = 0;
+    try {
+      const claims = await claimSeedOwnership(ql, chosen.id, { logger });
+      ownershipClaimed = claims.reduce((sum, c) => sum + c.count, 0);
+    } catch (e) {
+      logger?.warn?.('[security] seed ownership handoff failed', { error: (e as Error).message });
+    }
+
+    return {
+      seeded: seededCount,
+      adminPromoted: true,
+      ownershipClaimed,
+      basis: audit.basis,
+      ...resyncCounts,
+    };
+  };
+
+  // ── The candidate ORDER, stated to the DRIVER (#16682) ────────────────────
+  //
+  // The age rule used to be applied by `[...users].sort(byCreatedAtAsc)` over
+  // whatever `tryFind(ql, 'sys_user', {}, 50)` returned. That read carried no
+  // `orderBy`, so "the oldest authenticable user" meant *the oldest
+  // authenticable user among whatever 50 rows this driver produced first* —
+  // and the two families disagree by construction. Measured on 113 seeded
+  // `sys_user` rows, the intended owner inserted FIRST and holding an id that
+  // sorts LAST:
+  //
+  //     memory   window[0] = usr_zzz_owner   -> promoted admin@objectos.ai
+  //     sqlite   window[0] = usr_ats_c001    -> promoted candidate001@mail.example
+  //              (usr_zzz_owner was not in the window AT ALL)
+  //
+  // Same code, same config, same data; the answer changed with the storage
+  // driver, and a job-seeker persona took the unscoped `admin_full_access`
+  // grant plus — through `claimSeedOwnership` — ownership of every seeded row.
+  // A client-side sort cannot notice this: it sorts a SAMPLE and reports a
+  // global answer.
+  //
+  // So the ranking moves into the query and there is deliberately NO
+  // client-side re-sort left behind. A defensive `.sort()` here would re-rank
+  // the returned page and hide it if the `orderBy` ever stopped being sent —
+  // the guard would go on passing while the selection went back to being a
+  // function of the driver.
+  //
+  // `id` is the tie-breaker, not decoration: seeded populations routinely
+  // share one `created_at`, and among ties an unordered read is exactly the
+  // sample-dependent answer this fixes.
+  const OLDEST_FIRST: { field: string; order: 'asc' | 'desc' }[] = [
+    { field: 'created_at', order: 'asc' },
+    { field: 'id', order: 'asc' },
+  ];
   // [#11974 / #11663 L4] `single` is the ONLY posture that still selects a
   // target and writes the grant row (Choice 4A). The walled selection — query
   // by declared email, verified-only, oldest wins — moved with the decision
   // itself into the derivation site (`resolve-authz-context.ts` §6b-config)
   // and, for the audit answer, `platform-admin-service.ts`.
-  const allUsers = await tryFind(ql, 'sys_user', {}, 50);
-  const humanUsers = allUsers.filter(isHumanUser);
-  if (humanUsers.length === 0) {
+  //
+  // ── Leg 1: the DECLARED owner, when the operator declared one (#16682) ────
+  //
+  // `PLATFORM_OWNER_EMAIL_ENV` was imported into this file and read only on
+  // the walled branch. So a deployment that had SAID who the owner is could
+  // still have someone else promoted here — which is what made the loose read
+  // above a security defect rather than a nondeterminism one. This leg asks
+  // the anchor first.
+  //
+  // The predicate is "can AUTHENTICATE", the same one #14348 established for
+  // this branch — NOT the walled derivation's `email_verified` REQUIREMENT.
+  // That difference is deliberate: `single` ranks by authenticability
+  // everywhere else in this function and has no verification vocabulary at all
+  // (`bootstrap-platform-admin-walled-owner.test.ts` pins that an unverified
+  // first user is still promoted here — the verified invariant was
+  // walled-only), so requiring verification would refuse to promote the
+  // operator on every deployment that never configured email verification.
+  //
+  // Verification is used as a PREFERENCE instead, and that is the half that
+  // keeps this leg from opening a door. `matchesConfiguredPlatformAdmin`
+  // states the threat for the walled derivation: "an attacker who registers
+  // the operator's address before the operator does gains no standing by it."
+  // Ordering the matches VERIFIED-FIRST answers it here without the refusal:
+  // an address squatted by somebody who cannot read the operator's mailbox
+  // cannot verify, so the operator's own row outranks it as soon as it exists.
+  // Where nobody has verified, the leg still promotes — which is no wider than
+  // the incumbent, since today's rule hands the grant to whoever registered
+  // first with no config knowledge required at all.
+  //
+  // `isHumanUser` still applies: a declared address sitting on `usr_system` or
+  // a `role: 'system'` row must not become a route to the grant.
+  const declaredOwners = resolvePlatformAdminEmails();
+  if (declaredOwners.emails.length > 0) {
+    // Both spellings, same discipline as `resolvePlatformAdminStanding`: a
+    // driver `where` is an exact match and an imported/legacy row may not be
+    // stored lowercased. Declaration order decides between several declared
+    // addresses; `created_at` decides between several rows holding one.
+    let declaredTarget: any | undefined;
+    let declaredMatches = 0;
+    for (let i = 0; i < declaredOwners.emails.length && !declaredTarget; i++) {
+      const email = declaredOwners.emails[i]!;
+      const spelling = declaredOwners.declaredSpellings[i] ?? email;
+      const byId = new Map<string, any>();
+      for (const s of new Set([email, spelling])) {
+        for (const row of await tryFind(ql, 'sys_user', { email: s }, 10)) {
+          if (row && typeof row === 'object' && row.id) byId.set(String(row.id), row);
+        }
+      }
+      const matching = [...byId.values()]
+        .filter((row) => normalizePlatformAdminEmail(row.email) === email)
+        .filter(isHumanUser)
+        .sort((a, b) => {
+          // Verified first (the anti-squat half), then oldest — the same
+          // fail-closed predicate the walled derivation and the audit surface
+          // read, never a second local copy of "looks verified".
+          const va = isEmailVerifiedUserRow(a) ? 0 : 1;
+          const vb = isEmailVerifiedUserRow(b) ? 0 : 1;
+          return va === vb ? byCreatedAtAsc(a, b) : va - vb;
+        });
+      declaredMatches += matching.length;
+      declaredTarget = await firstAuthenticable(matching);
+    }
+    if (declaredTarget) {
+      return promote(declaredTarget, {
+        basis: 'declared-owner',
+        pool:
+          `${declaredOwners.emails.length} address(es) declared in ${PLATFORM_OWNER_EMAIL_ENV}, `
+          + `${declaredMatches} matching human user row(s)`,
+        candidatePoolSize: declaredMatches,
+      });
+    }
+    // Declared, and not one declared address can sign in. ⛔ NOT a silent
+    // fall-back to whoever happens to be oldest: the operator named the owner,
+    // so promoting somebody else is the very outcome this card is about. The
+    // walled branch already refuses loudly for the same input (see the
+    // `walled_owner_email_undeclared` diagnostic above); this is that answer
+    // for `single`. The replay predicate re-runs this pass on the next
+    // `sys_user` / `sys_account` insert, so the declared owner is promoted the
+    // moment their login exists.
+    const message =
+      `[security] ${PLATFORM_OWNER_EMAIL_ENV} declares `
+      + `${declaredOwners.emails.map((e) => JSON.stringify(e)).join(', ')} as this deployment's platform `
+      + `administrator, but ${declaredMatches === 0
+        ? 'no human sys_user row holds that address'
+        : `none of the ${declaredMatches} matching human row(s) can authenticate (no sys_account)`}`
+      + ' — platform admin NOT promoted. Promotion is NOT falling back to the oldest '
+      + 'authenticable user: that would hand the highest-privilege grant to somebody the '
+      + `operator did not choose. Register and sign in as the declared address, or unset `
+      + `${PLATFORM_OWNER_EMAIL_ENV} to use first-user promotion.`;
+    if (logger?.warn) logger.warn(message);
+    else logger?.info?.(message);
+    return {
+      seeded: seededCount,
+      adminPromoted: false,
+      reason: 'declared_owner_not_authenticable',
+      ...resyncCounts,
+    };
+  }
+
+  // ── Leg 2: no declaration — the oldest authenticable human ─────────────────
+  let scannedHumans = 0;
+  let scanTruncated = false;
+  let target: any | undefined;
+  const pageSize = PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE;
+  const ceiling = PLATFORM_ADMIN_CANDIDATE_SCAN_CEILING;
+  for (let offset = 0; offset < ceiling && !target; offset += pageSize) {
+    const pageLimit = Math.min(pageSize, ceiling - offset);
+    const page = await tryFind(ql, 'sys_user', {}, pageLimit, OLDEST_FIRST, offset);
+    if (page.length === 0) break;
+    const humans = page.filter(isHumanUser);
+    scannedHumans += humans.length;
+    target = await firstAuthenticable(humans);
+    if (target) break;
+    if (page.length < pageLimit) break;
+    if (offset + page.length >= ceiling) scanTruncated = true;
+  }
+  if (scannedHumans === 0) {
     logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
     return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
   }
-  const target = await oldestAuthenticable(ql, humanUsers);
   if (!target) {
     // [#14348] Humans exist, but not one of them can sign in. Measured on a
     // real composed boot before this branch existed: an app seeding people
@@ -590,10 +855,23 @@ export async function bootstrapPlatformAdmin(
     // nobody has signed up yet), the same register the `no_users` line above
     // uses, and a published sink shape gains nothing from a louder level.
     logger?.info?.(
-      `[security] ${humanUsers.length} human user row(s) exist but none can authenticate (no sys_account) ` +
+      `[security] ${scannedHumans} human user row(s) exist but none can authenticate (no sys_account) ` +
         '— platform admin NOT promoted. The first human that signs in will be promoted instead; a ' +
         'directory row nobody can sign in as would hold a grant it could never exercise.',
     );
+    // ⛔ The truncation is never silent again (#16682). Reaching the ceiling is
+    // the ONE way an ordered scan can still answer "nobody" while a promotable
+    // human exists, so it says the number it examined instead of letting the
+    // line above read as a statement about the whole table.
+    if (scanTruncated) {
+      const truncation =
+        `[security] the platform-admin candidate scan stopped at its ceiling of ${ceiling} `
+        + 'oldest sys_user row(s) and none of them can authenticate — rows beyond that point were NOT '
+        + 'examined, so this deployment may hold a promotable human the boot did not see. Promote the '
+        + `intended administrator explicitly by setting ${PLATFORM_OWNER_EMAIL_ENV}.`;
+      if (logger?.warn) logger.warn(truncation);
+      else logger?.info?.(truncation);
+    }
     return {
       seeded: seededCount,
       adminPromoted: false,
@@ -602,29 +880,11 @@ export async function bootstrapPlatformAdmin(
     };
   }
 
-  const inserted = await tryInsert(ql, 'sys_user_permission_set', {
-    id: genId('ups'),
-    user_id: target.id,
-    permission_set_id: adminPsId,
-    organization_id: null,
-    granted_by: null,
+  return promote(target, {
+    basis: 'oldest-authenticable',
+    pool:
+      `${scannedHumans} human user row(s) examined oldest-first by created_at`
+      + `${scanTruncated ? ` (scan ceiling ${ceiling} reached)` : ''}`,
+    candidatePoolSize: scannedHumans,
   });
-  if (!inserted) {
-    logger?.warn?.(`[security] failed to grant admin_full_access to first user ${target.email ?? target.id}`);
-    return { seeded: seededCount, adminPromoted: false, reason: 'insert_failed', ...resyncCounts };
-  }
-  logger?.info?.(`[security] first user promoted to platform admin: ${target.email ?? target.id}`);
-
-  // Hand seeded business records (owner_id NULL / usr_system) to the freshly
-  // promoted admin so owner-keyed UX works out of the box. Best-effort and
-  // idempotent — failures here must not undo the promotion above.
-  let ownershipClaimed = 0;
-  try {
-    const claims = await claimSeedOwnership(ql, target.id, { logger });
-    ownershipClaimed = claims.reduce((s, c) => s + c.count, 0);
-  } catch (e) {
-    logger?.warn?.('[security] seed ownership handoff failed', { error: (e as Error).message });
-  }
-
-  return { seeded: seededCount, adminPromoted: true, ownershipClaimed, ...resyncCounts };
 }
