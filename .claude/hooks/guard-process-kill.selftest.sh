@@ -84,6 +84,11 @@ expect block 'pkill --signal TERM node'
 expect block 'pkill -f "pnpm --filter @objectstack/spec test"'
 expect block '/usr/bin/pkill -f vitest'
 expect block 'OS_FOO=1 pkill -f vitest'
+# Bare `pkill` — its option loop completes with no PID-family selector, and it is the ONLY
+# input that reaches the pidscoped gate at the end of check_pkill. Without this row that gate
+# is unpinned: an ablation replacing it with an unconditional allow left this file green at
+# 68/0, which is how the hole was found rather than shipped.
+expect block 'pkill'
 
 echo "== killall is the spelling a pkill-only rule would go silent on =="
 expect block 'killall node'
