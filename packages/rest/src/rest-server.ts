@@ -691,17 +691,25 @@ function importJobUndoable(row: any): boolean {
  * [#13994] The input domain is what a DRIVER materialises into such a column,
  * and it is dialect-dependent — measured, not guessed:
  *
- *  - **JS `Date`** — `driver-sql` on Postgres and MySQL. `timestamptz` /
- *    `DATETIME(3)` are instants and the driver materialises them as `Date` on
- *    purpose (`SqlDriver.withPostgresCalendarDayAsText` says so in as many
- *    words); `driver-mongodb` stamps `new Date()` and BSON round-trips it.
- *    `formatOutput`'s two timestamp repairs — the `AUDIT_TIMESTAMP_COLUMNS`
- *    pass and the `normalizeSqliteDatetimeOutput` pass over `datetimeFields` —
- *    both sit INSIDE its `if (this.isSqlite)` arm, so neither runs here. ⚠️ A
- *    declared `Field.datetime` is therefore NOT protected on Postgres/MySQL.
- *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on SQLite and
- *    its `driver-turso` / `driver-sqlite-wasm` siblings, and `driver-memory`.
- *    Passed through unchanged, so a canonical row is a fixed point.
+ *  - **JS `Date`** — `driver-mongodb` stamps `new Date()` and BSON round-trips
+ *    it. On `driver-sql` the CLIENT layer still materialises `timestamptz` /
+ *    `DATETIME(3)` as a `Date` on purpose — those are instants, and
+ *    `SqlDriver.withPostgresCalendarDayAsText` still leaves the parser alone in
+ *    as many words ([ADR-0053 D-F2]) — but that is no longer what leaves the
+ *    read door. Since #13973 ([ADR-0053 D-F1]) `formatOutput`'s two timestamp
+ *    repairs — the `AUDIT_TIMESTAMP_COLUMNS` pass and the
+ *    `normalizeSqliteDatetimeOutput` pass over `datetimeFields` — both run on
+ *    EVERY dialect, so the driver folds that `Date` at its own read boundary.
+ *    ⚠️ Exactly one `Date` shape still arrives here from `driver-sql`: an
+ *    INVALID `Date`, which has no canonical text to fold to and is handed
+ *    through unchanged by design ([ADR-0053 D-F3], `isoFromValidDate`). That
+ *    residue is what keeps this arm live rather than dead — see the #14078
+ *    section below, which is the arm that absorbs it.
+ *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on every
+ *    dialect (SQLite and its `driver-turso` / `driver-sqlite-wasm` siblings
+ *    have always stored the text; Postgres and MySQL are folded to it at the
+ *    read door), and `driver-memory`. Passed through unchanged, so a canonical
+ *    row is a fixed point.
  *  - **anything else** a host stamps into the column — rendered as before.
  *
  * Why this is not `String(v)`: on a `Date`, `String` runs
