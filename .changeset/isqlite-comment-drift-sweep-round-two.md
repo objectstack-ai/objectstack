@@ -27,12 +27,13 @@ Comments only — no runtime behaviour, no exported symbol and no public type ch
 `@objectstack/cli` is the one package named here because its per-file build carries the
 amended text verbatim into `dist/commands/migrate/duplicates.js` and
 `dist/commands/migrate/duplicates.d.ts`, so its published output changes.
-`@objectstack/metadata-protocol` and `@objectstack/metadata` are deliberately NOT named:
-their edits are all in test files, which are not published. `@objectstack/service-storage`
-is deliberately NOT named either: its edit is a JSDoc block on the internal
-`usableCreatedAt`, and its bundle strips it — measured absent from `dist/`, with the
-exported `StrandedOrphanInventoryEngine` docblock present in the same `dist/index.d.ts` as
-the firing control that the probe works.
+`@objectstack/metadata-protocol` is deliberately NOT named: its edits are all in test
+files, which are not published. `@objectstack/service-storage` and `@objectstack/metadata`
+are deliberately NOT named either: their source edits are JSDoc blocks on the internal
+`usableCreatedAt` and `canonicalTimestampText`, and both bundles strip them — measured
+absent from `dist/`, with each package's identifier found in the same `dist/` (and the
+exported `StrandedOrphanInventoryEngine` docblock present in `dist/index.d.ts`) as the
+firing control that the probe works.
 
 Three carve-outs are preserved rather than flattened: `withPostgresCalendarDayAsText` is
 untouched by that ruling (D-F2 — the client library still materialises `timestamptz` /
