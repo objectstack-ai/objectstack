@@ -9003,7 +9003,63 @@ export class SqlDriver implements IDataDriver {
     if (query.limit !== undefined) builder.limit(query.limit);
     if (query.offset !== undefined) builder.offset(query.offset);
 
-    return await builder;
+    const rows = await builder;
+    if (!Array.isArray(rows)) return rows;
+
+    // [#16609] The last read door that returned STORAGE forms. It handed back
+    // `await builder` with no presentation at all, while `find()`/`findOne()`
+    // run every row through `formatOutput` and `aggregate()`/`distinct()` got
+    // `presentReadValue` under #3797/#3849 — so one driver answered one
+    // declared column two ways depending on which door you knocked on.
+    // Measured on `main` at `2e6a2ea4c9`, one row through the two doors:
+    //   find()   -> { ok: true, meta: { k: 1 } }
+    //   window   -> { ok: 1,    meta: '{"k":1}' }
+    // i.e. a declared `Field.boolean` answered `1` and a declared `Field.object`
+    // answered the stored JSON TEXT. `formatOutput` rather than
+    // `presentReadValue` is what runs here, and that choice is load-bearing:
+    // {@link ReadPresentationKind} has no `json` member, so the per-value
+    // helper the other two doors use cannot present `meta` at all. These are
+    // ROWS, which is exactly what `formatOutput` takes.
+    //
+    // ── The alias columns are carved out, and that is the whole design ──────
+    //
+    // A window alias is a COMPUTED value, not a declared field, so no declared
+    // field's presentation rule may touch it. The case that forces the rule to
+    // be explicit is an alias that COLLIDES with a declared field name, and SQL
+    // has already decided that one: `select *` plus `<window> as ok` projects
+    // two columns named `ok` and the row object keeps the LAST, so the computed
+    // value wins the key and the declared column's value is not in the row at
+    // all. Measured on `main` at `2e6a2ea4c9` with `alias: 'ok'` over a
+    // declared `Field.boolean ok`: rows came back `ok: 1` and `ok: 2` — the
+    // ROW_NUMBERs, not the booleans (`true`/`false`), which is how you can tell
+    // them apart. So the alias wins the key BEFORE this change and still wins
+    // it after; what this carve-out prevents is presenting that computed number
+    // as the declared type, which would have turned ROW_NUMBER 1 and 2 into
+    // `true` and `true` and destroyed the very value the caller asked for.
+    // Pinned by `sql-driver-window-function-output.test.ts`.
+    //
+    // Snapshot-and-restore rather than a "which keys would `formatOutput`
+    // touch?" pre-computation: that question can only be answered by re-reading
+    // the declared-field registries `formatOutput` reads, which would be a
+    // second, worse copy of it — and one that goes silently stale the next time
+    // `formatOutput` learns a new rule. Restoring a value the pass never
+    // touched is a no-op, so the cheap-looking version buys nothing.
+    const aliases = Array.isArray(query.windowFunctions)
+      ? query.windowFunctions.map((wf) => String(wf.alias))
+      : [];
+
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const computed: [string, any][] = [];
+      for (const alias of aliases) {
+        if (Object.prototype.hasOwnProperty.call(row, alias)) computed.push([alias, row[alias]]);
+      }
+      // Mutates in place and returns the same row, as `findRows()` relies on.
+      this.formatOutput(object, row);
+      for (const [alias, value] of computed) row[alias] = value;
+    }
+
+    return rows;
   }
 
   // ===================================
