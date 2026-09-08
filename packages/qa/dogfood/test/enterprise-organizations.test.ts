@@ -18,8 +18,8 @@
  * Every verdict here is a statement about what a host root HAS and, just as
  * load-bearing, what it has NOT got. Until #16215 the second half came free:
  * `@objectstack/organizations` was cloud-private, so a temp host that declared
- * it and did not install it was unresolvable by construction. #16215 brought
- * the package into this workspace; pnpm's hoisted store carries it, and every
+ * it and did not install it was unresolvable by construction. ADR-0132 (#16215)
+ * brought the package into this workspace; pnpm's hoisted store carries it, and every
  * `pnpm exec`-launched runner (vitest's bin shim included) exports a `NODE_PATH`
  * that reaches that store. From then on the CONTROL's verdict was a function of
  * whether an unrelated package had been BUILT: green on CI, whose task graph

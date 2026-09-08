@@ -49,7 +49,8 @@
  * The paragraph above used to end "…that is correct and unavoidable for a
  * cloud-private package", and the probe below used to say the enterprise package
  * was "resolvable from nowhere in the framework workspace". #16215 brought the
- * multi-organization runtime back to open core: `packages/plugins/organizations`
+ * multi-organization runtime back to open core (ADR-0132):
+ * `packages/plugins/organizations`
  * IS a member of this workspace now, pnpm's hoisted store carries it, and every
  * `pnpm exec`-launched runner exports a `NODE_PATH` that reaches it. Neither
  * sentence survived that landing, and nothing said so — which is the whole
@@ -88,7 +89,7 @@ import { createHostImporter, hostImportFailureKind } from '@objectstack/types/no
 /**
  * The enterprise multi-org package (ADR-0105 D12) these gates need.
  *
- * ⚠️ #16539: no longer cloud-private — #16215 brought it back to open core as
+ * ⚠️ #16539: no longer cloud-private — ADR-0132 / #16215 brought it back to open core as
  * `packages/plugins/organizations`. It stays the SUBJECT of this probe (the app
  * under test is what has to declare and install it), but it is no longer a name
  * this repo can use as an example of something a host root does not have.
