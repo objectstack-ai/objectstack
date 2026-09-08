@@ -806,6 +806,14 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * that dataset's declared `dimensions`; enforced by the lint rule
    * `dashboard-filter-field-unknown` (severity error).
    *
+   * The sibling `object` key does not move this: it names the object a
+   * translator's bundle entry is keyed by and is read for LABEL resolution
+   * only. `dashboard-filter-field-unknown` (exported as
+   * `DASHBOARD_FILTER_FIELD_UNKNOWN`) resolves against the widget's own
+   * dataset — `validateWidgetBindings` seeds its base with
+   * `const datasetObject = typeof dataset.object === 'string'` — and never
+   * reads a filter-level `object`.
+   *
    * `dimensions` is a separate namespace, the one `widgets[].dimensions[]`
    * selects from BY NAME (`widget-dimension-unknown`, also severity error).
    * That separation is a statement about the AUTHORABLE SURFACE only — it is
