@@ -80,6 +80,128 @@ describe('validateObjectReferences — action params', () => {
   });
 });
 
+describe('validateObjectReferences — field relationship targets (#16611)', () => {
+  // The card's control probe, verbatim: on 17.3.0 `os validate`, `os lint` and
+  // `os build` all exited 0 on it, with no diagnostic of any severity.
+  it('errors on a lookup whose reference names an object declared nowhere', () => {
+    const stack = baseStack();
+    (stack.objects[0].fields as Record<string, unknown>).zzz_probe = {
+      type: 'lookup',
+      label: 'Control probe',
+      reference: 'zzz_object_that_does_not_exist',
+    };
+    const findings = validateObjectReferences(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNKNOWN);
+    expect(findings[0].where).toBe('object "crm_lead" · field "zzz_probe"');
+    expect(findings[0].path).toBe('objects[0].fields.zzz_probe.reference');
+    expect(findings[0].message).toContain('lookup target "zzz_object_that_does_not_exist"');
+    // The hint says what the miss costs at runtime, not just that it is a miss.
+    expect(findings[0].hint).toContain('record picker');
+  });
+
+  it('errors on a master_detail whose reference names an object declared nowhere', () => {
+    const stack = baseStack();
+    (stack.objects[0].fields as Record<string, unknown>).parent = {
+      type: 'master_detail',
+      required: true,
+      reference: 'crm_led',
+    };
+    const findings = validateObjectReferences(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('objects[0].fields.parent.reference');
+    expect(findings[0].message).toContain('master_detail target "crm_led"');
+    // One edit away from an own object: the suggester names it.
+    expect(findings[0].message).toContain('Did you mean "crm_lead"?');
+  });
+
+  it('accepts a lookup into an own object and the `Field.user()` shape (rungs ① and ③)', () => {
+    const stack = baseStack();
+    Object.assign(stack.objects[0].fields as Record<string, unknown>, {
+      account: { type: 'lookup', reference: 'crm_account' },
+      owner: { type: 'user', reference: 'sys_user' },
+      watchers: { type: 'lookup', reference: 'sys_user', multiple: true },
+    });
+    expect(validateObjectReferences(stack)).toEqual([]);
+  });
+
+  it('warns (not errors) on a platform-shaped target no package registers (rung ④)', () => {
+    const stack = baseStack();
+    (stack.objects[0].fields as Record<string, unknown>).approval = {
+      type: 'lookup',
+      reference: 'sys_approval_process',
+    };
+    const findings = validateObjectReferences(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(OBJECT_REFERENCE_UNREGISTERED_PLATFORM);
+    expect(findings[0].path).toBe('objects[0].fields.approval.reference');
+    expect(findings[0].hint).toContain('sys_approval_request');
+  });
+
+  it('leaves the `reference` key alone on `tree` and on non-relationship types', () => {
+    // `tree`: the schema already refuses any target but the own name
+    // (`refuseForeignTreeReference`), so a survivor always resolves.
+    // `text`: the key is inert there; a finding would be about the wrong thing.
+    const stack = baseStack();
+    Object.assign(stack.objects[0].fields as Record<string, unknown>, {
+      parent: { type: 'tree', reference: 'crm_lead' },
+      note: { type: 'text', reference: 'zzz_object_that_does_not_exist' },
+    });
+    expect(validateObjectReferences(stack)).toEqual([]);
+  });
+
+  it('does not walk objectExtensions[].fields — cross-package by construction', () => {
+    // An extension adds fields to an object ANOTHER package owns; its targets
+    // are the cross-package case this ladder has no rung for, and the declared
+    // escape is its own card. Pinned so the boundary is a decision, not a gap.
+    const findings = validateObjectReferences({
+      ...baseStack(),
+      objectExtensions: [
+        {
+          object: 'crm_contract',
+          fields: { clause: { type: 'lookup', reference: 'zzz_object_that_does_not_exist' } },
+        },
+      ],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('walks array-shaped and map-shaped field collections alike', () => {
+    const findings = validateObjectReferences({
+      objects: [
+        { name: 'crm_lead', fields: [{ name: 'owner', type: 'lookup', reference: 'user' }] },
+        { name: 'crm_account', fields: { rep: { type: 'lookup', reference: 'user' } } },
+      ],
+    });
+    expect(findings.map((f) => f.path)).toEqual([
+      'objects[0].fields.owner.reference',
+      'objects[1].fields.rep.reference',
+    ]);
+    for (const f of findings) {
+      expect(f.severity).toBe('error');
+      expect(f.hint).toContain('sys_user');
+    }
+  });
+
+  it('reports the field site before the sites that hang off the same object', () => {
+    const stack = baseStack();
+    (stack.objects[0].fields as Record<string, unknown>).zzz_probe = {
+      type: 'lookup',
+      reference: 'zzz_object_that_does_not_exist',
+    };
+    (stack.objects[0] as Record<string, unknown>).actions = [
+      { name: 'convert', params: [{ name: 'target', type: 'lookup', reference: 'accounts' }] },
+    ];
+    expect(validateObjectReferences(stack).map((f) => f.path)).toEqual([
+      'objects[0].fields.zzz_probe.reference',
+      'objects[0].actions[0].params[0].reference',
+    ]);
+  });
+});
+
 describe('validateObjectReferences — dashboard global filters', () => {
   // The other HotCRM `object: 'user'` instance.
   it('errors on optionsFrom.object naming a nonexistent object', () => {

@@ -38,6 +38,14 @@
  *   - the nav `objectName` of an item that carries `requiresObject` — exempted
  *     from the `defineStack` throw for good reason (it may come from another
  *     package), but still worth an advisory when NO known package provides it.
+ *   - a field's `reference` (#16611) — the target of `Field.lookup()` /
+ *     `Field.masterDetail()` / `Field.user()`. `FieldSchema.reference` is
+ *     `z.string()`; the schema holds it present and non-empty on the two
+ *     relationship types and nothing asked whether it resolved, so the ONE
+ *     reference every record form depends on shipped whatever the author
+ *     typed. Dead → the record picker asks the REST layer for an object that
+ *     is not registered (404 `OBJECT_NOT_FOUND`), `$expand` on the field
+ *     fails, and the form renders a control that can never resolve a value.
  *
  * ── Severity ladder (the point of the rule) ──────────────────────────────
  *
@@ -73,6 +81,19 @@ import { recordsOf, suggestName } from './object-graph.js';
 
 /** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
+
+/**
+ * The field types whose `reference` names ANOTHER object this rule resolves
+ * (#16611). `RELATIONSHIP_FIELD_TYPES` (`object-graph.ts`) minus `tree`, on
+ * purpose: a `tree` reference is optional and, when written, must name the
+ * declaring object itself — `object.zod.ts` (`refuseForeignTreeReference`)
+ * refuses every other target at parse time, so one that reaches this rule
+ * always lands on rung ①, and judging it here would only echo the schema.
+ * `user` is a member because `Field.user()` writes `reference: 'sys_user'`,
+ * which is exactly a rung-③ resolution. A `reference` on any other type is
+ * inert and is left to the schema.
+ */
+const RELATIONSHIP_TARGET_FIELD_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail', 'user']);
 
 export const OBJECT_REFERENCE_UNKNOWN = 'object-reference-unknown';
 export const OBJECT_REFERENCE_UNREGISTERED_PLATFORM = 'object-reference-unregistered-platform';
@@ -188,6 +209,44 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         (ownObjects.size > 0 ? ` Defined objects: ${[...ownObjects].sort().join(', ')}.` : ''),
     });
   };
+
+  // ── Object fields → relationship targets (#16611) ──
+  // The reference site every record form depends on, and the last one on this
+  // rule's list to be enrolled. Measured on 17.3.0: `os validate`, `os lint`
+  // and `os build` all exited 0 on `Field.lookup('zzz_object_that_does_not_exist')`
+  // — `defineStack`'s `validateCrossReferences` never read a field, and the
+  // `relationship/missing-reference` lint asks only whether the key is
+  // PRESENT. The same ladder as every other site here: an unprefixed miss is
+  // the typo class and gates; a platform-shaped miss no package registers
+  // advises.
+  //
+  // `objectExtensions[].fields` is deliberately NOT walked. An extension exists
+  // to add fields to an object ANOTHER package owns, so every reference it
+  // carries is cross-package by construction — the case this ladder has no
+  // rung for. The declared escape for that case (a marker on the field, or
+  // resolution against composition) is its own authorable surface and its own
+  // card; judging the extension here would refuse the legitimate case by the
+  // rule that exists to catch the typo.
+  for (let oi = 0; oi < objects.length; oi++) {
+    const obj = objects[oi];
+    if (!obj || typeof obj !== 'object') continue;
+    const objName = strName(obj.name) ?? `#${oi}`;
+    const fields = recordsOf(obj.fields);
+    for (let fi = 0; fi < fields.length; fi++) {
+      const field = fields[fi];
+      const type = strName(field.type);
+      if (!type || !RELATIONSHIP_TARGET_FIELD_TYPES.has(type)) continue;
+      const fieldName = strName(field.name) ?? `#${fi}`;
+      check(
+        strName(field.reference),
+        `object "${objName}" · field "${fieldName}"`,
+        `objects[${oi}].fields.${fieldName}.reference`,
+        `${type} target`,
+        'The record picker has no object to query, `$expand` has nothing to resolve, and the ' +
+          'form renders a relationship control that can never resolve a value.',
+      );
+    }
+  }
 
   // ── Actions (global + object-embedded) → param object targets ──
   const checkActionParams = (action: AnyRec, actionPath: string, actionLabel: string) => {
