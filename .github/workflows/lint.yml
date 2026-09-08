@@ -4386,6 +4386,29 @@ jobs:
       - name: Check every driver runs the shared conformance cases
         run: pnpm check:driver-conformance
 
+      # Object-definition parameter keys (#16711). `SqlDriver` takes object
+      # definitions as inline object-literal parameter types and reads keys off
+      # them that the literal does not list, through `(obj as any).<key>`. Three
+      # single-key cards fixed one key each (#4311 `tenancy`, #16570 `indexes`,
+      # #16711 `lifecycle`) before anyone called it a class. The escape is
+      # silent: TypeScript's excess-property check fires on a FRESH object
+      # literal and not on one bound to a variable first, so an author who hits
+      # the refusal drops the key — an unsynced UNIQUE, an unarmed ADR-0057
+      # rotation policy — and nothing says so.
+      #
+      # ⛔ NOT scoped to sql-driver.ts, which is the whole ruling: `TursoDriver`
+      # OVERRIDES `initObjects` in a separately published package, so #4311's
+      # fix was invisible from outside `@objectstack/driver-sql` for five weeks
+      # and #16570's would have escaped identically. The gate compares every
+      # subclass override's declared keys against the base's, across packages,
+      # and refuses the two edits that would make that vacuous (an index
+      # signature, an opaque replacement type). AST-based, because the signature
+      # this class hides behind wraps across lines and a single-line grep for it
+      # returns a silence that reads exactly like a negative.
+      # Reads source files only; no build, ~2s.
+      - name: Check object-definition parameters declare the keys they are read for
+        run: pnpm check:object-def-param-keys
+
       # Stall-guard self-test (#4250). scripts/run-with-stall-guard.mjs is what
       # turns a frozen Test Core into a labeled red; six jobs across five
       # workflows now route their test steps through it. But it only executes its
