@@ -27,10 +27,13 @@
  *      a slot exclusively can still self-register via
  *      {@link HttpDispatcher.registerDomainHandler}.
  *
- * Matching semantics are deliberately faithful to the legacy if-chain,
- * INCLUDING its rough edges (`match: 'prefix'` on `/i18n` also matches
- * `/i18nxx`, exactly as `startsWith` did) — fixing those edges is explicitly
- * not this seam's job; behavior preservation is.
+ * Matching semantics were deliberately faithful to the legacy if-chain,
+ * INCLUDING its rough edges, for as long as the migration needed behaviour
+ * preservation to be the only promise this seam made. That period is over and
+ * the edges are fixed (#16263): a domain claim now stops at a SEGMENT
+ * BOUNDARY by default, so `/i18n` no longer claims `/i18nxx`. The legacy
+ * `startsWith` shape is still reachable, but only where a route ASKS for it in
+ * writing (`match: 'prefix'`) — see {@link DomainRoute.match}.
  */
 
 import type { HttpProtocolContext, HttpDispatcherResult } from './http-dispatcher.js';
@@ -60,10 +63,43 @@ export interface DomainRoute {
     /** Path prefix the domain claims, e.g. `'/i18n'`. */
     prefix: string;
     /**
-     * `'prefix'` — legacy `startsWith(prefix)` semantics (default).
+     * How much of the path space this route claims.
+     *
+     * `'segment'` — **the default**: the path equals the prefix, or is
+     * followed by `'/'`. Claims `/i18n` and everything under `/i18n/`, and
+     * does NOT claim `/i18nxx`.
      * `'exact'` — the path must equal the prefix exactly.
-     * `'segment'` — exact, or followed by `'/'` (the legacy
-     * `=== p || startsWith(p + '/')` branch shape; does NOT claim `/i18nxx`).
+     * `'prefix'` — bare `startsWith(prefix)`, NO segment boundary: the legacy
+     * if-chain's shape, which also claims `/i18nxx`.
+     *
+     * ## Why `'segment'` is the default and `'prefix'` must be asked for
+     *
+     * The reasoning is #16026's, applied to the whole table rather than to one
+     * prefix. A bare `startsWith` claim reaches SIBLING NAMESPACES: `/authx`,
+     * `/authentication/foo`, `/datax`, `/metaxyz`, `/uifoo` are not paths of
+     * the domain that was claiming them by any reading, and each is a
+     * plausible namespace someone mounts later — a route registered there is
+     * SHADOWED by a domain that never wanted it. `'segment'` claims the prefix
+     * exactly and everything under `prefix + '/'`, which is the whole of what
+     * a domain owns, so narrowing to it removes only claims a domain does not
+     * own and keeps every sub-path fallthrough intact (#4088's
+     * `/auth/me/permissions` is the case that pins that half).
+     *
+     * `'segment'` was already the codebase's own spelling for a
+     * boundary-correct claim — `/auth`, `/keys`, `/mcp`, `/mcp/skill`,
+     * `/security` and `/share-links` each declared it — so this makes the
+     * table's majority spelling its default rather than introducing a
+     * convention.
+     *
+     * ⚠️ `'prefix'` is NOT deprecated, and one shape genuinely needs it: a
+     * prefix ending in `'?'` (`'/keys?'`, `'/mcp?'`), which reproduces the
+     * legacy branch's query-string form for adapters that pass the query
+     * through in `path`. There is no `/` after that `'?'`, so a segment match
+     * cannot express it. Those routes declare `match: 'prefix'` in writing.
+     *
+     * ⛔ Do not reach for `'prefix'` to widen a domain's claim over its
+     * lexical neighbours. The default changed because that claim was never
+     * anything but a migration artefact.
      */
     match?: 'prefix' | 'exact' | 'segment';
     /** Restrict to these UPPERCASE HTTP methods. Omit = all methods. */
@@ -362,10 +398,12 @@ export class DomainHandlerRegistry {
         switch (route.match) {
             case 'exact':
                 return path === route.prefix;
-            case 'segment':
-                return path === route.prefix || path.startsWith(route.prefix + '/');
-            default:
+            case 'prefix':
+                // Bare `startsWith`, no segment boundary — the legacy
+                // if-chain's shape, now reachable only by asking for it.
                 return path.startsWith(route.prefix);
+            default:
+                return path === route.prefix || path.startsWith(route.prefix + '/');
         }
     }
 

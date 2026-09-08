@@ -67,7 +67,7 @@ interface FakeLedger {
 const LEDGER_OBJECT = 'sys_migration';
 
 function fakeEngine(ledger?: FakeLedger) {
-    const inserts: Array<{ object: string; row: any }> = [];
+    const inserts: Array<{ object: string; row: any; options?: Record<string, unknown> }> = [];
     const updates: Array<{ object: string; data: any }> = [];
     const finds: Array<{ object: string; query: any }> = [];
     const stored = new Map<string, Record<string, unknown>>(
@@ -89,8 +89,8 @@ function fakeEngine(ledger?: FakeLedger) {
                       },
                   }
                 : {}),
-            async insert(object: string, row: any) {
-                inserts.push({ object, row });
+            async insert(object: string, row: any, options?: Record<string, unknown>) {
+                inserts.push({ object, row, options });
                 if (object === LEDGER_OBJECT) {
                     if (ledger?.failWrites) throw new Error(ledger.failWrites);
                     stored.set(String(row.id), { ...row });
@@ -299,6 +299,69 @@ async function underProcessZone<T>(tz: string, body: () => Promise<T> | T): Prom
         else process.env.TZ = previous;
     }
 }
+
+// ---------------------------------------------------------------------------
+// [#16312] The historical-import channel is DECLARED on the two L5 writes
+// ---------------------------------------------------------------------------
+//
+// ⚠️ Read what this can and cannot say, because the card exists because the
+// difference was missed once already.
+//
+// This double runs NO hooks. It is faithful about DISPATCH — its write verbs
+// route through the producer's own predicates — and silent about the before
+// phase, so it cannot observe whether `sys_stamp_audit_insert` kept or
+// overwrote `created_at`. That is exactly the seam the defect lived in: every
+// assertion in this file about `created_at` passed on BOTH sides of #15964's
+// change, and the suite read `23 passed` while migrated rows were being
+// stamped with the migration instant.
+//
+// ⇒ what follows is a pin on the CALL SHAPE, which is inside what this double
+// can see, and nothing more. The EFFECT — that the real audit hook honours it
+// and the row lands with the notification's own instant — is measured on a real
+// engine, with a real driver, in
+// `packages/runtime/src/notification-migration-audit-preservation.integration.test.ts`.
+// ⛔ Do not read a green here as evidence the timeline is preserved; that is the
+// reading this card was filed to retire.
+// ---------------------------------------------------------------------------
+
+describe('#16312 the two L5 writes declare the historical-import channel', () => {
+    it('inbox and receipt inserts both carry `context.preserveAudit`', async () => {
+        const d = fakeDriver([
+            {
+                id: 'n1', recipient_id: 'u1', type: 'task.assigned', title: 'T',
+                body: 'B', url: '/r/1', actor_name: 'Ada', is_read: 1,
+                read_at: REPORTED_READ_INSTANT, created_at: REPORTED_INSTANT,
+                organization_id: 'org1',
+            },
+        ]);
+        const e = fakeEngine();
+        await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine });
+
+        const inbox = e.inserts.find((i) => i.object === 'sys_inbox_message')!;
+        const receipt = e.inserts.find((i) => i.object === 'sys_notification_receipt')!;
+        expect(inbox.options).toEqual({ context: { preserveAudit: true } });
+        expect(receipt.options).toEqual({ context: { preserveAudit: true } });
+    });
+
+    it('the event rewrite does NOT ask for it — that write really is happening now', async () => {
+        const d = fakeDriver([
+            {
+                id: 'n1', recipient_id: 'u1', type: 'task.assigned', title: 'T',
+                body: null, url: null, actor_name: null, is_read: 0,
+                read_at: null, created_at: REPORTED_INSTANT, organization_id: null,
+            },
+        ]);
+        const e = fakeEngine();
+        await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine });
+
+        // `sys_stamp_audit_update` stamps `updated_at`, never `created_at`, so
+        // the source row keeps its own instant without asking for anything —
+        // and `updated_at = now` is the true fact about this write.
+        const rewrite = e.updates.find((u) => u.object === 'sys_notification');
+        expect(rewrite).toBeDefined();
+        expect(e.updates.filter((u) => u.object === 'sys_notification')).toHaveLength(1);
+    });
+});
 
 describe('#13998 the timestamp spelling written into the new rows', () => {
     it('control — `String(Date)` is NOT the canonical spelling (the input discriminates)', async () => {

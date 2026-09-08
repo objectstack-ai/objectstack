@@ -21,13 +21,18 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * The legacy branches matched `/mcp/skill` (exact or `?`-suffixed) BEFORE
  * the `/mcp` transport claimed everything else (exact, `/`, or `?` forms).
  * Entry order reproduces that precedence.
+ *
+ * [#16263] The two `?`-suffixed entries now say `match: 'prefix'` out loud —
+ * they always rode the bare-`startsWith` default, which is `'segment'` now,
+ * and a prefix ending in `'?'` has no `/` after it for a segment match to
+ * find. Declaring it keeps both routes matching exactly what they always did.
  */
 export function createMcpDomains(deps: DomainHandlerDeps): DomainRoute[] {
     return [
         { prefix: '/mcp/skill', match: 'segment', handler: (req, context) => handleMcpSkillRequest(deps, req.method, context) },
-        { prefix: '/mcp/skill?', handler: (req, context) => handleMcpSkillRequest(deps, req.method, context) },
+        { prefix: '/mcp/skill?', match: 'prefix', handler: (req, context) => handleMcpSkillRequest(deps, req.method, context) },
         { prefix: '/mcp', match: 'segment', handler: (req, context) => handleMcpRequest(deps, req.body, context) },
-        { prefix: '/mcp?', handler: (req, context) => handleMcpRequest(deps, req.body, context) },
+        { prefix: '/mcp?', match: 'prefix', handler: (req, context) => handleMcpRequest(deps, req.body, context) },
     ];
 }
 
