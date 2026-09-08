@@ -109,12 +109,48 @@
  * their own, so a branch pushed to the default branch by any other route closes
  * the cards its intermediate commits name.
  *
- * The remedy is the contract this repository already carries, cited rather than
- * restated — the card relation is declared ONCE, in the PR body, and the merger
- * takes the squash message from that body. ⛔ Nothing in this gate's output asks
- * anyone to rewrite history: amend, rebase and force-push are forbidden here,
- * and a red on an already-pushed branch is repaired the way this repo's merges
- * already repair it, in the body and at the merge.
+ * The contract is the one this repository already carries, cited rather than
+ * restated — the card relation is declared ONCE, in the PR body, and no commit
+ * carries a card trailer.
+ *
+ * ## RULE 2 — what the output may ask for, and when it may ask for nothing
+ *
+ * ⛔ Nothing in this gate's output asks anyone to rewrite history: amend, rebase
+ * and force-push are forbidden here. That prohibition is absolute, which makes
+ * the TIMING of a RULE 2 finding the whole story:
+ *
+ *   - BEFORE the branch is pushed the remedy is ordinary work — reword the
+ *     commit messages, state the relation only in the body, push once. Nothing
+ *     published is rewritten and the check goes green.
+ *   - ONCE THE BRANCH IS PUSHED no author action clears the red. This gate reads
+ *     the PR's COMMIT LIST, so a new commit on top JOINS that list and leaves
+ *     the offending message in it; the only thing that would remove it is the
+ *     rewrite forbidden above. The red is PERMANENT for that branch, and saying
+ *     so plainly is the point of this section. An earlier revision instead told
+ *     the author to push reworded commits — which on a pushed branch IS the
+ *     forbidden rewrite — and a seat that read it instructed one; the dev's
+ *     refusal is what stopped it, not the wording.
+ *
+ * ⚠️ That earlier revision also had the merger "take the squash message from
+ * that body". Measured, that is false: on 0a61db1f5, the squash of PR #16646,
+ * the landed message is the branch commit's verbatim and carries its
+ * `Refs #16624`, while the body's `Fixes #16624` appears nowhere in it. The
+ * squash message is assembled from the COMMITS. This does not weaken RULE 2 —
+ * it is RULE 2's premise: a trailer left on a pushed commit really does reach
+ * the default branch's permanent history.
+ *
+ * What that costs depends on the spelling, and the output says so rather than
+ * flattening it: Part-of and Refs land as a reference and move no card, while a
+ * CLOSING keyword lands on the surface GitHub's parser reads. The asymmetry is
+ * why the rule refuses all three at PR time rather than only the contradictory
+ * ones.
+ *
+ * ⛔ Whether a pull request LANDS carrying this red is not this gate's call and
+ * its output must not make it. The check run is advisory at the branch-
+ * protection layer — absent from the required-context registry, and its workflow
+ * subscribes to no `merge_group` event because a queue build carries no body for
+ * it to judge — so that decision belongs to whoever lands the PR, under the
+ * rules that bind them. This gate reports.
  *
  * ## Where the commit messages come from, and why the endpoint and not a walk
  *
@@ -314,7 +350,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Context reading: presence, not truthiness.': 4,
   'The wiring itself. A gate whose workflow step is deleted or whose': 6,
   'The predicate source this gate reuses must still be there to reuse.': 1,
-  'RULE 2 — every card-relation spelling in a commit message is a finding,': 13,
+  'RULE 2 — every card-relation spelling in a commit message is a finding,': 19,
   'The regression fixture: the squash that assembled a contradiction no': 4,
   'RULE 2 delegates to the sweep extractors at the commit-message reading.': 3,
   'The commit list input. An absent, broken or empty list can never read': 8,
@@ -505,10 +541,11 @@ export function commitTrailerFindings(commits) {
         `message that lands on the default branch — a text no one writes and no one reviews, which ` +
         `carries every trailer its inputs carried and can contradict itself where its parts did not. ` +
         `The trailer is also live on its own. ${RELATION_CONTRACT} ` +
-        `Remedy: move this relation into the PR body, where it is stated once, and take the squash ` +
-        `message from that body at merge. ` +
+        `Remedy, while this branch is still UNPUSHED: reword this commit message so the relation is ` +
+        `stated only in the PR body. ` +
         `⛔ Do NOT amend, rebase or force-push to remove it — rewriting pushed history is forbidden ` +
-        `here, and it is not what fixes this.`,
+        `here; on an already-pushed branch nothing removes it, and the summary below is what to do ` +
+        `about that.`,
     );
   }
   return findings;
@@ -658,8 +695,32 @@ export function judge(ctx) {
       );
       for (const finding of commitFindings) lines.push(`  ${finding}`, '');
       lines.push(
-        '  Pushing the reworded commits re-runs this check. ⛔ The repair is NOT a history rewrite:',
-        '  state the relation once in the PR body and take the squash message from that body at merge.',
+        '  ⛔ The repair is NOT a history rewrite. Amend, rebase and force-push are forbidden in this',
+        '  repository and this gate never asks for one. What it does ask for turns on one thing only:',
+        '',
+        '  BRANCH NOT PUSHED YET — reword the commit messages now and push once. Nothing published is',
+        '  rewritten, the relation goes in the PR body where the contract puts it, and this check is green.',
+        '',
+        '  BRANCH ALREADY PUSHED — no author action clears this red, and that is expected rather than a',
+        "  problem to solve. This gate reads the PR's COMMIT LIST, so a new commit on top JOINS that list",
+        '  and leaves the message above in it; the only thing that would remove it is the rewrite forbidden',
+        '  above. Three measured facts, so this red can be READ rather than acted on:',
+        '',
+        '    1. This check run is advisory at the branch-protection layer: it is absent from the',
+        '       required-context registry, and its workflow subscribes to no `merge_group` event because a',
+        '       queue build carries no PR body for it to judge.',
+        '    2. The squash message is assembled from the COMMIT messages, not from the PR body. Measured on',
+        "       0a61db1f5, the squash of PR #16646: the landed message is the branch commit's, verbatim,",
+        "       carrying its `Refs #16624`; the body's `Fixes #16624` is nowhere in it.",
+        '    3. The card relation is safe either way. #16624 closed on that same merge although no commit',
+        "       message named a closing keyword for it — the PR BODY's keyword is what acts. Declaring the",
+        '       relation once in the body is the whole contract, and it already works.',
+        '',
+        '  So the residue of landing this red is the trailer above sitting in the permanent history, and',
+        '  what that costs depends on its spelling: `Part of` and `Refs` land as a reference and move no',
+        "  card, while a CLOSING keyword lands on the surface GitHub's parser reads. ⛔ Weigh that under the",
+        '  landing rules that bind you — this gate found a real contradiction between your commits and your',
+        '  body, and it does not decide whether the pull request merges.',
       );
     }
     return { exit: EXIT_CONTRADICTION, lines: [...lines, ...(unread.length ? ['', ...unread] : [])] };
@@ -879,6 +940,43 @@ function selfTest() {
   t(
     'the finding CITES the contract rather than restating it in its own words',
     named.includes(RELATION_CONTRACT),
+    true,
+  );
+  // The guidance text itself, pinned. This gate once told the author to push
+  // reworded commits while also forbidding a rewrite — unsatisfiable on a
+  // pushed branch, and a seat that read it instructed an amend and force-push.
+  // These six hold the repaired shape: the forbidden action stays forbidden,
+  // the reachable remedy is scoped to an UNPUSHED branch, the pushed case is
+  // named as permanent, the measured squash fact replaces the false one, and
+  // the gate still refuses to decide the merge.
+  t(
+    'the guidance still forbids amend, rebase and force-push',
+    /⛔ Do NOT amend, rebase or force-push/.test(named),
+    true,
+  );
+  t(
+    'the reachable remedy is scoped to a branch that is NOT pushed yet',
+    named.includes('UNPUSHED') && named.includes('BRANCH NOT PUSHED YET'),
+    true,
+  );
+  t(
+    'the already-pushed case is named, and named as clearing for nobody',
+    named.includes('BRANCH ALREADY PUSHED') && named.includes('no author action clears this red'),
+    true,
+  );
+  t(
+    'the guidance no longer claims the squash message comes from the PR body',
+    /squash message from that body/.test(named),
+    false,
+  );
+  t(
+    'the guidance states the MEASURED squash fact instead',
+    named.includes('assembled from the COMMIT messages, not from the PR body') && named.includes('0a61db1f5'),
+    true,
+  );
+  t(
+    'the guidance leaves the landing decision to the lander rather than ordering a merge',
+    named.includes('does not decide whether the pull request merges'),
     true,
   );
   t(
