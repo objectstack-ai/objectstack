@@ -148,7 +148,7 @@
 //     on the largest registrar, and hand-annotating the exceptions is the same
 //     rot this instrument already has.
 //
-//     ⚠️ RE-MEASURED 2026-09-08 against `0bb2318685`, because the 19 is a count
+//     ⚠️ RE-MEASURED 2026-09-08 against `5abca1792e`, because the 19 is a count
 //     inside the very registrar the per-item helper re-spelled, and because
 //     this paragraph attributed all 80 sites to the direct spelling alone
 //     while `:82` above already knew there were two — the authority on this
