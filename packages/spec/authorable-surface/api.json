@@ -310,6 +310,7 @@
     "api/CheckPermissionRequest:recordId",
     "api/CheckPermissionResponse:allowed",
     "api/CheckPermissionResponse:reason",
+    "api/CloneDataResponse:droppedFields",
     "api/CloneDataResponse:id",
     "api/CloneDataResponse:object",
     "api/CloneDataResponse:record",
