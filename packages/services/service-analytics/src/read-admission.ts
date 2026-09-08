@@ -48,12 +48,21 @@
  *
  * ## Fail direction
  *
- * The provider is access-NARROWING, so it fails CLOSED: a provider that throws
- * denies the query rather than admitting it. An ABSENT provider is a different
- * state — it means no security service answered at all, which is the same
- * deployment in which `/data` has no object-level gate either, so the two doors
- * still agree. `AnalyticsServicePlugin` logs that state loudly at init, the
- * same posture it already takes for a missing `getReadScope`.
+ * The provider is access-NARROWING, so it fails CLOSED — but "closed" is a
+ * claim about a WIRED provider, and it is worth saying which states are which:
+ *
+ *   - a wired provider that THROWS, or answers `false`, denies (this module);
+ *   - a `security` service that is wired but cannot be used — resolving it
+ *     throws, or it exposes neither `canReadObject` nor `explain` — denies at
+ *     the bridge, because `/data`'s middleware does not fall open in those
+ *     states either (`plugin.ts`);
+ *   - an ABSENT provider is a different state altogether. No security service
+ *     answered at all, which is the same deployment in which `/data` has no
+ *     object-level gate either, so the two doors still AGREE — and agreement is
+ *     the property being defended, not refusal for its own sake. Such a
+ *     deployment keeps its pre-existing analytics behaviour, and
+ *     `AnalyticsServicePlugin` logs that state loudly at init, the same posture
+ *     it already takes for a missing `getReadScope`.
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
@@ -104,10 +113,22 @@ export type ObjectReadAdmissionProvider = (
   context?: ExecutionContext,
 ) => boolean | Promise<boolean>;
 
-/** Log sink — the subset of `Logger` this module uses. */
+/**
+ * Log sink — the subset of `Logger` this module uses.
+ *
+ * `error` is OPTIONAL because hosts legitimately inject reduced sinks, and
+ * `warn` is REQUIRED because of that: a sink declaring an optional `error` and
+ * no guaranteed alternative is a contract that PERMITS SILENCE (#9754,
+ * `check:optional-error-sink`). Every value of this type therefore has a
+ * destination for a refusal report, and {@link assertObjectsReadable} reaches
+ * for it when `error` is absent rather than dropping the report. A denial this
+ * module makes is never allowed to be invisible: it is the one record that a
+ * request was refused, and a security refusal nobody can see is
+ * indistinguishable from a gate that never ran.
+ */
 interface AdmissionLogger {
   error?(message: string, error?: Error): void;
-  warn?(message: string): void;
+  warn(message: string): void;
 }
 
 /**
@@ -137,15 +158,19 @@ export async function assertObjectsReadable(
     } catch (e) {
       // Fail CLOSED. A resolution failure must deny — admitting on an error is
       // the shape this whole module exists to remove.
-      logger?.error?.(
+      const cause = e instanceof Error ? e : new Error(String(e));
+      const report =
         `[Analytics] read-admission resolution failed for object "${objectName}" — ` +
-          `denying query (fail-closed)`,
-        e instanceof Error ? e : new Error(String(e)),
-      );
+        `denying query (fail-closed)`;
+      // `error` is the right level for a gate that could not reach a verdict,
+      // but it is optional on this sink; `warn` is not, so the report lands
+      // either way. This is the guarantee the required `warn` above buys.
+      if (logger?.error) logger.error(report, cause);
+      else logger?.warn(`${report}: ${cause.message}`);
       throw readAdmissionDeniedError(objectName);
     }
     if (!admitted) {
-      logger?.warn?.(
+      logger?.warn(
         `[Analytics] object-level read admission denied for "${objectName}" ` +
           `(user ${String((context as { userId?: unknown } | undefined)?.userId ?? 'unknown')}) — ` +
           `the same verdict GET /data/${objectName} reaches`,

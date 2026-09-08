@@ -524,10 +524,31 @@ export class AnalyticsServicePlugin implements Plugin {
     // heavier call, which is why it is the fallback and not the primary; it
     // never fires against an in-repo stack.
     //
-    // A deployment with NO security service at all gets no gate — and no
-    // object-level gate on `/data` either, since that gate IS this plugin's
-    // absent middleware — so the two doors still agree. That state is reported
-    // at init below.
+    // ## The three resolutions, and why only ONE of them admits
+    //
+    // "No security service" and "the security service could not be used" are
+    // different states and they get opposite answers. Collapsing them is the
+    // shape of the defect this whole change removes, one level up.
+    //
+    //   ABSENT   — `getService('security')` returns nothing. There is no
+    //              object-level gate on this deployment at all, including on
+    //              `/data`, because that gate IS this plugin's absent
+    //              middleware. The two doors still agree, which is the
+    //              equivalence property the card asks for, so this ADMITS and
+    //              is reported loudly at init below.
+    //   UNUSABLE — a security service exists but cannot answer: resolving it
+    //              THREW, or the object it returned carries neither
+    //              `canReadObject` nor `explain`. This is a wired-but-broken
+    //              provider, and `/data`'s middleware does NOT fall open in
+    //              that state — so admitting here would reopen the exact
+    //              divergence between the two doors that this PR closes, and
+    //              it would do it silently. It DENIES, and says why.
+    //   USABLE   — ask it (below).
+    //
+    // The distinction is worth the type: both unusable corners used to be
+    // spelled `return undefined` beside the absent one, and three lines later
+    // all three read `if (!svc) return true`. A deployment whose security
+    // service throws on resolution is not a deployment without security.
     interface SecurityReadAdmission {
       canReadObject?(object: string, context?: ExecutionContext): boolean | Promise<boolean>;
       explain?(
@@ -535,25 +556,58 @@ export class AnalyticsServicePlugin implements Plugin {
         callerContext?: ExecutionContext,
       ): Promise<{ allowed?: boolean }>;
     }
+    type SecurityAdmissionResolution =
+      | { kind: 'usable'; svc: SecurityReadAdmission }
+      | { kind: 'absent' }
+      | { kind: 'unusable'; why: string };
     let admitObjectRead = this.options.admitObjectRead;
     let autoBridgedReadAdmission = false;
     if (!admitObjectRead) {
-      const trySecurityAdmission = (): SecurityReadAdmission | undefined => {
+      const trySecurityAdmission = (): SecurityAdmissionResolution => {
+        let svc: SecurityReadAdmission | undefined;
         try {
-          const svc = ctx.getService<SecurityReadAdmission>('security');
-          if (!svc) return undefined;
-          return typeof svc.canReadObject === 'function' || typeof svc.explain === 'function'
-            ? svc
-            : undefined;
-        } catch {
-          return undefined;
+          svc = ctx.getService<SecurityReadAdmission>('security');
+        } catch (e) {
+          // ⛔ Not `absent`. A throwing resolver is a service that exists and
+          // failed, and a failed security lookup is a refusal everywhere else
+          // in this stack.
+          return {
+            kind: 'unusable',
+            why:
+              `resolving the "security" service threw ` +
+              `(${String((e as Error)?.message ?? e)})`,
+          };
         }
+        if (!svc) return { kind: 'absent' };
+        if (typeof svc.canReadObject !== 'function' && typeof svc.explain !== 'function') {
+          // A registered service that answers neither question cannot admit
+          // anything. `explain` is NON-optional on `ISecurityService`, so a
+          // conforming provider never lands here — reaching it means the
+          // registered object is not the contract it claims to be.
+          return {
+            kind: 'unusable',
+            why:
+              'the registered "security" service exposes neither canReadObject() ' +
+              'nor explain(), so it cannot answer an object-level read admission',
+          };
+        }
+        return { kind: 'usable', svc };
       };
       admitObjectRead = async (object, context) => {
-        const svc = trySecurityAdmission();
+        const resolved = trySecurityAdmission();
         // No security service resolved at call time → no object-level gate on
         // this deployment, which is the state reported at init.
-        if (!svc) return true;
+        if (resolved.kind === 'absent') return true;
+        if (resolved.kind === 'unusable') {
+          ctx.logger.error(
+            `[Analytics] object-level read admission could not be resolved for "${object}" — ` +
+            `denying the query (fail-closed): ${resolved.why}. ` +
+            'A security service is wired on this deployment, so analytics must not fall open: ' +
+            'GET /data/' + object + ' does not.',
+          );
+          return false;
+        }
+        const svc = resolved.svc;
         if (typeof svc.canReadObject === 'function') {
           return await svc.canReadObject(object, context);
         }
