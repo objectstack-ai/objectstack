@@ -27,7 +27,7 @@ import {
 // `config.collection` as a bare VARIABLE NAME, binds `$loopItems`/`$loopIndex`
 // and falls through without iterating — so no `iteratorVariable` is ever set
 // and a `{item.…}` token downstream references nothing.
-import { LoopConfigSchema } from './control-flow.zod';
+import { LoopConfigSchema, collectFlowGraphs, validateControlFlow } from './control-flow.zod';
 import { formatZodError } from '../shared/error-map.zod';
 
 describe('FlowNodeAction', () => {
@@ -2121,14 +2121,14 @@ describe('FlowSchema — top-level node ids are unique (#15713)', () => {
     expect(issues![0].message).toContain('Duplicate node id `n`');
   });
 
-  // Scope boundary, pinned so the rule cannot silently widen: it judges the
-  // flow's OWN top-level `nodes[]`. A region body (`loop.config.body.nodes`) is
-  // `analyzeRegion`'s to judge, at `registerFlow()`, and whether a region node
-  // may reuse a top-level id — one id space or two — is an open decision
-  // (#16134) that this rule neither takes nor pre-empts. This pin records
-  // today's accept set at that boundary; the decision, when taken, moves it
-  // deliberately.
-  it('judges the top-level nodes[] only — a region node reusing a top-level id is outside this rule', () => {
+  // Scope boundary, MOVED deliberately (#16134, maintainer ruling 2026-09-07:
+  // one node-id space). #15713 pinned that this rule judged the flow's OWN
+  // top-level `nodes[]` and that a region node reusing a top-level id parsed —
+  // recording the accept set at the boundary so the decision, when taken,
+  // would move it rather than drift. Taken: the same shape is now refused, by
+  // the same rule, in the same shape. The full region pin set is the #16134
+  // describe below; this one is the boundary itself.
+  it('a region node reusing a top-level id is refused — the #15713 boundary, moved by #16134', () => {
     const result = FlowSchema.safeParse(flowWith([
       { id: 'start', type: 'start', label: 'Start' },
       {
@@ -2142,8 +2142,201 @@ describe('FlowSchema — top-level node ids are unique (#15713)', () => {
       },
       { id: 'end', type: 'end', label: 'End' },
     ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'id']],
+    ]);
+    expect(result.error.issues[0].message).toContain('Duplicate node id `start`');
+  });
+});
+
+describe('FlowSchema — one node-id space across the top-level nodes[] and every region (#16134)', () => {
+  // The ruling (director seat, decision batch #61, 2026-09-07, maintainer
+  // 「同意」): top-level `nodes[]` and every region body (`loop` / `try_catch` /
+  // `parallel`, at every depth) share ONE id space; a collision is refused at
+  // parse, by the rule that already refused top-level duplicates, in its one
+  // message shape, naming both locations. "Declared by" is the earlier
+  // position in the `collectFlowGraphs` walk — the top-level graph first, then
+  // each region in document order, depth first — so the top-level array is
+  // always the first declaration and a region node is the one that moves.
+  const edges: Flow['edges'] = [
+    { id: 'e1', source: 'start', target: 'n' },
+    { id: 'e2', source: 'n', target: 'end' },
+  ];
+  const flowWith = (nodes: Flow['nodes']): Flow => ({
+    name: 'one_id_space',
+    label: 'One id space',
+    type: 'autolaunched',
+    nodes,
+    edges,
+  });
+  const step = (id: string, label = id): FlowNode => ({ id, type: 'assignment', label });
+  const loopOver = (bodyNodes: FlowNode[], bodyEdges: FlowEdge[] = []): FlowNode => ({
+    id: 'n', type: 'loop', label: 'Loop',
+    config: { collection: '{items}', body: { nodes: bodyNodes, edges: bodyEdges } },
+  });
+  const bodyReusesStart = flowWith([
+    { id: 'start', type: 'start', label: 'Start' },
+    loopOver([step('start', 'Body step (reuses the top-level start)')]),
+    { id: 'end', type: 'end', label: 'End' },
+  ]);
+
+  it('refuses a loop-body node that reuses a top-level id — ONE issue, anchored at the region node, naming the region path and the top-level index', () => {
+    const result = FlowSchema.safeParse(bodyReusesStart);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toHaveLength(1);
+    const [issue] = result.error.issues;
+    expect(issue.code).toBe('custom');
+    expect(issue.path).toEqual(['nodes', 1, 'config', 'body', 'nodes', 0, 'id']);
+    expect(issue.message).toMatch(/^Duplicate node id `start` — `loop 'n' body → nodes\[0\]` reuses the id already declared by `nodes\[0\]`; every node id in a flow must be unique\. /);
+  });
+
+  it('renders through formatZodError as a line that points INTO the region, in the same shape as a top-level duplicate', () => {
+    const result = FlowSchema.safeParse(bodyReusesStart);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const rendered = formatZodError(result.error);
+    expect(rendered).toContain('Validation failed (1 issue):');
+    expect(rendered).toContain(
+      "✗ nodes.1.config.body.nodes.0.id: Duplicate node id `start` — `loop 'n' body → nodes[0]` reuses the id already declared by `nodes[0]`",
+    );
+  });
+
+  it('defineFlow refuses it with the same anchored issue', () => {
+    let caught: unknown;
+    try {
+      defineFlow(bodyReusesStart);
+    } catch (error) {
+      caught = error;
+    }
+    const issues = (caught as { issues?: Array<{ code: string; path: PropertyKey[] }> })?.issues;
+    expect(issues).toBeDefined();
+    expect(issues!.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'id']]]);
+  });
+
+  it('refuses a node in one parallel branch that reuses an id declared in a sibling branch — both locations are region paths', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'n', type: 'parallel', label: 'Fan out',
+        config: { branches: [{ nodes: [step('work')] }, { nodes: [step('work')] }] },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'branches', 1, 'nodes', 0, 'id']],
+    ]);
+    expect(result.error.issues[0].message).toContain(
+      "`parallel 'n' branch 1 → nodes[0]` reuses the id already declared by `parallel 'n' branch 0 → nodes[0]`",
+    );
+  });
+
+  it('walks every depth — a try_catch catch-region node nested inside a loop body that reuses a top-level id is refused with the chained region path', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      loopOver([{
+        id: 'tc', type: 'try_catch', label: 'Guard',
+        config: { try: { nodes: [step('attempt')] }, catch: { nodes: [step('end', 'Reuses the top-level end')] } },
+      }]),
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'catch', 'nodes', 0, 'id']],
+    ]);
+    expect(result.error.issues[0].message).toContain(
+      "`loop 'n' body → try_catch 'tc' catch → nodes[0]` reuses the id already declared by `nodes[2]`",
+    );
+  });
+
+  it('the top-level array is always the first declaration — a region node colliding with a LATER top-level node is the one refused', () => {
+    // Document order would put the body node first; walk order puts the
+    // whole top-level graph first. Pinned so the anchor cannot flip by drift.
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      loopOver([step('end', 'Body step declared before the top-level end in document order')]),
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => i.path)).toEqual([['nodes', 1, 'config', 'body', 'nodes', 0, 'id']]);
+    expect(result.error.issues[0].message).toContain("`loop 'n' body → nodes[0]` reuses the id already declared by `nodes[2]`");
+  });
+
+  it('a duplicate WITHIN one region is refused by this rule alone — one issue, so analyzeRegion is never a second refusal for the author', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      loopOver([step('a'), step('a', 'A again')], [{ id: 'b1', source: 'a', target: 'a' }]),
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'body', 'nodes', 1, 'id']],
+    ]);
+    expect(result.error.issues[0].message).toContain("`loop 'n' body → nodes[1]` reuses the id already declared by `loop 'n' body → nodes[0]`");
+  });
+
+  it('a region its own schema refused still has its authored ids judged — the collision is refused at parse, the malformed region stays validateControlFlow\'s', () => {
+    // `label` is required on every node, so this body fails `FlowRegionSchema`
+    // and `parseFlowNodeRegions` leaves it raw. The id the author wrote is
+    // still an id in the one space.
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      loopOver([{ id: 'start', type: 'assignment' } as never]),
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((i) => [i.code, i.path])).toEqual([
+      ['custom', ['nodes', 1, 'config', 'body', 'nodes', 0, 'id']],
+    ]);
+  });
+
+  it('a non-object element in a raw region does not crash the parse-time walk — safeParse returns, and validateControlFlow names the malformed region instead of throwing a TypeError', () => {
+    const result = FlowSchema.safeParse(flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      loopOver([null as never]),
+      { id: 'end', type: 'end', label: 'End' },
+    ]));
+    // Today's contract, unchanged: a region that fails its own schema is left
+    // raw by the node transform, and refusing it is `validateControlFlow`'s.
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.nodes.map((n) => n.id)).toEqual(['start', 'n', 'end']);
+    let caught: unknown;
+    try {
+      validateControlFlow(result.data);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught).not.toBeInstanceOf(TypeError);
+    expect((caught as Error).message).toContain("loop 'n' body: invalid region");
+  });
+
+  it('accepts a flow whose ids are unique across the whole flow, keeping every region node in authored order', () => {
+    const unique = flowWith([
+      { id: 'start', type: 'start', label: 'Start' },
+      loopOver([step('sweep_first'), step('sweep_second')], [{ id: 'b1', source: 'sweep_first', target: 'sweep_second' }]),
+      {
+        id: 'p', type: 'parallel', label: 'Fan out',
+        config: { branches: [{ nodes: [step('left')] }, { nodes: [step('right')] }] },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ]);
+    const result = FlowSchema.safeParse(unique);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(collectFlowGraphs(result.data).map((g) => g.nodes.map((n) => n.id))).toEqual([
+      ['start', 'n', 'p', 'end'],
+      ['sweep_first', 'sweep_second'],
+      ['left'],
+      ['right'],
+    ]);
   });
 });

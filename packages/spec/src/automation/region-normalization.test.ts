@@ -228,6 +228,25 @@ describe('#4347 — collectFlowGraphs', () => {
       .toEqual(['', "loop 'loop' body", "loop 'loop' body → try_catch 'tc' catch"]);
   });
 
+  it('carries each graph\'s key path beside its scope, so a finding can be anchored where the author wrote it (#16134)', () => {
+    const flow = flowWith(loopWith({
+      nodes: [{
+        id: 'tc', type: TRY_CATCH_NODE_TYPE, label: 'Guard',
+        config: { catch: gatedRegion() },
+      }],
+      edges: [],
+    }));
+    expect(collectFlowGraphs(flow).map(g => g.path)).toEqual([
+      [],
+      ['nodes', 1, 'config', 'body'],
+      ['nodes', 1, 'config', 'body', 'nodes', 0, 'config', 'catch'],
+    ]);
+    expect(collectFlowGraphs(flowWith({
+      id: 'par', type: PARALLEL_NODE_TYPE, label: 'Fan',
+      config: { branches: [gatedRegion(), gatedRegion()] },
+    })).map(g => g.path)).toEqual([[], ['nodes', 1, 'config', 'branches', 0], ['nodes', 1, 'config', 'branches', 1]]);
+  });
+
   it('terminates on a self-referential region instead of recursing forever', () => {
     // Hand-built flows are objects, not parsed JSON, so a cycle is reachable.
     const selfRegion: { nodes: unknown[]; edges: unknown[] } = { nodes: [], edges: [] };
