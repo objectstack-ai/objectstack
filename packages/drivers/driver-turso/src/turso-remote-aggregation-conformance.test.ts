@@ -101,8 +101,12 @@ const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) => 
   // `groupByAlias ?? groupBy`. Reading `c.groupBy` unconditionally is the bug
   // this axis exists to catch: it is green on a face that ignores the alias.
   const groupKey = c.groupByAlias ?? c.groupBy;
+  // [#15546] A NULL answer is kept as `null`, never coerced: `Number(null)` is
+  // `0`, the ruled answer for the all-null `sum` cell, so an unconditional
+  // `Number(r.n)` reads a face that hands SQL's NULL through as if it had
+  // folded — the harness holding the observable instead of the face.
   return rows
-    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: Number(r.n) }))
+    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n === null ? null : Number(r.n) }))
     .sort((x, y) => String(x.group).localeCompare(String(y.group)));
 };
 

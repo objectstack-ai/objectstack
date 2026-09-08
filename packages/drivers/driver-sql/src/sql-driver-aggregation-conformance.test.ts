@@ -216,8 +216,14 @@ const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) => 
   // `groupByAlias ?? groupBy`. Reading `c.groupBy` unconditionally is the bug
   // this axis exists to catch: it is green on a face that ignores the alias.
   const groupKey = c.groupByAlias ?? c.groupBy;
+  // [#15546] A NULL answer is kept as `null`, never coerced: `Number(null)` is
+  // `0`, which is the ruled answer for the all-null `sum` cell — so the
+  // unconditional `Number(r.n)` this read as before made that cell green with
+  // the fold ABLATED (measured: 85/85 green against a driver answering
+  // `null`). The harness, not the driver, was holding the observable. The
+  // string-typed answers node-pg hands back (`"6"` for `COUNT`) still coerce.
   return rows
-    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: Number(r.n) }))
+    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n === null ? null : Number(r.n) }))
     .sort((x, y) => String(x.group).localeCompare(String(y.group)));
 };
 

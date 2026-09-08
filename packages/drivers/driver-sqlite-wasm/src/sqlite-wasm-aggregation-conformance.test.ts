@@ -48,7 +48,10 @@ const actualFor = (c: AggregationCase, rows: Array<Record<string, unknown>>) => 
   // this axis exists to catch: it is green on a face that ignores the alias.
   const groupKey = c.groupByAlias ?? c.groupBy;
   return rows
-    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: Number(r.n) }))
+    // [#15546] A NULL answer stays `null` — `Number(null)` is `0`, the ruled
+    // answer for the all-null `sum` cell, so coercing would let a face that
+    // hands SQL's NULL through pass as if it had folded.
+    .map((r) => ({ group: groupKey ? String(r[groupKey]) : null, value: r.n === null ? null : Number(r.n) }))
     .sort((x, y) => String(x.group).localeCompare(String(y.group)));
 };
 
