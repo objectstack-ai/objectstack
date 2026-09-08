@@ -554,6 +554,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // same and replays a cached green over it.
       'packages/create-objectstack/bin/create-objectstack.js',
       'packages/create-objectstack/src/templates/blank/package.json',
+      // The CI workflow that same template ships, READ by
+      // test/scaffold-ci-script-parity.test.ts (#16350). That pin DERIVES the
+      // scripts a scaffolded project must declare from this workflow's `pnpm
+      // <script>` steps, so a step added or renamed there changes what the pin
+      // requires of `init.ts`'s three template maps — the divergence #16330
+      // created (`lint` added on the template side only) is exactly what it
+      // catches, and without the declaration `@objectstack/cli#test` would hash
+      // the same across a workflow-only diff and replay a cached green over it.
+      'packages/create-objectstack/src/templates/blank/.github/workflows/ci.yml',
       // The generator that ties those two to this package's own constants, and
       // the third entry of the mention shape on this package — settled the way
       // check-nul-bytes.mjs above is. It earns the declaration on the merits

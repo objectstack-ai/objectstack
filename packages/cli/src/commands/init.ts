@@ -547,6 +547,7 @@ export const TEMPLATES: Record<string, {
       start: 'objectstack compile && objectstack serve',
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
@@ -633,6 +634,7 @@ export default ${toCamelCase(namespace)}Item;
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       test: 'vitest run',
       typecheck: 'tsc --noEmit',
     },
@@ -706,6 +708,7 @@ export default ${toCamelCase(namespace)}Item;
     scripts: {
       build: 'objectstack compile',
       validate: 'objectstack validate',
+      lint: 'objectstack lint',
       typecheck: 'tsc --noEmit',
     },
     configContent: (name: string, namespace: string) => `import { defineStack } from '@objectstack/spec';
