@@ -33,6 +33,7 @@
       "@objectstack/core": ["../../core/src/index.ts"],
       "@objectstack/metadata-core": ["../../metadata-core/src/index.ts"],
       "@objectstack/plugin-auth": ["../plugin-auth/src/index.ts"],
+      "@objectstack/rest": ["../../rest/src/index.ts"],
       "@objectstack/spec": ["../../spec/src/index.ts"],
       "@objectstack/spec/*": ["../../spec/src/*/index.ts"],
       "@objectstack/types": ["../../types/src/index.ts"]

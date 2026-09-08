@@ -1493,6 +1493,9 @@ importers:
       '@objectstack/metadata-core':
         specifier: workspace:*
         version: link:../../metadata-core
+      '@objectstack/rest':
+        specifier: workspace:*
+        version: link:../../rest
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
