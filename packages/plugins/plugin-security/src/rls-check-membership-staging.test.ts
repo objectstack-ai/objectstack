@@ -346,6 +346,16 @@ function expectCheckDenial(outcome: WriteOutcome, operation: 'insert' | 'update'
 /** The compiled shape both twins resolve to once the key is staged. */
 const JOB_FILTER = { employer_org: { $in: [OWN_ORG] } };
 
+/**
+ * Store reads of objects the caller's policies GOVERN. The plugin's own grant
+ * resolution reads `sys_permission_set` / `sys_user_permission_set` /
+ * `sys_user` / `sys_position` under its system context; those never compute
+ * the caller's read filter and so can never stage the caller's context — they
+ * are excluded so the assertion measures the accident under test (a
+ * pre-image or master read under the CALLER's context) and nothing else.
+ */
+const governedReads = (stack: Stack): string[] => stack.engine._reads.filter((o) => !o.startsWith('sys_'));
+
 // ── the control: the read side, which always worked ────────────────────────
 
 describe('[#16607] control — the `using` twin resolves the resolver key on the read path', () => {
@@ -383,11 +393,11 @@ describe('[#16607] the repro — a BARE insert, on a context nothing has read wi
   it('is decided WITHOUT any read having staged the key: the write path consulted the resolver itself', async () => {
     const context = freshCtx();
     await stack.write('insert', 'qa_job', { data: { id: 'job_new', title: 'x', employer_org: OWN_ORG } }, context);
-    // No store read of any object happened before the verdict — an insert on
-    // an object with no master has no pre-image and no master to read. The
-    // accident that made the update / controlled_by_parent shapes pass is
-    // therefore absent here by measurement, not by assumption.
-    expect(stack.engine._reads, 'a bare insert reads nothing').toEqual([]);
+    // No governed object was read before the verdict — an insert on an object
+    // with no master has no pre-image and no master to read. The accident that
+    // made the update / controlled_by_parent shapes pass is therefore absent
+    // here by measurement, not by assumption.
+    expect(governedReads(stack), 'a bare insert reads no governed object').toEqual([]);
     expect(resolver.resolve, 'the write path staged the key itself').toHaveBeenCalledTimes(1);
     expect(resolver.resolve).toHaveBeenCalledWith(
       expect.objectContaining({ userId: ADMIN.userId, tenantId: 'org1', positions: ['employer_admin'] }),
@@ -480,7 +490,7 @@ describe('[#16607] the two shapes that passed by ACCIDENT pass by design', () =>
     const sets = await (stack.plugin as any).resolvePermissionSetsForContext(freshCtx());
     const checkCtx = freshCtx();
     const checkFilter = await (stack.plugin as any).computeWriteCheckFilter(sets, 'qa_job', 'insert', checkCtx);
-    expect(stack.engine._reads, 'no store read staged this context').toEqual([]);
+    expect(governedReads(stack), 'no governed-object read staged this context').toEqual([]);
     expect(checkFilter).not.toEqual(RLS_DENY_FILTER);
     expect(checkFilter).toEqual(JOB_FILTER);
     expect(checkCtx.__rlsMembershipStaged).toBe(true);
@@ -513,7 +523,7 @@ describe('[#16607] the two shapes that passed by ACCIDENT pass by design', () =>
     expect(stack.rows('qa_job').find((r) => r.id === JOB_OWN.id)).toMatchObject({ title: 'Renamed', employer_org: OWN_ORG });
     // The pre-image read staged the key AND the check reused it — memoized per
     // context, so adding the write-side staging did not double-resolve.
-    expect(stack.engine._reads).toContain('qa_job');
+    expect(governedReads(stack)).toContain('qa_job');
     expect(resolver.resolve).toHaveBeenCalledTimes(1);
   });
 
@@ -539,7 +549,7 @@ describe('[#16607] the two shapes that passed by ACCIDENT pass by design', () =>
     expect(out).toEqual({ ok: true, message: 'written' });
     expect(stack.rows('qa_employer_member').find((r) => r.id === 'mem_new')).toMatchObject({ employer: OWN_ORG });
     // The master read staged the key; the child's check reused it.
-    expect(stack.engine._reads).toContain('qa_employer');
+    expect(governedReads(stack)).toContain('qa_employer');
     expect(resolver.resolve).toHaveBeenCalledTimes(1);
   });
 
