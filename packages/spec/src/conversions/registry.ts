@@ -2051,10 +2051,6 @@ const toolInertAuthoringKeysRemoved: MetadataConversion = {
  * are.
  */
 
-    expectedNotices: 2,
-  },
-};
-
 
 /**
  * The #3896 close-out sweep, part 2 (protocol 17): the remaining inert
