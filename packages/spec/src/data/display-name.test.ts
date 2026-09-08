@@ -322,4 +322,47 @@ describe('objectTitleCompleteness', () => {
       .toEqual({ status: 'none' });
     expect(objectTitleCompleteness(undefined)).toEqual({ status: 'none' });
   });
+
+  // [#16663] PROVENANCE — the collapse the `status` declaration warns about,
+  // pinned WITH a control. `provisionPrimary(…, { synthesize: false })` is the
+  // designation a `/meta` read exit replays onto every served object body, so
+  // two authored bodies a reader would call "designated" and "not designated"
+  // reach this predicate as one body and grade identically. The control is the
+  // half that proves the pair really runs the designation: a pointer the
+  // derivation would NOT have picked survives it and stays distinguishable.
+  const bySortedKeys = (o: object): string =>
+    JSON.stringify(Object.fromEntries(Object.entries(o).sort(([a], [b]) => a.localeCompare(b))));
+
+  it('provenance — after the read-exit designation, an authored pointer and a derived one collapse', () => {
+    const fields = {
+      visit_title: { type: 'text' },
+      pet: { type: 'text' },
+      visited_at: { type: 'date' },
+    };
+    const authored = { nameField: 'visit_title', fields };
+    const unauthored = { fields };
+
+    // BEFORE the designation — a pre-write body still separates the two.
+    expect(objectTitleCompleteness(authored)).toEqual({ status: 'explicit', field: 'visit_title' });
+    expect(objectTitleCompleteness(unauthored)).toEqual({ status: 'derived', field: 'visit_title' });
+
+    // AFTER it — which is what a `/meta` read exit serves — it cannot.
+    const servedAuthored = provisionPrimary(authored, { synthesize: false });
+    const servedUnauthored = provisionPrimary(unauthored, { synthesize: false });
+    expect(objectTitleCompleteness(servedAuthored)).toEqual({ status: 'explicit', field: 'visit_title' });
+    expect(objectTitleCompleteness(servedUnauthored)).toEqual({ status: 'explicit', field: 'visit_title' });
+    expect(bySortedKeys(servedUnauthored)).toBe(bySortedKeys(servedAuthored));
+  });
+
+  it('provenance CONTROL — a pointer the derivation would not pick does NOT collapse', () => {
+    const fields = { note: { type: 'text' }, case_title: { type: 'text' } };
+    const authored = { nameField: 'note', fields };
+    const unauthored = { fields };
+
+    const servedAuthored = provisionPrimary(authored, { synthesize: false });
+    const servedUnauthored = provisionPrimary(unauthored, { synthesize: false });
+    expect(objectTitleCompleteness(servedAuthored)).toEqual({ status: 'explicit', field: 'note' });
+    expect(objectTitleCompleteness(servedUnauthored)).toEqual({ status: 'explicit', field: 'case_title' });
+    expect(bySortedKeys(servedUnauthored)).not.toBe(bySortedKeys(servedAuthored));
+  });
 });

@@ -2354,12 +2354,20 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
   object: z.string().describe('Object name'),
   records: z.array(z.record(z.string(), z.unknown())).describe('Created records'),
   count: z.number().describe('Number of records created'),
+  // The per-row read below is maintainer ruling C (#14147): the static-`readonly` strip
+  // moved into `engine.insert`, after `beforeInsert`, exempting keys a hook wrote
+  // (`rowHookWrittenKeys`). The id stays in this comment, never in the `.describe()` —
+  // that string is printed AT the customer, who has no tracker to resolve it.
   droppedFields: z.array(DroppedFieldsEventSchema).optional().describe(
     'Write-observability: caller-supplied `readonly` fields the in-engine create-side ' +
     'strip (`engine.insert`, `isSystem`-gated) removed before the rows were written. AGGREGATED across the batch ' +
-    '(one event per object/reason with the union of dropped field names) rather than per-row, ' +
-    'because the insert-time strip is static-`readonly` only — schema-uniform, so every row ' +
-    'drops the same set. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
+    '(one event per object/reason with the UNION of dropped field names) rather than per-row, ' +
+    'because this response is `{ object, records, count }` and has no per-row slot to hang a ' +
+    'drop set on — a union is the only view it can represent. So read a name here as "at least ' +
+    'one row dropped this field", NOT "every row dropped the same set": the strip runs INSIDE ' +
+    '`engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, ' +
+    'tracked per row: rows where a hook stamped a protected key drop a different set from ' +
+    'rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
     'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
     'backward-compatible. (The per-row `insertMany`/`batch` paths carry per-row `droppedFields` ' +
     'on each result instead — see BatchOperationResultSchema.)'

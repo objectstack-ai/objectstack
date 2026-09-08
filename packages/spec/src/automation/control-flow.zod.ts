@@ -486,7 +486,12 @@ export function findRegionEntry(region: { nodes: FlowNodeParsed[]; edges?: FlowE
 
 // ─── Where the containers keep their regions ─────────────────────────
 
-/** A dict — region-shaped enough to reach its `nodes` / `edges`. */
+/**
+ * A dict — region-shaped enough to reach its `nodes` / `edges`, and the same
+ * test a member of a node list must pass to be a node at all. One spelling for
+ * both, so what {@link collectFlowGraphs} walks cannot drift from what it hands
+ * out.
+ */
 function isRegionDict(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -699,6 +704,16 @@ export interface FlowGraph {
    * `[...path, 'nodes', i, 'id']` — rather than described in prose (#16134).
    */
   readonly path: readonly (string | number)[];
+  /**
+   * Every member is a record. A node list read out of a container's open
+   * `z.record` config can hold whatever the author typed — an empty YAML list
+   * item deserialises to `null` — and a region its own schema refused is left
+   * RAW for {@link validateControlFlow} to name. The walk therefore drops a
+   * non-record member rather than hand out an array that does not match this
+   * declared type (#16752). Only this array is narrowed: the schema refusal
+   * that owns the malformed region still fires, and {@link path} still indexes
+   * the RAW list, so a finding stays anchored where the author wrote it.
+   */
   readonly nodes: readonly FlowNodeParsed[];
   readonly edges: readonly FlowEdgeParsed[];
 }
@@ -727,18 +742,31 @@ export function collectFlowGraphs(
     path: readonly (string | number)[],
     depth: number,
   ): void => {
-    graphs.push({ scope, path, nodes, edges });
+    // A region its own schema refused is left RAW by `parseFlowNodeRegions` for
+    // `validateControlFlow` to name, so an element here can be whatever the
+    // author typed — `null` included. What is HANDED OUT and what is WALKED both
+    // drop it, through the one predicate above.
+    //
+    // Handed out (#16752): `FlowGraph.nodes` is declared `readonly
+    // FlowNodeParsed[]`, and an array whose members every caller must re-check
+    // is not that array. This list is one the walk picked up out of an open
+    // `z.record` config ITSELF — no caller ever held it, so no coercion at a
+    // call site can reach it. Identity is preserved when nothing is dropped.
+    //
+    // Walked (#16134): skip a non-record rather than read `.config` off it —
+    // this walk runs inside `FlowSchema`'s parse, where a thrown TypeError would
+    // escape `safeParse`, which is why this is a skip and not a throw. The schema
+    // refusal that owns the malformed region still fires, reached now where the
+    // throw used to pre-empt it.
+    const kept = nodes.filter((node) => isRegionDict(node));
+    graphs.push({ scope, path, nodes: kept.length === nodes.length ? nodes : kept, edges });
     if (depth >= MAX_REGION_DEPTH) return;
+    // Indexed over the RAW list, never `kept`: `path` anchors a Zod issue where
+    // the author wrote the node, so dropping a member must not renumber the
+    // siblings that outlive it. `Array.isArray` on the inner list below proves
+    // the LIST, never its MEMBERS — the sentence removed from four lint readers.
     nodes.forEach((node, index) => {
-      // A region its own schema refused is left RAW by `parseFlowNodeRegions`
-      // for `validateControlFlow` to name, so an element here can be whatever
-      // the author typed — `null` included. Skip what is not a node object
-      // rather than read `.config` off it: this walk runs inside `FlowSchema`'s
-      // parse (#16134), where a thrown TypeError would escape `safeParse`. The
-      // schema refusal that owns the malformed region still fires — reached now,
-      // where the throw used to pre-empt it.
-      const raw: unknown = node;
-      if (raw === null || typeof raw !== 'object') return;
+      if (!isRegionDict(node)) return;
       for (const slot of regionSlotsOf(node)) {
         if (!isRegionDict(slot.raw) || !Array.isArray(slot.raw.nodes)) continue;
         visit(

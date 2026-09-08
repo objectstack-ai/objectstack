@@ -13,8 +13,8 @@
  *   describe.skipIf(!organizationsAvailable)(...)
  *
  * Node ESM resolves a bare specifier against the IMPORTER's own realpath —
- * `packages/qa/dogfood`, inside the framework workspace — while the package is
- * cloud-private and lives in the host app's `node_modules`. The probe was
+ * `packages/qa/dogfood`, inside the framework workspace — while the package was
+ * cloud-private and lived in the host app's `node_modules`. The probe was
  * therefore **constant-false**: not "false because the package is absent", but
  * false by construction, in every environment, including the enterprise/cloud CI
  * whose comment claimed it "runs this". Two whole multi-org gates — the #1994
@@ -38,13 +38,31 @@
  *    ("Absence must be loud"). Undeclared-and-missing still skips, but the
  *    warning names the switch, so the skip is discoverable rather than folklore.
  *
- * The honest state after this change, stated plainly: in the FRAMEWORK repo the
- * package genuinely is not installed, so these gates still skip here — that is
- * correct and unavoidable for a cloud-private package. What changed is that the
- * skip is now a fact about the environment rather than an artefact of the
- * resolver, and a cloud/enterprise run that ships the package will actually
- * execute the blocks (and will fail loudly if it thinks it ships the package but
- * does not).
+ * The honest state after this change, stated plainly: these gates still skip in
+ * the FRAMEWORK repo. What changed is that the skip is now a fact about the
+ * environment rather than an artefact of the resolver, and a cloud/enterprise run
+ * that ships the package will actually execute the blocks (and will fail loudly
+ * if it thinks it ships the package but does not).
+ *
+ * ── #16539 — the reason for that skip changed, and prose was the wrong place ──
+ *
+ * The paragraph above used to end "…that is correct and unavoidable for a
+ * cloud-private package", and the probe below used to say the enterprise package
+ * was "resolvable from nowhere in the framework workspace". #16215 brought the
+ * multi-organization runtime back to open core (ADR-0132):
+ * `packages/plugins/organizations`
+ * IS a member of this workspace now, pnpm's hoisted store carries it, and every
+ * `pnpm exec`-launched runner exports a `NODE_PATH` that reaches it. Neither
+ * sentence survived that landing, and nothing said so — which is the whole
+ * finding, because a nearby CONTROL had quietly stopped controlling the thing
+ * its name claims.
+ *
+ * The skip does survive, for a DIFFERENT reason: `@objectstack/dogfood` does not
+ * DECLARE the package, and the undeclared arm resolves through this module's own
+ * ESM base, which never consults `NODE_PATH`. ⛔ That reason is not written down
+ * here as a second unpinned sentence — it is asserted, as a PREMISE case in
+ * `enterprise-organizations.test.ts`, so the day it stops being true a test says
+ * so instead of a comment lying quietly.
  *
  * ── #4719 ────────────────────────────────────────────────────────────────────
  *
@@ -68,7 +86,14 @@
 
 import { createHostImporter, hostImportFailureKind } from '@objectstack/types/node';
 
-/** The cloud-private enterprise package (ADR-0105 D12). */
+/**
+ * The enterprise multi-org package (ADR-0105 D12) these gates need.
+ *
+ * ⚠️ #16539: no longer cloud-private — ADR-0132 / #16215 brought it back to open core as
+ * `packages/plugins/organizations`. It stays the SUBJECT of this probe (the app
+ * under test is what has to declare and install it), but it is no longer a name
+ * this repo can use as an example of something a host root does not have.
+ */
 export const ORGANIZATIONS_PKG = '@objectstack/organizations';
 
 /**
@@ -91,24 +116,41 @@ export interface OrganizationsProbe {
  * dogfood suite runs and where a linked enterprise package would be declared).
  * @param declared Whether the run asserts the package is present; defaults to
  * reading {@link MULTI_ORG_ENV}. When true, absence THROWS instead of skipping.
+ * @param pkg The specifier to probe. Defaults to the real subject,
+ * {@link ORGANIZATIONS_PKG}; ⛔ production callers never pass it. #16539: every
+ * verdict this function reaches is a statement about what a host root has AND
+ * has not got, and a name this workspace owns can no longer make the second
+ * half of that statement — `@objectstack/organizations` became a workspace
+ * member in #16215, so a fixture host that declares it and does not install it
+ * is resolved out of the hoisted store instead, whenever that package happens to
+ * have been built. This file's own tests therefore drive a `@fixture/*` name and
+ * prove its absence rather than assuming it, the same repair #16723 made to
+ * `packages/types/src/node.test.ts` for the same landing.
  */
 export async function probeOrganizations(
   hostRoot?: string,
   declared: boolean = process.env[MULTI_ORG_ENV] === '1',
+  pkg: string = ORGANIZATIONS_PKG,
 ): Promise<OrganizationsProbe> {
   const root = hostRoot ?? process.cwd();
   // #10943: hand the helper THIS module's resolver. Its undeclared fallback is
   // documented as "the importing package's own resolution", and a bare
   // `import()` written inside `@objectstack/types` is that package's
-  // resolution, not this one's — it can see only `@objectstack/spec`. Measured
-  // to change nothing for `@objectstack/organizations` itself (cloud-private,
-  // resolvable from nowhere in the framework workspace); it makes the
-  // documented sentence true for this probe.
+  // resolution, not this one's — it can see only `@objectstack/spec`. It makes
+  // the documented sentence true for this probe.
+  //
+  // #16539: the clause that used to close this comment — "measured to change
+  // nothing for `@objectstack/organizations` itself (cloud-private, resolvable
+  // from nowhere in the framework workspace)" — died with #16215. It is now the
+  // test's PREMISE case rather than a comment. Note it was never the mechanism
+  // behind the CONTROL flip either: a host that DECLARES the package never
+  // reaches this fallback at all, and the escape route was `createHostRequire`'s
+  // CJS lookup finding the workspace copy through the pnpm bin shim's NODE_PATH.
   const importFromHost = createHostImporter(root, {
     fallbackImport: (specifier) => import(/* webpackIgnore: true */ specifier),
   });
   try {
-    await importFromHost(ORGANIZATIONS_PKG);
+    await importFromHost(pkg);
     return { available: true };
   } catch (e) {
     const detail = (e as Error).message;
@@ -123,17 +165,17 @@ export async function probeOrganizations(
     const kind = hostImportFailureKind(e);
     const remedy =
       kind === 'declared-unresolvable'
-        ? `${root} DECLARES ${ORGANIZATIONS_PKG}, so repair its INSTALL there (\`pnpm install\`, ` +
+        ? `${root} DECLARES ${pkg}, so repair its INSTALL there (\`pnpm install\`, ` +
           'un-prune, rebuild its dist)'
         : kind === 'declared-no-loadable-entry'
-          ? `${root} DECLARES ${ORGANIZATIONS_PKG} and it IS installed, so neither is the ` +
+          ? `${root} DECLARES ${pkg} and it IS installed, so neither is the ` +
             'problem — the package publishes no entry Node can load, and the importer\'s ' +
             'message below is the authority on what it has to publish'
-          : `declare ${ORGANIZATIONS_PKG} in ${root}'s own package.json and install it — being ` +
+          : `declare ${pkg} in ${root}'s own package.json and install it — being ` +
             'reachable as somebody else\'s transitive dependency is not enough (#4719)';
     if (declared) {
       throw new Error(
-        `${MULTI_ORG_ENV}=1 declares that ${ORGANIZATIONS_PKG} (enterprise, ADR-0105 D12) is ` +
+        `${MULTI_ORG_ENV}=1 declares that ${pkg} (enterprise, ADR-0105 D12) is ` +
           `installed for this run, but it could not be resolved from ${root}. ` +
           'Refusing to skip the multi-org dogfood gates silently: a run that believes it is ' +
           'exercising cross-tenant isolation and is not would report green over gates that ' +
@@ -144,7 +186,7 @@ export async function probeOrganizations(
     return {
       available: false,
       reason:
-        `${ORGANIZATIONS_PKG} (enterprise) is not resolvable from ${root} — ` +
+        `${pkg} (enterprise) is not resolvable from ${root} — ` +
         `skipping the multi-org gate. To enable it, ${remedy}. Set ${MULTI_ORG_ENV}=1 in a run ` +
         'that ships the package to turn this skip into a failure. ' +
         `(${detail})`,

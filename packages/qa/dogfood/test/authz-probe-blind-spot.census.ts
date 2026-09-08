@@ -331,7 +331,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     blindSpot: 61,
     populationRule:
       'route registration sites — `this.routeManager.register(` call sites, LESS the one inside ' +
-      '`registerPerItemRoute` (the shared forwarder, not a route), PLUS `registerPerItemRoute(` call sites; ' +
+      '`registerPerItemRoute` (the shared forwarder, not a route; its extent is bounded by the declaration\'s own ' +
+      'indentation and the subtrahend is pinned at 1 by the `forwarder slice:` control, never inferred from a ' +
+      'terminator spelling), PLUS `registerPerItemRoute(` call sites; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -390,6 +392,23 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // the control is 73 today for the spelling reason recorded above, and the
     // population it feeds is still 80. Do not "correct" the paragraph — it is a
     // dated measurement, not a live claim.
+    //
+    // [#16306] ⭐ A THIRD CONTROL, AND WHAT THE OTHER TWO CANNOT SEE. The two
+    // above were measured insufficient rather than argued insufficient. Respell
+    // the helper's terminator `};` as `}` — no semicolon, nothing lints it —
+    // and BOTH stay green (the declaration is still present and still matches;
+    // only its terminator moved) while the rule's old unanchored
+    // `indexOf('\n        };', at)` ran the forwarder slice 5132 → 9004, 3873
+    // lines, swallowing 21 registrations: population read 60 and reachable read
+    // 20, one measurement LOW and one HIGH, from a single edit. Measured
+    // 2026-09-08 against 44c849c7d6, before and after the repair.
+    //
+    // ⚠️ 60 is what a genuine removal of 20 routes reads too, and NOTHING in
+    // this record separated the two. `forwarder slice:
+    // this.routeManager.register(` is the reading that does: it is the
+    // subtrahend itself, pinned at 1, so a low population with it at 1 is a
+    // real drop and a low population with it off 1 is the slice eating too
+    // much. It is deliberately the one SLICE-scoped control on this row.
     controls: {
       'private register*Endpoints(': 17,
       'this.routeManager.register(': 73,
@@ -399,6 +418,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       // shape moved and force this provenance to be re-read.
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
+      'forwarder slice: this.routeManager.register(': 1,
       enforceAuth: 64,
     },
     note:
@@ -601,9 +621,17 @@ export function deriveProbeFileCensus(): {
   // Scoped to the exported array literal, exactly as the probes are: the
   // patterns are the ledger's own row vocabulary, so a doc-comment or a type
   // declaration spelling the same tokens outside the table would inflate the
-  // reading. `controls` stay WHOLE-FILE counts, like every other row here —
-  // they answer "is this still the file I think it is", which is a question
-  // about the file and not about the table.
+  // reading. `controls` here stay WHOLE-FILE counts — they answer "is this
+  // still the file I think it is", which is a question about the file and not
+  // about the table.
+  //
+  // ⚠️ [#16306] That is the rule on every row but one. `rest-server.ts` carries
+  // a single SLICE-scoped control (`forwarder slice:
+  // this.routeManager.register(`) because its population rule SUBTRACTS a
+  // slice, and no whole-file count can see that slice grow — the four
+  // whole-file controls on that row were measured staying green while the
+  // slice ran 3873 lines long. A subtracted slice needs a control on the
+  // slice; the exception is exactly that wide and no wider.
   for (const [rel, marker, keyField] of [
     ['packages/rest/src/rest-route-ledger.ts', 'REST_ROUTE_LEDGER', 'family'],
     ['packages/runtime/src/route-ledger.ts', 'ROUTE_LEDGER', 'domain'],
@@ -653,21 +681,85 @@ export function deriveProbeFileCensus(): {
     const helperDeclRe = /const\s+registerPerItemRoute\s*=/;
 
     /**
+     * The helper's OWN extent, bounded by its OWN indentation.
+     *
+     * ⛔ NEVER a forward search for the terminator's literal text. The rule
+     * this replaced ended the slice at `hay.indexOf('\n        };', at)` — an
+     * unanchored forward search with no upper bound. Respell that terminator
+     * as `}` with no semicolon (the single most ordinary way that line
+     * changes, and nothing lints it — there is no ESLint `semi` rule in this
+     * repo) and `indexOf` does not fail: it finds the NEXT `\n        };`
+     * anywhere later in the file. Measured 2026-09-08 against 44c849c7d6: the
+     * slice ran from line 5132 to line 9004 — 3873 lines — and swallowed 21
+     * direct `this.routeManager.register(` sites.
+     *
+     * The extent ends instead at the first non-blank line indented no deeper
+     * than the declaration itself, whatever that line is spelled as. That is
+     * spelling-independent, so the respelling above moves nothing.
+     *
+     * ⛔ It is still not TRUSTED — see `sites` below. An indentation scan can
+     * land short (a body line dedented to the declaration's own level) or land
+     * long (the closing line indented deeper), so the number of forwarding
+     * calls it returns is read back as an exact control rather than assumed.
+     */
+    const forwarderSlice = (hay: string): string => {
+      const at = hay.search(helperDeclRe);
+      if (at < 0) return '';
+      const indent = at - (hay.lastIndexOf('\n', at) + 1);
+      let cursor = hay.indexOf('\n', at);
+      while (cursor >= 0) {
+        const nl = hay.indexOf('\n', cursor + 1);
+        const line = hay.slice(cursor + 1, nl < 0 ? hay.length : nl);
+        if (line.trim() !== '' && line.length - line.trimStart().length <= indent) {
+          return hay.slice(at, cursor + 1 + line.length);
+        }
+        if (nl < 0) break;
+        cursor = nl;
+      }
+      return '';
+    };
+
+    /**
      * Registration sites in one haystack: direct call sites, LESS the helper's
      * own forwarding call, PLUS the helper's call sites.
      *
-     * ⛔ Fail-loud, like the ledger marker slice above: a helper declaration
-     * that moves out of this shape slices to '' and nothing is subtracted, so
-     * the reading comes out ONE HIGH (81 / 20) and this census goes RED. It
-     * never silently shrinks — a quietly narrower rule is the failure mode the
-     * whole file is built against.
+     * ⭐ THE SUBTRAHEND IS CHECKED, NOT TRUSTED, and that is the repair.
+     * `occurrences(forwarderSlice(hay), mountRe)` is recorded as its own exact
+     * control, pinned at 1 — the helper forwards exactly once. So:
+     *
+     *   slice lands SHORT — declaration gone, or the extent scan stops early
+     *     ⇒ subtrahend 0, the reading comes out ONE HIGH, and the control
+     *       reads 0 against a recorded 1;
+     *   slice lands LONG — the extent scan overshoots the helper's own body
+     *     ⇒ subtrahend > 1, the reading comes out low, and the control reads
+     *       > 1 against a recorded 1.
+     *
+     * ⛔ It never silently shrinks. Not "it cannot shrink" — it can; the word
+     * carrying the weight is SILENTLY. A low reading with the forwarder
+     * control at 1 is a real population drop; a low reading with that control
+     * off 1 is the slice eating too much. Before this control existed the two
+     * were indistinguishable — the day someone genuinely removes 20 routes the
+     * census reads 60 either way — and the two exact controls the spelling
+     * change added (`registerPerItemRoute(` = 8,
+     * `const registerPerItemRoute =` = 1) stay GREEN right through it, because
+     * the declaration is still present and still matches; only its terminator
+     * moved. Both legs measured, not argued.
+     *
+     * The control IS the subtrahend, which is what keeps it from being noise:
+     * it fires exactly when an overshoot actually distorts the reading, and
+     * stays at 1 through an overshoot over text that registers nothing — where
+     * there is no distortion to report.
+     *
+     * ⚠️ The ledger marker slice above is NOT symmetric with this one, which is
+     * why borrowing its "fail-loud" reasoning was the mistake. Its `\n];`
+     * overshoot can only ADD rows, so it reads HIGH; this slice's overshoot
+     * SUBTRACTS registrations, so it reads LOW — and low is the direction that
+     * looks like an ordinary answer.
      */
-    const sites = (hay: string): number => {
-      const at = hay.search(helperDeclRe);
-      const stop = at < 0 ? -1 : hay.indexOf('\n        };', at);
-      const forwarder = at < 0 || stop < 0 ? '' : hay.slice(at, stop);
-      return occurrences(hay, mountRe) - occurrences(forwarder, mountRe) + occurrences(hay, helperCallRe);
-    };
+    const sites = (hay: string): number =>
+      occurrences(hay, mountRe) -
+      occurrences(forwarderSlice(hay), mountRe) +
+      occurrences(hay, helperCallRe);
 
     // Slice the mintable registrar's body: from its declaration to the next one.
     const decls = [...src.matchAll(registrarRe)].map((m) => ({ at: m.index ?? 0, text: m[0] }));
@@ -682,6 +774,12 @@ export function deriveProbeFileCensus(): {
         'this.routeManager.register(': occurrences(src, /this\.routeManager\.register\(/g),
         'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
+        // ⭐ The one control here that is NOT a whole-file count, deliberately:
+        // it is the SHAPE of the slice the population rule subtracts, and it is
+        // the only reading that can tell "the slice ate too much" apart from a
+        // real population drop. The four counts around it cannot — all four are
+        // green while the slice is running 3873 lines long.
+        'forwarder slice: this.routeManager.register(': occurrences(forwarderSlice(src), mountRe),
         enforceAuth: occurrences(src, /enforceAuth/g),
       },
     });

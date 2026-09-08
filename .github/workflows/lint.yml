@@ -4,9 +4,23 @@ on:
   push:
     branches:
       - main
+  # ⭐ NO `branches:` filter here, deliberately (#16482) — see ci.yml's `on:`
+  # block for the full rationale and the measured runner cost; both files carry
+  # required contexts and are widened together, because six contexts split
+  # across two files are only as reachable as the less reachable file.
+  #
+  # ⚠️ The MEASURED 2026-08-25 (#12211) block immediately below does NOT bind
+  # on this widening, and it is not touched by it. Read what it measured: it is
+  # a `merge_group` COVERAGE result — "is there a queue-build gap to close" —
+  # answered NO, plus a ⛔ against adding `merge_group` to the ADVISORY
+  # workflows. It says nothing about the `pull_request:` trigger's `branches:`
+  # filter, and its residual is explicitly named as two repository SETTINGS
+  # (a commit reaching main with no queue build; `strict_required_status_checks
+  # _policy: false`), "neither reachable from this file". Removing a base-branch
+  # filter from `pull_request:` changes no merge_group behaviour whatsoever:
+  # `merge_group:` is a separate trigger key, still present below, and
+  # `check:required-contexts` assertion 6 fails the build if it ever is not.
   pull_request:
-    branches:
-      - main
   # Merge queue (see ci.yml for the full note): required checks must report on
   # queue builds or the queue stalls. This workflow has no PR-only steps, so
   # the trigger alone is enough.

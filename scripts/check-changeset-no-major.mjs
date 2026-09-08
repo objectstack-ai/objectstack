@@ -5,9 +5,12 @@
  *   1. LAUNCH-WINDOW GUARD — a PR may not introduce a changeset that declares a
  *      `major` bump. Everything above "The LEVEL axis" below is this.
  *   2. THE LEVEL AXIS (#16055) — a PR that DECLARES clause ② (a new key on a
- *      published payload) may not grade a package it grew `patch`. Read the
+ *      published payload) may not grade a package it grew `patch`, and (#16776)
+ *      a PR that grades one that way must not leave the declaration UNREADABLE:
+ *      where the missing reading is what decides the verdict, this refuses
+ *      rather than exiting 0 into a check run that concludes `success`. Read the
  *      block headed "The LEVEL axis" for what it cross-checks, where the
- *      declaration comes from, and the three residuals it records.
+ *      declaration comes from, and the residual it records.
  *
  * The run exits with the WORSE of the two verdicts and prints both, because
  * they are independent facts about one changeset set.
@@ -795,21 +798,35 @@ export function render(result) {
 // heads (`e0938d3fdce` was HEAD from 21:43:58Z until 22:18:39Z, `98179cae022`
 // from then until the strip).
 //
-// ## Two residuals, recorded rather than implied
+// ## What the payload is read on, and the one residual left
 //
-//   * THE PAYLOAD LABEL SET IS A SNAPSHOT. A carrier applied after the event
-//     fired is invisible to that run — the same stale cell this job documents
-//     at length for `skip-changeset` and `allow-major`, and closed the same
-//     way: `pull_request` here is triggered on `labeled`/`unlabeled` too, so
-//     hanging the carrier fires a run that DOES see it. Measured on #16044: the
-//     `opened` run at 21:40Z would have read NOT MEASURED, and the `labeled`
-//     run three minutes later reads the carrier and refuses the `patch`.
-//   * THE CARRIER IS STRIPPED AT REVIEW PASS, so a run after the PASS reads NOT
-//     MEASURED and this axis stands down. That is the intended order — the
-//     human review that clears the carrier is the authority on the level, and
-//     on #16044 its verdict comment concurred with the `minor` grading
-//     explicitly — but it means this axis is a PRE-review reading, never a
-//     landing-time one.
+//   * THE PAYLOAD IS A SNAPSHOT, and both carriers move after it is taken. A
+//     LABEL applied after the event fired is invisible to that run — the same
+//     stale cell this job documents at length for `skip-changeset` and
+//     `allow-major`, and closed the same way: `pull_request` here is triggered
+//     on `labeled`/`unlabeled` too, so hanging the carrier fires a run that DOES
+//     see it. Measured on #16044: the `opened` run at 21:40Z would have read NOT
+//     MEASURED, and the `labeled` run three minutes later reads the carrier and
+//     refuses the `patch`. The BODY moved on no trigger at all until #16776:
+//     there was no `edited` type, so a `Clause-②:` line added to the body after
+//     the last push was never read until somebody pushed again. That is now
+//     subscribed, for the same reason and by the same argument the two other
+//     PR-body-scoped gates in this repo already carry (`duplicate-fix-guard`,
+//     `partof-closing-keyword-guard`): a verdict whose input is the body must
+//     re-fire when the body changes, or its red cannot be cleared without a push
+//     — `rerun_failed_jobs` replays the SAME frozen payload.
+//   * THE CARRIER IS STRIPPED AT REVIEW PASS, so a run after the PASS no longer
+//     reads a `yes` from it. That is the intended order — the human review that
+//     clears the carrier is the authority on the level, and on #16044 its verdict
+//     comment concurred with the `minor` grading explicitly. What it USED to mean
+//     was that the axis silently stood down at exactly that moment (#16776's
+//     composed failure: strip the carrier, add the durable line, push nothing,
+//     and the gate concludes `success` having judged nothing). It no longer does:
+//     a run with no readable declaration and a `patch` on a package the diff grew
+//     REFUSES, so the standing-down is now confined to the diffs where the
+//     declaration could not have changed the answer. The axis is still a
+//     pre-review reading rather than a landing-time one; what it is not any more
+//     is a reading that can vanish without saying so.
 //   * THE `allow-major` LABEL SKIPS THE WHOLE STEP, this block included,
 //     because the step it lives in is the launch-window major guard. A PR that
 //     is granted a whole-stack major and ALSO grades a clause-②-declared
@@ -878,12 +895,16 @@ export function packagesTouched({ cwd, from, head }) {
  * which is what #16044 did, is still read.
  *
  * @param {{ labels?: ({ name?: string }|string)[], body?: string }|null} pr
- * @returns {{ value: 'yes'|'no'|null, readings: string[] }}
+ * @returns {{ value: 'yes'|'no'|null, payload: boolean, readings: string[] }}
  */
 export function declarationFromPullRequest(pr) {
   const readings = [];
   if (!pr || typeof pr !== 'object') {
-    return { value: null, readings: ['no `pull_request` payload was available to read a declaration from'] };
+    // `payload: false` is returned beside the null value, never folded into it:
+    // "no pull request to read" and "a pull request that declared nothing" are
+    // different facts about different runs, and #16776 is the card about two
+    // facts sharing one exit code. `judgeLevel` routes on this flag.
+    return { value: null, payload: false, readings: ['no `pull_request` payload was available to read a declaration from'] };
   }
 
   const labels = Array.isArray(pr.labels)
@@ -905,46 +926,104 @@ export function declarationFromPullRequest(pr) {
   else if (line?.kind === 'near-miss') readings.push(`declaration line: a near miss, not a declaration — ${line.line}`);
   else readings.push('declaration line: the PR body carries no `Clause-②:` line');
 
-  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', readings };
-  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', readings };
-  return { value: null, readings };
+  if (carrier || (line?.kind === 'declared' && line.value === 'yes')) return { value: 'yes', payload: true, readings };
+  if (line?.kind === 'declared' && line.value === 'no') return { value: 'no', payload: true, readings };
+  return { value: null, payload: true, readings };
 }
 
 /**
  * Decide the level axis. Pure, for the same reason `judge` is: the self-test
  * drives the real decision rather than an imitation of it.
  *
- *   unreadable-diff  the diff could not be computed          -> exit 1 (#4690)
- *   not-measured     no declaration was readable             -> exit 0, LOUD
- *   not-declared     the declaration reads `no`              -> exit 0
- *   clean            declared `yes`, no `patch` on a grown package -> exit 0
- *   enforce          declared `yes`, `patch` on a grown package    -> exit 1
+ *   unreadable-diff       the diff could not be computed               -> exit 1 (#4690)
+ *   payload-unreadable    a `pull_request` run whose payload would not read -> exit 1 (#4690)
+ *   no-pull-request       not a PR run at all (RC cut, local run)      -> exit 0
+ *   not-measured-moot     no declaration, and no `patch` it could have refused -> exit 0
+ *   not-measured-material no declaration, and a `patch` on a package this PR grew -> exit 1
+ *   not-declared          the declaration reads `no`                   -> exit 0
+ *   clean                 declared `yes`, no `patch` on a grown package -> exit 0
+ *   enforce               declared `yes`, `patch` on a grown package    -> exit 1
  *
- * `not-measured` and `not-declared` are separate verdicts and must stay so: one
- * is a missing reading and the other is a decision, and the card this block
- * closes is precisely about two readings that looked alike.
+ * Seven verdicts and no two of them collapse, because every collapse in this
+ * family has been a defect. `not-measured-*` and `not-declared` are a missing
+ * reading and a decision (#16055). The two `not-measured-*` are a missing
+ * reading that could not have mattered and one that decided the verdict
+ * (#16776) — sharing exit 0 is what let a gate that judged nothing conclude
+ * `success` on the surfaces that read conclusions rather than logs.
  *
  * @param {{
  *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
  *   touched: { packages: string[], unreadable: string[] },
- *   declaration: { value: 'yes'|'no'|null, readings: string[] },
+ *   declaration: { value: 'yes'|'no'|null, readings: string[], payload?: boolean },
+ *   prEvent?: boolean,
  * }} input
  */
-export function judgeLevel({ levels, touched, declaration }) {
+export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   const readings = declaration?.readings ?? [];
   if (!levels) return { verdict: 'unreadable-diff', offenders: [], readings, unreadable: [] };
   const unreadable = touched?.unreadable ?? [];
-  if (declaration?.value === null || declaration?.value === undefined) {
-    return { verdict: 'not-measured', offenders: [], readings, unreadable };
-  }
-  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], readings, unreadable };
 
+  // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
+  // did not declare", and #16776 is what happens when the two share an exit
+  // code, so they do not share a verdict either. Two callers reach it and
+  // neither is a PR: the RC cut (`cut-rc.yml`, `workflow_dispatch`, no
+  // `--event`) and a developer running this script in a checkout. The
+  // declaration lives on a pull request; where there is none, this axis has no
+  // input by construction rather than by omission, and it stands down.
+  //
+  // ⚠️ `prEvent` is what stops that from becoming the hole this card closes: on
+  // a real `pull_request` run the payload is written by the runner, so an
+  // unreadable one is a broken job rather than a non-PR context, and a gate
+  // that could not read the input it was owed has verified nothing (#4690).
+  //
+  // The test is `payload === false`, never `!== true`, and the difference is the
+  // direction it fails in. `false` is written by ONE place — the reader above,
+  // when there was no `pull_request` object at all — so standing down requires a
+  // positive statement that there was nothing to read. A caller that omits the
+  // flag entirely falls through to the lanes below, where an undeclared PR can
+  // still be refused: unknown provenance enforces, which is the #4690 direction
+  // this file takes everywhere else.
+  if (declaration?.payload === false) {
+    return prEvent
+      ? { verdict: 'payload-unreadable', offenders: [], readings, unreadable }
+      : { verdict: 'no-pull-request', offenders: [], readings, unreadable };
+  }
+
+  // The offenders are computed BEFORE the declaration is consulted, because
+  // #16776's whole repair turns on a question the old order could not ask:
+  // would the missing declaration have CHANGED anything? `patch` on a package
+  // whose `packages/*/src/**` this diff moves is the only shape a `yes` can
+  // refuse, so its presence is exactly the materiality of the reading that did
+  // not happen.
   const grown = new Set(touched?.packages ?? []);
   const offenders = [];
   for (const { file, entries } of levels) {
     const bad = entries.filter((entry) => entry.bump === 'patch' && grown.has(entry.pkg)).map((entry) => entry.pkg);
     if (bad.length) offenders.push({ file, packages: bad });
   }
+
+  if (declaration?.value === null || declaration?.value === undefined) {
+    // ⭐ #16776. `NOT MEASURED` used to be one verdict at exit 0, and the check
+    // run therefore concluded `success` whether the reading was IMMATERIAL or
+    // whether it was the one thing the gate needed. Those are the two halves
+    // split here, and only the second one fails:
+    //
+    //   * MOOT — no candidate offender exists, so `yes` and `no` reach the same
+    //     verdict. The exit 0 is a DECIDED one: the missing input could not have
+    //     moved it, and the reader is told exactly that rather than being handed
+    //     a tick that means nothing.
+    //   * MATERIAL — a `patch` sits on a package this PR grew, so the declaration
+    //     is the difference between `clean` and `enforce`, and it was not
+    //     readable. The gate refuses. Not because the level is wrong — it may
+    //     well be right — but because nobody can tell, and a reading that did
+    //     not happen must not be indistinguishable from one that passed at the
+    //     only layer anything downstream reads (#4690).
+    return offenders.length
+      ? { verdict: 'not-measured-material', offenders, readings, unreadable }
+      : { verdict: 'not-measured-moot', offenders: [], readings, unreadable };
+  }
+  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], readings, unreadable };
+
   // An unread manifest can only ever hide an offender, so it cannot be reported
   // under a tick: `clean` states it, and the reader is told what was not named.
   if (offenders.length) return { verdict: 'enforce', offenders, readings, unreadable };
@@ -976,14 +1055,67 @@ export function renderLevel(result) {
       );
       return { exitCode: 1, stdout, stderr };
 
-    case 'not-measured':
+    case 'payload-unreadable':
+      stderr.push(
+        '⛔ check-changeset-no-major (level axis): this is a `pull_request` run and its event payload could not be ' +
+          'read, so the clause-② declaration had no carrier to come from. The runner writes that file; a run that ' +
+          'cannot read it has verified nothing, and missing input is a failure, never a pass (#4690).',
+        ...readings,
+      );
+      return { exitCode: 1, stdout, stderr };
+
+    case 'no-pull-request':
       stdout.push(
-        'ℹ️ LEVEL AXIS: NOT MEASURED — no clause-② declaration was readable for this PR, so whether ' +
-          '`patch` fits the surface was not judged. This is neither a pass nor a failure (#4690).',
+        'ℹ️ LEVEL AXIS: NOT APPLICABLE — this run has no `pull_request` to read a declaration from, so the ' +
+          'clause-② axis has no input by construction rather than by omission. It is a PR-scoped reading: the RC cut ' +
+          '(`cut-rc.yml`) and a local run reach here, and neither is a PR that could have declared.',
         ...readings,
         ...unreadableNote,
       );
       return { exitCode: 0, stdout, stderr };
+
+    case 'not-measured-moot':
+      stdout.push(
+        'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — no clause-② declaration was ' +
+          'readable for this PR, AND no changeset here grades `patch` a package whose `packages/*/src/**` this PR moves. ' +
+          '`yes` and `no` reach the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
+        ...readings,
+        ...unreadableNote,
+      );
+      return { exitCode: 0, stdout, stderr };
+
+    case 'not-measured-material':
+      stderr.push('⛔ LEVEL AXIS: NOT MEASURED, and it is the one reading this PR needed.\n');
+      for (const { file, packages } of result.offenders ?? []) {
+        stderr.push(`   ${file}`);
+        for (const pkg of packages) stderr.push(`     - ${pkg}: patch   ← this PR moves ${pkg}'s packages/*/src/**`);
+      }
+      stderr.push(
+        '\nNo clause-② declaration was readable, so whether that `patch` fits the surface this PR grew was not judged:\n' +
+          `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
+          '\n' +
+          'This is a REFUSAL rather than the tick it used to be, and the reason is the layer above this log. A check run\n' +
+          'concludes `success` or `failure`; it has no third word for "did not judge". Exiting 0 published the same\n' +
+          'conclusion for a reading that passed and a reading that never happened, on every surface that reads\n' +
+          'conclusions rather than step logs (#16776, and #4690: a reading that cannot fail is indistinguishable from\n' +
+          'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so — it is\n' +
+          'refusing HERE because a `patch` above sits on a package this diff grew, which is exactly what a `yes` refuses.\n' +
+          '\n' +
+          'DECLARE IT. One line, at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
+          '\n' +
+          '  Clause-②: no    — this PR puts no new key on a published payload. The axis stands down and the `patch`\n' +
+          '                    above is yours to keep. Say it in the line, not only in the prose around it.\n' +
+          '  Clause-②: yes   — it does. Then the level rule applies and the `patch` must be raised to at least\n' +
+          '                    `minor` (maintainer ruling 2026-09-04, decision batch #35, on #15294 — written out\n' +
+          '                    under "WHICH LEVEL" in the `Check Changeset` step of pr-automation.yml).\n' +
+          '\n' +
+          'The review seat\'s `' + CONTRACT_REVIEW_LABEL + '` carrier declares `yes` on its own and needs no line.\n' +
+          '\n' +
+          '⛔ The remedy is the declaration, never the deletion: dropping the changeset, or regrading the package to\n' +
+          'dodge this message, changes what ships in order to quiet a gate. And the line is read from the body on the\n' +
+          'next `edited` event (pr-automation.yml subscribes to it), so this red clears with no push and no re-run.',
+      );
+      return { exitCode: 1, stdout, stderr };
 
     case 'not-declared':
       stdout.push('✓ LEVEL AXIS: this PR declares clause-② `no`, so no package here is declared to have grown a published surface.', ...readings, ...unreadableNote);
@@ -1210,10 +1342,17 @@ function main(argv) {
   // the exit code is the MAX of the two: two independent facts about one
   // changeset set, and a gate that reported only the first one it found would
   // hand an author one word to change and then fail them again on the next run.
+  // `prEvent` separates "not a pull request" from "a pull request whose payload
+  // would not read" (#16776). It is read from the event NAME rather than from
+  // the payload's shape, because the payload's shape is the thing in doubt: on a
+  // `pull_request` run the runner has written a `pull_request` object, so its
+  // absence is a broken job and not a context this axis may stand down in.
+  const eventName = process.env.GITHUB_EVENT_NAME ?? null;
   const levelResult = judgeLevel({
     levels: scanned?.levels ?? null,
     touched: scanned ? packagesTouched({ cwd: REPO_ROOT, from: scanned.base, head }) : { packages: [], unreadable: [] },
     declaration: declarationFromPullRequest(readEventPullRequest(eventPath)),
+    prEvent: eventName === 'pull_request' || eventName === 'pull_request_target',
   });
   const level = renderLevel(levelResult);
   for (const line of level.stdout) console.log(line);
@@ -1259,8 +1398,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#7107: an `R` row whose BASE side is README.md subtracts NOTHING': 4,
   '#6129 proper: main drift must not move the verdict': 5,
   'Missing input is a failure, never a pass (#4690)': 4,
-  'The wiring: these fixtures must actually run on every PR': 15,
-  "The LEVEL axis: #16044's two heads, one word apart (#16055)": 41,
+  'The wiring: these fixtures must actually run on every PR': 22,
+  "The LEVEL axis: #16044's two heads, one word apart (#16055)": 56,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1952,14 +2091,92 @@ function selfTest() {
       // The declaration axis, held against the SAME patch head. Each of these
       // is the byte-identical offending tree with one input changed, so a green
       // here is about the declaration and cannot be about the changeset.
-      const notMeasured = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: null, readings: [] } });
-      assert(notMeasured.verdict === 'not-measured', `no readable declaration is NOT MEASURED, never a pass and never a failure (#4690) — got ${notMeasured.verdict}`);
-      assert(renderLevel(notMeasured).exitCode === 0 && renderLevel(notMeasured).stdout.join('\n').includes('NOT MEASURED'), 'NOT MEASURED must exit 0 AND say so in words — a silent 0 is the reading this whole card is about');
-      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', readings: [] } });
+      //
+      // ⭐ #16776 splits the old single `not-measured` in two, and the pair below
+      // is the whole of it: the SAME missing declaration, over two trees that
+      // differ by exactly the bump word, must reach two different EXIT CODES.
+      // The old verdict exited 0 on both, so the check run concluded `success`
+      // whether the unread declaration was immaterial or whether it was the one
+      // input that decided the answer — indistinguishable at every surface that
+      // reads a conclusion rather than a step log.
+      const noDeclaration = { value: null, payload: true, readings: ['carrier: not on this PR', 'declaration line: the PR body carries no `Clause-②:` line'] };
+      const notMeasuredMaterial = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noDeclaration });
+      const notMeasuredMoot = judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noDeclaration });
+      assert(
+        notMeasuredMaterial.verdict === 'not-measured-material',
+        `an unread declaration over a \`patch\` on a package this diff grew is MATERIAL — got ${notMeasuredMaterial.verdict}`,
+      );
+      assert(
+        notMeasuredMoot.verdict === 'not-measured-moot',
+        `an unread declaration that could not have changed the verdict is MOOT — got ${notMeasuredMoot.verdict}`,
+      );
+      assert(
+        renderLevel(notMeasuredMaterial).exitCode === 1 && renderLevel(notMeasuredMoot).exitCode === 0,
+        'the two must differ in EXIT CODE, not merely in verdict name — the exit code is what becomes the check-run conclusion, and that conclusion is the whole of #16776',
+      );
+      assert(
+        PATCH_HEAD.replace('patch', 'minor') === MINOR_HEAD,
+        'control: the material/moot pair must differ by exactly the bump word, and by nothing about the declaration — both are judged on the same `noDeclaration` reading',
+      );
+      const materialText = renderLevel(notMeasuredMaterial).stderr.join('\n');
+      assert(materialText.includes('NOT MEASURED'), 'the refusal must still SAY it did not measure — #16055 bought that honesty and #16776 does not spend it');
+      assert(
+        materialText.includes(CLI) && materialText.includes(CHANGESET),
+        'the refusal must NAME the package and the changeset whose `patch` made the missing reading material — an author must not have to guess which line asked the question',
+      );
+      assert(
+        materialText.includes('Clause-②: no') && materialText.includes('Clause-②: yes'),
+        'the refusal must spell BOTH declarations — the way out of this red is a declaration, and a message that names only the `yes` reads as a demand to raise the level',
+      );
+      assert(
+        renderLevel(notMeasuredMoot).stdout.join('\n').includes('could not have changed this verdict'),
+        'the moot green must say WHY it is green — an exit 0 that means "the missing input could not have moved this" is a different claim from a tick, and #16776 is what happens when they print alike',
+      );
+      assert(
+        renderLevel(notMeasuredMaterial).stderr.join('\n') !== renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: declaredYes })).stderr.join('\n'),
+        'a missing reading and a self-contradiction must not print the same refusal: one asks for a declaration, the other says the declaration and the level disagree',
+      );
+      const declaredNo = judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: 'no', payload: true, readings: [] } });
       assert(declaredNo.verdict === 'not-declared', `a declaration of \`no\` is a DECISION, distinct from an unread one — got ${declaredNo.verdict}`);
       assert(
-        renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasured).stdout.join('\n'),
+        renderLevel(declaredNo).exitCode === 0,
+        'the explicit `no` is the opt-out this refusal is built around: it must stay a PASS on the very tree the unread reading refuses, or #16776 has been closed by making the gate uncloseable',
+      );
+      assert(
+        renderLevel(declaredNo).stdout.join('\n') !== renderLevel(notMeasuredMoot).stdout.join('\n'),
         'a decision and a missing reading must not print the same thing — collapsing them is the defect #16055 records',
+      );
+
+      // The two contexts that are NOT a pull request, and the one that only
+      // looks like it. `cut-rc.yml` runs this script on a `workflow_dispatch`
+      // with no `--event` at all, over a whole RC snapshot range that certainly
+      // contains `patch` bumps on packages whose src moved; a rule that reddened
+      // there would have made the material refusal above unshippable.
+      const noPayload = declarationFromPullRequest(readEventPullRequest(null));
+      assert(noPayload.payload === false && noPayload.value === null, 'no payload at all reports `payload: false` beside the null value — the two facts are read separately');
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: false }).verdict === 'no-pull-request',
+        'a run with no pull request is NOT APPLICABLE, never an unread declaration: the RC cut and a local run reach here and neither could have declared',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: false })).exitCode === 0,
+        'and it exits 0 — `cut-rc.yml` gates a whole snapshot range through this script with no event payload, and reddening it would be a rule that cannot ship',
+      );
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: noPayload, prEvent: true }).verdict === 'payload-unreadable',
+        'the same absence ON a `pull_request` run is a FAILURE: the runner writes that payload, so a run that cannot read it is broken, and standing down there would reopen this card through the back door (#4690)',
+      );
+      assert(
+        renderLevel(judgeLevel({ levels: levelsFor(MINOR_HEAD), touched: touchedCli, declaration: noPayload, prEvent: true })).exitCode === 1,
+        'control: the unreadable payload on a PR run fails on the MOOT tree too — it is about the input this run owed, not about what the diff happens to contain',
+      );
+      assert(
+        declarationFromPullRequest({ labels: [], body: 'nothing here\n' }).payload === true,
+        'control: a payload that WAS read but declared nothing reports `payload: true` — otherwise every undeclared PR would take the not-applicable lane and this card would be closed by relabelling it',
+      );
+      assert(
+        judgeLevel({ levels: levelsFor(PATCH_HEAD), touched: touchedCli, declaration: { value: null, readings: [] } }).verdict === 'not-measured-material',
+        'a declaration with NO `payload` field at all enforces rather than standing down — the stand-down lane needs a positive `payload: false` from the reader, so a caller that forgets the flag fails closed (#4690)',
       );
 
       // The package axis, same patch head: `patch` for a package this diff did
@@ -2208,6 +2425,54 @@ function selfTest() {
     assert(
       !/check-changeset-no-major\.mjs/.test(uncommented(lintYaml)),
       'wiring: lint.yml must NOT invoke this script directly — the self-test reaches it through `check:changeset-gate-self-tests`, and a real scan here would bypass the `allow-major` escape hatch its own error message prescribes and have no branch point to judge against',
+    );
+
+    // ── The trigger the `not-measured-material` refusal depends on (#16776) ──
+    //
+    // This is the A-and-B coupling of that card, pinned rather than trusted to
+    // prose. The refusal above is cleared by writing `Clause-②: no` (or `yes`
+    // plus a level) into the PR BODY. A `pull_request` payload is a snapshot and
+    // `rerun_failed_jobs` replays the frozen one, so WITHOUT `edited` in this
+    // trigger list the body a author just fixed is never re-read and the red
+    // cannot be cleared by any action short of pushing a commit — measured on PR
+    // #16342, which took a deliberate `git merge origin/main` after a body edit
+    // purely to manufacture a `synchronize`. Removing `edited` therefore does not
+    // merely lose a convenience: it turns this gate's own refusal into the
+    // permanently-red-by-construction shape #5580 and #6378 exist to remove.
+    const triggerTypes = prAutomation.match(/\n\s*types:\s*\[([^\]]*)\]/);
+    assert(triggerTypes !== null, 'wiring: pr-automation.yml must name its `pull_request` activity types explicitly — the assertion below would judge nothing');
+    const types = (triggerTypes?.[1] ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+    assert(
+      types.includes('edited'),
+      `wiring: pr-automation.yml must subscribe to \`edited\` — the level axis reads the clause-② declaration out of the PR BODY, and a verdict whose input is the body must re-fire when the body changes or its refusal cannot be cleared without a push (#16776). Got ${JSON.stringify(types)}`,
+    );
+    assert(
+      ['opened', 'synchronize', 'reopened', 'labeled', 'unlabeled'].every((t) => types.includes(t)),
+      `wiring: naming \`types:\` REPLACES GitHub's default set, so the five this job already needed must all still be listed beside \`edited\` — the label carriers are read on \`labeled\`/\`unlabeled\` and the diff on \`opened\`/\`synchronize\`/\`reopened\`. Got ${JSON.stringify(types)}`,
+    );
+
+    // The OTHER consumer, and why the refusal above may exit 1 at all: the RC cut
+    // runs this same script over a whole snapshot range on a `workflow_dispatch`,
+    // where there is no pull request and therefore no declaration to read. It
+    // reaches the `no-pull-request` lane BECAUSE it hands over no `--event` and
+    // GitHub sets no `pull_request` payload there. A `--event` grown onto that
+    // call site, or a second one that is a PR run, would put an RC cut into the
+    // lane that can refuse — so the shape is pinned where the refusal lives.
+    const cutRcPath = join(REPO_ROOT, '.github/workflows/cut-rc.yml');
+    assert(existsSync(cutRcPath), 'wiring: .github/workflows/cut-rc.yml must exist — it is this script\'s other consumer, and the one the level axis must never red');
+    const cutRc = uncommented(existsSync(cutRcPath) ? readFileSync(cutRcPath, 'utf8') : '');
+    const cutRcCalls = [...cutRc.matchAll(/node scripts\/check-changeset-no-major\.mjs([^\n]*)/g)].map((m) => m[1]);
+    assert(
+      cutRcCalls.length === 2 && cutRcCalls.some((c) => /^\s*--self-test\s*$/.test(c)),
+      `wiring: cut-rc.yml is expected to invoke this script exactly twice — \`--self-test\` then the real scan (found ${cutRcCalls.length}: ${JSON.stringify(cutRcCalls)})`,
+    );
+    assert(
+      cutRcCalls.every((c) => !/--event\b/.test(c)),
+      'wiring: no cut-rc.yml call site may pass `--event` — the RC cut is a `workflow_dispatch` with no pull request, and the level axis stands down there by having no declaration carrier at all. Handing it one would put a whole snapshot range into the lane that can refuse (#16776)',
+    );
+    assert(
+      !/pull_request/.test((cutRc.match(/^on:[\s\S]*?\njobs:/m) ?? [''])[0]),
+      'wiring: cut-rc.yml must stay off `pull_request` triggers — its `no-pull-request` lane is what keeps the #16776 refusal shippable, and a PR trigger there would make it a PR run with a payload',
     );
   }
 
