@@ -10348,6 +10348,187 @@ export class ObjectQL implements IObjectQLEngine {
         if (postRefusal) throw postRefusal;
       }
 
+      // ── [#16608] EVERY VALUE-CHANGING PASS, AHEAD OF THE SEAM ──────────
+      //
+      // The two strips below used to run AFTER the seam, and the contract
+      // review of PR #16805 measured what that cost: a static-`readonly`
+      // scoping field — the natural shape for a server-stamped column, and
+      // exactly what an RLS `check` compares (ADR-0055) — was judged by the
+      // seam with the CALLER’s value still on the row, then stripped and
+      // re-defaulted, so the store received a value the seam never saw. The
+      // row that was judged was not the row that was stored, which is this
+      // card’s own defect one layer down.
+      //
+      // So both strips run HERE, ahead of the seam. Neither has a side
+      // effect — they read `suppliedPerRow`, `rowHookWrittenKeys`, the
+      // schema and `options`, all resolved above, and they log — so moving
+      // them costs nothing and buys the seam the final row. What is left
+      // between the seam and the driver is engine-owned and named in the
+      // seam’s own comment below.
+      //
+      // ⚠️ The REPORTING half (`insertDropped` → `strictReadonlyWrites` /
+      // `onFieldsDropped`) deliberately stays where it was, after the seam:
+      // moving it too would put `ReadonlyFieldRejectedError` ahead of the
+      // gate’s 403 and change which refusal a caller sees. The strips are
+      // value-changing; their report is not.
+      const schemaForValidation = this._registry.getObject(object);
+      // Defaults are already resolved above (pre-hook, #2703); a hook may
+      // have overridden fields or replaced `input.data` — take its data as-is.
+      const rows = rowHookContexts.map((rowCtx) => rowCtx.input.data as Record<string, unknown>);
+      // [#8682] Rows the declared-field door refused are already dead on
+      // arrival — seeded before the strips, before the seam, and so before
+      // the credential loop further down, which is the first pass with a
+      // real side effect (`encryptSecretFields` writes a `sys_secret` row):
+      // a culled row is neither stripped, nor judged, nor able to mint a
+      // secret for a write that will never happen.
+      const rowErrors: (unknown | undefined)[] = new Array(rows.length);
+      for (let i = 0; i < rows.length; i++) rowErrors[i] = undeclaredPerRow[i];
+      // [#5503] `autonumber` is RUNTIME-owned: the engine (or the driver's
+      // persistent sequence) issues the value, so a non-system caller does not
+      // get to supply or rewrite it. Until now nothing enforced that — a POST
+      // carrying an explicit record number was stored verbatim, bypassing the
+      // sequence, and the SQL driver's `supports.autonumber` path adopted it
+      // too (it only fills a slot left empty). Stripping HERE, in the engine
+      // and before `applyAutonumbers`, is what makes the fix driver-agnostic:
+      // every driver — native-sequence or not — is handed a row with no
+      // caller-supplied record number, so no driver had to change.
+      //
+      // Runs BEFORE validation on purpose: a value the caller was never
+      // allowed to send must not be judged by the object's rules either (a
+      // `format` rule on the field would otherwise 400 on a payload we are
+      // about to discard). Symmetric with the UPDATE strip, which likewise
+      // runs before `evaluateValidationRules`. Exemptions are the update
+      // path's, unchanged: `isSystem` (seed replay, migration) skips the whole
+      // pass, and `preserveAudit` (#3493) lets a historical import reinstate
+      // legacy record numbers.
+      //
+      // [#6339] `suppliedPerRow[i]` is handed over WHOLE — values included —
+      // rather than reduced to its key set. This pass runs after the
+      // beforeInsert hooks, so a key set could only say "the caller named
+      // this", and `delete` then took whatever value was standing there: a
+      // hook that RE-ISSUES the record number lost its write to any caller
+      // that had also submitted the key, while the same hook's write survived
+      // on a caller that had not. The update path's twin (#5591).
+      const insertDropped: string[] = [];
+      if (!opCtx.context?.isSystem) {
+        const preserveAudit = opCtx.context?.preserveAudit === true;
+        for (let i = 0; i < rows.length; i++) {
+          if (rowErrors[i] !== undefined) continue;
+          // [#8214] The insert side carries the same claim and the same
+          // sequencing — this pass logs, the `ReadonlyFieldRejectedError`
+          // below throws before any driver dispatch. Measured on
+          // `origin/main`: `driverCreates 0` while the line said the write
+          // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
+          // it reproduces, so the flag is threaded here too.
+          // [#14259] `hookWrittenKeys` — THIS row's sealed record, the other
+          // half of the same question `suppliedPerRow[i]` answers. #6339
+          // handed values over instead of a key set because "the caller named
+          // this key" and "this key still holds the caller's value" are
+          // different facts; the record closes the case values cannot reach,
+          // where the hook wrote the value the caller also sent. The value
+          // test stays as the fallback for any row with no record.
+          const stripped = stripRuntimeOwnedFields(
+            schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+            {
+              preserveAudit,
+              strictReadonlyWrites: options?.strictReadonlyWrites === true,
+              hookWrittenKeys: rowHookWrittenKeys[i],
+            },
+          ) as Record<string, unknown>;
+          if (stripped === rows[i]) continue;
+          for (const k of Object.keys(rows[i])) {
+            if (!(k in stripped) && !insertDropped.includes(k)) insertDropped.push(k);
+          }
+          rows[i] = stripped;
+          rowHookContexts[i].input.data = stripped;
+        }
+        // [#14147] STATIC author-declared `readonly`, enforced HERE — one
+        // semantics, one enforcement point, per the maintainer ruling of
+        // 2026-09-03 (option C) which SUPERSEDED the 2026-07-24 row "INSERT
+        // (all callers) exempt". Until it landed, a non-system caller
+        // reaching `engine.insert` DIRECTLY wrote a read-only column with no
+        // refusal, no WARN and no `onFieldsDropped` event, while the very
+        // same payload through the DataProtocol was stripped — and
+        // `create_record`'s listener (`@objectstack/service-automation`) was
+        // wired for a readonly drop it could never receive. The boundary copy
+        // that produced that asymmetry (`stripReadonlyForInsert`,
+        // metadata-protocol) is DELETED in the same change rather than kept
+        // as a second implementation.
+        //
+        // The strip is {@link stripReadonlyFields} — the SAME function
+        // `update` runs, under the SAME `isSystem` gate (the branch above),
+        // reporting through the SAME channels: `readonlyStripWarning` at
+        // `warn`, `onFieldsDropped` under reason `readonly`, and
+        // `strictReadonlyWrites` refusing before any driver dispatch. Its
+        // guards therefore come across too, and they are wider than the
+        // deleted ingress copy's: a hook stamp is not caller-supplied
+        // (`suppliedPerRow`), and a key a `beforeInsert` hook ASSIGNED is the
+        // hook's write, not a forgery (`rowHookWrittenKeys`, #14259). The
+        // ingress copy ran BEFORE the hooks and could judge neither.
+        //
+        // ⛔ `preserveAudit` is deliberately NOT forwarded — see
+        // {@link preserveAuditIgnoredOnInsertWarning}: the 2026-08-08 ruling
+        // narrowed that exemption to the UPDATE path and left `isSystem` as
+        // the create side's only one. Ruling C moved WHERE this strip runs;
+        // it did not widen WHAT exempts it.
+        //
+        // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
+        // (runtime-owned types belong to the pass above, platform objects to
+        // their own 403 guards); `null` — no such field on this object — is
+        // the cheap exit every ordinary insert takes.
+        const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
+        if (readonlySubject) {
+          const preserveAuditIgnored: string[] = [];
+          for (let i = 0; i < rows.length; i++) {
+            if (rowErrors[i] !== undefined) continue;
+            const stripped = stripReadonlyFields(
+              readonlySubject as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
+              {
+                strictReadonlyWrites: options?.strictReadonlyWrites === true,
+                hookWrittenKeys: rowHookWrittenKeys[i],
+                verb: 'insert',
+              },
+            ) as Record<string, unknown>;
+            if (stripped === rows[i]) continue;
+            const takenFromRow: string[] = [];
+            for (const k of Object.keys(rows[i])) {
+              if (k in stripped) continue;
+              takenFromRow.push(k);
+              if (!insertDropped.includes(k)) insertDropped.push(k);
+              if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
+            }
+            // The field's `defaultValue` is RE-DERIVED for every key this
+            // pass took, which is #3043's stated contract and a guarantee in
+            // its own right: a forged `approval_status` becomes `draft` — the
+            // enforced initial state — never NULL, so a stripped forgery
+            // cannot leave a row in a state the object's own rules
+            // (`requiredWhen`, the state machine) were written to exclude.
+            // The deleted ingress copy got this for free by running BEFORE
+            // `applyFieldDefaults`; a strip that runs after the hooks has to
+            // ask. Asked over the STRIPPED row, so a `defaultValue`
+            // expression reads the payload it will really be stored beside,
+            // and copied back key by key: `applyFieldDefaults` also fills
+            // every OTHER absent field, and a hook that deliberately wrote
+            // `null` must keep its null (the first defaults pass, ahead of
+            // the hooks, is the one that owns those keys).
+            if (takenFromRow.length > 0) {
+              const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
+              for (const k of takenFromRow) {
+                if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
+              }
+            }
+            rows[i] = stripped;
+            rowHookContexts[i].input.data = stripped;
+          }
+          // One line per CALL, not per row, and only when the exemption was
+          // ASKED FOR and something was actually removed — the union is
+          // faithful because the strip is schema-uniform.
+          if (preserveAuditIgnored.length > 0) {
+            this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
+          }
+        }
+      }
+
       // ── [#16608] The INSERT POST-IMAGE seam ──────────────────────────────
       //
       // The enforcement layer's write `check` used to be evaluated in its
@@ -10360,12 +10541,42 @@ export class ObjectQL implements IObjectQLEngine {
       //
       // Placement obeys the rule #8682 wrote for the declared-field door and
       // #13657 restated for its post-hook half: a refusal must cost nothing.
-      // This sits immediately after that door and BEFORE every producer —
+      // This sits after that door and BEFORE every producer —
       // `resolveSystemInsertOrganization`, `encryptSecretFields` (which writes
       // a `sys_secret` row), `applyAutonumbers` (which CONSUMES a sequence
-      // number), validation and the statement. Nothing between here and the
-      // driver adds a value the caller could have steered: the passes that run
-      // after are engine-owned strips and stamps.
+      // number), validation and the statement.
+      //
+      // ## What runs between here and the driver — stated, not waved at
+      //
+      // The contract review of PR #16805 measured the version of this comment
+      // that said "nothing between here and the driver adds a value the caller
+      // could have steered" and then let TWO caller-steerable passes run after
+      // the seam. Both now run ABOVE (`stripRuntimeOwnedFields` and the static
+      // `readonly` strip with its re-default), which is why the seam judges the
+      // row the driver is handed on every key a caller can reach. What is left
+      // after this point is engine-owned, and it is a CLOSED list rather than a
+      // reassurance:
+      //
+      //  - `resolveSystemInsertOrganization` + the driver's `injectTenantOnInsert`
+      //    fill an ABSENT tenant column; an explicit value on the row is left
+      //    alone, and after the strips above that value is a hook's or the
+      //    caller's own organization. (The Layer 0 tenant wall still judges the
+      //    PRE-hook image — filed separately, and the fix's host is this seam.)
+      //  - `encryptSecretFields` replaces a `secret` field's plaintext with a
+      //    `sys_secret` REFERENCE, and `applyAutonumbers` fills an autonumber
+      //    the strips above just guaranteed the caller did not supply. Both
+      //    substitute a platform-owned value for a caller-owned one; a `check`
+      //    naming either field judges the caller's value and the store receives
+      //    the platform's.
+      //  - `normalizeMultiValueFields` coerces a declared multi-value field to
+      //    its stored array shape.
+      //
+      // So the invariant this seam buys is stated to its real edge: a stored row
+      // satisfies the insert `check` on every field the CALLER can steer. ⛔ It
+      // is not "on every field", and writing it that way is what the review
+      // caught. A policy whose `check` names an autonumber, a `secret` or the
+      // tenant column is judging a value the platform is about to replace, and
+      // that is a boundary rather than a guarantee.
       //
       // A culled row is skipped rather than judged: it will not be written, so
       // refusing it would replace one verdict with another for a row that has
@@ -10424,13 +10635,9 @@ export class ObjectQL implements IObjectQLEngine {
 
       try {
         let result: any;
-        const schemaForValidation = this._registry.getObject(object);
         // When the driver generates autonumbers natively (persistent SQL
         // sequence), the engine defers to it — see #1603.
         const driverOwnsAutonumber = (driver as any)?.supports?.autonumber === true;
-        // Defaults are already resolved above (pre-hook, #2703); a hook may
-        // have overridden fields or replaced `input.data` — take its data as-is.
-        const rows = rowHookContexts.map((rowCtx) => rowCtx.input.data as Record<string, unknown>);
         // Partial-success mode (framework#3172, entered via insertMany): a row
         // that fails validation is culled and reported per-row instead of
         // aborting the whole batch — so a bulkWrite caller never needs the
@@ -10438,13 +10645,6 @@ export class ObjectQL implements IObjectQLEngine {
         // rows. rowErrors[i] set = row i is dead; only live rows reach the
         // driver / afterInsert / summaries.
         const partialMode = partialRowMode;
-        const rowErrors: (unknown | undefined)[] = new Array(rows.length);
-        // [#8682] Rows the declared-field door refused are already dead on
-        // arrival — seeded BEFORE the credential loop below, which is the first
-        // pass with a real side effect (`encryptSecretFields` writes a
-        // `sys_secret` row), so a culled row cannot mint a secret for a write
-        // that will never happen.
-        for (let i = 0; i < rows.length; i++) rowErrors[i] = undeclaredPerRow[i];
         for (let i = 0; i < rows.length; i++) {
           if (rowErrors[i] !== undefined) continue;
           try {
@@ -10469,151 +10669,6 @@ export class ObjectQL implements IObjectQLEngine {
         // Locale + translation hooks for the rejection messages (#3957) —
         // resolved once for the batch, identical for every row.
         const msgCtx = this.validationMessageContext(object, opCtx.context);
-        // [#5503] `autonumber` is RUNTIME-owned: the engine (or the driver's
-        // persistent sequence) issues the value, so a non-system caller does not
-        // get to supply or rewrite it. Until now nothing enforced that — a POST
-        // carrying an explicit record number was stored verbatim, bypassing the
-        // sequence, and the SQL driver's `supports.autonumber` path adopted it
-        // too (it only fills a slot left empty). Stripping HERE, in the engine
-        // and before `applyAutonumbers`, is what makes the fix driver-agnostic:
-        // every driver — native-sequence or not — is handed a row with no
-        // caller-supplied record number, so no driver had to change.
-        //
-        // Runs BEFORE validation on purpose: a value the caller was never
-        // allowed to send must not be judged by the object's rules either (a
-        // `format` rule on the field would otherwise 400 on a payload we are
-        // about to discard). Symmetric with the UPDATE strip, which likewise
-        // runs before `evaluateValidationRules`. Exemptions are the update
-        // path's, unchanged: `isSystem` (seed replay, migration) skips the whole
-        // pass, and `preserveAudit` (#3493) lets a historical import reinstate
-        // legacy record numbers.
-        //
-        // [#6339] `suppliedPerRow[i]` is handed over WHOLE — values included —
-        // rather than reduced to its key set. This pass runs after the
-        // beforeInsert hooks, so a key set could only say "the caller named
-        // this", and `delete` then took whatever value was standing there: a
-        // hook that RE-ISSUES the record number lost its write to any caller
-        // that had also submitted the key, while the same hook's write survived
-        // on a caller that had not. The update path's twin (#5591).
-        const insertDropped: string[] = [];
-        if (!opCtx.context?.isSystem) {
-          const preserveAudit = opCtx.context?.preserveAudit === true;
-          for (let i = 0; i < rows.length; i++) {
-            if (rowErrors[i] !== undefined) continue;
-            // [#8214] The insert side carries the same claim and the same
-            // sequencing — this pass logs, the `ReadonlyFieldRejectedError`
-            // below throws before any driver dispatch. Measured on
-            // `origin/main`: `driverCreates 0` while the line said the write
-            // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
-            // it reproduces, so the flag is threaded here too.
-            // [#14259] `hookWrittenKeys` — THIS row's sealed record, the other
-            // half of the same question `suppliedPerRow[i]` answers. #6339
-            // handed values over instead of a key set because "the caller named
-            // this key" and "this key still holds the caller's value" are
-            // different facts; the record closes the case values cannot reach,
-            // where the hook wrote the value the caller also sent. The value
-            // test stays as the fallback for any row with no record.
-            const stripped = stripRuntimeOwnedFields(
-              schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
-              {
-                preserveAudit,
-                strictReadonlyWrites: options?.strictReadonlyWrites === true,
-                hookWrittenKeys: rowHookWrittenKeys[i],
-              },
-            ) as Record<string, unknown>;
-            if (stripped === rows[i]) continue;
-            for (const k of Object.keys(rows[i])) {
-              if (!(k in stripped) && !insertDropped.includes(k)) insertDropped.push(k);
-            }
-            rows[i] = stripped;
-            rowHookContexts[i].input.data = stripped;
-          }
-          // [#14147] STATIC author-declared `readonly`, enforced HERE — one
-          // semantics, one enforcement point, per the maintainer ruling of
-          // 2026-09-03 (option C) which SUPERSEDED the 2026-07-24 row "INSERT
-          // (all callers) exempt". Until it landed, a non-system caller
-          // reaching `engine.insert` DIRECTLY wrote a read-only column with no
-          // refusal, no WARN and no `onFieldsDropped` event, while the very
-          // same payload through the DataProtocol was stripped — and
-          // `create_record`'s listener (`@objectstack/service-automation`) was
-          // wired for a readonly drop it could never receive. The boundary copy
-          // that produced that asymmetry (`stripReadonlyForInsert`,
-          // metadata-protocol) is DELETED in the same change rather than kept
-          // as a second implementation.
-          //
-          // The strip is {@link stripReadonlyFields} — the SAME function
-          // `update` runs, under the SAME `isSystem` gate (the branch above),
-          // reporting through the SAME channels: `readonlyStripWarning` at
-          // `warn`, `onFieldsDropped` under reason `readonly`, and
-          // `strictReadonlyWrites` refusing before any driver dispatch. Its
-          // guards therefore come across too, and they are wider than the
-          // deleted ingress copy's: a hook stamp is not caller-supplied
-          // (`suppliedPerRow`), and a key a `beforeInsert` hook ASSIGNED is the
-          // hook's write, not a forgery (`rowHookWrittenKeys`, #14259). The
-          // ingress copy ran BEFORE the hooks and could judge neither.
-          //
-          // ⛔ `preserveAudit` is deliberately NOT forwarded — see
-          // {@link preserveAuditIgnoredOnInsertWarning}: the 2026-08-08 ruling
-          // narrowed that exemption to the UPDATE path and left `isSystem` as
-          // the create side's only one. Ruling C moved WHERE this strip runs;
-          // it did not widen WHAT exempts it.
-          //
-          // WHICH fields it may judge is {@link staticReadonlyInsertSubject}'s
-          // (runtime-owned types belong to the pass above, platform objects to
-          // their own 403 guards); `null` — no such field on this object — is
-          // the cheap exit every ordinary insert takes.
-          const readonlySubject = staticReadonlyInsertSubject(schemaForValidation as any);
-          if (readonlySubject) {
-            const preserveAuditIgnored: string[] = [];
-            for (let i = 0; i < rows.length; i++) {
-              if (rowErrors[i] !== undefined) continue;
-              const stripped = stripReadonlyFields(
-                readonlySubject as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
-                {
-                  strictReadonlyWrites: options?.strictReadonlyWrites === true,
-                  hookWrittenKeys: rowHookWrittenKeys[i],
-                  verb: 'insert',
-                },
-              ) as Record<string, unknown>;
-              if (stripped === rows[i]) continue;
-              const takenFromRow: string[] = [];
-              for (const k of Object.keys(rows[i])) {
-                if (k in stripped) continue;
-                takenFromRow.push(k);
-                if (!insertDropped.includes(k)) insertDropped.push(k);
-                if (preserveAudit && !preserveAuditIgnored.includes(k)) preserveAuditIgnored.push(k);
-              }
-              // The field's `defaultValue` is RE-DERIVED for every key this
-              // pass took, which is #3043's stated contract and a guarantee in
-              // its own right: a forged `approval_status` becomes `draft` — the
-              // enforced initial state — never NULL, so a stripped forgery
-              // cannot leave a row in a state the object's own rules
-              // (`requiredWhen`, the state machine) were written to exclude.
-              // The deleted ingress copy got this for free by running BEFORE
-              // `applyFieldDefaults`; a strip that runs after the hooks has to
-              // ask. Asked over the STRIPPED row, so a `defaultValue`
-              // expression reads the payload it will really be stored beside,
-              // and copied back key by key: `applyFieldDefaults` also fills
-              // every OTHER absent field, and a hook that deliberately wrote
-              // `null` must keep its null (the first defaults pass, ahead of
-              // the hooks, is the one that owns those keys).
-              if (takenFromRow.length > 0) {
-                const redefaulted = this.applyFieldDefaults(object, stripped, opCtx.context, nowSnap);
-                for (const k of takenFromRow) {
-                  if (redefaulted[k] !== undefined) stripped[k] = redefaulted[k];
-                }
-              }
-              rows[i] = stripped;
-              rowHookContexts[i].input.data = stripped;
-            }
-            // One line per CALL, not per row, and only when the exemption was
-            // ASKED FOR and something was actually removed — the union is
-            // faithful because the strip is schema-uniform.
-            if (preserveAuditIgnored.length > 0) {
-              this.logger.warn(preserveAuditIgnoredOnInsertWarning(object, preserveAuditIgnored));
-            }
-          }
-        }
         // [#3407 / #5126] This is the strip site both standing notes on
         // `insert()` pointed at, so both members of `WriteObservabilityOptions`
         // discharge here — the same one-per-call choice `update` offers, and by

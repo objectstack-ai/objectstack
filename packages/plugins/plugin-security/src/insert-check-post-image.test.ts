@@ -124,6 +124,85 @@ const OBJECTS = [
       role: { name: 'role', type: 'text' },
     },
   },
+  // ── the contract review's F1 subject ────────────────────────────────────
+  //
+  // The SAME object, except that the checked scoping field is declared static
+  // `readonly` — which is not an exotic decoration but the natural shape for a
+  // column the server stamps and a caller may not choose. That is the whole
+  // point of the field: ADR-0055 forces the predicate onto the denormalised
+  // column, and `readonly: true` is how an author says "not yours to send".
+  //
+  // It is also what turns `engine.insert`'s static-`readonly` strip into a
+  // second writer of the checked field, AFTER the middleware has had its say.
+  {
+    name: 'qa_ro_member',
+    label: 'Employer member, readonly scope',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      employer: { name: 'employer', type: 'lookup', reference: 'qa_employer' },
+      employer_org: { name: 'employer_org', type: 'text', readonly: true },
+      role: { name: 'role', type: 'text' },
+    },
+  },
+  // The same again, with a `defaultValue` the caller does NOT hold — the strip's
+  // re-default (#3043's contract: every key this pass takes is re-derived) then
+  // puts a FOREIGN organization on the row rather than leaving it empty.
+  {
+    name: 'qa_ro_member_default',
+    label: 'Employer member, readonly scope with a foreign default',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      employer: { name: 'employer', type: 'lookup', reference: 'qa_employer' },
+      employer_org: { name: 'employer_org', type: 'text', readonly: true, defaultValue: OTHER_ORG },
+      role: { name: 'role', type: 'text' },
+    },
+  },
+  // F4 (i): governed by a policy whose `check` cannot be compiled.
+  {
+    name: 'qa_unevaluable_member',
+    label: 'Employer member, unevaluable check',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      employer: { name: 'employer', type: 'lookup', reference: 'qa_employer' },
+      employer_org: { name: 'employer_org', type: 'text' },
+      role: { name: 'role', type: 'text' },
+    },
+  },
+  // F4 (ii): the two producers a refusal must not pay for — a sequence number
+  // and a `sys_secret` row.
+  {
+    name: 'qa_cost_member',
+    label: 'Employer member, with an autonumber and a secret',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      employer: { name: 'employer', type: 'lookup', reference: 'qa_employer' },
+      employer_org: { name: 'employer_org', type: 'text' },
+      code: { name: 'code', type: 'autonumber', autonumberFormat: 'C-{0000}', format: 'C-{0000}' },
+      token: { name: 'token', type: 'secret' },
+    },
+  },
+  // The secret store the credential channel writes into, declared here so
+  // `syncSchemas()` creates a real table for it and "no secret was minted" can
+  // be READ rather than inferred.
+  {
+    name: 'sys_secret',
+    label: 'Secret',
+    sharingModel: 'public_read_write',
+    fields: {
+      id: { name: 'id', type: 'text', primaryKey: true },
+      namespace: { name: 'namespace', type: 'text' },
+      key: { name: 'key', type: 'text' },
+      kms_key_id: { name: 'kms_key_id', type: 'text' },
+      alg: { name: 'alg', type: 'text' },
+      version: { name: 'version', type: 'number' },
+      ciphertext: { name: 'ciphertext', type: 'text' },
+      created_at: { name: 'created_at', type: 'datetime' },
+    },
+  },
 ];
 
 /** The real platform baseline, as the app runs under it. */
@@ -139,11 +218,47 @@ const EMPLOYER_ADMIN: PermissionSet = PermissionSetSchema.parse({
   objects: {
     qa_employer: { allowRead: true, allowCreate: true, allowEdit: true },
     qa_employer_member: { allowRead: true, allowCreate: true, allowEdit: true },
+    qa_ro_member: { allowRead: true, allowCreate: true, allowEdit: true },
+    qa_ro_member_default: { allowRead: true, allowCreate: true, allowEdit: true },
+    qa_unevaluable_member: { allowRead: true, allowCreate: true, allowEdit: true },
+    qa_cost_member: { allowRead: true, allowCreate: true, allowEdit: true },
   },
   rowLevelSecurity: [
     {
       name: 'employer_admin_members',
       object: 'qa_employer_member',
+      operation: 'all',
+      using: 'record.employer_org in current_user.employer_org_ids',
+      check: 'record.employer_org in current_user.employer_org_ids',
+    },
+    {
+      name: 'employer_admin_ro_members',
+      object: 'qa_ro_member',
+      operation: 'all',
+      using: 'record.employer_org in current_user.employer_org_ids',
+      check: 'record.employer_org in current_user.employer_org_ids',
+    },
+    {
+      name: 'employer_admin_ro_members_default',
+      object: 'qa_ro_member_default',
+      operation: 'all',
+      using: 'record.employer_org in current_user.employer_org_ids',
+      check: 'record.employer_org in current_user.employer_org_ids',
+    },
+    {
+      // The `check` names a `current_user.*` key NO resolver publishes, so the
+      // compiler cannot evaluate it and drops the policy — which upstream is
+      // `RLS_DENY_FILTER`, the fail-closed sentinel that matches no row. `using`
+      // stays evaluable so the read leg is not what is under test.
+      name: 'employer_admin_unevaluable',
+      object: 'qa_unevaluable_member',
+      operation: 'all',
+      using: 'record.employer_org in current_user.employer_org_ids',
+      check: 'record.employer_org in current_user.no_such_membership_key',
+    },
+    {
+      name: 'employer_admin_cost',
+      object: 'qa_cost_member',
       operation: 'all',
       using: 'record.employer_org in current_user.employer_org_ids',
       check: 'record.employer_org in current_user.employer_org_ids',
@@ -175,6 +290,41 @@ interface Booted {
   stampReads: string[];
   /** The stored rows, read past every scope, straight off the driver's table. */
   stored: () => Promise<Array<Record<string, unknown>>>;
+  /** The same, for any table — ground truth for the cells below. */
+  table: (name: string, columns: string[]) => Promise<Array<Record<string, unknown>>>;
+  /** How many times the credential channel actually minted a secret. */
+  crypto: { encrypt: number; decrypt: number };
+}
+
+/**
+ * A reversible stub `ICryptoProvider`, so `encryptSecretFields` runs its REAL
+ * path — mint a handle, write a `sys_secret` row, put an opaque ref on the row —
+ * and both halves of "a refusal costs nothing" become readable facts rather than
+ * an argument about ordering.
+ */
+function makeFakeCrypto() {
+  let n = 0;
+  const calls = { encrypt: 0, decrypt: 0 };
+  const provider = {
+    async encrypt(plain: string) {
+      calls.encrypt += 1;
+      n += 1;
+      return {
+        id: `sec_${n}`,
+        kmsKeyId: 'local',
+        alg: 'test-b64',
+        version: 1,
+        ciphertext: Buffer.from(plain, 'utf8').toString('base64'),
+      };
+    },
+    async decrypt(handle: { ciphertext: string }) {
+      calls.decrypt += 1;
+      return Buffer.from(handle.ciphertext, 'base64').toString('utf8');
+    },
+    async rotateKey(handle: { version: number }) { return { ...handle, version: handle.version + 1 }; },
+    digest(plain: string) { return `d:${plain.length}`; },
+  };
+  return { provider, calls };
 }
 
 async function boot(makeDriver: () => unknown): Promise<Booted> {
@@ -207,8 +357,18 @@ async function boot(makeDriver: () => unknown): Promise<Booted> {
     } as never)) as Record<string, unknown> | null;
     if (parent?.employer_org != null) ctx.input.data.employer_org = parent.employer_org;
   };
-  engine.on('beforeInsert', 'qa_employer_member', stamp as never);
-  engine.on('beforeUpdate', 'qa_employer_member', stamp as never);
+  for (const object of [
+    'qa_employer_member',
+    'qa_ro_member',
+    'qa_ro_member_default',
+    'qa_unevaluable_member',
+    'qa_cost_member',
+  ]) {
+    engine.on('beforeInsert', object, stamp as never);
+    engine.on('beforeUpdate', object, stamp as never);
+  }
+  const crypto = makeFakeCrypto();
+  engine.setCryptoProvider(crypto.provider as never);
 
   const resolver = {
     keys: ['employer_org_ids'],
@@ -247,16 +407,20 @@ async function boot(makeDriver: () => unknown): Promise<Booted> {
     { context: SYS_CTX } as never,
   );
 
+  const table = async (name: string, columns: string[]) => {
+    const driver = (engine as unknown as { getDriver(o: string): { knex: (t: string) => Promise<unknown> } })
+      .getDriver(name);
+    return (await (driver.knex as unknown as (t: string) => { select: (...c: string[]) => Promise<Array<Record<string, unknown>>> })(
+      name,
+    ).select(...columns)) as Array<Record<string, unknown>>;
+  };
+
   return {
     engine,
     stampReads,
-    stored: async () => {
-      const driver = (engine as unknown as { getDriver(o: string): { knex: (t: string) => Promise<unknown> } })
-        .getDriver('qa_employer_member');
-      return (await (driver.knex as unknown as (t: string) => { select: (...c: string[]) => Promise<Array<Record<string, unknown>>> })(
-        'qa_employer_member',
-      ).select('id', 'employer', 'employer_org')) as Array<Record<string, unknown>>;
-    },
+    crypto: crypto.calls,
+    table,
+    stored: () => table('qa_employer_member', ['id', 'employer', 'employer_org']),
   };
 }
 
@@ -559,3 +723,186 @@ describe('[#16608] fail-closed — an engine that does not run the installed che
     expect(ctx.logger.error).toHaveBeenCalled();
   });
 });
+
+// ── the contract review's cells, on the same both-drivers footing ──────────
+
+/**
+ * [contract review of PR #16805, F1 — BLOCKING] **The row the seam judges must
+ * be the row that is stored.**
+ *
+ * The first delivery of this card put the judgement immediately after the
+ * post-hook declared-field door — ahead of every producer with a side effect,
+ * which was the right rule — but two VALUE-CHANGING passes still ran after it:
+ * `stripRuntimeOwnedFields` and the static-`readonly` strip with its re-default
+ * (`engine.insert`). For a `readonly` scoping field, which is what an author
+ * declares precisely so a caller cannot choose it, that left the old defect
+ * intact one layer down:
+ *
+ *   caller sends an IN-scope value → the seam judges it and admits → the strip
+ *   removes it (caller-supplied, no hook wrote it) → `applyFieldDefaults`
+ *   re-derives the key → the STORE receives a value the seam never saw.
+ *
+ * With no `defaultValue` the stored row simply violates the `check`. With a
+ * `defaultValue` naming another organization it is the card's own headline
+ * defect verbatim: a row stored in an organization the caller does not hold.
+ *
+ * The fix moves both strips AHEAD of the seam, so the seam judges the row after
+ * every pass that can change a value a caller could steer and before every pass
+ * with a side effect. These two cells are what that fix is measured by: they are
+ * RED on the reviewed head `cd09d3b99` and green after.
+ *
+ * ⛔ Note what is NOT asserted: that the caller's value survives. It must not —
+ * the field is `readonly`. The invariant is the disjunction the review named:
+ * either the insert is refused, or the STORED row satisfies the check. Both
+ * cells assert the disjunction over the driver's own table first, and only then
+ * pin the answer the runtime actually gives.
+ */
+for (const [driverName, makeDriver] of DRIVERS) {
+  describe(`[#16608 F1] ${driverName} — a static \`readonly\` scoping field: the seam judges what the STRIP leaves`, () => {
+    it('no default — the caller’s in-scope value is stripped, so the insert is refused and nothing is stored', async () => {
+      const booted = await boot(makeDriver);
+
+      // No `employer`, so the stamp early-returns and writes nothing: the only
+      // author of `employer_org` on this payload is the CALLER, and the strip
+      // is the only thing that touches it afterwards.
+      const outcome = await attempt(() =>
+        booted.engine.insert(
+          'qa_ro_member',
+          { id: 'ro_1', employer_org: OWN_ORG, role: 'admin' },
+          { context: CALLER } as never,
+        ),
+      );
+
+      const rows = await booted.table('qa_ro_member', ['id', 'employer_org']);
+      // THE INVARIANT, asserted before any verdict is pinned: a stored row
+      // satisfies the check, or there is no stored row.
+      for (const row of rows) {
+        expect(
+          row.employer_org,
+          'a stored row must satisfy the insert check the seam claims to enforce',
+        ).toBe(OWN_ORG);
+      }
+      // And the answer the runtime gives: refused, on the gate's own envelope.
+      expectCheckDenial(outcome, 'insert');
+      expect(rows, 'nothing was stored').toEqual([]);
+    });
+
+    it('a `defaultValue` OUTSIDE the caller’s scope — refused, and no row lands in an organization the caller does not hold', async () => {
+      const booted = await boot(makeDriver);
+
+      const outcome = await attempt(() =>
+        booted.engine.insert(
+          'qa_ro_member_default',
+          { id: 'rod_1', employer_org: OWN_ORG, role: 'admin' },
+          { context: CALLER } as never,
+        ),
+      );
+
+      const rows = await booted.table('qa_ro_member_default', ['id', 'employer_org']);
+      expect(
+        rows.some((r) => r.employer_org === OTHER_ORG),
+        'the strip’s re-default must not be able to store an organization the caller does not hold',
+      ).toBe(false);
+      for (const row of rows) {
+        expect(row.employer_org, 'a stored row must satisfy the insert check').toBe(OWN_ORG);
+      }
+      expectCheckDenial(outcome, 'insert');
+      expect(rows, 'nothing was stored').toEqual([]);
+    });
+  });
+
+  /**
+   * [contract review F4 (i)] An `check` the compiler cannot evaluate compiles to
+   * `RLS_DENY_FILTER` — the fail-closed sentinel that matches no row — and the
+   * seam must REFUSE on it rather than wave the write through.
+   *
+   * The claim was argued in the first delivery and never pinned. It is pinned
+   * here through the seam specifically: the `beforeInsert` stamp is observed to
+   * have RUN, which it can only have done if the middleware handed the write to
+   * the engine — so the refusal below is `evaluate`'s, not the middleware's.
+   */
+  describe(`[#16608 F4] ${driverName} — an unevaluable \`check\` refuses`, () => {
+    it('refuses the insert through the seam, on the ADR-0112 envelope, with nothing stored', async () => {
+      const booted = await boot(makeDriver);
+
+      const outcome = await attempt(() =>
+        booted.engine.insert(
+          'qa_unevaluable_member',
+          // In-scope in every readable sense: the parent is the caller's own,
+          // so the stamp lands `org_a`. Only the UNEVALUABLE check refuses it.
+          { id: 'unev_1', employer: 'emp_a', employer_org: OWN_ORG, role: 'admin' },
+          { context: CALLER } as never,
+        ),
+      );
+
+      expectCheckDenial(outcome, 'insert');
+      expect(
+        booted.stampReads,
+        'the hook ran, so the write reached the engine and the refusal is the seam’s',
+      ).toContain('emp_a');
+      expect(await booted.table('qa_unevaluable_member', ['id', 'employer_org'])).toEqual([]);
+    });
+  });
+
+  /**
+   * [contract review F4 (ii)] **A refusal costs nothing** — the rule #8682 wrote
+   * for the declared-field door, now owed by this seam because it moved the
+   * judgement into the engine's own timeline.
+   *
+   * Two producers sit downstream of the seam and both are irreversible in the
+   * way that matters: `applyAutonumbers` (or the driver's native sequence)
+   * CONSUMES a number, and `encryptSecretFields` MINTS a `sys_secret` row. The
+   * PR body claimed both are safe. Neither was pinned.
+   *
+   * The autonumber half is asserted format-agnostically, against a control boot
+   * that never refuses anything: if the refused insert had drawn a number, the
+   * survivor's number would differ from the control's.
+   */
+  describe(`[#16608 F4] ${driverName} — a refusal consumes no autonumber and mints no secret`, () => {
+    it('the refused insert draws no sequence value and writes no sys_secret row', async () => {
+      // The control: the very first admitted insert on a fresh engine.
+      const control = await boot(makeDriver);
+      await control.engine.insert(
+        'qa_cost_member',
+        { id: 'cost_ctl', employer: 'emp_a', employer_org: OWN_ORG, token: 'sekrit' },
+        { context: CALLER } as never,
+      );
+      const baseline = (await control.table('qa_cost_member', ['id', 'code']))[0]!.code;
+      expect(baseline, 'the control drew a sequence value').toBeTruthy();
+      expect(control.crypto.encrypt, 'the control minted its secret — the field IS on the credential path').toBe(1);
+
+      // The subject: one refusal, then the same admitted insert.
+      const booted = await boot(makeDriver);
+      const refused = await attempt(() =>
+        booted.engine.insert(
+          'qa_cost_member',
+          // In-scope on the payload, out-of-scope parent — the measured bypass.
+          { id: 'cost_bad', employer: 'emp_b', employer_org: OWN_ORG, token: 'sekrit' },
+          { context: CALLER } as never,
+        ),
+      );
+      expectCheckDenial(refused, 'insert');
+      expect(await booted.table('qa_cost_member', ['id', 'code'])).toEqual([]);
+      // MINTED NOTHING: the credential channel never ran for the refused row.
+      expect(booted.crypto.encrypt, 'a refused insert must not mint a secret').toBe(0);
+      expect(await booted.table('sys_secret', ['id']), 'no sys_secret row for a refused insert').toEqual([]);
+
+      const admitted = await attempt(() =>
+        booted.engine.insert(
+          'qa_cost_member',
+          { id: 'cost_ok', employer: 'emp_a', employer_org: OWN_ORG, token: 'sekrit' },
+          { context: CALLER } as never,
+        ),
+      );
+      expect(admitted.ok, `expected the follow-up insert to be admitted: ${admitted.developerMessage ?? admitted.message}`).toBe(true);
+
+      const survivors = await booted.table('qa_cost_member', ['id', 'code']);
+      expect(survivors).toHaveLength(1);
+      // CONSUMED NOTHING: the survivor gets exactly the number the control got,
+      // so the refused attempt left the sequence where it found it.
+      expect(survivors[0]!.code, 'the refusal consumed no sequence value').toBe(baseline);
+      expect(booted.crypto.encrypt, 'exactly one mint, for the one write that happened').toBe(1);
+      expect(await booted.table('sys_secret', ['id'])).toHaveLength(1);
+    });
+  });
+}
