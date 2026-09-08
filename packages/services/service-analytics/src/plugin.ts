@@ -191,6 +191,21 @@ export interface AnalyticsServicePluginOptions {
     | undefined
     | Promise<FilterCondition | null | undefined>;
   /**
+   * The OBJECT-LEVEL read admission — "may this caller read this object at
+   * all". The sibling of {@link AnalyticsServicePluginOptions.getReadScope} and
+   * NOT a substitute for it: the scope answers WHICH ROWS and answers
+   * `undefined` for a caller with no grant at all, so a door holding only the
+   * scope cannot tell "unrestricted" from "not permitted" — which is how the
+   * raw-SQL path served a row count for an object whose `/data` door answers
+   * 403. When omitted, the plugin auto-bridges to a registered `'security'`
+   * service, preferring `canReadObject(object, context)` and falling back to
+   * `explain({ object, operation: 'read' }, context).allowed`.
+   */
+  admitObjectRead?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) => boolean | Promise<boolean>;
+  /**
    * ADR-0021 D-C — join allowlist per cube (the dataset's declared `include`).
    * Typically wired from the dataset registry's compiled `allowedRelationships`.
    */
@@ -492,6 +507,65 @@ export class AnalyticsServicePlugin implements Plugin {
       autoBridgedReadScope = true;
     }
 
+    // The OBJECT-LEVEL half of the same read, bridged the same way and for the
+    // same reason the scope is: analytics stays decoupled from security, and
+    // resolution happens at CALL time so plugin-registration order does not
+    // decide whether the gate exists.
+    //
+    // ## Why there are two spellings and neither of them is "admit"
+    //
+    // `canReadObject` is the direct answer and the one this repo's
+    // `plugin-security` serves. A security service that predates it is still a
+    // conforming `ISecurityService`, and the fallback for such a service is NOT
+    // to admit — falling open on absence is exactly the defect this gate
+    // closes. It is `explain`, which is NOT optional on that contract and whose
+    // `allowed` is the same bottom line ("would the middleware allow this
+    // operation?") computed by the same enforcement walk. `explain` is the
+    // heavier call, which is why it is the fallback and not the primary; it
+    // never fires against an in-repo stack.
+    //
+    // A deployment with NO security service at all gets no gate — and no
+    // object-level gate on `/data` either, since that gate IS this plugin's
+    // absent middleware — so the two doors still agree. That state is reported
+    // at init below.
+    interface SecurityReadAdmission {
+      canReadObject?(object: string, context?: ExecutionContext): boolean | Promise<boolean>;
+      explain?(
+        request: { object: string; operation: string },
+        callerContext?: ExecutionContext,
+      ): Promise<{ allowed?: boolean }>;
+    }
+    let admitObjectRead = this.options.admitObjectRead;
+    let autoBridgedReadAdmission = false;
+    if (!admitObjectRead) {
+      const trySecurityAdmission = (): SecurityReadAdmission | undefined => {
+        try {
+          const svc = ctx.getService<SecurityReadAdmission>('security');
+          if (!svc) return undefined;
+          return typeof svc.canReadObject === 'function' || typeof svc.explain === 'function'
+            ? svc
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      };
+      admitObjectRead = async (object, context) => {
+        const svc = trySecurityAdmission();
+        // No security service resolved at call time → no object-level gate on
+        // this deployment, which is the state reported at init.
+        if (!svc) return true;
+        if (typeof svc.canReadObject === 'function') {
+          return await svc.canReadObject(object, context);
+        }
+        const decision = await svc.explain!({ object, operation: 'read' }, context);
+        // A conforming `explain` always answers `allowed`; a shape that does
+        // not is a broken provider, and the fail-closed reading is the only
+        // safe one here.
+        return decision?.allowed === true;
+      };
+      autoBridgedReadAdmission = true;
+    }
+
     // ADR-0021 — relationship → target-object resolver. A dataset's `include`
     // names lookup/master_detail FIELDS on the base object; the joined TABLE is
     // each field's `reference` target (which can differ from the field name,
@@ -715,6 +789,7 @@ export class AnalyticsServicePlugin implements Plugin {
       executeAggregate,
       fallbackService,
       getReadScope,
+      admitObjectRead,
       getAllowedRelationships: this.options.getAllowedRelationships,
       coerceTemporalFilterValue,
       coerceTemporalFilterColumn,
@@ -804,6 +879,22 @@ export class AnalyticsServicePlugin implements Plugin {
         '[Analytics] No getReadScope configured and no "security" service with getReadFilter found — ' +
         'analytics queries will NOT enforce tenant/RLS scoping (ADR-0021 D-C). ' +
         'Supply getReadScope or register a security service in multi-tenant deployments.',
+      );
+    }
+
+    if (autoBridgedReadAdmission && securityPresentAtInit) {
+      ctx.logger.info(
+        '[Analytics] Auto-bridged admitObjectRead → "security" service (canReadObject, ' +
+        'falling back to explain) — every analytics door now asks the object-level ' +
+        'read grant the engine middleware asks, ahead of the strategy chain.',
+      );
+    } else if (autoBridgedReadAdmission) {
+      ctx.logger.warn(
+        '[Analytics] No admitObjectRead configured and no "security" service registered at init — ' +
+        'the bridge resolves per query, but if no security service ever appears, analytics ' +
+        'queries will NOT enforce the OBJECT-LEVEL read grant. On a SQL driver that means any ' +
+        'authenticated caller can post an inline dataset and read counts and groupings for an ' +
+        'object they hold no grant on. Supply admitObjectRead or register a security service.',
       );
     }
 
