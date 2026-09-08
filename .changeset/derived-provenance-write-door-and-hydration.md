@@ -1,5 +1,5 @@
 ---
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 ---
 
 Stop persisting the caller's `_packageId` / `_packageVersion` / `_provenance`, and restate tenant authorship at hydration for every metadata type.
