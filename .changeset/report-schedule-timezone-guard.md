@@ -2,7 +2,7 @@
 "@objectstack/plugin-reports": minor
 ---
 
-fix(plugin-reports): a non-member schedule `timezone` no longer discards the cron expression, and a schedule already holding one stops instead of firing on a cadence nobody asked for (#16291)
+fix(plugin-reports)!: a non-member schedule `timezone` no longer discards the cron expression, and a schedule already holding one stops instead of firing on a cadence nobody asked for (#16291)
 
 **BREAKING** for a deployment that already stores a report schedule with a cron expression and a `timezone` that is not an IANA member. Such a schedule is delivering today, on the wrong cadence; after this change it does not deliver at all until a human corrects the zone. It ships as `minor` under the lockstep launch-window convention (`scripts/check-changeset-no-major.mjs` refuses `major`); the version number is not the signal here, this entry is.
 
