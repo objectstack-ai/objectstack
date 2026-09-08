@@ -2278,6 +2278,78 @@ describe('Relationship target — `reference` required on lookup/master_detail (
     },
   );
 
+  // [#16126] A whitespace-only target is the same hole a third way: it names
+  // no object either (no whitespace-bearing string can match the declared
+  // object-name grammar), and it is what a cleared target picker emits when
+  // the value round-trips through an input. The notion of blank is `.trim()`,
+  // the same one `EvaluatedExpressionSchema` applies to `source`.
+
+  it.each(['lookup', 'master_detail'] as const)(
+    'refuses a %s whose reference is whitespace-only — same issue, same path, same message as `\'\'`',
+    (type) => {
+      const result = FieldSchema.safeParse({
+        name: 'company_id',
+        label: 'Company',
+        type,
+        reference: '   ',
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'reference');
+      expect(issue).toBeDefined();
+      expect(issue!.code).toBe('custom');
+      expect(issue!.message).toMatch(/non-empty `reference`/);
+      expect(issue!.message).toMatch(/target object/);
+    },
+  );
+
+  it.each(['\t', '\n', ' \t\n '] as const)(
+    'refuses a lookup whose reference is only whitespace (%j) — not just the space character',
+    (reference) => {
+      const result = FieldSchema.safeParse({
+        name: 'company_id', label: 'Company', type: 'lookup', reference,
+      });
+      expect(result.success).toBe(false);
+      expect(
+        result.error!.issues.find((i) => i.path.join('.') === 'reference')?.code,
+      ).toBe('custom');
+    },
+  );
+
+  it('refuses a whitespace-only reference at the DOCUMENT level too, located at the field', () => {
+    const result = ObjectSchema.safeParse({
+      name: 'acct_note',
+      label: 'Note',
+      fields: { rel: { name: 'rel', label: 'Rel', type: 'lookup', reference: '   ' } },
+    });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues.find(
+      (i) => i.path.join('.') === 'fields.rel.reference',
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('custom');
+  });
+
+  it.each([42, null, {}] as const)(
+    'keeps a non-string reference (%j) answering `invalid_type`, not the custom message',
+    (reference) => {
+      const result = FieldSchema.safeParse({
+        name: 'company_id', label: 'Company', type: 'lookup', reference,
+      });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i) => i.path.join('.') === 'reference');
+      expect(issue!.code).toBe('invalid_type');
+      expect(issue!.message).not.toMatch(/non-empty `reference`/);
+    },
+  );
+
+  it('trims only to TEST — a name with surrounding whitespace is authored and is stored as written', () => {
+    const result = FieldSchema.safeParse({
+      name: 'company_id', label: 'Company', type: 'lookup', reference: ' company ',
+    });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.reference).toBe(' company ');
+  });
+
   it.each(['lookup', 'master_detail'] as const)(
     'accepts a %s with a non-empty reference (positive control: the check refuses only the hole)',
     (type) => {
