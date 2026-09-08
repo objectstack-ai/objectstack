@@ -254,7 +254,13 @@ describe('executeRawSql auto-bridge routes by object (#5033)', () => {
       { stage: 'won', deal_count: 2 },
       { stage: 'lost', deal_count: 1 },
     ]);
-    expect(warn).not.toHaveBeenCalled();
+    // Scoped to the degradation this case is about, exactly as its sibling
+    // above spells it — ⛔ not a blanket "no warning at all". The analytics
+    // plugin now also reports at init when no `security` service is registered
+    // to answer the OBJECT-LEVEL read grant, and this fixture deliberately
+    // registers none; a blanket assertion would read that deliberate report as
+    // a routing regression.
+    expect(warn.mock.calls.map(String).join('\n')).not.toMatch(/is unavailable/);
   });
 });
 
