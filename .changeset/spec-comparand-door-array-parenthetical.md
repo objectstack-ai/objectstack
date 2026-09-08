@@ -1,5 +1,5 @@
 ---
-"@objectstack/spec": patch
+"@objectstack/spec": minor
 ---
 
 docs(spec): the comparand door's array parenthetical states what the drivers do today
