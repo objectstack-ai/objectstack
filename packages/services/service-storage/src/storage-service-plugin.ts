@@ -884,6 +884,11 @@ export interface StorageRoutesMountReport {
  * how a security decision acquires a second, divergent definition, and it
  * was refused (#15169 option C).
  *
+ * The three builders stay MODULE-private, not merely absent from `index.ts`:
+ * the package's `exports` map publishes `"."` alone, so no deep import reaches
+ * this file, and this file hands no caller a gate — only this composition,
+ * which binds them and returns booleans.
+ *
  * `resolveFileHolder` is bound to the reap guard's own `findFileHolder`
  * (#10246): one definition of "still held", asked by the sweep before it
  * reaps and by the download path before it refuses, so the two cannot answer
@@ -948,7 +953,7 @@ export function composeStorageRoutes(
  * organization therefore means no stamp — the pre-#12745 behaviour, reported
  * by the backfill rather than invented here.
  */
-export function buildAuthSessionResolver(
+function buildAuthSessionResolver(
   registry: StorageGateRegistry,
 ): ((req: { headers?: unknown }) => Promise<StorageUploadSession | null>) | undefined {
   const getSession = buildGetSession(registry);
@@ -1100,7 +1105,7 @@ async function resolveAdmissionTenancyPosture(
  * more. A shared model would have had to union field references too, silently
  * widening access whenever one file id was copied into a more public record.
  */
-export function buildFileReadAuthorizer(
+function buildFileReadAuthorizer(
   registry: StorageGateRegistry,
   engine: IDataEngine | null,
 ): ((file: FileRecord, req: { headers?: unknown }) => Promise<FileReadVerdict>) | undefined {
