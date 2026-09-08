@@ -341,6 +341,27 @@ describe('#16589 — the in-memory driver honours DriverOptions.tenantId', () =>
       expect(ids(await driver.find(object, {}))).toEqual(['b1']);
     });
 
+    it('deleteMany WITH a `where` deletes only this organization\'s matches', async () => {
+      const driver = makeDriver();
+      const object = await seed(driver);
+
+      // A different code path from the delete-all arm above, and the one worth
+      // pinning separately: it filters `visible`, collects `matchedIds`, then
+      // rebuilds the whole table from that set — so an id that crossed the wall
+      // would take the other organization's row with it. `contains 'one'`
+      // matches exactly one row in A (`a1`) and one in B (`b1`), which makes
+      // "scoped" and "unscoped" two different NUMBERS, not just two row lists.
+      expect(
+        await driver.deleteMany(
+          object,
+          { where: { type: 'comparison', field: 'name', operator: 'contains', value: 'one' } },
+          { tenantId: ORG_A },
+        ),
+      ).toBe(1);
+      // `b1` matched the filter and is the row that must survive it.
+      expect(ids(await driver.find(object, {}))).toEqual(['a2', 'b1', 'g1']);
+    });
+
     it('bulkUpdate and bulkDelete skip ids belonging to another organization', async () => {
       const driver = makeDriver();
       const object = await seed(driver);
@@ -367,6 +388,45 @@ describe('#16589 — the in-memory driver honours DriverOptions.tenantId', () =>
       await driver.upsert(object, { name: 'B one', organization_id: ORG_A }, ['name'], { tenantId: ORG_A });
       const b1 = (await driver.find(object, {})).find((r) => r.id === 'b1');
       expect(b1).toMatchObject({ organization_id: ORG_B });
+    });
+
+    it('upsert by an id that exists OUTSIDE the scope refuses — never a second row with one primary id', async () => {
+      const driver = makeDriver();
+      const object = await seed(driver);
+
+      // The `conflictKeys` arm above may insert; the `id` arm may NOT. `id` is
+      // this store's primary id, and falling through to `create` here landed a
+      // SECOND row carrying `b1` — `create` checks only DECLARED unique
+      // constraints and `id` is not one. A duplicate primary id then corrupts
+      // every id-addressed door for BOTH tenants. ⛔ `driver-sql` is not the
+      // precedent for falling through: it merges on the PRIMARY KEY regardless
+      // of tenant and scopes only the readback, so the duplicate is unreachable
+      // there.
+      await expect(
+        driver.upsert(object, { id: 'b1', name: 'hijacked' }, undefined, { tenantId: ORG_A }),
+      ).rejects.toThrow(/Record with ID b1 not found/);
+
+      const after = await driver.find(object, {});
+      expect(ids(after)).toEqual(['a1', 'a2', 'b1', 'g1']);
+      // The assertion the whole finding is about — one row, not two.
+      expect(after.filter((r) => r.id === 'b1')).toHaveLength(1);
+      expect(after.find((r) => r.id === 'b1')).toMatchObject({ name: 'B one', organization_id: ORG_B });
+
+      // Two positive controls, so this reads as "the cross-wall id is refused"
+      // rather than "upsert by id is broken": inside the organization the same
+      // door still MERGES, and an id no row in the table carries still INSERTS.
+      expect(
+        await driver.upsert(object, { id: 'a1', name: 'renamed' }, undefined, { tenantId: ORG_A }),
+      ).toMatchObject({ id: 'a1', name: 'renamed' });
+      expect(
+        await driver.upsert(
+          object,
+          { id: 'a3', name: 'A three', organization_id: ORG_A },
+          undefined,
+          { tenantId: ORG_A },
+        ),
+      ).toMatchObject({ id: 'a3' });
+      expect(ids(await driver.find(object, {}))).toEqual(['a1', 'a2', 'a3', 'b1', 'g1']);
     });
 
     it('distinct() is NOT scoped — the one door with no DriverOptions to scope by', async () => {

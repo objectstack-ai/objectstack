@@ -774,14 +774,42 @@ export class InMemoryDriver implements IDataDriver {
     let existingRecord: any = null;
 
     // [#16589] The conflict lookup is a read: a row belonging to another
-    // organization is not a conflict for this caller, so the upsert lands as an
-    // INSERT rather than silently rewriting a row it was never allowed to see.
-    // Matches `driver-sql`, which scopes its own upsert door.
+    // organization is not a conflict for this caller, so an upsert keyed on
+    // `conflictKeys` lands as an INSERT rather than silently rewriting a row it
+    // was never allowed to see.
+    //
+    // ⛔ `driver-sql` is NOT the precedent for that fall-through on the `id`
+    // arm. Its `INSERT … ON CONFLICT(id)` merges on the PRIMARY KEY regardless
+    // of tenant — "the verdict itself is tenant-independent regardless: `id` is
+    // the PRIMARY KEY, so at most one row in the table can carry it" — and only
+    // the READBACK is scoped. This store has no such key, so the `id` arm is
+    // handled separately below.
     const scope = this.tenantScope(object, options);
     const visible = scope ? table.filter(scope) : table;
 
     if (data.id) {
         existingRecord = visible.find(r => r.id === data.id);
+        // [#16589] The scope is the only thing that can have hidden the row: a
+        // row carrying `data.id` may sit in `table` and outside `visible`.
+        // Falling through to `create` there lands a SECOND row with the same
+        // primary id — `create` checks only DECLARED unique constraints and
+        // `id` is not one (pinned by `memory-bulk-create-atomicity.test.ts`) —
+        // and a duplicate primary id then corrupts every id-addressed door for
+        // BOTH tenants, since `update`/`delete` take the first matching index
+        // and `deleteMany` rebuilds the table from a matched-id set. Refuse on
+        // this driver's OWN existing "not found" contract instead, the same
+        // shape `update` and `delete` land on for a cross-tenant id.
+        //
+        // The refusal is raised in `strictMode` and outside it alike: unlike
+        // `update` (`| null`) and `delete` (`false`), `upsert`'s declared
+        // return carries no miss arm (#13878), so the quiet non-`strictMode`
+        // miss is not expressible here. The two alternatives were widening this
+        // door's declared return with an arm no caller was ever asked to
+        // narrow, or landing the duplicate id; both are worse than throwing.
+        if (!existingRecord && table.some(r => r.id === data.id)) {
+            this.logger.warn('Record not found for upsert', { object, id: data.id });
+            throw new Error(`Record with ID ${data.id} not found in ${object}`);
+        }
     } else if (conflictKeys && conflictKeys.length > 0) {
         existingRecord = visible.find(r => conflictKeys.every(key => r[key] === data[key]));
     }
