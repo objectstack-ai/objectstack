@@ -225,13 +225,19 @@ function owdOf(obj: AnyRec): unknown {
  * an acceptance that never happened, and sends the reader looking for the
  * conversion and the semantic entry that would exist if it had. The fix-it is
  * identical either way; only this clause differs.
+ *
+ * The sibling keys are named undotted on purpose: the receiver-coverage
+ * meta-test in this rule's test file scans the module's CODE text for
+ * `receiver.key` reads and cannot tell one inside a message string from a real
+ * read, so a dotted spelling here would present as an undeclared read off a
+ * receiver that does not exist.
  */
 function owdAliasProvenance(value: string): string {
   return OWD_RETIRED_ALIAS_FIX[value]
     ? `is a retired alias (ADR-0090 D4)`
     : `is not an OWD value and never was — ADR-0090 D4 retired 'read', 'read_write' and 'full', ` +
-        `not this one. '${value}' is legal on the neighbouring 'access.default' / ` +
-        `'publicSharing.allowedAudiences' keys, not on this one`;
+        `not this. '${value}' is legal on the neighbouring keys 'access' (its 'default') and ` +
+        `'publicSharing' (its 'allowedAudiences'), just not on this one`;
 }
 
 /**
