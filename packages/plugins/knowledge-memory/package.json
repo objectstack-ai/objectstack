@@ -37,6 +37,11 @@
     "memory",
     "in-memory"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/plugins/knowledge-memory"
+  },
   "files": [
     "dist",
     "README.md",

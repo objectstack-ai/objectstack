@@ -34,6 +34,11 @@
     "integration",
     "messaging"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/connectors/connector-slack"
+  },
   "files": [
     "dist",
     "README.md",

@@ -36,6 +36,11 @@
     "integration",
     "http"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/connectors/connector-rest"
+  },
   "files": [
     "dist",
     "README.md",

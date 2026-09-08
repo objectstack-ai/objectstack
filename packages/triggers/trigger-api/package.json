@@ -32,6 +32,11 @@
     "webhook",
     "automation"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/triggers/trigger-api"
+  },
   "files": [
     "dist",
     "README.md",
