@@ -5,11 +5,14 @@
  *   1. LAUNCH-WINDOW GUARD — a PR may not introduce a changeset that declares a
  *      `major` bump. Everything above "The LEVEL axis" below is this.
  *   2. THE LEVEL AXIS (#16055) — a PR that DECLARES clause ② (a new key on a
- *      published payload) may not grade a package it grew `patch`, and (#16776)
- *      a PR that grades one that way must not leave the declaration UNREADABLE:
+ *      published payload) must grade AT LEAST ONE package whose published
+ *      source it moves `minor` or above; and (#16776) a PR that
+ *      grades none of them that way must not leave the declaration UNREADABLE:
  *      where the missing reading is what decides the verdict, this refuses
- *      rather than exiting 0 into a check run that concludes `success`. Read the
- *      block headed "The LEVEL axis" for what it cross-checks, where the
+ *      rather than exiting 0 into a check run that concludes `success`. The
+ *      "at least one" is #16361 — the declaration is PR-scoped and names no
+ *      package, so a PR-scoped predicate is the whole of what it entails. Read
+ *      the block headed "The LEVEL axis" for what it cross-checks, where the
  *      declaration comes from, and the residual it records.
  *
  * The run exits with the WORSE of the two verdicts and prints both, because
@@ -782,6 +785,58 @@ export function render(result) {
 // silent wrong level into a loud one inside a window the PR is already waiting
 // out.
 //
+// ## THE GRAIN: the declaration is PR-scoped, so the predicate is too (#16361)
+//
+// ⭐ The rule above is right and is NOT what this section changes. What changed
+// is the LEVEL THE RULE IS APPLIED AT, and it was measured on two PRs from one
+// dispatch round — the pair, not either half alone:
+//
+//   * PR #16342 (head `273247e56f24`) — spec and runtime, both moved under
+//     `src/**`, both graded `patch`. Six new published `STACK_*` error codes.
+//     A CORRECT fire.
+//   * PR #16347 (head `23443ce169af`) — `@objectstack/lint` graded `minor`, and
+//     that is where the widening is (a new field-typed refusal arm on
+//     `filter-preset-comparand`); `@objectstack/spec` graded `patch`, and what
+//     it received is ONE re-worded TSDoc comment at `date-range-presets.ts:101`.
+//     The gate refused, and it refused the SPEC line — the package that did not
+//     grow — while never naming the package that did.
+//
+// The per-package predicate could not have done otherwise. Clause ② is declared
+// ONCE, FOR THE PR: the carrier is a PR label and the `Clause-②:` line is a PR
+// body line, and NEITHER NAMES A PACKAGE. Applying a PR-scoped declaration to
+// every package the diff moved `src/**` of asserts something the declaration
+// never said — that EACH of them was widened — and #16347 is that assertion
+// being false while the gate printed it as the reason for a refusal.
+//
+// ⇒ The predicate is now the strongest thing the declaration actually entails,
+// asked at the declaration's own grain:
+//
+//     A PR that declares clause-② `yes` must grade AT LEAST ONE package whose
+//     `packages/*/src/**` it moves at `minor` or above.
+//
+// The widened package IS one of the packages the diff moved src of — a widening
+// moves source — so "the widened package is graded `minor`+" IMPLIES "some
+// moved package is graded `minor`+. The converse does not hold, and that gap is
+// the residual this gate now NAMES rather than papering over (see `discharged`
+// below). On a single-package PR the two predicates are identical; they diverge
+// only where a PR moves several packages' src, which is exactly the shape that
+// produced the false refusal.
+//
+// ⛔ WHAT THIS IS NOT. It is not a tolerance, not an allowlist, and not "skip if
+// the diff is comment-only" — the filing card forbids all three and is right to:
+// a comment-only heuristic goes quiet on precisely the case it was built for.
+// Nothing here reads the CONTENT of a diff hunk. The inputs are unchanged — the
+// packages whose `src/**` moved, the levels the changesets grade them, and the
+// PR-scoped declaration — and the only thing that moved is the quantifier.
+//
+// ⚠️ WHAT IT CANNOT SEE, stated because an instrument that under-reads must say
+// where: it cannot see WHICH package the declared act landed in, so it cannot
+// catch a PR that widens TWO packages, grades one `minor` and the other `patch`.
+// That was never readable from a declaration that names no package; before
+// #16361 the gate did not read it either, it demanded `minor` on every moved
+// package and called the demand a finding about each. The `discharged` verdict
+// exists so this residual is printed on the green rather than left silent.
+//
 // ## Where the declaration is read from — the event payload, and nothing else
 //
 // This gate makes NO API call and needs NO token. Its whole input is the
@@ -938,18 +993,25 @@ export function declarationFromPullRequest(pr) {
  *   unreadable-diff       the diff could not be computed               -> exit 1 (#4690)
  *   payload-unreadable    a `pull_request` run whose payload would not read -> exit 1 (#4690)
  *   no-pull-request       not a PR run at all (RC cut, local run)      -> exit 0
- *   not-measured-moot     no declaration, and no `patch` it could have refused -> exit 0
- *   not-measured-material no declaration, and a `patch` on a package this PR grew -> exit 1
+ *   not-measured-moot     no declaration, and nothing a `yes` could have refused -> exit 0
+ *   not-measured-material no declaration, and a `yes` WOULD have refused  -> exit 1
  *   not-declared          the declaration reads `no`                   -> exit 0
- *   clean                 declared `yes`, no `patch` on a grown package -> exit 0
- *   enforce               declared `yes`, `patch` on a grown package    -> exit 1
+ *   clean                 declared `yes`, no moved package graded `patch` -> exit 0
+ *   discharged            declared `yes`, a moved package IS graded `minor`+,
+ *                         and others are graded `patch`                -> exit 0
+ *   enforce               declared `yes`, moved packages graded `patch` and
+ *                         NONE of them graded `minor` or above         -> exit 1
  *
- * Seven verdicts and no two of them collapse, because every collapse in this
+ * Nine verdicts and no two of them collapse, because every collapse in this
  * family has been a defect. `not-measured-*` and `not-declared` are a missing
  * reading and a decision (#16055). The two `not-measured-*` are a missing
  * reading that could not have mattered and one that decided the verdict
  * (#16776) — sharing exit 0 is what let a gate that judged nothing conclude
- * `success` on the surfaces that read conclusions rather than logs.
+ * `success` on the surfaces that read conclusions rather than logs. `clean` and
+ * `discharged` are #16361's: "no moved package is graded `patch`" and "some are,
+ * and this gate is deliberately not refusing them" are different facts, and the
+ * second one carries a residual that must be printed rather than implied by a
+ * tick.
  *
  * @param {{
  *   levels: { file: string, entries: { pkg: string, bump: string }[] }[] | null,
@@ -960,7 +1022,7 @@ export function declarationFromPullRequest(pr) {
  */
 export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   const readings = declaration?.readings ?? [];
-  if (!levels) return { verdict: 'unreadable-diff', offenders: [], readings, unreadable: [] };
+  if (!levels) return { verdict: 'unreadable-diff', offenders: [], raised: [], readings, unreadable: [] };
   const unreadable = touched?.unreadable ?? [];
 
   // NO PR TO READ A DECLARATION FROM. This is a different fact from "a PR that
@@ -985,22 +1047,39 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
   // this file takes everywhere else.
   if (declaration?.payload === false) {
     return prEvent
-      ? { verdict: 'payload-unreadable', offenders: [], readings, unreadable }
-      : { verdict: 'no-pull-request', offenders: [], readings, unreadable };
+      ? { verdict: 'payload-unreadable', offenders: [], raised: [], readings, unreadable }
+      : { verdict: 'no-pull-request', offenders: [], raised: [], readings, unreadable };
   }
 
   // The offenders are computed BEFORE the declaration is consulted, because
   // #16776's whole repair turns on a question the old order could not ask:
-  // would the missing declaration have CHANGED anything? `patch` on a package
-  // whose `packages/*/src/**` this diff moves is the only shape a `yes` can
-  // refuse, so its presence is exactly the materiality of the reading that did
-  // not happen.
+  // would the missing declaration have CHANGED anything? The shape a `yes`
+  // refuses is exactly the materiality of the reading that did not happen, so
+  // that shape has to be known first.
+  //
+  // #16361 changes what that shape IS, and the two halves are computed
+  // separately because the message needs both. `offenders` are the moved
+  // packages graded `patch` — the lines an author is being asked about.
+  // `raised` are the moved packages graded `minor` or above — the ones that
+  // ACCOUNT for the declared widening. A `yes` refuses only when the first set
+  // is non-empty and the second is EMPTY: the declaration names no package, so
+  // the most it can entail is that one of the moved packages carries the level,
+  // and one that does discharges it for the PR.
   const grown = new Set(touched?.packages ?? []);
   const offenders = [];
+  const raised = [];
   for (const { file, entries } of levels) {
     const bad = entries.filter((entry) => entry.bump === 'patch' && grown.has(entry.pkg)).map((entry) => entry.pkg);
     if (bad.length) offenders.push({ file, packages: bad });
+    for (const entry of entries) {
+      if (grown.has(entry.pkg) && (entry.bump === 'minor' || entry.bump === 'major')) raised.push({ file, pkg: entry.pkg, bump: entry.bump });
+    }
   }
+  // The one condition a `yes` refuses. Written once and read by both the
+  // declared lane and the NOT MEASURED lane, so materiality cannot drift from
+  // enforcement — two copies of this predicate is how the two would come to
+  // disagree about whether an unread declaration mattered.
+  const refusable = offenders.length > 0 && raised.length === 0;
 
   if (declaration?.value === null || declaration?.value === undefined) {
     // ⭐ #16776. `NOT MEASURED` used to be one verdict at exit 0, and the check
@@ -1018,16 +1097,22 @@ export function judgeLevel({ levels, touched, declaration, prEvent = false }) {
     //     well be right — but because nobody can tell, and a reading that did
     //     not happen must not be indistinguishable from one that passed at the
     //     only layer anything downstream reads (#4690).
-    return offenders.length
-      ? { verdict: 'not-measured-material', offenders, readings, unreadable }
-      : { verdict: 'not-measured-moot', offenders: [], readings, unreadable };
+    return refusable
+      ? { verdict: 'not-measured-material', offenders, raised, readings, unreadable }
+      : { verdict: 'not-measured-moot', offenders, raised, readings, unreadable };
   }
-  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], readings, unreadable };
+  if (declaration.value === 'no') return { verdict: 'not-declared', offenders: [], raised: [], readings, unreadable };
 
   // An unread manifest can only ever hide an offender, so it cannot be reported
-  // under a tick: `clean` states it, and the reader is told what was not named.
-  if (offenders.length) return { verdict: 'enforce', offenders, readings, unreadable };
-  return { verdict: 'clean', offenders: [], readings, unreadable };
+  // under a tick: every green below states it, and the reader is told what was
+  // not named.
+  if (refusable) return { verdict: 'enforce', offenders, raised, readings, unreadable };
+  // #16361. A `patch` on a moved package that this gate is NOT refusing is a
+  // reading it made and set aside, not an absence — it gets its own verdict so
+  // the residual is printed rather than folded into a tick that means "nothing
+  // to see".
+  if (offenders.length) return { verdict: 'discharged', offenders, raised, readings, unreadable };
+  return { verdict: 'clean', offenders: [], raised, readings, unreadable };
 }
 
 /**
@@ -1042,6 +1127,23 @@ export function renderLevel(result) {
   const stdout = [];
   const stderr = [];
   const readings = (result?.readings ?? []).map((r) => `   · ${r}`);
+  // The `patch` lines, listed WITHOUT a per-package claim about what the diff
+  // did to each one. The old rendering appended "← this PR moves <pkg>'s
+  // packages/*/src/**" to every line, which is true, directly under a headline
+  // that said the PR "grew" them — and a reader took the pair for the finding.
+  // It was not one: moving a file under `src/**` is all this gate reads, and a
+  // re-worded TSDoc comment moves one (#16361, PR #16347). What each line now
+  // carries is the reading itself, and the claim is made once, in prose, at the
+  // grain it holds at.
+  const patchLines = (offenders) => {
+    const lines = [];
+    for (const { file, packages } of offenders ?? []) {
+      lines.push(`   ${file}`);
+      for (const pkg of packages) lines.push(`     - ${pkg}: patch`);
+    }
+    return lines;
+  };
+  const raisedLines = (raised) => (raised ?? []).map(({ file, pkg, bump }) => `     - ${pkg}: ${bump}   (${file})`);
   const unreadableNote =
     (result?.unreadable ?? []).length > 0
       ? [`   ⚠️ ${result.unreadable.length} touched package dir(s) could not be named: ${result.unreadable.join(', ')} — an offender there could not be seen.`]
@@ -1077,7 +1179,9 @@ export function renderLevel(result) {
     case 'not-measured-moot':
       stdout.push(
         'ℹ️ LEVEL AXIS: NOT MEASURED, and it could not have changed this verdict — no clause-② declaration was ' +
-          'readable for this PR, AND no changeset here grades `patch` a package whose `packages/*/src/**` this PR moves. ' +
+          'readable for this PR, AND there is nothing here a `yes` would have refused: either no changeset grades ' +
+          '`patch` a package whose `packages/*/src/**` this PR moves, or one of the packages it moves is already ' +
+          'graded `minor` or above and carries the level for the PR (#16361). ' +
           '`yes` and `no` reach the same answer on this diff, so this exit 0 is a decided one rather than an unread one (#16776).',
         ...readings,
         ...unreadableNote,
@@ -1086,12 +1190,11 @@ export function renderLevel(result) {
 
     case 'not-measured-material':
       stderr.push('⛔ LEVEL AXIS: NOT MEASURED, and it is the one reading this PR needed.\n');
-      for (const { file, packages } of result.offenders ?? []) {
-        stderr.push(`   ${file}`);
-        for (const pkg of packages) stderr.push(`     - ${pkg}: patch   ← this PR moves ${pkg}'s packages/*/src/**`);
-      }
+      stderr.push('   The packages this PR moves `packages/*/src/**` of, and the level each is graded:');
+      stderr.push(...patchLines(result.offenders));
+      stderr.push('   ⇒ none of them is graded `minor` or above, so a `yes` here would REFUSE (#16361).\n');
       stderr.push(
-        '\nNo clause-② declaration was readable, so whether that `patch` fits the surface this PR grew was not judged:\n' +
+        'No clause-② declaration was readable, so whether this PR widened a published surface at all was not judged:\n' +
           `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
           '\n' +
           'This is a REFUSAL rather than the tick it used to be, and the reason is the layer above this log. A check run\n' +
@@ -1099,15 +1202,18 @@ export function renderLevel(result) {
           'conclusion for a reading that passed and a reading that never happened, on every surface that reads\n' +
           'conclusions rather than step logs (#16776, and #4690: a reading that cannot fail is indistinguishable from\n' +
           'one that passed). Where the declaration could not have mattered this gate still exits 0 and says so — it is\n' +
-          'refusing HERE because a `patch` above sits on a package this diff grew, which is exactly what a `yes` refuses.\n' +
+          'refusing HERE because every package this diff moves under `packages/*/src/**` is graded `patch`, which is\n' +
+          'exactly the shape a `yes` refuses (#16361).\n' +
           '\n' +
           'DECLARE IT. One line, at the START of a line in the PR BODY (a `- `, `> ` or `**` prefix is read too):\n' +
           '\n' +
           '  Clause-②: no    — this PR puts no new key on a published payload. The axis stands down and the `patch`\n' +
           '                    above is yours to keep. Say it in the line, not only in the prose around it.\n' +
-          '  Clause-②: yes   — it does. Then the level rule applies and the `patch` must be raised to at least\n' +
-          '                    `minor` (maintainer ruling 2026-09-04, decision batch #35, on #15294 — written out\n' +
-          '                    under "WHICH LEVEL" in the `Check Changeset` step of pr-automation.yml).\n' +
+          '  Clause-②: yes   — it does. Then the level rule applies, and ONE of the packages listed above — the one\n' +
+          '                    that actually grew — must be graded at least `minor`. This gate cannot read which of\n' +
+          '                    them that is, so it asks only that one of them carries it (maintainer ruling\n' +
+          '                    2026-09-04, decision batch #35, on #15294 — written out under "WHICH LEVEL" in the\n' +
+          '                    `Check Changeset` step of pr-automation.yml).\n' +
           '\n' +
           'The review seat\'s `' + CONTRACT_REVIEW_LABEL + '` carrier declares `yes` on its own and needs no line.\n' +
           '\n' +
@@ -1129,14 +1235,40 @@ export function renderLevel(result) {
       );
       return { exitCode: 0, stdout, stderr };
 
+    // #16361. A green that judged something and set it aside, printed as such.
+    // It is separate from `clean` because `clean` means there was nothing of
+    // this shape in the diff at all, and a tick that covers both would hide the
+    // one case where this gate knowingly does not look — which is the failure
+    // mode the filing card is about, one layer along.
+    case 'discharged':
+      stdout.push(
+        '✓ LEVEL AXIS: this PR declares clause-② `yes`, and it grades a package whose `packages/*/src/**` ' +
+          'it moves at `minor` or above — the declared widening is accounted for:',
+        ...raisedLines(result.raised),
+        '',
+        '   These packages the diff also moves are graded `patch`, and are NOT refused:',
+        ...patchLines(result.offenders),
+        '',
+        '   ⚠️ Because clause ② is declared once FOR THE PR and names no package, this gate cannot read WHICH ' +
+          'package the act landed in. It therefore does not ask every moved package to carry the level — it asks ' +
+          'that ONE of them does (#16361). The residual, named rather than left silent: a SECOND widening in this ' +
+          'PR, graded `patch` beside the `minor` above, would not be seen here. The contract review that placed the ' +
+          `\`${CONTRACT_REVIEW_LABEL}\` carrier is what reads the diff; this axis only cross-checks the levels.`,
+        ...readings,
+        ...unreadableNote,
+      );
+      return { exitCode: 0, stdout, stderr };
+
     case 'enforce':
-      stderr.push('⛔ This PR declares clause-② YES and grades a package it grew `patch`.\n');
-      for (const { file, packages } of result.offenders) {
-        stderr.push(`   ${file}`);
-        for (const pkg of packages) stderr.push(`     - ${pkg}: patch   ← this PR moves ${pkg}'s packages/*/src/**`);
-      }
       stderr.push(
-        '\nThe two declarations disagree, inside one PR:\n' +
+        '⛔ This PR declares clause-② YES, and it grades NO package whose `packages/*/src/**` it moves\n' +
+          '   at `minor` or above.\n',
+      );
+      stderr.push('   The packages this PR moves `packages/*/src/**` of, and the level each is graded:');
+      stderr.push(...patchLines(result.offenders));
+      stderr.push('   ⇒ none of them is graded `minor` or above.\n');
+      stderr.push(
+        'The two declarations disagree, inside one PR:\n' +
           `${(result.readings ?? []).map((r) => `   · ${r}`).join('\n')}\n` +
           '\n' +
           'A purely additive widening of a published package\'s public surface takes AT LEAST `minor`;\n' +
@@ -1144,9 +1276,17 @@ export function renderLevel(result) {
           'ruling 2026-09-04, decision batch #35, on #15294 — written out in full under "WHICH LEVEL" in\n' +
           'the `Check Changeset` step of .github/workflows/pr-automation.yml).\n' +
           '\n' +
+          '⚠️ WHICH of the packages above received that widening is NOT something this gate can read, and it\n' +
+          'does not claim to. Clause ② is declared ONCE, FOR THE PR — the `' + CONTRACT_REVIEW_LABEL + '`\n' +
+          'carrier is a PR label and the `Clause-②:` line is a PR-body line, and neither names a package. So\n' +
+          'the finding above is not "each of these was widened"; it is the whole of what a PR-scoped\n' +
+          'declaration entails: THE WIDENED PACKAGE IS ONE OF THEM, AND NONE OF THEM CARRIES THE LEVEL.\n' +
+          'Raise the one that actually grew. Raising a package that only received a comment is not asked\n' +
+          'for here, and one `minor` on a package this diff moved clears this red for the PR (#16361).\n' +
+          '\n' +
           'TWO ways forward, and they are not interchangeable:\n' +
-          '  1. The declaration is right and the level is wrong -> raise it to `minor`. This is the\n' +
-          '     ordinary case; #16044 is the measured one, one word in one changeset.\n' +
+          '  1. The declaration is right and the level is wrong -> raise the widened package to `minor`.\n' +
+          '     This is the ordinary case; #16044 is the measured one, one word in one changeset.\n' +
           '  2. The level is right and the DECLARATION is wrong -> correct it at the producer: the\n' +
           `     \`${CONTRACT_REVIEW_LABEL}\` carrier is the review seat's to place and to clear, and the\n` +
           '     `Clause-②:` line is the claim\'s. ⛔ Do not add a tolerance here to route around a\n' +
@@ -1400,11 +1540,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'Missing input is a failure, never a pass (#4690)': 4,
   'The wiring: these fixtures must actually run on every PR': 22,
   "The LEVEL axis: #16044's two heads, one word apart (#16055)": 56,
+  'The GRAIN: a PR-scoped declaration judged at PR scope (#16361)': 25,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 14;
+const SELF_TEST_BATTERY_FLOOR = 15;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2317,6 +2458,223 @@ function selfTest() {
         JSON.stringify(majorPackagesIn(MAJOR)) === JSON.stringify(entriesIn(MAJOR).filter((e) => e.bump === 'major').map((e) => e.pkg)),
         'majorPackagesIn must equal the `major` filter over entriesIn — one block, one parse',
       );
+    }
+
+    // ── The GRAIN: a PR-scoped declaration judged at PR scope (#16361) ───────
+    //
+    // The fixtures are the two PRs of one dispatch round, at the heads that
+    // actually carried the `patch` the gate judged, and THE PAIR IS THE CONTROL.
+    // #16347 alone going green would be a gate that stopped firing; #16342 still
+    // redding beside it is what says the rule survived the regrain.
+    //
+    //   #16342 @ 273247e56f24 — spec `patch` + runtime `patch`, both moved under
+    //     src/. Six new published STACK_* error codes. Must STAY refused.
+    //   #16347 @ 23443ce169af — lint `minor` (the real widening: a field-typed
+    //     refusal arm) + spec `patch` (one re-worded TSDoc comment). Must PASS,
+    //     and must SAY what it is not refusing.
+    battery('The GRAIN: a PR-scoped declaration judged at PR scope (#16361)');
+    {
+      const SPEC = '@objectstack/spec';
+      const RUNTIME = '@objectstack/runtime';
+      const LINT = '@objectstack/lint';
+      const yes = { value: 'yes', payload: true, readings: ['carrier: on'] };
+      const unread = { value: null, payload: true, readings: ['carrier: not on this PR'] };
+      const cs = (file, entries) => ({ file, entries });
+
+      // ---- #16342: every moved package graded `patch` -> REFUSED ------------
+      const p16342 = {
+        levels: [cs('.changeset/stack-refusal-envelopes.md', [
+          { pkg: SPEC, bump: 'patch' },
+          { pkg: RUNTIME, bump: 'patch' },
+        ])],
+        touched: { packages: [SPEC, RUNTIME], unreadable: [] },
+      };
+      // ---- #16347: one moved package graded `minor`, another `patch` -> PASS -
+      const p16347 = {
+        levels: [
+          cs('.changeset/lint-preset-comparand-field-typed-arm.md', [{ pkg: LINT, bump: 'minor' }]),
+          cs('.changeset/spec-preset-comparand-message-tsdoc.md', [{ pkg: SPEC, bump: 'patch' }]),
+        ],
+        touched: { packages: [LINT, SPEC], unreadable: [] },
+      };
+
+      const fire = judgeLevel({ ...p16342, declaration: yes });
+      const pass = judgeLevel({ ...p16347, declaration: yes });
+      assert(fire.verdict === 'enforce', `#16342 is the CORRECT fire and must stay refused — got ${fire.verdict}`);
+      assert(pass.verdict === 'discharged', `#16347 fired on the wrong package and must now pass — got ${pass.verdict}`);
+      assert(
+        renderLevel(fire).exitCode === 1 && renderLevel(pass).exitCode === 0,
+        'the pair must differ in EXIT CODE: #16347 going green proves nothing unless #16342 still reds beside it in the same harness',
+      );
+
+      // The ablation that makes the green about the RAISE and not about the
+      // diff: strip the lint `minor` from #16347 and the identical spec `patch`
+      // must be refused again.
+      const withoutRaise = judgeLevel({
+        levels: [cs('.changeset/spec-preset-comparand-message-tsdoc.md', [{ pkg: SPEC, bump: 'patch' }])],
+        touched: p16347.touched,
+        declaration: yes,
+      });
+      assert(
+        withoutRaise.verdict === 'enforce',
+        `control: with the lint \`minor\` removed, #16347's spec \`patch\` is refused again — the green above is about the raise, not about the diff (got ${withoutRaise.verdict})`,
+      );
+      // ...and the raise has to be on a package the diff MOVED. A `minor` on a
+      // package whose src this PR never touched cannot be the declared widening.
+      const raiseOffDiff = judgeLevel({
+        levels: p16347.levels,
+        touched: { packages: [SPEC], unreadable: [] },
+        declaration: yes,
+      });
+      assert(
+        raiseOffDiff.verdict === 'enforce',
+        `control: a \`minor\` on a package this diff does NOT move under packages/[pkg]/src/ does not discharge the declaration — got ${raiseOffDiff.verdict}`,
+      );
+      // A `major` is a raise too — the vocabulary is "minor or above", not
+      // "exactly minor". (The major guard reds it on its own axis; this axis
+      // must not ALSO call it an unraised package.)
+      assert(
+        judgeLevel({
+          levels: [cs('.changeset/x.md', [{ pkg: LINT, bump: 'major' }, { pkg: SPEC, bump: 'patch' }])],
+          touched: p16347.touched,
+          declaration: yes,
+        }).verdict === 'discharged',
+        '`major` counts as a raise on this axis — the level rule says "AT LEAST `minor`", and the major guard is a separate verdict',
+      );
+
+      // ---- the messages. This is the deliverable, not cleanup ---------------
+      const fireText = renderLevel(fire).stderr.join('\n');
+      assert(
+        !/← this PR moves/.test(fireText),
+        'THE FALSE PREMISE IS GONE: the refusal must no longer tag each listed package with a per-package claim about what the diff did to it — that arrow, under a headline saying the PR "grew" them, is what made #16347 read as a finding about @objectstack/spec',
+      );
+      assert(
+        fireText.includes('WHICH of the packages above received that widening is NOT something this gate can read'),
+        'the refusal must SAY it cannot tell which package was widened — a false premise in a refusal message trains readers to stop checking premises, and that is the cost this card is paying off',
+      );
+      assert(
+        fireText.includes('THE WIDENED PACKAGE IS ONE OF THEM, AND NONE OF THEM CARRIES THE LEVEL'),
+        'and it must state the claim it DOES make, at the grain a PR-scoped declaration holds at',
+      );
+      assert(
+        fireText.includes(SPEC) && fireText.includes(RUNTIME) && fireText.includes('.changeset/stack-refusal-envelopes.md'),
+        'the refusal must still name every candidate line and its file — an author who cannot see the lines cannot raise the right one',
+      );
+      assert(
+        fireText.includes('Raise the one that actually grew'),
+        'the refusal must ask for the RIGHT package, not for all of them — asking an author to raise a package that only received a comment is the defect, restated as an instruction',
+      );
+
+      const passText = renderLevel(pass).stdout.join('\n');
+      assert(passText.includes(LINT) && passText.includes('minor'), 'the green must NAME the package that carries the level — the old gate never named it, and it is the only package the declaration is about');
+      assert(
+        passText.includes(SPEC) && passText.includes('are NOT refused'),
+        'ANTI-QUIET: the green must print the `patch` lines it is deliberately not refusing. A gate that stops firing silently is the failure mode this repo has three open cards about; this one says out loud what it set aside',
+      );
+      assert(
+        passText.includes('a SECOND widening in this PR, graded `patch` beside the `minor` above, would not be seen here'),
+        'and it must name its own residual: what this predicate cannot see is stated on the green, not left for a reader to discover on the case it misses',
+      );
+      assert(
+        !/tolerance|allowlist|comment-only/i.test(passText),
+        'control: the green is not a tolerance, an allowlist, or a comment-only skip — none of those words appear because none of those mechanisms is here. Nothing reads the CONTENT of a diff hunk',
+      );
+
+      // `clean` and `discharged` are two different greens and must not print
+      // alike: one means there was nothing of this shape, the other means there
+      // was and this gate knowingly did not refuse it.
+      const cleanGreen = judgeLevel({
+        levels: [cs('.changeset/lint-preset-comparand-field-typed-arm.md', [{ pkg: LINT, bump: 'minor' }])],
+        touched: { packages: [LINT], unreadable: [] },
+        declaration: yes,
+      });
+      assert(cleanGreen.verdict === 'clean', `no moved package graded \`patch\` at all is still \`clean\` — got ${cleanGreen.verdict}`);
+      assert(
+        renderLevel(cleanGreen).stdout.join('\n') !== passText,
+        'a green with nothing to set aside and a green that set something aside must not print the same thing — collapsing them is the defect #16055 records, one lane along',
+      );
+
+      // ---- materiality moved with the predicate, and had to (#16776) --------
+      // The unread declaration is MATERIAL exactly where a `yes` would have
+      // refused. Both halves are read from one `refusable`, so the NOT MEASURED
+      // lane cannot drift from the enforcing lane.
+      assert(
+        judgeLevel({ ...p16342, declaration: unread }).verdict === 'not-measured-material',
+        "#16342's shape with no declaration is MATERIAL — a `yes` would have refused it, so the missing reading decided the verdict",
+      );
+      assert(
+        judgeLevel({ ...p16347, declaration: unread }).verdict === 'not-measured-moot',
+        "#16347's shape with no declaration is MOOT — `yes` and `no` reach the same answer once a moved package carries the level, and refusing here would re-open this card through the NOT MEASURED lane",
+      );
+      assert(
+        renderLevel(judgeLevel({ ...p16342, declaration: unread })).exitCode === 1 &&
+          renderLevel(judgeLevel({ ...p16347, declaration: unread })).exitCode === 0,
+        'and the two differ in EXIT CODE — #16776 bought that split and #16361 must not spend it',
+      );
+      assert(
+        renderLevel(judgeLevel({ ...p16347, declaration: unread })).stdout.join('\n').includes('carries the level for the PR'),
+        'the moot green must say WHICH of the two reasons made it moot — "no `patch` at all" and "a raise already carries it" are different facts about the diff',
+      );
+      assert(
+        judgeLevel({ ...p16342, declaration: { value: 'no', payload: true, readings: [] } }).verdict === 'not-declared',
+        'control: an explicit `no` is still a DECISION on the very tree the unread reading refuses — the opt-out survives the regrain',
+      );
+
+      // ---- end to end, on a real temp git repository ------------------------
+      // #16347's shape with nothing stubbed: two packages' src moved, two
+      // changesets, one `minor` and one `patch`.
+      {
+        const manifest = (name) => JSON.stringify({ name, version: '0.0.0' });
+        const { dir, base } = makeRepo(
+          {
+            'packages/lint/package.json': manifest(LINT),
+            'packages/spec/package.json': manifest(SPEC),
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** old wording */\nexport const m = 1;\n',
+          },
+          {
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\nexport const fieldTyped = 2;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** new wording */\nexport const m = 1;\n',
+            '.changeset/lint-preset-comparand-field-typed-arm.md': `---\n'${LINT}': minor\n---\n\nbody\n`,
+            '.changeset/spec-preset-comparand-message-tsdoc.md': `---\n'${SPEC}': patch\n---\n\nbody\n`,
+          },
+        );
+        const scanned = scan({ cwd: dir, base });
+        const touched = packagesTouched({ cwd: dir, from: scanned.base, head: 'HEAD' });
+        assert(
+          touched.packages.includes(LINT) && touched.packages.includes(SPEC),
+          `end to end: both packages' src moved and both must be read — got ${JSON.stringify(touched)}`,
+        );
+        assert(
+          judgeLevel({ levels: scanned.levels, touched, declaration: yes }).verdict === 'discharged',
+          'end to end: the real #16347 shape passes, and passes as `discharged` rather than as an empty tick',
+        );
+        // The same repository with the lint changeset graded `patch` instead:
+        // now nothing carries the level and the refusal is right again.
+        const { dir: dir2, base: base2 } = makeRepo(
+          {
+            'packages/lint/package.json': manifest(LINT),
+            'packages/spec/package.json': manifest(SPEC),
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** old wording */\nexport const m = 1;\n',
+          },
+          {
+            'packages/lint/src/rules/filter-preset-comparand.ts': 'export const arm = 1;\nexport const fieldTyped = 2;\n',
+            'packages/spec/src/data/date-range-presets.ts': '/** new wording */\nexport const m = 1;\n',
+            '.changeset/lint-preset-comparand-field-typed-arm.md': `---\n'${LINT}': patch\n---\n\nbody\n`,
+            '.changeset/spec-preset-comparand-message-tsdoc.md': `---\n'${SPEC}': patch\n---\n\nbody\n`,
+          },
+        );
+        const scanned2 = scan({ cwd: dir2, base: base2 });
+        assert(
+          judgeLevel({
+            levels: scanned2.levels,
+            touched: packagesTouched({ cwd: dir2, from: scanned2.base, head: 'HEAD' }),
+            declaration: yes,
+          }).verdict === 'enforce',
+          'end to end control: one word along — the lint entry graded `patch` — and the same two-package diff is refused, so the pass above is about the level and not about the shape of the diff',
+        );
+      }
     }
 
   } finally {
