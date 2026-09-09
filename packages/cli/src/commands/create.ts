@@ -347,8 +347,14 @@ function pluginDirName(name: string): string {
  * `--in-repo` keeps `@objectstack/plugin-<name>` and stays publishable: that
  * placement lands under `packages/plugins/`, where every sibling genuinely
  * carries that scope and whoever runs it genuinely can publish there.
+ *
+ * ⛔ Module-private on purpose, unlike its five exported neighbours. Each of
+ * those is exported because a test in this package IMPORTS it; nothing imports
+ * this one, and nothing should — `test/create.test.ts` pins the two composed
+ * names as LITERALS precisely so the pin cannot move with the function it is
+ * pinning. An `export` here would widen this module's surface for no reader.
  */
-export function pluginPackageName(placement: ScaffoldPlacement, name: string): string {
+function pluginPackageName(placement: ScaffoldPlacement, name: string): string {
   return placement === 'in-repo'
     ? `@objectstack/${pluginDirName(name)}`
     : pluginDirName(name);
