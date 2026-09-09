@@ -282,7 +282,16 @@ describe("#16534 ① the card's own probe, with the manual re-set deleted", () =
   it('login → enable → verifyTotp → disable → deleteUser, no hand-repaired credential', async () => {
     const { engine, manager, client, email } = await signedIn();
     const userId = await userIdFor(engine, email);
+
+    // ── the probe's FIRST step, spelled the way the card spells it. The card's
+    //    sequence opens on `login`, not on the registration that had to precede
+    //    it, so this opens on `login` too — a real second sign-in whose token
+    //    the SDK stores, which is the line the card measured verbatim:
+    //    `client.auth.login({ email, password }) -> RESOLVED { token, user }`.
+    const session = await client.auth.login({ email, password: PASSWORD });
+    expect(session?.data?.token, 'login echoed no token').toBeTruthy();
     const afterLogin = String(storedToken(client));
+    expect(afterLogin, 'login did not store the token it was handed').toBe(session.data?.token);
 
     // The premise. Without it a green run could not tell "the rotation is
     // followed now" from "the bearer seam never worked here".
