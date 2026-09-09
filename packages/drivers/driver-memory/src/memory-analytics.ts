@@ -15,11 +15,24 @@ import {
   // the ONE refusal for a string outside it, shared with the SQL analytics
   // path so the two backends cannot answer one input differently again.
   resolveAnalyticsDateRangeString,
+  // [#16178] The ONE forward bucket labeller, and the guard that says which
+  // granularities it can label. Hoisted into core precisely so this driver can
+  // bucket with the SAME rule the objectql aggregation path uses, without a
+  // driver depending on objectql and without a third hand copy of the labels.
+  bucketDateKey,
+  isBucketGranularity,
+  type BucketGranularity,
 } from '@objectstack/core';
+// [#16178] The pipeline below is split at its `$group` when a time dimension
+// buckets, so the bucket key can be folded in JS between the two halves — mingo
+// has no expression that produces the canonical labels, and writing one would
+// be the second dialect this repair exists to avoid.
+import { Aggregator } from 'mingo';
 import {
   assertFilterConditionShape,
   uncompilableCombinatorError,
   uncompilableFieldOperatorError,
+  unsupportedTimeGranularityError,
   type FilterFaceCapabilities,
 } from './filter-refusal.js';
 
@@ -625,6 +638,51 @@ export interface MemoryAnalyticsConfig {
 }
 
 /**
+ * [#16178] A `timeDimensions[]` entry that asks its dimension to be BUCKETED,
+ * resolved to everything the fold needs.
+ *
+ * `granularity` is already narrowed to the five the canonical vocabulary can
+ * label — the three sub-day names `TimeUpdateInterval` also declares are refused
+ * at compile, before this is built.
+ */
+interface TimeBucket {
+  /** The row field the instant is read from. */
+  readonly fieldPath: string;
+  /** The bucket size, narrowed to what `bucketDateKey` can label. */
+  readonly granularity: BucketGranularity;
+  /** The synthetic field the bucket key is written to. */
+  readonly bucketKey: string;
+}
+
+/**
+ * The synthetic field a dimension's bucket key travels under.
+ *
+ * Synthetic rather than an overwrite of the source field, because one member can
+ * be both a group key and a measure's aggregand: folding `created_at` in place
+ * would leave `max(created_at)` ranking `'2026-W23'` strings. The `$` prefix a
+ * mingo expression adds is applied by the caller, so the name itself carries
+ * none; the double underscore keeps it clear of any real column.
+ */
+function bucketFieldFor(dimName: string): string {
+  return `__bucket__${dimName}`;
+}
+
+/**
+ * Read a row value at a resolved field path, dotted paths included — the same
+ * traversal mingo performs for the `$<path>` the `$group` stage would have used,
+ * so a nested dimension buckets from the value it would have grouped on.
+ */
+function readFieldPath(row: Record<string, any>, fieldPath: string): unknown {
+  if (!fieldPath.includes('.')) return row[fieldPath];
+  let cursor: any = row;
+  for (const segment of fieldPath.split('.')) {
+    if (cursor == null || typeof cursor !== 'object') return undefined;
+    cursor = cursor[segment];
+  }
+  return cursor;
+}
+
+/**
  * [#16179] A `timeDimensions[].dateRange` resolved to its two bounds, together
  * with what the UPPER one means.
  *
@@ -775,9 +833,34 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     }
 
     // Stage 2: Time dimension filters
+    //
+    // [#16178] and their GRANULARITY, which this face used to accept and never
+    // read. The two keys are orthogonal and both live on the same entry:
+    // `dateRange` decides WHICH rows are selected (#16042/#16179), `granularity`
+    // decides how the selected rows are FOLDED. Collected here, applied between
+    // the `$match` half of the pipeline and its `$group` (see
+    // {@link aggregateWithTimeBuckets}).
+    const timeBuckets: TimeBucket[] = [];
     if (query.timeDimensions && query.timeDimensions.length > 0) {
       for (const timeDim of query.timeDimensions) {
         const fieldPath = this.resolveFieldPath(cube, timeDim.dimension);
+        if (timeDim.granularity !== undefined) {
+          // Refused, not dropped: `TimeUpdateInterval` declares three sub-day
+          // names the canonical bucket-key vocabulary has no label for, and
+          // passing one through is this card's own defect under a new name.
+          if (!isBucketGranularity(timeDim.granularity)) {
+            throw unsupportedTimeGranularityError(timeDim.dimension, timeDim.granularity);
+          }
+          // The bucket travels under its own synthetic key rather than
+          // overwriting the row's field: the SAME member can be both a group key
+          // and a measure's aggregand (`max(created_at)`), and folding the field
+          // in place would silently rank bucket LABELS instead of instants.
+          timeBuckets.push({
+            fieldPath,
+            granularity: timeDim.granularity,
+            bucketKey: bucketFieldFor(this.getShortName(timeDim.dimension)),
+          });
+        }
         if (timeDim.dateRange) {
           // [#16179] The union's two arms are discriminated HERE, and the
           // answer travels the two lines down to the bound construction rather
@@ -852,7 +935,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       for (const dim of query.dimensions) {
         const fieldPath = this.resolveFieldPath(cube, dim);
         const dimName = this.getShortName(dim);
-        groupStage._id[dimName] = `$${fieldPath}`;
+        // [#16178] A dimension that a time dimension buckets keys on the FOLDED
+        // value. Matched on the resolved field path, so `createdAt` in
+        // `dimensions` and `events.createdAt` in `timeDimensions` are one member.
+        const bucketed = timeBuckets.find(b => b.fieldPath === fieldPath);
+        groupStage._id[dimName] = bucketed ? `$${bucketed.bucketKey}` : `$${fieldPath}`;
       }
     } else {
       groupStage._id = null; // No grouping, aggregate all
@@ -917,7 +1004,12 @@ export class MemoryAnalyticsService implements IAnalyticsService {
 
     // Execute the aggregation pipeline
     const tableName = this.extractTableName(cube.sql);
-    const rawRows = await this.driver.aggregate(tableName, pipeline);
+    // [#16178] Unbucketed queries keep the single-call path they always had,
+    // byte for byte; only a query that actually asks for a granularity pays the
+    // split.
+    const rawRows = timeBuckets.length === 0
+      ? await this.driver.aggregate(tableName, pipeline)
+      : await this.aggregateWithTimeBuckets(tableName, pipeline, timeBuckets, query.timezone);
 
     // [#6814] `$addToSet` COLLECTS; a `count_distinct` measure has to ANSWER a
     // number. Without this step the value reached the caller as the raw array
@@ -992,6 +1084,52 @@ export class MemoryAnalyticsService implements IAnalyticsService {
       fields,
       sql: this.generateSqlFromPipeline(tableName, pipeline) // For debugging
     };
+  }
+
+  /**
+   * [#16178] Run a pipeline whose time dimensions BUCKET, folding the bucket key
+   * in between the pipeline's two halves.
+   *
+   * The fold has to happen in JavaScript. mingo has no expression that produces
+   * the canonical bucket keys (`2026-Q2`, `2026-W23`) and building one out of
+   * `$isoWeek`/`$concat` would be a SECOND implementation of the label rule —
+   * exactly the divergence `checkDateBucketParity` exists to catch, and exactly
+   * what hoisting `bucketDateKey` into `@objectstack/core` was ruled to avoid.
+   * So the pipeline is cut at its `$group`: the `$match` half still runs in the
+   * driver (which is where the rows live, and which is where the tenancy guard
+   * sits), the bucket keys are written onto the selected rows, and the grouping
+   * half runs over those rows with the same mingo the driver would have used.
+   *
+   * `timezone` is `AnalyticsQuery.timezone` — the SAME reference zone
+   * `parseDateRangeString` resolves a `dateRange` preset against, so the window
+   * that selects the rows and the bucket that folds them agree on where a
+   * calendar day starts. Unset means UTC, on both.
+   */
+  private async aggregateWithTimeBuckets(
+    tableName: string,
+    pipeline: Record<string, any>[],
+    timeBuckets: readonly TimeBucket[],
+    timezone?: string,
+  ): Promise<Record<string, any>[]> {
+    const groupIndex = pipeline.findIndex(stage => '$group' in stage);
+    // Stage 3 pushes `$group` unconditionally, so this cannot miss. Stated as a
+    // throw rather than left to a `-1` slicing the pipeline inside out.
+    if (groupIndex < 0) {
+      throw new Error(
+        'Analytics pipeline carries no $group stage to fold a time bucket into (driver-memory).',
+      );
+    }
+    const selected = await this.driver.aggregate(tableName, pipeline.slice(0, groupIndex));
+    for (const row of selected) {
+      for (const bucket of timeBuckets) {
+        row[bucket.bucketKey] = bucketDateKey(
+          readFieldPath(row, bucket.fieldPath),
+          bucket.granularity,
+          timezone,
+        );
+      }
+    }
+    return new Aggregator(pipeline.slice(groupIndex)).run(selected) as Record<string, any>[];
   }
 
   /**

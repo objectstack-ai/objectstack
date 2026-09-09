@@ -38,6 +38,9 @@ import { ACCEPTED_FILTER_COMPARAND_TYPES_SENTENCE } from '@objectstack/spec/data
 // [#7536] The `$like` pattern language's shared gate, so this driver refuses
 // the same malformed patterns as every other face.
 import { hasDanglingLikeEscape } from '@objectstack/spec/data';
+// [#16178] The canonical bucket-key vocabulary, quoted rather than hand-listed —
+// the refusal below names the accepted set from its one definition.
+import { BUCKET_GRANULARITIES } from '@objectstack/core';
 import { StandardErrorCode } from '@objectstack/spec/api';
 
 /**
@@ -90,6 +93,41 @@ export function refusePerAggregationFilter(alias: string): never {
   err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
   err.status = 501;
   throw err;
+}
+
+/**
+ * [#16178] A `timeDimensions[].granularity` this backend cannot BUCKET.
+ *
+ * `@objectstack/spec`'s `TimeUpdateInterval` declares eight intervals; the
+ * canonical bucket-key vocabulary (`@objectstack/core`'s
+ * {@link BUCKET_GRANULARITIES}) defines a label for five of them. The three
+ * sub-day names — `second`, `minute`, `hour` — have no canonical key anywhere in
+ * the contract, so there is no label this backend could emit that another
+ * backend's pushed-down SQL would agree with.
+ *
+ * The same NOT_IMPLEMENTED/501 class, and for the same reason, as
+ * {@link refusePerAggregationFilter} (#5907, ADR-0112): the query is spelled
+ * correctly and the spec declares the value, and it is this backend that
+ * compiles no bucket for it — a capability gap, not a mistake in the query.
+ *
+ * Refused rather than passed through, because passing it through is #16178's own
+ * defect wearing a new name: an unbucketed time dimension answers one group per
+ * distinct timestamp under an ordinary 200, which is a chart with one bar per
+ * row and no warning anywhere.
+ */
+export function unsupportedTimeGranularityError(dimension: string, granularity: string): Error {
+  const err = new Error(
+    `Time dimension "${dimension}" asks for granularity "${granularity}", which this backend ` +
+      `(driver-memory) cannot bucket. The query is spelled correctly and @objectstack/spec's ` +
+      `TimeUpdateInterval declares the value — but the canonical bucket-key vocabulary defines a ` +
+      `label only for ${BUCKET_GRANULARITIES.join(', ')}, and a sub-day bucket has no key any ` +
+      `other backend's pushed-down SQL would agree with. It is refused rather than silently left ` +
+      `unbucketed, which answers one group per distinct timestamp (#16178). Ask for a coarser ` +
+      `granularity, or drop the key and group on the raw timestamp deliberately.`,
+  ) as Error & { code?: string; status?: number };
+  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
+  err.status = 501;
+  return err;
 }
 
 /**
