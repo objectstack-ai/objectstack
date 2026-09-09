@@ -310,6 +310,23 @@ node scripts/isystem-census.mjs          # the summary below
 node scripts/isystem-census.mjs --json   # every site, its kind and its package
 ```
 
+**Every number below marked ✅, plus the four sentences elsewhere on this page
+that restate the same figures (the opening headline, the plugin-sharing share,
+the #4707 ruling quote), is *generated*, never hand-maintained.** `pnpm
+gen:system-context-census` (`node scripts/check-system-context-census.mjs
+--fix`) re-derives the census and rewrites every declared count that has
+drifted from it — the exact computation the check below already runs, applied
+as a write instead of a comparison. ⛔ **Never hand-retype one of these
+digits.** Two branches each independently — and correctly, for their own
+tree — bumping the same sentence to the same number is exactly how this page
+once went silently wrong: the edits are textually identical, git merges them
+clean with no conflict, and the merged total is neither side's number
+(#16919). Run the generator instead, against the tree you actually want
+counted, and it fails loudly rather than writing a partial page if a sentence
+no longer parses. `--fix` still cannot add or drop a **row** — a site that
+arrived or vanished is a human's editorial call, same as always — it only
+keeps the aggregate counts in lockstep with whatever rows exist.
+
 **⛔ Not a `grep`.** A text scan is where a census *starts* and it cannot be where
 one ends: it returns prose inside comments and strings, the three unrelated
 metadata fields, and the `isSystemObject` / `isSystemObjectName` /
