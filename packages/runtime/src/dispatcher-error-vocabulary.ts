@@ -186,6 +186,27 @@ export type CodeStampShape =
  */
 export type CodeDoor = 'dispatcher' | 'rest' | 'plugin-route' | 'none';
 
+/**
+ * [#16649] `'boot-refusal'` was HERE, and is retired. It named a refusal raised
+ * before any HTTP boundary exists — the CLI rethrows it and aborts — and until
+ * #16404 the ledger ratified that class as not owed a row
+ * (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by #8035 on "host boot
+ * matching is not wire vocabulary"). #16404 deleted the exemption (the ledger
+ * is the published face, door or no door), which left the verdict meaning only
+ * "a registration this tree still owes" — #16449 discharged nine of those,
+ * #16649's first half the remaining fourteen, and the second half widened
+ * `check-dispatcher-error-vocabulary`'s face refusal from `packages/spec/src/`
+ * to every published package's `src/`, which is what makes the verdict
+ * unwritable: a row carrying it inside that face is now a
+ * `published-face-unregistered` finding, and the whole scan population lives
+ * inside it. A union member no site can legally carry is a place to park work,
+ * so it comes out with the widening that closed it.
+ *
+ * ⛔ Do not reintroduce it for the next pre-HTTP producer the scan finds. Its
+ * answer under #16404 is the ledger row, and the gate's `unclassified-site`
+ * text says so. REACHABILITY is still recorded — on the ledger row, as the
+ * `door: 'none'` reading each of the twenty-three registrations carries.
+ */
 export type CodeVerdict =
     /**
      * Reaches a wire and the ledger does not know it. Since #9106 the door
@@ -209,28 +230,6 @@ export type CodeVerdict =
      * draw the same line for field-level and diagnostic codes).
      */
     | 'foreign-vocabulary'
-    /**
-     * A refusal raised before any HTTP boundary exists — the CLI rethrows it
-     * and aborts. Until #16404 the ledger's own note ratified this class as
-     * NOT owed a row (`MONGODB_MULTI_TENANT_UNSUPPORTED` was UNregistered by
-     * #8035 on "host boot matching is not wire vocabulary").
-     *
-     * [#16404] That exemption is gone: the published face is the ledger, and
-     * every code that ships in `dist` is registered there, door or no door.
-     * This verdict now records REACHABILITY only — no door answers with the
-     * code, so registering it changes no HTTP body — and a row carrying it is
-     * a registration OWED, exactly like `pending-registration`: the row
-     * ratchets out when the ledger row lands (#16449 took the nine measured on
-     * that card's tree; #16649 took the fourteen that remained, so on this
-     * tree no row carries this verdict — it stays declared for the next
-     * pre-HTTP producer the scan finds, until the gate's spec-face refusal is
-     * widened to every published package and this verdict retires with it;
-     * see the running log below). ⛔ Under `packages/spec/src/**` the gate refuses
-     * this verdict outright (`spec-face-unregistered`): a spec stamp site is a
-     * ledger member, a foreign vocabulary or a runtime-pinned template —
-     * nothing between.
-     */
-    | 'boot-refusal'
     /**
      * [#9223] The site builds its code by INTERPOLATION, so no source scan can
      * say which codes it produces or whether they are registered — and a named
@@ -320,10 +319,21 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // `WALLED_MEMBERSHIP_POLICY_UNDECLARED` (`@objectstack/organizations`) —
     // were registered under their stamping packages and ratcheted out
     // (`stale-row`), the reachability each row recorded now carried on its
-    // ledger row. On this tree NO row carries the `boot-refusal` verdict; a
-    // future pre-HTTP producer the scan finds still lands here as an
-    // `unclassified-site` and takes one, then a registration, then comes out
-    // again. ──
+    // ledger row.
+    //
+    // ── [#16649, second half] The class is now closed MECHANICALLY rather than
+    // by having been emptied once. `check-dispatcher-error-vocabulary`'s face
+    // refusal, which #16449 could only afford over `packages/spec/src/`, covers
+    // every published package's `src/` — the whole of this scan's population on
+    // this tree (52 sites: 47 published-face, 5 spec-face) — so a site here is
+    // a ledger member, a `foreign-vocabulary` or a `runtime-pinned` template
+    // and nothing else, and the `boot-refusal` verdict that used to park one
+    // between is retired from `CodeVerdict` above. The single carve-out is
+    // `pending-registration` outside `packages/spec/src/`, granted 2026-09-08
+    // and owed to #8846; the gate's header dates it and every run prints how
+    // many rows still stand on it. A future pre-HTTP producer the scan finds
+    // lands here as an `unclassified-site` and its way out is the ledger row,
+    // not a row here. ──
 
     // ── runtime-pinned: an interpolated family, checked where it can be ─────
     {
