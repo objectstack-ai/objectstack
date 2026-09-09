@@ -160,19 +160,23 @@ describe('per-call tenant-scope refusal (#16589)', () => {
         thrown = err;
       }
 
-      // The three-way discrimination, stated as the readings it is NOT.
-      expect(answered).toBeNull();
       expect(thrown).toBeInstanceOf(MemoryMultiTenantUnsupportedError);
       expect((thrown as { code?: string }).code).toBe(MULTI_TENANT_UNSUPPORTED_CODE);
 
-      // ⛔ Answering 12 would be the defect (scope discarded).
-      // ⛔ Answering 2 would be row-level isolation — the direction the
-      //    maintainer REFUSED on this card; implementing it reds this line.
-      // ⛔ Answering 0 would be an over-scope that silently hides rows.
-      // The only acceptable outcome is that there is no answer.
-      expect(answered).not.toHaveLength(TOTAL);
-      expect(answered).not.toHaveLength(ORG_A_SUBSET);
-      expect(answered).not.toHaveLength(0);
+      // The discrimination, stated as the readings this call is NOT. Taken as a
+      // nullable COUNT rather than with `toHaveLength`, which refuses a null
+      // target even under `.not` and would pass this block for the wrong reason.
+      const rowsAnswered = Array.isArray(answered) ? answered.length : null;
+
+      // ⛔ 12 would be the defect (scope discarded, every organization returned).
+      // ⛔ 2 would be row-level isolation — the direction the maintainer REFUSED
+      //    on this card; implementing it reds this line.
+      // ⛔ 0 would be an over-scope that silently hides rows.
+      // The only acceptable outcome is that there is no answer at all.
+      expect(rowsAnswered).toBeNull();
+      expect(rowsAnswered).not.toBe(TOTAL);
+      expect(rowsAnswered).not.toBe(ORG_A_SUBSET);
+      expect(rowsAnswered).not.toBe(0);
     });
 
     it('names the operation, the object and the scope it was handed', async () => {
@@ -206,8 +210,10 @@ describe('per-call tenant-scope refusal (#16589)', () => {
       expect(thrown).toBeInstanceOf(MemoryMultiTenantUnsupportedError);
       // ⛔ 5 would be the widened union — the reading the closed round could not
       //    distinguish from "no scope ran" when only two orgs were seeded.
-      expect(answered).toBeNull();
-      expect(answered).not.toHaveLength(ORG_A_B_UNION);
+      const rowsAnswered = Array.isArray(answered) ? answered.length : null;
+      expect(rowsAnswered).toBeNull();
+      expect(rowsAnswered).not.toBe(ORG_A_B_UNION);
+      expect(rowsAnswered).not.toBe(TOTAL);
       expect((thrown as Error).message).toContain('tenantIds');
       expect((thrown as Error).message).toContain(ORG_B);
     });
