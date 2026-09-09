@@ -47,13 +47,7 @@ import { createHmac } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuthManager } from '@objectstack/plugin-auth';
-import {
-  SysAccount,
-  SysSession,
-  SysTwoFactor,
-  SysUser,
-  SysVerification,
-} from '@objectstack/platform-objects/identity';
+import * as identityObjects from '@objectstack/platform-objects/identity';
 import { ObjectStackClient } from './index';
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';
@@ -62,14 +56,26 @@ const NEW_PASSWORD = 'S3cure!Passw0rd-16534-rotated';
 const ORIGIN = 'http://localhost:3000';
 
 /**
- * The identity objects this arrangement needs — the user, credential, session,
- * verification and two-factor rows better-auth's ObjectQL adapter reads and
- * writes on the routes under test. A subset of plugin-auth's own
- * `authIdentityObjects` (which is package-private), taken from the same
- * canonical definitions in `@objectstack/platform-objects/identity`, so these
- * are the shipped schemas rather than a local re-declaration.
+ * The identity objects this arrangement stands up — the user, credential,
+ * session, verification and two-factor rows better-auth's ObjectQL adapter
+ * reads and writes on the routes under test, plus every sibling the boot path
+ * touches (`AuthManager` resolves an OIDC resource row on startup, so a
+ * hand-picked subset fails at `sys_oauth_resource` before the first request).
+ *
+ * Read out of `@objectstack/platform-objects/identity` by shape rather than
+ * transcribed as a list: plugin-auth's own `authIdentityObjects` is
+ * package-private, and a hand-copied list here would be a second declaration
+ * of the same set, drifting silently the day the plugin registers one more.
  */
-const IDENTITY_OBJECTS = [SysUser, SysSession, SysAccount, SysVerification, SysTwoFactor];
+const IDENTITY_OBJECTS = Object.values(
+  identityObjects as unknown as Record<string, unknown>,
+).filter(
+  (o): o is Record<string, unknown> =>
+    !!o &&
+    typeof o === 'object' &&
+    typeof (o as { name?: unknown }).name === 'string' &&
+    typeof (o as { fields?: unknown }).fields === 'object',
+);
 
 // ── RFC 6238 TOTP ──────────────────────────────────────────────────────────
 // Hand-rolled for the reason `two-factor-rotated-token-echo.test.ts` gives:
