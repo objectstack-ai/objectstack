@@ -685,10 +685,11 @@ const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
  * half) untouched: it declares the very same code and status, composes a
  * DIFFERENT sentence, and whether its prose should be unwrapped is a separate
  * decision this helper deliberately does not take. An envelope that declares
- * the code and composes a DIFFERENT, NON-EMPTY sentence is returned exactly as
- * it arrived — it speaks at depth 0, so the walk stops on it. ⚠️ Not so for a
- * declared envelope whose own message is EMPTY: an empty node says nothing, so
- * the walk steps past it and that envelope IS unwrapped (measured:
+ * the code and composes a NON-EMPTY sentence this fragment does not match is
+ * returned exactly as it arrived — it speaks at depth 0, so the walk stops on
+ * it. ⚠️ Not so for a declared envelope whose own message is EMPTY: an empty
+ * node says nothing, so the walk steps past it and that envelope IS unwrapped
+ * (measured:
  * `{code:'DATABASE_ERROR', message:'', cause:{message:'walked'}}` answers
  * `'walked'`). ⛔ No claim is made about whether any producer composes an
  * empty-message `DATABASE_ERROR`; that was not measured.
@@ -707,11 +708,12 @@ const RAW_STATEMENT_FAULT_SENTENCE = /refused to run a raw statement/;
  * `message` for an object or function, the string itself for a string, and
  * `String()` for any other primitive; anything else reads `''`. So a non-Error
  * node reads whatever text it carries rather than the `undefined` that
- * `(e as Error).message` produced at the FIVE sites spelled that way — of the
- * fourteen this helper replaces; the other nine spell
- * `instanceof Error ? … : String()` (five) or `?.message ?? …` (four) and
- * already carried a fallback — and a node whose own text is empty, a thrown
- * empty string among them, reads `''`.
+ * `(e as Error).message` produced at the FIVE sites spelled that way (for
+ * `null` and `undefined` that expression produced nothing at all — it threw a
+ * `TypeError` out of the catch) — of the fourteen this helper replaces; the
+ * other nine spell `instanceof Error ? … : String()` (five) or
+ * `?.message ?? …` (four) and already carried a fallback — and a node whose own
+ * text is empty, a thrown empty string among them, reads `''`.
  */
 function messageChannelOf(node: unknown): string {
     if (typeof node === 'string') return node;

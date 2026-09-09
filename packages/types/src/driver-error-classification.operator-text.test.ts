@@ -140,9 +140,13 @@ describe('[#16657] operatorFacingErrorText — the fallback channel when no caus
         expect(operatorFacingErrorText(thrown)).not.toBe('');
     });
 
-    it('reads a thrown non-Error on its own channel, where `(e as Error).message` read `undefined`', () => {
+    it('reads a thrown non-Error on its own channel, where `(e as Error).message` read `undefined` or threw', () => {
         // `(e as Error).message` — the expression this helper replaces at five
-        // sites — evaluates to `undefined` for every one of these.
+        // sites — answered these five two different ways, neither of them a
+        // record worth storing. It evaluated to `undefined` for the string, the
+        // number and `{}`; for `null` and `undefined` it threw a `TypeError`
+        // out of the catch, so no record was written at all and the operation
+        // aborted. The helper reads a channel instead, so all five store text.
         expect(operatorFacingErrorText('no such column: foo')).toBe('no such column: foo');
         expect(operatorFacingErrorText(42)).toBe('42');
         expect(operatorFacingErrorText(undefined)).toBe('undefined');

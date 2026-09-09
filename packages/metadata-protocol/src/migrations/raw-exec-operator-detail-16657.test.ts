@@ -25,9 +25,25 @@
  * The negative direction is pinned per site as well: a seam failure that is NOT
  * a declared raw-statement fault is NOT unwrapped — its `cause` is never walked
  * and the record reads the thrown value's own message channel,
- * `messageChannelOf(error) || String(error)` — because the alternative, a
- * helper that unwraps whatever it is handed, is the message sniffing #16019
- * exists to remove.
+ * `messageChannelOf(error) || String(error)`, at every site here but the one
+ * noted below — because the alternative, a helper that unwraps whatever it is
+ * handed, is the message sniffing #16019 exists to remove.
+ *
+ * ⚠️ That formula is the WHOLE record at eight of this package's nine call
+ * sites (thirteen of the fourteen across the change), not at all of them.
+ * `seed-tenancy-backfill`'s ORGANIZATION probe still spells
+ * `operatorFacingErrorText(e) || 'unknown error'` — the one surviving fallback
+ * — so where the channel is EMPTY that record reads `'unknown error'` and
+ * never `''`. Measured at that probe: a thrown `''`, a thrown `[]`, and an
+ * `Error` whose `name` and `message` are both empty each record
+ * `'unknown error'`; the control `new Error('boom')` records `'boom'`. The
+ * fallback is load-bearing rather than leftover — this site reads
+ * `organizationProbeError === ''` as "the probe did not fail", and with the
+ * fallback deleted a thrown `''` routes the run down the benign
+ * `no-organization-yet` path instead of the ambiguous one (measured by
+ * ablation), which is the "unknown read as zero" confusion #9261 exists to
+ * prevent. Whether this record SHOULD be `''` like the other eight is a
+ * BEHAVIOUR question, deliberately not taken here; #17167 carries it.
  *
  * ⚠️ That channel is a RULE, not byte-identity with what each site used to
  * compute. Every negative pin below throws a NON-EMPTY `new Error(…)`, the
@@ -303,7 +319,13 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         expect(line?.meta?.error).toBe(DIALECT_TEXT);
     });
 
-    it('an UNDECLARED refusal reads its own message channel at every one of these sites', async () => {
+    it('an UNDECLARED refusal reads its own message channel at the sites without a fallback', async () => {
+        // "Without a fallback" is eight of this package's nine call sites. The
+        // exception is the ORGANIZATION probe (`|| 'unknown error'`), whose
+        // record for an EMPTY channel is `'unknown error'` rather than `''` —
+        // see the module docblock above, and #17167. This pin drives the
+        // duplicates warning, which carries no fallback, with a NON-EMPTY
+        // message, so it exercises the channel and not the fallback.
         const log = createLogger();
         const bare = async (sql: string): Promise<unknown> => {
             if (sql.includes('rows_holding')) throw new Error('connection terminated unexpectedly');

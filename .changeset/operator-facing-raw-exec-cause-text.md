@@ -79,9 +79,12 @@ and never a type. The change these sites were made for is the declared raw-path 
 the record gains the dialect's words in place of the driver's composed placeholder. Every
 other throw now reaches these records through the rule above rather than through the
 expression each site spelled out, so its text can move too — a consequence of the rule, not a
-bounded list of exceptions, and some shapes still record `''` — a thrown empty string, a
-thrown empty array, and an `Error` whose `name` and `message` are both empty are the ones
-measured. The
-sentence being replaced is not a value any consumer can have been parsing: it is an opaque
-human diagnostic. A consumer reading these records gets the dialect's words back where it had
-been getting a placeholder.
+bounded list of exceptions. At thirteen of the fourteen sites the rule is the whole record,
+and some shapes still record `''` there: a thrown empty string, a thrown empty array, and an
+`Error` whose `name` and `message` are both empty are the ones measured. The fourteenth is
+`seed-tenancy-backfill`'s organization probe, which keeps a `|| 'unknown error'` fallback on
+top of the rule, so those same three shapes record `'unknown error'` there rather than `''`;
+that fallback is deliberate — the site reads an empty value as "the probe did not fail" — and
+whether it should go is tracked by #17167. The sentence being replaced is not a value any
+consumer can have been parsing: it is an opaque human diagnostic. A consumer reading these
+records gets the dialect's words back where it had been getting a placeholder.
