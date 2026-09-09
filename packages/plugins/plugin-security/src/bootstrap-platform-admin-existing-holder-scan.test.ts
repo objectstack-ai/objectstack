@@ -451,16 +451,21 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
           const bound = (rows: any[]) =>
             typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
           const where = q?.where ?? {};
-          for (const k of Object.keys(where)) {
-            // Refuse loudly rather than reading a combinator as a field name — a
-            // matcher that answers `false` for `$or` reports a row it never
-            // understood as absent.
-            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-          }
           if (object === 'sys_permission_set') {
             return bound(
-              permissionSets.filter((r) => Object.entries(where).every(([k, v]) => r[k] === v)),
+              permissionSets.filter((r) =>
+                Object.entries(where).every(([k, v]) => {
+                  // Refuse loudly rather than reading a combinator as a field
+                  // name — a matcher that answers `false` for `$or` reports a
+                  // row it never understood as absent.
+                  if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+                  return r[k] === v;
+                }),
+              ),
             );
+          }
+          for (const k of Object.keys(where)) {
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           }
           if (object === 'sys_user_permission_set') {
             // Every synthetic row is organization-scoped, so the narrow leg
