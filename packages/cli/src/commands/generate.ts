@@ -18,7 +18,13 @@ import type { FieldType } from '@objectstack/spec/data';
 // `computeTenantField` — are spelled here in the driver's own terms ON TOP of
 // these, so the part that can be shared is shared and only the part that
 // genuinely lives on `driver-sql` is mirrored.
-import { isTenancyDisabled, isUniqueDeclared, numericColumnFor } from '@objectstack/spec/data';
+import {
+  isNowDefaultToken,
+  isRuntimeDefaultToken,
+  isTenancyDisabled,
+  isUniqueDeclared,
+  numericColumnFor,
+} from '@objectstack/spec/data';
 import { printHeader, printSuccess, printError, printInfo, printStep, createTimer, isReportedError, CLI_ALIAS } from '../utils/format.js';
 import { metadataFileName } from '../utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../utils/emitted-source-parses.js';
@@ -1337,6 +1343,163 @@ function declaredNotNull(field: unknown): boolean {
 }
 
 /**
+ * The physical column DEFAULT a field's `defaultValue` calls for — or, exactly
+ * as deliberately, none at all.
+ *
+ * `SqlDriver.applyDeclaredColumnDefault` is the single place a `defaultValue`
+ * becomes DDL on the platform side, and this is its decision, format-free. Both
+ * emitters below render THIS verdict, so the two formats cannot answer the
+ * question differently from each other — which is the shape #16294 measured:
+ * both generators agreed with each other and disagreed with the platform.
+ *
+ * The driver's four cases, in its own order:
+ *
+ *   1. **`'NOW()'`** — the one runtime token with a database counterpart,
+ *      translated to the driver-native canonical default (`nowColumnDefault`).
+ *      That translation is TYPE-branched, which is why the three `now-*`
+ *      verdicts are distinguished here rather than collapsed: a bare
+ *      `CURRENT_TIMESTAMP` in a `date` column resolves the calendar day in the
+ *      SERVER's timezone (a UTC-12 server records YESTERDAY, #4022) and in a
+ *      `time` column resolves it in the server's or the session's clock (#3994).
+ *   2. **Any other runtime token** (`current_user`, and whatever the spec adds
+ *      to `DEFAULT_VALUE_TOKENS` later) — resolved by the ENGINE at insert time
+ *      against the request context, with NO database counterpart, so nothing is
+ *      emitted. That omission is the contract: the engine deliberately leaves a
+ *      `current_user` field UNSET when there is no authenticated user, and a
+ *      column DEFAULT silently overrode that decision by writing the literal
+ *      string `'current_user'` into `lookup('sys_user')` columns (#4560).
+ *   3. **Objects** — Expression envelopes (`{ dialect, source }`), evaluated
+ *      app-side; never a column DEFAULT.
+ *   4. **Everything else** — a real literal, emitted verbatim.
+ *
+ * ⛔ The two token predicates are IMPORTED, never re-spelled: `isNowDefaultToken`
+ * is case- and whitespace-tolerant, and `isRuntimeDefaultToken` is what makes a
+ * token added tomorrow degrade to "no column default" instead of leaking its own
+ * spelling into the database. A transcription here would be a second vocabulary
+ * for one contract — the defect class this family of pins exists to close.
+ *
+ * ## What this deliberately does NOT emit, each because the driver does not
+ *
+ * - **A `multiple: true` field.** `createColumn` short-circuits on the flag and
+ *   returns before both the nullability line and this one, so a multi-value
+ *   column carries no DEFAULT on the platform either.
+ * - **An option-level `default: true`** on a `select`. `applyDeclaredColumnDefault`
+ *   states at length why that stays out of DDL (one resolver owns the precedence;
+ *   the `multiple` shape has no scalar DDL form; a retrofit would divide
+ *   deployments silently) — ⛔ do not restate the reasoning here, read it there.
+ * - **A non-finite number**, and any `typeof` a parsed config cannot hold at all
+ *   (`symbol`, `function`). `Infinity` and `NaN` have no literal that round-trips
+ *   through a numeric column; named rather than left to the renderer so the
+ *   omission is a decision and not a malformed statement.
+ */
+type DeclaredColumnDefault =
+  | { kind: 'none' }
+  | { kind: 'now' }
+  | { kind: 'now-date' }
+  | { kind: 'now-time' }
+  | { kind: 'literal'; value: string | number | bigint | boolean };
+
+function declaredColumnDefault(field: unknown, type: string): DeclaredColumnDefault {
+  const declaring = field as { defaultValue?: unknown; multiple?: unknown } | undefined;
+  if (declaring?.multiple) return { kind: 'none' };
+  const dv = declaring?.defaultValue;
+  if (dv === undefined || dv === null) return { kind: 'none' };
+  if (isNowDefaultToken(dv)) {
+    if (type === 'date') return { kind: 'now-date' };
+    if (type === 'time') return { kind: 'now-time' };
+    return { kind: 'now' };
+  }
+  if (isRuntimeDefaultToken(dv)) return { kind: 'none' };
+  if (typeof dv === 'object') return { kind: 'none' };
+  if (typeof dv === 'number' && !Number.isFinite(dv)) return { kind: 'none' };
+  if (typeof dv !== 'string' && typeof dv !== 'number' && typeof dv !== 'bigint' && typeof dv !== 'boolean') {
+    return { kind: 'none' };
+  }
+  return { kind: 'literal', value: dv };
+}
+
+/**
+ * {@link declaredColumnDefault} as the `--format sql` emitter spells it: the
+ * ` DEFAULT …` tail of a column definition, or `''`.
+ *
+ * PostgreSQL, and only PostgreSQL — the same claim `generateMigrationSql`'s own
+ * header already makes for `JSONB` / `TIMESTAMPTZ` / `CURRENT_TIMESTAMP`. The
+ * three `now-*` spellings are `SqlDriver.nowColumnDefault`'s Postgres arm, and
+ * `generate-declared-column-default.pin.test.ts` recomputes them from the
+ * driver's own builder rather than trusting these literals.
+ *
+ * ⭐ EVERY literal is quoted — number and boolean included — and that is a
+ * measurement, not a style choice. knex binds every default it is given as a
+ * quoted literal (`default '42'`, `default '9.99'`, `default '1'` for `true`),
+ * which is the form the driver's own tables therefore carry, and the two
+ * spellings do NOT collapse: PostgreSQL records an unquoted `DEFAULT 42` on a
+ * `DECIMAL(18,2)` column as `42` and the quoted one as `'42'::numeric`. Same
+ * value, permanently different default TEXT — the row #15521 already paid for
+ * once, where a schema differ comparing default text reported the audit pair
+ * forever. Booleans are the case where quoting looks wrong and is not: `'1'` and
+ * `'0'` are what knex emits, PostgreSQL normalises both to `true` / `false`, and
+ * a SQLite table built by the driver carries the quoted form verbatim — so one
+ * rule agrees with the driver on both dialects where two rules agree on one.
+ *
+ * The quote itself is doubled, SQL's own escape and the form
+ * `information_schema.column_default` reads back for the driver's own column.
+ */
+function columnDefaultSql(field: unknown, type: string): string {
+  const declared = declaredColumnDefault(field, type);
+  switch (declared.kind) {
+    case 'none': return '';
+    case 'now': return ' DEFAULT CURRENT_TIMESTAMP';
+    case 'now-date': return " DEFAULT (timezone('utc', now())::date)";
+    case 'now-time': return " DEFAULT (timezone('utc', now())::time(3))";
+    case 'literal': {
+      const bound = typeof declared.value === 'boolean'
+        ? (declared.value ? '1' : '0')
+        : String(declared.value);
+      return ` DEFAULT '${bound.replace(/'/g, "''")}'`;
+    }
+  }
+}
+
+/**
+ * {@link declaredColumnDefault} as the `--format ts` emitter spells it: the
+ * `.defaultTo(…)` link of the knex column chain, or `''`.
+ *
+ * Appended AFTER the nullability call because that is the order
+ * `SqlDriver.createColumn` applies them in — `col.notNullable()`, then
+ * `applyDeclaredColumnDefault`. knex builds both as independent modifiers on one
+ * `ColumnBuilder`, so there is no coupling to reconcile on this line; the
+ * coupling the audit-column block below records belongs to
+ * `table.timestamps(true, true)` alone — that HELPER compiles its second
+ * argument to `.notNullable().defaultTo(…)` and offers no spelling for one
+ * without the other, which is why those two columns are written out longhand.
+ * ⛔ Do not read that note as a constraint here.
+ *
+ * The two expression defaults are `db.raw` for the reason
+ * `generate-declared-unique-index.pin.test.ts` already measured one property
+ * over: knex's builder has no expression spelling, and `db.raw` is the seam the
+ * driver itself uses. They carry the PostgreSQL arm — this file's declared claim
+ * — so a `date`/`time` field defaulted to `NOW()` is the one emitted line that
+ * is not dialect-portable, and it is the line whose portable spelling
+ * (`db.fn.now()`) is measurably WRONG on the dialect the file does claim.
+ *
+ * A string is emitted through `JSON.stringify`, a valid TypeScript expression
+ * for every string, which escapes the quote, the backslash and the newline an
+ * authored default may legally contain. This emitter single-quotes IDENTIFIERS
+ * it has validated; a default VALUE is neither.
+ */
+function columnDefaultTs(field: unknown, type: string): string {
+  const declared = declaredColumnDefault(field, type);
+  switch (declared.kind) {
+    case 'none': return '';
+    case 'now': return '.defaultTo(db.fn.now())';
+    case 'now-date': return '.defaultTo(db.raw("(timezone(\'utc\', now())::date)"))';
+    case 'now-time': return '.defaultTo(db.raw("(timezone(\'utc\', now())::time(3))"))';
+    case 'literal':
+      return `.defaultTo(${typeof declared.value === 'string' ? JSON.stringify(declared.value) : String(declared.value)})`;
+  }
+}
+
+/**
  * The widest `varchar(n)` any dialect this platform speaks will declare —
  * `SqlDriver.MAX_VARCHAR_CHARS`, whose own comment records the measurement
  * (MySQL 8.0.46 refuses `varchar(16384)` with `ERROR 1074`; it is the LOWEST of
@@ -1922,8 +2085,9 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
     // as DDL that cannot run. Filled by the loop below, read after it.
     const emittedColumns = new Set<string>(['id']);
     for (const [fieldName, fieldDef] of Object.entries(fields)) {
+      const fType = String(fieldDef.type || 'text');
       const sqlType = fieldTypeToSql(
-        String(fieldDef.type || 'text'),
+        fType,
         !!fieldDef.multiple,
         fieldDef.maxLength,
         keyColumns.has(fieldName),
@@ -1936,7 +2100,12 @@ export function generateMigrationSql(config: Record<string, unknown>): string {
       // storage constraint, never from `required`. See {@link declaredNotNull}
       // for the driver's own recorded reason; ⛔ do not restate it here.
       const notNull = declaredNotNull(fieldDef) ? ' NOT NULL' : '';
-      fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}`);
+      // [#16294 cause 3] The column DEFAULT the field's `defaultValue` calls
+      // for. See {@link declaredColumnDefault} for the driver's own four cases
+      // and for the three it deliberately does not emit; ⛔ do not restate them
+      // here. Ordered after NOT NULL to match `createColumn`'s own sequence.
+      const columnDefault = columnDefaultSql(fieldDef, fType);
+      fieldLines.push(`  "${fieldName}" ${sqlType}${notNull}${columnDefault}`);
       emittedColumns.add(fieldName);
     }
 
@@ -2263,7 +2432,9 @@ export function generateMigrationTs(config: Record<string, unknown>): string {
       // #14828 — the virtual answer: emit nothing at all for this field.
       if (colMethod === null) continue;
 
-      lines.push(`    ${colMethod}${required};`);
+      // [#16294 cause 3] The same verdict the sql format above renders, in
+      // knex's spelling. See {@link columnDefaultTs}.
+      lines.push(`    ${colMethod}${required}${columnDefaultTs(fieldDef, fType)};`);
       emittedColumns.add(fieldName);
     }
 
