@@ -34,6 +34,12 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
+// The ONE comment stripper (`pnpm check:comment-mask-adoption`) — a private
+// regex pair joins two measured failure families, so §3's reading goes through
+// the shared module. Typed by the hand-written `scripts/js-comment-mask.d.mts`
+// beside it, so this `.mjs` specifier needs no shim.
+import { maskComments } from '../../../../scripts/js-comment-mask.mjs';
+
 import { ObjectKernel } from '../kernel.js';
 import { ServiceLifecycle } from '../plugin-loader.js';
 import { isServiceNotRegisteredError } from '../service-not-registered.js';
@@ -249,8 +255,8 @@ describe('[#16013] §2 — the resolver is a THUNK, and the seams depend on how 
 
 describe('[#16013] §3 — the helper must never learn how to REACH the service', () => {
   const SOURCE = readFileSync(new URL('./admission-tenancy-posture.ts', import.meta.url), 'utf8');
-  /** Source minus block comments — the doc names these symbols on purpose. */
-  const CODE = SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  /** Source with comments BLANKED — the doc names these symbols on purpose. */
+  const CODE = maskComments(SOURCE);
 
   it('names no accessor, no kernel and no context — the resolution stays at each seam', () => {
     for (const forbidden of ['getServiceAsync', 'getKernel', 'PluginContext', 'getService(']) {
