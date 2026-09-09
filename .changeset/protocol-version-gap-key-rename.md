@@ -2,6 +2,8 @@
 "@objectstack/cli": minor
 ---
 
+<!-- adr-0087: not-required (no-migration-prescription) the renamed member is a CLI `--json` OUTPUT key emitted from an inline object literal — no Zod schema, no `packages/spec` declaration, no stored representation, so `objectstack migrate meta` has nothing to reach. The affected party is a script reading stdout (ADR-0087 D8). -->
+
 feat(cli)!: the `--json` payload key `specVersionGap` is renamed to `protocolVersionGap` (#14261)
 
 **BREAKING** — a published machine surface changes a key name. `os validate --json` and
