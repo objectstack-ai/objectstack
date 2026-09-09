@@ -2,6 +2,8 @@
 "@objectstack/verify": minor
 ---
 
+**Clause-②: yes** — new exported symbols on a published package (`bootStackOnce`, `isVerifyRefusal`, and ten new members on the `VerifyStack` every `bootStack` caller already holds), so the accept set a consumer writes against widens. Contract-review tier.
+
 Every `VerifyStack` now carries an **in-process handle** on the stack `bootStack` boots — a way to run a hook, a validation rule, a flow, an action, a seed or a read against the REAL engine and assert on what the engine did, instead of writing through HTTP and inferring from persisted rows, or rebuilding the engine's semantics in a test stand-in.
 
 New members on `VerifyStack` (the same object `bootStack` returns; `api` / `apiAs` / `signIn` / `signUp` / `stop` are unchanged):
