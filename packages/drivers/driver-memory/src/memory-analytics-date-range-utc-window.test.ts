@@ -275,7 +275,7 @@ describe('#15825 defect 1 fences', () => {
     //
     // The cross-driver half (memory and the SQL analytics path refusing with
     // one envelope) is the shared conformance fixture this card owed:
-    // `packages/runtime/src/analytics-daterange-driver-conformance.test.ts`.
+    // `packages/core/src/utils/analytics-date-range-conformance.ts`.
     it('the unrecognised-range REFUSAL carries no calendar — same envelope in every zone', async () => {
         const seen = new Set<string>();
         for (const zone of ['UTC', 'Asia/Shanghai', 'America/Los_Angeles', 'Pacific/Chatham']) {

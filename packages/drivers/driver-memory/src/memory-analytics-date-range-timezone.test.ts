@@ -392,7 +392,7 @@ describe("#16042 — the rolling `last_N_days` window anchors on the zone's cale
         // The third retirement this card owed back, in its new form: the
         // `[range, range]` fallback that made this whole family match every row
         // is a refusal now. The shared conformance fixture
-        // (`packages/runtime/src/analytics-daterange-driver-conformance.test.ts`)
+        // (`packages/core/src/utils/analytics-date-range-conformance.ts`)
         // holds memory and the SQL analytics path to the SAME envelope; this
         // cell is the driver-local half, next to the window it protects.
         await at(ZONE, INSTANT, async () => {
