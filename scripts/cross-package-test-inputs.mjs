@@ -1315,3 +1315,61 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
 };
+
+/**
+ * The one input entry that keeps a declared radius from being hashed over
+ * `node_modules/` (#16555).
+ *
+ * ## The defect, and why the glob table alone cannot state it
+ *
+ * A `$TURBO_ROOT$` glob is resolved against the FILESYSTEM, not against git's
+ * tracked set, so `packages/**` descends into every installed dependency tree
+ * under `packages/`. The globs above are declared against what the escaping
+ * tests WALK, and every walk in this repo skips `node_modules` -- the
+ * declaration was simply wider than the walk, in the one direction a glob
+ * cannot narrow by itself.
+ *
+ * What that costs is not a wasted read, it is a task that can never replay from
+ * cache. vitest rewrites `node_modules/.vite/vitest/<hash>/results.json` on
+ * every run, so on a runner that ran any vitest earlier the hash has already
+ * moved before the task is hashed. Measured on the card's tree: 9,404 input
+ * keys for `@objectstack/spec#test:repo`, exactly ONE changed hash between two
+ * consecutive dry-runs, and that file was it -- while the package-local
+ * `@objectstack/spec#test` (`$TURBO_DEFAULT$`, git-scoped) read HIT across the
+ * same experiment.
+ *
+ * ## Why this spelling and not a negated `$TURBO_ROOT$` input
+ *
+ * Measured on turbo 2.10.10 against `@objectstack/spec#test:repo`, three
+ * probe files planted under three packages' dependency trees (a real tracked
+ * `.json` under `packages/` staying an input throughout, as the firing
+ * control):
+ *
+ *   baseline                                     7307 keys, 3 under node_modules
+ *   a negation carrying the root token           7307 keys, 3   -- INERT
+ *   the same, `*` instead of `**`                7307 keys, 3   -- INERT
+ *   the same, rooted at the repo instead         7307 keys, 3   -- INERT
+ *   THIS spelling (package-relative)             7304 keys, 0
+ *
+ * ⇒ turbo drops a negation that carries the root token instead of applying it,
+ * silently. The negation mechanism itself is live -- a package-relative
+ * `"!LICENSE"` on the same task removed exactly that one key (7307 -> 7306) --
+ * so the three zeros above are a reading about the ROOT TOKEN, not about
+ * negation. ⛔ Do not "tidy" this entry into the `$TURBO_ROOT$` form the globs
+ * beside it use: it reads as consistent and enforces nothing.
+ *
+ * Package-relative is also why it needs no per-package depth: `**` spans zero
+ * or more segments, so this one string covers the task's own tree and the
+ * `../<pkg>/...` keys a root-scoped glob contributes alike.
+ *
+ * `check-cross-package-test-inputs.mjs` requires it on the turbo task of every
+ * package that declares a glob able to reach a `node_modules` path, so the next
+ * root-scoped declaration cannot re-commit this silently.
+ */
+export const NODE_MODULES_EXCLUSION = '!**/node_modules/**';
+
+/**
+ * The path segment `NODE_MODULES_EXCLUSION` excludes, as the gate's rule needs
+ * it: a name to test a declared glob's reach against, not a path.
+ */
+export const NODE_MODULES_SEGMENT = 'node_modules';
