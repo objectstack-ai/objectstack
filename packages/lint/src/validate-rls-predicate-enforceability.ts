@@ -152,13 +152,24 @@
  */
 
 import {
+  compileCelToFilter,
   isPushdownableCel,
   isSupportedRlsExpression,
   parseCelToAstWithReason,
   sqlPredicateToCel,
 } from '@objectstack/formula';
 import type { CelBoundsOverrun } from '@objectstack/formula';
-import { recordsOf } from './object-graph.js';
+import { RESERVED_RLS_MEMBERSHIP_KEYS } from '@objectstack/spec/contracts';
+import {
+  describeFieldPathVerdict,
+  indexObjectGraph,
+  isUnjudgeable,
+  listNames,
+  recordsOf,
+  resolveFieldPath,
+  suggestName,
+  type ObjectGraph,
+} from './object-graph.js';
 
 /** A predicate outside the pushdown subset — the policy enforces nothing. */
 export const RLS_PREDICATE_UNENFORCEABLE = 'rls-predicate-unenforceable';
@@ -166,6 +177,16 @@ export const RLS_PREDICATE_UNENFORCEABLE = 'rls-predicate-unenforceable';
 export const RLS_PREDICATE_UNPARSEABLE = 'rls-predicate-unparseable';
 /** Valid CEL that overruns a platform parse bound (`maxAstNodes`, `maxDepth`, …). */
 export const RLS_PREDICATE_OVER_BUDGET = 'rls-predicate-over-budget';
+/**
+ * A predicate whose SHAPE is fine but which names a field the policy's object
+ * does not declare — the reference half of the same failure (#16119).
+ */
+export const RLS_PREDICATE_UNKNOWN_FIELD = 'rls-predicate-unknown-field';
+/**
+ * A predicate referencing a `current_user.*` value nothing pre-resolves — the
+ * variable half of the same failure (#16119).
+ */
+export const RLS_PREDICATE_UNKNOWN_USER_VARIABLE = 'rls-predicate-unknown-user-variable';
 
 export type RlsPredicateSeverity = 'error' | 'warning';
 
@@ -242,6 +263,379 @@ function consequence(clause: 'using' | 'check'): string {
         '`PermissionDeniedError`. The policy reads as a write rule and behaves as a blanket refusal.';
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * #16119 — the REFERENCE half. The three ids above judge a predicate's SHAPE
+ * (does it parse, does it lower, does it fit the bounds) and nothing judges
+ * what it POINTS AT, so `is_private_nope == false || owner_id == current_user.id`
+ * and `is_private == false || owner_id == current_user.nope` were both reported
+ * by NOTHING — measured at the same site, in the same run, that reported the two
+ * shape faults twice.
+ *
+ * Both were invisible, and they are NOT the same failure. The card measured
+ * both as fail-CLOSED and that reading is right for the shapes it measured; it
+ * does not generalise. An unresolved `current_user.*` really is refused by the
+ * compiler in every position, so that half always fails closed: the authored
+ * narrowing becomes a blanket refusal and every holder of the permission set
+ * loses the object. A missing FIELD takes its direction from POSITION, and one
+ * of the two is fail-OPEN:
+ *
+ *  - Leading `field ==` / `=` / `in` — the only shape `extractTargetField`
+ *    recognises — is dropped by the field-existence safety net and arms the
+ *    deny sentinel. Fail closed.
+ *  - A negation (`nope != "x"`, `!(nope == 1)`, `!(nope in ['a'])`) or any arm
+ *    after the first is NOT recognised, so the policy is KEPT and the phantom
+ *    column lowers to a negated constraint that a row without that column
+ *    SATISFIES (`noValueSatisfiesNegation`: `$ne` / `$nin` / `$notContains`).
+ *    The narrowing is DEFEATED — measured at 3 of 3 rows against a 1-of-3 real
+ *    narrowing and a 0-of-3 phantom positive, on the read path and on the
+ *    write path's `matchesFilterCondition` alike. ⛔ Not a cross-tenant leak:
+ *    tenancy is a separate layer and holds. The runtime half is #17042 and is
+ *    NOT this rule's to fix — this rule reports the miss, in both directions.
+ *
+ * Either way it is what a column RENAME leaves behind, with lint and CI green.
+ *
+ * ## Why this is a SECOND pair of ids and not a widening of the three above
+ *
+ * Same disposition `security-fls-unknown-field` took beside
+ * `security-fls-unqualified-key`: those ids say *unenforceable* / *unparseable*
+ * and are correct inside that scope, the prescriptions differ (rewrite the
+ * predicate / fix the name / pre-resolve the variable), and an author who
+ * suppresses one must not thereby suppress the other. These run only where the
+ * shape check PASSED, so the guards are disjoint by construction — a predicate
+ * is judged by the shape ids or by these, never both.
+ */
+
+/**
+ * The `current_user.*` keys the platform itself resolves, read from the
+ * contract that declares them rather than transcribed.
+ *
+ * {@link RESERVED_RLS_MEMBERSHIP_KEYS} (`@objectstack/spec/contracts`) is the
+ * list `IRlsMembershipResolver` is forbidden to supply *because the kernel
+ * already owns them* — "keys … must not collide with the named context fields
+ * (`id`, `organization_id`, `positions`, `org_user_ids`, `accessible_org_ids`,
+ * `email`) — the compiler never lets a membership key clobber those." That is
+ * the same set `RLSCompiler.compileFilter` builds its `RLSUserContext` from,
+ * and it is in `@objectstack/spec`, which this package may read (the RLS
+ * compiler itself is a runtime it may not).
+ *
+ * ⛔ Deliberately NOT hotcrm's five-name guard, and ⛔ not `RLSUserContextSchema`
+ * in `packages/spec/src/security/rls.zod.ts` — that schema still spells the org
+ * key `tenantId` and carries `department` / `attributes` the RLS compiler never
+ * binds, so reading it would judge authored policies against a shape the
+ * runtime does not have.
+ */
+const PRERESOLVED_USER_KEYS: ReadonlySet<string> = new Set(RESERVED_RLS_MEMBERSHIP_KEYS);
+
+/**
+ * Probe values bound in place of the real request context.
+ *
+ * An ARRAY is the value that lowers in EVERY position the pushdown subset has:
+ * `lowerMembership` requires `Array.isArray` on the right of `in`, and
+ * `lowerComparison` accepts any value at all — so binding every known key to one
+ * array lets a well-formed predicate compile without a request. The SCALAR is
+ * the discriminator described on {@link userVariableIsScalarPositioned}.
+ */
+const PROBE_ARRAY: readonly string[] = ['__objectstack_lint_probe__'];
+const PROBE_SCALAR = '__objectstack_lint_probe__';
+
+/** `variable "current_user.nope" is undefined` → `current_user.nope`. */
+function unresolvedVariablePath(detail: string): string | null {
+  const m = /variable "([^"]+)"/.exec(detail);
+  return m ? m[1] : null;
+}
+
+type UserProbe = Record<string, unknown>;
+
+function baseUserProbe(): UserProbe {
+  const probe: UserProbe = {};
+  for (const key of PRERESOLVED_USER_KEYS) probe[key] = PROBE_ARRAY;
+  return probe;
+}
+
+function compileWithProbe(bridged: string, probe: UserProbe) {
+  return compileCelToFilter(bridged, { variables: { current_user: probe } });
+}
+
+/**
+ * Is this `current_user.<key>` reference in a position only a SCALAR can fill?
+ *
+ * This is the whole reason the variable rule can exist without false-positiving
+ * the platform's own documented feature. §7.3.1 dynamic membership lets an app
+ * stage ARBITRARY keys into `ExecutionContext.rlsMembership` and reference them
+ * as `field in current_user.<key>` — the existing `rls-predicate-unparseable`
+ * hint *recommends exactly that shape* — so a key this linter has never heard of
+ * is, in an `in` position, indistinguishable from a correct §7.3.1 reference and
+ * must NOT be reported (the object graph's `unknowable` discipline, one axis
+ * over).
+ *
+ * What makes the other positions decidable is that the merge is array-only:
+ * `compileFilter` stages a membership entry only `if (Array.isArray(value))`,
+ * and it never lets one clobber a named field. So the complete set of values
+ * `current_user.<unknown key>` can EVER hold at runtime is "some array" — and an
+ * array is the one thing a scalar position cannot use. A key compared with
+ * `==` / `!=` / `<` / `>` or handed to `startsWith` therefore resolves to
+ * nothing on every request there will ever be.
+ *
+ * The question is asked of the COMPILER, not of a model of it: bind the key to
+ * a scalar and re-run `compileCelToFilter`. If the predicate still lowers, the
+ * key sat in a scalar position; if the compiler refuses (`in` requires an
+ * array/list on the right), it sat in a membership position and is left alone.
+ * A key used in BOTH positions in one predicate takes the membership answer and
+ * is skipped — the conservative direction for a new rule.
+ */
+function userVariableIsScalarPositioned(bridged: string, probe: UserProbe, path: string): boolean {
+  const scalarProbe: UserProbe = { ...probe };
+  setProbePath(scalarProbe, path, PROBE_SCALAR);
+  const res = compileWithProbe(bridged, scalarProbe);
+  if (res.ok) return true;
+  // Still unresolved, but about a DIFFERENT variable: this one resolved as a
+  // scalar before the compiler reached the next miss.
+  if (res.reason === 'unresolved-variable') return unresolvedVariablePath(res.detail) !== path;
+  return false;
+}
+
+/** Bind `current_user.a.b` inside the probe, creating the intermediate records. */
+function setProbePath(probe: UserProbe, path: string, value: unknown): void {
+  const segments = path.split('.').slice(1); // drop the `current_user` root
+  if (segments.length === 0) return;
+  let cursor: UserProbe = probe;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const next = cursor[segments[i]];
+    const rec = next && typeof next === 'object' && !Array.isArray(next) ? (next as UserProbe) : {};
+    cursor[segments[i]] = rec;
+    cursor = rec;
+  }
+  cursor[segments[segments.length - 1]] = value;
+}
+
+/** Is this whole path exactly one pre-resolved key (`current_user.id`)? */
+function isPreresolvedPath(path: string): boolean {
+  const segments = path.split('.');
+  return segments.length === 2 && segments[0] === 'current_user' && PRERESOLVED_USER_KEYS.has(segments[1]);
+}
+
+/**
+ * Compile the predicate against a probe context, reporting each unresolvable
+ * `current_user.*` reference on the way, and return the lowered filter — whose
+ * KEYS are the field paths the runtime will push down (ADR-0055: every one a
+ * single column).
+ *
+ * The loop exists because `resolveValue` throws on the FIRST miss it reaches, so
+ * each discovered key is bound to a probe value before the next compile. Bounded
+ * rather than `while (true)`: a linter must terminate on input it did not
+ * anticipate, and stopping early only costs a finding.
+ */
+function resolveReferences(
+  bridged: string,
+): { filter: Record<string, unknown> | null; unresolvedScalars: string[] } {
+  const probe = baseUserProbe();
+  const unresolvedScalars: string[] = [];
+  for (let pass = 0; pass < 32; pass++) {
+    const res = compileWithProbe(bridged, probe);
+    if (res.ok) return { filter: res.filter as Record<string, unknown>, unresolvedScalars };
+    if (res.reason !== 'unresolved-variable') {
+      // The predicate passed `isSupportedRlsExpression`, so a shape refusal here
+      // can only be a probe value the position cannot take (an array handed to
+      // `startsWith`). Nothing further is decidable; report what was found.
+      return { filter: null, unresolvedScalars };
+    }
+    const path = unresolvedVariablePath(res.detail);
+    if (!path || !path.startsWith('current_user.') || isPreresolvedPath(path)) {
+      return { filter: null, unresolvedScalars };
+    }
+    if (userVariableIsScalarPositioned(bridged, probe, path)) {
+      unresolvedScalars.push(path);
+      setProbePath(probe, path, PROBE_SCALAR);
+    } else {
+      // A membership position — an app-staged §7.3.1 key is indistinguishable
+      // from a typo here, so this is `unknowable`, never a finding.
+      setProbePath(probe, path, PROBE_ARRAY);
+    }
+  }
+  return { filter: null, unresolvedScalars };
+}
+
+/** Collect every `{ $field: '<path>' }` reference nested anywhere under a value. */
+function collectFieldRefs(value: unknown, out: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectFieldRefs(item, out);
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (key === '$field' && typeof nested === 'string' && nested) out.add(nested);
+    else collectFieldRefs(nested, out);
+  }
+}
+
+/**
+ * The field paths a lowered FilterCondition addresses.
+ *
+ * Read off the COMPILER'S OWN OUTPUT rather than re-walked from the source:
+ * every producer of a field key in `cel-to-filter.ts` (`emit`, `lowerMembership`,
+ * `lowerStringMethod`) writes the path as the condition's key, so this reads
+ * exactly the columns the driver will be handed. A second parse of the predicate
+ * here would be the fork this file's docblock refuses.
+ */
+function filterFieldPaths(filter: Record<string, unknown> | null): Set<string> {
+  const fields = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === '$and' || key === '$or' || key === '$not') {
+        walk(value);
+        continue;
+      }
+      if (key.startsWith('$')) continue;
+      fields.add(key);
+      collectFieldRefs(value, fields);
+    }
+  };
+  walk(filter);
+  return fields;
+}
+
+/**
+ * What a reference miss costs at request time, per clause. Measured, not inferred.
+ *
+ * ⚠️ The two KINDS do not have the same failure direction, and the field half
+ * does not have ONE direction. An unresolved variable is refused by the compiler
+ * in every position, so it always fails closed. A missing FIELD fails closed or
+ * fails OPEN depending on where in the predicate it sits, and the message says
+ * which — an author told "this denies everything" about a predicate that in fact
+ * matches everything would harden exactly the wrong thing.
+ */
+function referenceConsequence(clause: 'using' | 'check', kind: 'field' | 'variable'): string {
+  if (kind === 'variable') {
+    const dropped =
+      'The pushdown compiler answers `unresolved-variable` in EVERY position — including under `!` and in ' +
+      'a trailing `||` arm — so `RLSCompiler` DROPS the policy at request time, and one WARN line is the ' +
+      'only signal. ';
+    return clause === 'using'
+      ? dropped +
+          'When it is the only applicable policy for that object and operation the layer falls back to the ' +
+          '`RLS_DENY_FILTER` sentinel, which is AND-ed onto the where clause: every select / update / ' +
+          'delete matches ZERO rows, so the object DISAPPEARS for every holder of this permission set — ' +
+          'not because they were denied, but because the narrowing they were granted resolves to nothing. ' +
+          'When other policies also apply, this one vanishes from the OR and grants none of the access it ' +
+          'appears to.'
+      : dropped +
+          'On the ADR-0058 D4 write path that leaves the post-image `check` unsatisfiable: every insert / ' +
+          'update the policy governs fails with `PermissionDeniedError`. The policy reads as a write rule ' +
+          'and behaves as a blanket refusal for every holder of this permission set.';
+  }
+
+  // ── The FIELD half. Which direction it takes is decided by position, and one
+  // of the two is fail-OPEN. The runtime repair is tracked in #17042; the id
+  // stays HERE and never in the returned string, because that string reaches
+  // authors, operators and generated surfaces, none of whom can resolve
+  // `#NNNN` (`check:doc-authoring`, maintainer ruling 2026-08-12).
+  const closed =
+    clause === 'using'
+      ? 'the field-existence safety net in `SecurityPlugin` DROPS the policy and, when it was the only ' +
+        'applicable one, arms the `RLS_DENY_FILTER` sentinel — every select / update / delete matches ZERO ' +
+        'rows and the object disappears for every holder of this permission set'
+      : 'the post-image can never satisfy the constraint, so every insert / update the policy governs ' +
+        'fails with `PermissionDeniedError` — a blanket refusal for every holder of this permission set';
+  const open =
+    clause === 'using'
+      ? 'every row inside the tenant wall SATISFIES the negated constraint, so the policy stops narrowing ' +
+        'and matches everything the wall admits'
+      : 'the post-image SATISFIES the negated constraint vacuously, so the check permits exactly the ' +
+        'writes it was written to refuse';
+  return (
+    'What it costs depends on WHERE the miss sits, and one of the two directions is fail-OPEN. ' +
+    'The safety net recognises only a LEADING `field ==` / `=` / `in` — `extractTargetField` is that ' +
+    `shape match — so a miss THERE fails CLOSED: ${closed}. A miss the net does NOT recognise — a ` +
+    'negation (`field != x`, `!(field == x)`, `!(field in [...])`), or any arm after the first — leaves ' +
+    'the policy KEPT, and a row that has no such column satisfies a negation: ' +
+    `${open}. The authored narrowing is then DEFEATED rather than enforced. ` +
+    'Measured on the driver-memory matcher and on `matchesFilterCondition` (the write path), each against ' +
+    'two controls: the real narrowing selects 1 of 3 rows, the SAME phantom column in a positive position ' +
+    'selects 0 of 3, and each negation shape selects 3 of 3. ⛔ It is NOT a cross-tenant leak — tenancy is ' +
+    'a separate layer and holds; what is defeated is the narrowing authored INSIDE the wall. ' +
+    'driver-mongodb follows the same shared ruling; driver-sql is NOT MEASURED and is expected to fail ' +
+    'closed by raising `no such column`. Repairing that is the runtime\'s job, not this rule\'s — what ' +
+    'this diagnostic owes you is WHICH direction your predicate is in.'
+  );
+}
+
+/**
+ * The reference pass: every finding a SHAPE-VALID predicate earns.
+ *
+ * Ordered fields-then-variables and deduplicated per name, so a predicate
+ * naming one missing column twice earns one finding rather than one per
+ * occurrence.
+ */
+function referenceFindings(
+  graph: ObjectGraph,
+  source: string,
+  clause: 'using' | 'check',
+  where: string,
+  path: string,
+  object: string,
+): RlsPredicateFinding[] {
+  const findings: RlsPredicateFinding[] = [];
+  const bridged = sqlPredicateToCel(source);
+  const { filter, unresolvedScalars } = resolveReferences(bridged);
+
+  for (const fieldPath of filterFieldPaths(filter)) {
+    const verdict = resolveFieldPath(graph, object, fieldPath);
+    if (isUnjudgeable(verdict) || !verdict) continue;
+    const account = describeFieldPathVerdict(verdict, fieldPath, `RLS ${clause} predicate field`);
+    if (!account) continue;
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNKNOWN_FIELD,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` lowers correctly but does not name a real column: ` +
+        `${account.message} ` + referenceConsequence(clause, 'field'),
+      hint:
+        `${account.detail} Point the predicate at a column the object really declares, or delete the ` +
+        `policy if the narrowing is gone — a policy naming a column that does not exist is not ` +
+        `protection either way: it is an outage in one position and an open door in the other. If the ` +
+        `field was RENAMED, this policy has been wrong since that rename — check WHICH way before you ` +
+        `judge the blast radius, because a negated or non-leading miss has been granting, not denying. ` +
+        `If the value was meant to live on another object, RLS cannot join to it (ADR-0055) — ` +
+        `denormalise it onto "${object}" (a formula/rollup field) and test that column instead.`,
+    });
+  }
+
+  for (const variablePath of unresolvedScalars) {
+    const key = variablePath.slice('current_user.'.length);
+    findings.push({
+      severity: 'error',
+      rule: RLS_PREDICATE_UNKNOWN_USER_VARIABLE,
+      where,
+      path,
+      message:
+        `RLS ${clause} \`${quote(source)}\` reads \`${variablePath}\`, which nothing pre-resolves. The ` +
+        `kernel-resolved \`current_user\` keys are exactly ${listNames(PRERESOLVED_USER_KEYS)}, and the ` +
+        `only other keys that can EVER appear are §7.3.1 membership sets, which the runtime stages as ` +
+        `ARRAYS and which are therefore usable only as \`field in current_user.<key>\` — this reference ` +
+        `is in a scalar position, so no request can ever supply it. ` +
+        referenceConsequence(clause, 'variable'),
+      hint:
+        `Use one of the pre-resolved context values (${listNames(PRERESOLVED_USER_KEYS)})${suggestName(
+          key,
+          PRERESOLVED_USER_KEYS,
+        )} — \`current_user.organization_id\` is the tenant, \`current_user.id\` the acting user, ` +
+        `\`current_user.email\` their unique address. If "${key}" is meant to be an app-resolved set, it ` +
+        `must be staged into \`ExecutionContext.rlsMembership\` by an \`IRlsMembershipResolver\` that ` +
+        `DECLARES the key, and it can then only be tested with \`in\` (\`<field> in ${variablePath}\`), ` +
+        `never compared with \`==\`: the runtime stages membership sets as arrays and never as scalars.`,
+    });
+  }
+
+  return findings;
+}
+
 /**
  * Gate every stack-declared RLS predicate on the ONE thing the runtime does
  * with it: lower it to a FilterCondition (ADR-0056 D4).
@@ -252,6 +646,15 @@ function consequence(clause: 'using' | 'check'): string {
 export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicateFinding[] {
   const findings: RlsPredicateFinding[] = [];
   const cfg = (stack ?? {}) as AnyRec;
+
+  // [#16119] The object graph for the reference pass, built ONCE: `indexObjectGraph`
+  // walks every object's whole field map, and a stack with N permission sets would
+  // otherwise pay for that walk N times to answer the same question. It is the
+  // SHARED index every field-existence rule in this package resolves through, so
+  // the three skips (an object this stack does not define, an object with no
+  // readable field map, registry-injected system columns) are the graph's and not
+  // re-derived here.
+  const graph: ObjectGraph = indexObjectGraph(cfg);
 
   recordsOf(cfg.permissions).forEach((ps, psIndex) => {
     recordsOf(ps.rowLevelSecurity).forEach((policy, pIndex) => {
@@ -266,7 +669,23 @@ export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicate
         // it: `RLSCompiler.compileFilter` calls the SAME `isSupportedRlsExpression`
         // to decide whether a dropped policy warrants its WARN. There is no
         // heuristic here to drift.
-        if (isSupportedRlsExpression(source)) continue;
+        const psNameEarly = str(ps.name) || String(psIndex);
+        const policyNameEarly = str(policy.name) || String(pIndex);
+        const objectEarly = str(policy.object);
+        const whereEarly =
+          `permission set "${psNameEarly}" policy "${policyNameEarly}"` +
+          (objectEarly ? ` on object "${objectEarly}"` : '');
+        const pathEarly = `permissions[${psIndex}].rowLevelSecurity[${pIndex}].${clause}`;
+
+        if (isSupportedRlsExpression(source)) {
+          // [#16119] The shape is fine, so the REFERENCE pass owns this predicate.
+          // Disjoint from everything below by construction: the three shape ids
+          // only ever run on predicates this branch has already returned from.
+          findings.push(
+            ...referenceFindings(graph, source, clause, whereEarly, pathEarly, objectEarly),
+          );
+          continue;
+        }
 
         // ── The explanation. Re-derived only to tell the author WHICH fix they
         // need; the red/green boundary above never consults it. (Both agree by
@@ -280,12 +699,8 @@ export function validateRlsPredicateEnforceability(stack: unknown): RlsPredicate
         // the two are separated here, and only here.
         const overrun = parseError ? boundsOverrunOf(bridged) : null;
 
-        const psName = str(ps.name) || String(psIndex);
-        const policyName = str(policy.name) || String(pIndex);
-        const object = str(policy.object);
-        const where =
-          `permission set "${psName}" policy "${policyName}"` + (object ? ` on object "${object}"` : '');
-        const path = `permissions[${psIndex}].rowLevelSecurity[${pIndex}].${clause}`;
+        const where = whereEarly;
+        const path = pathEarly;
 
         if (overrun) {
           // `limit` is null only for a bounds fault this package cannot NAME
