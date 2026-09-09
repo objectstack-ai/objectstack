@@ -123,6 +123,20 @@ function fakeStack(opts: FakeOpts): VerifyStack {
     signIn: async () => 'admin',
     signUp: async () => 'member',
     stop: async () => {},
+    // [#15951] The in-process handle every real `VerifyStack` carries is NOT
+    // modelled here: the runner under test drives the HTTP half only. Typed
+    // `never`, like `kernel` / `api` / `raw` above, so a runner that starts
+    // reaching for the handle fails to compile in this test rather than
+    // finding an `undefined` at run time.
+    contextFor: undefined as never,
+    hooks: undefined as never,
+    validate: undefined as never,
+    flows: undefined as never,
+    actions: undefined as never,
+    seed: undefined as never,
+    rows: undefined as never,
+    metadata: undefined as never,
+    tenancy: undefined as never,
   };
 }
 
