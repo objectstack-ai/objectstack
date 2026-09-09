@@ -25,3 +25,10 @@ value counts `0`, never null — `emptyGroupValueFor` rules counting nothing the
 identity `0`.
 
 The live path is unchanged.
+
+Bumped `patch` rather than `minor`: the package's published surface is
+byte-unchanged — `src/index.ts` is not in this diff, `aggregate()` is
+module-private and `evaluateAnalyticsQueryOverRows` is not on the barrel — and
+the only user-visible effect is a drafted chart's number moving to the number
+the published chart already showed, which is a correction toward the live
+standard rather than the backwards-compatible feature addition `minor` denotes.
