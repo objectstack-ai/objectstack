@@ -181,7 +181,7 @@
 // changelogs" is exactly why a finding here is a report and not a build failure:
 // the process itself sanctions the other branch, and no gate should hard-fail a
 // state its own process document permits.
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -374,6 +374,41 @@ export function coverageFindings(major, minor, pagePath, pageText) {
     + 'prose and cannot: a curated section is a judgement about what is user-facing, read out of the '
     + 'per-package changelogs. It only reports that the section is absent.',
   ];
+}
+
+/**
+ * The corpus this gate reads for one major, across BOTH page layouts, or null
+ * when the major has no page at all.
+ *
+ * A major is either one flat `v17.mdx` or a `v17/` folder holding `index.mdx`
+ * plus one page per minor — the same two layouts check:release-notes and
+ * check:release-page-status accept, and neither is deprecated. The assertion
+ * here is "some heading NAMES this minor", which is a property of the major's
+ * prose wherever it is written down, so the folder is read as one corpus: the
+ * split moved the `## What's new in 17.1.0` heading from line 3475 of one file
+ * to line 5 of another, and that is not a coverage change.
+ *
+ * ⛔ Returning null on a folder that exists would be worse than the old flat-only
+ * lookup, not equal to it: the skip below is only honest while a sibling gate
+ * really does go red on the same fact, and once those two learned this layout a
+ * skip here became a silent hole reported as "in scope" by renderOk.
+ *
+ * @param {number} major
+ * @returns {{ pagePath: string, pageText: string } | null}
+ */
+export function releasePageCorpus(major) {
+  const flat = `${RELEASES_DIR}/v${major}.mdx`;
+  if (existsSync(flat)) return { pagePath: flat, pageText: readFileSync(flat, 'utf8') };
+
+  const dir = `${RELEASES_DIR}/v${major}`;
+  if (!existsSync(`${dir}/index.mdx`)) return null;
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.mdx'))
+    .sort();
+  return {
+    pagePath: `${dir}/`,
+    pageText: files.map((f) => readFileSync(`${dir}/${f}`, 'utf8')).join('\n'),
+  };
 }
 
 // ── Assertion 2: index currency ──────────────────────────────────────────────
@@ -1210,14 +1245,14 @@ function main(argv) {
   const indexText = existsSync(INDEX_PATH) ? readFileSync(INDEX_PATH, 'utf8') : null;
 
   for (const major of inScopeMajors) {
-    const pagePath = `${RELEASES_DIR}/v${major}.mdx`;
-    if (!existsSync(pagePath)) {
+    const page = releasePageCorpus(major);
+    if (page === null) {
       // check:release-notes and check:release-page-status both already fail on
       // this. Reporting it a third time is three reds for one fix.
-      console.log(`  (v${major}: no ${pagePath} — page existence is check:release-notes' verdict; skipped)`);
+      console.log(`  (v${major}: no ${RELEASES_DIR}/v${major}.mdx and no ${RELEASES_DIR}/v${major}/ — page existence is check:release-notes' verdict; skipped)`);
       continue;
     }
-    const pageText = readFileSync(pagePath, 'utf8');
+    const { pagePath, pageText } = page;
     for (const [maj, min] of minors) {
       if (maj !== major) continue;
       findings.push(...coverageFindings(maj, min, pagePath, pageText));

@@ -68,13 +68,27 @@
  *                            semver range pinned to the running CLI's own
  *                            version, the `tsconfig.json` is self-contained,
  *                            a `pnpm-workspace.yaml` carries the build
- *                            approvals a fresh `pnpm install` needs, and the
- *                            project lands in the developer's own directory.
+ *                            approvals a fresh `pnpm install` needs, the
+ *                            package is named `plugin-<name>` and marked
+ *                            `private`, and the project lands in the
+ *                            developer's own directory.
  *   `in-repo`     (--in-repo) the platform-work shape: `workspace:*` deps, a
  *                            `tsconfig.json` that extends this repo's root
- *                            config, landing under `packages/plugins/`.
- *                            Explicit and documented, never the default — its
- *                            output installs nowhere else.
+ *                            config, a publishable `@objectstack/plugin-<name>`
+ *                            landing under `packages/plugins/`. Explicit and
+ *                            documented, never the default — its output
+ *                            installs nowhere else.
+ *
+ * ## The emitted package NAME follows the placement too (#15530)
+ *
+ * The audience decides the name, and #14824 moved the audience without moving
+ * the name: the standalone default kept stamping `@objectstack/plugin-<name>`
+ * — a scope the developer it now scaffolds for cannot publish to — onto every
+ * project, with the emitted README telling them to install it from there. The
+ * rule and the reason live on {@link pluginPackageName}; the README is the
+ * SECOND site that repeats the name and is fixed in the same place, because a
+ * rename that reaches only the manifest leaves the README pointing at a package
+ * that exists under no name at all.
  *
  * ## The version the standalone shape pins
  *
@@ -192,14 +206,20 @@ function defineTemplate(t: Omit<CreateTemplate, 'files'>): CreateTemplate {
 }
 
 /**
- * The scoped package name a scaffold is about to write, READ BACK off the
- * rendered manifest rather than recomposed here.
+ * The package name a scaffold is about to write, READ BACK off the rendered
+ * manifest rather than recomposed here.
  *
- * Recomposing it would be a second copy of `@objectstack/plugin-${name}` that
- * nothing keeps in step with the renderer — the same restatement that let this
- * command's emitted name drift away from what `os init` enforces. Reading the
- * rendered object measures the string that actually lands on disk, and a
- * template added later is covered without being told to declare anything.
+ * Recomposing it would be a second copy of the composition that nothing keeps
+ * in step with the renderer — the same restatement that let this command's
+ * emitted name drift away from what `os init` enforces. Reading the rendered
+ * object measures the string that actually lands on disk, and a template added
+ * later is covered without being told to declare anything.
+ *
+ * ⭐ Load-bearing since #15530, not merely tidy: the composition is no longer
+ * ONE string. The standalone placement emits an unscoped `plugin-<name>` and
+ * `--in-repo` a scoped `@objectstack/plugin-<name>`, so a recomposition here
+ * would have to know the placement rule too — and would be judging the wrong
+ * length for one of the two placements the moment the rule moved.
  *
  * `null` when the template emits no `package.json`, or emits one without a
  * string `name`: there is then no package name to judge, which is not the same
@@ -220,12 +240,17 @@ export function emittedPackageName(
  * The one rule `os create` needs and `os init` cannot.
  *
  * `init`'s argument IS the package name, so measuring the argument is the same
- * measurement. `create` composes its argument into a SCOPED name, and npm's
- * 214-character ceiling counts the scope: `@objectstack/plugin-` spends 20 of
- * them before the user's first character. A 200-character name is therefore
- * legal for `init` (measured: accepted) and illegal for `create` (measured:
- * emits a 220-character name npm refuses) — which is why the shared validator
- * is shared and this check is not.
+ * measurement. `create` COMPOSES its argument into a longer name, and npm's
+ * 214-character ceiling counts every character of the composition — the
+ * `plugin-` prefix the standalone placement writes (7), or the whole
+ * `@objectstack/plugin-` the in-repo placement writes (20), before the user's
+ * first character. A 214-character name is therefore legal for `init`
+ * (measured: accepted) and illegal for `create` in EITHER placement — which is
+ * why the shared validator is shared and this check is not.
+ *
+ * ⛔ Never re-derive the prefix length here: the caller hands in the string
+ * `emittedPackageName` read back off the rendered manifest, so this measures
+ * the bytes that would land whichever placement produced them.
  */
 export function validateEmittedPackageName(packageName: string): string | null {
   const over = packageName.length - NPM_PACKAGE_NAME_MAX_LENGTH;
@@ -284,17 +309,76 @@ export function sanitizeIdentifier(name: string): string {
 
 const PLUGIN_IN_REPO_DIR = 'packages/plugins';
 
+/** The project directory the `plugin` template lands in, in either placement. */
+function pluginDirName(name: string): string {
+  return `plugin-${name}`;
+}
+
+/**
+ * The package name the `plugin` template writes — DERIVED from the placement,
+ * exactly as its dependency specs and its `tsconfig.json` already are.
+ *
+ * ## Why the standalone name is unscoped
+ *
+ * `@objectstack` is a scope the developer this command scaffolds FOR cannot
+ * publish to. Until #14824 that was arguably fine, because the default output
+ * landed inside this monorepo, where every sibling really does carry the scope.
+ * That ruling pointed the default at the developer's own directory and the name
+ * did not move with the audience — so the standalone emission stamped a scope
+ * its owner does not own onto every project generated from it. ⚠️ Nothing in
+ * this repository can see that: the name is never resolved from a registry
+ * inside the project, so `pnpm install`, the type-check and the scaffold smoke
+ * are all green on it. The cost is paid once, later, at `npm publish`, in
+ * someone else's terminal.
+ *
+ * The #15530 ruling is that the standalone default emits `plugin-<name>` —
+ * unscoped, and the same string as {@link pluginDirName}, which is what the
+ * scaffolder prints and what the developer already sees on disk. ⛔ Those are
+ * not two spellings of one convention: the package name is COMPOSED from the
+ * directory name here, so a template that renames its directory cannot leave a
+ * stale package name behind it.
+ *
+ * ⭐ The name is the readable half. `"private": true` — emitted beside it, for
+ * the standalone placement only — is the STRUCTURAL half, and the one that
+ * actually prevents the defect: `npm publish` refuses a private manifest
+ * loudly, whatever the name says. A later change that keeps this name and drops
+ * that flag reinstates the defect with better prose.
+ *
+ * `--in-repo` keeps `@objectstack/plugin-<name>` and stays publishable: that
+ * placement lands under `packages/plugins/`, where every sibling genuinely
+ * carries that scope and whoever runs it genuinely can publish there.
+ *
+ * ⛔ Module-private on purpose, unlike its five exported neighbours. Each of
+ * those is exported because a test in this package IMPORTS it; nothing imports
+ * this one, and nothing should — `test/create.test.ts` pins the two composed
+ * names as LITERALS precisely so the pin cannot move with the function it is
+ * pinning. An `export` here would widen this module's surface for no reader.
+ */
+function pluginPackageName(placement: ScaffoldPlacement, name: string): string {
+  return placement === 'in-repo'
+    ? `@objectstack/${pluginDirName(name)}`
+    : pluginDirName(name);
+}
+
 export const templates: Record<string, CreateTemplate> = {
   plugin: defineTemplate({
     description: 'Create a new kernel code plugin (TypeScript implementing the kernel Plugin contract)',
     inRepoDir: PLUGIN_IN_REPO_DIR,
-    dirName: (name: string) => `plugin-${name}`,
+    dirName: pluginDirName,
     filesFor: (placement: ScaffoldPlacement) => {
       const standalone = placement === 'standalone';
       const files: Record<string, FileRenderer> = {
         'package.json': (name: string) => ({
-          name: `@objectstack/plugin-${name}`,
+          name: pluginPackageName(placement, name),
           version: '0.1.0',
+          // ⛔ Standalone only, and ⛔ never dropped as "just a default the
+          // developer will change": this is the line that makes an accidental
+          // `npm publish` fail loudly instead of landing a package in a
+          // namespace its author does not own. The unscoped name above is the
+          // readable half; this is the enforcing one. The in-repo placement
+          // omits it because `packages/plugins/*` really is published from here
+          // — see {@link pluginPackageName}.
+          ...(standalone ? { private: true } : {}),
           description: `ObjectStack Plugin: ${name}`,
           // `tsc` emits ES modules under the compiler options below, so the
           // manifest has to declare the project as ESM or Node refuses the
@@ -332,7 +416,7 @@ export const templates: Record<string, CreateTemplate> = {
                 include: SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
               })
             : {
-                extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, `plugin-${name}`),
+                extends: rootTsconfigExtends(PLUGIN_IN_REPO_DIR, pluginDirName(name)),
                 compilerOptions: {
                   outDir: 'dist',
                   rootDir: 'src',
@@ -361,15 +445,53 @@ export const ${sanitizeIdentifier(name)}Plugin: Plugin = {
 
 export default ${sanitizeIdentifier(name)}Plugin;
 `,
-        'README.md': (name: string) => `# @objectstack/plugin-${name}
+        'README.md': (name: string) => {
+          const packageName = pluginPackageName(placement, name);
+          // ⛔ The README is not downstream of the manifest rename — it REPEATS
+          // the name, at the title, at the install line and at the import
+          // specifier. Renaming the manifest alone would leave this file
+          // telling a developer to `pnpm add` a package that now exists under
+          // no name at all, which is the same defect one layer out. All three
+          // sites read `packageName` for that reason.
+          //
+          // The install instruction itself is placement-dependent (#15530):
+          // the standalone project is `private` and unpublished, so a registry
+          // install is not something its reader can run — the only instruction
+          // that WORKS from a freshly scaffolded directory is a local link.
+          // The in-repo project is a real workspace sibling under a scope this
+          // repo publishes, so it keeps the install it always had.
+          //
+          // ⛔ Never spell the local reference as a PATH (`pnpm add ../<dir>`,
+          // `link:../<dir>`): the scaffolder knows where this project landed
+          // and knows nothing about where the reader's app is, so any relative
+          // path is a guess about a directory layout it never created — a
+          // reference the newcomer cannot follow, and one
+          // `test/init-template-comments-self-contained.test.ts` refuses on
+          // exactly that ground. `pnpm link --global` names no location at all
+          // and both halves run where the reader already is.
+          const install = standalone
+            ? `This project is \`private\` and carries no npm scope, so there is nothing to
+install from a registry — and \`npm publish\` refuses it until you give it a name
+you own and drop that flag. Link it into your app locally in the meantime:
+
+\`\`\`bash
+# here — your app loads dist/index.js, so build it first
+pnpm install && pnpm build
+pnpm link --global
+
+# in your ObjectStack app
+pnpm link --global ${packageName}
+\`\`\``
+            : `\`\`\`bash
+pnpm add ${packageName}
+\`\`\``;
+          return `# ${packageName}
 
 ObjectStack Plugin: ${name}
 
 ## Installation
 
-\`\`\`bash
-pnpm add @objectstack/plugin-${name}
-\`\`\`
+${install}
 
 ## Usage
 
@@ -380,7 +502,7 @@ hyphen, an underscore, a leading digit) are folded away, so the exported symbol
 can differ from the name.
 
 \`\`\`typescript
-import { ${sanitizeIdentifier(name)}Plugin } from '@objectstack/plugin-${name}';
+import { ${sanitizeIdentifier(name)}Plugin } from '${packageName}';
 
 // Use the plugin in your ObjectStack configuration
 export default {
@@ -393,7 +515,8 @@ export default {
 ## License
 
 MIT
-`,
+`;
+        },
       };
 
       // pnpm does not run dependency build scripts unless they are approved in

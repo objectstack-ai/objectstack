@@ -36,6 +36,10 @@ import {
   readUnemittedBaseline,
   type UnemittedSkip,
 } from './lib/unemitted-schemas';
+import {
+  projectByPruningUnionBranches,
+  type PrunedBranch,
+} from './lib/union-branch-projection';
 // Who owns what under json-schema/. This generator shares that directory with
 // gen:openapi, and used to clear it by deleting the directory itself (#5371).
 import {
@@ -374,6 +378,19 @@ const emittedDefs: EmittedDef[] = [];
 const exportedZodKeys = new Set<string>();
 const unemittedSkips: UnemittedSkip[] = [];
 
+// Every export that reached a published surface only because the projection
+// dropped a union branch with no JSON form (#16431 (a)). Recorded here — and
+// printed in the summary, and written onto the artifact itself as
+// `x-unprojectable-branches` — because a schema that is NARROWER than its Zod
+// type with nothing saying so is the same silence this card was filed about,
+// one level down: the difference would otherwise live only in the two files
+// nobody diffs against each other.
+const branchPrunedProjections: Array<{
+  readonly namespace: string;
+  readonly exportKey: string;
+  readonly pruned: readonly PrunedBranch[];
+}> = [];
+
 // Error messages for schema types that inherently cannot be represented in JSON Schema.
 // These are expected warnings, not build-breaking errors.
 const KNOWN_UNSUPPORTED_PATTERNS = [
@@ -421,6 +438,7 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           // schema (that's how PageTabsProps vanished in #2967 — see #2978).
           let jsonSchema: Record<string, unknown>;
           let io: 'output' | 'input' = 'output';
+          let prunedBranches: readonly PrunedBranch[] = [];
           try {
             jsonSchema = z.toJSONSchema(value, {
               target: 'draft-2020-12',
@@ -428,12 +446,32 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
           } catch (outputError) {
             if (!isKnownUnsupported(outputError)) throw outputError;
             io = 'input';
-            // Throws again for types unrepresentable in either direction
-            // (functions, Date, BigInt, custom) — caught by the outer skip.
-            jsonSchema = z.toJSONSchema(value, {
-              target: 'draft-2020-12',
-              io: 'input',
-            }) as Record<string, unknown>;
+            try {
+              jsonSchema = z.toJSONSchema(value, {
+                target: 'draft-2020-12',
+                io: 'input',
+              }) as Record<string, unknown>;
+            } catch (inputError) {
+              if (!isKnownUnsupported(inputError)) throw inputError;
+              // THIRD attempt, #16431 (a): both directions above refuse the
+              // WHOLE schema over one node, so try the projection that drops
+              // union branches with no JSON form. `orderingComparandSchema` is
+              // `number | Date | string | { $field }`; a JSON document can
+              // carry three of those and no Date instance, so the union's set
+              // of valid JSON documents is unchanged by the drop while the
+              // reference section it was costing is not.
+              //
+              // ⛔ Returns null unless the projection is faithful — a marked
+              // node outside a union position, or nothing to drop. The skip is
+              // then re-thrown with the message Zod produced, so this attempt
+              // can never change WHY an export is skipped, and so never the
+              // `cause` recorded for it in unemitted-schemas.baseline.json.
+              const projected = projectByPruningUnionBranches(value, { target: 'draft-2020-12' });
+              if (!projected) throw inputError;
+              jsonSchema = projected.schema;
+              io = projected.io;
+              prunedBranches = projected.pruned;
+            }
           }
 
           // Add $id URL and version metadata for IDE autocomplete and schema resolution
@@ -444,6 +482,19 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
             // Flag that this schema describes the author-time (pre-parse)
             // shape — parse-time transforms/defaults are not applied in it.
             jsonSchema['x-io'] = 'input';
+          }
+          if (prunedBranches.length > 0) {
+            // Say it on the artifact, not only in the build log (#16431 (a)).
+            // A reader of this file — or of the reference page rendered from it
+            // — can otherwise not tell that the Zod type carries a branch no
+            // JSON document could ever satisfy, and the `.describe()` prose
+            // above the union DOES name it (the ordering comparand's text says
+            // "a number, a Date, a string, or a { $field } reference").
+            jsonSchema['x-unprojectable-branches'] = prunedBranches.map((branch) => ({
+              at: branch.at,
+              type: branch.type,
+            }));
+            branchPrunedProjections.push({ namespace: namespaceName, exportKey: key, pruned: prunedBranches });
           }
 
           const fileName = `${schemaName}.json`;
@@ -482,7 +533,29 @@ for (const [namespaceName, namespaceExports] of Object.entries(Protocol)) {
 console.log(`\n─── Summary ───`);
 console.log(`  Generated: ${count}${inputModeCount > 0 ? ` (${inputModeCount} as input shape)` : ''}`);
 if (skippedCount > 0) {
-  console.log(`  Skipped:   ${skippedCount} (unsupported types: function, date, bigint, custom)`);
+  // The cause list is DERIVED from this build's own skips (#16431 (a)). It was
+  // a hard-coded `function, date, bigint, custom` — a fixed list that had
+  // stopped describing the tree: `bigint` was in it and is not a cause here,
+  // `undefined` is a cause here and was not in it. A summary line that names
+  // the wrong families is worse than a bare count, because it reads as a
+  // measurement.
+  const causeList = [...countByCause(unemittedSkips).keys()].join(', ');
+  console.log(`  Skipped:   ${skippedCount} (unsupported types: ${causeList})`);
+}
+if (branchPrunedProjections.length > 0) {
+  // Never a silent widening: every entry here published ONLY the branches that
+  // have a JSON form, and each dropped branch is named on the artifact too.
+  const droppedCount = branchPrunedProjections.reduce((sum, p) => sum + p.pruned.length, 0);
+  console.log(
+    `  Projected: ${branchPrunedProjections.length} export(s) after dropping ` +
+      `${droppedCount} union branch(es) with no JSON form (#16431):`,
+  );
+  for (const projection of branchPrunedProjections) {
+    const types = [...new Set(projection.pruned.map((b) => b.type))].sort().join(', ');
+    console.log(
+      `     ⤷ ${projection.namespace}.${projection.exportKey} — dropped ${projection.pruned.length} (${types})`,
+    );
+  }
 }
 
 if (errorCount > 0) {

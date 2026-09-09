@@ -331,6 +331,16 @@ const SEAM_LEDGER_PATH = join(ROOT, 'scripts', 'engine-double-contract.seams.jso
 const SCAN_ROOTS = ['packages', 'examples'];
 
 /**
+ * The exit code for a POPULATION REFUSAL (#13014), distinct from a finding's 1.
+ *
+ * A refusal and a finding are different verdicts and must not share a code: 1
+ * says "this tree has problems, here they are", 2 says "this run read too
+ * little of the tree to say anything about it". Both fail CI, so the split
+ * costs nothing there and buys a reader the difference.
+ */
+const EXIT_POPULATION_REFUSED = 2;
+
+/**
  * The slices. Each names ONE member of an engine double and the producer-side
  * predicate that member must reach; everything else in this file is shared.
  *
@@ -2958,10 +2968,192 @@ function scanSlice(slice) {
   return found;
 }
 
+// ---------------------------------------------------------------------------
+// POPULATION FLOORS -- the protection this gate's zero-checks do not give
+// (#13014's residual R1).
+//
+// DISCOVERED and SEAMS_DISCOVERED above already refuse a scan that collects
+// NOTHING, ledger or no ledger: measured on an empty tree with all three
+// ledgers emptied, this gate exits 1 with four named refusals. So the total
+// collapse is closed and this block is not a second copy of it.
+//
+// What is open is the PARTIAL collapse, and it is reachable by the remedy this
+// gate's own RETAINED message prescribes. Measured on `origin/main` with a tree
+// carrying one package of eighty (`packages/mcp`) and the three ledgers
+// emptied: the first run reds with 17 RETAINED/SEAMS_RETAINED findings, each
+// ending "Run `node scripts/check-engine-double-contract.mjs --write` and
+// commit." Doing exactly that, and re-running, prints
+// `check-engine-double-contract: OK -- 15 pinned, 0 in the DEBT ledger` and
+// exits 0 -- 15 pinned rows where the whole tree has 779, from a walk that read
+// 26 test files where the whole tree has 3,503. Every verdict this gate reaches
+// is a statement about the set discovery handed it, so a walk that returns a
+// fraction of the tree makes all of them true of a fraction and silent about
+// the rest.
+//
+// ⛔ The floors below are over the DERIVED population -- what the two walks
+// found and what the parser made of it -- and NEVER over a ledger's size. The
+// DEBT baseline is shrink-only by design and its stated goal is to empty; a
+// floor on it would red the ratchet's own success, which is the opposite of
+// the point.
+//
+// ## The four rows measure four different stages, not one number four times
+//
+//   testFiles       -- the discovery walk itself. All three slices iterate it.
+//   productionFiles -- the OTHER walk. Different filter, different consumer
+//                      (the seam scan); a break in one says nothing about it.
+//   discoveredFiles -- what the pre-filter and the parser made of the walk. A
+//                      walk that works and a parser that stopped reading leaves
+//                      testFiles high and this low.
+//   pinnedRows      -- what guard-recognition made of the parse. `d.pinned`
+//                      going false everywhere leaves discoveredFiles untouched
+//                      and empties the RETAINED census.
+//
+// ## Why no floor on seamCount, deliberately
+//
+// SEAMS_DISCOVERED floors it at zero, and the population is 6 across 3 files --
+// small enough that any headroom would be invented rather than measured, which
+// is the trade the precedent's header argues against under "why no band". The
+// walk that FEEDS it is floored (`productionFiles`) and that is where a silent
+// collapse enters. Recorded as a limit, not an oversight.
+//
+// ## Re-measuring
+//
+// Every count is printed by `populationProvenanceLine` on every green run, so
+// reproducing the record is running the gate. Re-measuring UP is free; LOWERING
+// a floor to make a run pass is the move this block exists to make visible in a
+// diff.
+
+/**
+ * The census the floors below were derived from, and the commit it was taken
+ * on -- one claim about one named tree, so a count and its provenance cannot be
+ * edited apart. ⛔ Never repoint `ref` without re-running all four counts.
+ *
+ * Taken on `854639b311` by running this gate with the floors in place and
+ * reading `populationProvenanceLine`. The diff that added them touches only
+ * `scripts/`, and every count here is a function of `packages/` and
+ * `examples/`, so the numbers are the ones a clean run of that commit produces.
+ */
+const MEASURED_POPULATION = Object.freeze({
+  ref: '854639b311',
+  testFiles: 3503,
+  productionFiles: 2596,
+  discoveredFiles: 911,
+  pinnedRows: 779,
+});
+
+// Roughly a fifth of headroom on each, which is the precedent's band
+// (`check-dual-build-cjs-loads` sits at 87%, 87% and 85% of its record) widened
+// a little for the two reader counts, because those two legitimately shrink
+// faster: a fake engine replaced by a real one leaves `discoveredFiles`, and a
+// double whose file is deleted leaves `pinnedRows`, in the ordinary course of
+// the repo getting better. ⛔ These are floors, not targets: a run BELOW one is
+// a scan to fix, never a number to lower.
+const MIN_TEST_FILES = 2800;
+const MIN_PRODUCTION_FILES = 2000;
+const MIN_DISCOVERED_FILES = 700;
+const MIN_PINNED_ROWS = 600;
+
+/**
+ * The first floor a run falls below, as a refusal message -- or `null` when
+ * every count clears. Pure, so `--self-test` drives every row with no tree.
+ *
+ * ⛔ Each `why` names ONLY the stage its own count measures. A row that fell
+ * says which walk or which reader went quiet and nothing else: the other three
+ * stages are reported by their own rows, and blaming them here would put causes
+ * that did not occur in front of the reader.
+ *
+ * @param {{testFiles?: number, productionFiles?: number, discoveredFiles?: number, pinnedRows?: number}} counts
+ * @returns {string | null}
+ *
+ * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
+ * that exports a binding AND runs on import -- whatever its top level does then
+ * runs inside the importer -- and this file's top level IS its dispatch. The
+ * self-test lives in this same module and reaches it directly, so an export
+ * would buy nothing and cost that rule. (The precedent this shape is copied
+ * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
+ * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
+ * gates' argv handling and not this card's subject.)
+ */
+function populationFloorProblem(counts) {
+  const rows = [
+    [counts?.testFiles ?? 0, MIN_TEST_FILES, MEASURED_POPULATION.testFiles,
+      'test file(s) offered by the discovery walk',
+      'This is the population all three slices iterate. `walk()` swallows a readdir failure and '
+        + 'returns what it has, so a scan root that stopped being readable narrows this set in '
+        + 'silence and every verdict below becomes a statement about the remainder.'],
+    [counts?.productionFiles ?? 0, MIN_PRODUCTION_FILES, MEASURED_POPULATION.productionFiles,
+      'non-test source file(s) offered by the seam walk',
+      'This is the population the consumer-seam scan iterates, and it is a SEPARATE walk with a '
+        + 'separate filter -- REFUSES and SEAMS_RETAINED are statements about whatever it hands '
+        + 'over. SEAMS_DISCOVERED only sees this reach zero.'],
+    [counts?.discoveredFiles ?? 0, MIN_DISCOVERED_FILES, MEASURED_POPULATION.discoveredFiles,
+      '(file, verb) pair(s) in which a double was discovered',
+      'The walk offered files and the pre-filter or the parser read almost nothing in them. '
+        + 'DISCOVERED only fires when a slice finds zero, so a reader that went quiet on most of '
+        + 'the tree while still answering somewhere passes it.'],
+    [counts?.pinnedRows ?? 0, MIN_PINNED_ROWS, MEASURED_POPULATION.pinnedRows,
+      'pinned (file, verb) row(s) in the RETAINED census',
+      'Doubles were discovered and almost none of them read as pinned. That is guard recognition '
+        + 'going quiet rather than the tree getting worse -- and it is the count `--write` '
+        + 'rewrites the RETAINED ledger down to, so the ledger cannot report it.'],
+  ];
+  for (const [got, min, measured, what, why] of rows) {
+    if (got >= min) continue;
+    return `measured only ${got} ${what}, below the floor of ${min} `
+      + `(${measured} on ${MEASURED_POPULATION.ref}).\n`
+      + `  ${why}\n`
+      + '  ⛔ NOT a pass: nothing, or nearly nothing, was read. This says WHICH population fell and\n'
+      + '  nothing about why the others stand — they are reported by their own rows.';
+  }
+  return null;
+}
+
+/**
+ * The provenance footer for a PASSING run: what this run read, the floors it
+ * cleared, and the census those floors were derived from, side by side.
+ *
+ * The floors are inequalities on purpose, so no run can contradict the record.
+ * Without this line the record could stop describing the tree with nothing
+ * anywhere saying so, and every green log would look identical either way. The
+ * delta is INFORMATION, never a verdict: this population moves in both
+ * directions for good reasons -- a package leaving the workspace, a fake engine
+ * replaced by a real one -- and only the floors decide. Pure.
+ *
+ * @param {{testFiles?: number, productionFiles?: number, discoveredFiles?: number, pinnedRows?: number}} counts
+ * @returns {string}
+ *
+ * ⛔ NOT exported, deliberately. `check:entry-guard` refuses a `scripts/**` file
+ * that exports a binding AND runs on import -- whatever its top level does then
+ * runs inside the importer -- and this file's top level IS its dispatch. The
+ * self-test lives in this same module and reaches it directly, so an export
+ * would buy nothing and cost that rule. (The precedent this shape is copied
+ * from, `check-dual-build-cjs-loads.mjs`, exports because it already guards its
+ * dispatch with `isEntrypoint`; retrofitting that here is a change to two large
+ * gates' argv handling and not this card's subject.)
+ */
+function populationProvenanceLine(counts) {
+  const got = [counts?.testFiles ?? 0, counts?.productionFiles ?? 0,
+    counts?.discoveredFiles ?? 0, counts?.pinnedRows ?? 0];
+  const rec = [MEASURED_POPULATION.testFiles, MEASURED_POPULATION.productionFiles,
+    MEASURED_POPULATION.discoveredFiles, MEASURED_POPULATION.pinnedRows];
+  const floors = [MIN_TEST_FILES, MIN_PRODUCTION_FILES, MIN_DISCOVERED_FILES, MIN_PINNED_ROWS];
+  const delta = got.map((g, i) => (g === rec[i] ? '=' : `${g > rec[i] ? '+' : ''}${g - rec[i]}`));
+  return `  provenance — testFiles/productionFiles/discoveredFiles/pinnedRows: this run ${got.join('/')}`
+    + ` · floors ${floors.join('/')} · derived from ${rec.join('/')} measured on ${MEASURED_POPULATION.ref}`
+    + ` (${delta.join('/')} vs the record).\n`
+    + '  ⚠ The delta is information, not a verdict — this population grows AND shrinks for good'
+    + ' reasons, and only the floors decide.';
+}
+
 function audit() {
   const baseline = readBaseline();
   const errors = [];
   const slices = [];
+  // The two walks, counted once here rather than inferred from what survived
+  // them. `scanSlice` and `scanAllSeams` each re-walk internally; these are the
+  // same functions, so the counts are the sets those scans were offered.
+  const testFileCount = testFiles().length;
+  const productionFileCount = productionFiles().length;
 
   // DECLARED — before anything reconciles, every entry must name a verb this
   // script scans. An entry whose verb nothing scans reconciles against nothing
@@ -3113,7 +3305,18 @@ function audit() {
     fileDeclaresFunction,
   ));
 
-  return { slices, baseline, errors, seamFiles, seamCount, seamCensus, census, pinnedLedger };
+  return {
+    slices, baseline, errors, seamFiles, seamCount, seamCensus, census, pinnedLedger,
+    // The population floors' subjects (#13014). Two walk counts taken above and
+    // two reader counts derived from what this run actually parsed -- never
+    // from a ledger's size, which is shrink-only by design.
+    population: {
+      testFiles: testFileCount,
+      productionFiles: productionFileCount,
+      discoveredFiles: slices.reduce((n, s) => n + s.found.length, 0),
+      pinnedRows: census.length,
+    },
+  };
 }
 
 const PINNED_LEDGER_COMMENT =
@@ -3215,7 +3418,7 @@ function writeSeamLedger(seamFiles) {
 }
 
 function report() {
-  const { slices, baseline, errors, seamFiles, seamCount, seamCensus, census } = audit();
+  const { slices, baseline, errors, seamFiles, seamCount, seamCensus, census, population } = audit();
 
   console.log('');
   let totalPinned = 0;
@@ -3288,6 +3491,16 @@ function report() {
   }
   console.log('');
 
+  // ⛔ Before any verdict: a run that read (almost) nothing must refuse, not
+  // report on the fraction it reached. Ordered ahead of the findings branch
+  // because "nothing was measured" outranks "here are findings", and the
+  // findings would be drawn from the same collapsed set (#13014).
+  const populationFloor = populationFloorProblem(population);
+  if (populationFloor !== null) {
+    console.error(`check-engine-double-contract REFUSES — ${populationFloor}`);
+    process.exit(EXIT_POPULATION_REFUSED);
+  }
+
   if (errors.length) {
     for (const e of errors) console.error(`  x ${e}`);
     console.error(`\ncheck-engine-double-contract: ${errors.length} problem(s).\n`);
@@ -3328,8 +3541,10 @@ function report() {
   }
   console.log(
     `check-engine-double-contract: ${census.length} (file, verb) row(s) held by the RETAINED `
-      + `ledger — a pin that leaves names itself.\n`,
+      + `ledger — a pin that leaves names itself.`,
   );
+  console.log(populationProvenanceLine(population));
+  console.log('');
 }
 
 // ── Self-test ───────────────────────────────────────────────────────────────
@@ -3392,11 +3607,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The UNRECOGNISED census (#9747)': 23,
   'The RECOGNIZER CENSUS (#9943)': 7,
   '#11626: the DECLARED single-verb double': 14,
+  'The POPULATION FLOORS (#13014)': 23,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 31;
+const SELF_TEST_BATTERY_FLOOR = 32;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -4906,6 +5122,93 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
     + 'const store: any = { update };\n', UD);
   expect('#11626 — an UNDECLARED single-verb construct is in neither walk',
     cc2.unrecognised.length === 0 && cc2.scopedOut.length === 0);
+
+  // ── The POPULATION FLOORS (#13014) ────────────────────────────────────────
+  //
+  // Driven as pure functions, so every row is exercised with no tree at all.
+  // Both directions on every count: a value that FIRES it and a value that does
+  // not, because a floor asserted only in the failing direction is one that
+  // could be firing on everything.
+  battery('The POPULATION FLOORS (#13014)');
+  const fullPop = {
+    testFiles: MEASURED_POPULATION.testFiles,
+    productionFiles: MEASURED_POPULATION.productionFiles,
+    discoveredFiles: MEASURED_POPULATION.discoveredFiles,
+    pinnedRows: MEASURED_POPULATION.pinnedRows,
+  };
+  expect('FLOOR — the recorded census clears every floor',
+    populationFloorProblem(fullPop) === null);
+  expect('FLOOR — a dead discovery walk refuses',
+    populationFloorProblem({ ...fullPop, testFiles: 0 }) !== null);
+  expect('FLOOR — a dead seam walk refuses',
+    populationFloorProblem({ ...fullPop, productionFiles: 0 }) !== null);
+  expect('FLOOR — a reader that went quiet refuses (files walked, nothing parsed)',
+    populationFloorProblem({ ...fullPop, discoveredFiles: 0 }) !== null);
+  expect('FLOOR — guard recognition going quiet refuses (RETAINED census emptied)',
+    populationFloorProblem({ ...fullPop, pinnedRows: 0 }) !== null);
+  // The nonsense direction for each row: a count AT its own floor is a pass, so
+  // no row can be firing unconditionally.
+  expect('FLOOR — testFiles exactly at its floor passes',
+    populationFloorProblem({ ...fullPop, testFiles: MIN_TEST_FILES }) === null);
+  expect('FLOOR — productionFiles exactly at its floor passes',
+    populationFloorProblem({ ...fullPop, productionFiles: MIN_PRODUCTION_FILES }) === null);
+  expect('FLOOR — discoveredFiles exactly at its floor passes',
+    populationFloorProblem({ ...fullPop, discoveredFiles: MIN_DISCOVERED_FILES }) === null);
+  expect('FLOOR — pinnedRows exactly at its floor passes',
+    populationFloorProblem({ ...fullPop, pinnedRows: MIN_PINNED_ROWS }) === null);
+  expect('FLOOR — one below the floor is where each row turns over',
+    populationFloorProblem({ ...fullPop, testFiles: MIN_TEST_FILES - 1 }) !== null
+      && populationFloorProblem({ ...fullPop, productionFiles: MIN_PRODUCTION_FILES - 1 }) !== null
+      && populationFloorProblem({ ...fullPop, discoveredFiles: MIN_DISCOVERED_FILES - 1 }) !== null
+      && populationFloorProblem({ ...fullPop, pinnedRows: MIN_PINNED_ROWS - 1 }) !== null);
+  expect('FLOOR — a missing count is zero, not "unmeasured but fine"',
+    populationFloorProblem({}) !== null);
+  // ⛔ The floors may never exceed what was measured on the recorded ref: a
+  // floor above its own record reds a healthy tree, which is a failed patch and
+  // not a stricter gate.
+  expect('FLOOR — every floor sits at or below its own record',
+    MIN_TEST_FILES <= MEASURED_POPULATION.testFiles
+      && MIN_PRODUCTION_FILES <= MEASURED_POPULATION.productionFiles
+      && MIN_DISCOVERED_FILES <= MEASURED_POPULATION.discoveredFiles
+      && MIN_PINNED_ROWS <= MEASURED_POPULATION.pinnedRows);
+  expect('FLOOR — the refusal cites the ref its record was taken on',
+    (populationFloorProblem({ ...fullPop, testFiles: 0 }) ?? '').includes(MEASURED_POPULATION.ref));
+  // HONESTY (#13014 acceptance): a fallen row names ITS OWN population and says
+  // nothing about the three that are standing. A message that listed every way
+  // a scan can break would blame causes that did not occur.
+  const testFilesMsg = populationFloorProblem({ ...fullPop, testFiles: 0 }) ?? '';
+  expect('FLOOR — a fallen discovery walk names the discovery walk',
+    /test file\(s\) offered by the discovery walk/.test(testFilesMsg));
+  expect('FLOOR — and blames neither the seam walk nor the RETAINED census',
+    !/seam walk/.test(testFilesMsg) && !/RETAINED census/.test(testFilesMsg));
+  const pinnedMsg = populationFloorProblem({ ...fullPop, pinnedRows: 0 }) ?? '';
+  expect('FLOOR — a fallen RETAINED census names guard recognition, not the walks',
+    /RETAINED census/.test(pinnedMsg) && !/discovery walk/.test(pinnedMsg));
+  expect('FLOOR — the first row to fall is the one reported, in row order',
+    /discovery walk/.test(populationFloorProblem({ testFiles: 0, productionFiles: 0 }) ?? ''));
+  // The collapse this block was written against, at the size it was measured:
+  // `packages/mcp` alone, all three ledgers emptied and `--write` run, which is
+  // exactly what the RETAINED remedy tells a reader to do. Before this floor
+  // that tree printed OK and exited 0.
+  expect('FLOOR — the measured one-package collapse is refused',
+    populationFloorProblem({ testFiles: 26, productionFiles: 12, discoveredFiles: 15, pinnedRows: 15 }) !== null);
+  // The provenance line, driven both ways: it reports, it never decides.
+  expect('PROVENANCE — an exact match reads as four equals signs',
+    populationProvenanceLine(fullPop).includes('=/=/=/='));
+  expect('PROVENANCE — growth is signed and shrinkage is not mistaken for it',
+    populationProvenanceLine({ ...fullPop, testFiles: MEASURED_POPULATION.testFiles + 15 }).includes('+15/')
+      && populationProvenanceLine({ ...fullPop, pinnedRows: MEASURED_POPULATION.pinnedRows - 3 }).includes('/-3'));
+  expect('PROVENANCE — the floors and the record are both on the line',
+    populationProvenanceLine(fullPop)
+      .includes(`floors ${MIN_TEST_FILES}/${MIN_PRODUCTION_FILES}/${MIN_DISCOVERED_FILES}/${MIN_PINNED_ROWS}`)
+      && populationProvenanceLine(fullPop).includes(`measured on ${MEASURED_POPULATION.ref}`));
+  // Without this the pass path could stop calling it and the record would quietly
+  // stop being reconciled in the log — the precedent's own guard, same reason.
+  expect('PROVENANCE — the pass path in report() still prints it',
+    readFileSync(fileURLToPath(import.meta.url), 'utf8')
+      .includes(`console.log(${'populationProvenanceLine'}(population));`));
+  expect('FLOOR — a refusal and a finding do not share an exit code',
+    EXIT_POPULATION_REFUSED !== 1 && EXIT_POPULATION_REFUSED !== 0);
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //

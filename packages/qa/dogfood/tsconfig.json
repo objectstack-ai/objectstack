@@ -47,9 +47,20 @@
     // answer this suite would want the day it really imports the package. Same
     // ONE bare-name shape as the entry above: that package's `exports` map
     // carries only `"."`.
+    //
+    // [#16679] `approval-override-composite-pin.dogfood.test.ts` and its
+    // fixture import `@objectstack/formula`, `@objectstack/plugin-approvals`
+    // and `@objectstack/trigger-record-change` as values (the CEL engine, the
+    // approvals plugin, the record-change trigger plugin) — same
+    // dist-resolved-type hazard as the driver above, this time caught by
+    // `check:type-source-resolution` rather than its vitest counterpart. Same
+    // ONE bare-name shape: each package's `exports` map carries only `"."`.
     "paths": {
       "@objectstack/driver-turso": ["../../drivers/driver-turso/src/index.ts"],
-      "@objectstack/organizations": ["../../plugins/organizations/src/index.ts"]
+      "@objectstack/organizations": ["../../plugins/organizations/src/index.ts"],
+      "@objectstack/formula": ["../../formula/src/index.ts"],
+      "@objectstack/plugin-approvals": ["../../plugins/plugin-approvals/src/index.ts"],
+      "@objectstack/trigger-record-change": ["../../triggers/trigger-record-change/src/index.ts"]
     }
   },
   "include": ["test/**/*"],
