@@ -408,7 +408,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
   'TSO-U: unit pins on predicate 4\'s readers': 30,
-  'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 21,
+  'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
   'G6: a changeset that was ALREADY breaking at base is inherited': 1,
   'R15: a changeset RENAMED AND turned breaking in the same commit': 5,
   'G10: a PURE rename of an ALREADY-breaking stock changeset': 3,
@@ -2492,8 +2492,9 @@ export function memberReturnAnnotation(text, symbol) {
  * Every DEFINITION of `symbol` whose name starts inside `[from, to)`, in file order.
  *
  * The shared core of `memberReturnAnnotation` (whole file, first hit wins — the
- * behaviour bare references have always had) and of the dotted-path reader below
- * (one nesting region, and a count that is refused unless it is exactly one).
+ * behaviour bare references have always had) and of the dotted-path reader below,
+ * which narrows this ANY-DEPTH result to the region's TOP DEPTH
+ * (`definitionsAtTopDepth`) and refuses unless exactly one candidate is left.
  *
  * The declaration shapes it reads, and nothing else:
  *
@@ -2592,6 +2593,35 @@ function objectLiteralBodiesFor(structural, name, from, to) {
 }
 
 /**
+ * The subset of `defs` that sits at the TOP DEPTH of the region `[from, to)`.
+ *
+ * A dotted path's leading segments ARE the nesting the member sits in (the
+ * `parseSymbolRef` grammar), so a definition that starts inside `[from, to)` but
+ * inside a nested object literal OPENED within that region belongs to the deeper
+ * path, ⛔ never to this one. Without this filter a direct member whose name recurs
+ * in a nested literal has NO addressable spelling at all: it is counted against
+ * itself, refused as AMBIGUOUS, and told to "name a deeper path" -- an instruction
+ * it cannot carry out, because it already sits at the depth the path names (#16571).
+ *
+ * ⚠️ This is a NARROWING of the candidate set, never a tie-break. The direct member
+ * resolves because the nested one stopped being a candidate for this path, not
+ * because ties are now broken by position -- so a region holding SEVERAL same-named
+ * definitions at its own top depth is still refused, loudly, and a "take the first"
+ * reading is never reachable from here.
+ *
+ * `structural` MUST be the comment- and literal-masked projection, for the reason
+ * `matchBracket` gives. `IDENT` is passed as the literal's NAME because every named
+ * literal counts: the spans of literals nested inside those are contained in them,
+ * so their union is the union of the top-level ones and one pass suffices.
+ *
+ * @returns {{ index: number, annotation: string|null }[]} in file order, a subset.
+ */
+function definitionsAtTopDepth(structural, defs, from, to) {
+  const nested = objectLiteralBodiesFor(structural, IDENT, from, to);
+  return defs.filter((d) => !nested.some((b) => d.index > b.open && d.index < b.close));
+}
+
+/**
  * The region of `text` a dotted path's LEADING segments narrow the search to.
  *
  * Walked STRUCTURALLY on the comment- and literal-masked projection (offsets
@@ -2604,6 +2634,9 @@ function objectLiteralBodiesFor(structural, name, from, to) {
  * REPORTED, never guessed at -- `packages` opens three in that file, and picking
  * one of them would be the "writable but wrong" reference this widening exists to
  * avoid.
+ *
+ * This returns the REGION only. Which definitions inside it the LAST segment may
+ * name is `definitionsAtTopDepth`'s rule: the region's own depth, never deeper.
  *
  * @returns {{ ok: true, from: number, to: number }|{ ok: false, reason: string }}
  */
@@ -2634,8 +2667,15 @@ export function resolveMemberPath(text, segments) {
  * A bare reference is `readDeclaredTypeSurface` verbatim -- unchanged behaviour,
  * including its "first same-named definition" reading, which is what every marker
  * written before #15627 means. A DOTTED reference is resolved through the nesting
- * and read only inside it; a dotted path never names an exported `interface` /
- * `type` / `class` / `enum`, so only the member branch applies to it.
+ * and read only inside it, at that nesting's OWN depth: `organizations.create` is
+ * the direct member and `organizations.teams.create` the nested one, and neither
+ * spelling can reach the other (#16571). A dotted path never names an exported
+ * `interface` / `type` / `class` / `enum`, so only the member branch applies to it.
+ *
+ * ⚠️ Every refusal below states something the author can ACT on. "Name a deeper
+ * path" is printed only where a deeper path exists to name; where the collision is
+ * at the path's own depth the message says THAT instead. A gate whose diagnosis is
+ * right but whose remedy cannot be carried out is the failure #16571 recorded.
  *
  * @returns {{ surface: {shape: string, type: string|null, erased: boolean}|null,
  *             refusal: string|null }} at most one of the two is non-null.
@@ -2655,14 +2695,32 @@ export function readTypeSurfaceRef(text, parsed) {
         'definition sits inside it.',
     };
   }
-  if (defs.length > 1) {
+  // The path names the member at `parent`'s OWN depth, so only definitions there
+  // are candidates for it (#16571). Everything deeper belongs to a deeper path.
+  const here = definitionsAtTopDepth(masked, defs, region.from, region.to);
+  if (here.length > 1) {
+    // ⛔ Not "name a deeper path": these sit at the depth the path already names,
+    // so no deeper path exists to write. A gate whose remedy cannot be carried out
+    // is the defect #16571 was filed on -- the refusal stays loud, the fix text
+    // says what is actually wrong.
     return {
       surface: null,
-      refusal: `\`${spelling}\` is AMBIGUOUS: ${defs.length} \`${parsed.symbol}\` definitions sit inside ` +
-        `\`${parent}\`. Name a deeper path that resolves to exactly one.`,
+      refusal: `\`${spelling}\` is AMBIGUOUS: ${here.length} \`${parsed.symbol}\` definitions sit at the TOP ` +
+        `DEPTH of \`${parent}\`, so no deeper path distinguishes them.`,
     };
   }
-  const { annotation } = defs[0];
+  if (here.length === 0) {
+    return {
+      surface: null,
+      refusal: defs.length > 1
+        ? `\`${spelling}\` is AMBIGUOUS: ${defs.length} \`${parsed.symbol}\` definitions sit inside ` +
+          `\`${parent}\`, every one of them inside a nested object literal. Name a deeper path that ` +
+          'resolves to exactly one.'
+        : `\`${spelling}\` does not resolve: the one \`${parsed.symbol}\` definition inside \`${parent}\` ` +
+          'sits inside a nested object literal, not at the depth this path names. Name the deeper path.',
+    };
+  }
+  const { annotation } = here[0];
   return {
     surface: annotation === null
       ? { shape: `\`${spelling}\`, which carries NO return annotation`, type: null, erased: true }
@@ -4875,6 +4933,80 @@ function selfTest() {
     assert(
       r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /2 `list` definitions/.test(r.refusal ?? ''),
       `TSO-D13: a member name that resolves to SEVERAL definitions inside the region is refused, with the count -- the fix is a deeper path, not a guess. Got: ${JSON.stringify(r)}`,
+    );
+  }
+
+  // -- #16571: the LAST segment resolves at the region's TOP DEPTH ------------
+  // Numbered after TSO-D17 but written HERE, against the two refusals they bound:
+  // TSO-D12/D13 pin what must STILL be refused, TSO-D18..D23 pin what must now
+  // RESOLVE and what must not have moved with it. Before this rule a DIRECT member
+  // whose name recurs in a nested literal was counted against itself and told to
+  // "name a deeper path" -- an instruction unsatisfiable at the depth it already
+  // sits at. Measured on the real `packages/client/src/index.ts` at the fix:
+  // 5 of #14314's 19 `organizations.*` refs went from refused to resolved, each to
+  // its own annotation, and the other 14 did not move.
+  // ⚠️ BOTH DIRECTIONS, in one battery. A one-direction pin cannot tell "fixed"
+  // from "every spelling now lands on the same definition", so TSO-D20 asserts the
+  // two readings are DIFFERENT, not merely that each is non-null.
+  {
+    // `organizations` now holds a DIRECT `create` and a nested `teams.create` --
+    // the #14314 shape. `list` is left alone so TSO-D13 keeps its own fixture.
+    const direct = DOT_CLIENT.replace(
+      '    teams: {\n',
+      '    create: async (): Promise<Organization> => {\n' +
+      "      const res = await this.fetch('/organizations');\n" +
+      '      return res.json();\n' +
+      '    },\n' +
+      '    teams: {\n' +
+      '      create: async (): Promise<Team> => {\n' +
+      "        const res = await this.fetch('/teams');\n" +
+      '        return res.json();\n' +
+      '      },\n',
+    );
+    const shallow = readRef(direct, DOT('organizations.create'));
+    const deep = readRef(direct, DOT('organizations.teams.create'));
+    assert(
+      shallow.refusal === null && shallow.surface?.type === 'Promise<Organization>',
+      `TSO-D18: a DIRECT member whose name recurs in a NESTED literal resolves to ITSELF -- before #16571 this was refused as AMBIGUOUS against \`organizations.teams.create\` and the printed remedy ("name a deeper path") could not be carried out, because the member already sits at the depth the path names. Got: ${JSON.stringify(shallow)}`,
+    );
+    assert(
+      deep.refusal === null && deep.surface?.type === 'Promise<Team>',
+      `TSO-D19: THE OTHER DIRECTION -- the nested spelling still reads the NESTED definition. The top-depth rule narrows what the SHALLOW path may name; it must take nothing away from the deeper one. Got: ${JSON.stringify(deep)}`,
+    );
+    assert(
+      shallow.surface?.type !== deep.surface?.type,
+      `TSO-D20: THE PIN THAT MAKES THE PAIR A READING -- the two spellings resolve to DIFFERENT definitions. Two green one-direction assertions are equally green when every path collapses onto one definition; this is the assertion that is not. Got: ${JSON.stringify([shallow, deep])}`,
+    );
+    {
+      const r = readRef(direct, DOT('organizations.list'));
+      assert(
+        r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /2 `list` definitions/.test(r.refusal ?? ''),
+        `TSO-D21: THE FIRING CONTROL -- on the SAME fixture, a name with NO top-depth definition and two nested ones is still refused with its count. The direct member resolves because the nested one stopped being a candidate for its path, ⛔ never because ties are now broken by position; if this ever resolves, the narrowing became "take the first". Got: ${JSON.stringify(r)}`,
+      );
+    }
+    {
+      const r = readRef(direct, DOT('organizations.nosuchmember'));
+      assert(
+        r.surface === null && /no `nosuchmember` definition sits inside it/.test(r.refusal ?? ''),
+        `TSO-D22: THE NONSENSE CONTROL -- a member that exists at NO depth is still refused by the same named finding, so TSO-D18's green is a reading of the fixture and not of an unconditionally-resolving reader. Got: ${JSON.stringify(r)}`,
+      );
+    }
+  }
+  {
+    // TWO definitions at `organizations`'s OWN depth: a class-field arrow and a
+    // second property of the same name. No deeper path can tell them apart, so the
+    // refusal must NOT print the deeper-path remedy #16571 was filed on.
+    const twiceAtTop = DOT_CLIENT.replace(
+      '    teams: {\n',
+      '    create: async (): Promise<Organization> => { return {} as Organization; },\n' +
+      '    create: async (): Promise<Team> => { return {} as Team; },\n' +
+      '    teams: {\n',
+    );
+    const r = readRef(twiceAtTop, DOT('organizations.create'));
+    assert(
+      r.surface === null && /AMBIGUOUS/.test(r.refusal ?? '') && /2 `create` definitions sit at the TOP/.test(r.refusal ?? '') &&
+      !/Name a deeper path/.test(r.refusal ?? ''),
+      `TSO-D23: a collision at the path's OWN depth is still refused LOUDLY -- and the message no longer prescribes a deeper path, because there is none to write. An unsatisfiable remedy is the defect #16571 recorded; a silent pick of one of the two would be strictly worse than either. Got: ${JSON.stringify(r)}`,
     );
   }
 
