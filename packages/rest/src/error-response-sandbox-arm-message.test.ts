@@ -36,13 +36,15 @@
  *  §3 the non-sandbox control: a plain producer on the same codes keeps
  *     `error.message` byte for byte — the two-read rule is a read of a field
  *     the sandbox populated, never a strip of the wrapper off `.message`;
- *  §4 ACCEPTED DIVERGENCE, fenced by triage: a sandboxed CRASH carrying a
- *     declared code keeps TODAY's answer — the arm's status and the wrapper —
- *     where the unwrap door's terminal for the same crash is the sanitised
- *     500. `sandboxBusinessMessage` declines a crash (#7543), so the two-read
- *     rule leaves this byte-identical on purpose. Choosing between those two
- *     answers is FAULT CLASSIFICATION, not message sourcing; it is named here
- *     rather than decided, and carried as a follow-up decision card;
+ *  §4 CONVERGED (#15071, maintainer ruling 2026-09-04 / batch #27, option B):
+ *     a sandboxed CRASH carrying a declared code reaches the unwrap door's
+ *     sanitised `500 UNCLASSIFIED_FAULT` whatever code it declares — the
+ *     terminal moved above the arms (`isSandboxCrash`). This section was the
+ *     ACCEPTED DIVERGENCE the follow-up decision card was carried on; the
+ *     verdict flipped, the section did not go away. Three legs: the flip per
+ *     arm, the surviving positive control (the same crash with NO declared
+ *     code), and the negative control the ruling makes mandatory — "only the
+ *     crash branch moves", so an ordinary declared refusal is untouched;
  *  §5 the bulk-door control: this change is unreachable from
  *     `resolveErrorResponse`, which declines the consult for a sandbox-origin
  *     error (#14541), so nothing moves on those routes;
@@ -58,6 +60,14 @@ import { fileURLToPath } from 'node:url';
 import { mapDataError, sendThrownError } from './error-response.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The classification's own source, read once: §4-derivation and §6 both scan it
+ * — one re-derives the arm list from the tree (the #15071 ruling's execution
+ * constraint), the other guards the sentence rule. Same package, so the read
+ * does not escape it (AGENTS.md → cross-package test inputs).
+ */
+const SOURCE = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
 
 /** The business sentence a hook author addressed to the end user. */
 const BUSINESS = 'Opportunity is closed.';
@@ -223,40 +233,183 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
     });
 
     /**
-     * ⛔ NOT decided here. Triage fenced the crash question out of this card
-     * explicitly: "If a sandboxed CRASH (`isScriptFaultMessage`, #7543) reaches
-     * a code-gated arm, leave today's behaviour exactly as it is, implement the
-     * business-message read only, and name the site and the divergence."
+     * FLIPPED by #15071, deliberately and in that card's PR, from
+     * `ACCEPTED DIVERGENCE` to `CONVERGED` — the same discipline PR #15065 used
+     * on its own §4 one file over. ⛔ The section is not DELETED: it is the only
+     * thing that would notice the divergence coming back, and what changes is
+     * its verdict, not its existence.
      *
-     * The site is `structuredCodeAnswer` (and the `PERMISSION_DENIED` arm below
-     * the consult) reached from `mapDataError`. The divergence: the arm answers
-     * a CRASH with its own declared status and the QuickJS wrapper prose, where
-     * `classifyDataError`'s unwrap door answers the same crash with the
-     * sanitised 500 fault terminal. The two-read rule keeps this byte-identical
-     * because `sandboxBusinessMessage` declines a crash by design — so the
-     * divergence is UNCHANGED by this card, and pinned so that choosing an
-     * answer for it is a visible edit rather than a drift.
+     * ## The reason, quoted beside the flip
+     *
+     * Maintainer ruling, 2026-09-04, decision batch #27, verbatim 「同意」 on
+     * option B: *"A declared code is the author's statement about the failure
+     * mode they **handled**. A crash (`isScriptFaultMessage`, #7543) is not that
+     * mode, so it is classified as a fault at both doors: `mapDataError`'s
+     * code-gated arms … hand a sandboxed crash to the same sanitised terminal
+     * `classifyDataError`'s unwrap door already produces — `500`,
+     * `UNCLASSIFIED_FAULT`, no wrapper prose on the wire."* ⛔ Not A: *"an
+     * internal stack-shaped sentence at a business status is both a leak and a
+     * lie to the client about what happened."* ⛔ Not C: *"it adds a mechanism to
+     * keep answering a crash with a business status."*
+     *
+     * ## What the section pins now, in three legs
+     *
+     *  - **the flip**, per arm and by NAME over {@link ARMS} — the list the
+     *    ruling required be RE-DERIVED from the tree rather than copied from
+     *    #14704, and `§4-derivation` below is the guard that keeps it derived;
+     *  - **the positive control STAYS** and is still a control: the same crash
+     *    carrying NO declared code reaches the same sanitised 500, so a green
+     *    flip leg cannot be read as "the terminal swallowed everything";
+     *  - **the negative control**, which is the condition a plausible-but-wrong
+     *    implementation fails. The ruling: *"Ordinary declared refusals (a hook
+     *    that throws a business error carrying a code, no crash) are
+     *    **untouched** — only the crash branch moves."* An implementation that
+     *    degraded anything carrying a code to 500 would turn the flip leg green
+     *    while deleting the whole declarative-refusal surface, so the refusal
+     *    leg is asserted HERE per arm as well, not merely inherited from §1.
      */
-    describe('§4 ACCEPTED DIVERGENCE — a sandboxed CRASH carrying a declared code is unchanged', () => {
-        it('DELETE_RESTRICTED: the arm still answers 409 with the wrapper prose, not the 500 terminal', () => {
-            const wire = mapDataError(sandboxCrash({ code: 'DELETE_RESTRICTED', status: 409, object: 'account' }), 'account');
-            expect(wire.status).toBe(409);
-            expect(wire.body.code).toBe('DELETE_RESTRICTED');
-            expect(wire.body.error).toBe("hook 'guard' threw: TypeError: x is not a function");
-        });
+    describe('§4 CONVERGED (#15071) — a sandboxed CRASH reaches the fault terminal whatever code it declares', () => {
+        for (const arm of ARMS) {
+            it(`${arm.arm}: a crash carrying it answers the sanitised 500, not ${arm.status}`, () => {
+                const wire = mapDataError(sandboxCrash(arm.declares), 'account');
+                // ADR-0112 envelope: both halves asserted, never a status alone.
+                expect(wire.status).toBe(500);
+                expect(wire.body.code).toBe('INTERNAL_ERROR');
+                // ⛔ The stack-shaped sentence is the leak the ruling names.
+                expect(String(wire.body.error)).not.toContain('threw:');
+                expect(String(wire.body.error)).not.toContain('TypeError');
+                // The arm's declared status is gone with it — a crash is not
+                // the failure mode the author declared.
+                expect(wire.status).not.toBe(arm.status);
+                expect(wire.body.code).not.toBe(arm.code);
+                // …and so are the arm's structured fields: the sanitised
+                // terminal says status and code and nothing else.
+                for (const key of Object.keys(arm.keeps ?? {})) {
+                    expect(wire.body, `${arm.arm} leaked ${key}`).not.toHaveProperty(key);
+                }
+            });
+        }
 
-        it('VALIDATION_FAILED: same shape, the most ordinary authored refusal code', () => {
-            const wire = mapDataError(sandboxCrash({ code: 'VALIDATION_FAILED', status: 400 }), 'account');
-            expect(wire.status).toBe(400);
-            expect(wire.body.code).toBe('VALIDATION_FAILED');
-            expect(wire.body.error).toBe("hook 'guard' threw: TypeError: x is not a function");
-        });
-
-        it('the control: the SAME crash with no declared code reaches the sanitised fault terminal', () => {
+        it('the positive control STAYS: the same crash with no declared code reaches the same terminal', () => {
             const wire = mapDataError(sandboxCrash({}), 'account');
             expect(wire.status).toBe(500);
+            expect(wire.body.code).toBe('INTERNAL_ERROR');
             expect(String(wire.body.error)).not.toContain('threw:');
             expect(String(wire.body.error)).not.toContain('TypeError');
+        });
+
+        describe('§4-negative — «only the crash branch moves»', () => {
+            for (const arm of ARMS) {
+                it(`${arm.arm}: a sandboxed BUSINESS refusal is completely unaffected`, () => {
+                    const wire = mapDataError(sandboxRefusal(arm.declares), 'account');
+                    expect(wire.status).toBe(arm.status);
+                    expect(wire.body.code).toBe(arm.code);
+                    expect(wire.body.error).toBe(BUSINESS);
+                    for (const [key, value] of Object.entries(arm.keeps ?? {})) {
+                        expect(wire.body[key]).toEqual(value);
+                    }
+                });
+
+                it(`${arm.arm}: a NON-sandbox producer on the same code is untouched too`, () => {
+                    const plain: any = Object.assign(new Error('Plain producer sentence'), arm.declares);
+                    const wire = mapDataError(plain, 'account');
+                    expect(wire.status).toBe(arm.status);
+                    expect(wire.body.code).toBe(arm.code);
+                    expect(wire.body.error).toBe('Plain producer sentence');
+                });
+            }
+
+            it('a crash-SHAPED sentence a non-sandbox producer wrote is NOT a sandbox crash', () => {
+                // `isSandboxCrash` is gated on the sandbox side-channel first.
+                // A plain producer whose own message happens to read like a
+                // native error name never had an `innerMessage`, so the arm
+                // answers it exactly as before — the crash rule reaches only
+                // what the sandbox unwrapped.
+                const plain: any = Object.assign(new Error('TypeError: x is not a function'), {
+                    code: 'DELETE_RESTRICTED', status: 409, object: 'account',
+                });
+                const wire = mapDataError(plain, 'account');
+                expect(wire.status).toBe(409);
+                expect(wire.body.code).toBe('DELETE_RESTRICTED');
+                expect(wire.body.error).toBe('TypeError: x is not a function');
+            });
+        });
+
+        /**
+         * The ruling's own execution constraint: *"the seat re-derives the arm
+         * list from the tree, not from #14704's list."* Re-deriving once is a
+         * reading that rots; this leg is the same re-derivation asked
+         * mechanically, so the next arm added to the shared classification is
+         * either covered above or excused here BY NAME.
+         *
+         * Measured re-derivation on this tree: thirteen declared-code literals
+         * sit above the unwrap door — ten reachable by a sandboxed producer
+         * (the {@link ARMS} rows) and three that are not, each for a reason the
+         * source states in the arm itself.
+         */
+        describe('§4-derivation — the arm list is DERIVED from the tree, not copied', () => {
+            /** Code literals a sandboxed producer provably cannot reach. */
+            const UNREACHABLE_BY_A_SANDBOX_PRODUCER: ReadonlyArray<{ code: string; why: string }> = [
+                {
+                    code: 'DUPLICATE_RECORD',
+                    why: 'gated on the ENVELOPE — `name === \'DuplicateRecordError\'` — and `SandboxError` sets '
+                        + '`name` unconditionally, so no sandbox producer, crashed or not, reaches this arm.',
+                },
+                {
+                    code: 'OBJECT_NOT_FOUND',
+                    why: 'carries #14541\'s `!isSandboxOrigin` clause, which routes every sandboxed producer '
+                        + 'past the arm to the unwrap door — where #15071\'s terminal now sits above it anyway.',
+                },
+                {
+                    code: 'INVALID_FIELD',
+                    why: 'the same `!isSandboxOrigin` clause as the arm above, for the same reason.',
+                },
+            ];
+
+            /** The whole region asked BEFORE the unwrap door: the shared classification plus the arms below the consult. */
+            function aboveTheUnwrapDoor(): string {
+                const shared = SOURCE.indexOf('function structuredCodeAnswer(');
+                const door = SOURCE.indexOf("if (typeof error?.innerMessage === 'string' && error.innerMessage) {", shared);
+                expect(shared).toBeGreaterThan(-1);
+                expect(door).toBeGreaterThan(shared);
+                return SOURCE.slice(shared, door);
+            }
+
+            function declaredCodeLiterals(): string[] {
+                return [...aboveTheUnwrapDoor().matchAll(/error\?\.code === '([A-Z_]+)'/g)].map((m) => m[1]);
+            }
+
+            it('the scan really sees the arms (a zero-match scan is a green that measured nothing)', () => {
+                expect(new Set(declaredCodeLiterals()).size).toBeGreaterThanOrEqual(13);
+            });
+
+            it('every declared-code arm above the unwrap door is either covered here or named unreachable', () => {
+                const covered = new Set(ARMS.map((a) => a.arm));
+                const excused = new Set(UNREACHABLE_BY_A_SANDBOX_PRODUCER.map((e) => e.code));
+                const uncovered = [...new Set(declaredCodeLiterals())]
+                    .filter((code) => !covered.has(code) && !excused.has(code));
+                expect(uncovered).toEqual([]);
+            });
+
+            it('the excuse list is not a dumping ground: every entry is a live arm with a real reason', () => {
+                const region = aboveTheUnwrapDoor();
+                for (const entry of UNREACHABLE_BY_A_SANDBOX_PRODUCER) {
+                    expect(region).toContain(`error?.code === '${entry.code}'`);
+                    expect(entry.why.length).toBeGreaterThan(60);
+                }
+            });
+
+            it('the crash terminal is asked ONCE, above the arms — not duplicated into them', () => {
+                // The move is the change: one `isScriptFaultMessage` gate on
+                // this path, and it out-ranks the consult. A second copy inside
+                // an arm would be the mechanism option C was refused for.
+                const fn = SOURCE.indexOf('function classifyDataError(');
+                const consult = SOURCE.indexOf('const structured = structuredCodeAnswer(error, object);', fn);
+                expect(consult).toBeGreaterThan(fn);
+                expect(SOURCE.slice(fn, consult)).toContain('isSandboxCrash(error)');
+                expect(SOURCE.slice(fn, consult)).toContain('UNCLASSIFIED_FAULT()');
+                expect(aboveTheUnwrapDoor()).not.toContain('isScriptFaultMessage(');
+            });
         });
     });
 
@@ -302,8 +455,6 @@ describe('#14704 · the single `/data` door never ships the QuickJS wrapper out 
                     + 'produce the right answer, and triage ruled this arm out of scope.',
             },
         ];
-
-        const SOURCE = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
 
         function sharedClassification(): string {
             const a = SOURCE.indexOf('function structuredCodeAnswer(');
