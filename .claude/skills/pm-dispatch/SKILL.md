@@ -237,16 +237,16 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 ## 域车道
 
 - 锚定规则:每个包恰好属于一个域;issue 的 `domain:*` = 修复落地的那个包所属的域。
-- 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域。
-- 说不出修复碰哪个文件就还没分诊完,不可标。
+- 唯一例外 `packages/lint` 等与 spec 相交的 devx 面:围着 spec 契约转的归 `domain:spec`,余留 devx。
+- 域由分诊读代码判定,⛔ 绝不从 issue 标题的词汇猜域;说不出修复碰哪个文件就还不可标。
 
 | 标签 | 包家族 |
 |:--|:--|
 | `domain:engine` | `packages/objectql`、`packages/core`、`packages/formula`(CEL / `matches-filter` / RLS 谓词求值)、`plugin-pinyin-search`;`packages/metadata*`、`packages/platform-objects`;`packages/drivers/driver-*`;退役标签 `domain:engine-core` / `domain:metadata` / `domain:drivers` 只退出流通,GitHub 标签对象保留 |
 | `domain:services` | `packages/services/*`、`packages/connectors/*`、`packages/triggers/*`、`plugin-approvals`、`plugin-webhooks`、`plugin-email`、`plugin-reports`、`embedder-openai`、`knowledge-*`;`plugin-auth`、`plugin-security`、`plugin-sharing`、`plugin-audit`;退役标签 `domain:identity` 同上只退流通 |
-| `domain:devx` | `packages/lint`、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域);与 `domain:spec` 相交的面按是否围着 spec 契约转切分 |
+| `domain:devx` | `packages/lint`(与 spec 相交的面均按锚定规则的例外切分)、`packages/sdui-parser`、`content/docs/**`、`apps/docs`、`scripts/`(门禁类;与 `domain:skills` 的分界按门禁的 SUBJECT:治理 agent 指令面/governed 面的归 skills,治理代码/文档质量的归本域) |
 | `domain:skills` | `.claude/skills/**`(含本文件)+ `skills/**`;根 `AGENTS.md` + 根 `CLAUDE.md`;governed 面的治理执行文件:`.github/CODEOWNERS` + SUBJECT 是 governed 面本身的门禁/审计(现为 `scripts/pm/check-governed-merges.mjs`) |
-| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及围着 spec 契约转的工具链;一般开发工具面留 `devx`;席内分派见 `references/lanes/spec.md` |
+| `domain:spec` | `packages/spec` 整包:schema 形状、`contracts/**`、退役行为半边、strictness 台账;describe/JSDoc/墓碑散文/错误 guidance 与 alias 表;`packages/spec/scripts/**`、`packages/spec/docs/**` 及按锚定规则的例外归本域的工具链(域边界枚举与席内分派见 `references/lanes/spec.md`) |
 | `domain:cli` | `packages/cli`、`runtime`、`verify`、`qa`、`types`、`packages/rest`、`packages/mcp`、`packages/observability`、`packages/client*`、`cloud-connection`、`create-objectstack`、`packages/adapters/*`、`plugin-hono-server`、`plugin-dev` |
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统) |
 
