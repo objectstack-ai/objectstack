@@ -26,8 +26,22 @@
 #                 The queue builds each entry as merged onto the current main
 #                 (or onto the entry ahead of it) and NAMES that base, so there
 #                 is no merge-base to compute and no frozen sha to drift from.
-#   push          the FULL list, unchanged: a push to main gates nobody, and
-#                 it is the ground truth the shard-timings refresh reads.
+#   push          affected set against `github.event.before` -- the commit main
+#                 was on before this merge landed -- with the same union
+#                 (#16467). A push to main gates nobody and re-tests a tree the
+#                 merge group has just verified, so re-running the FULL list on
+#                 every merge bought coverage nobody read: measured over 60 push
+#                 runs, 36 were cancelled by the next merge before they finished.
+#                 A ZERO before sha (a branch's first push, or a force-push that
+#                 rewrote history) has no previous commit to diff from and falls
+#                 back to the FULL list, loudly.
+#   schedule      the FULL list. This is the hourly run (#16467) that keeps
+#   workflow_     "main is green" a statement about the WHOLE workspace, and it
+#     dispatch    -- not the push run -- is the measurement the shard-timings
+#                 refresh reads (scripts/ci/select-shard-timings-run.mjs).
+#                 `workflow_dispatch` is the same battery on demand.
+#   anything      the FULL list, by falling through every guard below. There is
+#     else        no "skip" default in this file.
 #
 # An EMPTY affected set on merge_group is legitimate -- a docs-only group has
 # nothing to test -- and flows into ci.yml's existing "No packages on this
@@ -56,6 +70,9 @@
 #                                   payload's FROZEN base, printed for the drift
 #                                   reading and never diffed from (#6195)
 #   OS_SHARD_MERGE_GROUP_BASE_SHA   `github.event.merge_group.base_sha`
+#   OS_SHARD_PUSH_BEFORE_SHA        `github.event.before` -- the commit the
+#                                   pushed-to branch was on beforehand, or 40
+#                                   zeroes when there was none (#16467)
 #   RUNNER_TEMP                     the runner's temp dir; the outputs land here
 #
 # Variables absent from the event are empty strings, which is what the runner
@@ -76,6 +93,11 @@ EVENT_NAME="${OS_SHARD_EVENT_NAME:-}"
 BASE_REF="${OS_SHARD_PR_BASE_REF:-}"
 PINNED_BASE_SHA="${OS_SHARD_PR_PINNED_BASE_SHA:-}"
 MERGE_GROUP_BASE_SHA="${OS_SHARD_MERGE_GROUP_BASE_SHA:-}"
+PUSH_BEFORE_SHA="${OS_SHARD_PUSH_BEFORE_SHA:-}"
+# The sha GitHub sends for "there was no previous commit". Spelled once, matched
+# exactly: a PREFIX test would also swallow a real commit whose id starts with
+# zeroes, and this value decides whether a run tests the workspace or a diff.
+ZERO_SHA='0000000000000000000000000000000000000000'
 
 SCM_BASE=''
 if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -142,6 +164,38 @@ if [ "$EVENT_NAME" = "merge_group" ]; then
     fi
   fi
 fi
+# push (#16467): the payload names the previous tip of the branch outright, so
+# like merge_group there is no merge-base to compute. `github.event.before` is
+# the commit `main` was on before this merge landed, it is an ancestor of HEAD,
+# and `git diff before HEAD` is exactly what this push added. Every failure
+# shape mirrors the two branches above -- an absent field, the zero sha, a sha
+# the checkout cannot resolve even after a fetch -- and every one of them falls
+# back to the FULL list with a `::warning::` naming the reason, never to a
+# silent narrower set.
+#
+# ⛔ The zero sha is checked BEFORE the fetch, not left to it. `git fetch origin
+# 0000...` fails and `git cat-file -e` then declines, so the fallback would be
+# reached either way -- but the log would read "could not fetch", which invites
+# someone to go looking for a network fault that never happened. A first push
+# and a force-push are not faults; they are events with no previous commit.
+if [ "$EVENT_NAME" = "push" ]; then
+  if [ -z "$PUSH_BEFORE_SHA" ]; then
+    echo "::warning::This push event carries no before sha, so the affected-set diff base cannot be computed."
+  elif [ "$PUSH_BEFORE_SHA" = "$ZERO_SHA" ]; then
+    echo "::warning::This push event's before sha is all zeroes -- the branch's first push, or a force-push that rewrote history -- so there is no previous commit to diff from."
+  else
+    # `fetch-depth: 0` already makes this resolve; the fetch is the guard for
+    # the day that changes. By sha, as on merge_group: after a force-push the
+    # previous tip may be unreachable from any ref.
+    if ! git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null; then
+      git fetch --no-tags --quiet origin "$PUSH_BEFORE_SHA" \
+        || echo "::warning::Could not fetch this push's previous commit $PUSH_BEFORE_SHA; the resolution below will decide."
+    fi
+    if git cat-file -e "$PUSH_BEFORE_SHA^{commit}" 2>/dev/null; then
+      SCM_BASE="$PUSH_BEFORE_SHA"
+    fi
+  fi
+fi
 if [ -n "$SCM_BASE" ]; then
   if [ "$EVENT_NAME" = "pull_request" ]; then
     # The drift is printed, not just corrected: nothing in this log ever
@@ -150,6 +204,8 @@ if [ -n "$SCM_BASE" ]; then
     DRIFT=$(git rev-list --count "$PINNED_BASE_SHA..$SCM_BASE" 2>/dev/null || echo '?')
     echo "Affected-set diff base: $SCM_BASE  (merge-base of origin/$BASE_REF and HEAD)"
     echo "Frozen payload base.sha: $PINNED_BASE_SHA  -- $BASE_REF has moved $DRIFT commit(s) since it was frozen, and that drift is exactly what this step used to charge to this PR."
+  elif [ "$EVENT_NAME" = "push" ]; then
+    echo "Affected-set diff base: $SCM_BASE  (this push's before sha)"
   else
     echo "Affected-set diff base: $SCM_BASE  (the merge group's base_sha)"
   fi
@@ -200,11 +256,13 @@ if [ -n "$SCM_BASE" ]; then
   # can be told apart.
   #
   # Scoping this to pull_request is an explicit test now that merge_group
-  # reaches this branch too (#16453): a merge group whose diff against its
-  # base lists nothing is a group whose tree IS its base's tree -- already
-  # validated as main, nothing new to test -- so selecting nothing there is
-  # the honest answer, not the #10057 shape. push never reaches this branch:
-  # SCM_BASE is assigned only under the two event guards above.
+  # (#16453) and push (#16467) reach this branch too: a merge group whose diff
+  # against its base lists nothing is a group whose tree IS its base's tree --
+  # already validated as main, nothing new to test -- and a push whose diff
+  # against `event.before` lists nothing added no files to `main` (a merge whose
+  # tree equals its first parent's, a tag-only push). Both are the honest
+  # nothing, not the #10057 shape, which remains pull_request-only: only there
+  # is an empty diff impossible by construction.
   elif [ "$EVENT_NAME" = "pull_request" ] && [ ! -s "$RUNNER_TEMP/changed-files.txt" ]; then
     echo "::warning::The diff against merge-base $SCM_BASE listed no changed files, which a pull_request cannot legitimately produce; falling back to the full package list for this shard rather than selecting nothing (#10057)."
     pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
@@ -216,15 +274,25 @@ else
   # is a strict superset of the affected one — this shard still runs
   # everything it would have run and more. Cost is minutes; the
   # alternative is a red Test Core on a PR with nothing wrong with it.
-  # Push builds take this branch by design: a push to main gates nobody, and
-  # its full run is the ground truth the shard-timings refresh reads. Merge
-  # groups used to take it too; since #16453 they land here only when the
-  # group's base could not be resolved, and say so just below.
+  # Push builds used to take this branch BY DESIGN, on the argument that a push
+  # to main gates nobody and its full run is the ground truth the shard-timings
+  # refresh reads. Both halves of that are retired (#16467): the full run cost
+  # ~90 machine-hours a day to re-test a tree the merge group had just verified,
+  # and 36 of 60 of those runs never finished, so it was not ground truth for
+  # anything -- the HOURLY `schedule` run is, and `scripts/ci/select-shard-
+  # timings-run.mjs` now reads that event by name. Since #16467 a push lands
+  # here only when its `before` sha is absent, zero, or unresolvable, and says
+  # so just below; merge groups likewise since #16453. What still takes this
+  # branch unconditionally is `schedule`, `workflow_dispatch` and every other
+  # event: no guard above assigns them a base, which is the fail-open default.
   if [ "$EVENT_NAME" = "pull_request" ]; then
     echo "::warning::Could not resolve merge-base(origin/$BASE_REF, HEAD); falling back to the full package list for this shard rather than diffing from the frozen base.sha (#6195)."
   fi
   if [ "$EVENT_NAME" = "merge_group" ]; then
     echo "::warning::Could not resolve the merge group's base '$MERGE_GROUP_BASE_SHA' in this checkout; falling back to the full package list for this shard rather than selecting nothing (#16453)."
+  fi
+  if [ "$EVENT_NAME" = "push" ]; then
+    echo "::warning::Could not resolve this push's previous commit '$PUSH_BEFORE_SHA' in this checkout; falling back to the full package list for this shard rather than selecting nothing (#16467)."
   fi
   pnpm exec turbo ls --output=json > "$RUNNER_TEMP/turbo-ls.json"
 fi
