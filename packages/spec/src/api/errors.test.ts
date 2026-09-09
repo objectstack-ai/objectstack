@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   ErrorCategory,
   StandardErrorCode,
@@ -188,6 +189,19 @@ describe('EnhancedApiErrorSchema', () => {
     });
     expect(rejected.success).toBe(false);
     expect(rejected.error?.issues[0]?.path).toEqual(['refusal']);
+  });
+
+  // [#16335] Same pin as `ApiErrorSchema`'s: the shipped
+  // `json-schema/api/EnhancedApiError.json` carries the value rule as
+  // `const: true`, on the generator's own `toJSONSchema` options.
+  it('ships `refusal` as `{ type: boolean, const: true }` in the JSON Schema the tarball carries', () => {
+    const json = z.toJSONSchema(EnhancedApiErrorSchema, { target: 'draft-2020-12' }) as {
+      properties?: Record<string, { type?: unknown; const?: unknown }>;
+    };
+    expect(json.properties?.refusal).toMatchObject({ type: 'boolean', const: true });
+    // Lit control on a neighbour: `retryable` is a plain boolean, no `const`.
+    expect(json.properties?.retryable).toMatchObject({ type: 'boolean' });
+    expect(json.properties?.retryable?.const).toBeUndefined();
   });
 
   it('should accept rate limit error with retry info', () => {

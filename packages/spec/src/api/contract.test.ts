@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   ApiErrorSchema,
   makeApiErrorSchema,
@@ -141,6 +142,23 @@ describe('ApiErrorSchema', () => {
     expect(error.refusal).toBe(true);
     expect(error.userMessage).toBe('此部署未安装消息服务。');
     expect(error.message).toBe('service-messaging is not installed on this deployment');
+  });
+
+  // [#16335] The value rule as the tarball ships it. `json-schema/api/ApiError.json`
+  // is built from this schema by `scripts/build-schemas.ts` with
+  // `z.toJSONSchema(schema, { target: 'draft-2020-12' })`, and `build-docs.ts`
+  // renders each generated reference row's type column from `prop.const` — so
+  // the shipped JSON and the checked-in reference rows both carry `true`, and
+  // `check:docs` (a required check with no paths filter) compares the rows.
+  // This pin reads the JSON directly, on the generator's own options.
+  it('ships `refusal` as `{ type: boolean, const: true }` in the JSON Schema the tarball carries', () => {
+    const json = z.toJSONSchema(ApiErrorSchema, { target: 'draft-2020-12' }) as {
+      properties?: Record<string, { type?: unknown; const?: unknown }>;
+    };
+    expect(json.properties?.refusal).toMatchObject({ type: 'boolean', const: true });
+    // Lit control on a neighbour: a plain string key carries no `const`.
+    expect(json.properties?.userMessage).toMatchObject({ type: 'string' });
+    expect(json.properties?.userMessage?.const).toBeUndefined();
   });
 });
 
