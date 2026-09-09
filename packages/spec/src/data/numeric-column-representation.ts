@@ -98,12 +98,19 @@
  * ## The residual bound, stated rather than assumed
  *
  * An exact-decimal column is bounded where a float is not, so this table is
- * not lossless in every direction. Magnitudes below 1e-30 round to zero and
- * magnitudes at or above 1e35 are REFUSED, where today's `real` keeps about
- * seven significant digits out to ~1e38. Two things make that the right
- * trade: a refusal is loud and a silent rounding is not, and the sql format's
- * `numeric(18,2)` already refuses everything at or above 1e16 today. It is a
- * bound, and it is stated here so no reader has to rediscover it.
+ * not lossless in every direction, and the bound has two ends. Downward, the
+ * column keeps 30 fractional digits, so a magnitude whose significant digits
+ * run past the 30th decimal place loses the tail silently:
+ * `1.2345678901234567e-15` stores as `0.000000000000001234567890123457`.
+ * Precision loss therefore BEGINS around |x| < 1e-13 — where a double's ~17
+ * significant digits first reach past the 30th decimal place — and is TOTAL
+ * below 1e-30, where nothing is left and the value rounds to zero. Upward,
+ * magnitudes at or above 1e35 are REFUSED (the 35 integer digits that
+ * 65 - 30 leaves), where today's `real` keeps about seven significant digits
+ * out to ~1e38. Two things make that the right trade: a refusal is loud and a
+ * silent rounding is not, and the sql format's `numeric(18,2)` already
+ * refuses everything at or above 1e16 today. It is a bound, and it is stated
+ * here so no reader has to rediscover it.
  *
  * ## SQLite, per type — the constraint the report raised, answered
  *
