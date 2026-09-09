@@ -35,6 +35,33 @@ import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protoco
 import { ObjectQL } from './engine.js';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 
+/**
+ * [#16231] `findOne` and `update` declare what they answer now, so a pin that
+ * reads a field off either has to say WHICH limb it means. Said once here
+ * rather than scattered through the cases as `!` and casts:
+ *
+ * - every read below is a by-id `findOne`, so `null` means the row this case
+ *   just wrote is gone — a failure of the case, not a shape to tolerate;
+ * - every write below is a by-id `update` (payload id plus a `where` naming
+ *   the one row), so the affected-row COUNT limb is unreachable and a count
+ *   arriving here would mean the dispatch ladder changed under the pin.
+ *
+ * Both refuse loudly, so the case fails where the wrong shape appeared instead
+ * of several lines later on an `undefined` field.
+ */
+function readRow(row: Record<string, any> | null): Record<string, any> {
+  if (row === null) throw new Error('expected findOne to answer the row this case wrote');
+  return row;
+}
+
+function writtenRow(result: Record<string, any> | number | null): Record<string, any> {
+  if (result === null) throw new Error('expected a by-id update to answer the written record, got null');
+  if (typeof result === 'number') {
+    throw new Error(`expected a by-id update to answer the written record, got an affected count (${result})`);
+  }
+  return result;
+}
+
 const ACCOUNT = {
   name: 'an_account',
   label: 'Account',
@@ -395,7 +422,7 @@ describe('#5503 x #5126 — strictReadonlyWrites covers runtime-owned fields', (
     expect(err.fields).toEqual(['account_number']);
     expect([...err.drops].map((d: DroppedFieldsEvent) => d.reason)).toEqual(['readonly']);
     // Nothing was written — not even the legitimate rename.
-    const readback = await rig.engine.findOne('an_account', { where: { id } });
+    const readback = readRow(await rig.engine.findOne('an_account', { where: { id } }));
     expect(readback.name).toBe('Acme');
     expect(readback.account_number).toBe('ACC-0001');
   });
@@ -413,7 +440,7 @@ describe('#5503 x #5126 — strictReadonlyWrites covers runtime-owned fields', (
     );
 
     expect(events.flatMap((e) => e.fields)).toContain('account_number');
-    const readback = await rig.engine.findOne('an_account', { where: { id } });
+    const readback = readRow(await rig.engine.findOne('an_account', { where: { id } }));
     expect(readback.name).toBe('renamed');          // the legitimate half landed
     expect(readback.account_number).toBe('ACC-0001'); // the forged half did not
   });
@@ -422,11 +449,11 @@ describe('#5503 x #5126 — strictReadonlyWrites covers runtime-owned fields', (
     const rig = await makeEngine();
     const created = await rig.protocol.createData({ object: 'an_account', data: { name: 'Acme' } });
     const id = created.id as string;
-    const res = await rig.engine.update(
+    const res = writtenRow(await rig.engine.update(
       'an_account',
       { id, account_number: 'LEGACY-0007' },
       { where: { id }, strictReadonlyWrites: true, context: { preserveAudit: true } },
-    );
+    ));
     expect(res.account_number).toBe('LEGACY-0007');
   });
 
@@ -467,7 +494,7 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
       data: { account_number: 'ACC-888888' },
     });
     expect(res.record.account_number).toBe('ACC-0001');
-    const readback = await rig.engine.findOne('an_account', { where: { id } });
+    const readback = readRow(await rig.engine.findOne('an_account', { where: { id } }));
     expect(readback.account_number).toBe('ACC-0001');
   });
 
@@ -512,20 +539,20 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
   });
 
   it('keeps an explicit value for a system write', async () => {
-    const res = await rig.engine.update(
+    const res = writtenRow(await rig.engine.update(
       'an_account',
       { id, account_number: 'ACC-000042' },
       { where: { id }, context: { isSystem: true } } as any,
-    );
+    ));
     expect(res.account_number).toBe('ACC-000042');
   });
 
   it('keeps an explicit value for a `preserveAudit` historical import / undo (#3493)', async () => {
-    const res = await rig.engine.update(
+    const res = writtenRow(await rig.engine.update(
       'an_account',
       { id, account_number: 'LEGACY-0007' },
       { where: { id }, context: { preserveAudit: true } } as any,
-    );
+    ));
     expect(res.account_number).toBe('LEGACY-0007');
   });
 
@@ -533,7 +560,7 @@ describe('#5503 — autonumber is runtime-owned: UPDATE', () => {
     rig.engine.registerHook('beforeUpdate', async (ctx: any) => {
       ctx.input.data.account_number = 'HOOK-0002';
     }, { object: 'an_account' });
-    const res = await rig.engine.update('an_account', { id, name: 'x' }, { where: { id } } as any);
+    const res = writtenRow(await rig.engine.update('an_account', { id, name: 'x' }, { where: { id } } as any));
     expect(res.account_number).toBe('HOOK-0002');
   });
 });

@@ -59,37 +59,6 @@ const SHARED_SHOWCASE = [
 ];
 
 export default defineConfig({
-  resolve: {
-    // [#7865] `federated-anchor-provenance.dogfood.test.ts` imports the
-    // provenance marker from `@objectstack/metadata-core` — alias it to SOURCE
-    // so the pin is a verdict about the checkout, not about a build artifact
-    // (`check-test-source-alias`; #7668 is what a dist-resolved pin costs).
-    // Anchored array form on purpose: the object form matches by prefix and
-    // would swallow subpath imports (the ENOTDIR trap the gate's header names).
-    // Aliasing is graph-wide, so packages still loaded from dist (objectql,
-    // plugin-security, …) resolve their own `@objectstack/metadata-core`
-    // imports to this same single source instance rather than a second copy.
-    // [#13513] `date-bucket-parity-turso.test.ts` drives `TursoDriver` itself —
-    // it asserts the driver's SQL date bucketing against the in-memory
-    // reference, plus the on-disk storage form SqlDriver writes. That verdict
-    // has to be about the driver source in this checkout, not about the last
-    // `pnpm build`, and it was: the suite used to live inside
-    // `packages/drivers/driver-turso` and imported `./turso-driver.js`
-    // relatively. It moved here because the `@objectstack/verify` devDependency
-    // it needs was the one edge that made this workspace's manifest graph
-    // cyclic; this alias is what keeps the move semantics-preserving rather than
-    // quietly converting a source pin into a dist pin.
-    alias: [
-      {
-        find: /^@objectstack\/metadata-core$/,
-        replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
-      },
-      {
-        find: /^@objectstack\/driver-turso$/,
-        replacement: path.resolve(__dirname, '../../drivers/driver-turso/src/index.ts'),
-      },
-    ],
-  },
   test: {
     projects: [
       {
@@ -110,6 +79,80 @@ export default defineConfig({
         },
       },
       {
+        // [#16679] `resolve.alias` at the ROOT of this config is NOT
+        // inherited by `test.projects[]` — measured empirically (a
+        // deliberately broken replacement path for
+        // `@objectstack/plugin-approvals` still resolved through `dist/`
+        // with zero errors), the same "inline projects do not inherit the
+        // root-level setting" gap #10374 already found for
+        // `disableConsoleIntercept` on Vitest 4.1.10. A root-level `alias:`
+        // entry here would read as live but be dead for every test in
+        // EITHER project — which is precisely the false-green
+        // `check-test-source-alias` exists to prevent. So it lives HERE,
+        // on the one project whose test files actually import these
+        // specifiers (none of `SHARED_SHOWCASE`'s files do — grepped).
+        //
+        // It must also be an INLINE array literal, not a shared constant:
+        // `check-test-source-alias` parses this file's TEXT statically (it
+        // does not evaluate the config) and reads the first `alias:
+        // [...]`/`alias: {...}` region it finds — `alias: SOME_CONST_NAME`
+        // is invisible to it and silently drops every entry, root ones
+        // included. Anchored array form (not the object form) is also
+        // load-bearing: the object form matches by PREFIX and would swallow
+        // subpath imports (the ENOTDIR trap the gate's header names).
+        resolve: {
+          alias: [
+            // [#7865] `federated-anchor-provenance.dogfood.test.ts` imports
+            // the provenance marker from `@objectstack/metadata-core` —
+            // alias it to SOURCE so the pin is a verdict about the checkout,
+            // not about a build artifact (#7668 is what a dist-resolved pin
+            // costs).
+            {
+              find: /^@objectstack\/metadata-core$/,
+              replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
+            },
+            // [#13513] `date-bucket-parity-turso.test.ts` drives
+            // `TursoDriver` itself — it asserts the driver's SQL date
+            // bucketing against the in-memory reference, plus the on-disk
+            // storage form SqlDriver writes. That verdict has to be about
+            // the driver source in this checkout, not about the last `pnpm
+            // build`, and it was: the suite used to live inside
+            // `packages/drivers/driver-turso` and imported
+            // `./turso-driver.js` relatively. It moved here because the
+            // `@objectstack/verify` devDependency it needs was the one edge
+            // that made this workspace's manifest graph cyclic; this alias
+            // is what keeps the move semantics-preserving rather than
+            // quietly converting a source pin into a dist pin.
+            {
+              find: /^@objectstack\/driver-turso$/,
+              replacement: path.resolve(__dirname, '../../drivers/driver-turso/src/index.ts'),
+            },
+            // [#16679] `approval-override-composite-pin.dogfood.test.ts`
+            // evaluates the SERVED `sys_approval_request` action predicates
+            // against the SERVED viewer with `@objectstack/formula`'s
+            // `celEngine` — a dist merely behind would run the composite
+            // green against the engine's old semantics, exactly the #8990
+            // hazard `action-predicate-sparse-face.test.ts` (that package's
+            // own alias) already documents for this same engine.
+            // `@objectstack/plugin-approvals` and
+            // `@objectstack/trigger-record-change` are the pin's subject —
+            // the whole point is that a change to either can silently break
+            // the override composite, so the pin has to be a verdict about
+            // THIS checkout's source, not the last `pnpm build`.
+            {
+              find: /^@objectstack\/formula$/,
+              replacement: path.resolve(__dirname, '../../formula/src/index.ts'),
+            },
+            {
+              find: /^@objectstack\/plugin-approvals$/,
+              replacement: path.resolve(__dirname, '../../plugins/plugin-approvals/src/index.ts'),
+            },
+            {
+              find: /^@objectstack\/trigger-record-change$/,
+              replacement: path.resolve(__dirname, '../../triggers/trigger-record-change/src/index.ts'),
+            },
+          ],
+        },
         test: {
           // #10374: disarm the late-console teardown race. Set PER PROJECT because
           // inline projects do not inherit the root-level setting (measured on

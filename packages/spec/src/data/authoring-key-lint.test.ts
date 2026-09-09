@@ -20,7 +20,7 @@ import {
   type UnknownAuthoringKeyFinding,
 } from './authoring-key-lint';
 import { ObjectSchema } from './object.zod';
-import { FieldSchema } from './field.zod';
+import { FieldSchema, InlineGridColumnSchema } from './field.zod';
 
 const shapeKeys = (s: unknown) => Object.keys((s as { shape: Record<string, unknown> }).shape);
 
@@ -109,5 +109,58 @@ describe('the guidance tables do not rot', () => {
         if (hint.why) expect(hint.why.length, `${name}.${key} reason too short`).toBeGreaterThan(30);
       }
     }
+  });
+});
+
+/**
+ * The gap every other test in this file leaves open (#16632).
+ *
+ * The tests above prove the table is CONSISTENT — every `to` names a live key,
+ * no entry names a key the schema declares. None of them proves an entry is
+ * ever CONSULTED, so a row filed under a spelling nobody writes passes all of
+ * them: an assertion that cannot fail and an assertion that passed look
+ * identical from the outside.
+ *
+ * These read the channel that actually answers an authored field key today.
+ * `FieldSchema` is a `strictObject` and pulls this table in through
+ * `fieldKeyGuidanceAsStrictOptions()`, so the PARSE is loud first and the
+ * walker stays silent on the field surface by its own posture rule
+ * (`kernel/metadata-authoring-lint.ts`: `strict` → silent). Reaching for the
+ * lint to prove reachability here would prove nothing — it never fires.
+ */
+describe('the `id_field` retirement is reached, not merely declared (#16632)', () => {
+  const authored = { name: 'account_id', type: 'lookup', reference: 'crm_account' } as const;
+  const unrecognizedKeyMessage = (value: unknown): string => {
+    const r = FieldSchema.safeParse(value);
+    expect(r.success).toBe(false);
+    if (r.success) throw new Error('unreachable');
+    const issue = r.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue, 'the field parse did not refuse the unknown key at all').toBeTruthy();
+    return issue!.message;
+  };
+
+  it('an authored `id_field` is answered with THIS table\'s sentence, verbatim', () => {
+    // The load-bearing assertion: the prescription reaches the author. Change
+    // the entry's key face to `idField` and this goes red, which is the whole
+    // point — the guidance channel is an exact, case-sensitive match.
+    const why = FIELD_KEY_GUIDANCE.id_field?.why;
+    expect(why, 'FIELD_KEY_GUIDANCE has no `id_field` entry').toBeTruthy();
+    expect(unrecognizedKeyMessage({ ...authored, id_field: 'name' })).toContain(why!);
+  });
+
+  it('the retirement suppresses the rename channel — no "did you mean"', () => {
+    // A `why` row with no `to` must not also offer an edit-distance guess: the
+    // `pii` → `min` failure class this table exists to suppress.
+    expect(unrecognizedKeyMessage({ ...authored, id_field: 'name' })).not.toContain('Did you mean');
+  });
+
+  it('the same-named GridColumn key is a different schema and stays live', () => {
+    // `git grep idField packages/spec/src/data/field.zod.ts` reads as "the
+    // target already exists" — but the hit belongs to the `inlineColumns`
+    // mirror, and `GridField` (a path in a comment) contains the substring
+    // `idField` besides. Both facts are pinned so nobody "unifies" the two.
+    expect(InlineGridColumnSchema.safeParse({ name: 'account_id', idField: 'id' }).success).toBe(true);
+    expect(shapeKeys(FieldSchema)).not.toContain('idField');
+    expect(shapeKeys(InlineGridColumnSchema)).toContain('idField');
   });
 });

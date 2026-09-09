@@ -15,6 +15,30 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { RLS } from '@objectstack/spec/security';
 import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 
+/**
+ * [#16608] What the ENGINE does inside the middleware's `next()` — the part of
+ * `ObjectQL.insert` the doubles in this file stand in for.
+ *
+ * Since #16608 the insert-side RLS `check` is not evaluated in the middleware:
+ * it is INSTALLED on the operation context and run by the engine once the
+ * `beforeInsert` chain has produced the row that will be stored. A double whose
+ * executor is a bare `async () => {}` therefore models an engine that carries a
+ * write past a gate that never ran — and the middleware refuses exactly that,
+ * fail-closed, rather than vouching for it. A looser double would convert a
+ * green suite into no suite at all, which is the family `check:engine-double-contract`
+ * exists for.
+ *
+ * So the executor honours the seam the way the engine does: the flag first (it
+ * answers "did the seam run", never "did the write pass"), then the judgement.
+ * These doubles run no hooks, so the row that would be stored IS `opCtx.data`.
+ */
+const runEngineWriteBody = async (opCtx: any): Promise<void> => {
+  const seam = opCtx?.postHookWriteImageCheck;
+  if (!seam) return;
+  seam.honoured = true;
+  await seam.evaluate([opCtx.data]);
+};
+
 // ---------------------------------------------------------------------------
 // SecurityPlugin – basic metadata
 // ---------------------------------------------------------------------------
@@ -162,7 +186,7 @@ describe('SecurityPlugin', () => {
     const drive = async (opCtx: any) => {
       for (const mw of middlewares) {
         try {
-          await mw(opCtx, async () => {});
+          await mw(opCtx, () => runEngineWriteBody(opCtx));
         } catch {
           // Another middleware (e.g. the CRUD-authorization one) may refuse a
           // bare opCtx — irrelevant here: the replay middleware never throws.
@@ -287,7 +311,7 @@ describe('SecurityPlugin', () => {
       ctx,
       findOne,
       run: async (opCtx: any) => {
-        await middleware(opCtx, async () => {});
+        await middleware(opCtx, () => runEngineWriteBody(opCtx));
         return opCtx;
       },
     };
@@ -3594,7 +3618,7 @@ describe('SecurityPlugin — ADR-0066 D3 field-level requiredPermissions', () =>
       getService: (n: string) => { if (!(n in services)) throw new Error(`service not registered: ${n}`); return services[n]; },
     };
     const plugin = new SecurityPlugin({ fallbackPermissionSet: fallback });
-    return { plugin, ctx, run: async (opCtx: any) => { await middleware(opCtx, async () => {}); return opCtx; } };
+    return { plugin, ctx, run: async (opCtx: any) => { await middleware(opCtx, () => runEngineWriteBody(opCtx)); return opCtx; } };
   };
 
   it('masks a capability-gated field on read when the caller lacks the capability', async () => {
@@ -3834,7 +3858,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     };
     return {
       ctx, taskFindOne,
-      run: async (opCtx: any) => { await middleware(opCtx, async () => {}); return opCtx; },
+      run: async (opCtx: any) => { await middleware(opCtx, () => runEngineWriteBody(opCtx)); return opCtx; },
     };
   };
 
