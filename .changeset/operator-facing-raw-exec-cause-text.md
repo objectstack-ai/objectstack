@@ -56,9 +56,10 @@ list. Illustrations of it, not an exhaustive set: an empty-message `Error` reads
 which for a named subclass is that subclass's name rather than `Error` / `TypeError`; a
 thrown non-`Error` reads its own text or `String(error)` where `(e as Error).message` read
 `undefined`, and where `null` / `undefined` threw a `TypeError` out of the catch, so no
-record was written at all and the operation aborted; an object carrying a string `message`
-reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`. A thrown
-EMPTY string reads `''`, so this channel is neither always prose nor never empty.
+record was written at all and the operation aborted; an object carrying a NON-EMPTY string
+`message` reads it where `err instanceof Error ? … : String(err)` recorded `[object Object]`
+(one carrying an EMPTY `message` still reads `[object Object]`). A thrown EMPTY string reads
+`''`, so this channel is neither always prose nor never empty.
 
 ## The levels, and why they are not uniform
 
@@ -78,7 +79,9 @@ and never a type. The change these sites were made for is the declared raw-path 
 the record gains the dialect's words in place of the driver's composed placeholder. Every
 other throw now reaches these records through the rule above rather than through the
 expression each site spelled out, so its text can move too — a consequence of the rule, not a
-bounded list of exceptions, and one shape (a thrown empty string) still records `''`. The
+bounded list of exceptions, and some shapes still record `''` — a thrown empty string, a
+thrown empty array, and an `Error` whose `name` and `message` are both empty are the ones
+measured. The
 sentence being replaced is not a value any consumer can have been parsing: it is an opaque
 human diagnostic. A consumer reading these records gets the dialect's words back where it had
 been getting a placeholder.

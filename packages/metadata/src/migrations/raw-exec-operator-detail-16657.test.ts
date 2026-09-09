@@ -16,7 +16,18 @@
  *
  * Each case pins the "before" half beside the "after" one — the envelope's own
  * message is the composed sentence, and the record's is not — plus the negative
- * direction: an UNDECLARED throw reaches the record exactly as it did before.
+ * direction: an UNDECLARED throw is NOT unwrapped. Its `cause` is never walked
+ * and the record reads the thrown value's own message channel,
+ * `messageChannelOf(error) || String(error)`.
+ *
+ * ⚠️ That channel is a RULE, not byte-identity with what these `catch` blocks
+ * used to compute, and the negative pins below do not claim otherwise: each
+ * throws a NON-EMPTY `new Error(…)`, the shape for which the rule and the old
+ * expression agree. They differ elsewhere — at the three `err?.message ??
+ * String(err)` sites `new Error('')` recorded `''` and now records `'Error'`,
+ * and `{message:42}` recorded the number where it now records
+ * `'[object Object]'`; at the `error instanceof Error ? … : String(error)` site
+ * `{message:'x'}` recorded `'[object Object]'` and now records `'x'`.
  *
  * ⚠️ The composed sentence is the producer's, copied; `driver-sql`'s
  * `sql-driver-16657-operator-facing-cause-text.test.ts` pins the copy against a
@@ -93,7 +104,7 @@ describe('[#16657] migrateEnvIdToProjectId — the per-table error record', () =
         }
     });
 
-    it('an UNDECLARED refusal is recorded exactly as before', async () => {
+    it('an UNDECLARED refusal is recorded on its own message channel', async () => {
         const results = await migrateEnvIdToProjectId(
             refusingDriver(['id', 'env_id'], () => new Error('database is locked')),
         );
@@ -116,7 +127,7 @@ describe('[#16657] migrateProjectIdToEnvironmentId — the per-table error recor
         for (const row of errors) expect(row.error).toBe(DIALECT_TEXT);
     });
 
-    it('an UNDECLARED refusal is recorded exactly as before', async () => {
+    it('an UNDECLARED refusal is recorded on its own message channel', async () => {
         const results = await migrateProjectIdToEnvironmentId(
             refusingDriver(['id', 'project_id'], () => new Error('database is locked')),
         );
@@ -140,7 +151,7 @@ describe('[#16657] dropProjectionTables — the per-table error record', () => {
         }
     });
 
-    it('an UNDECLARED refusal is recorded exactly as before', async () => {
+    it('an UNDECLARED refusal is recorded on its own message channel', async () => {
         const results = await dropProjectionTables({
             async execute() {
                 throw new Error('database is locked');
@@ -170,7 +181,7 @@ describe('[#16657] migrateSysNotificationToEvent — the run-level error record'
         expect(result.error).not.toContain('refused to run a raw statement');
     });
 
-    it('an UNDECLARED refusal is recorded exactly as before', async () => {
+    it('an UNDECLARED refusal is recorded on its own message channel', async () => {
         const result = await migrateSysNotificationToEvent({
             driver: refusingDriver(legacyColumns, () => new Error('connection reset')),
             data: noLedgerEngine,

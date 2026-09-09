@@ -23,9 +23,23 @@
  * "after" assertion unfalsifiable.
  *
  * The negative direction is pinned per site as well: a seam failure that is NOT
- * a declared raw-statement fault must reach the record exactly as it did
- * before, because the alternative — a helper that unwraps whatever it is handed
- * — is the message sniffing #16019 exists to remove.
+ * a declared raw-statement fault is NOT unwrapped — its `cause` is never walked
+ * and the record reads the thrown value's own message channel,
+ * `messageChannelOf(error) || String(error)` — because the alternative, a
+ * helper that unwraps whatever it is handed, is the message sniffing #16019
+ * exists to remove.
+ *
+ * ⚠️ That channel is a RULE, not byte-identity with what each site used to
+ * compute. Every negative pin below throws a NON-EMPTY `new Error(…)`, the
+ * shape for which the rule and the replaced expression agree; they differ
+ * elsewhere — at the `error instanceof Error ? … : String(error)` sites
+ * (`runProbe`, the seam-failure fan-out, both `partial-index-probe` legs)
+ * `new Error('')` recorded `''` and now records `'Error'`, and `{message:'x'}`
+ * recorded `'[object Object]'` and now records `'x'`; at the five
+ * `(e as Error).message` sites in `seed-tenancy-backfill` a thrown `'x'`
+ * recorded `undefined` — `'unknown error'` at the one site that spelled
+ * `|| 'unknown error'` — and now records `'x'`, and a thrown `null` threw a
+ * `TypeError` out of the catch at all five where it now records `'null'`.
  *
  * ⚠️ The composed sentence here is the producer's, copied. `driver-sql`'s
  * `sql-driver-16657-operator-facing-cause-text.test.ts` pins the copy against a
@@ -121,7 +135,7 @@ describe('[#16657] runtime-index-preflight — the per-probe detail', () => {
         expect(results.every((p) => p.detail === 'no such table: main.sys_metadata')).toBe(true);
     });
 
-    it('an UNDECLARED seam failure reaches the detail exactly as before', async () => {
+    it('an UNDECLARED seam failure reaches the detail on its own message channel', async () => {
         const exec: IndexExec = async () => {
             throw new Error('connection terminated unexpectedly');
         };
@@ -179,7 +193,7 @@ describe('[#16657] partial-index-probe — the detail both callers report', () =
         expect(outcome.detail).toBe('near "where": syntax error');
     });
 
-    it('an UNDECLARED build failure reports its own message, unchanged', async () => {
+    it('an UNDECLARED build failure reports its own message channel, no cause walked', async () => {
         const exec: IndexExec = async (sql: string) => {
             if (sql.includes('CREATE')) throw new Error('disk I/O error');
             return [];
@@ -289,7 +303,7 @@ describe('[#16657] seed-tenancy-backfill — the stored operator record', () => 
         expect(line?.meta?.error).toBe(DIALECT_TEXT);
     });
 
-    it('an UNDECLARED refusal keeps its own message at every one of these sites', async () => {
+    it('an UNDECLARED refusal reads its own message channel at every one of these sites', async () => {
         const log = createLogger();
         const bare = async (sql: string): Promise<unknown> => {
             if (sql.includes('rows_holding')) throw new Error('connection terminated unexpectedly');

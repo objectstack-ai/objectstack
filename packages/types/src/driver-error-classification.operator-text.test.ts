@@ -130,7 +130,7 @@ describe('[#16657] operatorFacingErrorText — the raw-path envelope', () => {
     });
 });
 
-describe('[#16657] operatorFacingErrorText — a record is never empty or undefined', () => {
+describe('[#16657] operatorFacingErrorText — the fallback channel when no cause speaks', () => {
     it('falls back to the envelope itself when nothing is attached', () => {
         // The measured shape when a transport drops `cause`: there is nothing
         // better to say, and saying `undefined` is worse than saying this.
@@ -140,7 +140,7 @@ describe('[#16657] operatorFacingErrorText — a record is never empty or undefi
         expect(operatorFacingErrorText(thrown)).not.toBe('');
     });
 
-    it('answers prose for a thrown value that is not an Error at all', () => {
+    it('reads a thrown non-Error on its own channel, where `(e as Error).message` read `undefined`', () => {
         // `(e as Error).message` — the expression this helper replaces at five
         // sites — evaluates to `undefined` for every one of these.
         expect(operatorFacingErrorText('no such column: foo')).toBe('no such column: foo');

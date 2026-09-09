@@ -81,7 +81,7 @@ describe('[#16657] a real raw-exec refusal still yields the dialect text to an o
     expect(operatorText).not.toMatch(/refused to run a raw statement/);
   });
 
-  it('an UNDECLARED throw from the same seam is returned unchanged', async () => {
+  it('an UNDECLARED throw from the same seam is returned on its own message channel', async () => {
     // The control that proves the pin above reads the declaration and not the
     // shape of any error the seam happens to produce.
     const bare = new Error('connection terminated unexpectedly');

@@ -685,7 +685,13 @@ const DECLARED_DATABASE_FAULT_CODE = 'DATABASE_ERROR';
  * half) untouched: it declares the very same code and status, composes a
  * DIFFERENT sentence, and whether its prose should be unwrapped is a separate
  * decision this helper deliberately does not take. An envelope that declares
- * the code but does not carry this sentence is returned exactly as it arrived.
+ * the code and composes a DIFFERENT, NON-EMPTY sentence is returned exactly as
+ * it arrived — it speaks at depth 0, so the walk stops on it. ⚠️ Not so for a
+ * declared envelope whose own message is EMPTY: an empty node says nothing, so
+ * the walk steps past it and that envelope IS unwrapped (measured:
+ * `{code:'DATABASE_ERROR', message:'', cause:{message:'walked'}}` answers
+ * `'walked'`). ⛔ No claim is made about whether any producer composes an
+ * empty-message `DATABASE_ERROR`; that was not measured.
  *
  * The producer is pinned in the driver, where a real refusal can be raised:
  * `packages/drivers/driver-sql/src/sql-driver-16657-operator-facing-cause-text.test.ts`
@@ -701,8 +707,11 @@ const RAW_STATEMENT_FAULT_SENTENCE = /refused to run a raw statement/;
  * `message` for an object or function, the string itself for a string, and
  * `String()` for any other primitive; anything else reads `''`. So a non-Error
  * node reads whatever text it carries rather than the `undefined` that
- * `(e as Error).message` produced at every site this helper replaces — and a
- * node whose own text is empty, a thrown empty string among them, reads `''`.
+ * `(e as Error).message` produced at the FIVE sites spelled that way — of the
+ * fourteen this helper replaces; the other nine spell
+ * `instanceof Error ? … : String()` (five) or `?.message ?? …` (four) and
+ * already carried a fallback — and a node whose own text is empty, a thrown
+ * empty string among them, reads `''`.
  */
 function messageChannelOf(node: unknown): string {
     if (typeof node === 'string') return node;
@@ -748,7 +757,9 @@ function messageChannelOf(node: unknown): string {
  *    `name`; a thrown non-`Error` reads its own text or `String(error)` where
  *    `(e as Error).message` read `undefined`, and where `null` / `undefined`
  *    threw out of the catch instead of recording anything; an object carrying a
- *    string `message` reads it where `String(err)` recorded `[object Object]`. A
+ *    NON-EMPTY string `message` reads it where `String(err)` recorded
+ *    `[object Object]` — one carrying an EMPTY `message` still reads
+ *    `[object Object]`, because an empty channel is no channel. A
  *    thrown EMPTY string reads `''`, so this channel is neither always prose nor
  *    never empty. Reading a `cause` chain nobody declared would be sniffing,
  *    which is the mechanism #16019 removed;
@@ -757,9 +768,13 @@ function messageChannelOf(node: unknown): string {
  *
  * The walk is bounded by the same {@link MAX_CAUSE_DEPTH} every predicate in
  * this module uses, so a cyclic or absurdly deep chain terminates. Exhausting
- * the bound — like finding no `cause` at all — falls back to the surface
- * message, so a record always carries a sentence rather than `undefined` or an
- * empty string.
+ * the bound — like finding no `cause` at all — falls back to the SAME surface
+ * channel an undeclared throw reads, `messageChannelOf(error) || String(error)`.
+ * ⛔ That fallback is not a promise of prose: it is `''` exactly when that
+ * channel is, which inside this branch means a declared envelope whose own
+ * `message` and `name` are both empty (measured: it answers `''`). The
+ * "neither always prose nor never empty" reading above holds here too — what
+ * the fallback rules out is `undefined`, never emptiness.
  *
  * @param error - the thrown value, of any shape.
  * @returns text for an operator; never `undefined`, never empty for a thrown
