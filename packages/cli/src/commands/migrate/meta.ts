@@ -26,6 +26,7 @@ import {
   createTimer,
   emitJson,
   errorCodeFields,
+  isReportedError,
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
@@ -435,7 +436,10 @@ export default class MigrateMeta extends Command {
         await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         this.exit(1);
       }
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint
+      // lines to stderr before throwing; printing the sentence again here
+      // would put a second copy on stdout.
+      if (!isReportedError(error)) printError(error.message || String(error));
       this.exit(1);
     }
   }

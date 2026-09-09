@@ -15,6 +15,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../../utils/format.js';
 import { computeI18nCoverage, COVERAGE_SURFACE_PHRASE } from '../../utils/i18n-coverage.js';
 
@@ -186,8 +187,13 @@ export default class I18nCheck extends Command {
         await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
         process.exit(1);
       }
-      console.log('');
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint
+      // lines to stderr before throwing; printing the sentence again here
+      // would put a second copy on stdout.
+      if (!isReportedError(error)) {
+        console.log('');
+        printError(error.message || String(error));
+      }
       process.exit(1);
     }
   }

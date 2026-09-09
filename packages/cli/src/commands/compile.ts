@@ -42,6 +42,7 @@ import {
   emitJson,
   isExitSignal,
   errorCodeFields,
+  isReportedError,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // [#14553] The compile-time half of the navigation-contribution group ruling.
@@ -915,8 +916,13 @@ export default class Compile extends Command {
         await emitJson({ success: false, error: error.message, ...errorCodeFields(error), warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
         this.exit(1);
       }
-      console.log('');
-      printError(error.message || String(error));
+      // [#15547] `resolveConfigPath()` already wrote its refusal and hint
+      // lines to stderr before throwing; printing the sentence again here
+      // would put a second copy on stdout.
+      if (!isReportedError(error)) {
+        console.log('');
+        printError(error.message || String(error));
+      }
       this.error(error.message || String(error));
     }
   }
