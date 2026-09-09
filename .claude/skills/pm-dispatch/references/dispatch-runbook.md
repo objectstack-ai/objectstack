@@ -213,7 +213,7 @@
 - ⛔ 不在消费者侧打补丁;只写一个路径名,是要求 dev 在守约与修对之间二选一。
 - 跨包常等于跨车道,PM 事后补跨座位声明。
 - 模型标识只禁内容工件:PR 标题与正文、代码注释、文档、changeset、评论。
-- 两条豁免同属规则,⛔ 不再申报为偏差:一是 commit 的 `Co-Authored-By` 尾注(含 session 链接)。
+- 豁免不再申报为偏差:一是 harness 的 `Co-Authored-By` 尾注,免的是申报,trailer pair 仍 model-free。
 - 另一条是 `.claude/agents/*` frontmatter 的 `model:`,`check:agent-model-declared` 要求。
 - same-day churn 行:派发时 `git log origin/main --oneline -20 -- <paths>` 见当天合并即加一行。
 - 该行原文:基于合并后的代码工作,issue 引用的片段可能已变,先核对当前 main。
