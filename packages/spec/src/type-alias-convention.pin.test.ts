@@ -205,6 +205,7 @@ import type * as M177 from './data/date-macros.zod.js';
 import type * as M178 from './data/field-value.zod.js';
 import type * as M179 from './data/mapping.zod.js';
 import type * as M180 from './security/sharing.zod.js';
+import type * as M186 from './automation/schedule-organization.zod.js';
 import type * as M114 from './shared/metadata-types.zod.js';
 import type * as M115 from './shared/protection.zod.js';
 import type * as M116 from './stack.zod.js';
@@ -631,6 +632,13 @@ export type Iso246 = Assert<Eq< z.input< typeof M42.StateMachineSchema >, z.infe
 
 // automation/time-relative-trigger.zod.ts
 export type Iso247 = Assert<Eq< z.input< typeof M43.TimeRelativeTriggerSchema >, z.infer< typeof M43.TimeRelativeTriggerSchema > >>;
+
+// automation/schedule-organization.zod.ts
+// [#16659] A bare non-empty string: no transform, no default, no coercion — an
+// organization id is written exactly as it is stored. So input === infer, and an
+// `XParsed` here would be a permanent synonym. The day this schema learns to
+// normalize an id, this line goes red and the ADR's remedy applies.
+export type Iso871 = Assert<Eq< z.input< typeof M186.ScheduleOrganizationSchema >, z.infer< typeof M186.ScheduleOrganizationSchema > >>;
 
 // automation/webhook.zod.ts
 export type Iso248 = Assert<Eq< z.input< typeof M44.WebhookTriggerType >, z.infer< typeof M44.WebhookTriggerType > >>;

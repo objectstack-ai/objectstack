@@ -84,8 +84,13 @@ export const ScheduleOrganizationSchema = z
 /**
  * The declared value's type — the alias the machine-readable surface needs
  * beside the schema, and the name a reference page's import example carries.
+ *
+ * `z.input` per ADR-0122: the bare name is reserved for the AUTHOR state. No
+ * `ScheduleOrganizationParsed` sibling exists because the two states are the
+ * same type here — the schema neither transforms nor defaults, it only refuses
+ * what cannot be acted on.
  */
-export type ScheduleOrganization = z.infer<typeof ScheduleOrganizationSchema>;
+export type ScheduleOrganization = z.input<typeof ScheduleOrganizationSchema>;
 
 /**
  * Spellings an author reaches for that are NOT this key, in the order a
