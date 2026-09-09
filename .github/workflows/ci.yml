@@ -942,8 +942,8 @@ jobs:
             echo "No test log — the test step did not get far enough to produce one."
             exit 0
           fi
-          node scripts/test-timing-table.mjs --self-test
-          node scripts/test-timing-table.mjs --capture \
+          node scripts/report-test-timings.mjs --self-test
+          node scripts/report-test-timings.mjs --capture \
             --log "$RUNNER_TEMP/test-core.log" \
             --summaries .turbo/runs \
             --shard "${{ matrix.shard }}/6" \
@@ -1150,7 +1150,7 @@ jobs:
         if: always()
         continue-on-error: true
         run: |
-          node scripts/test-timing-table.mjs --merge \
+          node scripts/report-test-timings.mjs --merge \
             --captures "$RUNNER_TEMP/test-timings" \
             --out "$RUNNER_TEMP/test-timing-table/test-timing-table.md" \
             --json "$RUNNER_TEMP/test-timing-table/test-timing-table.json"
