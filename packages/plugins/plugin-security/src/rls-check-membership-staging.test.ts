@@ -295,6 +295,20 @@ async function makeStack(resolver: Resolver | null): Promise<Stack> {
     try {
       await securityMw(opCtx, async () => {
         await sharingMw(opCtx, async () => {
+          // [#16608] The engine's own half of the write gate, which this
+          // executor stands in for: the insert-side RLS `check` is INSTALLED on
+          // the operation context by the middleware and run by `ObjectQL.insert`
+          // once the `beforeInsert` chain has produced the row that will be
+          // stored. A double that skips it models an engine carrying a write
+          // past a gate that never ran, and the middleware refuses exactly that
+          // (fail closed) rather than vouching for it. Flag first — it answers
+          // "did the seam run", never "did the write pass". This harness runs
+          // no hooks, so the row that would be stored IS `opCtx.data`.
+          const seam = opCtx.postHookWriteImageCheck;
+          if (seam) {
+            seam.honoured = true;
+            await seam.evaluate([opCtx.data]);
+          }
           if (opCtx.operation === 'insert') await engine.insert(opCtx.object, opCtx.data);
           else await engine.update(opCtx.object, opCtx.data, opCtx.options);
           reached = true;
