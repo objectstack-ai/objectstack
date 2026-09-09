@@ -758,7 +758,7 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
 
   // ── The measured consequence of "an assignment ran", stated out loud ───────
 
-  it('MEASURED: a lone self-assigning hook leaves the CALLER value on the key', async () => {
+  it('MEASURED: a lone self-assigning hook can no longer leave the CALLER value on the key (#16344)', async () => {
     // ⚠️ RECORDING BEHAVIOUR, NOT BLESSING IT. The direct consequence of the
     // mechanism #14088 chose: the record says an ASSIGNMENT RAN and is
     // deliberately blind to the VALUE (that blindness is the whole repair — it
@@ -790,6 +790,23 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     //
     // A future ruling that reverses this INVERTS both pins together; it never
     // deletes either. `isCallerSuppliedValue`'s docblock carries the argument.
+    //
+    // ⭐ [#16344] THE VERDICT MOVED, and this is the record of it rather than a
+    // deletion. Everything above still describes the recording mechanism
+    // exactly; what changed is what a `beforeUpdate` hook is SHOWN. The
+    // caller's forged `completed_at` is now hidden from the hook, so
+    // `ctx.input.data.completed_at` reads `undefined` and the self-assign
+    // writes THAT — a hook write of `undefined`, faithfully persisted, rather
+    // than the caller's timestamp promoted to hook-owned.
+    //
+    // Two things follow, and both are the point:
+    //  - the laundering route this case existed to make VISIBLE is now CLOSED.
+    //    A no-op-looking line can no longer confer hook provenance on a value
+    //    the caller minted, because the line can no longer reach that value.
+    //  - the line is still not a no-op. It is an assignment, so the hook owns
+    //    the key and the column is written — with what the hook assigned. That
+    //    is #14088 working as designed, and it is why this case stays pinned
+    //    with the new reading instead of being dropped as fixed.
     const FORGED = '1999-01-01T00:00:00.000Z';
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       ctx.input.data.completed_at = ctx.input.data.completed_at;
@@ -800,34 +817,72 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
       id: 't_20', status: 'in_progress', completed_at: FORGED,
     });
 
-    expect(task('t_20').completed_at).toBe(FORGED);
+    expect(task('t_20').completed_at).not.toBe(FORGED);
+    expect(task('t_20').completed_at).toBeUndefined();
     expect(warns).toEqual([]);
   });
 
   it('the recording is transparent to a hook reading its own payload', async () => {
-    // Hooks read `ctx.input.data` for diagnostics (plugin-auth's identity write
-    // guard NAMES the keys it found). The recording view must be indistinguishable
-    // from the payload for every read shape a hook uses.
+    // The recording view must be indistinguishable from the payload for every
+    // read shape a hook uses.
+    //
+    // [#16344] Written on WRITABLE keys, and that is the repair rather than an
+    // accommodation. This case's subject is the recording PROXY; using a
+    // read-only key the engine now hides made it assert two mechanisms at once
+    // and fail on the one it does not test. The hidden key gets its own
+    // assertion below — where it says what it means.
     const seen: any[] = [];
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       seen.push({
         keys: Object.keys(ctx.input.data),
         spread: { ...ctx.input.data },
         json: JSON.stringify(ctx.input.data),
-        has: 'completed_at' in ctx.input.data,
+        has: 'status' in ctx.input.data,
         own: Object.prototype.hasOwnProperty.call(ctx.input.data, 'title'),
       });
     }, { object: 'duly_task', priority: 1 });
     seedDone('t_19');
 
-    await engine.update('duly_task', { id: 't_19', title: 'T', completed_at: null });
+    await engine.update('duly_task', { id: 't_19', title: 'T', status: 'in_progress' });
 
     expect(seen).toHaveLength(1);
-    expect(seen[0].keys).toEqual(['id', 'title', 'completed_at']);
-    expect(seen[0].spread).toEqual({ id: 't_19', title: 'T', completed_at: null });
-    expect(seen[0].json).toBe(JSON.stringify({ id: 't_19', title: 'T', completed_at: null }));
+    expect(seen[0].keys).toEqual(['id', 'title', 'status']);
+    expect(seen[0].spread).toEqual({ id: 't_19', title: 'T', status: 'in_progress' });
+    expect(seen[0].json).toBe(JSON.stringify({ id: 't_19', title: 'T', status: 'in_progress' }));
     expect(seen[0].has).toBe(true);
     expect(seen[0].own).toBe(true);
+  });
+
+  it('[#16344] the hide is CONSISTENT across every read shape, not just Object.keys', async () => {
+    // A key hidden from enumeration but reachable by `in`, by a direct read or
+    // through `JSON.stringify` would be worse than no hide at all: the derived
+    // write this card exists to stop is written by hooks that read the key
+    // DIRECTLY, and a partial hide would leave exactly those working while the
+    // audit of them came back clean. Asked of all five shapes, in one dispatch,
+    // through the recording view — so this also pins that the hide and the
+    // #14088 Proxy compose rather than one masking the other.
+    const seen: any[] = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      seen.push({
+        keys: Object.keys(ctx.input.data),
+        ownNames: Object.getOwnPropertyNames(ctx.input.data),
+        spread: { ...ctx.input.data },
+        json: JSON.stringify(ctx.input.data),
+        inOperator: 'completed_at' in ctx.input.data,
+        direct: ctx.input.data.completed_at,
+      });
+    }, { object: 'duly_task', priority: 1 });
+    seedDone('t_21');
+
+    await engine.update('duly_task', { id: 't_21', title: 'T', completed_at: null });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].keys).toEqual(['id', 'title']);
+    expect(seen[0].ownNames).toEqual(['id', 'title']);
+    expect(seen[0].spread).toEqual({ id: 't_21', title: 'T' });
+    expect(seen[0].json).toBe(JSON.stringify({ id: 't_21', title: 'T' }));
+    expect(seen[0].inOperator).toBe(false);
+    expect(seen[0].direct).toBeUndefined();
   });
 
   it('no recording view reaches the driver — the seal puts the RAW payload back', async () => {
@@ -841,6 +896,13 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     // stripped, every pass returns the SAME reference, so `updateMany` receives
     // `hookContext.input.data` verbatim and the identity is decisive rather
     // than laundered through one of the copies the by-id path makes.
+    //
+    // [#16344] "Nothing stripped" is a PRECONDITION of the identity argument,
+    // and the caller payload is now written to satisfy it: it no longer echoes
+    // the read-only `completed_at`, because the pre-hook hide would copy the
+    // payload for exactly the reason every other strip does. The hook still
+    // stamps the column, so the write under test is unchanged; what the caller
+    // echoes is not this case's subject, and the echo is covered above.
     const seenByDriver: any[] = [];
     const d2 = makeDriver();
     const e2 = new ObjectQL({});
@@ -865,7 +927,7 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     }, { object: 'duly_task', priority: 50 });
     d2.storeFor('duly_task').set('t_20', { id: 't_20', title: 'T', status: 'open', completed_at: null });
 
-    const payload: Record<string, unknown> = { status: 'done', completed_at: null };
+    const payload: Record<string, unknown> = { status: 'done' };
     await e2.update('duly_task', payload as any, { where: { status: 'open' }, multi: true } as any);
 
     expect(seenByDriver).toHaveLength(1);
