@@ -40,18 +40,28 @@ async function faultOf(run: () => Promise<unknown>): Promise<unknown> {
   throw new Error('expected the driver to refuse this statement, but it resolved');
 }
 
-describe('[#16657] a real raw-exec refusal still yields the dialect text to an operator', () => {
-  let driver: SqlDriver;
-
-  beforeEach(() => {
-    driver = new SqlDriver({
+/**
+ * The driver's log sink is `protected`, so the only way to hold it is from a
+ * subclass — the shape the sibling #16019 suite uses. The dialect text is
+ * written HERE on any default deployment; a stored record's reader never sees
+ * this line, which is the whole card.
+ */
+class QuietSqlDriver extends SqlDriver {
+  constructor() {
+    super({
       client: 'better-sqlite3',
       connection: { filename: ':memory:' },
       useNullAsDefault: true,
     });
-    // The dialect text is written here on any default deployment. A stored
-    // record's reader never sees this line — which is the whole card.
-    driver.logger = { warn: () => {} };
+    this.logger = { warn: () => {} };
+  }
+}
+
+describe('[#16657] a real raw-exec refusal still yields the dialect text to an operator', () => {
+  let driver: SqlDriver;
+
+  beforeEach(() => {
+    driver = new QuietSqlDriver();
   });
 
   afterEach(async () => {
