@@ -111,8 +111,12 @@ const GROUP_ROUTED_TYPES = new Set(['position', 'team', 'department']);
  * goes stale: it would then be wrong to tell an author their only route is
  * provisioning. Update it in the same change that opens the write surface.
  */
+// ⛔ The tracker ids stay in the comments above and never in this string:
+// `check:doc-authoring` Rule 3 — a runtime string reaches authors, operators and
+// generated surfaces, none of whom can resolve `#NNNN`. The reader who can
+// resolve it is reading this source.
 const MANAGER_ONLY_REMEDY =
-  `sys_user.manager_id has no product write surface today (#16678) — the data API's managed-update ` +
+  `sys_user.manager_id has no product write surface today — the data API's managed-update ` +
   `whitelist is {name, image, locale}, the auth admin endpoints do not accept the column and the ` +
   `Console renders no field for it — so it is populated by SCIM provisioning, a seed / bulk import ` +
   `or directory sync, NOT by editing the user in the Console.`;
@@ -475,7 +479,7 @@ export function validateApprovalApprovers(stack: AnyRec): ApprovalApproverFindin
             `${MANAGER_ONLY_REMEDY} Populate it for everyone who submits this request, or add a ` +
             `fallback approver that cannot resolve empty, e.g. ` +
             `{ type: 'org_membership_level', value: 'owner' }. A request that still lands empty is ` +
-            `recoverable only by a platform/tenant admin override (#3424).`,
+            `recoverable only by a platform/tenant admin override.`,
         });
       }
 
