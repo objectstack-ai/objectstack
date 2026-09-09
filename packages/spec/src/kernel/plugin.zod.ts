@@ -174,7 +174,31 @@ export const PluginSchema = lazySchema(() => z.object({
   slug: z.string().regex(/^[a-z0-9-_]+$/).optional().describe('URL path segment (Required for type="ui")'),
   default: z.boolean().optional().describe('Serve at root path (Only one "ui" plugin can be default)'),
   
-  version: z.string().regex(/^\d+\.\d+\.\d+$/).optional().describe('Semantic Version'),
+  // #16365 — the grammar SemVer 2.0.0 actually defines, prerelease and build
+  // metadata included, which is what `describe('Semantic Version')` has said
+  // without qualification all along. The regex it replaces, `/^\d+\.\d+\.\d+$/`,
+  // refused `1.0.0-alpha.1` and `1.0.0+20230101` — a declaration refusing part
+  // of what it declared.
+  //
+  // ⭐ This is `PluginLoader.isValidSemanticVersion`'s spelling character for
+  // character (`packages/core/src/plugin-loader.ts`), deliberately, and not a
+  // third grammar invented here. That check is the one the boot path has always
+  // run, so adopting it makes the two declarations converge EXACTLY — which is
+  // what let `assertPluginContract` drop the `version` exclusion it carried as a
+  // stopgap, and is why nothing that loads today is refused now.
+  //
+  // ⚠️ MEASURED, not assumed, in both directions. It is a strict SUPERSET of the
+  // regex it replaces (same three-segment core, two OPTIONAL suffix groups), so
+  // the accept set only grows. It is ALSO wider than SemVer 2.0.0 itself, in a
+  // fringe this change neither introduces nor widens: leading zeroes in the
+  // numeric core (`01.1.1`) were accepted by BOTH spellings before this change
+  // and are accepted by both after it, and the loader additionally accepts the
+  // degenerate identifier forms SemVer forbids (`1.0.0-alpha..1`, `1.0.0-0123`,
+  // `1.0.0+.`). Tightening to the official SemVer 2.0.0 regex would therefore
+  // have NARROWED this key — refusing `01.1.1`, which it accepts today — which
+  // is the one thing the #16365 ruling forbids. Closing that fringe is its own
+  // card, on the loader and this key together.
+  version: z.string().regex(/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/).optional().describe('Semantic Version'),
   description: z.string().optional(),
   author: z.string().optional(),
   homepage: z.string().url().optional(),

@@ -31,27 +31,29 @@ import type { Plugin } from './types.js';
  * module converges EXISTING enforcement onto the second kernel; it does not
  * mint a public validation API. Both kernels import it by relative path.
  *
- * ## What this refuses: the EIGHT declared keys, and `null` on any of them
+ * ## What this refuses: the NINE declared keys, and `null` on any of them
  *
  * `PluginSchema` (`@objectstack/spec`, `kernel/plugin.zod.ts`) declares nine
- * optional keys; the filter below drops `version` (see below), so the
- * accept-set narrowing this function performs covers exactly these eight, each
- * reported as `at '<key>'`:
+ * optional keys, and since #16365 this function reaches ALL NINE — the
+ * `version` filter that stood here was a stopgap and is gone (see below). Each
+ * is reported as `at '<key>'`:
  *
  * - `id` — a non-string, or the empty string (`z.string().min(1)`).
  * - `type` — outside the closed set `'standard'` + `CORE_PLUGIN_TYPES`.
  * - `staticPath` — a non-string.
  * - `slug` — a non-string, or not matching `/^[a-z0-9-_]+$/`.
  * - `default` — a non-boolean.
+ * - `version` — a non-string, or a string outside the SemVer 2.0.0 grammar
+ *   `/^\d+\.\d+\.\d+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$/`.
  * - `description` — a non-string.
  * - `author` — a non-string; an object such as `{ name }` is refused.
  * - `homepage` — a non-string, or a string that is not a URL.
  *
- * All eight are `.optional()`, which admits absence and `undefined` but
- * never an explicit `null` — so `null` on any of the eight is refused too.
+ * All nine are `.optional()`, which admits absence and `undefined` but
+ * never an explicit `null` — so `null` on any of the nine is refused too.
  *
  * Since #16334 the schema carries ONE conditional requirement on top of
- * the eight: `type: 'ui'` owes `staticPath` and `slug`, and `PluginSchema`
+ * the nine: `type: 'ui'` owes `staticPath` and `slug`, and `PluginSchema`
  * refuses a `ui` plugin missing either with `PLUGIN_UI_REQUIRED_KEY_MISSING`
  * at the head of the issue message (`packages/spec/src/kernel/plugin.zod.ts`).
  * That refusal rides this function's envelope unchanged — reported as
@@ -60,12 +62,16 @@ import type { Plugin } from './types.js';
  * else. `plugin-contract-enforcement.test.ts` group F pins the surfacing on
  * `ObjectKernel`; group G pins the same envelope on `LiteKernel`.
  *
- * ⛔ ENUMERATE ALL EIGHT wherever this is restated. The changeset ships to
+ * ⛔ ENUMERATE ALL NINE wherever this is restated. The changeset ships to
  * consumers as `CHANGELOG.md` and is what an upgrading author greps after
  * the refusal, so a shorter enumeration there does not merely omit keys —
  * it tells an author refused `at 'author'` that their key is not enforced.
- * This comment, the #16049 changeset and the `PLUGIN_CONTRACT_VIOLATION` row
- * in `dispatcher-error-vocabulary.ts` are the three places that restate it.
+ * ⚠️ `CHANGELOG.md` is NOT a live document and is deliberately not corrected:
+ * `@objectstack/core@17.4.0` shipped with both enforcement entries enumerating
+ * EIGHT and saying `version` is excluded, which is what that release did. The
+ * #16365 changeset carries the ninth key and supersedes them BY VERSION rather
+ * than by rewriting them. ⇒ This comment is the authority on the CURRENT set;
+ * a released entry is the authority on the release it names.
  *
  * What this does NOT refuse, which is what bounds the narrowing: UNKNOWN
  * keys. `PluginSchema` is a plain `z.object` with no `.strict()` — the
@@ -112,37 +118,41 @@ import type { Plugin } from './types.js';
  * boundary exists, and `dispatcher-error-vocabulary.ts` classifies it
  * `door: 'none'` / `boot-refusal` for that reason.
  *
- * ## Why `version` is excluded, and why that is not a weakening
+ * ## `version`: the ninth key, and why admitting it refused nothing new
  *
- * MEASURED, not assumed. `PluginSchema.version` is `/^\d+\.\d+\.\d+$/`, which
- * refuses the prerelease and build-metadata forms SemVer 2.0.0 defines — while
- * `PluginLoader.isValidSemanticVersion`, the check the loader has always run,
- * implements the full grammar and accepts them. Two declarations in this
- * repository disagree about what a version is, and `plugin-loader.test.ts`
- * pins the wider one deliberately: "should accept versions with pre-release
- * tags" (`1.0.0-alpha.1`) and "should accept versions with build metadata"
- * (`1.0.0+20230101`). Two in-repo class-based plugin fixtures ship
- * `version = '0.0.0-fixture'` and boot through the real kernel.
+ * This function used to filter `version` issues out. It did so because the two
+ * declarations disagreed: `PluginSchema.version` was `/^\d+\.\d+\.\d+$/` and
+ * refused the prerelease and build-metadata forms SemVer 2.0.0 defines, while
+ * `PluginLoader.isValidSemanticVersion` — the check the loader has always run —
+ * implemented the full grammar and accepted them. Enforcing the narrow spelling
+ * would have RETIRED a pinned capability under a card that ruled on `type`, so
+ * the disagreement was declared here rather than performed.
  *
- * So enforcing the schema's `version` here would not enforce the protocol —
- * it would RETIRE a pinned capability, silently, under a card that ruled on
- * `type`. Version is not among the eight keys enumerated above. On
- * `ObjectKernel` the loader's own `validatePluginStructure` still judges
- * `version` with the wider grammar; `LiteKernel` has never judged `version`
- * and, under this convergence, still does not — the convergence is on the
- * SCHEMA (#16721 ruled on `PluginSchema`), not on the loader's structural
- * checks (`name`, `init`, semver), which stay `PluginLoader`'s own.
- * Reconciling the two `version` spellings belongs in `packages/spec` beside
- * #16334; until then this exclusion is declared here rather than performed by
- * leaving the disagreement unmeasured.
+ * #16365 settled it in `packages/spec`, the direction its triage ruled: the
+ * SPEC widened. `PluginSchema.version` now carries the loader's grammar
+ * character for character, so the filter had nothing left to filter and is
+ * gone. ⭐ The widening is a strict SUPERSET of the regex it replaced, so
+ * admitting `version` to this function's reach refused NOTHING that loaded
+ * before — the direct measurement is that the three versions group E and group
+ * G pin (`1.0.0-alpha.1`, `1.0.0+20230101`, `0.0.0-fixture`) still load, on
+ * both kernels, with the filter removed.
+ *
+ * What did NOT converge, deliberately: the loader's STRUCTURAL checks. On
+ * `ObjectKernel`, `validatePluginStructure` judges `version` before this
+ * function is reached and refuses `v1.0.0` with its own `Invalid semantic
+ * version` message, not `PLUGIN_CONTRACT_VIOLATION`; that ordering is
+ * unchanged and is pinned. `LiteKernel` has never run `validatePluginStructure`
+ * and still does not — so on that kernel a malformed `version` is refused for
+ * the first time here, by the schema, which is exactly the convergence #16721
+ * ruled for the other eight keys.
  */
 const PLUGIN_CONTRACT_VIOLATION_CODE = 'PLUGIN_CONTRACT_VIOLATION';
 
 /**
  * Refuse `plugin` when the DECLARED plugin contract refuses it; return when
  * it does not. Reads `PluginSchema.safeParse` for `success` and for the first
- * non-`version` issue, and NOTHING else — see the module comment for the
- * eight keys this reaches, the `version` exclusion and the envelope.
+ * issue, and NOTHING else — see the module comment for the nine keys this
+ * reaches and the envelope.
  *
  * @throws an `Error` whose `code` is `PLUGIN_CONTRACT_VIOLATION` and whose
  *         message carries the same code at its head, the plugin's name (and
@@ -154,12 +164,7 @@ export function assertPluginContract(plugin: Plugin): void {
         return;
     }
 
-    const issues = result.error.issues.filter((issue) => issue.path[0] !== 'version');
-    if (issues.length === 0) {
-        return;
-    }
-
-    const first = issues[0];
+    const first = result.error.issues[0];
     const at = first.path.length > 0 ? first.path.join('.') : '(root)';
     const id = (plugin as { id?: unknown }).id;
     const named = typeof id === 'string' && id.length > 0

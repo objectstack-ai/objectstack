@@ -4,15 +4,13 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import {
   resolveAuthzContext,
   isAuthzStoreUnavailableError,
-  // [#15352] The three symbols the download door's tenancy-posture read is
-  // built from: the reader for the posture IN FORCE (ADR-0093 D4/D5 - a
-  // deployment REQUESTING `isolated` without the enterprise organizations
-  // runtime is `single` in force), plus the two halves of the classification
-  // #13906 decision 1 option A requires - the registry's "never registered"
-  // brand, and the loud outage every other rejection has to become.
-  effectiveTenancyPosture,
-  isServiceNotRegisteredError,
-  AuthzStoreUnavailableError,
+  // [#16013] The download door's tenancy-posture read, in ONE call: the
+  // posture IN FORCE (ADR-0093 D4/D5 - a deployment REQUESTING `isolated`
+  // without the enterprise organizations runtime is `single` in force), taken
+  // through the one shared classification #13906 decision 1 option A requires
+  // - the registry's "never registered" brand stays quiet, and the loud outage
+  // is what every other rejection becomes.
+  classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
 } from '@objectstack/core';
 import type {
@@ -1001,18 +999,20 @@ function buildAuthSessionResolver(
  * be judged by the ownership and record-reachability checks below — checks
  * evaluated for a principal the wall should have refused at the door.
  *
- * ## The classification — #13906 decision 1 option A
+ * ## The classification — #13906 decision 1 option A, no longer written here
  *
- * - **Never registered** ⇒ branded (`isServiceNotRegisteredError`) ⇒ a quiet
- *   `undefined`. A kernel assembled without `plugin-auth` registers no
- *   `tenancy` service and enforces no organization wall, so there is nothing
- *   for a key to be walled out of; that composition is SUPPORTED and its
- *   behaviour here is exactly what it was.
- * - **Registered and unable to answer** ⇒ `AuthzStoreUnavailableError`. The
- *   posture is an authorization INPUT, so admission was never DECIDED and must
- *   not be answered. A `try { … } catch { undefined }` here would re-introduce
- *   precisely the permissive-on-failure defect #13906 exists to repair — a
- *   FAILURE reading as "this check does not apply".
+ * [#16013] `classifyAdmissionTenancyPosture` (`@objectstack/core`) owns it for
+ * every admission seam: never registered ⇒ branded ⇒ a quiet `undefined`;
+ * every other rejection ⇒ `AuthzStoreUnavailableError`, because the posture is
+ * an authorization INPUT, so admission was never DECIDED and must not be
+ * answered. ⛔ A `try { … } catch { undefined }` at any seam would re-introduce
+ * precisely the permissive-on-failure defect #13906 exists to repair — a
+ * FAILURE reading as "this check does not apply".
+ *
+ * ⚠️ The quiet arm's MEANING is this door's own: a kernel assembled without
+ * `plugin-auth` registers no `tenancy` service and enforces no organization
+ * wall, so there is nothing for a key to be walled out of; that composition is
+ * SUPPORTED and its behaviour here is exactly what it was.
  *
  * The throw is raised inside the authorizer's own `try`, so it takes the
  * #13279 relay that block already runs for the identical fault one seam over
@@ -1069,24 +1069,19 @@ function buildAuthSessionResolver(
  * for the life of the process. The read costs two registry lookups and no I/O,
  * so there is nothing to buy by caching it.
  *
- * ⛔ Deliberately NOT extracted into a shared helper. Sibling cards are live on
- * this same seam in other packages (#15349, #15350, #15351), and a helper
- * extracted by one of them collides with the rest; the landed siblings
- * (`mcp`, `cloud-connection`) each wrote a local copy for the same reason. The
- * extraction is worth doing — once, as its own card, after they land.
+ * ⛔ And this door's degrade-to-ungated reason is precisely why the RESOLUTION
+ * stayed here when the classification was folded (#16013): a shared owner of
+ * the resolution would have had to erase that reason or carry a flag for it.
+ * The helper receives the already-decided way to reach the service and nothing
+ * else.
  */
 async function resolveAdmissionTenancyPosture(
   registry: StorageGateRegistry,
 ): Promise<TenancyPosture | undefined> {
   if (typeof registry.getServiceAsync !== 'function') return undefined;
-  try {
-    return effectiveTenancyPosture(await registry.getServiceAsync<TenancyPostureSource>('tenancy'));
-  } catch (err) {
-    if (!isServiceNotRegisteredError(err)) {
-      throw new AuthzStoreUnavailableError('tenancy', err);
-    }
-    return undefined;
-  }
+  return classifyAdmissionTenancyPosture(() =>
+    registry.getServiceAsync!<TenancyPostureSource>('tenancy'),
+  );
 }
 
 /**
