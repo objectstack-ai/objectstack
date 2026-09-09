@@ -23,7 +23,7 @@
     "@objectstack/formula": "workspace:*",
     "@objectstack/platform-objects": "workspace:*",
     "@objectstack/spec": "workspace:*",
-    "nodemailer": "^9.0.5"
+    "nodemailer": "^9.1.1"
   },
   "devDependencies": {
     "@objectstack/objectql": "workspace:*",
@@ -33,7 +33,7 @@
     "@types/nodemailer": "^8.0.1",
     "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "keywords": [
     "objectstack",
