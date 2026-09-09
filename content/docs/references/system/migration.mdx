@@ -378,6 +378,7 @@ Deployment-level record that a data migration ran here and its self-check passed
 | **details** | `string` | optional | JSON-encoded counts from the last run, for diagnostics |
 | **deviation_observed_at** | `string \| null` | optional | When this deployment last ADMITTED a value the verified contract rejects, via an OS_ALLOW_LAX_* escape hatch. Does not clear verified_at — it withdraws the irreversible half of what the certificate authorises |
 | **deviation_detail** | `string \| null` | optional | JSON-encoded first counterexample behind deviation_observed_at (object, field, type, parse issue), for diagnostics |
+| **columns_moved_at** | `string \| null` | optional | When this deployment last completed the COLUMN MOVE for this migration — the step that retypes the migrated columns and rewrites the values they hold into the new encoding. Separate evidence from applied_at and verified_at, which attest the backfill and its self-check only: a deployment can carry both and still store the legacy encoding. Null/absent says exactly that, and is an expected steady state rather than an error — it is what a consumer that cannot read this field must assume |
 
 
 ---
