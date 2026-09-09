@@ -310,7 +310,7 @@ describe('#11727 — `os build --json` carries the capability-provider and packa
         'runtimeModule',
         'runtimeModuleSize',
         'size',
-        'specVersionGap',
+        'protocolVersionGap',
         'stats',
         'success',
         'warnings',
