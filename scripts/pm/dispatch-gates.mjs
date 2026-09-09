@@ -22520,7 +22520,7 @@ function selfTest() {
       'the unreachable listing',
       'the always-runs tail',
     ]) {
-      t(`--commands' closing disclaimer names "${name}", not the always-runs tail alone`, commandsAllBlocks.includes(name));
+      t(`--commands' closing disclaimer names "${name}" — every block outside the command list, where it used to name one`, commandsAllBlocks.includes(name));
     }
     // ⭐ The card's own repro, as a case: `grep -c 'WIDE' commands.err` read 0.
     // The token is what a consumer greps for, and it was absent from the whole
